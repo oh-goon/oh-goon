@@ -40,7 +40,8 @@ Backend and integration Make gates use the existing bounded pytest batches,
 retain their original pytest configuration and markers, and keep their original
 serial execution with one worker. Exact native collected test cases retain class
 and parameter suffixes, allowing the existing timeout refinement to split large
-files without changing timeouts. An omitted `BACKEND_CHECK_TEST_ROOTS` still
+files within the new 180-second per-batch timeout. An omitted
+`BACKEND_CHECK_TEST_ROOTS` still
 delegates selection to native pytest `testpaths`. Coverage retains file batches
 and the complete selected scope, combining native child data before applying the
 existing floor once.
