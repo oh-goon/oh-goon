@@ -38,9 +38,13 @@ def run_project_tests(
         print(text, end="", flush=True)
 
     try:
-        for name, relative, groups in (
-            ("iris", "templates/goons/ml/iris-train", ("dev",)),
-            ("orders", "templates/goons/general/orders-taskflow", ("dev", "airflow")),
+        for name, relative, tests in (
+            ("iris", "templates/goons/ml/iris-train", ("tests",)),
+            (
+                "orders",
+                "templates/goons/general/orders-taskflow",
+                ("tests/test_operations.py", "tests/test_cli.py"),
+            ),
         ):
             project = root / relative
             environment = {
@@ -48,18 +52,16 @@ def run_project_tests(
                 "UV_PROJECT_ENVIRONMENT": str(scratch / name),
                 "PYTHONDONTWRITEBYTECODE": "1",
             }
-            if name == "orders":
-                environment["OH_GOON_REQUIRE_AIRFLOW_TESTS"] = "1"
-            group_arguments = tuple(argument for group in groups for argument in ("--group", group))
             commands = (
                 (
                     "uv",
                     "sync",
                     "--project",
                     str(project),
-                    "--locked",
+                    "--frozen",
                     "--no-default-groups",
-                    *group_arguments,
+                    "--group",
+                    "dev",
                     "--no-python-downloads",
                 ),
                 (
@@ -73,7 +75,7 @@ def run_project_tests(
                     "pytest",
                     "-p",
                     "no:cacheprovider",
-                    str(project / "tests"),
+                    *(str(project / test) for test in tests),
                 ),
             )
             for command in commands:

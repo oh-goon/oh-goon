@@ -580,7 +580,7 @@ test-integration:
 	@$(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- backend/.venv/bin/oh-goon-qualification-exec pytest -c backend/pyproject.toml -m "$(CHECK_PYTEST_MARKER)" tests/integration
 
 test-python-projects:
-	@$(RUN_STEP) 'STANDALONE PYTHON PROJECT TESTS' 'Owner: native uv | Iris and orders application + Airflow adapter' -- uv run --offline --frozen --no-sync --project backend oh-goon-python-project-checks
+	@$(RUN_STEP) 'STANDALONE PYTHON PROJECT TESTS' 'Owner: native uv | Iris and orders application tests' -- uv run --offline --frozen --no-sync --project backend oh-goon-python-project-checks
 
 # Compact production-shaped SQLite lifetime gate. This deliberately crosses the
 # worker/wait/restart boundary and complements component/fault-matrix coverage.

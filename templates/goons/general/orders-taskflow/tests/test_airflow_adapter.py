@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 
 def test_copied_dag_native_runs_and_failure_propagation(tmp_path):
     assert importlib.util.find_spec("airflow") is not None, (
-        "Select the locked airflow dependency group to run the required native adapter test"
+        "Select the airflow dependency group to run this explicitly requested native adapter test"
     )
     home = tmp_path / "airflow"
     dag_folder = home / "dags"

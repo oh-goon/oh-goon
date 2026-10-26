@@ -88,6 +88,14 @@ Cache recovery may acquire that exact commit; unavailable content refuses and
 never advances the pin. `oh-goon lock run.yml --update-goons` is the explicit
 refresh action. `--update-skills` refreshes Skill sources independently.
 
+Agent source identity binds Git-owned Plan and Goon files to their origin,
+exact commit and repository-relative path. Disposable checkout locations do not
+change that identity. Bounded repair captures each next candidate from fresh
+local Plan, Goon and Skill sources, while Git sources retain the original pins.
+Native acquisition keeps a source lease through that capture; continuation can
+restore an expired checkout or lost cache without reopening a retired path or
+silently accepting changed local authoring.
+
 Inspection/validation are cached-only and report acquisition-required source
 without fetching. Acquisition captures source without executing project code,
 installing dependencies or initializing submodules. The receiver consumes the

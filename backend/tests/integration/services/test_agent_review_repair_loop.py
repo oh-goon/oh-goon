@@ -33,6 +33,7 @@ from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.models.agent_review import MAX_REVIEW_BYTES, AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.fleet_plan_evidence import CompletedPlanStepExecution
+from oh_goon.core.models.git_sources import LockedGoonSource
 from oh_goon.core.models.goon_plan_source import SharedPlanSource
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.target import FleetPlanTarget
@@ -41,6 +42,7 @@ from oh_goon.engine.git import GitService
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
+from oh_goon.integrations.git_source_preparation import prepare_git_source
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from tests.factories.agent_review import agent_review_case
@@ -207,6 +209,13 @@ model = "synthetic/reviewer"
         ),
         (
             "shared_http",
+            2,
+            "converged",
+            ["review", "adjudicate", "repair", "regression", "review", "verification"],
+            10,
+        ),
+        (
+            "git_plan",
             2,
             "converged",
             ["review", "adjudicate", "repair", "regression", "review", "verification"],
@@ -606,14 +615,80 @@ def test_native_loop_reserves_review_and_retains_each_phase(
             monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "database.sqlite"))
             monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
             monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+            lock_path = tmp_path / "goon.lock"
+            if scenario == "git_plan":
+                monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+                upstream = tmp_path / "git-plan"
+                upstream.mkdir()
+                authored = upstream / "workflows/review"
+                authored.mkdir(parents=True)
+                (authored / "plan.yml").write_bytes(path.read_bytes())
+                subprocess.run(["git", "init", "-q", "-b", "main", str(upstream)], check=True)
+                subprocess.run(["git", "-C", str(upstream), "add", "."], check=True)
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(upstream),
+                        "-c",
+                        "user.name=Test",
+                        "-c",
+                        "user.email=test@example.test",
+                        "commit",
+                        "-qm",
+                        "Plan",
+                    ],
+                    check=True,
+                )
+                commit = subprocess.check_output(
+                    ["git", "-C", str(upstream), "rev-parse", "HEAD"], text=True
+                ).strip()
+                pin = LockedGoonSource(
+                    git=str(upstream),
+                    ref="main",
+                    path="workflows/review",
+                    kind="plan",
+                    plan="plan.yml",
+                    commit=commit,
+                )
+                with prepare_git_source(pin.git, pin.ref, commit=pin.commit) as (checkout, _):
+                    root = checkout / pin.path
+                    graph = resolver.analyze_source(
+                        root / "plan.yml",
+                        containment_root=root,
+                        plan_source=pin,
+                        locked_goons=(pin,),
+                    )
+                path = graph.root.path
+                assert not path.exists()
+                options["source_graph"] = graph
             plan, deliveries, _ = resolver.resolve_frozen_agents(path, **options)
             assert "fixture-secret-not-a-source" not in plan.model_dump_json()
             assert all(
                 b"fixture-secret-not-a-source" not in handoff.encode_prework_delivery()
                 for handoff in deliveries.values()
             )
-            write_execution_lock(path.parent / "goon.lock", build_execution_lock(plan))
-            lock = (path.parent / "goon.lock").read_bytes()
+            write_execution_lock(lock_path, build_execution_lock(plan))
+            lock = lock_path.read_bytes()
+            if scenario == "git_plan":
+                (authored / "plan.yml").write_text("goons:\n- python/quality\n")
+                subprocess.run(["git", "-C", str(upstream), "add", "."], check=True)
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(upstream),
+                        "-c",
+                        "user.name=Test",
+                        "-c",
+                        "user.email=test@example.test",
+                        "commit",
+                        "-qm",
+                        "Advance main",
+                    ],
+                    check=True,
+                )
+                shutil.rmtree(tmp_path / "cache/oh-goon/skill-sources")
             if scenario == "remote":
                 assert len(plan.skill_sources) == 1
                 assert all(
@@ -716,6 +791,8 @@ max_output_tokens = 8192
                 else:
                     result = runtime.plans.repair(
                         path,
+                        source_graph=options.get("source_graph"),
+                        lock_path=lock_path,
                         repository_id=repository_id(repo),
                         budget=AgentRepairBudget(
                             max_attempts=passes,
@@ -767,8 +844,10 @@ max_output_tokens = 8192
                     : min(calls, 4)
                 ]
                 assert len({o["candidate_identity"] for o in observed[:4]}) == 1
-                assert (path.parent / "goon.lock").read_bytes() == lock
+                assert lock_path.read_bytes() == lock
                 for index, detail in enumerate(result.attempts):
+                    if scenario == "git_plan":
+                        assert detail.run.target.plan.goon_sources == (pin,)
                     context = detail.run.target.agent_repair
                     assert context.max_attempts == 4 * (passes - 1) + 2
                     assert context.previous_run_id == (
@@ -799,6 +878,7 @@ max_output_tokens = 8192
                 if scenario in (
                     "repair",
                     "shared_http",
+                    "git_plan",
                     "accepted_nonzero",
                     "remote",
                     "arbitrary",
@@ -828,7 +908,7 @@ max_output_tokens = 8192
                     assert not (repo / "regression.txt").exists()
             finally:
                 runtime.shutdown(wait_for_runs=True)
-            if scenario in ("repair", "accepted_nonzero", "large_scope", "shared_http"):
+            if scenario in ("repair", "accepted_nonzero", "large_scope", "shared_http", "git_plan"):
                 reopened = ApplicationRuntime.build(standard_local=True)
                 try:
                     assert [

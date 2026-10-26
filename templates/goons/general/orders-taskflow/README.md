@@ -2,21 +2,28 @@
 
 **Status:** teaching example. **Effects:** Extracts, transforms and loads fixture orders through three installed commands. **Prerequisites:** Python 3.12+ and native uv. The Airflow adapter selects the separate optional `airflow` dependency group.
 
-One standalone Python application adapts the official [Airflow 3.3.2 TaskFlow tutorial](https://airflow.apache.org/docs/apache-airflow/3.3.2/_modules/airflow/example_dags/tutorial_taskflow_api.html) into shared `extract → transform → load` operations. The original values 301.27 + 433.21 + 502.22 give **1236.70**. The `changed` fixture gives **60.00**; `invalid` fails transformation. These two fixtures, decimal arithmetic, validation, the CLI, and file outputs are showcase extensions. Airflow's original sample loads by printing the total.
+One standalone Python application adapts the official [Airflow 3.3.2 TaskFlow tutorial source](https://airflow.apache.org/docs/apache-airflow/3.3.2/_modules/airflow/example_dags/tutorial_taskflow_api.html) into shared `extract → transform → load` operations. That version's `tutorial_taskflow_api` reads a hardcoded JSON string, sums the values with ordinary Python arithmetic, returns `total_order_value`, and prints it to two decimal places. Its amounts 301.27 + 433.21 + 502.22 give **1236.70**.
+
+This project's packaged input resources, Decimal arithmetic, validation, installed CLI and output files are showcase adaptations. Its additional `changed` fixture gives **60.00**; `invalid` fails the shared transformation. The adapted application is not a copy of the upstream program. OH-Goon runs three ordered Steps; it does not execute, parse or convert an Airflow DAG. Airflow remains an optional external comparison.
 
 ## Local development
 
-Copy this entire package directory to a location outside the OH-Goon checkout. It is a complete Python project with a committed native `uv.lock`; Python 3.12+ and uv are required. From the copied directory:
+Enter this package directory directly, or copy the whole directory outside the OH-Goon checkout. It is a complete Python project with a committed native `uv.lock`; Python 3.12+ and uv are required:
 
 ```bash
-uv sync --locked
+uv sync --frozen --no-default-groups --group dev
 uv run --no-sync pytest tests/test_operations.py tests/test_cli.py
+uv run --no-sync orders-pipeline run --fixture official
 uv run --no-sync orders-pipeline extract --fixture official
 uv run --no-sync orders-pipeline transform --data '{"1001":301.27,"1002":433.21,"1003":502.22}'
 uv run --no-sync orders-pipeline load --total 1236.70
 ```
 
-The application and its ordinary tests need neither Airflow nor OH-Goon. Each CLI operation writes its result under `.showcase/` in the working directory. `extract` requires an explicit fixture; the Goon owns the workflow default. `transform --data` accepts JSON data, and `load --total` accepts the scalar total. OH-Goon transports the preceding Step's output value into those arguments.
+The application and its ordinary tests need neither Airflow nor OH-Goon. `run --fixture` calls the same extraction, transformation and loading functions directly, stopping on a real application exception. The individual commands expose each business operation. Use `changed` to observe a different total or `invalid` to observe transformation failure. Each writes its result under `.showcase/` in the working directory; use a fresh working directory or remove old demonstration outputs before inspecting a failure.
+
+`extract` and `run` require an explicit fixture; the Goon owns the workflow default. `transform --data` accepts JSON data, and `load --total` accepts the scalar total. OH-Goon transports the preceding Step's actual output value into those arguments. Its Goon deliberately invokes the three individual commands as three separately observed Steps.
+
+Native frozen synchronization consumes the committed resolution without rewriting it or checking metadata freshness. The development environment explicitly selects `dev` for pytest; OH-Goon's managed workload installs base dependencies only in its separate owned environment.
 
 ## OH-Goon
 
@@ -54,7 +61,7 @@ bind freshness; caches and declared `.showcase/` outputs do not.
 This project's explicit optional `airflow` group pins **Airflow 3.3.2** and its native lock records the complete dependency resolution. Select it in a separate Python 3.12 environment:
 
 ```bash
-uv sync --locked --no-default-groups --group dev --group airflow --python 3.12
+uv sync --frozen --no-default-groups --group dev --group airflow --python 3.12
 OH_GOON_REQUIRE_AIRFLOW_TESTS=1 uv run --no-sync pytest tests/test_airflow_adapter.py
 ```
 
@@ -62,11 +69,11 @@ The ordinary application environment does not install Airflow. Register `dags/or
 
 Trigger `orders_taskflow_comparison`. Set `ORDERS_FIXTURE=official`, `changed`, or `invalid` in the task environment. Airflow owns that environment selection; it does not read OH-Goon's `run.yml`. TaskFlow passes the small Python results through native XCom. Inspect the three task instances, logs and final returned `total_order_value`. The invalid fixture must fail `transform_orders` and prevent `load_orders` from succeeding.
 
-The selected adapter test uses isolated temporary SQLite state to verify a copied DAG's native import, dependency graph, complete local `dag.test()` runs, XCom totals and invalid-input failure propagation. A scheduler/worker deployment remains a separate verification boundary.
+The explicitly selected adapter test uses isolated temporary SQLite state to verify a copied DAG's native import, dependency graph, complete local `dag.test()` runs, XCom totals and invalid-input failure propagation. It is optional and does not run as an OH-Goon acceptance gate. A scheduler/worker deployment remains a separate verification boundary.
 
 ## Scope and the Python Goon contract
 
-Both adapters use the same installed `orders_pipeline.operations`. OH-Goon observes three linear Steps; Airflow observes three dependent tasks. Neither engine invokes the other. Equivalent results here do not establish general DAG equivalence, relative performance, or reliability.
+Both adapters use the same installed `orders_pipeline.operations`. Airflow can run ordinary Python functions and represents dependencies as a DAG. OH-Goon uses its ordered Plan → Goon → Step model and explicit output bindings; it neither stores nor computes DAG dependencies. A dependency-respecting order is sufficient for these three operations. Equivalent results here do not establish general DAG equivalence, relative performance, or reliability.
 
 This example uses the [complete Python Goon contract](https://github.com/oh-goon/oh-goon/blob/main/docs/architecture/ADR_PYTHON_GOON_PROJECTS.md):
 one installable application, explicit workflow inputs, package-owned runtime,
@@ -77,4 +84,6 @@ explicit pinned Git coordinates; see the [template guide](https://github.com/oh-
 This root-Goon comparison does not establish scheduler/worker deployment,
 strict/native qualification, APP certification or the broader initialization/result roadmap.
 
-The required integration CI check and ordinary `make release-check` run this package's application and native Airflow tests, and the Iris package tests, in disposable environments through `make test-python-projects`. The canonical strict integration ring keeps its prepared-environment contract. The [Git-selected example](../../../../examples/airflow-taskflow-showcase/README.md) runs this same package against an empty target.
+The required integration CI check and ordinary `make release-check` run this package's application tests and the Iris package tests in disposable environments through `make test-python-projects`, without selecting Airflow. The canonical strict integration ring keeps its prepared-environment contract. The [Git-selected example](../../../../examples/airflow-taskflow-showcase/README.md) runs this same named package against an empty target.
+
+The existing native CLI regression in `backend/tests/integration/services/test_airflow_taskflow_showcase.py` executes `official` success → `invalid` failure → `changed` success through both local and Git Plan selections. Each invocation obtains a distinct real Run ID. After the execution owner disposes attempt scratch, new CLI processes reopen all three IDs and compare their retained source/selection identity, exact Step outcomes and output evidence. The failed Run retains no load artifact after the later success. These checks qualify this showcase's durable evidence; they do not prove a separate crash-recovery system or retained downloadable bytes.

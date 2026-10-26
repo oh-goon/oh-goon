@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import ExitStack
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 
@@ -17,6 +17,7 @@ from oh_goon.core.models.fleet_plan import (
 from oh_goon.core.models.git_sources import LockedGoonSource
 from oh_goon.core.path_authority import ContainedPathSpace, canonical_path, navigation_path
 from oh_goon.core.product_identity import stable_id
+from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations.fleet_plan_compilation import GoonTemplateProvider
 from oh_goon.integrations.fleet_plan_source_snapshot import (
     FleetPlanStepPosition,
@@ -38,6 +39,8 @@ class FleetPlanSourceNode:
     package_kind: str | None = None
     package_name: str | None = None
     local_source: str | None = None
+    git_source: LockedGoonSource | None = None
+    git_path: str | None = None
     step_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
     value_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
     python_project: CapturedPythonGoonProject | None = None
@@ -68,20 +71,27 @@ class FleetPlanSourceGraph:
         secondary YAML resolution may occur during capture of agent sources.
         """
         entries = []
-        for path, node in sorted(self._nodes.items(), key=lambda pair: pair[0].as_posix()):
+        nodes = sorted(
+            ((_source_owner_key(node), node) for node in self._nodes.values()),
+            key=lambda item: item[0],
+        )
+        for owner, node in nodes:
             if node.source_sha256 is None:
                 raise FleetPlanInvalid(
                     "Agent source closure requires immutable original Goon bytes"
                 )
             entries.append(
                 {
-                    "owner": path.as_posix(),
+                    "owner": owner if node.git_source is not None else node.path.as_posix(),
                     "sha256": node.source_sha256,
                     "kind": node.package_kind or "root",
                     "name": node.package_name or node.path.name,
                 }
             )
-        return stable_id("agent-original-plan-graph-closure-v1", {"sources": entries})
+        return stable_id(
+            "agent-original-plan-graph-closure-v1",
+            {"sources": entries},
+        )
 
     def has_agent_source_contract(self) -> bool:
         """Discover preview-only agent source inputs in every analyzed Goon.
@@ -199,7 +209,7 @@ class FleetPlanSourceGraph:
 @dataclass(slots=True)
 class _SourceGraphBuild:
     goon_edges: dict[tuple[Path, str], FleetPlanSourceNode] = field(default_factory=dict)
-    loaded: dict[tuple[str, str], FleetPlanSourceNode] = field(default_factory=dict)
+    loaded: dict[tuple[str, ...], FleetPlanSourceNode] = field(default_factory=dict)
     extensions: list[str] = field(default_factory=list)
     seen_extensions: set[str] = field(default_factory=set)
     visited: set[Path] = field(default_factory=set)
@@ -214,6 +224,7 @@ class _SourceGraphBuild:
     goon_sources: dict[tuple[str, str, str], LockedGoonSource] = field(default_factory=dict)
     project_bytes: int = 0
     archive_bytes: int = 0
+    cancel_requested: Callable[[], bool] | None = None
 
 
 def analyze_fleet_plan_sources(
@@ -228,9 +239,12 @@ def analyze_fleet_plan_sources(
     update_goons: bool = False,
     allow_source_network: bool = False,
     plan_source: LockedGoonSource | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> FleetPlanSourceGraph:
     """Read each root/Goon source once and validate the complete composition graph."""
 
+    if cancel_requested is not None and cancel_requested():
+        raise OperationCancelledError("Plan source capture cancelled")
     path = navigation_path(plan_path)
     pinned_commits: dict[tuple[str, str], str] = {}
     for pin in locked_goons or ():
@@ -248,6 +262,15 @@ def analyze_fleet_plan_sources(
         canonical_path(item): template for item, template in (compiled_overrides or {}).items()
     }
     root = _read_node(path, overrides, expected_name=root_expected_name)
+    if plan_source is not None:
+        assert plan_source.plan is not None
+        logical = (PurePosixPath(plan_source.path) / plan_source.plan).as_posix()
+        root = replace(
+            root,
+            git_source=plan_source,
+            git_path=logical,
+            local_source=_git_source_label(plan_source, logical),
+        )
     build = _SourceGraphBuild(
         loaded={("path", str(canonical_path(root.path))): root},
         locked_goons=locked_goons,
@@ -257,6 +280,7 @@ def analyze_fleet_plan_sources(
         selected_git_commits=selected_commits,
         project_bytes=root.python_project.identity.byte_count if root.python_project else 0,
         archive_bytes=len(root.python_project.archive) if root.python_project else 0,
+        cancel_requested=cancel_requested,
     )
     with build.acquisitions:
         _visit_source(
@@ -265,6 +289,7 @@ def analyze_fleet_plan_sources(
             overrides=overrides,
             goon_templates=goon_templates,
             authoring_root=containment_root,
+            authoring_source=plan_source,
             build=build,
         )
     return FleetPlanSourceGraph(
@@ -289,8 +314,11 @@ def _visit_source(
     overrides: Mapping[Path, CompiledExecutionTemplate],
     goon_templates: GoonTemplateProvider | None,
     authoring_root: Path,
+    authoring_source: LockedGoonSource | None,
     build: _SourceGraphBuild,
 ) -> None:
+    if build.cancel_requested is not None and build.cancel_requested():
+        raise OperationCancelledError("Plan source capture cancelled")
     identity = canonical_path(node.path)
     if identity in build.visited:
         return
@@ -306,6 +334,7 @@ def _visit_source(
                 step,
                 parent_path=node.path,
                 authoring_root=authoring_root,
+                authoring_source=authoring_source,
                 overrides=overrides,
                 provider=goon_templates,
                 build=build,
@@ -329,6 +358,7 @@ def _visit_source(
             overrides=overrides,
             goon_templates=goon_templates,
             authoring_root=child.authoring_root or authoring_root,
+            authoring_source=child.git_source,
             build=build,
         )
 
@@ -370,6 +400,7 @@ def _load_goon_child(
     *,
     parent_path: Path,
     authoring_root: Path,
+    authoring_source: LockedGoonSource | None,
     overrides: Mapping[Path, CompiledExecutionTemplate],
     provider: GoonTemplateProvider | None,
     build: _SourceGraphBuild,
@@ -377,8 +408,10 @@ def _load_goon_child(
     key = step.goon
     local_source = None
     local_root = None
-    cache_key = ("goon", key)
+    cache_key: tuple[str, ...] = ("goon", key)
     remote_root = None
+    git_source = None
+    git_path = None
     if step.git_source is not None:
         from oh_goon.integrations.git_source_preparation import prepare_git_source
 
@@ -411,6 +444,7 @@ def _load_goon_child(
                     selection.ref,
                     commit=build.selected_git_commits.get(source_key),
                     allow_network=build.acquire_goons or build.allow_source_network,
+                    cancel_requested=build.cancel_requested,
                 )
             )
         checkout, commit = build.acquired_git[source_key]
@@ -426,9 +460,11 @@ def _load_goon_child(
         )
         remote_root = checkout
         local_root = selected.parent.parent
-        local_source = f"git:{selection.git}@{commit}:{selection.path}/goon.yml"
-        cache_key = ("git", local_source)
-        build.goon_sources[coordinates] = LockedGoonSource(**selection.model_dump(), commit=commit)
+        git_source = LockedGoonSource(**selection.model_dump(), commit=commit)
+        git_path = (PurePosixPath(selection.path) / "goon.yml").as_posix()
+        local_source = _git_source_label(git_source, git_path)
+        cache_key = _git_source_key(git_source, git_path)
+        build.goon_sources[coordinates] = git_source
     elif step.source_root is not None:
         space = ContainedPathSpace.from_root(authoring_root)
         root = space.resolve_from(
@@ -441,6 +477,11 @@ def _load_goon_child(
         selected = root / key / "goon.yml"
         relative = space.relative(selected, label="Local Goon source")
         local_source = f"local:{relative.as_posix()}"
+        if authoring_source is not None:
+            prefix = authoring_source.path if authoring_source.kind == "plan" else "."
+            git_source = authoring_source
+            git_path = (PurePosixPath(prefix) / relative).as_posix()
+            local_source = _git_source_label(git_source, git_path)
         cache_key = ("path", str(canonical_path(selected)))
         local_root = root
     cached = build.loaded.get(cache_key)
@@ -486,6 +527,8 @@ def _load_goon_child(
         package_kind="goon",
         package_name=key,
         local_source=local_source,
+        git_source=git_source,
+        git_path=git_path,
         step_positions=source.step_positions,
         value_positions=source.value_positions,
         python_project=captured_project,
@@ -493,6 +536,23 @@ def _load_goon_child(
     )
     build.loaded[cache_key] = node
     return node
+
+
+def _git_source_label(source: LockedGoonSource, path: str) -> str:
+    return f"git:{source.git}@{source.commit}:{path}"
+
+
+def _git_source_key(source: LockedGoonSource, path: str) -> tuple[str, ...]:
+    """Native coordinates retain authority independently of their display label."""
+    return ("git", source.git, source.ref, source.commit, path)
+
+
+def _source_owner_key(node: FleetPlanSourceNode) -> tuple[str, ...]:
+    if node.git_source is not None:
+        if node.git_path is None:
+            raise FleetPlanInvalid("Git source owner provenance is unavailable")
+        return _git_source_key(node.git_source, node.git_path)
+    return ("file", node.path.as_posix())
 
 
 def _capture_project(

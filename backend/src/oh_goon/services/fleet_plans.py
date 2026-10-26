@@ -1783,6 +1783,8 @@ class FleetPlanService:
                         allowed_acceptance=accepted,
                         cancel_requested=capture_cancelled,
                         locked_skills=lock.skill_sources,
+                        source_graph=source_graph,
+                        locked_goons=plan.goon_sources,
                     )
                     require_same_subject()
                 except OperationCancelledError:
@@ -1810,6 +1812,7 @@ class FleetPlanService:
                     steps=(steps.test, rebound, steps.apply, steps.retest),
                     requirements=plan.requirements,
                     skill_sources=plan.skill_sources,
+                    goon_sources=plan.goon_sources,
                     imports=plan.imports,
                     step_sources=plan.step_sources,
                 )

@@ -13,7 +13,7 @@ This directory is the canonical Python project; it installs after relocation
 without the Oh-Goon backend or a separate certification fixture. From here:
 
 ```sh
-uv sync --locked
+uv sync --frozen --no-default-groups --group dev
 uv run --no-sync pytest
 uv run --no-sync ruff check .
 uv run --no-sync iris-train --random-seed 42 --test-size-percent 20 --minimum-accuracy-percent 90 --max-iterations 300
@@ -21,7 +21,8 @@ uv run --no-sync iris-train --random-seed 42 --test-size-percent 20 --minimum-ac
 
 `pyproject.toml` owns the console entry point, scikit-learn runtime dependency,
 development tools and build backend; committed `uv.lock` owns native dependency
-resolution. Local development includes `dev`; package execution installs only
+resolution. Frozen synchronization consumes that lock without a metadata-freshness
+check or rewrite. Local development explicitly selects `dev`; package execution installs only
 the project and runtime dependencies by default. The Goon owns workflow input
 defaults and constraints; the CLI requires explicit arguments.
 

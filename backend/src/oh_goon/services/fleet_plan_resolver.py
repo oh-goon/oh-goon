@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping
-from contextlib import ExitStack, nullcontext
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import replace
 from functools import cache
 from pathlib import Path
@@ -36,7 +36,7 @@ from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepCache,
 )
 from oh_goon.core.models.git_sources import LockedGoonSource
-from oh_goon.core.path_authority import RepositoryPathSpace, navigation_path
+from oh_goon.core.path_authority import ContainedPathSpace, RepositoryPathSpace, navigation_path
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
@@ -104,6 +104,7 @@ class FleetPlanResolver:
         update_goons: bool = False,
         allow_source_network: bool = False,
         plan_source: LockedGoonSource | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> FleetPlanSourceGraph:
         path = navigation_path(plan_path)
         root = _containment_root(path, containment_root)
@@ -118,7 +119,67 @@ class FleetPlanResolver:
             update_goons=update_goons,
             allow_source_network=allow_source_network,
             plan_source=plan_source,
+            cancel_requested=cancel_requested,
         )
+
+    @contextmanager
+    def _recapture_agent_graph(
+        self,
+        plan_path: Path,
+        *,
+        source_graph: FleetPlanSourceGraph | None,
+        locked_goons: tuple[LockedGoonSource, ...],
+        root_expected_name: str | None,
+        cancel_requested: Callable[[], bool] | None,
+    ) -> Iterator[FleetPlanSourceGraph]:
+        """Re-read mutable source; reacquire frozen Git revisions through their original owner."""
+        from oh_goon.integrations.git_source_preparation import prepare_git_source
+
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Agent source recapture cancelled")
+        pins = locked_goons or (source_graph.goon_sources if source_graph is not None else ())
+        if source_graph is not None and pins != source_graph.goon_sources:
+            raise FleetPlanInvalid("Agent continuation changed its captured Git source pins")
+        plan_source = next((pin for pin in pins if pin.kind == "plan"), None)
+        with ExitStack() as source_lease:
+            if plan_source is not None:
+                checkout, _ = source_lease.enter_context(
+                    prepare_git_source(
+                        plan_source.git,
+                        plan_source.ref,
+                        commit=plan_source.commit,
+                        cancel_requested=cancel_requested,
+                    )
+                )
+                root = ContainedPathSpace.from_root(checkout).resolve_from(
+                    checkout,
+                    plan_source.path,
+                    label="Git example authoring root",
+                    kind="directory",
+                    require_exists=True,
+                )
+                assert plan_source.plan is not None
+                selected = ContainedPathSpace.from_root(root).resolve_from(
+                    root,
+                    plan_source.plan,
+                    label="Git example Plan",
+                    kind="file",
+                    require_exists=True,
+                )
+            else:
+                selected = plan_path
+                root = (
+                    source_graph.containment_root if source_graph is not None else plan_path.parent
+                )
+            yield self.analyze_source(
+                selected,
+                containment_root=root,
+                root_expected_name=root_expected_name,
+                locked_goons=pins,
+                allow_source_network=True,
+                plan_source=plan_source,
+                cancel_requested=cancel_requested,
+            )
 
     def resolve_source_graph(
         self,
@@ -163,6 +224,7 @@ class FleetPlanResolver:
         repository: Path | None = None,
         git_service: GitService | None = None,
         root_expected_name: str | None = None,
+        locked_goons: tuple[LockedGoonSource, ...] = (),
     ) -> tuple[ResolvedFleetPlan, dict[str, FrozenAgentStepHandoff], str]:
         """Freeze each occurrence while the canonical compiler binds its inputs.
 
@@ -186,23 +248,36 @@ class FleetPlanResolver:
             if native_agent is not None and native_agent.profile.codex_service is not None
             else ()
         )
-        graph = (
-            source_graph
-            if source_graph is not None
-            else self.analyze_source(plan_path, root_expected_name=root_expected_name)
-        )
-        if graph.root.path != navigation_path(plan_path):
+        if source_graph is not None and source_graph.root.path != navigation_path(plan_path):
             raise FleetPlanInvalid("Captured source graph differs from the selected Plan")
-        if root_expected_name is not None and graph.root.compiled.name != root_expected_name:
-            raise FleetPlanInvalid("Captured Agent source differs from the selected Plan name")
-        graph.validate_agent_selection(
-            native_selected=native_agent is not None, require_review_phases=require_review_phases
-        )
-        source_sha = graph.root.source_sha256
-        if source_sha is None:
-            raise FleetPlanInvalid("Agent Plan source fingerprint is unavailable")
-        graph_identity = graph.immutable_source_closure_identity()
         with ExitStack() as owned_sources:
+            if previous is not None:
+                graph = owned_sources.enter_context(
+                    self._recapture_agent_graph(
+                        plan_path,
+                        source_graph=source_graph,
+                        locked_goons=locked_goons,
+                        root_expected_name=root_expected_name,
+                        cancel_requested=cancel_requested,
+                    )
+                )
+            else:
+                graph = source_graph or self.analyze_source(
+                    plan_path,
+                    root_expected_name=root_expected_name,
+                    locked_goons=locked_goons,
+                    cancel_requested=cancel_requested,
+                )
+            if root_expected_name is not None and graph.root.compiled.name != root_expected_name:
+                raise FleetPlanInvalid("Captured Agent source differs from the selected Plan name")
+            graph.validate_agent_selection(
+                native_selected=native_agent is not None,
+                require_review_phases=require_review_phases,
+            )
+            source_sha = graph.root.source_sha256
+            if source_sha is None:
+                raise FleetPlanInvalid("Agent Plan source fingerprint is unavailable")
+            graph_identity = graph.immutable_source_closure_identity()
             aliases: Mapping[str, str] | None = None
             aliases_loaded = False
             if callable(connection):
@@ -419,6 +494,8 @@ class FleetPlanResolver:
         allowed_acceptance: tuple[str, ...],
         cancel_requested: Callable[[], bool] | None = None,
         locked_skills: tuple[LockedSkillSource, ...] | None = None,
+        source_graph: FleetPlanSourceGraph | None = None,
+        locked_goons: tuple[LockedGoonSource, ...] = (),
     ) -> "FrozenAgentStepHandoff":
         """Explicitly capture a repaired repository for a separately admitted attempt.
 
@@ -438,46 +515,54 @@ class FleetPlanResolver:
             or previous_handoff.handoff_identity != expected_previous_handoff_identity
         ):
             raise FleetPlanInvalid("Agent repair previous handoff identity mismatch")
-        graph = self.analyze_source(plan_path)
-        if (
-            graph.root.source_sha256 != previous_handoff.source.plan_source_sha256
-            or graph.immutable_source_closure_identity()
-            != previous_handoff.source.plan_graph_identity
-        ):
-            raise FleetPlanInvalid(
-                "Agent repair Plan/Step source changed; new authorization required"
-            )
-        matches = graph.agent_step_sources()
-        if len(matches) != 1:
-            raise FleetPlanInvalid("Agent repair requires exactly one original Agent Step")
-        owner, step_id = matches[0]
-        authored = next(
-            step
-            for step in graph.node(owner).compiled.steps
-            if isinstance(step, AgentPlanStep) and step.step_id == step_id
-        )
-        require_agent_step_handoff(
-            authored,
-            previous_handoff,
-            owner_source_sha256=graph.node(owner).source_sha256,
-        )
-        source = self._capture_agent_source_graph(
-            graph,
-            inputs=inputs,
-            repository_root=repository_root,
-            skill_root=skill_root,
-            allowed_acceptance=allowed_acceptance,
-            expected_source_sha256=previous_handoff.source.plan_source_sha256,
-            skill_aliases=None,
-            previous_source=previous_handoff.source,
+        if source_graph is not None and source_graph.root.path != navigation_path(plan_path):
+            raise FleetPlanInvalid("Captured source graph differs from the selected Plan")
+        with self._recapture_agent_graph(
+            plan_path,
+            source_graph=source_graph,
+            locked_goons=locked_goons,
+            root_expected_name=None,
             cancel_requested=cancel_requested,
-            locked_skills=locked_skills,
-        )
-        handoff = replace(previous_handoff, source=source)
-        handoff.verify()
-        if cancel_requested is not None and cancel_requested():
-            raise OperationCancelledError("Agent repair capture cancelled")
-        return handoff
+        ) as graph:
+            if (
+                graph.root.source_sha256 != previous_handoff.source.plan_source_sha256
+                or graph.immutable_source_closure_identity()
+                != previous_handoff.source.plan_graph_identity
+            ):
+                raise FleetPlanInvalid(
+                    "Agent repair Plan/Step source changed; new authorization required"
+                )
+            matches = graph.agent_step_sources()
+            if len(matches) != 1:
+                raise FleetPlanInvalid("Agent repair requires exactly one original Agent Step")
+            owner, step_id = matches[0]
+            authored = next(
+                step
+                for step in graph.node(owner).compiled.steps
+                if isinstance(step, AgentPlanStep) and step.step_id == step_id
+            )
+            require_agent_step_handoff(
+                authored,
+                previous_handoff,
+                owner_source_sha256=graph.node(owner).source_sha256,
+            )
+            source = self._capture_agent_source_graph(
+                graph,
+                inputs=inputs,
+                repository_root=repository_root,
+                skill_root=skill_root,
+                allowed_acceptance=allowed_acceptance,
+                expected_source_sha256=previous_handoff.source.plan_source_sha256,
+                skill_aliases=None,
+                previous_source=previous_handoff.source,
+                cancel_requested=cancel_requested,
+                locked_skills=locked_skills,
+            )
+            handoff = replace(previous_handoff, source=source)
+            handoff.verify()
+            if cancel_requested is not None and cancel_requested():
+                raise OperationCancelledError("Agent repair capture cancelled")
+            return handoff
 
     def input_definitions(
         self,

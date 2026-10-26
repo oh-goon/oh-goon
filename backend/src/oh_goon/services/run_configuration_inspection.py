@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 from oh_goon.core.errors import FleetPlanInvalid
@@ -15,7 +15,6 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedCommandStep,
 )
 from oh_goon.core.models.fleet_plan_composition import PlanInputType
-from oh_goon.core.models.git_sources import LockedGoonSource
 from oh_goon.core.models.run_configuration import CatalogPlanSelection
 from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
 from oh_goon.services.execution_lock_persistence import (
@@ -98,10 +97,6 @@ def inspect_run_configuration(
         diagnostic = safe_plan_diagnostic(exc)
     occurrences: list[dict[str, Any]] = []
     declared_steps: list[dict[str, Any]] = []
-    plan_pin = next((pin for pin in graph.goon_sources if pin.kind == "plan"), None)
-    # These lexical roots are captured graph facts, even after native Git has
-    # retired its checkout. Projection never reopens source or resolves a ref.
-    root_context = (plan_pin, graph.containment_root, plan_pin.path) if plan_pin else None
     resolved_commands = (
         {step.step_id: step for step in resolved.steps if isinstance(step, ResolvedCommandStep)}
         if resolved is not None
@@ -143,18 +138,17 @@ def inspect_run_configuration(
 
     def source_report(
         node: FleetPlanSourceNode,
-        context: tuple[LockedGoonSource, Path, str] | None,
         *,
         root: bool = False,
         lineage: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         git = None
-        if context is not None:
-            pin, directory, prefix = context
-            relative = node.path.relative_to(directory)
-            logical = (PurePosixPath(prefix) / PurePosixPath(*relative.parts)).as_posix()
-            git = {"git": pin.git, "ref": pin.ref, "commit": pin.commit, "path": logical}
-            location = f"git:{pin.git}@{pin.commit}:{logical}"
+        if node.git_source is not None:
+            pin = node.git_source
+            if node.git_path is None or node.local_source is None:
+                raise FleetPlanInvalid("Git source owner provenance is unavailable")
+            git = {"git": pin.git, "ref": pin.ref, "commit": pin.commit, "path": node.git_path}
+            location = node.local_source
         elif root and isinstance(snapshot.selection.source, CatalogPlanSelection):
             location = f"catalog:{snapshot.selection.source.name}/plan.yml"
         elif root:
@@ -177,22 +171,10 @@ def inspect_run_configuration(
     def walk(
         node: Any,
         lineage: tuple[str, ...],
-        context: tuple[LockedGoonSource, Path, str] | None,
     ) -> None:
         for step in node.compiled.steps:
             if isinstance(step, CompiledGoonImportStep):
                 child = graph.goon(node.path, step)
-                child_context = context if step.source_root is not None else None
-                if step.git_source is not None:
-                    pin = next(
-                        pin
-                        for pin in graph.goon_sources
-                        if pin.kind == "goon"
-                        and (pin.git, pin.ref, pin.path)
-                        == (step.git_source.git, step.git_source.ref, step.git_source.path)
-                    )
-                    assert child.authoring_root is not None
-                    child_context = (pin, child.authoring_root, ".")
                 path = (*lineage, step.step_id)
                 definitions = {
                     item.name: item
@@ -230,7 +212,7 @@ def inspect_run_configuration(
                         "occurrence": list(path),
                         "goon": step.goon,
                         "source_sha256": child.source_sha256,
-                        "source": source_report(child, child_context, lineage=path),
+                        "source": source_report(child, lineage=path),
                         "phase": getattr(step, "phase", None),
                         "requirements": [
                             item.model_dump(mode="json") for item in child.compiled.requirements
@@ -238,7 +220,7 @@ def inspect_run_configuration(
                         "bindings": bindings,
                     }
                 )
-                walk(child, path, child_context)
+                walk(child, path)
             else:
                 capabilities = (
                     step.requested_effects.capabilities
@@ -267,7 +249,7 @@ def inspect_run_configuration(
                     }
                 )
 
-    walk(graph.root, (), root_context)
+    walk(graph.root, ())
     inputs = []
     for item in interface.inputs:
         definition = item.definition
@@ -322,7 +304,7 @@ def inspect_run_configuration(
         "diagnostic": diagnostic,
         "configuration": {"path": snapshot.relative_path, "sha256": snapshot.sha256},
         "source": {
-            **source_report(graph.root, root_context, root=True),
+            **source_report(graph.root, root=True),
             "selection": snapshot.selection.source.model_dump(mode="json"),
             "sha256": graph.root.source_sha256,
             "git_sources": [pin.model_dump(mode="json") for pin in graph.goon_sources],

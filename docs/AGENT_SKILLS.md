@@ -375,6 +375,12 @@ the repository bytes may change in this repair request. A changed Plan, Goon,
 source selector or Skill requires a new authorization. A cancellation callback
 can interrupt capture, including file reads, without returning a next handoff.
 
+For Git-owned Plans or Goons, transport the selected source graph and original
+resolved Plan's `goon_sources` as `source_graph` and `locked_goons`. Recapture
+uses the native Git owner to restore those exact revisions and holds its lease
+through capture. A retained graph supplies provenance; mutable local authoring
+is read again and must still match the authorized source.
+
 For remote Skills, pass the original resolved Plan's `skill_sources` as
 `locked_skills` during recapture and resolution of a supplied handoff. The
 receiver verifies the captured delivery and supplied pins; it does not reopen
