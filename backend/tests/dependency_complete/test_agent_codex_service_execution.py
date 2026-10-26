@@ -25,7 +25,7 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord
-from oh_goon.core.models.fleet_plan import ResolvedAgentStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedNativeAgentWorkload
 from oh_goon.core.models.fleet_plan_values import HostEnvironmentPart, ResolvedEnvironmentBinding
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
@@ -316,7 +316,7 @@ def execute_fixture(
         process,
         ResolvedAgentStep(
             timeout_seconds=3600,
-            workload={"harness": "native", "native_agent": selected},
+            workload=ResolvedNativeAgentWorkload(native_agent=selected),
             step_id="native-service",
             delivery_sha256="0" * 64,
             handoff_identity="original-frozen-handoff",
@@ -383,6 +383,21 @@ def test_service_turn_success_retains_actual_owned_daemon_cancellation_receipt(
     assert "PRIVATE_NATIVE_REGISTRATION" not in result.execution.model_dump_json()
     assert events.index("sandbox_qualification") < events.index("model_turn")
     assert events.index("disconnect") < events.index("process_closed")
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux AF_UNIX pathname transport")
+def test_long_service_socket_refuses_before_private_state_or_native_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / ("é" * 40)
+    root.mkdir()
+    invoke, events, physical = execute_fixture(root, monkeypatch)
+    with pytest.raises(AgentProviderError, match="107-byte"):
+        invoke()
+    assert events == []
+    assert physical == []
+    assert not (root / "control" / "service-private").exists()
+    assert not (root / "control" / "service-scratch").exists()
 
 
 def test_service_turn_transports_the_selected_adjudication_schema_without_rewriting_output(

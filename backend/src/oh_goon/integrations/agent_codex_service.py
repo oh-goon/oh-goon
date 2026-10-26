@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import re
+import sys
 import time
 from collections import deque
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
@@ -54,6 +56,19 @@ def _socket_name(path: Path) -> str:
     return value
 
 
+def codex_unix_socket_name(path: Path) -> str:
+    """Admit the selected pathname for this direct Unix-socket transport."""
+    value = _socket_name(path)
+    # Linux sockaddr_un reserves 108 bytes including the terminating NUL.
+    # Native advertised aliases still cross this boundary as their exact path.
+    if sys.platform == "linux" and len(os.fsencode(value)) > 107:
+        raise AgentProviderError(
+            "Native Codex Unix socket exceeds Linux's 107-byte pathname limit; "
+            "select a shorter execution temporary directory"
+        )
+    return value
+
+
 def _unique_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for name, value in pairs:
@@ -90,7 +105,7 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         timeout_seconds: float = 10.0,
         experimental_api: bool = False,
     ) -> None:
-        self._socket = _socket_name(socket_path)
+        self._socket = codex_unix_socket_name(socket_path)
         if (
             isinstance(timeout_seconds, bool)
             or not math.isfinite(timeout_seconds)
