@@ -1,0 +1,83 @@
+{
+  "schema_version": 90,
+  "receipt_model_commit": "54452fccda9137a8a629e137d353260c482af523",
+  "entries": [
+    {
+      "revision": 1,
+      "session_id": "session-d8eb6fd982f941c0abff4514c6da6cda",
+      "kind": "RUN_EVENT",
+      "report_json": null,
+      "event_json": "{\"application_launch\":{\"kind\":\"unmanaged\"},\"capability\":{\"action\":\"init\",\"capability_id\":\"initialize\",\"invalidates_all\":false,\"invalidates_capabilities\":[\"plan\",\"update\",\"verify\"],\"policy_fingerprint\":\"capability-policy-9d19c7d10b1b58ba0c33777553da62f4fe185138219f0623e44f3e959b8e21de\",\"safety\":\"READ_ONLY\",\"target_kind\":\"NONE\"},\"event_type\":\"RUN_ADMITTED\",\"execution\":{\"kind\":\"direct\",\"rerun_from_run_id\":null},\"fleet_run_id\":\"schema90-cancelled\",\"generated_at\":\"2026-10-26T13:51:39.819305Z\",\"repository_admissions\":[],\"repository_scope\":{\"kind\":\"ALL\"},\"scheduling\":null,\"sequence\":1,\"source\":\"MANUAL\",\"target\":null,\"targets\":[{\"name\":\"fixture\",\"path\":\"/synthetic/schema90/repository\",\"repository_id\":\"repo-88d555e468faf5951376\"}]}",
+      "effect_json": null,
+      "committed_at": "2026-10-26T13:51:39.819623+00:00",
+      "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "fact_hash": "03e605ecd40a7ed3d62510013de205a4d49649807365e9d282cec90f45f429db"
+    },
+    {
+      "revision": 2,
+      "session_id": "session-d8eb6fd982f941c0abff4514c6da6cda",
+      "kind": "RUN_EVENT",
+      "report_json": null,
+      "event_json": "{\"event_type\":\"RUN_STARTED\",\"fleet_run_id\":\"schema90-cancelled\",\"generated_at\":\"2026-10-26T13:51:39.822066Z\",\"sequence\":2}",
+      "effect_json": null,
+      "committed_at": "2026-10-26T13:51:39.822234+00:00",
+      "previous_hash": "03e605ecd40a7ed3d62510013de205a4d49649807365e9d282cec90f45f429db",
+      "fact_hash": "e47e8124a046575d27b88bf4fc7e168a6b19afd7a9b15ef7bf142b5300358d64"
+    },
+    {
+      "revision": 3,
+      "session_id": "session-d8eb6fd982f941c0abff4514c6da6cda",
+      "kind": "RUN_EVENT",
+      "report_json": null,
+      "event_json": "{\"event_type\":\"REPOSITORY_STARTED\",\"fleet_run_id\":\"schema90-cancelled\",\"generated_at\":\"2026-10-26T13:51:39.824536Z\",\"operation_id\":\"op-516766c4826fa6c9deae508197a5e5a9c731ed5c76a19023350cc59636935916\",\"repository_id\":\"repo-88d555e468faf5951376\",\"sequence\":3}",
+      "effect_json": null,
+      "committed_at": "2026-10-26T13:51:39.824712+00:00",
+      "previous_hash": "e47e8124a046575d27b88bf4fc7e168a6b19afd7a9b15ef7bf142b5300358d64",
+      "fact_hash": "1eebbd0168716253569f40b282b6da838d1761254c390f57ab19232df3699301"
+    },
+    {
+      "revision": 4,
+      "session_id": "session-d8eb6fd982f941c0abff4514c6da6cda",
+      "kind": "RUN_EVENT",
+      "report_json": null,
+      "event_json": "{\"event_type\":\"STEP_REACHED\",\"fleet_run_id\":\"schema90-cancelled\",\"generated_at\":\"2026-10-26T13:51:39.826997Z\",\"operation_id\":\"op-516766c4826fa6c9deae508197a5e5a9c731ed5c76a19023350cc59636935916\",\"repository_id\":\"repo-88d555e468faf5951376\",\"sequence\":4,\"step_id\":\"before-launch\",\"step_order\":1}",
+      "effect_json": null,
+      "committed_at": "2026-10-26T13:51:39.827185+00:00",
+      "previous_hash": "1eebbd0168716253569f40b282b6da838d1761254c390f57ab19232df3699301",
+      "fact_hash": "c92f758edac48f00198cbb973b4593b612b4e33a476cf1505e09c9db6d777d67"
+    },
+    {
+      "revision": 5,
+      "session_id": "session-d8eb6fd982f941c0abff4514c6da6cda",
+      "kind": "RUN_EVENT",
+      "report_json": null,
+      "event_json": "{\"cancellation\":{\"duration_ms\":0,\"native_agent_observations\":[],\"physical_execution_id\":null,\"settlement\":{\"cleanup\":\"UNAVAILABLE\",\"observed_returncode\":null,\"outcome\":\"INCOMPLETE\",\"owner\":\"fleet_step_settlement\",\"reason\":\"SUPERVISION_UNAVAILABLE\"},\"standard_isolation\":null,\"supervisor\":null},\"event_type\":\"STEP_CANCELLED\",\"fleet_run_id\":\"schema90-cancelled\",\"generated_at\":\"2026-10-26T13:51:39.829503Z\",\"operation_id\":\"op-516766c4826fa6c9deae508197a5e5a9c731ed5c76a19023350cc59636935916\",\"repository_id\":\"repo-88d555e468faf5951376\",\"sequence\":5,\"step_id\":\"before-launch\",\"step_order\":1}",
+      "effect_json": null,
+      "committed_at": "2026-10-26T13:51:39.829705+00:00",
+      "previous_hash": "c92f758edac48f00198cbb973b4593b612b4e33a476cf1505e09c9db6d777d67",
+      "fact_hash": "33dce6339dd272534ed13e4385af0487218d5a749cdd2b6b8c79fc4186872911"
+    },
+    {
+      "revision": 6,
+      "session_id": "session-d8eb6fd982f941c0abff4514c6da6cda",
+      "kind": "RUN_EVENT",
+      "report_json": null,
+      "event_json": "{\"event_type\":\"RUN_CANCEL_REQUESTED\",\"fleet_run_id\":\"schema90-cancelled\",\"generated_at\":\"2026-10-26T13:51:39.832089Z\",\"sequence\":6}",
+      "effect_json": null,
+      "committed_at": "2026-10-26T13:51:39.832313+00:00",
+      "previous_hash": "33dce6339dd272534ed13e4385af0487218d5a749cdd2b6b8c79fc4186872911",
+      "fact_hash": "17e41de1f91222225291e7e06ff9c3531503e800640a249b466c043d68ed3fa5"
+    },
+    {
+      "revision": 7,
+      "session_id": "session-d8eb6fd982f941c0abff4514c6da6cda",
+      "kind": "RUN_EVENT",
+      "report_json": null,
+      "event_json": "{\"event_type\":\"RUN_CANCELLED\",\"fleet_run_id\":\"schema90-cancelled\",\"generated_at\":\"2026-10-26T13:51:39.832381Z\",\"sequence\":7}",
+      "effect_json": null,
+      "committed_at": "2026-10-26T13:51:39.832629+00:00",
+      "previous_hash": "17e41de1f91222225291e7e06ff9c3531503e800640a249b466c043d68ed3fa5",
+      "fact_hash": "080d3e6513d2a3c881d0da8eb7eac100e9a38b2c13f97ebe3b0ae4f89070133f"
+    }
+  ]
+}

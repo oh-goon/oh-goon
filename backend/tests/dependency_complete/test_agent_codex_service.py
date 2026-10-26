@@ -549,10 +549,12 @@ def test_invalid_native_exchange_fails_without_private_payloads_or_leaking_resou
     fault: str,
 ) -> None:
     decisions: list[dict[str, Any]] = []
+    methods: list[str] = []
 
     async def endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
         message = await websocket.receive_json()
+        methods.append(message["method"])
         identifier = message["id"]
         try:
             if fault == "error":
@@ -587,9 +589,9 @@ def test_invalid_native_exchange_fails_without_private_payloads_or_leaking_resou
     endpoint_transport(monkeypatch, endpoint)
 
     async def check() -> None:
-        client = CodexServiceClient(tmp_path / "explicit.sock", timeout_seconds=0.03)
+        client = CodexServiceClient(tmp_path / "explicit.sock", timeout_seconds=1)
         with pytest.raises(AgentProviderError) as error:
-            async with asyncio.timeout(1):
+            async with asyncio.timeout(3):
                 await client.connect()
         assert "PRIVATE" not in str(error.value)
         if fault != "error":
@@ -599,6 +601,7 @@ def test_invalid_native_exchange_fails_without_private_payloads_or_leaking_resou
         await client.close()
 
     asyncio.run(check())
+    assert methods == ["initialize"]
     if fault == "interaction":
         assert decisions == [
             {"id": 90, "error": {"code": -32601, "message": "Client interaction is not supported"}}

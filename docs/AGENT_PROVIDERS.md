@@ -97,6 +97,9 @@ and available native observations. Visible native final summaries are retained a
 redacted untrusted claims up to 4,000 characters, with explicit omission notices;
 unavailable summaries and controller diagnostics are labelled separately. Native
 claims never upgrade a failed or unrun independent verification check.
+Cancelled Steps retain original physical settlement and cleanup evidence;
+interrupted native claims remain in the bounded diagnostic sink rather than the
+canonical cancellation receipt. Duration is unavailable when no process launched.
 The reusable handoff view bounds source admissions, Steps and claim excerpts and
 reports every projection omission. Full recorded facts remain in the original
 Run events and Game Tape; transient raw output may be unavailable.

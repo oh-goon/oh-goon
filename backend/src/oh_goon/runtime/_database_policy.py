@@ -16,8 +16,8 @@ from oh_goon.runtime._sqlite_authority_gate import sqlite_authority_gate
 from oh_goon.runtime.local_state_maintenance import LocalStateCompatibility, LocalStateInspection
 from oh_goon.runtime.schema_version_policy import DurableSchemaDisposition, DurableSchemaPolicy
 
-# Contract 46 makes persisted Plan/UV payloads incompatible with schema 89.
-DATABASE_SCHEMA_VERSION = 90
+# Schema 91 retires cancellation-native claims and unbound physical facts.
+DATABASE_SCHEMA_VERSION = 91
 DATABASE_SCHEMA_POLICY = DurableSchemaPolicy(
     name="Local oh-goon database", current=DATABASE_SCHEMA_VERSION
 )

@@ -103,7 +103,7 @@ OH_GOON_NATIVE_OPENCODE=/opt/native-tools/bin/opencode \
 uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_opencode_service.py
 ```
 
-The installed OpenCode CLI lifecycle cases separately exercise completed text,
+The installed Codex, OpenCode and Pi CLI lifecycle cases separately exercise completed text,
 a later native streaming error, caller cancellation and an active-stream
 deadline through original Run/Step supervision. A model claim cannot override
 failed/cancelled/timed-out settlement. Original process receipts retain observed
@@ -113,7 +113,26 @@ acknowledgement does not acquire an isolation receipt:
 ```sh
 OH_GOON_NATIVE_OPENCODE=/opt/native-tools/bin/opencode \
 OH_GOON_NATIVE_OPENCODE_RUNTIME_ROOT=/opt/native-tools \
-uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_opencode_lifecycle.py
+OH_GOON_NATIVE_PI=/opt/native-pi/node_modules/.bin/pi \
+OH_GOON_NATIVE_PI_RUNTIME_ROOT=/opt/native-pi \
+OH_GOON_NATIVE_CODEX=/opt/native-codex/bin/codex \
+OH_GOON_NATIVE_CODEX_RUNTIME_ROOT=/opt/native-codex \
+uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_cli_lifecycle.py
+```
+
+The Pi and OpenCode installed compaction cases use a bounded local streaming
+context-overflow response. Each real harness summarizes its history and continues
+the admitted review. Every request retains the exact task, complete Skill and
+qualified Hashmarks context; the continuation carries the native summary and
+frozen output identity. Typed acceptance, an independent verification Step,
+original process cleanup and Journal reopen remain in the original Run:
+
+```sh
+OH_GOON_NATIVE_OPENCODE=/opt/native-tools/bin/opencode \
+OH_GOON_NATIVE_OPENCODE_RUNTIME_ROOT=/opt/native-tools \
+OH_GOON_NATIVE_PI=/opt/native-pi/node_modules/.bin/pi \
+OH_GOON_NATIVE_PI_RUNTIME_ROOT=/opt/native-pi \
+uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_cli_compaction.py
 ```
 
 The installed Codex permission probe uses a synthetic authentication home and no

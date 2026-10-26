@@ -873,10 +873,6 @@ def test_cancelled_service_preserves_visible_output_without_fabricating_completi
     assert cancelled.value.__cause__ is physical[0]
     assert cancelled.value.outcome.supervisor is physical[0].supervisor
     assert physical[0].supervisor.final_process_group_quiescent is True
-    assert cancelled.value.native_observations == ()
-    context = "\n".join(item.summary for item in cancelled.value.safe_diagnostics)
-    assert "visible-before-cancel" in context
-    assert "cancel-secret" not in context
     del invoke
     retained = [json.loads(line) for line in path.read_text().splitlines()]
     visible = [item for item in retained if item["source"] == "native_visible_claim"]

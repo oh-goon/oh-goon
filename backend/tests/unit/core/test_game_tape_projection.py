@@ -177,6 +177,58 @@ def _assert_tape_derived_views_are_not_source_facts(tape) -> None:
         assert field in normal
 
 
+@pytest.mark.parametrize("duration", [None, 0, 18])
+def test_cancelled_step_preserves_unknown_and_observed_durations(duration):
+    from oh_goon.core.game_tape_step_projection import project_steps
+    from oh_goon.core.models.fleet_plan_evidence import (
+        PlanExecutionSupervisorEvidence,
+        PlanStepCancellationEvidence,
+    )
+
+    step = ResolvedCommandStep(step_id="cancelled", argv=("work",))
+    receipt = PlanStepCancellationEvidence(
+        settlement=PlanStepSettlementEvidence(
+            outcome="INCOMPLETE" if duration is None else "CANCELLED",
+            reason="SUPERVISION_UNAVAILABLE" if duration is None else "CALLER_CANCELLED",
+            cleanup="UNAVAILABLE" if duration is None else "VERIFIED",
+        ),
+        duration_ms=duration,
+        physical_execution_id=None if duration is None else "original-physical",
+        supervisor=None
+        if duration is None
+        else PlanExecutionSupervisorEvidence(
+            process_group_cleanup_requested=True,
+            cleanup_reason="cancel",
+            final_process_group_quiescent=True,
+        ),
+    )
+    event = StepCancelledEvent(
+        event_type=FleetRunEventType.STEP_CANCELLED,
+        sequence=1,
+        fleet_run_id="cancelled-run",
+        repository_id="cancelled-repository",
+        operation_id="cancelled-operation",
+        step_id=step.step_id,
+        step_order=1,
+        cancellation=receipt,
+    )
+    projected = project_steps(
+        event.fleet_run_id,
+        event.repository_id,
+        (step,),
+        (),
+        step_sources={},
+        source_label="plan.yml",
+        terminal=True,
+        operation_reason_code=None,
+        lifecycle_events=(event,),
+    )[0]
+    assert projected.duration_ms == duration
+    assert projected.cancellation == receipt
+    assert not projected.attempts and projected.finished_at is None
+    assert projected.native_agent_observations == ()
+
+
 _FAILED_PLAN_PLAY_BY_PLAY = [
     GameTapeEventType.RUN_ADMITTED,
     GameTapeEventType.RUN_STARTED,

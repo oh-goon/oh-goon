@@ -353,7 +353,7 @@ def run_handoff_projection(detail: FleetRunDetail) -> dict[str, Any]:
             "availability": "not_checked; bounded rotation or storage failure may remove supporting output",
             "authority": "supporting controller diagnostics; no Run outcome, permission or cleanup authority",
         },
-        "native_payload_retention": "Only recorded native observations are projected; cancelled/interrupted work without a retained Step result or cancellation receipt has unavailable journal payload. Supporting diagnostics may retain earlier visible output.",
+        "native_payload_retention": "Only native observations from accepted Step results are projected; cancelled/interrupted work without such a result has unavailable journal payload. Cancellation receipts retain physical settlement and cleanup evidence. Supporting diagnostics may retain earlier visible output.",
         "record_authority": "Original journal/Game Tape facts; native summaries remain untrusted claims",
         "remaining_work": "Not independently inferred; inspect canonical Step statuses, why_not and explicitly unverified claims",
     }

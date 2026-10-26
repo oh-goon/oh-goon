@@ -1,4 +1,4 @@
-"""Opt-in installed OpenCode failure/cancellation through original Run supervision.
+"""Installed native CLI failure/cancellation through original Run supervision.
 
 The local model emits a completion, rejects inference, or leaves a text stream
 open. Synthetic state and credentials establish lifecycle conformance only.
@@ -12,24 +12,29 @@ import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Thread
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.vocabulary import FleetRunEventType, FleetRunOutcome, FleetRunStatus
+from tests.fakes.codex_responses import CodexResponsesFixture
 
 
 @pytest.mark.certification
 @pytest.mark.parametrize("scenario", ("success", "error", "cancel", "timeout"))
-def test_installed_opencode_terminal_claim_respects_original_run_settlement(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str
+@pytest.mark.parametrize("agent", ("opencode", "pi", "codex"))
+def test_installed_native_terminal_claim_respects_original_run_settlement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    agent: Literal["opencode", "pi", "codex"],
 ) -> None:
-    executable = os.environ.get("OH_GOON_NATIVE_OPENCODE")
-    runtime_root = os.environ.get("OH_GOON_NATIVE_OPENCODE_RUNTIME_ROOT")
+    executable = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}")
+    runtime_root = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}_RUNTIME_ROOT")
     if not executable or not runtime_root:
-        pytest.skip("Select the installed OpenCode executable and public runtime root")
+        pytest.skip(f"Select the installed {agent} executable and public runtime root")
     program = Path(executable).resolve(strict=True)
     public_runtime = Path(runtime_root).resolve(strict=True)
     assert public_runtime.is_dir() and program.is_relative_to(public_runtime)
@@ -53,34 +58,74 @@ def test_installed_opencode_terminal_claim_respects_original_run_settlement(
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 request_count += 1
                 assert request_count <= 5
-                assert self.path == "/v1/chat/completions"
+                assert self.path == (
+                    "/v1/responses" if agent == "codex" else "/v1/chat/completions"
+                )
                 assert self.headers["Authorization"] == "Bearer SYNTHETIC_LIFECYCLE_KEY"
                 assert body["model"] == "native-lifecycle-fixture"
                 active = bool(body.get("tools"))
                 if active:
                     model_requests += 1
                     assert model_requests == 1, "Native turn unexpectedly retried inference"
-                delta: dict[str, Any] = {
-                    "role": "assistant",
-                    "content": "CLEAN: synthetic lifecycle completion claim.",
-                }
-                chunks = [{"choices": [{"index": 0, "delta": delta, "finish_reason": None}]}]
                 hanging = active and scenario in {"cancel", "timeout"}
-                if active and scenario == "error":
-                    chunks.append(
-                        {
-                            "error": {
-                                "message": "Synthetic terminal inference rejection",
-                                "type": "invalid_request_error",
-                                "code": "invalid_request_error",
+                if agent == "codex":
+                    item = {
+                        "type": "message",
+                        "id": "msg_lifecycle_claim",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "CLEAN: synthetic lifecycle completion claim.",
+                                "annotations": [],
                             }
-                        }
+                        ],
+                        "status": "completed",
+                    }
+                    events = list(CodexResponsesFixture._events("resp_lifecycle", item, 1))
+                    for event in events:
+                        if isinstance(event.get("response"), dict):
+                            event["response"]["model"] = body["model"]
+                    if active and scenario == "error":
+                        failed = events.pop()["response"]
+                        failed.update(
+                            status="failed",
+                            error={
+                                "code": "invalid_prompt",
+                                "message": "Synthetic terminal inference rejection",
+                            },
+                        )
+                        events.append({"type": "response.failed", "response": failed})
+                    elif hanging:
+                        events.pop()
+                    data = "".join(
+                        f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events
                     )
-                elif not hanging:
-                    chunks.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
-                data = "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks)
-                if not hanging:
-                    data += "data: [DONE]\n\n"
+                else:
+                    delta: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": "CLEAN: synthetic lifecycle completion claim.",
+                    }
+                    chunks: list[dict[str, Any]] = [
+                        {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
+                    ]
+                    if active and scenario == "error":
+                        chunks.append(
+                            {
+                                "error": {
+                                    "message": "Synthetic terminal inference rejection",
+                                    "type": "invalid_request_error",
+                                    "code": "invalid_request_error",
+                                }
+                            }
+                        )
+                    elif not hanging:
+                        chunks.append(
+                            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+                        )
+                    data = "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks)
+                    if not hanging:
+                        data += "data: [DONE]\n\n"
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
@@ -117,7 +162,9 @@ def test_installed_opencode_terminal_claim_respects_original_run_settlement(
                         "default_model": "selected",
                         "providers": {
                             "approved": {
-                                "api": "openai-chat-completions",
+                                "api": "openai-responses"
+                                if agent == "codex"
+                                else "openai-chat-completions",
                                 "base_url": f"http://127.0.0.1:{endpoint.server_port}/v1",
                                 "api_key_env": "NATIVE_LIFECYCLE_KEY",
                             }
@@ -131,14 +178,14 @@ def test_installed_opencode_terminal_claim_respects_original_run_settlement(
                         "native_profiles": {
                             "isolated": {
                                 "backend": "bubblewrap",
-                                "allowed_agents": ["opencode"],
+                                "allowed_agents": [agent],
                                 "workspace_roots": [str(workspace.parent)],
                                 "inference_profile": "selected",
                                 "timeout_seconds": 15 if scenario == "timeout" else 45,
                             }
                         },
                         "native_agents": {
-                            "opencode": {
+                            agent: {
                                 "executable": str(program),
                                 "runtime_roots": [str(public_runtime)],
                             }
@@ -148,7 +195,7 @@ def test_installed_opencode_terminal_claim_respects_original_run_settlement(
                 encoding="utf-8",
             )
             selected, backend, git = resolve_native_cli_selection(
-                agent="opencode", profile="isolated", workspace=workspace, config_file=catalog
+                agent=agent, profile="isolated", workspace=workspace, config_file=catalog
             )
             runtime = ApplicationRuntime.build(
                 standard_local=True, standard_process_isolation=backend, git_service=git
@@ -252,23 +299,25 @@ def test_installed_opencode_terminal_claim_respects_original_run_settlement(
                 )
             finally:
                 runtime.shutdown(wait_for_runs=True)
-            if scenario == "cancel":
-                requests_before_readback = model_requests
-                reopened = ApplicationRuntime.build(
-                    standard_local=True, standard_process_isolation=backend, git_service=git
-                )
-                try:
-                    retained = reopened.runs.get(admitted.fleet_run_id)
-                    assert retained.run.status is FleetRunStatus.CANCELLED
-                    assert (
-                        retained.game_tape.repositories[0].steps[0].cancellation
-                        == step.cancellation
-                    )
-                    assert retained.game_tape.repositories[0].steps[0].settlement == step.settlement
+            requests_before_readback = (request_count, model_requests)
+            reopened = ApplicationRuntime.build(
+                standard_local=True, standard_process_isolation=backend, git_service=git
+            )
+            try:
+                retained = reopened.runs.get(admitted.fleet_run_id)
+                assert retained.run.status is detail.run.status
+                retained_step = retained.game_tape.repositories[0].steps[0]
+                assert retained_step.settlement == step.settlement
+                assert retained_step.cancellation == step.cancellation
+                if scenario == "cancel":
                     assert not retained.operations
-                finally:
-                    reopened.shutdown(wait_for_runs=True)
-                assert model_requests == requests_before_readback
+                else:
+                    assert retained.operations == detail.operations
+                    assert retained_step.attempts == step.attempts
+                    assert retained_step.native_agent_observations == step.native_agent_observations
+            finally:
+                reopened.shutdown(wait_for_runs=True)
+            assert (request_count, model_requests) == requests_before_readback
         finally:
             release_model.set()
             endpoint.shutdown()

@@ -147,7 +147,10 @@ def test_cancelled_step_preserves_original_receipt_and_rejects_other_process(
     observer("native", 1, "DESCENDANTS_QUIESCENT", **physical)
     receipt = PlanStepCancellationEvidence(
         settlement=PlanStepSettlementEvidence(
-            outcome="CANCELLED", reason="CALLER_CANCELLED", cleanup="VERIFIED"
+            outcome="CANCELLED",
+            reason="CALLER_CANCELLED",
+            cleanup="VERIFIED",
+            observed_returncode=-15,
         ),
         physical_execution_id="original-physical",
         supervisor=PlanExecutionSupervisorEvidence(
@@ -163,6 +166,18 @@ def test_cancelled_step_preserves_original_receipt_and_rejects_other_process(
             1,
             "STEP_CANCELLED",
             cancellation=receipt.model_copy(update={"physical_execution_id": "other-process"}),
+        )
+    assert journal.run_events("run-1") == before
+    with pytest.raises(InvalidRunTransition, match="observed exit must match"):
+        observer(
+            "native",
+            1,
+            "STEP_CANCELLED",
+            cancellation=receipt.model_copy(
+                update={
+                    "settlement": receipt.settlement.model_copy(update={"observed_returncode": 99})
+                }
+            ),
         )
     assert journal.run_events("run-1") == before
     observer("native", 1, "STEP_CANCELLED", cancellation=receipt)
@@ -216,6 +231,61 @@ def test_incomplete_cancellation_cannot_publish_invented_verified_cleanup(tmp_pa
     assert journal.run_events("run-1") == before
     observer("native", 1, "STEP_CANCELLED", cancellation=baseline)
     assert journal.run_events("run-1").events[-1].cancellation == baseline
+
+
+def test_cancelled_command_rejects_native_claims_without_an_accepted_step_result(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.core.models.fleet_observation import NativeAgentObservation
+    from oh_goon.core.models.fleet_plan import ResolvedCommandStep
+    from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
+    from oh_goon.core.models.run_events import StepCancelledEvent
+    from oh_goon.engine.errors import OperationCancelledError
+    from oh_goon.integrations._fleet_plan_step_evidence import cancellation_evidence
+
+    step = ResolvedCommandStep(step_id="command", argv=("work",))
+    baseline = cancellation_evidence(step, OperationCancelledError("before launch"))
+    foreign = NativeAgentObservation(
+        agent="pi",
+        implementation_identity="foreign-implementation",
+        profile="foreign-profile",
+        input_identity="foreign-input",
+        occurrence="another-step",
+        source_identity="foreign-source",
+        role="proposal",
+        native_event_count=0,
+        settled=True,
+        failed=False,
+    )
+    payload = baseline.model_dump(mode="json")
+    payload["native_agent_observations"] = [foreign.model_dump(mode="json")]
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        PlanStepCancellationEvidence.model_validate(payload)
+    journal, identity = running_journal(tmp_path)
+    operation_id = start_repository(journal, "run-1", identity)
+    observer = journal.execution_lifecycle_observer("run-1", identity.repository_id, operation_id)
+    observer(step.step_id, 1, "STEP_REACHED")
+    before = journal.run_events("run-1")
+    persisted = {
+        "event_type": "STEP_CANCELLED",
+        "sequence": before.next_sequence + 1,
+        "fleet_run_id": "run-1",
+        "repository_id": identity.repository_id,
+        "operation_id": operation_id,
+        "step_id": step.step_id,
+        "step_order": 1,
+        "cancellation": baseline.model_dump(mode="json"),
+    }
+    assert StepCancelledEvent.model_validate_json(json.dumps(persisted)).cancellation == baseline
+    persisted["cancellation"] = payload
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        StepCancelledEvent.model_validate_json(json.dumps(persisted))
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        observer(step.step_id, 1, "STEP_CANCELLED", cancellation=payload)
+    assert journal.run_events("run-1") == before
+    observer(step.step_id, 1, "STEP_CANCELLED", cancellation=baseline)
+    reopened = Journal(LocalDatabase(tmp_path / "state.db"))
+    assert reopened.run_events("run-1").events[-1].cancellation == baseline
 
 
 def test_execution_lifecycle_rejects_valid_attempt_under_wrong_repository(tmp_path: Path) -> None:
