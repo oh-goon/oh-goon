@@ -206,7 +206,7 @@ def test_ml_iris_training_uses_captured_package_and_base_dependencies() -> None:
     assert source.compiled.description == ""
     assert PLANS.read("ml/iris-training").classification.value == "teaching-example"
     assert goon["runtime"] == "python"
-    assert "uv" not in goon
+    assert goon["uv"] == {"lock_mode": "frozen"}
     assert "requirements" not in goon
     assert len(goon["steps"]) == 1
     assert goon["steps"][0]["run"].startswith("iris-train ")

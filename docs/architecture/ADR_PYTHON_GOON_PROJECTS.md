@@ -198,8 +198,9 @@ explicit imports of those switches are refused for managed UV Steps. Other nativ
 UV configuration, credentials, certificates and transport settings retain their
 native ownership.
 
-Resolved Plan contract 46 requires explicit lock mode. Older contract 45 payloads
-are refused rather than reinterpreted as frozen. Quiesce the old writer before
+Resolved Plan contract 46 requires explicit lock mode. Database schema 90 rejects
+older schema-89 state before decoding incompatible contract-45 Journal payloads;
+they are not corruption and are never reinterpreted as frozen. Quiesce the old writer before
 switching runtimes, retain old evidence under its original runtime, and re-resolve
 and re-lock authoring with the new runtime before new admission. Creating a new
 state directory does not prove that an old process has stopped.

@@ -2,16 +2,15 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClientProvider, useApiClient, useMutationBusy } from "@/app/ApiClientProvider";
-import { createApiClient } from "@/app/createApiClient";
 import type { ApiClient } from "@/domain/api/ApiClient";
 import { MutationController } from "@/domain/concurrency/MutationController";
 import { ReadController } from "@/domain/concurrency/ReadController";
-import { CurrentRunPanel } from "@/features/maintenance/MaintenanceFeature";
+import { CurrentRunPanel } from "@/features/maintenance/components/CurrentRunPanel";
 import { FleetRunStatus } from "@generated/enums";
 import { operations, operationUrl } from "@generated/operations";
-import { fixtureUnadmittedCampaignResult } from "../../e2e/fixtures/gameTape";
-import { PRIMARY_REPOSITORY } from "../../e2e/fixtures/identities";
-import { runState } from "../../e2e/fixtures/runProjection";
+import { fixtureUnadmittedCampaignResult } from "../../../../e2e/fixtures/gameTape";
+import { PRIMARY_REPOSITORY } from "../../../../e2e/fixtures/identities";
+import { runState } from "../../../../e2e/fixtures/runProjection";
 
 const repairRequest: Parameters<ApiClient["repairSharedPlan"]>[0] = {
   fleet_run_id: "reviewed-campaign", plan_key: "reviewed-plan",
@@ -35,12 +34,13 @@ describe("repair cancellation transport", () => {
     vi.stubGlobal("fetch", fetchMock);
     const mutations = new MutationController();
     const reads = new ReadController(mutations.causality);
-    const client = createApiClient(mutations);
+    let client!: ApiClient;
     const commits: number[] = [];
     mutations.subscribeCommits((_scope, revision) => { commits.push(revision); });
     let cancellation: ReturnType<ApiClient["cancelFleetRun"]> | undefined;
     function LiveRun() {
       const api = useApiClient();
+      client = api;
       const busy = useMutationBusy();
       return <>
         <button disabled={busy}>Ordinary write</button>
@@ -48,7 +48,7 @@ describe("repair cancellation transport", () => {
           onCancel={(runId) => { cancellation = api.cancelFleetRun(runId); }} />
       </>;
     }
-    render(<ApiClientProvider client={client} mutationController={mutations} readController={reads}><LiveRun /></ApiClientProvider>);
+    render(<ApiClientProvider mutationController={mutations} readController={reads}><LiveRun /></ApiClientProvider>);
     let repair!: ReturnType<ApiClient["repairSharedPlan"]>;
     act(() => { repair = client.repairSharedPlan(repairRequest); });
     const payloads = [fixtureUnadmittedCampaignResult(repairRequest.fleet_run_id), cancelledRun];

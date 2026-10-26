@@ -291,7 +291,9 @@ admission. Retired `local-model-skill-loop` input requires an explicit supported
 replacement and fresh caller authorization. Frozen legacy bytes remain historical
 evidence, never a new permission source.
 
-Database schema 89 adds the Journal `CAMPAIGN` entry kind. The original database
+Database schema 89 added the Journal `CAMPAIGN` entry kind. Schema 90 marks the
+incompatible resolved Plan contract 46 and explicit native UV lock-mode payloads;
+schema 89 must be refused before its contract-45 Journal is decoded. The original database
 owner rejects incompatible schema generations before stateful work; it does not
 migrate/reset the store or silently choose another directory. Before an
 incompatible deployment, stop admission and use the matching old lifecycle and

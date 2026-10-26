@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -149,6 +150,42 @@ def test_stateful_cli_turns_schema_mismatch_into_actionable_startup_error(
     assert str(path) in output
     assert "Source checkout: make local-state-reset" in output
     assert "Built release:   oh-goon local-state reset --yes" in output
+
+
+def test_contract45_journal_refuses_at_schema_boundary_without_decoding_or_mutation(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    from oh_goon.runtime.journal_codec import JournalFactCodec
+
+    path = tmp_path / "historical.db"
+    _set_database(monkeypatch, path)
+    LocalDatabase(path, journal_mode="DELETE")
+    assert inspect_local_database().compatible
+    # Synthetic admission authored and read back by the original contract-45
+    # writer at 997efd1, including native UV selection without a lock-mode field.
+    fixture = Path(__file__).parents[2] / "fixtures/contract45_run_admitted.json"
+    row = json.loads(fixture.read_text())
+    assert json.loads(row["event_json"])["target"]["plan"]["contract_version"] == 45
+    with closing(sqlite3.connect(path)) as connection, connection:
+        columns = tuple(row)
+        connection.execute(
+            f"INSERT INTO journal_entries ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+            tuple(row[column] for column in columns),
+        )
+        connection.execute("PRAGMA user_version = 89")
+    before = path.read_bytes()
+
+    def unexpected_decode(**_kwargs):
+        pytest.fail("incompatible storage must refuse before Journal payload decoding")
+
+    monkeypatch.setattr(JournalFactCodec, "decode", unexpected_decode)
+    assert main(["doctor"]) == 2
+    output = capsys.readouterr().out
+    assert "found 89; expected 90" in output
+    assert "matching original runtime" in output
+    assert "A fresh state path does not settle an original unresolved writer" in output
+    assert "JournalCorruption" not in output
+    assert path.read_bytes() == before
 
 
 def test_serve_stops_before_uvicorn_on_stale_local_state(tmp_path, monkeypatch, capsys) -> None:

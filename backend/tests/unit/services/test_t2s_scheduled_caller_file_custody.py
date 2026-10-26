@@ -64,7 +64,12 @@ def test_scheduled_receipt_only_references_frozen_plan_and_no_caller_root(tmp_pa
     assert receipt.execution_digest == target.execution_digest
     assert receipt.relative_path == "run.yml"
     assert "caller_root" not in target.model_dump_json()
-    assert "85" not in receipt.model_dump_json()
+    assert set(receipt.model_dump()) == {
+        "schema_version",
+        "relative_path",
+        "sha256",
+        "execution_digest",
+    }
     assert FleetPlanTarget.model_validate_json(target.model_dump_json()) == target
     source.unlink()
     require_target_caller_file_fresh(target)  # A future occurrence needs no old file.
