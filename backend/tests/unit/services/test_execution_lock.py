@@ -85,7 +85,7 @@ def test_generation_is_deterministic_and_byte_identical(tmp_path: Path) -> None:
 def test_lock_yaml_rejects_duplicate_authority_instead_of_selecting_the_last_value(
     tmp_path: Path, duplicate: str
 ) -> None:
-    from oh_goon.core.models.git_sources import LockedGoonSource
+    from oh_goon.core.models.git_sources import LockedExecutionSource
 
     goons = tmp_path / "goons"
     _package(goons, "general/a", _atomic("a"))
@@ -94,8 +94,8 @@ def test_lock_yaml_rejects_duplicate_authority_instead_of_selecting_the_last_val
     plan, _ = _resolve(path, goons)
     plan = plan.model_copy(
         update={
-            "goon_sources": (
-                LockedGoonSource(
+            "execution_sources": (
+                LockedExecutionSource(
                     git="https://example.test/goons.git",
                     ref="main",
                     path="goons/general/a",
@@ -105,7 +105,7 @@ def test_lock_yaml_rejects_duplicate_authority_instead_of_selecting_the_last_val
         }
     )
     text = render_execution_lock(build_execution_lock(plan))
-    assert parse_execution_lock(text).goon_sources[0].commit == "a" * 40
+    assert parse_execution_lock(text).execution_sources[0].commit == "a" * 40
     if duplicate == "digest":
         text += "digest: sha256:" + "b" * 64 + "\n"
     elif duplicate == "pin-commit":
@@ -113,7 +113,7 @@ def test_lock_yaml_rejects_duplicate_authority_instead_of_selecting_the_last_val
             "  commit: " + "a" * 40, "  commit: " + "b" * 40 + "\n  commit: " + "a" * 40
         )
     elif duplicate == "merge":
-        text = text.replace("lock_version: 1", "<<: {lock_version: 1}")
+        text = text.replace("lock_version: 2", "<<: {lock_version: 2}")
     else:
         text += "external: &cycle {recursive: *cycle}\n"
     with pytest.raises(FleetPlanInvalid, match="Malformed goon.lock"):
@@ -127,9 +127,9 @@ def test_lock_format_version_does_not_coerce_yaml_booleans(tmp_path: Path) -> No
     _plan(path, ("general/a",))
     plan, _ = _resolve(path, goons)
     text = render_execution_lock(build_execution_lock(plan))
-    assert parse_execution_lock(text).lock_version == 1
+    assert parse_execution_lock(text).lock_version == 2
     with pytest.raises(FleetPlanInvalid, match="Unsupported goon.lock version"):
-        parse_execution_lock(text.replace("lock_version: 1", "lock_version: true"))
+        parse_execution_lock(text.replace("lock_version: 2", "lock_version: true"))
 
 
 def test_generated_lock_over_owner_bound_refuses_before_publication(tmp_path, monkeypatch):
@@ -393,7 +393,7 @@ def test_malformed_version_tamper_and_stale_fail_closed(tmp_path: Path) -> None:
     with pytest.raises(FleetPlanInvalid, match="Malformed goon.lock"):
         parse_execution_lock("not: [valid")
     with pytest.raises(FleetPlanInvalid, match="Unsupported goon.lock version"):
-        parse_execution_lock("lock_version: 2\nplan: x\n")
+        parse_execution_lock("lock_version: 3\nplan: x\n")
 
     goons = tmp_path / "goons"
     source = _package(goons, "general/a", _atomic("a"))

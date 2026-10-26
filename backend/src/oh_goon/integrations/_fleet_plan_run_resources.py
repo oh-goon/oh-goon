@@ -134,7 +134,21 @@ class _FleetPlanRunInputs:
         combined_managed = dict(managed_runtimes or {})
         from oh_goon.integrations.python_goon_projects import materialize_plan_projects
 
-        materialize_plan_projects(active_plan, self._layout)
+        project_sources = materialize_plan_projects(active_plan, self._layout)
+        self._captured_projects = MappingProxyType(
+            {
+                step.project_source.content_sha256: (
+                    project_sources[step.project_source.content_sha256],
+                    SnapshotIdentity(
+                        sha256=step.project_source.content_sha256,
+                        byte_count=step.project_source.byte_count,
+                        entry_count=step.project_source.entry_count,
+                    ),
+                )
+                for step in active_steps
+                if isinstance(step, ResolvedCommandStep) and step.project_source is not None
+            }
+        )
         uv_managed = prepare_uv_project_runtimes(
             active_plan,
             source_root=self.base_workspace,
@@ -202,16 +216,32 @@ class _FleetPlanRunInputs:
                 f"Fleet plan step {step.step_id} was not bound during strict run preparation"
             ) from exc
 
+    def captured_project_source(self, step: ResolvedCommandStep) -> tuple[Path, SnapshotIdentity]:
+        assert step.project_source is not None
+        try:
+            return self._captured_projects[step.project_source.content_sha256]
+        except KeyError as exc:
+            raise FleetPlanInvalid(
+                "Captured project is outside original Run input custody"
+            ) from exc
+
     def _bind_step(self, step: ResolvedPlanStep) -> StepInputBinding:
         managed = self._managed.get(step.step_id, ())
         runtime = self._managed_specs.get(step.step_id)
         _validate_managed_runtime_binding(step, runtime)
+        source = (
+            self.captured_project_source(step)[0]
+            if isinstance(step, ResolvedCommandStep)
+            and step.project_source is not None
+            and step.project_source.application is not None
+            else self.base_workspace
+        )
         return StepInputBinding(
             egress=effective_egress_for(step, self._hostname_egress),
             hosts=hosts_for(step, self._hostname_egress),
             sandbox_bindings=managed,
             managed_runtime=runtime,
-            execution_authority=logical_step_execution_authority(self.base_workspace, step),
+            execution_authority=logical_step_execution_authority(source, step),
         )
 
     def evidence(
@@ -228,6 +258,12 @@ class _FleetPlanRunInputs:
             for bindings in self._managed.values()
             for binding in bindings
         }
+        managed_identities.update(
+            {
+                (identity.sha256, identity.byte_count, identity.entry_count): identity
+                for _path, identity in self._captured_projects.values()
+            }
+        )
         return PlanExecutionInputEvidence(
             repository_id=self.repository_id,
             source_authority_id=self.source_authority_id,

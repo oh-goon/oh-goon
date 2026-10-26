@@ -32,6 +32,82 @@ metadata-freshness check or rewrite. Select `locked` to require native freshness
 refusal. Neither mode updates dependency resolution or falls back to another mode.
 Both preserve the execution-lock binding to captured project and lock bytes.
 
+## Independently maintained application source
+
+A separate Atomic Goon can invoke an application that contains no `goon.yml`,
+Oh-Goon SDK or catalog layout. When that application is the actual repository
+being operated on, register it as the target and use the target-project form
+above. The workflow declarations can live elsewhere; no application changes are
+needed.
+
+To select application bytes independently of the effect target, declare one
+literal source on the Atomic Goon:
+
+```yaml
+application:
+  path: /absolute/path/to/application
+runtime: python
+steps:
+- run: application-command --help
+```
+
+`runtime: python` explicitly selects managed native uv and the application's
+installed command. The selected application must contain its native
+`pyproject.toml`, `uv.lock`, implementation and required resources; Goon YAML and
+README are not application requirements. The same installed command and native
+tests can be run directly in the application repository.
+
+For an ordinary explicit command, omit `runtime` and `uv`. That form requires no
+Python metadata. For example, `run: sh scripts/check.sh` invokes the captured
+application's own script. Commands and interpreters retain their existing
+resolved executable authority; source selection creates no ambient fallback.
+
+A live dotenv file (`.env` or `.env.*`) is private runtime configuration, not an
+application source input. Capture refuses it before copying or retaining its
+bytes. Keep live secrets outside the selected source and use the existing
+explicit environment/secret imports. Non-live `.env.example`, `.env.sample` and
+`.env.template` files remain ordinary authored templates. This path boundary is
+not a content secret scanner; other secrets also belong outside authored source.
+Git ignore rules do not select captured membership.
+
+A relative application path resolves from the owning authoring root, regardless
+of the controller's working directory, and must stay contained there. An
+explicit absolute path selects only that application directory, not its parents.
+Application selectors are literal workload declarations, not caller scalar input
+interpolation. Select an exact Git root or subdirectory through the same field:
+
+```yaml
+application:
+  git: https://github.com/your-org/application.git
+  ref: main
+  path: tools/verifier
+runtime: python
+steps:
+- run: application-command --help
+```
+
+Use `path: .` for the Git repository root. Submodules and executable checkout filters are
+unsupported; acquisition refuses them before executable project effects.
+Native Git acquisition freezes the
+commit in the existing execution lock. `lock run.yml --update-applications`
+explicitly refreshes application pins; `--update-goons` and `--update-skills`
+retain their separate scopes. Selections sharing an origin/ref must agree on one
+commit; a partial refresh cannot silently advance another source kind.
+
+Local captured bytes and exact Git provenance travel through the existing
+resolved Command Step, retained project delivery and admission. App code runs
+from a verified private attempt copy, with native environment and outputs owned
+separately. Authoring source, acquisition cache and developer `.venv` remain
+outside writable execution state. A changed local source requires relocking;
+historical readback never reacquires it. Game Tape and `plan handoff --json`
+retain the captured source identity, selected uv mode and original outcome.
+
+The Run's target remains the actual registered repository whose effects were
+admitted. Application source is no permission to write that repository, the
+original app checkout or the acquisition cache. A repository-free Run-owned
+subject is not supported: it requires a decision in the original Fleet admission
+and workspace owners, rather than a placeholder repository or another runner.
+
 ## Package-owned Python Goon
 
 A reusable Atomic Goon can carry its own complete Python project:

@@ -6,6 +6,7 @@ import type { GameTapeFailureHistory, GameTapeStepExecution } from "@generated/m
 import type { GameTapeArtifact } from "@/features/game-tape/gameTapeArtifacts";
 import { GameTapeStepArtifacts } from "@/features/game-tape/components/GameTapeStepArtifacts";
 import { GameTapeNativeAgentObservations } from "@/features/game-tape/components/GameTapeNativeAgentObservations";
+import { GameTapeProjectSource } from "@/features/game-tape/components/GameTapeProjectSource";
 import {
   command,
   duration,
@@ -104,6 +105,7 @@ export function GameTapeStepInspector({ step, artifacts = [], failureHistory = n
             <div className="game-tape-inspector__wide"><dt>{t("gameTape.inspector.command")}</dt><dd><code>{exactCommand}</code><button type="button" className="game-tape-copy-command" onClick={() => { const owner = renderIdentity; void navigator.clipboard.writeText(exactCommand).then(() => { if (currentIdentity.current === owner) setCopiedFor(owner); }, () => { if (currentIdentity.current === owner) setCopiedFor(null); }); }}>{copied ? t("gameTape.inspector.copied") : t("gameTape.inspector.copyCommand")}</button></dd></div>
             <div className="game-tape-inspector__wide"><dt>{t("gameTape.inspector.workingDirectory")}</dt><dd><code>{step.working_directory ?? "."}</code></dd></div>
           </dl>
+          <GameTapeProjectSource project={step.project_source} uv={step.uv} />
           {(step.environment ?? []).length > 0 ? <section className="game-tape-provenance"><strong>{t("gameTape.inspector.values")}</strong><ul>{(step.environment ?? []).map((binding) => <li key={binding.name}><code>{binding.name}</code><span>← {binding.sources.join(" → ")}</span></li>)}</ul><small>{t("gameTape.inspector.secretRule")}</small></section> : null}
           {(step.output_names ?? []).length > 0 ? <section className="game-tape-provenance"><strong>{t("gameTape.inspector.outputs")}</strong><p>{(step.output_names ?? []).join(", ")}</p></section> : null}
           {authority ? <section className="game-tape-provenance game-tape-execution-authority">

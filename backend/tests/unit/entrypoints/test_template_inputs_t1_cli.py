@@ -50,8 +50,8 @@ def test_every_catalog_contract_is_discoverable_from_selected_config(tmp_path, m
             native_agent=native,
             repair=phases,
         )
-        if graph.root.python_project is not None:
-            project = graph.root.python_project
+        if graph.root.project is not None:
+            project = graph.root.project
             frozen = tmp_path / "captured-project"
             materialize_python_goon_project(project.archive, project.identity, frozen)
             shutil.copytree(frozen, config.parent / "repository", dirs_exist_ok=True)

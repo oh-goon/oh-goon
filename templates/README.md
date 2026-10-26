@@ -172,6 +172,11 @@ repository does not supply its implementation. Execution leaves the developer's
 Source, project metadata, native lock and resources bind the execution lock;
 generated environments, caches and declared output locations do not.
 The [Iris Goon](goons/ml/iris-train/README.md) is a complete shipped example.
+For an application maintained separately from its Goon, select one literal
+`application` local path or exact Git source. The existing captured-project and
+Step owners deliver it without requiring Goon files in the application. Native
+environment selection stays explicit; the actual registered effect target stays
+separate. See the [independent application walkthrough](../examples/independent-application/README.md).
 An explicit strict `trust_repository_code: false` runs native installation and
 package builds inside the selected Step isolation boundary. Captured source
 stays read-only; a verified private build copy and non-editable environment live

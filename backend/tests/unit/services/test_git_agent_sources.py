@@ -10,7 +10,7 @@ import yaml
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock, verify_execution_lock
-from oh_goon.core.models.git_sources import LockedGoonSource
+from oh_goon.core.models.git_sources import LockedExecutionSource
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations.git_source_preparation import prepare_git_source
 from oh_goon.runtime.goon_templates import GoonTemplateStore
@@ -59,7 +59,7 @@ def _case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     shutil.copytree(store.root / "agents/review", root / "goons/agents/review")
     (root / "plan.yml").write_text("goons:\n- import: agents/loop\n  from: goons\n")
     commit = _commit(upstream, initialize=True)
-    pin = LockedGoonSource(
+    pin = LockedExecutionSource(
         git=str(upstream),
         ref="main",
         path="workflows/demo",
@@ -74,7 +74,7 @@ def _case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             return resolver.analyze_source(
                 authoring / "plan.yml",
                 containment_root=authoring,
-                locked_goons=(pin,),
+                locked_sources=(pin,),
                 plan_source=pin,
             )
 
@@ -96,7 +96,7 @@ def test_git_agent_capture_identity_survives_native_checkout_relocation(tmp_path
     verify_execution_lock(build_execution_lock(again), build_execution_lock(plan))
     assert repeated == deliveries
     assert first.immutable_source_closure_identity() == second.immutable_source_closure_identity()
-    assert plan.goon_sources == (pin,)
+    assert plan.execution_sources == (pin,)
     assert any(
         source.source.startswith(f"git:{pin.git}@{pin.commit}:") for source in plan.step_sources
     )
@@ -133,11 +133,11 @@ def test_git_agent_recapture_restores_exact_pin_and_holds_native_lease(tmp_path,
         graph.root.path,
         previous=deliveries,
         source_graph=graph,
-        locked_goons=plan.goon_sources,
+        locked_sources=plan.execution_sources,
         **options,
     )
     assert again == plan and repeated == deliveries
-    assert again.goon_sources == (pin,)
+    assert again.execution_sources == (pin,)
     assert len(analyzed) == 1 and not analyzed[0].exists()
 
 
@@ -214,7 +214,9 @@ def test_git_ref_aliases_preserve_each_requested_source(tmp_path, monkeypatch):
             }
         )
     )
-    graph = FleetPlanResolver().analyze_source(plan, acquire_goons=True, allow_source_network=True)
+    graph = FleetPlanResolver().analyze_source(
+        plan, acquire_sources=True, allow_source_network=True
+    )
     selected = [graph.goon(graph.root.path, edge) for edge in graph.root.compiled.steps]
     assert [node.git_source.ref for node in selected] == ["main", "alias"]
     assert {node.git_source.commit for node in selected} == {commit}
@@ -254,7 +256,7 @@ def test_display_uri_collision_cannot_replace_explicit_git_source(tmp_path, monk
         )
     )
     resolver = FleetPlanResolver()
-    graph = resolver.analyze_source(plan, acquire_goons=True, allow_source_network=True)
+    graph = resolver.analyze_source(plan, acquire_sources=True, allow_source_network=True)
     selected = [graph.goon(graph.root.path, edge) for edge in graph.root.compiled.steps]
     assert selected[0].local_source == selected[1].local_source, (
         "Native coordinates intentionally share one display URI"

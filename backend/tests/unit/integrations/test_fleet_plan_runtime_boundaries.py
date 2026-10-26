@@ -24,7 +24,7 @@ from oh_goon.core.models.fleet_plan_isolation import (
 )
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepCapabilities
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.engine.command import CommandResult
+from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations.fleet_content_store import FleetContentStore
@@ -33,6 +33,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     IsolatedProcessRequest,
     isolation_backend_evidence,
 )
+from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.bubblewrap_command import prepared_bubblewrap_command as _prepared
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.fleet_plan_executor import (
@@ -126,6 +127,49 @@ def test_explicit_strict_execution_rejects_direct_plan(tmp_path: Path) -> None:
             executor.execute_strict_run(repository, direct_plan, prepared, cancel_requested=None)
     finally:
         prepared.close()
+
+
+def test_captured_application_binds_original_strict_input_and_attempt_authority(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repo"
+    seed_cicd_repository(repository)
+    (repository / "check.sh").write_text("#!/bin/sh\nprintf target-source\n")
+    application = tmp_path / "application"
+    application.mkdir()
+    executable = application / "check.sh"
+    executable.write_text("#!/bin/sh\nprintf captured-application\n")
+    executable.chmod(0o755)
+    workflow = tmp_path / "goon.yml"
+    workflow.write_text(
+        f"application: {{path: '{application}'}}\n"
+        "execution: {purpose: cicd, trust_repository_code: true}\n"
+        "tools: {allow: [sh]}\nsteps:\n- run: ./check.sh\n"
+    )
+    plan = FleetPlanResolver().resolve(workflow)
+    step = plan.steps[0]
+    assert isinstance(step, ResolvedCommandStep) and step.project_source is not None
+    captured = step.project_source
+    executable.write_text("#!/bin/sh\nprintf changed-live-application\n")
+
+    with prepare_physical_test_run(RepositoryIdentity(path=repository), plan) as session:
+        source = session.source_for(step)
+        assert source != repository and source != application
+        evidence = session.execution_input_evidence()
+        assert evidence.base_workspace.sha256 != captured.content_sha256
+        assert any(item.sha256 == captured.content_sha256 for item in evidence.managed_inputs)
+        attempt = session.create_attempt(step, 1)
+        bound = attempt.executable_materialization.direct_workspace_executable
+        assert bound is not None and bound.relative_path == "check.sh"
+        result = run_command("./check.sh", cwd=attempt.paths.workspace, timeout=5)
+        assert result.returncode == 0 and result.stdout == "captured-application"
+        assert (repository / "check.sh").read_text().startswith("#!/bin/sh\nprintf target-source")
+        # A changed captured input cannot authorize a later physical attempt,
+        # even when the target and live application remain valid directories.
+        (source / "check.sh").chmod(0o755)
+        (source / "check.sh").write_text("#!/bin/sh\nprintf forged\n")
+        with pytest.raises(FleetPlanInvalid, match="source changed"):
+            session.create_attempt(step, 2)
 
 
 def test_runtime_root_tamper_is_rejected_before_process_launch(tmp_path: Path) -> None:

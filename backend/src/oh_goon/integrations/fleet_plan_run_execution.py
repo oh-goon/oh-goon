@@ -52,6 +52,7 @@ from oh_goon.integrations._fleet_plan_step_local_execution import (
     validate_pre_commit_runtime,
 )
 from oh_goon.integrations._fleet_plan_step_sequence import FleetPlanStepSequence
+from oh_goon.integrations.content_snapshot import SnapshotIdentity, copy_frozen_directory
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.integrations.fleet_plan_environment import require_environment
 from oh_goon.integrations.fleet_plan_import_applicability import applicable_plan_for_repository
@@ -274,11 +275,29 @@ class FleetPlanRunExecutor:
                     workspace = AttemptPathLayout.from_root(
                         layout.attempt_root(step.step_id, 1)
                     ).workspace
-                    workspace.mkdir(parents=True)
+                    if step.project_source.application is None:
+                        workspace.mkdir(parents=True)
+                    else:
+                        expected = step.project_source
+                        observed = copy_frozen_directory(
+                            sources[expected.content_sha256],
+                            workspace,
+                            label=f"Application {step.step_id} attempt workspace",
+                            cancel_requested=cancel_requested,
+                        )
+                        if observed != SnapshotIdentity(
+                            sha256=expected.content_sha256,
+                            byte_count=expected.byte_count,
+                            entry_count=expected.entry_count,
+                        ):
+                            raise FleetPlanInvalid(
+                                "Captured application changed while creating its attempt workspace"
+                            )
                     RepositoryPathSpace.from_root(workspace).resolve(
                         step.working_directory,
-                        label=f"Python Goon {step.step_id} output working_directory",
+                        label=f"Captured project {step.step_id} working_directory",
                         kind="directory",
+                        require_exists=step.project_source.application is not None,
                     ).mkdir(parents=True, exist_ok=True)
                     workspaces[step.step_id] = workspace
             runtime = replace(

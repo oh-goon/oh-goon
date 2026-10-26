@@ -39,6 +39,7 @@ def prepare_configuration(args: argparse.Namespace) -> None:
         acquire=args.command == "lock" or bool(getattr(args, "acquire", False)),
         allow_network=args.command in {"lock", "run"} or bool(getattr(args, "acquire", False)),
         update=bool(getattr(args, "update_goons", False)),
+        update_applications=bool(getattr(args, "update_applications", False)),
     )
     args._run_configuration = selected
     agent = snapshot.selection.agent

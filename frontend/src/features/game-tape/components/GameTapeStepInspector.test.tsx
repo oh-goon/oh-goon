@@ -32,6 +32,38 @@ function failedStep(): GameTapeStepExecution {
 }
 
 describe("GameTapeStepInspector failure actions", () => {
+  it("shows the recorded application pin and selected environment under technical details", () => {
+    const step = failedStep();
+    step.project_source = {
+      content_sha256: "a".repeat(64), archive_sha256: "b".repeat(64), byte_count: 42, entry_count: 2,
+      application: { kind: "application", git: "/removed/application.git", ref: "release", path: "tools/verifier", commit: "c".repeat(40) },
+    };
+    step.uv = { source: "captured", project: ".", lock_mode: "frozen", group: "dev" };
+    render(<GameTapeStepInspector step={step} technicalOpen />);
+    const source = screen.getByRole("region", { name: "Project source and environment" });
+    expect(source).toHaveTextContent("/removed/application.git");
+    expect(source).toHaveTextContent("release");
+    expect(source).toHaveTextContent("tools/verifier");
+    expect(source).toHaveTextContent("c".repeat(40));
+    expect(source).toHaveTextContent("a".repeat(64));
+    expect(source).toHaveTextContent("b".repeat(64));
+    expect(source).toHaveTextContent("frozen");
+    expect(source).toHaveTextContent("dev");
+  });
+
+  it("shows a captured plain application without inventing a Python environment", () => {
+    const step = failedStep();
+    step.project_source = {
+      content_sha256: "a".repeat(64), archive_sha256: "b".repeat(64), byte_count: 42, entry_count: 2,
+      application: { path: "/removed/independent-application" },
+    };
+    step.uv = null;
+    render(<GameTapeStepInspector step={step} technicalOpen />);
+    const source = screen.getByRole("region", { name: "Project source and environment" });
+    expect(source).toHaveTextContent("/removed/independent-application");
+    expect(screen.queryByText("Selected uv lock mode")).not.toBeInTheDocument();
+  });
+
   it("navigates failures and copies only canonical failure facts", async () => {
     const previous = vi.fn();
     const next = vi.fn();

@@ -33,7 +33,7 @@ from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.models.agent_review import MAX_REVIEW_BYTES, AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.fleet_plan_evidence import CompletedPlanStepExecution
-from oh_goon.core.models.git_sources import LockedGoonSource
+from oh_goon.core.models.git_sources import LockedExecutionSource
 from oh_goon.core.models.goon_plan_source import SharedPlanSource
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.target import FleetPlanTarget
@@ -697,7 +697,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                 commit = subprocess.check_output(
                     ["git", "-C", str(upstream), "rev-parse", "HEAD"], text=True
                 ).strip()
-                pin = LockedGoonSource(
+                pin = LockedExecutionSource(
                     git=str(upstream),
                     ref="main",
                     path="workflows/review",
@@ -711,7 +711,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                         root / "plan.yml",
                         containment_root=root,
                         plan_source=pin,
-                        locked_goons=(pin,),
+                        locked_sources=(pin,),
                     )
                 path = graph.root.path
                 assert not path.exists()
@@ -903,7 +903,7 @@ max_output_tokens = 8192
                 assert lock_path.read_bytes() == lock
                 for index, detail in enumerate(result.attempts):
                     if scenario in ("git_plan", "python_phases"):
-                        assert detail.run.target.plan.goon_sources == (pin,)
+                        assert detail.run.target.plan.execution_sources == (pin,)
                     context = detail.run.target.agent_repair
                     assert context.max_attempts == 4 * (passes - 1) + 2
                     assert context.previous_run_id == (
@@ -994,7 +994,7 @@ max_output_tokens = 8192
                     if scenario == "python_phases":
                         for identifier in result.admitted_run_ids:
                             restored = reopened.runs.get(identifier)
-                            assert restored.run.target.plan.goon_sources == (pin,)
+                            assert restored.run.target.plan.execution_sources == (pin,)
                             assert restored.run.target.plan.configuration is not None
                             if restored.run.target.agent_repair.phase in (
                                 "regression",
@@ -1738,7 +1738,19 @@ def test_controller_death_during_admission_process_and_applied_effect(
             with pytest.raises(StateConflict, match="active or unresolved Runs"):
                 reset_local_state(database_path)
             assert journal.read_view().revision == view.revision
-            started = _assert_started_crash_processes_exited(details)
+            from oh_goon.core import process_birth
+
+            # Reaped or inaccessible procfs is not a veto over native pidfd
+            # readiness/ESRCH. The crash must still close its actual processes;
+            # unknown identity never authorizes signaling a numeric PID.
+            with monkeypatch.context() as unavailable_procfs:
+                unavailable_procfs.setattr(
+                    process_birth, "observe_process_birth", lambda _pid: None
+                )
+                unavailable_procfs.setattr(
+                    process_birth, "observe_process_liveness", lambda _pid: None
+                )
+                started = _assert_started_crash_processes_exited(details)
             if cut == "process":
                 assert len(started) == 1
                 assert not any(

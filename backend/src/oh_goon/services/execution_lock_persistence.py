@@ -37,8 +37,10 @@ def render_execution_lock(lock: ExecutionLock) -> str:
         payload["external"] = {item.path: item.digest for item in lock.external}
     if lock.skill_sources:
         payload["skill_sources"] = [item.model_dump(mode="json") for item in lock.skill_sources]
-    if lock.goon_sources:
-        payload["goon_sources"] = [item.model_dump(mode="json") for item in lock.goon_sources]
+    if lock.execution_sources:
+        payload["execution_sources"] = [
+            item.model_dump(mode="json") for item in lock.execution_sources
+        ]
     payload["digest"] = lock.digest
     return _GENERATED_COMMENT + yaml.safe_dump(
         payload,
@@ -57,7 +59,7 @@ def parse_execution_lock(text: str) -> ExecutionLock:
         raise FleetPlanInvalid("Malformed goon.lock: invalid YAML mapping") from exc
     version = payload.get("lock_version")
     if type(version) is not int or version != LOCK_VERSION:
-        raise FleetPlanInvalid(f"Unsupported goon.lock version: {version!r}; expected 1")
+        raise FleetPlanInvalid(f"Unsupported goon.lock version: {version!r}; expected 2")
     external = payload.get("external", {})
     if not isinstance(external, dict):
         raise FleetPlanInvalid("Malformed goon.lock: external must be a path-to-digest mapping")

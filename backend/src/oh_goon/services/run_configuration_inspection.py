@@ -163,8 +163,8 @@ def inspect_run_configuration(
             "path": location,
             "git": git,
             "yaml_sha256": node.source_sha256,
-            "project": node.python_project.identity.model_dump(mode="json")
-            if node.python_project is not None
+            "project": node.project.identity.model_dump(mode="json")
+            if node.project is not None
             else None,
             "runtime": node.compiled.runtime,
             "dependency_selections": dependency_selections(node, lineage),
@@ -311,7 +311,7 @@ def inspect_run_configuration(
             **source_report(graph.root, root=True),
             "selection": snapshot.selection.source.model_dump(mode="json"),
             "sha256": graph.root.source_sha256,
-            "git_sources": [pin.model_dump(mode="json") for pin in graph.goon_sources],
+            "git_sources": [pin.model_dump(mode="json") for pin in graph.execution_sources],
         },
         "target": normalized.repository.model_dump(mode="json"),
         "inputs": inputs,
@@ -333,7 +333,7 @@ def inspect_run_configuration(
             "current_closure": "unknown" if agent_source else "not-applicable",
         },
         "proof": {
-            "acquisition": "captured" if graph.goon_sources else "not-required",
+            "acquisition": "captured" if graph.execution_sources else "not-required",
             "source": "contract-inspected",
             "lock": lock_records["status"],
             "skill_closure": "not-captured" if agent_source else "not-applicable",

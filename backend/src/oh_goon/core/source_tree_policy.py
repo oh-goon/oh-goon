@@ -110,6 +110,15 @@ def is_package_manager_materialization_path(
     return any(part in PACKAGE_MANAGER_MATERIALIZATION_DIRECTORY_NAMES for part in relative.parts)
 
 
+def is_live_dotenv_state(path: Path | PurePosixPath | str) -> bool:
+    """Structural private input names refused by independent application capture."""
+    templates = {".env.example", ".env.sample", ".env.template"}
+    return any(
+        part == ".env" or part.startswith(".env.") and part not in templates
+        for part in repository_relative_path(path).parts
+    )
+
+
 def is_transient_source_path(
     path: Path | PurePosixPath | str,
     *,

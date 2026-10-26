@@ -15,7 +15,8 @@ from urllib.parse import unquote, urlsplit
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.file_digest import sha256_file
 from oh_goon.core.models.fleet_plan import CompiledExecutionTemplate, ResolvedFleetPlan
-from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+from oh_goon.core.models.fleet_plan_resources import CapturedProjectSource
+from oh_goon.core.models.git_sources import LocalApplicationSource, LockedExecutionSource
 from oh_goon.core.path_authority import ContainedPathSpace, repository_relative_parts
 from oh_goon.core.path_layouts import RunPathLayout
 from oh_goon.integrations.content_snapshot import replace_tree_from_tar_gz
@@ -25,8 +26,8 @@ MAX_PROJECT_ARCHIVE_BYTES = 96 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
-class CapturedPythonGoonProject:
-    identity: PythonGoonProject
+class CapturedProject:
+    identity: CapturedProjectSource
     archive: bytes
 
 
@@ -47,14 +48,17 @@ def python_goon_generated_paths(compiled: CompiledExecutionTemplate) -> tuple[st
     return tuple(sorted(outputs))
 
 
-def capture_python_goon_project(
+def capture_project_source(
     root: Path,
     compiled: CompiledExecutionTemplate,
     *,
-    yaml_sha256: str,
+    yaml_sha256: str | None,
+    application: LocalApplicationSource | LockedExecutionSource | None = None,
+    python_project: bool = True,
+    uv_project: str = ".",
     max_source_bytes: int = 64 * 1024 * 1024,
     max_archive_bytes: int = MAX_PROJECT_ARCHIVE_BYTES,
-) -> CapturedPythonGoonProject:
+) -> CapturedProject:
     """Freeze authored bytes once; Hashmarks retains package-content authority."""
     with tempfile.TemporaryDirectory(prefix="oh-goon-python-source-") as directory:
         snapshot = Path(directory) / "project"
@@ -65,16 +69,31 @@ def capture_python_goon_project(
             exclude_paths=python_goon_generated_paths(compiled),
             max_bytes=max_source_bytes,
             max_entries=4096,
+            reject_dotenv_state=application is not None,
         )
         if identity.byte_count > 64 * 1024 * 1024 or identity.entry_count > 4096:
             raise FleetPlanInvalid("Python Goon project exceeds source bounds")
-        for name in ("goon.yml", "README.md", "pyproject.toml", "uv.lock"):
+        required: tuple[str, ...] = ("goon.yml", "README.md") if application is None else ()
+        if python_project:
+            if application is None:
+                required += ("pyproject.toml", "uv.lock")
+            else:
+                required += (str(PurePosixPath(uv_project) / "pyproject.toml"),)
+        for name in required:
             path = snapshot / name
             if path.is_symlink() or not path.is_file():
                 raise FleetPlanInvalid(f"Python Goon project requires a regular {name}")
-        if sha256_file(snapshot / "goon.yml") != yaml_sha256:
+        if application is None and sha256_file(snapshot / "goon.yml") != yaml_sha256:
             raise FleetPlanInvalid("Python Goon changed during source capture")
-        _validate_project_metadata(snapshot)
+        if python_project:
+            selected_metadata = ContainedPathSpace.from_root(snapshot).resolve_from(
+                snapshot,
+                str(PurePosixPath(uv_project) / "pyproject.toml"),
+                label="Captured uv project metadata",
+                kind="file",
+                require_exists=True,
+            )
+            _validate_project_metadata(snapshot, project_root=selected_metadata.parent)
         archive_path = Path(directory) / "project.tar.gz"
         with archive_path.open("wb") as output:
             with gzip.GzipFile(fileobj=output, mode="wb", mtime=0, filename="") as compressed:
@@ -84,12 +103,13 @@ def capture_python_goon_project(
         if archive_path.stat().st_size > max_archive_bytes:
             raise FleetPlanInvalid("Python Goon archive exceeds source bounds")
         packet = archive_path.read_bytes()
-        return CapturedPythonGoonProject(
-            PythonGoonProject(
+        return CapturedProject(
+            CapturedProjectSource(
                 content_sha256=identity.sha256,
                 archive_sha256=hashlib.sha256(packet).hexdigest(),
                 byte_count=identity.byte_count,
                 entry_count=identity.entry_count,
+                application=application,
             ),
             packet,
         )
@@ -103,12 +123,28 @@ def _archive_metadata(member: tarfile.TarInfo) -> tarfile.TarInfo:
     return member
 
 
-def _validate_project_metadata(root: Path) -> None:
+def _validate_project_metadata(root: Path, *, project_root: Path) -> None:
     space = ContainedPathSpace.from_root(root)
-    root_metadata = [root / "pyproject.toml", root / "uv.lock"]
-    if (root / "uv.toml").is_file():
-        root_metadata.append(root / "uv.toml")
-    pending = list(root_metadata)
+    # Native uv may use metadata on the selected project's ancestor chain.
+    # Inspect only that exact chain, not unrelated projects in the source tree.
+    ancestors = [root]
+    current = root
+    for part in project_root.relative_to(root).parts:
+        current /= part
+        ancestors.append(current)
+    if not any(
+        (directory / "uv.lock").is_file() and not (directory / "uv.lock").is_symlink()
+        for directory in ancestors
+    ):
+        raise FleetPlanInvalid(
+            "Captured uv project requires a regular uv.lock on its captured ancestor chain"
+        )
+    pending = [
+        directory / name
+        for directory in ancestors
+        for name in ("pyproject.toml", "uv.lock", "uv.toml")
+        if (directory / name).is_file()
+    ]
     seen: set[Path] = set(pending)
     for path in pending:
         try:
@@ -126,7 +162,7 @@ def _validate_project_metadata(root: Path) -> None:
         if isinstance(optional, dict):
             for requirements in optional.values():
                 _require_contained_file_requirements(requirements, space=space, base=base)
-        if path == root / "uv.lock":
+        if path.name == "uv.lock":
             # The native lock identifies installed local projects. Inspect exactly
             # those projects' authored build metadata, without searching for other
             # pyprojects (which may intentionally be invalid test resources).
@@ -140,7 +176,7 @@ def _validate_project_metadata(root: Path) -> None:
                         location = source.get(field)
                         if isinstance(location, str):
                             directory = space.resolve_from(
-                                root, location, label="Python Goon local dependency"
+                                base, location, label="Python Goon local dependency"
                             )
                             for name in ("pyproject.toml", "uv.toml"):
                                 child = directory / name
@@ -246,7 +282,7 @@ def _require_contained_file_requirements(
 
 
 def materialize_python_goon_project(
-    packet: bytes, expected: PythonGoonProject, destination: Path
+    packet: bytes, expected: CapturedProjectSource, destination: Path
 ) -> None:
     if (
         len(packet) > MAX_PROJECT_ARCHIVE_BYTES

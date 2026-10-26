@@ -157,15 +157,15 @@ def test_untrusted_uv_preparation_defers_every_build_to_isolated_step(
     monkeypatch: pytest.MonkeyPatch,
     package: bool,
 ) -> None:
-    from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+    from oh_goon.core.models.fleet_plan_resources import CapturedProjectSource
     from oh_goon.integrations import fleet_plan_managed_runtime
 
-    project = PythonGoonProject(
+    project = CapturedProjectSource(
         content_sha256="a" * 64, archive_sha256="b" * 64, byte_count=1, entry_count=1
     )
     step = _step().model_copy(
         update={
-            "uv": UvExecutionEnvironment(lock_mode="frozen", source="package"),
+            "uv": UvExecutionEnvironment(lock_mode="frozen", source="captured"),
             "project_source": project,
             "argv": (
                 "uv",
@@ -571,7 +571,7 @@ def test_uv_preparation_failure_stops_before_application_work(
 def test_trusted_package_build_writes_only_owned_copy_and_retains_unsettled_work(
     tmp_path: Path, quiescent: bool | None
 ) -> None:
-    from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+    from oh_goon.core.models.fleet_plan_resources import CapturedProjectSource
     from oh_goon.core.path_layouts import RunPathLayout
     from oh_goon.integrations.content_snapshot import snapshot_identity
 
@@ -579,7 +579,7 @@ def test_trusted_package_build_writes_only_owned_copy_and_retains_unsettled_work
     source.mkdir()
     (source / "pyproject.toml").write_bytes(b"authored project metadata")
     identity = snapshot_identity(source)
-    project = PythonGoonProject(
+    project = CapturedProjectSource(
         content_sha256=identity.sha256,
         archive_sha256="b" * 64,
         byte_count=identity.byte_count,
@@ -591,7 +591,7 @@ def test_trusted_package_build_writes_only_owned_copy_and_retains_unsettled_work
     (captured / "pyproject.toml").write_bytes(b"authored project metadata")
     step = _step().model_copy(
         update={
-            "uv": UvExecutionEnvironment(lock_mode="frozen", source="package"),
+            "uv": UvExecutionEnvironment(lock_mode="frozen", source="captured"),
             "project_source": project,
         }
     )
@@ -646,7 +646,7 @@ def test_trusted_package_build_writes_only_owned_copy_and_retains_unsettled_work
 def test_package_preparation_refuses_changed_source_before_backend_execution(
     tmp_path: Path,
 ) -> None:
-    from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+    from oh_goon.core.models.fleet_plan_resources import CapturedProjectSource
     from oh_goon.core.path_layouts import RunPathLayout
     from oh_goon.integrations.content_snapshot import snapshot_identity
 
@@ -658,7 +658,7 @@ def test_package_preparation_refuses_changed_source_before_backend_execution(
     captured = layout.package_source(expected.sha256)
     captured.mkdir(parents=True)
     (captured / "pyproject.toml").write_bytes(b"changed after source capture")
-    project = PythonGoonProject(
+    project = CapturedProjectSource(
         content_sha256=expected.sha256,
         archive_sha256="b" * 64,
         byte_count=expected.byte_count,
@@ -666,7 +666,7 @@ def test_package_preparation_refuses_changed_source_before_backend_execution(
     )
     step = _step().model_copy(
         update={
-            "uv": UvExecutionEnvironment(lock_mode="frozen", source="package"),
+            "uv": UvExecutionEnvironment(lock_mode="frozen", source="captured"),
             "project_source": project,
         }
     )
@@ -691,7 +691,7 @@ def test_package_preparation_refuses_changed_source_before_backend_execution(
 def test_direct_package_builds_keep_repeated_import_source_immutable(
     tmp_path: Path, tamper: bool
 ) -> None:
-    from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
+    from oh_goon.core.models.fleet_plan_resources import CapturedProjectSource
     from oh_goon.core.path_layouts import AttemptPathLayout
     from oh_goon.engine.git import GitService
     from oh_goon.integrations.content_snapshot import snapshot_identity
@@ -706,7 +706,7 @@ def test_direct_package_builds_keep_repeated_import_source_immutable(
     source.mkdir()
     (source / "pyproject.toml").write_bytes(b"authored native metadata")
     identity = snapshot_identity(source)
-    project = PythonGoonProject(
+    project = CapturedProjectSource(
         content_sha256=identity.sha256,
         archive_sha256="a" * 64,
         byte_count=identity.byte_count,
@@ -715,7 +715,7 @@ def test_direct_package_builds_keep_repeated_import_source_immutable(
     step = _step().model_copy(
         update={
             "project_source": project,
-            "uv": UvExecutionEnvironment(lock_mode="frozen", source="package"),
+            "uv": UvExecutionEnvironment(lock_mode="frozen", source="captured"),
             "argv": (
                 "uv",
                 "run",
@@ -993,7 +993,7 @@ def test_untrusted_uv_attempt_uses_locked_isolated_build_before_installed_comman
     if package:
         step = step.model_copy(
             update={
-                "uv": UvExecutionEnvironment(lock_mode="frozen", source="package"),
+                "uv": UvExecutionEnvironment(lock_mode="frozen", source="captured"),
                 "argv": (
                     "uv",
                     "run",

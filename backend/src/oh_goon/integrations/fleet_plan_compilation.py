@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import yaml
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from yaml.nodes import MappingNode, ScalarNode, SequenceNode
 
 from oh_goon.core.errors import FleetExtensionInvalid, FleetPlanInvalid
@@ -17,7 +17,7 @@ from oh_goon.core.models.fleet_plan import (
     CompiledGoonImportStep,
     ExtensionCatalog,
 )
-from oh_goon.core.models.git_sources import GoonGitSource
+from oh_goon.core.models.git_sources import GitSourceSelection, LocalApplicationSource
 from oh_goon.core.path_authority import ContainedPathSpace, navigation_path
 from oh_goon.core.template_identity import canonical_template_key, import_step_id
 from oh_goon.integrations.fleet_plan_goon_authoring import (
@@ -184,10 +184,21 @@ def _compile_goon_payload(
         "outputs",
         "uv",
         "runtime",
+        "application",
         "steps",
         "goons",
     }
     _reject_unknown_fields(payload, allowed=allowed, source=source, kind="Goon")
+    if "application" in payload:
+        try:
+            payload["application"] = TypeAdapter(
+                LocalApplicationSource | GitSourceSelection
+            ).validate_python(payload["application"])
+        except ValidationError:
+            raise FleetPlanInvalid(
+                f"Invalid Goon {source}: application requires a literal local directory or "
+                "credential-free Git origin/ref/path coordinates"
+            ) from None
     for field in ("env", "outputs"):
         if field in payload and not isinstance(payload[field], dict):
             raise FleetPlanInvalid(f"Invalid Goon {source}: {field} must be a mapping")
@@ -217,7 +228,7 @@ def _compile_goon_payload(
                 f"Invalid Goon {source}: Composite Goons leave repository requirements "
                 "with child Goons"
             )
-        if "uv" in normalized or "runtime" in normalized:
+        if "uv" in normalized or "runtime" in normalized or "application" in normalized:
             raise FleetPlanInvalid(
                 f"Invalid Goon {source}: uv belongs to an Atomic Goon execution environment, "
                 "not a Composite Goon"
@@ -388,7 +399,7 @@ def _compile_goon_imports(
             source_root = item.get("from")
             if isinstance(source_root, dict):
                 try:
-                    git_source = GoonGitSource.model_validate(source_root)
+                    git_source = GitSourceSelection.model_validate(source_root)
                 except ValidationError as exc:
                     raise FleetPlanInvalid(
                         "Goon Git source requires explicit git, ref and contained path"
@@ -864,7 +875,7 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
     lock_mode = raw_uv.get("lock_mode", "frozen")
     if lock_mode not in ("frozen", "locked"):
         raise FleetPlanInvalid("Goon uv.lock_mode must be frozen or locked")
-    if runtime is not None and "project" in raw_uv:
+    if runtime is not None and normalized.get("application") is None and "project" in raw_uv:
         raise FleetPlanInvalid("Python runtime owns the Goon package project; remove uv.project")
     group = raw_uv.get("group")
     project = raw_uv.get("project", ".")
@@ -935,7 +946,9 @@ def _apply_uv_environment(normalized: dict[str, Any]) -> None:
             "lock_mode": lock_mode,
             "project": project,
             "group": group,
-            "source": "package" if runtime == "python" else "repository",
+            "source": "captured"
+            if runtime == "python" or normalized.get("application") is not None
+            else "repository",
         }
         step.setdefault("working_directory", project)
 

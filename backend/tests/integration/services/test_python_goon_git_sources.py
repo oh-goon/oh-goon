@@ -111,7 +111,7 @@ def test_git_package_and_complete_example_keep_pins_across_cache_loss(tmp_path):
     cli("lock", str(selection))
     lock_path = workflow / "goon.lock"
     locked = yaml.safe_load(lock_path.read_text())
-    assert locked["goon_sources"][0]["commit"] == original
+    assert locked["execution_sources"][0]["commit"] == original
     assert not (package / ".venv").exists()
 
     def run_and_read(expected_total):
@@ -139,7 +139,7 @@ def test_git_package_and_complete_example_keep_pins_across_cache_loss(tmp_path):
     finally:
         offline.rename(source)
     cli("lock", str(selection), "--update-goons")
-    assert yaml.safe_load(lock_path.read_text())["goon_sources"][0]["commit"] == changed
+    assert yaml.safe_load(lock_path.read_text())["execution_sources"][0]["commit"] == changed
     run_and_read("5.00")
 
     # A complete example names both its authoring root and exact Plan. Its local
@@ -161,6 +161,6 @@ def test_git_package_and_complete_example_keep_pins_across_cache_loss(tmp_path):
     )
     cli("lock", str(selection))
     complete = yaml.safe_load(lock_path.read_text())
-    assert complete["goon_sources"][0]["kind"] == "plan"
-    assert complete["goon_sources"][0]["commit"] == changed
+    assert complete["execution_sources"][0]["kind"] == "plan"
+    assert complete["execution_sources"][0]["commit"] == changed
     run_and_read("5.00")

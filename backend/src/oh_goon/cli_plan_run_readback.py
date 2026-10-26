@@ -261,6 +261,10 @@ def _handoff_step(step: GameTapeStepExecution, repository_execution_id: str) -> 
         "status": step.status.value,
         "exit_code": step.exit_code,
         "settlement": step.settlement.model_dump(mode="json"),
+        "project_source": step.project_source.model_dump(mode="json")
+        if step.project_source is not None
+        else None,
+        "uv": step.uv.model_dump(mode="json") if step.uv is not None else None,
         "reason": step.reason,
         "native_claims": [
             {

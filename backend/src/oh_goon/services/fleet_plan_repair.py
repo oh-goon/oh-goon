@@ -325,7 +325,7 @@ class AgentReviewRepairCampaign:
         self.capture_options: AgentCaptureOptions = {
             **capture_options,
             "locked_skills": plan.skill_sources,
-            "locked_goons": plan.goon_sources,
+            "locked_sources": plan.execution_sources,
         }
         self.passes = passes
         self.write_roots = validate_write_roots(write_roots)
@@ -490,7 +490,7 @@ class AgentReviewRepairCampaign:
             requirements=self.original.requirements,
             step_sources=tuple(s for s in self.original.step_sources if s.step_id in members),
             skill_sources=self.original.skill_sources,
-            goon_sources=self.original.goon_sources,
+            execution_sources=self.original.execution_sources,
             native_agent=self.original.native_agent,
             configuration=configuration,
         )

@@ -345,7 +345,11 @@ def execute_direct_step(
         retain_package_scratch = False
         try:
             outcome = None
-            if isinstance(step, ResolvedCommandStep) and step.project_source is not None:
+            if (
+                isinstance(step, ResolvedCommandStep)
+                and step.project_source is not None
+                and step.uv is not None
+            ):
                 process, outcome = _prepare_python_project_attempt(
                     repository, step, process, runtime
                 )
@@ -1102,6 +1106,7 @@ def _execute_command_step(
         environment.update(process.environment)
     package_runtime = (
         step.project_source is not None
+        and step.uv is not None
         or isinstance(managed, UvProjectManagedRuntime)
         and managed.package_source is not None
     )
@@ -1208,6 +1213,12 @@ def _prepare_python_project_attempt(
         entry_count=expected.entry_count,
     ):
         raise FleetPlanInvalid("Python Goon source changed while creating its build project")
+    project = RepositoryPathSpace.from_root(project).resolve(
+        step.uv.project,
+        label=f"Captured uv project for step {step.step_id}",
+        kind="directory",
+        require_exists=True,
+    )
     native = capture_native_uv_authority(
         process.host_environment,
         owned_uv_names=frozenset(
@@ -1265,8 +1276,8 @@ def _prepare_strict_uv_attempt(
         raise FleetPlanInvalid(f"Managed uv lock mode differs from resolved step {step.step_id}")
 
     if managed.package_source is not None:
-        project = RepositoryPathSpace.from_root(process.paths.cache).resolve(
-            process.paths.uv_build_project.relative_to(process.paths.cache).as_posix(),
+        project = RepositoryPathSpace.from_root(process.paths.uv_build_project).resolve(
+            managed.project,
             label=f"Fleet uv build project for step {step.step_id}",
             kind="directory",
             require_exists=True,

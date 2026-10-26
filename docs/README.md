@@ -29,7 +29,7 @@ Use topic guides for current behavior. Specialized deployment and high-security 
 - [Hashmarks execution handoff](development/HASHMARKS_EXECUTION_LAYER.md) — admitted repository evidence, exact verification membership and Oh-Goon execution results.
 - [Agent runtime ownership](development/AGENT_RUNTIME_OWNERS.md) — live model/Agent call paths, outer workflow ownership, current evidence limits and the contract questions for replaceable coding agents.
 - [Harness compatibility](development/AGENT_HARNESS_COMPATIBILITY.md) — native adaptation removal conditions and conformance evidence for each harness and integration mode.
-- [Complete Python Goon projects](architecture/ADR_PYTHON_GOON_PROJECTS.md) — standalone package-owned Python projects, native dependency selections, captured source and pinned Git acquisition.
+- [Complete Python Goon projects](architecture/ADR_PYTHON_GOON_PROJECTS.md) — package-owned projects and independently selected application sources, native environments, captured delivery and pinned Git acquisition.
 
 Retained ADRs explain architectural choices and their original evidence limits. Checkpoint status and historical test results in an ADR describe that source; they do not establish current qualification or select the next development task.
 

@@ -37,7 +37,7 @@ test("New shared run starts from an explicit saved Plan before repository select
   const lock = page.locator(".shared-plan-lock-preview");
   await expect(lock.getByText("goon.lock", { exact: true })).toBeVisible();
   await lock.getByText("goon.lock", { exact: true }).click();
-  await expect(lock).toContainText("lock_version: 1");
+  await expect(lock).toContainText("lock_version: 2");
   await expect(page.locator(".repository-selector")).toBeVisible();
   await page.getByRole("button", { name: "Select all 7" }).click();
   await expect(page.locator(".repository-selector")).toContainText("7 selected · 7 total");

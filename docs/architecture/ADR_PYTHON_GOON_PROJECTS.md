@@ -2,7 +2,8 @@
 
 **Status:** Implemented, 2026-10-25.
 **Scope:** Atomic Goons carrying their own Python implementation, from local
-packages or explicit pinned Git selections.
+packages or explicit pinned Git selections; the same captured-project owner also
+supports explicitly selected independent application sources.
 
 ## Decision
 
@@ -31,6 +32,48 @@ This project contract applies to Atomic Goons carrying implementation.
 Composite Goons and Goons invoking tools in a selected target project need no
 dummy Python projects. Plans still order Goons; Atomic Goons own Steps;
 Composite Goons own Goons. There is no additional runner or execution graph.
+
+## Independent application binding
+
+An Atomic Goon may declare `application: {path: /absolute/application}` or
+`application: {git: URL, ref: REF, path: exact/subdirectory}`. This selects source
+independently of the Goon's authoring source and the actual registered effect
+target. It extends the existing captured-project binding, retained delivery and
+Command Step lifecycle rather than adding an application runner.
+
+The independent application needs no Goon YAML, catalog identity, README or
+Oh-Goon SDK. Native `pyproject.toml`/`uv.lock` requirements apply only when native
+uv is selected. `runtime: python` selects managed uv and installed commands;
+ordinary explicit commands also support captured applications without Python
+metadata. The package-owned form below retains its colocated-project contract.
+
+The source graph captures one complete bounded closure before execution. Exact
+bytes and local or pinned-Git provenance travel through the existing project
+archive and repository-owned retained-content references. The original Step
+owners create a verified private application copy, select the native environment,
+execute and collect declared outputs. Application files and acquisition caches
+do not become writable target authority. Repeated occurrences and later Runs
+retain separate attempt/output identities.
+Independent application capture refuses live dotenv state before delivery or execution;
+explicit environment/secret authority remains separate from source selection.
+The existing source-policy owner permits non-live dotenv templates, without
+using Git ignore rules or adding a content secret scanner.
+
+The original lock owner stores application pins in the same execution-source
+collection as Plan/Goon pins. `--update-applications` refreshes applications
+explicitly; other source refresh scopes cannot advance them. A repair candidate
+can be recaptured through its original owner without changing an independently
+captured verifier. Historical readers consume retained facts and never fetch the
+current branch.
+
+The existing registered-target route already supports a separately authored Goon
+over an unchanged application repository with no Goon files. The new binding is
+needed when the selected executable source must remain independent of that
+target. A genuine target-free execution subject remains unsupported: Fleet
+admission, repository/workspace authority, schedules, campaigns and Game Tape
+require a coordinated subject decision. Do not satisfy that gap with a dummy
+repository or a parallel execution lane. See
+[authoring](../development/GOON_AUTHORING.md#independently-maintained-application-source).
 
 ## Complete project ownership
 
@@ -209,9 +252,12 @@ requirements and perform their selected preparation inside the original Step
 boundary. The native issuer restriction is separate from the existing isolated
 `uv sync --locked` execution capability.
 
-Resolved Plan contract 46 requires explicit lock mode. Database schema 90 rejects
-older schema-89 state before decoding incompatible contract-45 Journal payloads;
-they are not corruption and are never reinterpreted as frozen. Quiesce the old writer before
+Resolved Plan contract 46 introduced explicit lock mode; contract 47 separates
+captured application source from native environment selection. Execution lock
+version 2 uses one `execution_sources` collection for Goon, Plan and application
+pins. Database schema 92 refuses older serialized Plans before decoding; no old
+source spelling or lock format is accepted as an alias. Incompatible histories
+are not corruption and are never reinterpreted as current selections. Quiesce the old writer before
 switching runtimes, retain old evidence under its original runtime, and re-resolve
 and re-lock authoring with the new runtime before new admission. Creating a new
 state directory does not prove that an old process has stopped.
@@ -319,7 +365,7 @@ shared with [Skill sources](../AGENT_SKILLS.md#select-a-skill). Goons remain
 Goons; `.goonskills.yml` remains the separate Skill source contract.
 
 - The first `lock` explicitly acquires source and records origin, requested ref,
-  selected path and resolved commit in `goon_sources`. Complete examples also
+  selected path and resolved commit in `execution_sources`. Complete examples also
   record their Plan selection.
 - Ordinary relocking and runs retain exact commits. A moving branch/tag or
   cache miss never advances a locked selection. Cache recovery may acquire the

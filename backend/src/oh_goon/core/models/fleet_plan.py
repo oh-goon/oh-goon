@@ -118,6 +118,7 @@ from oh_goon.core.models.fleet_plan_requirements import (
     RepositoryRequirement,
     UvLockMode,
 )
+from oh_goon.core.models.fleet_plan_resources import CapturedProjectSource
 from oh_goon.core.models.fleet_plan_resources import (
     ExtensionCatalog as ExtensionCatalog,
 )
@@ -130,7 +131,6 @@ from oh_goon.core.models.fleet_plan_resources import (
 from oh_goon.core.models.fleet_plan_resources import (
     ManagedToolRuntime as ManagedToolRuntime,
 )
-from oh_goon.core.models.fleet_plan_resources import PythonGoonProject
 from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepCache as PlanStepCache,
 )
@@ -201,12 +201,16 @@ from oh_goon.core.models.fleet_plan_values import (
 from oh_goon.core.models.fleet_plan_values import (
     ResolvedEnvironmentBinding as ResolvedEnvironmentBinding,
 )
-from oh_goon.core.models.git_sources import GoonGitSource, LockedGoonSource
+from oh_goon.core.models.git_sources import (
+    GitSourceSelection,
+    LocalApplicationSource,
+    LockedExecutionSource,
+)
 from oh_goon.core.models.provenance import MAX_SOURCE_LOCATION_LENGTH
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
-FLEET_PLAN_CONTRACT_VERSION: Literal[46] = 46
+FLEET_PLAN_CONTRACT_VERSION: Literal[47] = 47
 _NATIVE_AGENT_ADAPTER = TypeAdapter(ResolvedNativeAgent)
 DEFAULT_PRE_COMMIT_REQUIREMENT = "pre-commit==4.6.2"
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 3600.0
@@ -222,7 +226,7 @@ class UvExecutionEnvironment(ImmutableModel):
 
     lock_mode: UvLockMode
     project: str = Field(default=".", min_length=1, max_length=240)
-    source: Literal["repository", "package"] = Field(
+    source: Literal["repository", "captured"] = Field(
         default="repository", exclude_if=lambda value: value == "repository"
     )
     group: str | None = Field(
@@ -411,7 +415,7 @@ class CompiledGoonImportStep(ImmutableModel):
     kind: Literal["goon"] = "goon"
     phase: Literal["review", "adjudicate", "repair", "regression", "verification"] | None = None
     source_root: str | None = Field(default=None, min_length=1, max_length=240)
-    git_source: GoonGitSource | None = None
+    git_source: GitSourceSelection | None = None
 
     @field_validator("source_root")
     @classmethod
@@ -475,6 +479,7 @@ class CompiledExecutionTemplate(ImmutableModel):
     version: Literal[1] = 1
     authoring_kind: Literal["plan", "goon"] = "goon"
     runtime: Literal["python"] | None = None
+    application: LocalApplicationSource | GitSourceSelection | None = None
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
     execution: PlanExecutionPolicy | None = None
@@ -489,6 +494,25 @@ class CompiledExecutionTemplate(ImmutableModel):
 
     @model_validator(mode="after")
     def validate_step_ids(self) -> CompiledExecutionTemplate:
+        if self.application is not None and any(
+            not isinstance(step, CommandPlanStep) for step in self.steps
+        ):
+            raise ValueError("Application sources belong to Atomic Goon command Steps")
+        if self.application is not None:
+            for step in self.steps:
+                assert isinstance(step, CommandPlanStep)
+                if step.workspace.source.kind != "repository" or step.workspace.publish:
+                    raise ValueError(
+                        "Application source cannot be replaced or published as a Step workspace"
+                    )
+                paths = (
+                    step.working_directory,
+                    *(getattr(output, "path", "") for output in (*step.outputs, *step.artifacts)),
+                )
+                if any("${" in path for path in paths):
+                    raise ValueError(
+                        "Captured application working and output paths must be literal"
+                    )
         validate_template_contract(
             self.inputs,
             self.outputs,
@@ -516,7 +540,7 @@ class CompiledExecutionTemplate(ImmutableModel):
 
 
 class ResolvedCommandStep(CommandPlanStep):
-    project_source: PythonGoonProject | None = Field(
+    project_source: CapturedProjectSource | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     environment: tuple[ResolvedEnvironmentBinding, ...] = Field(
@@ -527,11 +551,22 @@ class ResolvedCommandStep(CommandPlanStep):
     def validate_uv_selection(self) -> ResolvedCommandStep:
         if self.uv is not None and self.argv[:3] != ("uv", "run", f"--{self.uv.lock_mode}"):
             raise ValueError("Resolved uv argv must retain its selected native lock mode")
-        package = self.uv is not None and self.uv.source == "package"
-        if package != (self.project_source is not None):
-            raise ValueError("Package execution requires the exact captured Python Goon source")
+        captured = self.project_source is not None
+        if self.uv is not None and (self.uv.source == "captured") != captured:
+            raise ValueError("Captured uv execution requires its exact captured project source")
+        package = self.project_source is not None and self.project_source.application is None
+        if package and (self.uv is None or self.uv.source != "captured"):
+            raise ValueError("Python Goon package requires its captured uv environment")
         if package and self.uv is not None and self.uv.project != ".":
             raise ValueError("Python Goon runtime selects its package root")
+        if (
+            captured
+            and not package
+            and (self.workspace.source.kind != "repository" or self.workspace.publish)
+        ):
+            raise ValueError(
+                "Application source cannot be replaced or published as a Step workspace"
+            )
         if self.uv is not None and any(
             binding.name in UV_PROJECT_SELECTION_SWITCHES for binding in self.environment
         ):
@@ -828,7 +863,7 @@ class ResolvedImport(ImmutableModel):
 class ResolvedFleetPlan(ImmutableModel):
     """Fully bound immutable execution plan.  Runtime never re-reads YAML/TOML."""
 
-    contract_version: Literal[46] = FLEET_PLAN_CONTRACT_VERSION
+    contract_version: Literal[47] = FLEET_PLAN_CONTRACT_VERSION
     _project_archives: dict[str, bytes] = PrivateAttr(default_factory=dict)
 
     @field_validator("contract_version", mode="before")
@@ -858,7 +893,7 @@ class ResolvedFleetPlan(ImmutableModel):
     skill_sources: tuple[LockedSkillSource, ...] = Field(
         default_factory=tuple, max_length=128, exclude_if=lambda value: not value
     )
-    goon_sources: tuple[LockedGoonSource, ...] = Field(
+    execution_sources: tuple[LockedExecutionSource, ...] = Field(
         default=(), max_length=128, exclude_if=lambda value: not value
     )
 
@@ -874,7 +909,7 @@ class ResolvedFleetPlan(ImmutableModel):
         imports: tuple[ResolvedImport, ...] = (),
         step_sources: tuple[ResolvedStepSource, ...] = (),
         skill_sources: tuple[LockedSkillSource, ...] = (),
-        goon_sources: tuple[LockedGoonSource, ...] = (),
+        execution_sources: tuple[LockedExecutionSource, ...] = (),
         configuration: PlanConfigurationEvidence | None = None,
         native_agent: ResolvedNativeAgent | None = None,
     ) -> ResolvedFleetPlan:
@@ -901,8 +936,8 @@ class ResolvedFleetPlan(ImmutableModel):
                 else {}
             ),
             **(
-                {"goon_sources": [item.model_dump(mode="json") for item in goon_sources]}
-                if goon_sources
+                {"execution_sources": [item.model_dump(mode="json") for item in execution_sources]}
+                if execution_sources
                 else {}
             ),
         }
@@ -916,7 +951,7 @@ class ResolvedFleetPlan(ImmutableModel):
             steps=steps,
             step_sources=step_sources,
             skill_sources=skill_sources,
-            goon_sources=goon_sources,
+            execution_sources=execution_sources,
             configuration=configuration,
             native_agent=native_agent,
         )

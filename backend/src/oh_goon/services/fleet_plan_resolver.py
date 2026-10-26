@@ -35,7 +35,7 @@ from oh_goon.core.models.fleet_plan_evidence import FleetPlanPreview
 from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepCache,
 )
-from oh_goon.core.models.git_sources import LockedGoonSource
+from oh_goon.core.models.git_sources import LockedExecutionSource
 from oh_goon.core.path_authority import ContainedPathSpace, RepositoryPathSpace, navigation_path
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
@@ -99,11 +99,13 @@ class FleetPlanResolver:
         containment_root: Path | None = None,
         compiled_overrides: Mapping[Path, CompiledExecutionTemplate] | None = None,
         root_expected_name: str | None = None,
-        locked_goons: tuple[LockedGoonSource, ...] | None = (),
-        acquire_goons: bool = False,
+        locked_sources: tuple[LockedExecutionSource, ...] | None = (),
+        acquire_sources: bool = False,
         update_goons: bool = False,
+        update_applications: bool = False,
+        retained_graph: FleetPlanSourceGraph | None = None,
         allow_source_network: bool = False,
-        plan_source: LockedGoonSource | None = None,
+        plan_source: LockedExecutionSource | None = None,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> FleetPlanSourceGraph:
         path = navigation_path(plan_path)
@@ -114,9 +116,11 @@ class FleetPlanResolver:
             compiled_overrides=compiled_overrides,
             goon_templates=self.goon_templates,
             root_expected_name=root_expected_name,
-            locked_goons=locked_goons,
-            acquire_goons=acquire_goons,
+            locked_sources=locked_sources,
+            acquire_sources=acquire_sources,
             update_goons=update_goons,
+            update_applications=update_applications,
+            retained_graph=retained_graph,
             allow_source_network=allow_source_network,
             plan_source=plan_source,
             cancel_requested=cancel_requested,
@@ -128,7 +132,7 @@ class FleetPlanResolver:
         plan_path: Path,
         *,
         source_graph: FleetPlanSourceGraph | None,
-        locked_goons: tuple[LockedGoonSource, ...],
+        locked_sources: tuple[LockedExecutionSource, ...],
         root_expected_name: str | None,
         cancel_requested: Callable[[], bool] | None,
     ) -> Iterator[FleetPlanSourceGraph]:
@@ -137,8 +141,10 @@ class FleetPlanResolver:
 
         if cancel_requested is not None and cancel_requested():
             raise OperationCancelledError("Agent source recapture cancelled")
-        pins = locked_goons or (source_graph.goon_sources if source_graph is not None else ())
-        if source_graph is not None and pins != source_graph.goon_sources:
+        pins = locked_sources or (
+            source_graph.execution_sources if source_graph is not None else ()
+        )
+        if source_graph is not None and pins != source_graph.execution_sources:
             raise FleetPlanInvalid("Agent continuation changed its captured Git source pins")
         plan_source = next((pin for pin in pins if pin.kind == "plan"), None)
         with ExitStack() as source_lease:
@@ -175,10 +181,11 @@ class FleetPlanResolver:
                 selected,
                 containment_root=root,
                 root_expected_name=root_expected_name,
-                locked_goons=pins,
+                locked_sources=pins,
                 allow_source_network=True,
                 plan_source=plan_source,
                 cancel_requested=cancel_requested,
+                retained_graph=source_graph,
             )
 
     def resolve_source_graph(
@@ -224,7 +231,7 @@ class FleetPlanResolver:
         repository: Path | None = None,
         git_service: GitService | None = None,
         root_expected_name: str | None = None,
-        locked_goons: tuple[LockedGoonSource, ...] = (),
+        locked_sources: tuple[LockedExecutionSource, ...] = (),
     ) -> tuple[ResolvedFleetPlan, dict[str, FrozenAgentStepHandoff], str]:
         """Freeze each occurrence while the canonical compiler binds its inputs.
 
@@ -256,7 +263,7 @@ class FleetPlanResolver:
                     self._recapture_agent_graph(
                         plan_path,
                         source_graph=source_graph,
-                        locked_goons=locked_goons,
+                        locked_sources=locked_sources,
                         root_expected_name=root_expected_name,
                         cancel_requested=cancel_requested,
                     )
@@ -265,7 +272,7 @@ class FleetPlanResolver:
                 graph = source_graph or self.analyze_source(
                     plan_path,
                     root_expected_name=root_expected_name,
-                    locked_goons=locked_goons,
+                    locked_sources=locked_sources,
                     cancel_requested=cancel_requested,
                 )
             if root_expected_name is not None and graph.root.compiled.name != root_expected_name:
@@ -495,7 +502,7 @@ class FleetPlanResolver:
         cancel_requested: Callable[[], bool] | None = None,
         locked_skills: tuple[LockedSkillSource, ...] | None = None,
         source_graph: FleetPlanSourceGraph | None = None,
-        locked_goons: tuple[LockedGoonSource, ...] = (),
+        locked_sources: tuple[LockedExecutionSource, ...] = (),
     ) -> "FrozenAgentStepHandoff":
         """Explicitly capture a repaired repository for a separately admitted attempt.
 
@@ -520,7 +527,7 @@ class FleetPlanResolver:
         with self._recapture_agent_graph(
             plan_path,
             source_graph=source_graph,
-            locked_goons=locked_goons,
+            locked_sources=locked_sources,
             root_expected_name=None,
             cancel_requested=cancel_requested,
         ) as graph:
@@ -1128,7 +1135,7 @@ class FleetPlanResolver:
                 steps=steps,
                 step_sources=scope.step_sources,
                 skill_sources=skill_sources() if callable(skill_sources) else skill_sources,
-                goon_sources=source_graph.goon_sources,
+                execution_sources=source_graph.execution_sources,
                 configuration=context.diagnostics.evidence(),
                 native_agent=native_agent,
             )
@@ -1137,7 +1144,7 @@ class FleetPlanResolver:
         plan._project_archives.update(
             {
                 project.identity.content_sha256: project.archive
-                for project in source_graph.python_projects()
+                for project in source_graph.projects()
             }
         )
         return plan, plan_root, source_sha256

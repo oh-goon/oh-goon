@@ -13,7 +13,7 @@ from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.path_authority import repository_relative_parts
 
 
-class GoonGitSource(ImmutableModel):
+class GitSourceSelection(ImmutableModel):
     model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
     git: str = Field(min_length=1, max_length=2000)
@@ -23,7 +23,11 @@ class GoonGitSource(ImmutableModel):
     @field_validator("git", "ref")
     @classmethod
     def printable_argument(cls, value: str) -> str:
-        if value.startswith("-") or any(ord(c) <= 32 or ord(c) == 127 for c in value):
+        if (
+            "${" in value
+            or value.startswith("-")
+            or any(ord(c) <= 32 or ord(c) == 127 for c in value)
+        ):
             raise ValueError("Git source and ref must be printable non-option arguments")
         return value
 
@@ -71,6 +75,8 @@ class GoonGitSource(ImmutableModel):
     @field_validator("path")
     @classmethod
     def contained_path(cls, value: str) -> str:
+        if "${" in value:
+            raise ValueError("Git source path must be literal")
         path = PurePosixPath(value)
         if (
             path.is_absolute()
@@ -87,14 +93,14 @@ class GoonGitSource(ImmutableModel):
             ) from None
 
 
-class LockedGoonSource(GoonGitSource):
-    kind: Literal["goon", "plan"] = "goon"
+class LockedExecutionSource(GitSourceSelection):
+    kind: Literal["goon", "plan", "application"] = "goon"
     commit: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
     plan: str | None = Field(default=None, min_length=1, max_length=500)
 
     @model_validator(mode="after")
-    def selected_kind(self) -> LockedGoonSource:
-        if self.kind == "goon":
+    def selected_kind(self) -> LockedExecutionSource:
+        if self.kind in {"goon", "application"}:
             if self.plan is not None:
                 raise ValueError("A locked Goon source cannot select a Plan")
         elif self.plan is None or not self.plan or PurePosixPath(self.plan).name == "goon.yml":
@@ -104,3 +110,19 @@ class LockedGoonSource(GoonGitSource):
             if normalized != self.plan or normalized == ".":
                 raise ValueError("A locked Plan source requires a canonical contained Plan path")
         return self
+
+
+class LocalApplicationSource(ImmutableModel):
+    """One literal source root; acquiring it grants no execution effects."""
+
+    path: str = Field(min_length=1, max_length=4096)
+
+    @field_validator("path")
+    @classmethod
+    def literal_root(cls, value: str) -> str:
+        if "${" in value or not value.isprintable() or not value.strip():
+            raise ValueError("Application source path must be a literal printable directory")
+        path = Path(value)
+        if not path.is_absolute() and ".." in path.parts:
+            raise ValueError("Relative application source must stay inside its authoring root")
+        return path.as_posix()

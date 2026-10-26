@@ -113,7 +113,7 @@ def test_native_local_flat_index_relocates_only_with_captured_wheels(tmp_path: P
     _native_lock(project)
     _native_sync(project)
     resolver = FleetPlanResolver()
-    captured = resolver.analyze_source(project / "goon.yml").python_projects()[0]
+    captured = resolver.analyze_source(project / "goon.yml").projects()[0]
     receiver = tmp_path / "receiver"
     materialize_python_goon_project(captured.archive, captured.identity, receiver)
     shutil.rmtree(project)
@@ -149,7 +149,7 @@ def test_native_build_requirement_file_url_must_not_depend_on_external_wheel(
     project = tmp_path / "project"
     metadata = _write_project(project)
     _native_lock(project)
-    assert FleetPlanResolver().analyze_source(project / "goon.yml").python_projects()
+    assert FleetPlanResolver().analyze_source(project / "goon.yml").projects()
     wheel = _build_native_wheel(tmp_path / "backend-source", tmp_path / "outside", backend=True)
     (project / "pyproject.toml").write_text(
         metadata.replace(
@@ -204,7 +204,7 @@ def test_native_selected_local_project_build_metadata_is_contained(
     (unrelated / "pyproject.toml").write_text("intentionally invalid TOML")
     _native_lock(project)
     _native_sync(project)
-    captured = FleetPlanResolver().analyze_source(project / "goon.yml").python_projects()[0]
+    captured = FleetPlanResolver().analyze_source(project / "goon.yml").projects()[0]
     (child / "uv.toml").write_text('find-links = ["../../outside"]\n')
     with pytest.raises(FleetPlanInvalid, match="dependency path escapes"):
         FleetPlanResolver().analyze_source(project / "goon.yml")
@@ -233,7 +233,7 @@ def local_project(tmp_path: Path) -> tuple[Path, str]:
     project = tmp_path / "project"
     metadata = _write_project(project)
     _native_lock(project)
-    assert FleetPlanResolver().analyze_source(project / "goon.yml").python_projects()
+    assert FleetPlanResolver().analyze_source(project / "goon.yml").projects()
     return project, metadata
 
 
@@ -308,7 +308,7 @@ def test_remote_locations_and_requirements_remain_native_authority(
         stream.write(
             '\n[[package]]\nname = "remote"\nversion = "1.0.0"\nsource = {registry = "https://example.invalid/simple"}\n'
         )
-    assert FleetPlanResolver().analyze_source(project / "goon.yml").python_projects()
+    assert FleetPlanResolver().analyze_source(project / "goon.yml").projects()
 
 
 @pytest.mark.parametrize(

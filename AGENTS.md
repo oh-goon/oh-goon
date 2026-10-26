@@ -174,12 +174,21 @@ files. `make generate` writes contracts; `make check-generated` checks freshness
 Each Plan, Composite Goon, and tool-invoking Atomic Goon contains exactly YAML and README:
 `templates/goons/<category>/<name>/{goon.yml,README.md}` or
 `templates/plans/<category>/<name>/{plan.yml,README.md}`.
-An Atomic Goon with `runtime: python` owns a complete standalone Python project
-beside `goon.yml`: `README.md`, `pyproject.toml`, native `uv.lock`, implementation,
+An Atomic Goon with `runtime: python` and no independent application source owns a
+complete standalone Python project beside `goon.yml`: `README.md`, `pyproject.toml`, native `uv.lock`, implementation,
 resources and tests. Its captured authored contents participate in execution
 identity; disposable environments, caches and declared outputs do not. Native uv
 installs that project in an owned environment, with base dependencies only unless
 `uv.group` explicitly selects a group. `uv.project` cannot redirect package runtime.
+
+An Atomic Goon may instead select one independent `application` source: a literal
+local `path`, or explicit Git origin/ref/contained project path. Application code
+needs no Goon files. The original source graph captures it and the original Step
+owners execute its retained bytes; source selection grants no target effects.
+Native environment selection remains explicit. `lock --update-applications`
+refreshes application Git pins separately from Goon/Plan and Skill pins. A Run
+still requires its actual registered repository subject; do not manufacture one
+for target-free execution. See `docs/development/GOON_AUTHORING.md`.
 
 - Plan owns run intent and ordered `goons:`, never executable steps or commands.
   Atomic Goon owns `steps:`; Composite Goon owns `goons:`; exactly one form.

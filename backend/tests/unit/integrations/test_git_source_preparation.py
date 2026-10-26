@@ -67,6 +67,52 @@ def test_capture_error_survives_native_worktree_cleanup_failure(tmp_path, monkey
     assert "private cleanup diagnostic" not in str(raised.value)
 
 
+def test_gitlink_refuses_before_checkout_and_closes_original_worktree(tmp_path, monkeypatch):
+    source, original = _native_source(tmp_path, monkeypatch)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{original},component",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "incomplete application closure",
+        ],
+        check=True,
+    )
+    native = GitService.run
+
+    def no_checkout(self, *arguments, **kwargs):
+        assert "checkout-index" not in arguments, (
+            "Project bytes were materialized before closure refusal"
+        )
+        return native(self, *arguments, **kwargs)
+
+    monkeypatch.setattr(GitService, "run", no_checkout)
+    with pytest.raises(FleetPlanInvalid, match="submodules are unsupported"):
+        with prepare_git_source(str(source), "main", commit=None):
+            pytest.fail("Incomplete Git application reached source capture")
+    assert not next(git_source_cache().glob("*.git")).joinpath("worktrees").exists()
+
+
 def test_nonquiescent_native_result_stops_before_next_git_helper(tmp_path, monkeypatch):
     source, commit = _native_source(tmp_path, monkeypatch)
     run = Mock(

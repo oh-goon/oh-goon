@@ -188,25 +188,37 @@ def test_contract45_journal_refuses_at_schema_boundary_without_decoding_or_mutat
     assert path.read_bytes() == before
 
 
-def test_schema90_cancellation_refuses_before_codec_or_ddl_without_mutation(
-    tmp_path, monkeypatch, capsys
+@pytest.mark.parametrize(
+    "fixture_name,legacy_schema",
+    [("schema90_cancelled_run.json", 90), ("schema91_contract46_run.json", 91)],
+)
+def test_incompatible_journal_refuses_before_codec_or_ddl_without_mutation(
+    tmp_path, monkeypatch, capsys, fixture_name, legacy_schema
 ) -> None:
     from oh_goon.core.errors import DatabaseSchemaMismatch
     from oh_goon.runtime.journal_codec import JournalFactCodec
 
-    path = tmp_path / "schema90.db"
+    path = tmp_path / "historical.db"
     _set_database(monkeypatch, path)
     LocalDatabase(path, journal_mode="DELETE")
     assert inspect_local_database().compatible
-    fixture = Path(__file__).parents[2] / "fixtures/schema90_cancelled_run.json"
+    fixture = Path(__file__).parents[2] / "fixtures" / fixture_name
     legacy = json.loads(fixture.read_text(encoding="utf-8"))
+    assert legacy["schema_version"] == legacy_schema
     events = [json.loads(row["event_json"]) for row in legacy["entries"] if row["event_json"]]
-    cancellation = next(
-        event["cancellation"] for event in events if event["event_type"] == "STEP_CANCELLED"
-    )
-    assert cancellation["native_agent_observations"] == []
-    assert cancellation["physical_execution_id"] is None and cancellation["duration_ms"] == 0
-    assert events[-1]["event_type"] == "RUN_CANCELLED"
+    if legacy_schema == 90:
+        cancellation = next(
+            event["cancellation"] for event in events if event["event_type"] == "STEP_CANCELLED"
+        )
+        assert cancellation["native_agent_observations"] == []
+        assert cancellation["physical_execution_id"] is None and cancellation["duration_ms"] == 0
+        assert events[-1]["event_type"] == "RUN_CANCELLED"
+    else:
+        # Authored and independently decoded by the original schema91 reader at
+        # 95c5411; contract46 selected package source through the native UV field.
+        plan = events[0]["target"]["plan"]
+        assert plan["contract_version"] == 46
+        assert plan["steps"][0]["uv"]["source"] == "package"
     with closing(sqlite3.connect(path)) as connection, connection:
         for row in legacy["entries"]:
             columns = tuple(row)
@@ -218,7 +230,7 @@ def test_schema90_cancellation_refuses_before_codec_or_ddl_without_mutation(
     before = path.read_bytes()
 
     def unexpected_decode(**_kwargs):
-        pytest.fail("schema90 must refuse before decoding its cancellation payload")
+        pytest.fail("incompatible history must refuse before payload decoding")
 
     statements = []
     native_connect = sqlite3.connect
@@ -234,7 +246,7 @@ def test_schema90_cancellation_refuses_before_codec_or_ddl_without_mutation(
         LocalDatabase(path, journal_mode="WAL")
     assert main(["doctor"]) == 2
     output = capsys.readouterr().out
-    assert f"found 90; expected {DATABASE_SCHEMA_VERSION}" in output
+    assert f"found {legacy_schema}; expected {DATABASE_SCHEMA_VERSION}" in output
     assert "matching original runtime" in output and "JournalCorruption" not in output
     assert path.read_bytes() == before
     assert not any(

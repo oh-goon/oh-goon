@@ -11,7 +11,7 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
-from oh_goon.core.models.git_sources import GoonGitSource
+from oh_goon.core.models.git_sources import GitSourceSelection
 from oh_goon.core.template_identity import canonical_template_key
 
 _INPUT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,63}\Z")
@@ -43,14 +43,14 @@ class RepositoryGoonSelection(_SelectionModel):
     kind: Literal["repository-goon"]
 
 
-class GitPlanSelection(GoonGitSource):
+class GitPlanSelection(GitSourceSelection):
     kind: Literal["git-plan"]
     plan: str = Field(min_length=1, max_length=500)
 
     @field_validator("plan")
     @classmethod
     def exact_plan(cls, value: str) -> str:
-        value = GoonGitSource.contained_path(value)
+        value = GitSourceSelection.contained_path(value)
         if value == "." or value.endswith("/") or value.rsplit("/", 1)[-1] == "goon.yml":
             raise ValueError("Git Plan selection must name an exact Plan file, not a Goon")
         return value
