@@ -11,7 +11,7 @@ from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan import AgentPlanStep, ExtensionCatalog, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_composition import PlanInputDefinition, PlanInputValue
 from oh_goon.core.models.fleet_plan_execution_policy import PlanExecutionPolicy
-from oh_goon.core.models.git_sources import LockedGoonSource
+from oh_goon.core.models.git_sources import LockedExecutionSource
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
@@ -41,7 +41,7 @@ class AgentCaptureOptions(TypedDict):
     require_review_phases: NotRequired[bool | None]
     source_graph: NotRequired[FleetPlanSourceGraph | None]
     root_expected_name: NotRequired[str | None]
-    locked_goons: NotRequired[tuple[LockedGoonSource, ...]]
+    locked_sources: NotRequired[tuple[LockedExecutionSource, ...]]
 
 
 @dataclass(frozen=True)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -193,10 +194,17 @@ def test_unknown_run_preserves_original_readback_error_contract(capsys):
     assert owner.calls == [("get", "run-5")]
 
 
-def test_handoff_transports_actual_fleet_detail_game_tape(tmp_path, capsys):
+@pytest.mark.parametrize("captured_application", [False, True])
+def test_handoff_transports_actual_fleet_detail_game_tape(tmp_path, capsys, captured_application):
     """The original computed Game Tape is the only source of diagnostic fields."""
-    from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+    from oh_goon.core.models.fleet_plan import (
+        ResolvedCommandStep,
+        ResolvedFleetPlan,
+        UvExecutionEnvironment,
+    )
     from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
+    from oh_goon.core.models.fleet_plan_resources import CapturedProjectSource
+    from oh_goon.core.models.git_sources import LocalApplicationSource
     from oh_goon.core.models.goon_plan_source import PlanFileSource
     from oh_goon.core.models.repository import RepositoryIdentity
     from oh_goon.core.models.run import CompletedFleetRun, FleetRunDetail, FleetRunProgress
@@ -211,11 +219,32 @@ def test_handoff_transports_actual_fleet_detail_game_tape(tmp_path, capsys):
     from tests.factories.fleet_plan_targets import structural_execution_identity
     from tests.factories.run_admission import repository_admissions_for
 
+    project = (
+        CapturedProjectSource(
+            content_sha256="a" * 64,
+            archive_sha256="b" * 64,
+            entry_count=1,
+            byte_count=20,
+            application=LocalApplicationSource(path=str(tmp_path / "removed-application")),
+        )
+        if captured_application
+        else None
+    )
+    uv = UvExecutionEnvironment(source="captured", lock_mode="frozen") if project else None
+    step = ResolvedCommandStep(
+        step_id="check",
+        argv=("uv", "run", "--frozen", "--no-default-groups", "--project", ".", "app-command")
+        if project
+        else ("true",),
+        uv=uv,
+        project_source=project,
+        timeout_seconds=30,
+    )
     plan = ResolvedFleetPlan.create(
         name="run5-handoff",
         description="",
         execution=MaintenanceExecutionPolicy(),
-        steps=(ResolvedCommandStep(step_id="check", argv=("true",), timeout_seconds=30),),
+        steps=(step,),
     )
     target = FleetPlanTarget(
         kind="fleet_plan",
@@ -259,6 +288,12 @@ def test_handoff_transports_actual_fleet_detail_game_tape(tmp_path, capsys):
     assert result["summary"] == tape.summary.model_dump(mode="json")
     assert result["issue_focus"] == [item.model_dump(mode="json") for item in tape.issue_focus]
     assert result["observability"] == tape.observability.model_dump(mode="json")
+    recorded_step = result["recorded_steps"]["steps"][0]
+    assert recorded_step["project_source"] == (project.model_dump(mode="json") if project else None)
+    assert recorded_step["uv"] == (uv.model_dump(mode="json") if uv else None)
+    if project:
+        assert isinstance(project.application, LocalApplicationSource)
+        assert not Path(project.application.path).exists()
 
 
 def test_handoff_preserves_failed_verification_beside_successful_untrusted_claim(capsys):
@@ -293,6 +328,8 @@ def test_handoff_preserves_failed_verification_beside_successful_untrusted_claim
         exit_code=7,
         reason="Independent verifier failed",
         native_agent_observations=(claim,),
+        project_source=None,
+        uv=None,
         settlement=PlanStepSettlementEvidence(),
     )
     tape = _Tape()
@@ -317,6 +354,8 @@ def test_handoff_bounds_steps_and_qualifies_absent_native_claims(capsys):
         exit_code=None,
         reason=None,
         native_agent_observations=(),
+        project_source=None,
+        uv=None,
         settlement=PlanStepSettlementEvidence(),
     )
     tape = _Tape()
@@ -363,6 +402,8 @@ def test_handoff_claim_excerpt_retains_origin_tail_and_exact_omission_accounting
         exit_code=125,
         reason="Native preflight rejected",
         native_agent_observations=(observation,),
+        project_source=None,
+        uv=None,
         settlement=PlanStepSettlementEvidence(),
     )
     tape = _Tape()

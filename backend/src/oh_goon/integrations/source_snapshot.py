@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.source_tree_policy import is_transient_source_path
+from oh_goon.core.source_tree_policy import is_live_dotenv_state, is_transient_source_path
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 
@@ -24,7 +24,11 @@ class SourceSnapshotBinding:
 
 
 def source_snapshot_identity(
-    source: Path, *, cancel_requested: Cancel = None, exclude_paths: tuple[str, ...] = ()
+    source: Path,
+    *,
+    cancel_requested: Cancel = None,
+    exclude_paths: tuple[str, ...] = (),
+    reject_dotenv_state: bool = False,
 ) -> SnapshotIdentity:
     """Identify certifiable source with Hashmarks after Oh-Goon policy exclusions."""
 
@@ -32,7 +36,10 @@ def source_snapshot_identity(
     if not root.is_dir():
         raise FleetPlanInvalid(f"Repository source snapshot is not a directory: {root}")
     exclusions = _transient_source_exclusions(
-        root, cancel_requested=cancel_requested, exclude_paths=exclude_paths
+        root,
+        cancel_requested=cancel_requested,
+        exclude_paths=exclude_paths,
+        reject_dotenv_state=reject_dotenv_state,
     )
     return _identify_source(root, exclusions, cancel_requested)
 
@@ -51,7 +58,11 @@ def _identify_source(
 
 
 def _transient_source_exclusions(
-    root: Path, *, cancel_requested: Cancel, exclude_paths: tuple[str, ...] = ()
+    root: Path,
+    *,
+    cancel_requested: Cancel,
+    exclude_paths: tuple[str, ...] = (),
+    reject_dotenv_state: bool = False,
 ) -> tuple[str, ...]:
     excluded: list[str] = list(exclude_paths)
     # Output files do not make their newly-created parent directories authored.
@@ -74,12 +85,15 @@ def _transient_source_exclusions(
         kept: list[str] = []
         for name in sorted(directories):
             relative = relative_current / name
+            _require_source_input(relative, reject_dotenv_state)
             entry = current_path / name
             if is_transient_source_path(relative, exclude_paths=exclude_paths):
                 excluded.append(relative.as_posix())
             else:
                 if entry.is_symlink():
-                    raw, target = _validated_symlink_target(root, entry, relative)
+                    raw, target = _validated_symlink_target(
+                        root, entry, relative, reject_dotenv_state=reject_dotenv_state
+                    )
                     symlinks.append((relative, raw, target))
                     retain_ancestors(relative)
                 elif relative in output_ancestors:
@@ -90,11 +104,14 @@ def _transient_source_exclusions(
         directories[:] = kept
         for name in sorted(files):
             relative = relative_current / name
+            _require_source_input(relative, reject_dotenv_state)
             entry = current_path / name
             if is_transient_source_path(relative, exclude_paths=exclude_paths):
                 excluded.append(relative.as_posix())
             elif entry.is_symlink():
-                raw, target = _validated_symlink_target(root, entry, relative)
+                raw, target = _validated_symlink_target(
+                    root, entry, relative, reject_dotenv_state=reject_dotenv_state
+                )
                 symlinks.append((relative, raw, target))
                 retain_ancestors(relative)
             else:
@@ -147,6 +164,7 @@ def snapshot_source_directory(
     exclude_paths: tuple[str, ...] = (),
     max_bytes: int | None = None,
     max_entries: int | None = None,
+    reject_dotenv_state: bool = False,
 ) -> SnapshotIdentity:
     """Freeze source-only repository bytes and prove the filtered source stayed stable."""
 
@@ -156,7 +174,10 @@ def snapshot_source_directory(
     for _attempt in range(3):
         _check_cancel(cancel_requested, root)
         exclusions = _transient_source_exclusions(
-            root, cancel_requested=cancel_requested, exclude_paths=exclude_paths
+            root,
+            cancel_requested=cancel_requested,
+            exclude_paths=exclude_paths,
+            reject_dotenv_state=reject_dotenv_state,
         )
         before = _identify_source(root, exclusions, cancel_requested)
         if (max_bytes is not None and before.byte_count > max_bytes) or (
@@ -166,14 +187,29 @@ def snapshot_source_directory(
         _remove(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
-            _copy_source_tree(root, root, destination, cancel_requested, label, exclusions)
+            _copy_source_tree(
+                root,
+                root,
+                destination,
+                cancel_requested,
+                label,
+                exclusions,
+                reject_dotenv_state=reject_dotenv_state,
+            )
+            after = source_snapshot_identity(
+                root,
+                cancel_requested=cancel_requested,
+                exclude_paths=exclude_paths,
+                reject_dotenv_state=reject_dotenv_state,
+            )
+            copied = source_snapshot_identity(
+                destination,
+                cancel_requested=cancel_requested,
+                reject_dotenv_state=reject_dotenv_state,
+            )
         except BaseException:
             _remove(destination)
             raise
-        after = source_snapshot_identity(
-            root, cancel_requested=cancel_requested, exclude_paths=exclude_paths
-        )
-        copied = source_snapshot_identity(destination, cancel_requested=cancel_requested)
         if before == after == copied:
             return copied
     _remove(destination)
@@ -187,6 +223,8 @@ def _copy_source_tree(
     cancel_requested: Cancel,
     label: str,
     exclude_paths: tuple[str, ...] = (),
+    *,
+    reject_dotenv_state: bool = False,
 ) -> None:
     _check_cancel(cancel_requested, root)
     destination.mkdir()
@@ -194,16 +232,29 @@ def _copy_source_tree(
     relative_current = source.relative_to(root)
     for entry in sorted(source.iterdir(), key=lambda item: item.name):
         relative = relative_current / entry.name
+        _require_source_input(relative, reject_dotenv_state)
         if is_transient_source_path(relative, exclude_paths=exclude_paths):
             continue
         target = destination / entry.name
         if entry.is_symlink():
             symlink_target, _target_relative = _validated_symlink_target(
-                root, entry, relative, exclude_paths=exclude_paths
+                root,
+                entry,
+                relative,
+                exclude_paths=exclude_paths,
+                reject_dotenv_state=reject_dotenv_state,
             )
             target.symlink_to(symlink_target)
         elif entry.is_dir():
-            _copy_source_tree(root, entry, target, cancel_requested, label, exclude_paths)
+            _copy_source_tree(
+                root,
+                entry,
+                target,
+                cancel_requested,
+                label,
+                exclude_paths,
+                reject_dotenv_state=reject_dotenv_state,
+            )
         elif entry.is_file():
             _copy_file(entry, target, cancel_requested, label)
         else:
@@ -211,7 +262,12 @@ def _copy_source_tree(
 
 
 def _validated_symlink_target(
-    root: Path, entry: Path, relative: Path, *, exclude_paths: tuple[str, ...] = ()
+    root: Path,
+    entry: Path,
+    relative: Path,
+    *,
+    exclude_paths: tuple[str, ...] = (),
+    reject_dotenv_state: bool = False,
 ) -> tuple[str, Path]:
     raw = os.readlink(entry)
     target = Path(raw)
@@ -224,11 +280,20 @@ def _validated_symlink_target(
         raise FleetPlanInvalid(
             f"Repository source contains escaping symlink: {relative} -> {raw}"
         ) from exc
+    _require_source_input(target_relative, reject_dotenv_state)
     if is_transient_source_path(target_relative, exclude_paths=exclude_paths):
         raise FleetPlanInvalid(
             f"Repository source symlink targets generated/operational state: {relative} -> {raw}"
         )
     return raw, target_relative
+
+
+def _require_source_input(relative: Path, reject_dotenv_state: bool) -> None:
+    if reject_dotenv_state and is_live_dotenv_state(relative):
+        raise FleetPlanInvalid(
+            "Independent application source contains live dotenv state; "
+            "keep it outside authored source and use explicit environment inputs"
+        )
 
 
 def _copy_file(source: Path, destination: Path, cancel_requested: Cancel, label: str) -> None:

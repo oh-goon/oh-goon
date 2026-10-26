@@ -16,7 +16,7 @@ from urllib.request import url2pathname
 from pydantic import ValidationError
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.git_sources import GoonGitSource, LockedGoonSource
+from oh_goon.core.models.git_sources import GitSourceSelection, LockedExecutionSource
 from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.git import GitService
 
@@ -74,9 +74,9 @@ def prepare_git_source(
 
     try:
         if commit is None:
-            GoonGitSource(git=source, ref=ref, path=".")
+            GitSourceSelection(git=source, ref=ref, path=".")
         else:
-            LockedGoonSource(git=source, ref=ref, path=".", commit=commit)
+            LockedExecutionSource(git=source, ref=ref, path=".", commit=commit)
     except ValidationError:
         raise FleetPlanInvalid("Invalid native Git source coordinates") from None
     if native_workspace is not None:
@@ -201,9 +201,24 @@ def prepare_git_source(
                             selected,
                         )
                         run("read-tree", "HEAD", cwd=checkout)
-                        paths = run("ls-files", "--cached", "-z", cwd=checkout).stdout
-                        if "\ufffd" in paths:
+                        tracked = run("ls-files", "--cached", "--stage", "-z", cwd=checkout).stdout
+                        if "\ufffd" in tracked:
                             raise FleetPlanInvalid("Git source paths cannot be inspected exactly")
+                        entries = tracked.split("\0")
+                        if entries[-1] != "":
+                            raise FleetPlanInvalid("Git source index framing is unavailable")
+                        paths = []
+                        for entry in entries[:-1]:
+                            metadata, separator, path = entry.partition("\t")
+                            fields = metadata.split(" ")
+                            if not separator or len(fields) != 3 or fields[2] != "0" or not path:
+                                raise FleetPlanInvalid("Git source index entry is unavailable")
+                            if fields[0] == "160000":
+                                raise FleetPlanInvalid(
+                                    "Git source submodules are unsupported; select a complete source closure"
+                                )
+                            paths.append(path)
+                        selected_paths = "".join(path + "\0" for path in paths)
                         attribute_text = run(
                             "check-attr",
                             "--cached",
@@ -211,7 +226,7 @@ def prepare_git_source(
                             "-z",
                             "--stdin",
                             cwd=checkout,
-                            input_data=paths.encode("utf-8"),
+                            input_data=selected_paths.encode("utf-8"),
                         ).stdout
                         attributes = attribute_text.split("\0")
                         if (

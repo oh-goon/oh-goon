@@ -2784,6 +2784,56 @@
         "title": "CapabilityTargetKind",
         "type": "string"
       },
+      "CapturedProjectSource": {
+        "additionalProperties": false,
+        "description": "Captured package identity; executable source bytes travel privately.",
+        "properties": {
+          "application": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalApplicationSource"
+              },
+              {
+                "$ref": "#/components/schemas/LockedExecutionSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application"
+          },
+          "archive_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Archive Sha256",
+            "type": "string"
+          },
+          "byte_count": {
+            "maximum": 67108864.0,
+            "minimum": 0.0,
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "entry_count": {
+            "maximum": 4096.0,
+            "minimum": 1.0,
+            "title": "Entry Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_sha256",
+          "archive_sha256",
+          "byte_count",
+          "entry_count"
+        ],
+        "title": "CapturedProjectSource",
+        "type": "object"
+      },
       "ChangedGitHead": {
         "additionalProperties": false,
         "properties": {
@@ -12621,6 +12671,16 @@
             "title": "Outputs",
             "type": "array"
           },
+          "project_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CapturedProjectSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reason": {
             "anyOf": [
               {
@@ -12684,6 +12744,16 @@
             "minLength": 1,
             "title": "Step Id",
             "type": "string"
+          },
+          "uv": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UvExecutionEnvironment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "why": {
             "$ref": "#/components/schemas/GameTapeWhy"
@@ -15313,6 +15383,23 @@
         "title": "LiteralEnvironmentPart",
         "type": "object"
       },
+      "LocalApplicationSource": {
+        "additionalProperties": false,
+        "description": "One literal source root; acquiring it grants no execution effects.",
+        "properties": {
+          "path": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "LocalApplicationSource",
+        "type": "object"
+      },
       "LocationRequest": {
         "properties": {
           "path": {
@@ -15356,29 +15443,7 @@
         "title": "LocationsResponse",
         "type": "object"
       },
-      "LockedExternalArtifact": {
-        "additionalProperties": false,
-        "properties": {
-          "digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Digest",
-            "type": "string"
-          },
-          "path": {
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Path",
-            "type": "string"
-          }
-        },
-        "required": [
-          "path",
-          "digest"
-        ],
-        "title": "LockedExternalArtifact",
-        "type": "object"
-      },
-      "LockedGoonSource": {
+      "LockedExecutionSource": {
         "additionalProperties": false,
         "properties": {
           "commit": {
@@ -15396,7 +15461,8 @@
             "default": "goon",
             "enum": [
               "goon",
-              "plan"
+              "plan",
+              "application"
             ],
             "title": "Kind",
             "type": "string"
@@ -15433,7 +15499,29 @@
           "path",
           "commit"
         ],
-        "title": "LockedGoonSource",
+        "title": "LockedExecutionSource",
+        "type": "object"
+      },
+      "LockedExternalArtifact": {
+        "additionalProperties": false,
+        "properties": {
+          "digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "digest"
+        ],
+        "title": "LockedExternalArtifact",
         "type": "object"
       },
       "LockedSkillSource": {
@@ -21293,42 +21381,6 @@
         "title": "PyprojectValueRequirement",
         "type": "object"
       },
-      "PythonGoonProject": {
-        "additionalProperties": false,
-        "description": "Captured package identity; executable source bytes travel privately.",
-        "properties": {
-          "archive_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Archive Sha256",
-            "type": "string"
-          },
-          "byte_count": {
-            "maximum": 67108864.0,
-            "minimum": 0.0,
-            "title": "Byte Count",
-            "type": "integer"
-          },
-          "content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Content Sha256",
-            "type": "string"
-          },
-          "entry_count": {
-            "maximum": 4096.0,
-            "minimum": 1.0,
-            "title": "Entry Count",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "content_sha256",
-          "archive_sha256",
-          "byte_count",
-          "entry_count"
-        ],
-        "title": "PythonGoonProject",
-        "type": "object"
-      },
       "PythonRuntimeResult": {
         "additionalProperties": false,
         "properties": {
@@ -23319,7 +23371,7 @@
           "project_source": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PythonGoonProject"
+                "$ref": "#/components/schemas/CapturedProjectSource"
               },
               {
                 "type": "null"
@@ -23823,8 +23875,8 @@
             ]
           },
           "contract_version": {
-            "const": 46,
-            "default": 46,
+            "const": 47,
+            "default": 47,
             "title": "Contract Version",
             "type": "integer"
           },
@@ -23863,13 +23915,13 @@
             ],
             "title": "Execution"
           },
-          "goon_sources": {
+          "execution_sources": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/LockedGoonSource"
+              "$ref": "#/components/schemas/LockedExecutionSource"
             },
             "maxItems": 128,
-            "title": "Goon Sources",
+            "title": "Execution Sources",
             "type": "array"
           },
           "imports": {
@@ -31975,7 +32027,7 @@
             "default": "repository",
             "enum": [
               "repository",
-              "package"
+              "captured"
             ],
             "title": "Source",
             "type": "string"

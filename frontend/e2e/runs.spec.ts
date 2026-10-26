@@ -237,6 +237,12 @@ test("Step inspector explains first and keeps exact technical truth one disclosu
   await technicalDetails.locator("summary").click();
   await expect(page).toHaveURL(/tech=1/);
   await expect(exactCommand).toBeVisible();
+  const projectSource = technicalDetails.getByRole("region", { name: "Project source and environment" });
+  await expect(projectSource).toContainText("c".repeat(40));
+  await expect(projectSource).toContainText("tools/verification-with-a-long-contained-subdirectory-name");
+  await expect(projectSource).toContainText("frozen");
+  await page.setViewportSize({ width: 375, height: 800 });
+  expect(await projectSource.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   await page.reload();
   const technical = page.locator("details.game-tape-inspector__technical");
   await expect(technical).toHaveAttribute("open", "");

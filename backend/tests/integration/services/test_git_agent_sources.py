@@ -121,7 +121,7 @@ def test_native_git_agent_lock_runs_same_commit_after_branch_advance_and_cache_l
     lock_path = workflow / "goon.lock"
     lock_bytes = lock_path.read_bytes()
     lock = load_execution_lock(lock_path)
-    assert len(lock.goon_sources) == 1 and lock.goon_sources[0].commit == pinned
+    assert len(lock.execution_sources) == 1 and lock.execution_sources[0].commit == pinned
 
     for advance in (False, True):
         if advance:
@@ -143,7 +143,7 @@ def test_native_git_plan_proposal_repair_recaptures_before_its_second_attempt(
 ) -> None:
     from oh_goon.application import ApplicationRuntime
     from oh_goon.core.execution_lock_identity import build_execution_lock
-    from oh_goon.core.models.git_sources import LockedGoonSource
+    from oh_goon.core.models.git_sources import LockedExecutionSource
     from oh_goon.integrations.git_source_preparation import prepare_git_source
     from oh_goon.integrations.hashmarks import identity as external_identity
     from oh_goon.runtime.goon_templates import GoonTemplateStore
@@ -179,7 +179,7 @@ def test_native_git_plan_proposal_repair_recaptures_before_its_second_attempt(
         ],
         check=True,
     )
-    pin = LockedGoonSource(
+    pin = LockedExecutionSource(
         git=str(upstream),
         ref="main",
         path=".",
@@ -195,7 +195,7 @@ def test_native_git_plan_proposal_repair_recaptures_before_its_second_attempt(
             checkout / "plan.yml",
             containment_root=checkout,
             plan_source=pin,
-            locked_goons=(pin,),
+            locked_sources=(pin,),
         )
     path = graph.root.path
     assert not path.exists()
@@ -242,7 +242,7 @@ def test_native_git_plan_proposal_repair_recaptures_before_its_second_attempt(
         )
         assert result.stop_reason.value == "test_passed", result
         assert len(result.attempts) == 2
-        assert all(detail.run.target.plan.goon_sources == (pin,) for detail in result.attempts)
+        assert all(detail.run.target.plan.execution_sources == (pin,) for detail in result.attempts)
         assert (repository / "code.txt").read_text() == "final repaired content\n"
         assert lock_path.read_bytes() == lock
     finally:

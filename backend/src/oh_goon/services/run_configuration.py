@@ -20,7 +20,7 @@ from oh_goon.core.errors import (
 )
 from oh_goon.core.models.caller_input_file import CallerInputFileIdentity
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
-from oh_goon.core.models.git_sources import LockedGoonSource
+from oh_goon.core.models.git_sources import LockedExecutionSource
 from oh_goon.core.models.repository import RepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.models.run_configuration import (
     CatalogPlanSelection,
@@ -348,6 +348,7 @@ def capture_run_configuration_source(
     acquire: bool = False,
     allow_network: bool = False,
     update: bool = False,
+    update_applications: bool = False,
 ) -> tuple[NormalizedRunConfiguration, FleetPlanSourceGraph]:
     """Acquire only explicitly, then capture one original source graph before closing Git."""
     from oh_goon.core.execution_lock_identity import verify_execution_lock
@@ -358,7 +359,7 @@ def capture_run_configuration_source(
     )
 
     repository = _configuration_repository(snapshot, repositories)
-    locked: tuple[LockedGoonSource, ...] | None = ()
+    locked: tuple[LockedExecutionSource, ...] | None = ()
     if snapshot.lock_path.exists() or snapshot.lock_path.is_symlink():
         try:
             lock_path, _ = locate_caller_file(snapshot.lock_path, root=snapshot.root)
@@ -367,7 +368,7 @@ def capture_run_configuration_source(
             )
             lock = parse_execution_lock(lock_bytes.decode("utf-8"))
             verify_execution_lock(lock, lock)
-            locked = lock.goon_sources
+            locked = lock.execution_sources
         except (FleetPlanInvalid, OSError, UnicodeError, ValueError):
             if acquire or allow_network:
                 raise FleetPlanInvalid(
@@ -386,6 +387,17 @@ def capture_run_configuration_source(
                     )
     selection = snapshot.selection.source
     if isinstance(selection, GitPlanSelection):
+        if (
+            update
+            and not update_applications
+            and any(
+                pin.kind == "application" and (pin.git, pin.ref) == (selection.git, selection.ref)
+                for pin in locked or ()
+            )
+        ):
+            raise FleetPlanInvalid(
+                "Git Plan refresh conflicts with a retained application; explicitly refresh both selections"
+            )
         if locked is None:
             raise FleetPlanInvalid(
                 "Existing goon.lock is unavailable or invalid; restore its source pins before acquisition"
@@ -427,24 +439,26 @@ def capture_run_configuration_source(
             )
             if plan.name == "goon.yml":
                 raise FleetPlanInvalid("Git Plan selection must name a Plan, not a Goon")
-            provenance = LockedGoonSource(
+            provenance = LockedExecutionSource(
                 **selection.model_dump(exclude={"kind"}), kind="plan", commit=commit
             )
             graph = resolver.analyze_source(
                 plan,
                 containment_root=root,
                 plan_source=provenance,
-                locked_goons=locked,
-                acquire_goons=acquire,
+                locked_sources=locked,
+                acquire_sources=acquire,
                 update_goons=update,
+                update_applications=update_applications,
                 allow_source_network=allow_network,
             )
             return NormalizedRunConfiguration(snapshot, repository, plan), graph
     plan = snapshot.source_path(repository.path)
     return NormalizedRunConfiguration(snapshot, repository, plan), resolver.analyze_source(
         plan,
-        locked_goons=locked,
-        acquire_goons=acquire,
+        locked_sources=locked,
+        acquire_sources=acquire,
         update_goons=update,
+        update_applications=update_applications,
         allow_source_network=allow_network,
     )

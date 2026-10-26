@@ -22,6 +22,17 @@ Game Tape never schedules work. A Flow node is not schedulable, a Flow edge is n
 
 The browser owns no parallel execution model. `FleetRunDetail.game_tape` is the API projection consumed by every Game Tape view.
 
+Command Steps expose their admitted `project_source` and selected `uv`
+environment directly from the resolved Plan. Captured application facts include
+the content/archive identity and original local root or exact Git
+origin/ref/subdirectory/commit. They remain available after source and scratch
+removal; viewing a Run never acquires source or prepares an environment. Selected
+lock mode is configuration, while actual interpreter, freshness and cleanup facts
+remain in the original attempt evidence. Output evidence alone is not retained
+downloadable content or proof of success.
+The inspector keeps these source and environment facts under Technical Step
+details, beside the original command and execution authority.
+
 Native Agent Steps expose bounded `native_agent_observations` on their canonical
 Step. The inspector shows implementation, profile, occurrence, captured source
 and harness-input identities, event kinds and omitted-observation counts. Native

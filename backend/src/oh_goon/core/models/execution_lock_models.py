@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import Field, model_validator
 
 from oh_goon.core.models.base import ImmutableModel
-from oh_goon.core.models.git_sources import LockedGoonSource
+from oh_goon.core.models.git_sources import LockedExecutionSource
 
 
 class LockedGoon(ImmutableModel):
@@ -34,28 +34,28 @@ class ExecutionLock(ImmutableModel):
     execution: tuple[LockedGoon, ...] = Field(default_factory=tuple)
     external: tuple[LockedExternalArtifact, ...] = Field(default_factory=tuple)
     skill_sources: tuple[LockedSkillSource, ...] = Field(default_factory=tuple, max_length=128)
-    goon_sources: tuple[LockedGoonSource, ...] = Field(default=(), max_length=128)
+    execution_sources: tuple[LockedExecutionSource, ...] = Field(default=(), max_length=128)
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_lock_version(self) -> ExecutionLock:
-        if self.lock_version != 1:
+        if self.lock_version != 2:
             raise ValueError(f"Unsupported goon.lock version: {self.lock_version}")
         return self
 
     @model_validator(mode="after")
-    def validate_goon_source_pins(self) -> ExecutionLock:
+    def validate_execution_source_pins(self) -> ExecutionLock:
         selections: set[tuple[str, str, str, str, str | None]] = set()
         commits: dict[tuple[str, str], str] = {}
         plans = 0
-        for source in self.goon_sources:
+        for source in self.execution_sources:
             selection = (source.kind, source.git, source.ref, source.path, source.plan)
             if selection in selections:
-                raise ValueError("goon.lock contains duplicate Goon source selections")
+                raise ValueError("goon.lock contains duplicate execution source selections")
             selections.add(selection)
             repository = (source.git, source.ref)
             if repository in commits and commits[repository] != source.commit:
-                raise ValueError("goon.lock Goon sources disagree on the selected commit")
+                raise ValueError("goon.lock execution sources disagree on the selected commit")
             commits[repository] = source.commit
             plans += source.kind == "plan"
         if plans > 1:

@@ -11,6 +11,7 @@ from oh_goon.core.models.execution_authority_diagnostics import (
 )
 from oh_goon.core.models.execution_identity import ResolvedExecutionReference
 from oh_goon.core.models.fleet_observation import NativeAgentObservation
+from oh_goon.core.models.fleet_plan import UvExecutionEnvironment
 from oh_goon.core.models.fleet_plan_diagnostics import PlanConfigurationEvidence
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanArtifactEvidence,
@@ -20,6 +21,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanStepSettlementEvidence,
     PublishedPlanOutputEvidence,
 )
+from oh_goon.core.models.fleet_plan_resources import CapturedProjectSource
 from oh_goon.core.models.game_tape_observability import GameTapeObservabilityReceipt
 from oh_goon.core.models.game_tape_team import GameTapeTeamComposition
 from oh_goon.core.models.provenance import MAX_SOURCE_LOCATION_LENGTH
@@ -129,6 +131,8 @@ class GameTapeStepExecution(ImmutableModel):
     duration_ms: int | None = Field(default=None, ge=0)
     command: tuple[str, ...] = Field(default_factory=tuple)
     working_directory: str = Field(default=".", min_length=1, max_length=240)
+    project_source: CapturedProjectSource | None = None
+    uv: UvExecutionEnvironment | None = None
     environment: tuple[GameTapeEnvironmentSource, ...] = Field(default_factory=tuple, max_length=64)
     exit_code: int | None = None
     settlement: PlanStepSettlementEvidence = Field(default_factory=PlanStepSettlementEvidence)

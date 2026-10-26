@@ -18,7 +18,7 @@ from oh_goon.core.models.execution_lock_models import (
 )
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan, ResolvedImport
 
-LOCK_VERSION = 1
+LOCK_VERSION = 2
 _NATIVE_AGENT_ADAPTER = TypeAdapter(ResolvedNativeAgent)
 
 
@@ -63,8 +63,12 @@ def build_execution_lock(
             ],
             **_skill_source_identity(plan.skill_sources),
             **(
-                {"goon_sources": [item.model_dump(mode="json") for item in plan.goon_sources]}
-                if plan.goon_sources
+                {
+                    "execution_sources": [
+                        item.model_dump(mode="json") for item in plan.execution_sources
+                    ]
+                }
+                if plan.execution_sources
                 else {}
             ),
         }
@@ -75,7 +79,7 @@ def build_execution_lock(
         execution=goons,
         external=external,
         skill_sources=plan.skill_sources,
-        goon_sources=plan.goon_sources,
+        execution_sources=plan.execution_sources,
         digest=overall,
     )
 
@@ -114,8 +118,8 @@ def verify_execution_lock(expected: ExecutionLock, actual: ExecutionLock) -> Non
         )
     if actual.skill_sources != expected.skill_sources:
         raise FleetPlanInvalid("goon.lock Skill sources are stale; regenerate goon.lock")
-    if actual.goon_sources != expected.goon_sources:
-        raise FleetPlanInvalid("goon.lock Goon sources are stale; explicitly lock again")
+    if actual.execution_sources != expected.execution_sources:
+        raise FleetPlanInvalid("goon.lock execution sources are stale; explicitly lock again")
     if actual.digest != expected.digest:
         raise FleetPlanInvalid("goon.lock execution digest is stale; regenerate goon.lock")
 
@@ -229,8 +233,12 @@ def _recompute_overall(lock: ExecutionLock) -> str:
             ],
             **_skill_source_identity(lock.skill_sources),
             **(
-                {"goon_sources": [item.model_dump(mode="json") for item in lock.goon_sources]}
-                if lock.goon_sources
+                {
+                    "execution_sources": [
+                        item.model_dump(mode="json") for item in lock.execution_sources
+                    ]
+                }
+                if lock.execution_sources
                 else {}
             ),
         }

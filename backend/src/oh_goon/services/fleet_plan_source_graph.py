@@ -8,13 +8,14 @@ from types import MappingProxyType
 
 from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceAcquisitionRequired
 from oh_goon.core.models.fleet_plan import (
+    CommandPlanStep,
     CompiledExecutionTemplate,
     CompiledGoonImportStep,
     ExtensionPlanStep,
     PlanStep,
     PreCommitPlanStep,
 )
-from oh_goon.core.models.git_sources import LockedGoonSource
+from oh_goon.core.models.git_sources import LocalApplicationSource, LockedExecutionSource
 from oh_goon.core.path_authority import ContainedPathSpace, canonical_path, navigation_path
 from oh_goon.core.product_identity import stable_id
 from oh_goon.engine.errors import OperationCancelledError
@@ -24,8 +25,8 @@ from oh_goon.integrations.fleet_plan_source_snapshot import (
     read_fleet_plan_source,
 )
 from oh_goon.integrations.python_goon_projects import (
-    CapturedPythonGoonProject,
-    capture_python_goon_project,
+    CapturedProject,
+    capture_project_source,
 )
 
 MAX_GRAPH_PROJECT_BYTES = 128 * 1024 * 1024
@@ -39,11 +40,11 @@ class FleetPlanSourceNode:
     package_kind: str | None = None
     package_name: str | None = None
     local_source: str | None = None
-    git_source: LockedGoonSource | None = None
+    git_source: LockedExecutionSource | None = None
     git_path: str | None = None
     step_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
     value_positions: Mapping[str, FleetPlanStepPosition] = field(default_factory=dict)
-    python_project: CapturedPythonGoonProject | None = None
+    project: CapturedProject | None = None
     authoring_root: Path | None = None
 
 
@@ -57,12 +58,10 @@ class FleetPlanSourceGraph:
     uses_pre_commit: bool
     _goon_edges: Mapping[tuple[Path, str], FleetPlanSourceNode]
     _nodes: Mapping[Path, FleetPlanSourceNode]
-    goon_sources: tuple[LockedGoonSource, ...] = ()
+    execution_sources: tuple[LockedExecutionSource, ...] = ()
 
-    def python_projects(self) -> tuple[CapturedPythonGoonProject, ...]:
-        return tuple(
-            node.python_project for node in self._nodes.values() if node.python_project is not None
-        )
+    def projects(self) -> tuple[CapturedProject, ...]:
+        return tuple(node.project for node in self._nodes.values() if node.project is not None)
 
     def immutable_source_closure_identity(self) -> str:
         """Digest the already-analyzed original Plan + every imported Goon.
@@ -86,6 +85,11 @@ class FleetPlanSourceGraph:
                     "sha256": node.source_sha256,
                     "kind": node.package_kind or "root",
                     "name": node.package_name or node.path.name,
+                    **(
+                        {"project": node.project.identity.model_dump(mode="json")}
+                        if node.project is not None
+                        else {}
+                    ),
                 }
             )
         return stable_id(
@@ -215,16 +219,18 @@ class _SourceGraphBuild:
     visited: set[Path] = field(default_factory=set)
     uses_pre_commit: bool = False
     acquisitions: ExitStack = field(default_factory=ExitStack)
-    locked_goons: tuple[LockedGoonSource, ...] | None = ()
-    acquire_goons: bool = False
+    locked_sources: tuple[LockedExecutionSource, ...] | None = ()
+    acquire_sources: bool = False
     update_goons: bool = False
+    update_applications: bool = False
     allow_source_network: bool = False
     acquired_git: dict[tuple[str, str], tuple[Path, str]] = field(default_factory=dict)
     selected_git_commits: dict[tuple[str, str], str] = field(default_factory=dict)
-    goon_sources: dict[tuple[str, str, str], LockedGoonSource] = field(default_factory=dict)
+    execution_sources: dict[tuple[str, ...], LockedExecutionSource] = field(default_factory=dict)
     project_bytes: int = 0
     archive_bytes: int = 0
     cancel_requested: Callable[[], bool] | None = None
+    retained_nodes: Mapping[tuple[str, ...], FleetPlanSourceNode] = field(default_factory=dict)
 
 
 def analyze_fleet_plan_sources(
@@ -234,12 +240,14 @@ def analyze_fleet_plan_sources(
     compiled_overrides: Mapping[Path, CompiledExecutionTemplate] | None = None,
     goon_templates: GoonTemplateProvider | None = None,
     root_expected_name: str | None = None,
-    locked_goons: tuple[LockedGoonSource, ...] | None = (),
-    acquire_goons: bool = False,
+    locked_sources: tuple[LockedExecutionSource, ...] | None = (),
+    acquire_sources: bool = False,
     update_goons: bool = False,
+    update_applications: bool = False,
     allow_source_network: bool = False,
-    plan_source: LockedGoonSource | None = None,
+    plan_source: LockedExecutionSource | None = None,
     cancel_requested: Callable[[], bool] | None = None,
+    retained_graph: FleetPlanSourceGraph | None = None,
 ) -> FleetPlanSourceGraph:
     """Read each root/Goon source once and validate the complete composition graph."""
 
@@ -247,11 +255,15 @@ def analyze_fleet_plan_sources(
         raise OperationCancelledError("Plan source capture cancelled")
     path = navigation_path(plan_path)
     pinned_commits: dict[tuple[str, str], str] = {}
-    for pin in locked_goons or ():
+    for pin in locked_sources or ():
         previous = pinned_commits.setdefault((pin.git, pin.ref), pin.commit)
         if previous != pin.commit:
             raise FleetPlanInvalid("Locked Git source selections disagree on their captured commit")
-    selected_commits = {} if update_goons else pinned_commits
+    selected_commits = {
+        (pin.git, pin.ref): pin.commit
+        for pin in locked_sources or ()
+        if not (update_applications if pin.kind == "application" else update_goons)
+    }
     if plan_source is not None:
         previous = selected_commits.setdefault(
             (plan_source.git, plan_source.ref), plan_source.commit
@@ -273,16 +285,25 @@ def analyze_fleet_plan_sources(
         )
     build = _SourceGraphBuild(
         loaded={("path", str(canonical_path(root.path))): root},
-        locked_goons=locked_goons,
-        acquire_goons=acquire_goons,
+        locked_sources=locked_sources,
+        acquire_sources=acquire_sources,
         update_goons=update_goons,
         allow_source_network=allow_source_network,
         selected_git_commits=selected_commits,
-        project_bytes=root.python_project.identity.byte_count if root.python_project else 0,
-        archive_bytes=len(root.python_project.archive) if root.python_project else 0,
+        update_applications=update_applications,
         cancel_requested=cancel_requested,
+        retained_nodes={_source_owner_key(node): node for node in retained_graph._nodes.values()}
+        if retained_graph is not None
+        else {},
     )
     with build.acquisitions:
+        project = _project_for_node(
+            root,
+            authoring_root=containment_root,
+            build=build,
+        )
+        root = replace(root, project=project)
+        build.loaded[("path", str(canonical_path(root.path)))] = root
         _visit_source(
             root,
             source_stack=(root,),
@@ -301,8 +322,9 @@ def analyze_fleet_plan_sources(
         _nodes=MappingProxyType(
             {canonical_path(node.path): node for node in build.loaded.values()}
         ),
-        goon_sources=tuple(
-            ([plan_source] if plan_source is not None else []) + list(build.goon_sources.values())
+        execution_sources=tuple(
+            ([plan_source] if plan_source is not None else [])
+            + list(build.execution_sources.values())
         ),
     )
 
@@ -314,7 +336,7 @@ def _visit_source(
     overrides: Mapping[Path, CompiledExecutionTemplate],
     goon_templates: GoonTemplateProvider | None,
     authoring_root: Path,
-    authoring_source: LockedGoonSource | None,
+    authoring_source: LockedExecutionSource | None,
     build: _SourceGraphBuild,
 ) -> None:
     if build.cancel_requested is not None and build.cancel_requested():
@@ -391,7 +413,6 @@ def _read_node(
         source_sha256=source.sha256,
         step_positions=source.step_positions,
         value_positions=source.value_positions,
-        python_project=_capture_project(source.path, source.compiled, source.sha256),
     )
 
 
@@ -400,7 +421,7 @@ def _load_goon_child(
     *,
     parent_path: Path,
     authoring_root: Path,
-    authoring_source: LockedGoonSource | None,
+    authoring_source: LockedExecutionSource | None,
     overrides: Mapping[Path, CompiledExecutionTemplate],
     provider: GoonTemplateProvider | None,
     build: _SourceGraphBuild,
@@ -416,7 +437,7 @@ def _load_goon_child(
         from oh_goon.integrations.git_source_preparation import prepare_git_source
 
         selection = step.git_source
-        if build.locked_goons is None:
+        if build.locked_sources is None:
             raise FleetPlanInvalid(
                 "Git source pins are unavailable; restore goon.lock before acquisition"
             )
@@ -426,24 +447,25 @@ def _load_goon_child(
         frozen = next(
             (
                 item
-                for item in build.locked_goons
+                for item in build.locked_sources
                 if item.kind == "goon" and (item.git, item.ref, item.path) == coordinates
             ),
             None,
         )
-        if frozen is None and not build.acquire_goons:
+        if frozen is None and not build.acquire_sources:
             raise FleetPlanSourceAcquisitionRequired(
                 "Git Goon source requires explicit acquisition with lock; "
                 "inspect its contract first with 'oh-goon config inspect run.yml --acquire'"
             )
         source_key = (selection.git, selection.ref)
+        selected_commit = _selected_git_commit(build, "goon", source_key)
         if source_key not in build.acquired_git:
             build.acquired_git[source_key] = build.acquisitions.enter_context(
                 prepare_git_source(
                     selection.git,
                     selection.ref,
-                    commit=build.selected_git_commits.get(source_key),
-                    allow_network=build.acquire_goons or build.allow_source_network,
+                    commit=selected_commit,
+                    allow_network=build.acquire_sources or build.allow_source_network,
                     cancel_requested=build.cancel_requested,
                 )
             )
@@ -460,11 +482,11 @@ def _load_goon_child(
         )
         remote_root = checkout
         local_root = selected.parent.parent
-        git_source = LockedGoonSource(**selection.model_dump(), commit=commit)
+        git_source = LockedExecutionSource(**selection.model_dump(), commit=commit)
         git_path = (PurePosixPath(selection.path) / "goon.yml").as_posix()
         local_source = _git_source_label(git_source, git_path)
         cache_key = _git_source_key(git_source, git_path)
-        build.goon_sources[coordinates] = git_source
+        build.execution_sources[("goon", *coordinates)] = git_source
     elif step.source_root is not None:
         space = ContainedPathSpace.from_root(authoring_root)
         root = space.resolve_from(
@@ -509,17 +531,6 @@ def _load_goon_child(
         raise FleetPlanInvalid(
             f"Imported Goon {key!r} cannot declare execution policy; execution belongs to the root Plan or repository Goon"
         )
-    captured_project = _capture_project(
-        source.path,
-        compiled,
-        source.sha256,
-        catalog_package=True,
-        max_source_bytes=min(64 * 1024 * 1024, MAX_GRAPH_PROJECT_BYTES - build.project_bytes),
-        max_archive_bytes=min(96 * 1024 * 1024, MAX_GRAPH_PROJECT_BYTES - build.archive_bytes),
-    )
-    if captured_project is not None:
-        build.project_bytes += captured_project.identity.byte_count
-        build.archive_bytes += len(captured_project.archive)
     node = FleetPlanSourceNode(
         path=source.path,
         compiled=compiled,
@@ -531,18 +542,26 @@ def _load_goon_child(
         git_path=git_path,
         step_positions=source.step_positions,
         value_positions=source.value_positions,
-        python_project=captured_project,
         authoring_root=remote_root,
+    )
+    node = replace(
+        node,
+        project=_project_for_node(
+            node,
+            authoring_root=remote_root or authoring_root,
+            build=build,
+            catalog_package=True,
+        ),
     )
     build.loaded[cache_key] = node
     return node
 
 
-def _git_source_label(source: LockedGoonSource, path: str) -> str:
+def _git_source_label(source: LockedExecutionSource, path: str) -> str:
     return f"git:{source.git}@{source.commit}:{path}"
 
 
-def _git_source_key(source: LockedGoonSource, path: str) -> tuple[str, ...]:
+def _git_source_key(source: LockedExecutionSource, path: str) -> tuple[str, ...]:
     """Native coordinates retain authority independently of their display label."""
     return ("git", source.git, source.ref, source.commit, path)
 
@@ -558,20 +577,196 @@ def _source_owner_key(node: FleetPlanSourceNode) -> tuple[str, ...]:
 def _capture_project(
     path: Path,
     compiled: CompiledExecutionTemplate,
-    sha256: str,
+    sha256: str | None,
     *,
+    authoring_root: Path,
+    authoring_source: LockedExecutionSource | None,
+    build: _SourceGraphBuild,
     catalog_package: bool = False,
     max_source_bytes: int = 64 * 1024 * 1024,
     max_archive_bytes: int = 96 * 1024 * 1024,
-) -> CapturedPythonGoonProject | None:
-    if compiled.runtime == "python":
-        return capture_python_goon_project(
-            path.parent,
+) -> CapturedProject | None:
+    application = compiled.application
+    if application is not None or compiled.runtime == "python":
+        selected = path.parent
+        provenance: LocalApplicationSource | LockedExecutionSource | None = None
+        if isinstance(application, LocalApplicationSource):
+            requested = Path(application.path)
+            selected = (
+                requested
+                if requested.is_absolute()
+                else ContainedPathSpace.from_root(authoring_root).resolve_from(
+                    authoring_root,
+                    application.path,
+                    label="Application source",
+                    kind="directory",
+                    require_exists=True,
+                )
+            )
+            selected = canonical_path(selected)
+            if not selected.is_dir():
+                raise FleetPlanInvalid("Application source requires its exact existing directory")
+            if requested.is_absolute() or authoring_source is None:
+                provenance = LocalApplicationSource(path=str(selected))
+            else:
+                prefix = authoring_source.path if authoring_source.kind == "plan" else "."
+                logical_path = (PurePosixPath(prefix) / application.path).as_posix()
+                coordinates = (authoring_source.git, authoring_source.ref, logical_path)
+                frozen = next(
+                    (
+                        pin
+                        for pin in build.locked_sources or ()
+                        if pin.kind == "application" and (pin.git, pin.ref, pin.path) == coordinates
+                    ),
+                    None,
+                )
+                if frozen is None and not build.acquire_sources:
+                    raise FleetPlanSourceAcquisitionRequired(
+                        "Git application requires explicit acquisition with lock"
+                    )
+                selected_commit = _selected_git_commit(
+                    build, "application", (authoring_source.git, authoring_source.ref)
+                )
+                if selected_commit is not None and selected_commit != authoring_source.commit:
+                    raise FleetPlanInvalid("Git application differs from its authoring commit")
+                if (
+                    frozen is not None
+                    and not build.update_applications
+                    and frozen.commit != authoring_source.commit
+                ):
+                    raise FleetPlanInvalid("Git application differs from its locked commit")
+                provenance = LockedExecutionSource(
+                    kind="application",
+                    git=authoring_source.git,
+                    ref=authoring_source.ref,
+                    path=logical_path,
+                    commit=authoring_source.commit,
+                )
+                build.execution_sources[("application", *coordinates)] = provenance
+        elif application is not None:
+            from oh_goon.integrations.git_source_preparation import prepare_git_source
+
+            if build.locked_sources is None:
+                raise FleetPlanInvalid("Execution source pins are unavailable; restore goon.lock")
+            coordinates = (application.git, application.ref, application.path)
+            frozen = next(
+                (
+                    pin
+                    for pin in build.locked_sources
+                    if pin.kind == "application" and (pin.git, pin.ref, pin.path) == coordinates
+                ),
+                None,
+            )
+            if frozen is None and not build.acquire_sources:
+                raise FleetPlanSourceAcquisitionRequired(
+                    "Git application requires explicit acquisition with lock"
+                )
+            key = (application.git, application.ref)
+            selected_commit = _selected_git_commit(build, "application", key)
+            if key not in build.acquired_git:
+                build.acquired_git[key] = build.acquisitions.enter_context(
+                    prepare_git_source(
+                        application.git,
+                        application.ref,
+                        commit=selected_commit,
+                        allow_network=build.acquire_sources or build.allow_source_network,
+                        cancel_requested=build.cancel_requested,
+                    )
+                )
+            checkout, commit = build.acquired_git[key]
+            build.selected_git_commits[key] = commit
+            if frozen is not None and not build.update_applications and commit != frozen.commit:
+                raise FleetPlanInvalid("Git application differs from its locked commit")
+            selected = ContainedPathSpace.from_root(checkout).resolve_from(
+                checkout,
+                application.path,
+                label="Git application source",
+                kind="directory",
+                require_exists=True,
+            )
+            provenance = LockedExecutionSource(
+                **application.model_dump(), kind="application", commit=commit
+            )
+            build.execution_sources[("application", *coordinates)] = provenance
+        uv = next(
+            (
+                step.uv
+                for step in compiled.steps
+                if isinstance(step, CommandPlanStep) and step.uv is not None
+            ),
+            None,
+        )
+        project = capture_project_source(
+            selected,
             compiled,
             yaml_sha256=sha256,
-            max_source_bytes=max_source_bytes,
-            max_archive_bytes=max_archive_bytes,
+            application=provenance,
+            python_project=uv is not None,
+            uv_project=uv.project if uv is not None else ".",
+            max_source_bytes=min(max_source_bytes, MAX_GRAPH_PROJECT_BYTES - build.project_bytes),
+            max_archive_bytes=min(max_archive_bytes, MAX_GRAPH_PROJECT_BYTES - build.archive_bytes),
         )
+        build.project_bytes += project.identity.byte_count
+        build.archive_bytes += len(project.archive)
+        return project
     if catalog_package and (path.parent / "pyproject.toml").is_file():
         raise FleetPlanInvalid("A Python Goon package must select runtime: python")
     return None
+
+
+def _project_for_node(
+    node: FleetPlanSourceNode,
+    *,
+    authoring_root: Path,
+    build: _SourceGraphBuild,
+    catalog_package: bool = False,
+) -> CapturedProject | None:
+    previous = build.retained_nodes.get(_source_owner_key(node))
+    if previous is not None and previous.project is not None:
+        if (
+            node.source_sha256 != previous.source_sha256
+            or node.compiled.application != previous.compiled.application
+        ):
+            raise FleetPlanInvalid("Captured project workflow changed during candidate recapture")
+        project = previous.project
+        if (
+            build.project_bytes + project.identity.byte_count > MAX_GRAPH_PROJECT_BYTES
+            or build.archive_bytes + len(project.archive) > MAX_GRAPH_PROJECT_BYTES
+        ):
+            raise FleetPlanInvalid("Captured projects exceed source graph bounds")
+        build.project_bytes += project.identity.byte_count
+        build.archive_bytes += len(project.archive)
+        provenance = project.identity.application
+        if isinstance(provenance, LockedExecutionSource):
+            build.execution_sources[
+                ("application", provenance.git, provenance.ref, provenance.path)
+            ] = provenance
+        return project
+    if build.retained_nodes and node.compiled.application is not None:
+        raise FleetPlanInvalid("Candidate recapture cannot select a new application source")
+    return _capture_project(
+        node.path,
+        node.compiled,
+        node.source_sha256,
+        authoring_root=authoring_root,
+        authoring_source=node.git_source,
+        build=build,
+        catalog_package=catalog_package,
+        max_source_bytes=min(64 * 1024 * 1024, MAX_GRAPH_PROJECT_BYTES - build.project_bytes),
+        max_archive_bytes=min(96 * 1024 * 1024, MAX_GRAPH_PROJECT_BYTES - build.archive_bytes),
+    )
+
+
+def _selected_git_commit(
+    build: _SourceGraphBuild, kind: str, source: tuple[str, str]
+) -> str | None:
+    refreshing = build.update_applications if kind == "application" else build.update_goons
+    if refreshing and any(
+        (pin.git, pin.ref) == source
+        and not (build.update_applications if pin.kind == "application" else build.update_goons)
+        for pin in build.locked_sources or ()
+    ):
+        raise FleetPlanInvalid(
+            "Git source refresh conflicts with a retained source kind; explicitly refresh both selections"
+        )
+    return build.selected_git_commits.get(source)

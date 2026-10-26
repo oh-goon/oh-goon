@@ -147,8 +147,10 @@ def resolve_plan_step(
         )
     if isinstance(step, CommandPlanStep):
         project_source = None
-        if step.uv is not None and step.uv.source == "package":
-            project = context.source_graph.node(plan_base / "goon.yml").python_project
+        if context.source_graph.node(plan_base / "goon.yml").compiled.application is not None or (
+            step.uv is not None and step.uv.source == "captured"
+        ):
+            project = context.source_graph.node(plan_base / "goon.yml").project
             if project is None:
                 raise FleetPlanInvalid("Python Goon command requires captured package source")
             project_source = project.identity

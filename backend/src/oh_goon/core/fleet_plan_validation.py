@@ -418,8 +418,8 @@ def _validate_plan_identity(plan: Any) -> None:
             {"skill_sources": [item.model_dump(mode="json") for item in sources]} if sources else {}
         ),
         **(
-            {"goon_sources": [item.model_dump(mode="json") for item in plan.goon_sources]}
-            if plan.goon_sources
+            {"execution_sources": [item.model_dump(mode="json") for item in plan.execution_sources]}
+            if plan.execution_sources
             else {}
         ),
     }

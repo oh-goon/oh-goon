@@ -6,15 +6,33 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.models.git_sources import LocalApplicationSource, LockedExecutionSource
 
 
-class PythonGoonProject(ImmutableModel):
+class CapturedProjectSource(ImmutableModel):
     """Captured package identity; executable source bytes travel privately."""
 
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     archive_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     byte_count: int = Field(ge=0, le=64 * 1024 * 1024)
     entry_count: int = Field(ge=1, le=4096)
+    application: LocalApplicationSource | LockedExecutionSource | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def exact_application(self) -> CapturedProjectSource:
+        if (
+            isinstance(self.application, LocalApplicationSource)
+            and not Path(self.application.path).is_absolute()
+        ):
+            raise ValueError("Captured application source requires its resolved absolute root")
+        if (
+            isinstance(self.application, LockedExecutionSource)
+            and self.application.kind != "application"
+        ):
+            raise ValueError("Captured application Git provenance must select an application")
+        return self
 
 
 class ExtensionDeclaration(ImmutableModel):

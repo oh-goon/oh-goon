@@ -45,6 +45,11 @@ def add_plan_commands(
         action="store_true",
         help="Explicitly refresh declared Git Goon and Plan pins",
     )
+    lock.add_argument(
+        "--update-applications",
+        action="store_true",
+        help="Explicitly refresh declared Git application source pins",
+    )
     plan = subparsers.add_parser("plan", help="Inspect recorded Runs or compare authored sources")
     plan_commands = plan.add_subparsers(dest="plan_command", required=True)
     check = plan_commands.add_parser(

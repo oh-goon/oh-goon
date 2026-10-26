@@ -40,7 +40,7 @@ def test_capture_survives_relocation_and_transports_no_live_path(
     resolver = FleetPlanResolver()
     graph = resolver.analyze_source(project / "goon.yml")
     plan = resolver.resolve_source_graph(graph)
-    captured = graph.python_projects()[0]
+    captured = graph.projects()[0]
     shutil.rmtree(project)
     destination = tmp_path / "receiver"
     materialize_python_goon_project(captured.archive, captured.identity, destination)
@@ -142,10 +142,10 @@ def test_native_setuptools_sync_preserves_authored_package_identity(tmp_path: Pa
 
     native_uv("lock", "--offline")
     resolver = FleetPlanResolver()
-    before = resolver.analyze_source(project / "goon.yml").python_projects()[0]
+    before = resolver.analyze_source(project / "goon.yml").projects()[0]
     native_uv("sync", "--locked", "--no-default-groups")
     assert (project / "src/native_demo.egg-info/PKG-INFO").is_file()
-    after = resolver.analyze_source(project / "goon.yml").python_projects()[0]
+    after = resolver.analyze_source(project / "goon.yml").projects()[0]
     assert after.identity == before.identity
     assert after.archive == before.archive
     receiver = tmp_path / "receiver"
@@ -208,8 +208,8 @@ def test_imported_packages_share_the_original_source_graph_memory_budget(
     )
     resolver = FleetPlanResolver()
     baseline = resolver.analyze_source(plan)
-    assert len(baseline.python_projects()) == 2
-    budget = baseline.python_projects()[0].identity.byte_count + 1
+    assert len(baseline.projects()) == 2
+    budget = baseline.projects()[0].identity.byte_count + 1
     monkeypatch.setattr(fleet_plan_source_graph, "MAX_GRAPH_PROJECT_BYTES", budget)
     with pytest.raises(FleetPlanInvalid, match="source bounds"):
         resolver.analyze_source(plan)
@@ -228,7 +228,7 @@ def test_output_siblings_remain_captured_source_and_invalidate_execution_identit
     resolver = FleetPlanResolver()
     graph = resolver.analyze_source(goon)
     original = build_execution_lock(resolver.resolve_source_graph(graph))
-    captured = graph.python_projects()[0]
+    captured = graph.projects()[0]
     destination = tmp_path / "receiver"
     materialize_python_goon_project(captured.archive, captured.identity, destination)
     assert (destination / "resources/settings.json").read_bytes() == resource.read_bytes()
@@ -342,7 +342,7 @@ members = ["member"]
         assert result.returncode == 0, result.stderr
 
     native_lock(project)
-    captured = FleetPlanResolver().analyze_source(project / "goon.yml").python_projects()[0]
+    captured = FleetPlanResolver().analyze_source(project / "goon.yml").projects()[0]
     receiver = tmp_path / "receiver"
     materialize_python_goon_project(captured.archive, captured.identity, receiver)
     native_lock(receiver, check=True)
@@ -384,7 +384,7 @@ def test_source_symlink_to_declared_generated_output_refuses_before_capture(
 
 
 def test_corrupt_source_delivery_is_rejected(project: Path, tmp_path: Path) -> None:
-    captured = FleetPlanResolver().analyze_source(project / "goon.yml").python_projects()[0]
+    captured = FleetPlanResolver().analyze_source(project / "goon.yml").projects()[0]
     with pytest.raises(FleetPlanInvalid, match="delivery differs"):
         materialize_python_goon_project(
             captured.archive + b"changed", captured.identity, tmp_path / "receiver"
@@ -396,7 +396,7 @@ def test_corrupt_source_delivery_is_rejected(project: Path, tmp_path: Path) -> N
 def test_source_delivery_refuses_excess_archive_members_before_materialization(
     project: Path, tmp_path: Path, excess: str
 ) -> None:
-    captured = FleetPlanResolver().analyze_source(project / "goon.yml").python_projects()[0]
+    captured = FleetPlanResolver().analyze_source(project / "goon.yml").projects()[0]
     buffer = io.BytesIO()
     if excess == "bytes":
         member = tarfile.TarInfo("too-large")

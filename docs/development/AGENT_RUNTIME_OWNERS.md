@@ -303,8 +303,8 @@ failed commands and process-free verified work remain settled; missing cleanup
 for a never-started or skipped Step creates no synthetic writer obligation.
 
 
-The neutral Agent model uses resolved Plan contract version 46, including explicit
-native UV lock mode. Previous
+The neutral Agent model uses resolved Plan contract version 47, including explicit
+native UV lock mode and independently captured application sources. Previous
 serialized Agent Steps/locks are not converted or accepted through a compatibility
 alias: resolve and lock the authored Plan with the current runtime before new
 admission. Retired `local-model-skill-loop` input requires an explicit supported
@@ -314,7 +314,9 @@ evidence, never a new permission source.
 Database schema 89 added the Journal `CAMPAIGN` entry kind. Schema 90 marked the
 incompatible resolved Plan contract 46 and explicit native UV lock-mode payloads.
 Schema 91 narrows cancellation receipts to original physical evidence and makes
-unobserved duration unavailable; schema 90 receipts are incompatible. Older
+unobserved duration unavailable; schema 90 receipts are incompatible. Schema 92
+binds contract-47 captured application sources and rejects contract-46 history
+before decoding. Older
 schemas must be refused before their Journal payloads are decoded. The original database
 owner rejects incompatible schema generations before stateful work; it does not
 migrate/reset the store or silently choose another directory. Before an

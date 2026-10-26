@@ -92,7 +92,7 @@ def _case(tmp_path, monkeypatch, *, complete_example=False, extra_package=False)
         allow_network=True,
     )
     resolved = resolver.resolve_source_graph(graph)
-    assert len(resolved.goon_sources) == 1
+    assert len(resolved.execution_sources) == 1
     write_execution_lock(
         snapshot.lock_path,
         build_execution_lock(resolved, external_artifacts=snapshot.external_artifacts()),
@@ -110,7 +110,7 @@ def test_unavailable_or_invalid_pin_authority_never_reaches_git(
         snapshot.lock_path.write_text("invalid: [\n")
     elif invalid == "tampered":
         payload = yaml.safe_load(snapshot.lock_path.read_text())
-        payload["goon_sources"][0]["commit"] = "a" * 40
+        payload["execution_sources"][0]["commit"] = "a" * 40
         snapshot.lock_path.write_text(yaml.safe_dump(payload))
     else:
         snapshot.lock_path.unlink()
@@ -168,7 +168,7 @@ def test_adding_a_same_selector_package_preserves_existing_pin_in_either_order(
     tmp_path, monkeypatch, new_import_first
 ):
     snapshot, repository, resolver = _case(tmp_path, monkeypatch, extra_package=True)
-    original = yaml.safe_load(snapshot.lock_path.read_text())["goon_sources"][0]["commit"]
+    original = yaml.safe_load(snapshot.lock_path.read_text())["execution_sources"][0]["commit"]
     upstream = tmp_path / "upstream"
     for name in ("check", "second"):
         (upstream / f"goons/general/{name}/goon.yml").write_text(
@@ -212,7 +212,7 @@ def test_adding_a_same_selector_package_preserves_existing_pin_in_either_order(
         allow_network=True,
     )
     pinned = resolver.resolve_source_graph(graph)
-    assert [pin.commit for pin in pinned.goon_sources] == [original, original]
+    assert [pin.commit for pin in pinned.execution_sources] == [original, original]
     assert [step.argv[-1] for step in pinned.steps] == [
         "secondary" if name == "second" else "selected" for name in names
     ]
@@ -224,7 +224,7 @@ def test_adding_a_same_selector_package_preserves_existing_pin_in_either_order(
         allow_network=True,
         update=True,
     )
-    assert [pin.commit for pin in refreshed.goon_sources] == [current, current]
+    assert [pin.commit for pin in refreshed.execution_sources] == [current, current]
 
 
 @pytest.mark.parametrize("complete_example", [False, True])
@@ -243,7 +243,7 @@ def test_changed_run_configuration_refuses_before_pinned_source_acquisition(
 
 def test_switching_to_a_complete_example_retains_the_shared_selector_pin(tmp_path, monkeypatch):
     snapshot, repository, resolver = _case(tmp_path, monkeypatch)
-    original = yaml.safe_load(snapshot.lock_path.read_text())["goon_sources"][0]["commit"]
+    original = yaml.safe_load(snapshot.lock_path.read_text())["execution_sources"][0]["commit"]
     upstream = tmp_path / "upstream"
     (upstream / "goons/general/check/goon.yml").write_text("steps:\n- run: echo advanced\n")
     subprocess.run(["git", "-C", str(upstream), "add", "."], check=True)
@@ -281,8 +281,8 @@ def test_switching_to_a_complete_example_retains_the_shared_selector_pin(tmp_pat
         acquire=True,
         allow_network=True,
     )
-    assert graph.goon_sources[0].kind == "plan"
-    assert graph.goon_sources[0].commit == original
+    assert graph.execution_sources[0].kind == "plan"
+    assert graph.execution_sources[0].commit == original
     assert resolver.resolve_source_graph(graph).steps[0].argv[-1] == "selected"
 
 
@@ -352,7 +352,7 @@ def test_nested_same_selector_import_uses_the_complete_examples_captured_commit(
         update=True,
     )
     resolved = resolver.resolve_source_graph(graph)
-    assert [pin.commit for pin in resolved.goon_sources] == [selected, selected]
+    assert [pin.commit for pin in resolved.execution_sources] == [selected, selected]
     assert resolved.steps[0].argv[-1] == "selected"
 
 
@@ -501,4 +501,4 @@ def test_repeated_acyclic_source_alias_keeps_written_occurrences_and_one_pin(tmp
     plan = resolver.resolve_source_graph(graph)
     assert len(plan.steps) == 2
     assert plan.steps[0].step_id != plan.steps[1].step_id
-    assert len(plan.goon_sources) == 1
+    assert len(plan.execution_sources) == 1

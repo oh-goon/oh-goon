@@ -9,6 +9,7 @@ from oh_goon.core.game_tape_lifecycle import step_status
 from oh_goon.core.models.fleet_observation import NativeAgentObservation
 from oh_goon.core.models.fleet_plan import (
     ResolvedAgentStep,
+    ResolvedCommandStep,
     ResolvedPlanStep,
     ResolvedStepSource,
 )
@@ -140,6 +141,8 @@ def _step_execution(
         else None,
         command=execution.argv if execution is not None else _planned_argv(step),
         working_directory=getattr(step, "working_directory", "."),
+        project_source=step.project_source if isinstance(step, ResolvedCommandStep) else None,
+        uv=step.uv if isinstance(step, ResolvedCommandStep) else None,
         environment=_environment_sources(step),
         exit_code=returncode,
         **(

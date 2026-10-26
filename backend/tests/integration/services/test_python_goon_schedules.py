@@ -64,10 +64,28 @@ class _ScheduleOptions(TypedDict):
     external_artifacts: tuple[tuple[str, bytes], ...]
 
 
+def _select_independent_application(plan: Path) -> Path:
+    package = plan.parent / "goons/general/orders"
+    application = plan.parent.with_name("independent-orders")
+    application.mkdir()
+    shutil.copyfile(package / "README.md", application / "README.md")
+    for source in tuple(package.iterdir()):
+        if source.name not in {"goon.yml", "README.md"}:
+            shutil.move(source, application / source.name)
+    declaration = yaml.safe_load((package / "goon.yml").read_text())
+    declaration["application"] = {"path": str(application)}
+    (package / "goon.yml").write_text(yaml.safe_dump(declaration))
+    return application
+
+
+@pytest.mark.parametrize("independent_application", (False, True), ids=("package", "application"))
 def test_package_run_replay_reuses_original_delivery_and_rejects_changed_authority(
     execution: tuple[ApplicationRuntime, Path, Path],
+    independent_application: bool,
 ) -> None:
     runtime, repository, plan = execution
+    if independent_application:
+        _select_independent_application(plan)
     runtime.plans.lock(plan)
     target = runtime.plans.prepare_execution_target(plan)
     options: _RunOptions = {
@@ -209,13 +227,14 @@ def test_native_package_lifecycle_retains_scratch_only_when_terminal_supervision
 
 
 @pytest.mark.parametrize(
-    ("phase", "quiescent", "diagnostic_failure"),
+    ("phase", "quiescent", "diagnostic_failure", "independent_application"),
     (
-        ("preparation", False, False),
-        ("preparation", None, False),
-        ("command", False, False),
-        ("command", None, False),
-        ("preparation", False, True),
+        ("preparation", False, False, False),
+        ("preparation", None, False, False),
+        ("command", False, False, False),
+        ("command", None, False, False),
+        ("preparation", False, True, False),
+        ("command", False, False, True),
     ),
 )
 def test_cancellation_after_unsettled_native_receipt_preserves_package_resources(
@@ -224,8 +243,10 @@ def test_cancellation_after_unsettled_native_receipt_preserves_package_resources
     phase: str,
     quiescent: bool | None,
     diagnostic_failure: bool,
+    independent_application: bool,
 ) -> None:
     runtime, repository, plan = execution
+    application = _select_independent_application(plan) if independent_application else None
     runtime.plans.lock(plan)
     native_runner = fleet_plan_step_execution._direct_step_command_runner
     roots: list[tuple[Path, Path, Path]] = []
@@ -310,12 +331,18 @@ def test_cancellation_after_unsettled_native_receipt_preserves_package_resources
         assert source != captured_source
     assert not (repository / ".venv").exists()
     assert not (repository / ".showcase").exists()
+    if application is not None:
+        assert not (application / ".venv").exists()
+        assert not (application / ".showcase").exists()
 
 
+@pytest.mark.parametrize("independent_application", (False, True), ids=("package", "application"))
 def test_schedule_keeps_captured_package_after_source_removal_and_serialization(
     execution: tuple[ApplicationRuntime, Path, Path],
+    independent_application: bool,
 ) -> None:
     runtime, repository, plan = execution
+    application = _select_independent_application(plan) if independent_application else None
     selection = plan.with_name("run.yml")
     selection.write_text(
         yaml.safe_dump(
@@ -349,6 +376,8 @@ def test_schedule_keeps_captured_package_after_source_removal_and_serialization(
     # Remove all authoring inputs, including the caller file and native lock.
     # A separately decoded Schedule still executes its exact retained package.
     shutil.rmtree(plan.parent)
+    if application is not None:
+        shutil.rmtree(application)
     decoded = runtime.schedules.definition(saved.schedule_id)
     assert decoded == saved
     occurrence = runtime.schedules.start(

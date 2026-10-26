@@ -58,7 +58,7 @@ class SchedulePlanApiClient extends InMemoryApiClient {
   ): Promise<SharedPlanLockPreview> {
     this.lockPreviewRequests.push({ planKey, expectedRevision, inputs: { ...inputs } });
     if (this.validationError !== null) throw this.validationError;
-    return { plan_key: planKey, plan_id: "shared-plan-a", sha256: expectedRevision, execution_digest: "sha256:" + "d".repeat(64), content: "lock_version: 1\n" };
+    return { plan_key: planKey, plan_id: "shared-plan-a", sha256: expectedRevision, execution_digest: "sha256:" + "d".repeat(64), content: "lock_version: 2\n" };
   }
 }
 

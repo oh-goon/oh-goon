@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.fleet_plan import ResolvedPlanStep
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedPlanStep
 from oh_goon.core.models.fleet_plan_evidence import PlanContentObjectEvidence
 from oh_goon.core.models.fleet_plan_step_contract import (
     RetainedPlanCacheSource,
@@ -109,6 +109,12 @@ class _RunLineage:
         return self._content_cache_evidence
 
     def source(self, step: ResolvedPlanStep) -> tuple[Path, SnapshotIdentity]:
+        if (
+            isinstance(step, ResolvedCommandStep)
+            and step.project_source is not None
+            and step.project_source.application is not None
+        ):
+            return self._inputs.captured_project_source(step)
         source = step.workspace.source
         if isinstance(source, StepWorkspaceSource):
             try:

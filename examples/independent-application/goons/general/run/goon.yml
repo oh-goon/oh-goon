@@ -1,0 +1,7 @@
+application:
+  path: /absolute/path/to/your/application
+runtime: python
+uv:
+  lock_mode: frozen
+steps:
+- run: your-installed-command --help

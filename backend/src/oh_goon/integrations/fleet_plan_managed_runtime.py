@@ -236,11 +236,11 @@ def prepare_uv_project_runtimes(
                 step.uv.lock_mode,
             )
             if key not in prepared:
-                project = package_source or RepositoryPathSpace.from_root(source_root).resolve(
+                project = RepositoryPathSpace.from_root(package_source or source_root).resolve(
                     step.uv.project,
                     label=f"Fleet uv project for step {step.step_id}",
                     kind="directory",
-                    require_exists=True,
+                    require_exists=not (isolated_preparation and package_source is not None),
                 )
                 selection_id = stable_id(
                     "fleet-uv-preparation",
@@ -256,11 +256,11 @@ def prepare_uv_project_runtimes(
                     assert native_uv is not None
                     if package_source is not None:
                         assert step.project_source is not None
-                        project = project_root / selection_id
-                        owned_directories.add(project)
+                        captured = project_root / selection_id
+                        owned_directories.add(captured)
                         observed = copy_frozen_directory(
                             package_source,
-                            project,
+                            captured,
                             label=f"Python Goon {step.step_id} native preparation project",
                             cancel_requested=cancel_requested,
                         )
@@ -273,6 +273,12 @@ def prepare_uv_project_runtimes(
                             raise FleetPlanInvalid(
                                 "Python Goon source changed while creating its preparation project"
                             )
+                        project = RepositoryPathSpace.from_root(captured).resolve(
+                            step.uv.project,
+                            label=f"Captured uv project for step {step.step_id}",
+                            kind="directory",
+                            require_exists=True,
+                        )
                     env = _uv_preparation_environment(
                         preparation,
                         environment=environment,

@@ -1458,6 +1458,7 @@ class FleetPlanService:
             if agent_connection is not None
             else None,
             locked_skills=lock.skill_sources,
+            locked_sources=lock.execution_sources,
             require_review_phases=review_write_roots is not None,
             source_graph=source_graph,
             native_agent=native_agent,
@@ -1467,8 +1468,17 @@ class FleetPlanService:
         if prepared_agent_plan is not None:
             capture_options = prepared_agent_plan.capture_options.copy()
             capture_options["cancel_requested"] = lambda: stop_requested() is not None
+            source_graph = capture_options.get("source_graph")
         target_handoff: FrozenAgentStepHandoff | dict[str, FrozenAgentStepHandoff]
         try:
+            if prepared_agent_plan is None and source_graph is None:
+                source_graph = self._resolver.analyze_source(
+                    plan_path,
+                    root_expected_name=root_expected_name,
+                    locked_sources=lock.execution_sources,
+                    cancel_requested=capture_options["cancel_requested"],
+                )
+                capture_options["source_graph"] = source_graph
             if review_write_roots is not None:
                 plan, handoffs, source_sha = (
                     (
@@ -1801,7 +1811,7 @@ class FleetPlanService:
                         cancel_requested=capture_cancelled,
                         locked_skills=lock.skill_sources,
                         source_graph=source_graph,
-                        locked_goons=plan.goon_sources,
+                        locked_sources=plan.execution_sources,
                     )
                     require_same_subject()
                 except OperationCancelledError:
@@ -1829,7 +1839,7 @@ class FleetPlanService:
                     steps=(steps.test, rebound, steps.apply, steps.retest),
                     requirements=plan.requirements,
                     skill_sources=plan.skill_sources,
-                    goon_sources=plan.goon_sources,
+                    execution_sources=plan.execution_sources,
                     imports=plan.imports,
                     step_sources=plan.step_sources,
                 )
