@@ -8,7 +8,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -44,6 +44,7 @@ class _Provider:
     hold: bool = False
     hold_after_first: bool = False
     base_url: str = ""
+    respond: Callable[[bytes], tuple[int, tuple[bytes, ...]]] | None = None
 
 
 @pytest.fixture
@@ -62,12 +63,15 @@ def provider() -> Iterator[_Provider]:
             state.started.set()
             if state.hold:
                 state.release.wait(5)
+            status, chunks = (
+                state.respond(body) if state.respond is not None else (state.status, state.chunks)
+            )
             with contextlib.suppress(OSError):
-                self.send_response(state.status)
+                self.send_response(status)
                 for name, value in state.headers.items():
                     self.send_header(name, value)
                 self.end_headers()
-                for index, chunk in enumerate(state.chunks):
+                for index, chunk in enumerate(chunks):
                     self.wfile.write(chunk)
                     self.wfile.flush()
                     if index == 0 and state.hold_after_first:
@@ -455,6 +459,171 @@ def test_responses_prompt_data_and_causal_fields_remain_native_transport(
 
 
 @pytest.mark.parametrize(
+    "reference_shape", ["previous-response", "conversation-string", "conversation-object"]
+)
+def test_optional_managed_history_remains_provider_owned_across_broker_lifetimes(
+    directory: Path, provider: _Provider, reference_shape: str
+) -> None:
+    """Deliberate fixture state proves transport, not production history isolation.
+
+    The local provider alone creates and resolves these fixture-owned handles.
+    This does not exercise Conversations API creation or real authorization.
+    """
+    evidence_a = EVIDENCE + "; fixture-capture-A-canary"
+    skill_a = SKILL + "\nfixture-Skill-A-canary"
+    evidence_b = EVIDENCE + "; fixture-capture-B-canary"
+    skill_b = SKILL + "\nfixture-Skill-B-canary"
+    frozen_headers = {
+        "OpenAI-Project": "fixture-project",
+        "OpenAI-Organization": "fixture-organization",
+    }
+    selected = _selected(provider, "openai-responses", api_key_env=None, headers=frozen_headers)
+    provider_history: dict[str, str] = {}
+    retrievals: list[tuple[str | None, str | None]] = []
+    replies: list[bytes] = []
+
+    def reference(handle: str) -> dict[str, Any]:
+        if reference_shape == "previous-response":
+            return {"previous_response_id": handle}
+        return {
+            "conversation": {"id": handle} if reference_shape == "conversation-object" else handle
+        }
+
+    def stateful_reply(raw: bytes) -> tuple[int, tuple[bytes, ...]]:
+        assert len(provider.requests) <= 8
+        body = json.loads(raw)
+        handle = (
+            body.get("previous_response_id")
+            if reference_shape == "previous-response"
+            else body.get("conversation")
+        )
+        if isinstance(handle, dict):
+            handle = handle["id"]
+        assert handle is None or isinstance(handle, str)
+        retrieved = provider_history.get(handle) if handle is not None else None
+        retrievals.append((handle, retrieved))
+        if handle is not None and handle not in provider_history:
+            reply = b"fixture-private-provider-refusal"
+            replies.append(reply)
+            return 403, (reply,)
+        next_handle = f"{'resp' if reference_shape == 'previous-response' else 'conv'}-fixture-{len(provider.requests)}"
+        provider_history[next_handle] = body["input"][0]["content"]
+        reply = (
+            b"data: "
+            + json.dumps(
+                {"fixture_reference": next_handle, "fixture_retrieved_context": retrieved}
+            ).encode()
+            + b"\n\n"
+        )
+        replies.append(reply)
+        return 200, (reply,)
+
+    provider.respond = stateful_reply
+
+    def send(
+        client: httpx2.Client,
+        causal: dict[str, Any],
+        evidence: str,
+        skill: str,
+        *,
+        rejected: bool = False,
+    ) -> str:
+        body = _body("openai-responses")
+        body.update(causal)
+        count = len(provider.requests)
+        response = client.post(
+            "/v1/responses",
+            json=body,
+            headers={
+                "OpenAI-Project": "untrusted-project",
+                "OpenAI-Organization": "untrusted-organization",
+            },
+        )
+        assert len(provider.requests) == count + 1
+        path, headers, raw = provider.requests[-1]
+        assert path == "/provider/v1/responses"
+        assert "authorization" not in headers
+        assert all(headers[name.lower()] == value for name, value in frozen_headers.items())
+        forwarded = json.loads(raw)
+        assert forwarded["input"][0]["role"] == "developer"
+        assert evidence in forwarded["input"][0]["content"]
+        assert skill in forwarded["input"][0]["content"]
+        assert forwarded["input"][1:] == body["input"]
+        assert {key: value for key, value in forwarded.items() if key != "input"} == {
+            key: value for key, value in body.items() if key != "input"
+        }
+        if evidence == evidence_b:
+            assert b"fixture-capture-A-canary" not in raw
+            assert b"fixture-Skill-A-canary" not in raw
+        if rejected:
+            assert response.status_code == 502
+            assert "fixture-private-provider-refusal" not in response.text
+            return ""
+        assert response.status_code == 200 and response.content == replies[-1]
+        return str(json.loads(response.content.removeprefix(b"data: "))["fixture_reference"])
+
+    prior_threads = set(threading.enumerate())
+    with approved_model_broker(
+        directory,
+        selected,
+        repository_evidence=evidence_a,
+        skill_instructions=skill_a,
+        cancel_requested=lambda: False,
+    ) as broker_a:
+        workers_a = set(threading.enumerate()) - prior_threads
+        assert workers_a
+        with _client(broker_a.socket_path) as client:
+            initial = send(client, {}, evidence_a, skill_a)
+            captured_a = provider_history[initial]
+            followup = send(client, reference(initial), evidence_a, skill_a)
+            assert retrievals[-1:] == [(initial, captured_a)]
+            fork = send(client, reference(initial), evidence_a, skill_a)
+            assert len({initial, followup, fork}) == 3
+            assert retrievals[-1:] == [(initial, captured_a)]
+            send(client, {}, evidence_a, skill_a)
+            assert retrievals[-1:] == [(None, None)]
+            send(client, {"previous_response_id": None, "conversation": None}, evidence_a, skill_a)
+            assert retrievals[-1:] == [(None, None)]
+    assert not broker_a.socket_path.exists()
+    assert all(not worker.is_alive() for worker in workers_a)
+    with _client(broker_a.socket_path) as revoked:
+        with pytest.raises(httpx2.ConnectError):
+            revoked.post("/v1/responses", json=_body("openai-responses"))
+    assert len(provider.requests) == 5
+
+    prior_threads = set(threading.enumerate())
+    with approved_model_broker(
+        directory,
+        selected,
+        repository_evidence=evidence_b,
+        skill_instructions=skill_b,
+        cancel_requested=lambda: False,
+    ) as broker_b:
+        workers_b = set(threading.enumerate()) - prior_threads
+        assert workers_b and broker_b.socket_path != broker_a.socket_path
+        with _client(broker_b.socket_path) as client:
+            send(client, {}, evidence_b, skill_b)
+            assert retrievals[-1:] == [(None, None)]
+            send(client, reference(initial), evidence_b, skill_b)
+            assert retrievals[-1:] == [(initial, captured_a)]
+            assert (
+                json.loads(replies[-1].removeprefix(b"data: "))["fixture_retrieved_context"]
+                == captured_a
+            )
+            send(
+                client,
+                reference("fixture-provider-rejected-handle"),
+                evidence_b,
+                skill_b,
+                rejected=True,
+            )
+            assert retrievals[-1:] == [("fixture-provider-rejected-handle", None)]
+    assert len(provider.requests) == len(retrievals) == 8
+    assert not broker_b.socket_path.exists()
+    assert all(not worker.is_alive() for worker in workers_b)
+
+
+@pytest.mark.parametrize(
     ("api", "route"),
     [
         ("openai-chat-completions", "/v1/chat/completions"),
@@ -603,7 +772,7 @@ def test_inline_attachments_and_native_function_data_keep_stream_and_frozen_cont
     if api == "openai-responses":
         content_key = "input"
         body["tools"] = [{"type": "function", **function}]
-        content = [
+        content: list[dict[str, Any]] = [
             {
                 "type": "input_file",
                 "filename": "source.txt",
@@ -611,7 +780,7 @@ def test_inline_attachments_and_native_function_data_keep_stream_and_frozen_cont
             },
             {"type": "input_image", "image_url": "data:image/png;base64,YQ=="},
         ]
-        invocation = {
+        invocation: dict[str, Any] = {
             "type": "function_call",
             "call_id": "edit-1",
             "name": "edit",

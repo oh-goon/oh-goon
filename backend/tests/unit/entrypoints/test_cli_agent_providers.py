@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -58,6 +59,54 @@ def test_path_does_not_read_or_create_configuration(tmp_path, monkeypatch, capsy
     assert main(["agent", "providers", "path", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["config"] == str(tmp_path / "oh-goon/providers.json")
     assert not (tmp_path / "oh-goon").exists()
+
+
+@pytest.mark.parametrize("command", ["list", "validate"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_saved_native_default_is_visible_without_api_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_runtime: None,
+    command: str,
+    as_json: bool,
+) -> None:
+    from oh_goon.integrations.agent_provider_client import AgentProviderClient
+
+    monkeypatch.setattr(
+        AgentProviderClient,
+        "complete",
+        lambda *args, **kwargs: pytest.fail("native catalog inspection must stay offline"),
+    )
+    path = tmp_path / "providers.json"
+    path.write_text(
+        json.dumps(
+            {
+                "default_native_profile": "signed-in",
+                "native_profiles": {
+                    "signed-in": {
+                        "allowed_agents": ["codex"],
+                        "codex_login": {
+                            "home": "/unprobed/native-home",
+                            "model": "gpt-6.1-sol",
+                            "reasoning_effort": "low",
+                        },
+                    }
+                },
+            }
+        )
+    )
+    argv = ["agent", "providers", command, "--config", str(path)]
+    assert main([*argv, *(["--json"] if as_json else [])]) == 0
+    output = capsys.readouterr().out
+    if as_json:
+        report = json.loads(output)
+        assert report["default_native_profile"] == "signed-in"
+        assert report["status"] == "configured_not_connected"
+        assert report["providers"] == report["models"] == {}
+    else:
+        assert "Default native profile: signed-in" in output
+    assert "/unprobed/native-home" not in output
 
 
 @pytest.mark.parametrize("source", ["argument", "file", "stdin"])

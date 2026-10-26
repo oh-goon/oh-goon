@@ -138,6 +138,8 @@ def run_provider_command(args: argparse.Namespace) -> int:
                     for name, model in config.models.items()
                 },
             }
+            if config.default_native_profile is not None:
+                report["default_native_profile"] = config.default_native_profile
     except (AgentProviderError, OSError, ValueError) as exc:
         message = (
             "Invalid provider configuration: "
@@ -157,6 +159,8 @@ def run_provider_command(args: argparse.Namespace) -> int:
     else:
         print(f"Provider configuration: {path}")
         print("Configuration is valid. No provider connection or installation check performed.")
+        if config.default_native_profile is not None:
+            print(f"Default native profile: {config.default_native_profile}")
         for name, provider in config.providers.items():
             print(f"  {name}: {provider.api} at {provider.base_url}")
         for name, model in config.models.items():

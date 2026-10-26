@@ -1,6 +1,6 @@
 # Agent provider configuration
 
-Oh-Goon defaults to the installed Codex CLI for managed coding tasks. Use its existing sign-in with the explicitly configured trusted local profile below; Codex retains authentication and refresh authority. No local model server is needed. OpenCode and Pi remain explicit native-agent choices. Oh-Goon also supports configured model endpoints without installing their servers or provider SDKs. Direct OpenAI connections use API keys.
+Oh-Goon defaults to the installed Codex CLI for managed coding tasks. Save the trusted local sign-in profile below as `default_native_profile` once, then run tasks without repeating `--agent` or `--profile`. Codex retains authentication, refresh and native session authority. No API key or local model server is needed for that profile. OpenCode, Pi and managed API connections remain explicit choices. Direct OpenAI API connections use API keys.
 
 ## Run a native coding agent
 
@@ -11,15 +11,16 @@ select the repository explicitly. The `signed-in` profile is defined in
 [Use an existing Codex sign-in](#use-an-existing-codex-sign-in):
 
 ```sh
-oh-goon ai --config providers.json --profile signed-in --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
+oh-goon ai --config providers.json --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
 oh-goon ai --agent pi --config providers.json --profile company --prompt-file task.txt --headless
 oh-goon-ai --agent opencode --config providers.json --profile company --workspace /path/to/project --prompt "Review the failing test"
 oh-goon ai --agent codex --config providers.json --profile company-responses --prompt-file task.txt --headless --verify "uv run pytest tests/test_example.py" --json
 ```
 
-Omitting `--agent` selects `codex`; an explicit `--agent` is preserved. Agent
-selection does not discover native authentication, change the selected profile or
-start a model server. New native `templates init` selections also name Codex
+Omitting `--agent` selects `codex`; an explicit `--agent` is preserved. `--profile`
+overrides the catalog's `default_native_profile`. Without either selection,
+the existing `isolated-managed` profile applies. Agent selection does not discover
+native authentication or start a model server. New native `templates init` selections also name Codex
 with the `isolated-managed` profile; existing `run.yml` selections stay explicit.
 Missing configuration fails before work.
 
@@ -32,12 +33,13 @@ direct-model Steps and cannot be selected for these native adapters. The endpoin
 must also support the selected agent's native tool calling and replay behavior;
 a compatible API path alone does not establish coding-task compatibility.
 
-The default execution profile remains `isolated-managed`, using the catalog's explicit
+The `isolated-managed` execution profile uses the catalog's explicit
 `default_model` and the existing Bubblewrap backend. A missing model selection
 fails before work. Broker-backed reasoning cannot use the general `local` profile:
 host networking would let native project settings bypass required context
 delivery. Ordinary trusted-local Plan verification keeps its existing default.
-On a POSIX terminal the default is the native TUI.
+On a POSIX terminal, broker-backed profiles default to the native TUI. Signed-in
+Codex CLI and Codex service profiles select their supported headless mode automatically.
 `--headless` selects native JSON events; `--json` also selects headless execution
 and prints the terminal Run detail. `--interactive` requires a terminal and
 conflicts with `--headless` and `--json`. Ctrl-C requests Run cancellation and
@@ -120,7 +122,8 @@ No prior Run or ambient conversation is selected automatically.
 
 ### Use an existing Codex sign-in
 
-Select this profile explicitly for trusted local coding tasks. Codex owns its
+Configure this profile once for trusted local coding tasks and select it with
+`default_native_profile`. An explicit `--profile` can select another profile. Codex owns its
 saved authentication and refresh; Oh-Goon resolves the home path without reading,
 copying or exporting credentials. This requires a Codex version supporting
 `exec --ignore-user-config`, native permission profiles and `model_instructions_file`
@@ -128,6 +131,7 @@ copying or exporting credentials. This requires a Codex version supporting
 
 ```json
 {
+  "default_native_profile": "signed-in",
   "native_agents": {"codex": {"executable": "/path/to/codex"}},
   "native_profiles": {
     "signed-in": {
@@ -136,7 +140,7 @@ copying or exporting credentials. This requires a Codex version supporting
       "workspace_roots": ["/path/to/projects"],
       "codex_login": {
         "home": "/path/to/existing/.codex",
-        "model": "gpt-6-luna",
+        "model": "gpt-6.1-sol",
         "reasoning_effort": "low"
       }
     }
@@ -145,8 +149,20 @@ copying or exporting credentials. This requires a Codex version supporting
 ```
 
 ```sh
-oh-goon ai --profile signed-in --config providers.json --workspace /path/to/projects/app --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
+oh-goon ai --config providers.json --workspace /path/to/projects/app --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
 ```
+
+Save the catalog at the path printed by `oh-goon agent providers path` to also
+omit `--config`, or select its path through `OH_GOON_PROVIDERS_FILE`. From the
+project root, the ordinary invocation is then:
+
+```sh
+oh-goon ai --prompt-file task.txt --verify "python3 -m unittest discover"
+```
+
+Missing or invalid native configuration fails before a Run starts; it does not trigger API
+setup or a different authentication method. Existing `run.yml` files retain their
+explicit Agent profile selection.
 
 The same selected profile works with the initialized `agents/native-coding`
 Plan or Goon through `run.yml`, lock and run; see the [native coding
@@ -644,8 +660,13 @@ provider/account/project separation enforced by the provider. The existing
 catalog selects endpoints and credential references; it does not establish
 storage isolation. Qualify the selected provider's actual behavior before relying
 on that isolation. For OpenAI, [conversation state](https://developers.openai.com/api/docs/guides/conversation-state)
-documents durable conversations and response chaining; the broker's transport
-tests establish field preservation, not live retrieval or history isolation.
+documents durable conversations and response chaining. Bounded stateful broker
+regressions cover continuation, forks, resets, fresh brokers and known history
+references under the same selected provider configuration, while checking current context
+delivery and socket cleanup. These local provider fixtures establish transport
+and lifecycle behavior; live provider retrieval and storage isolation remain
+provider-specific qualifications. This optional managed API boundary does not
+require API setup for the signed-in Codex CLI profile above.
 
 For Pi's retained explicit configuration surface, native inference must target
 `http://127.0.0.1:18743` inside the namespace, use the selected API path/model and either no client key or the dummy

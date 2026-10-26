@@ -43,8 +43,9 @@ def executable(path: Path) -> Path:
     ],
     ids=["existing", "ultra", "client-owned", "unmodified", "bounded"],
 )
+@pytest.mark.parametrize("profile", (None, "signed-in"))
 def test_codex_login_freezes_only_explicit_public_connection_facts(
-    tmp_path: Path, model: str, effort: str
+    tmp_path: Path, model: str, effort: str, profile: str | None
 ) -> None:
     home = tmp_path / "native-home"
     home.mkdir()
@@ -59,6 +60,7 @@ def test_codex_login_freezes_only_explicit_public_connection_facts(
     catalog.write_text(
         json.dumps(
             {
+                "default_native_profile": "signed-in",
                 "native_agents": {"codex": {"executable": "codex"}},
                 "native_profiles": {
                     "signed-in": {
@@ -75,10 +77,9 @@ def test_codex_login_freezes_only_explicit_public_connection_facts(
     )
     config = load_agent_providers(catalog)
     catalog.unlink()
-    selected = resolve_native_agent(
-        config, "codex", "signed-in", workspace=workspace, environment={}
-    )
+    selected = resolve_native_agent(config, "codex", profile, workspace=workspace, environment={})
     assert selected.connection is None
+    assert selected.profile_name == "signed-in"
     assert selected.disclosure_recipients == ("codex",)
     assert selected.profile.codex_login is not None
     assert selected.profile.codex_login.home == str(home)
@@ -285,13 +286,20 @@ def test_explicit_named_profile_is_not_replaced_by_managed_builtin(tmp_path: Pat
     program = executable(tmp_path / "pi")
     profile = NativeAgentProfile(backend="local", allowed_agents=("pi",), timeout_seconds=123)
     config = AgentProvidersConfig(
+        default_native_profile="catalog",
         native_agents={"pi": NativeAgentDefinition(executable=str(program))},
-        native_profiles={"isolated-managed": profile},
+        native_profiles={
+            "isolated-managed": profile,
+            "catalog": NativeAgentProfile(backend="bubblewrap"),
+        },
     )
     selected = resolve_native_agent(
         config, "pi", "isolated-managed", workspace=tmp_path, environment={}
     )
     assert selected.profile == profile
+    assert selected.profile_name == "isolated-managed"
+    default = resolve_native_agent(config, "pi", None, workspace=tmp_path, environment={})
+    assert default.profile_name == "catalog" and default.profile.backend == "bubblewrap"
 
 
 def test_nonexecutable_native_file_is_not_admitted(tmp_path: Path) -> None:
