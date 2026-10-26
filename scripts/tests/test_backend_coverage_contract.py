@@ -68,6 +68,10 @@ def _batch_options(commands: list[list[str]]) -> list[argparse.Namespace]:
         assert arguments.qualified is True
         assert arguments.show_output is True
         assert arguments.pytest_config == Path("pyproject.toml")
+        if arguments.coverage_source:
+            assert arguments.granularity == "files"
+            assert arguments.batch_size == 4
+            assert arguments.workers == 1 and arguments.batch_timeout == 180
         options.append(arguments)
     return options
 
@@ -144,7 +148,9 @@ def test_ordinary_backend_gate_measures_correctness_without_coverage_targets() -
     assert tests[0].paths == []
     assert tests[0].marker == "not certification and not slow"
     assert tests[0].workers == 1
-    assert tests[0].batch_size == 4
+    assert tests[0].granularity == "tests"
+    assert tests[0].batch_size == 64
+    assert tests[0].batch_timeout == 180
     assert all(not test.coverage_source for test in tests)
     assert not any("check" in argv and "--area" in argv for argv in commands)
 
@@ -161,3 +167,5 @@ def test_backend_gate_preserves_explicit_roots_and_caller_marker() -> None:
     assert test.paths == [Path("tests/unit"), Path("tests/dependency_complete")]
     assert test.marker == "not certification"
     assert test.workers == 1
+    assert test.granularity == "tests"
+    assert test.batch_size == 64 and test.batch_timeout == 180

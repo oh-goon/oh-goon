@@ -274,7 +274,9 @@ def test_integration_gate_runs_both_owners_and_preserves_failures(
             assert "--pytest-config" not in arguments
         assert arguments.count("tests/integration") == 1
         assert arguments[arguments.index("--workers") + 1] == "1"
-        assert arguments[arguments.index("--batch-size") + 1] == "4"
+        assert arguments[arguments.index("--batch-size") + 1] == "8"
+        assert arguments[arguments.index("--granularity") + 1] == "tests"
+        assert arguments[arguments.index("--batch-timeout") + 1] == "180"
     assert result.returncode == (2 if failure else 0), result.stdout + result.stderr
     if failure:
         assert "exit 7" in result.stderr

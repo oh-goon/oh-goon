@@ -243,7 +243,7 @@ backend-install:
 
 # OH_GOON_OPAQUE_TOOLS: git ldd uv
 verify-p0: python-static-sanity
-	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 \
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --granularity tests --workers 1 --batch-size 64 --batch-timeout 180 \
 		tests/unit/services/test_fleet_plan_input_resolution.py \
 		tests/unit/services/test_execution_boundary_contract.py \
 		tests/unit/services/test_execution_lock.py \
@@ -256,14 +256,14 @@ verify-p0: python-static-sanity
 		tests/unit/runtime/test_readmission_lineage.py \
 		tests/unit/integrations/test_fleet_plan_cicd_isolation.py \
 		tests/unit/entrypoints/test_python_source_file_smoke.py
-	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-test-batches --qualified --show-output --marker "" --workers 1 --batch-size 4 --batch-timeout 180 \
+	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-test-batches --qualified --show-output --marker "" --granularity tests --workers 1 --batch-size 64 --batch-timeout 180 \
 		scripts/tests/test_simple_template_contract.py \
 		scripts/tests/test_native_command.py
 	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-check-generated
 
 # OH_GOON_OPAQUE_TOOLS: ldd sh true uv
 template-startability-certification:
-	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 tests/integration/services/test_catalog_template_startability.py
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --granularity tests --workers 1 --batch-size 8 --batch-timeout 180 tests/integration/services/test_catalog_template_startability.py
 
 # OH_GOON_OPAQUE_TOOLS: bash git sh
 verify-p1:
@@ -474,7 +474,7 @@ check-generated:
 # focused: semantic lock/identity/admission/schedule contracts, not release or real
 # child-process lifecycle tests.
 test-execution-fast:
-	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "not slow and not process and not scale" --workers 1 --batch-size 4 --batch-timeout 180 \
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "not slow and not process and not scale" --granularity tests --workers 1 --batch-size 64 --batch-timeout 180 \
 		tests/unit/services/test_execution_boundary_contract.py \
 		tests/unit/services/test_execution_lock.py \
 		tests/unit/services/test_fleet_plan_preparation_no_magic.py \
@@ -516,7 +516,7 @@ test-python-dependency-complete:
 # Profiling is diagnostic, never part of the normal gate. It exposes accidental
 # suite growth without making wall-clock timing a correctness assertion.
 test-python-profile:
-	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 tests/unit tests/dependency_complete --show-output --pytest-arg=--durations=40 --pytest-arg=--durations-min=0.05
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --pytest-config pyproject.toml --marker "" --granularity tests --workers 1 --batch-size 64 --batch-timeout 180 tests/unit tests/dependency_complete --show-output --pytest-arg=--durations=40 --pytest-arg=--durations-min=0.05
 
 # Fast backend repair/development gate. Selection is semantic: real-process, scale,
 # certification and explicitly slow tests stay outside the inner loop. Scheduling itself
@@ -577,8 +577,8 @@ frontend-build:
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run build
 
 test-integration:
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualified native pytest batches | original serial selection' -- sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml tests/integration --workers 1 --batch-size 4 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualified native pytest batches' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output tests/integration --workers 1 --batch-size 4 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualified native pytest batches | original serial selection' -- sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml tests/integration --granularity tests --workers 1 --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualified native pytest batches' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output tests/integration --granularity tests --workers 1 --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
 
 test-python-projects:
 	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'STANDALONE PYTHON PROJECT TESTS' 'Owner: native uv | Iris and orders application tests' -- uv run --offline --frozen --no-sync --project backend oh-goon-python-project-checks
@@ -755,7 +755,7 @@ check-backend:
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality ruff format --check src tests
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality mypy
 	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet guard
-	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --workers 1 --batch-size 4 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(BACKEND_CHECK_TEST_ROOTS)
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --granularity tests --workers 1 --batch-size 64 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(BACKEND_CHECK_TEST_ROOTS)
 
 backend-check: check-backend
 

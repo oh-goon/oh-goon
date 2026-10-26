@@ -614,6 +614,11 @@ def test_hosted_backend_roots_partition_the_complete_suite_without_nested_select
         for option in options
     )
     assert all(option.marker == "not certification and not slow" for option in options)
+    assert all(
+        option.granularity == "tests" and option.batch_timeout == 180
+        for option in options
+    )
+    assert [option.batch_size for option in options] == [64, 64, 8, 8]
     assert all(option.pytest_arg == [] and option.exclude == [] for option in options)
     assert all(option.batch is None and not option.resume for option in options)
     pytest_config = tomllib.loads((ROOT / "backend/pyproject.toml").read_text())
@@ -656,14 +661,17 @@ def test_complete_release_check_executes_each_native_surface_once() -> None:
     )
     assert tooling.qualified is False and tooling.workers == 2
     assert tooling.pytest_config == Path("backend/pyproject.toml")
-    for options, configuration in (
-        (backend, Path("pyproject.toml")),
-        (backend_integration, Path("pyproject.toml")),
-        (cross_owner, Path("backend/pyproject.toml")),
+    assert tooling.granularity == "files" and tooling.batch_size == 4
+    for options, configuration, batch_size in (
+        (backend, Path("pyproject.toml"), 64),
+        (backend_integration, Path("pyproject.toml"), 8),
+        (cross_owner, Path("backend/pyproject.toml"), 8),
     ):
         assert options.qualified and options.show_output
         assert options.workers == 1 and options.pytest_config == configuration
         assert options.pytest_arg == [] and options.exclude == []
+        assert options.granularity == "tests"
+        assert options.batch_size == batch_size and options.batch_timeout == 180
     assert not any("pytest" in command for command in commands)
     assert sum(command[-3:] == ["npm", "run", "check"] for command in commands) == 1
 

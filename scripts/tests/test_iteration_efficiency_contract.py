@@ -606,7 +606,11 @@ def test_python_profile_uses_qualified_native_batches_and_retains_duration_diagn
     assert options.marker == ""
     assert options.pytest_arg == ["--durations=40", "--durations-min=0.05"]
     assert options.show_output is True
+    assert options.granularity == "tests"
+    assert options.batch_size == 64
+    assert options.workers == 1 and options.batch_timeout == 180
     assert not options.coverage_source
+    assert options.exclude == [] and options.batch is None and not options.resume
 
 
 def test_integration_gates_keep_original_serial_selection_in_both_owners(
@@ -632,4 +636,56 @@ def test_integration_gates_keep_original_serial_selection_in_both_owners(
         "not certification and not slow"
     ] * 2
     assert [profile.workers for profile in profiles] == [1, 1]
-    assert [profile.batch_size for profile in profiles] == [4, 4]
+    assert [profile.batch_size for profile in profiles] == [8, 8]
+    assert all(
+        profile.granularity == "tests" and profile.batch_timeout == 180
+        for profile in profiles
+    )
+    assert all(
+        profile.pytest_arg == [] and profile.exclude == [] for profile in profiles
+    )
+    assert all(profile.batch is None and not profile.resume for profile in profiles)
+
+
+def test_execution_fast_retains_exact_scope_in_bounded_native_case_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
+
+    (command,) = _native_batch_commands("test-execution-fast")
+    monkeypatch.setattr(sys, "argv", command)
+    _parser, options = parse_batch_args()
+
+    assert options.paths == [
+        Path("tests/unit") / path
+        for path in (
+            "services/test_execution_boundary_contract.py",
+            "services/test_execution_lock.py",
+            "services/test_fleet_plan_preparation_no_magic.py",
+            "services/test_fleet_plan_runtime.py",
+            "services/test_shared_plan_schedules.py",
+            "services/test_fleet_target_scheduler.py",
+            "runtime/test_schedule_lifecycle.py",
+            "runtime/test_schedule_persistence.py",
+            "runtime/test_run_admission_lock.py",
+            "runtime/test_run_admission_singleflight.py",
+            "runtime/test_readmission_lineage.py",
+            "runtime/test_executor_readmission.py",
+            "runtime/test_fleet_worker_settlement.py",
+            "runtime/test_effect_boundary.py",
+            "runtime/test_database_path_ownership.py",
+            "runtime/test_preparation_cancellation.py",
+            "runtime/test_sqlite_prelaunch_stress.py",
+            "runtime/test_sqlite_prelaunch_writeability.py",
+            "runtime/test_certification_wait_sqlite_pressure.py",
+            "runtime/test_sqlite_adversarial_identity.py",
+            "runtime/test_sqlite_fault_matrix.py",
+        )
+    ]
+    assert options.qualified and options.show_output
+    assert options.pytest_config == Path("pyproject.toml")
+    assert options.marker == "not slow and not process and not scale"
+    assert options.granularity == "tests" and options.batch_size == 64
+    assert options.workers == 1 and options.batch_timeout == 180
+    assert options.pytest_arg == [] and options.exclude == []
+    assert options.batch is None and not options.resume

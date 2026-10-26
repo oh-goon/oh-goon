@@ -79,6 +79,7 @@ def _member_for_item(item: Any) -> str | None:
     except (AttributeError, OSError, TypeError):
         return None
     _prefix, separator, item_selector = item.nodeid.partition("::")
+    fallback: str | None = None
     for member in _EXPECTED_MEMBERS:
         member_path_text, member_separator, member_selector = member.partition("::")
         try:
@@ -87,12 +88,20 @@ def _member_for_item(item: Any) -> str | None:
         except OSError:
             continue
         if not member_separator:
-            return member
+            if fallback is None:
+                fallback = member
+            continue
         if not separator:
             continue
-        if item_selector == member_selector or item_selector.startswith(member_selector + "["):
+        if item_selector == member_selector:
             return member
-    return None
+        if (
+            fallback is None
+            and "[" not in member_selector
+            and item_selector.startswith(member_selector + "[")
+        ):
+            fallback = member
+    return fallback
 
 
 def pytest_collection_finish(session: Any) -> None:

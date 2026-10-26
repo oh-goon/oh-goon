@@ -132,6 +132,11 @@ def test_template_startability_gate_is_plan_owned_and_uses_exact_catalog_harness
     assert options.show_output is True
     assert options.pytest_config == Path("pyproject.toml")
     assert options.marker == ""
+    assert options.granularity == "tests"
+    assert options.batch_size == 8
+    assert options.workers == 1 and options.batch_timeout == 180
+    assert options.pytest_arg == [] and options.exclude == []
+    assert options.batch is None and not options.resume
     certify = _target_body("certify")
     assert "template-startability-certification" not in certify
     assert "oh-goon/template-startability" in _plan_goons()
@@ -234,6 +239,12 @@ def test_backend_p0_uses_repository_owned_native_test_launcher() -> None:
     assert backend.pytest_config == Path("pyproject.toml")
     assert tooling.pytest_config == Path("backend/pyproject.toml")
     assert backend.marker == tooling.marker == ""
+    for options in (backend, tooling):
+        assert options.granularity == "tests"
+        assert options.batch_size == 64
+        assert options.workers == 1 and options.batch_timeout == 180
+        assert options.pytest_arg == [] and options.exclude == []
+        assert options.batch is None and not options.resume
     assert "oh-goon-check-generated" in _target_body("verify-p0")
 
 

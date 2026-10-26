@@ -38,9 +38,12 @@ commands remain native and do not acquire the Make-owned CPU scope.
 
 Backend and integration Make gates use the existing bounded pytest batches,
 retain their original pytest configuration and markers, and keep their original
-serial execution with one worker. An omitted `BACKEND_CHECK_TEST_ROOTS` still
-delegates selection to native pytest `testpaths`. Coverage retains the complete selected
-scope and combines native child data before applying the existing floor once.
+serial execution with one worker. Exact native collected test cases retain class
+and parameter suffixes, allowing the existing timeout refinement to split large
+files without changing timeouts. An omitted `BACKEND_CHECK_TEST_ROOTS` still
+delegates selection to native pytest `testpaths`. Coverage retains file batches
+and the complete selected scope, combining native child data before applying the
+existing floor once.
 See [test resource budgets](../docs/DEVELOPMENT.md#local-test-resource-budget)
 for supported scope, diagnostics and parallel-invocation limits.
 
