@@ -12,6 +12,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
     FleetPlanResult,
     PlanOutputEvidence,
+    PlanStepSettlementEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
 from oh_goon.core.models.goon_plan_source import PlanFileSource
@@ -65,6 +66,12 @@ def _detail(
     step = step_type(
         step_id="test",
         kind="command",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS" if passed else "FAILED",
+            cleanup="VERIFIED",
+            reason="ACCEPTED_EXIT" if passed else "FAILED_EXIT",
+            observed_returncode=0 if passed else 1,
+        ),
         started_at=now,
         finished_at=now + timedelta(milliseconds=duration_ms),
         argv=("pytest",),

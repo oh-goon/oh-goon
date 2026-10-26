@@ -32,6 +32,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanExecutionAuthorityEconomicsEvidence,
     PlanOutputEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
 from oh_goon.core.models.goon_plan_source import PlanFileSource
@@ -199,6 +200,9 @@ def _completed_detail(
     execution = CompletedPlanStepExecution(
         step_id=step.step_id,
         kind="command",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         argv=step.argv,
         stdout_evidence=attempt.stdout_evidence,
         stderr_evidence=attempt.stderr_evidence,

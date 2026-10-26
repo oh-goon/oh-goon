@@ -15,6 +15,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanOutputEvidence,
     PlanResourceEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
     PlanToolEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
@@ -133,6 +134,9 @@ def test_game_tape_marks_successful_command_with_failed_teardown_as_failed() -> 
     execution = CompletedPlanStepExecution(
         step_id="cleanup-sensitive",
         kind="command",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         argv=("true",),
         stdout_evidence=_output(""),
         stderr_evidence=_output(""),

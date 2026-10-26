@@ -539,8 +539,6 @@ def test_redaction_expansion_retains_bounded_idempotent_canonical_diagnostic(tmp
     "contradiction",
     [
         "failed",
-        "unknown_settlement",
-        "unknown_cleanup",
         "missing_attempt",
         "different_step",
         "phase_campaign",
@@ -554,24 +552,12 @@ def test_test_passed_publication_requires_its_accepted_native_test(tmp_path, con
     run_id, target = admit_phase(
         journal, repository, phase=initial_phase, failure_driven=contradiction != "phase_campaign"
     )
-    settlement = (
-        PlanStepSettlementEvidence()
-        if contradiction == "unknown_settlement"
-        else (
-            PlanStepSettlementEvidence(
-                outcome="INCOMPLETE", cleanup="UNVERIFIED", reason="CLEANUP_UNVERIFIED"
-            )
-            if contradiction == "unknown_cleanup"
-            else None
-        )
-    )
     settle(
         journal,
         repository,
         run_id,
         target,
         exit_code=17 if contradiction == "failed" else 0,
-        settlement=settlement,
         attempts=contradiction != "missing_attempt",
     )
     terminal = decision(
@@ -642,35 +628,19 @@ def test_test_passed_reference_is_mandatory_only_for_that_decision(tmp_path):
         decision(journal, stop=AgentRepairStopReason.CANCELLED, passed_test_step_id="test")
 
 
-@pytest.mark.parametrize("classification", ["missing", "unverified_cleanup", "service_completion"])
-def test_convergence_consumes_canonical_settlement_before_publication(tmp_path, classification):
+def test_convergence_consumes_canonical_service_completion_before_publication(tmp_path):
     journal, repository, _ = campaign(tmp_path)
     run_id, target = admit_phase(journal, repository)
-    settlement = (
-        PlanStepSettlementEvidence()
-        if classification == "missing"
-        else PlanStepSettlementEvidence(
-            outcome="INCOMPLETE", cleanup="UNVERIFIED", reason="CLEANUP_UNVERIFIED"
-        )
-        if classification == "unverified_cleanup"
-        else PlanStepSettlementEvidence(
-            outcome="SUCCESS",
-            cleanup="VERIFIED",
-            reason="ACCEPTED_SERVICE_COMPLETION",
-            observed_returncode=-15,
-        )
+    settlement = PlanStepSettlementEvidence(
+        outcome="SUCCESS",
+        cleanup="VERIFIED",
+        reason="ACCEPTED_SERVICE_COMPLETION",
+        observed_returncode=-15,
     )
     settle(journal, repository, run_id, target, settlement=settlement)
     journal.commit_agent_campaign_decision(decision(journal))
     run_id, target = admit_phase(journal, repository, ordinal=2, phase="verification")
     settle(journal, repository, run_id, target)
     terminal = decision(journal, stop=AgentRepairStopReason.CONVERGED, decision_id="converge")
-    before = journal.read_view().revision
-    if classification == "service_completion":
-        journal.commit_agent_campaign_decision(terminal)
-        assert journal.agent_campaign_result("campaign").converged
-    else:
-        with pytest.raises(JournalConflict, match="exact accepted settled Step evidence"):
-            journal.commit_agent_campaign_decision(terminal)
-        assert journal.read_view().revision == before
-        assert journal.agent_campaign("campaign").terminal_decision is None
+    journal.commit_agent_campaign_decision(terminal)
+    assert journal.agent_campaign_result("campaign").converged

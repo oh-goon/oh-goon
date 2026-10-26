@@ -2,6 +2,7 @@ import json
 from dataclasses import replace
 
 import pytest
+from pydantic import ValidationError
 
 from oh_goon.core.agent_review_plan import agent_review_phases
 from oh_goon.core.errors import FleetPlanInvalid
@@ -982,15 +983,8 @@ def test_structured_phase_consumes_settled_result_and_affirmative_cleanup(
         )
         assert reopened.settlement == step.settlement
         missing = step.model_copy(update={"settlement": PlanStepSettlementEvidence()})
-        missing_report = report.model_copy(
-            update={
-                "evidence": report.evidence.model_copy(
-                    update={"plan": FleetPlanResult(plan_id=plan.plan_id, steps=(missing,))}
-                )
-            }
-        )
-        with pytest.raises(FleetPlanInvalid, match="complete successful native attempt evidence"):
-            completed_phase_steps(detail.model_copy(update={"operations": (missing_report,)}), plan)
+        with pytest.raises(ValidationError, match="accepted SUCCESS settlement"):
+            FleetPlanResult(plan_id=plan.plan_id, steps=(missing,))
     else:
         with pytest.raises(FleetPlanInvalid, match="complete successful native attempt evidence"):
             completed_phase_steps(detail, plan)

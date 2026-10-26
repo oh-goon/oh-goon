@@ -20,6 +20,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanEgressEvidence,
     PlanOutputEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
 )
 from oh_goon.core.models.fleet_plan_release_evidence import KubernetesRolloutVerificationEvidence
 from oh_goon.core.path_layouts import AttemptPathLayout
@@ -462,6 +463,9 @@ def test_completed_rollout_evidence_requires_ready_verification() -> None:
     step = CompletedPlanStepExecution(
         step_id="verify",
         kind="kubernetes_rollout_verify",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         argv=("kubernetes_rollout_verify",),
         stdout_evidence=empty_output,
         stderr_evidence=empty_output,
@@ -516,6 +520,12 @@ def test_rollout_verification_survives_canonical_result_json_round_trip() -> Non
             CompletedPlanStepExecution(
                 step_id="verify",
                 kind="kubernetes_rollout_verify",
+                settlement=PlanStepSettlementEvidence(
+                    outcome="SUCCESS",
+                    cleanup="VERIFIED",
+                    reason="ACCEPTED_EXIT",
+                    observed_returncode=0,
+                ),
                 argv=("kubernetes_rollout_verify",),
                 stdout_evidence=empty_output,
                 stderr_evidence=empty_output,

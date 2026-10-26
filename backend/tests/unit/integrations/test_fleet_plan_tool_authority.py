@@ -35,6 +35,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanOutputEvidence,
     PlanSnapshotEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
     PlanToolEvidence,
 )
 from oh_goon.core.models.fleet_plan_step_contract import PlanStepCapabilities
@@ -90,6 +91,9 @@ def _step(*, step_id: str = "quality", sha256: str = "a" * 64) -> CompletedPlanS
     return CompletedPlanStepExecution(
         step_id=step_id,
         kind="command",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         stdout_evidence=_output(),
         stderr_evidence=_output(),
         repository_state_before="before",

@@ -351,6 +351,7 @@ def test_repair_handoff_projects_durable_step_teardown_failure(capsys) -> None:
         FailedPlanStepTeardownEvidence,
         FleetPlanResult,
         PlanOutputEvidence,
+        PlanStepSettlementEvidence,
     )
     from oh_goon.core.models.operation import FleetPlanOperationEvidence
 
@@ -372,6 +373,9 @@ def test_repair_handoff_projects_durable_step_teardown_failure(capsys) -> None:
     execution = CompletedPlanStepExecution(
         step_id="oh-goon-dependency-materialize.make",
         kind="command",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         argv=("make", "certification-workspace-setup"),
         stdout_evidence=output(),
         stderr_evidence=output(),

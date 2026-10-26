@@ -253,6 +253,9 @@ def test_game_tape_projects_plan_order_timing_outcomes_and_safe_provenance(tmp_p
     prepare = CompletedPlanStepExecution(
         step_id="prepare",
         kind="command",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         started_at=now + timedelta(seconds=1),
         finished_at=now + timedelta(seconds=2),
         argv=("echo", "prepare"),
@@ -568,6 +571,12 @@ def test_game_tape_diff_compares_only_debugging_facts(tmp_path: Path) -> None:
             CompletedPlanStepExecution(
                 step_id="prepare",
                 kind="command",
+                settlement=PlanStepSettlementEvidence(
+                    outcome="SUCCESS",
+                    cleanup="VERIFIED",
+                    reason="ACCEPTED_EXIT",
+                    observed_returncode=0,
+                ),
                 started_at=now,
                 finished_at=now + timedelta(milliseconds=duration_ms),
                 argv=("echo", "prepare"),

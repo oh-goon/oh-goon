@@ -100,6 +100,7 @@ def test_installed_codex_retains_instructions_across_followup_and_compaction(
         account_id=auth.account_id,
         tls_certificate=auth.certificate,
         tls_key=auth.key,
+        expected_task=task,
     ) as endpoint:
 
         def command_runner(*argv: str, **kwargs: Any) -> CommandResult:
@@ -107,13 +108,12 @@ def test_installed_codex_retains_instructions_across_followup_and_compaction(
             if argv[0] == str(program):
                 native_launch_count += 1
                 assert native_launch_count == 1
-                prompt = kwargs["input_data"]
-                assert isinstance(prompt, bytes)
+                assert kwargs["input_data"] == task.encode("utf-8")
                 settings: dict[str, Any] = {}
                 for index, argument in enumerate(argv[:-1]):
                     if argument == "-c":
                         settings.update(tomllib.loads(argv[index + 1]))
-                assert Path(settings["model_instructions_file"]).read_bytes() == prompt
+                prompt = Path(settings["model_instructions_file"]).read_bytes()
                 assert kwargs["env"]["CODEX_HOME"] == str(home)
                 payload = json.loads(prompt)
                 assert payload["task"] == task
@@ -190,9 +190,11 @@ def test_installed_codex_retains_instructions_across_followup_and_compaction(
                 )
             else:
                 assert endpoint.account_checks == 0
-            # stdin also duplicates these bytes as user content. That copy
-            # cannot satisfy the separate exact privileged-context assertion.
-            assert observations[0]["user_duplicate"]
+            assert observations[0]["task_user_exact"]
+            assert all(
+                not item["user_duplicate"]
+                for item in (*observations, *endpoint.warmup_observations)
+            )
             if transport == "http":
                 assert all(item["privileged_exact_count"] == 1 for item in observations)
                 assert endpoint.websocket_connections == 0

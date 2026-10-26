@@ -8,6 +8,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
     FleetPlanResult,
     PlanOutputEvidence,
+    PlanStepSettlementEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy, CicdResourcePolicy
 from oh_goon.core.vocabulary.result_semantics import CanonicalResultStatus, FailureImpact
@@ -32,7 +33,13 @@ def _execution(step_id: str, *, failed: bool = False):
     )
     if failed:
         return FailedPlanStepExecution(returncode=1, **common)
-    return CompletedPlanStepExecution(returncode=0, **common)
+    return CompletedPlanStepExecution(
+        returncode=0,
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
+        **common,
+    )
 
 
 def _plan(

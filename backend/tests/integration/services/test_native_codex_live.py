@@ -2918,7 +2918,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         else (sys.executable, "-I", "-B", str(verifier), str(repo))
     )
     # The serial async fixture hits three independent five-second event guards.
-    baseline_options = {"timeout": 30} if scenario == "async-window" else {}
+    baseline_options: dict[str, Any] = {"timeout": 30} if scenario == "async-window" else {}
     baseline = run_command(*verification, cwd=repo, **baseline_options)
     assert baseline.returncode == 1
 
@@ -2945,7 +2945,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         encoding="utf-8",
     )
     argv_verifier_bytes = argv_verifier.read_bytes()
-    verifications = (
+    verifications: tuple[tuple[str, ...], ...] = (
         verification,
         (sys.executable, "-I", "-B", str(argv_verifier), str(repo), *quoted_arguments),
     )
@@ -3056,8 +3056,12 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             assert len(native_occurrences) == expected_native_launches, (
                 "Each Run launches Codex once"
             )
-            prompt = kwargs["input_data"]
-            assert isinstance(prompt, bytes)
+            assert kwargs["input_data"] == task.encode("utf-8")
+            settings: dict[str, Any] = {}
+            for index, argument in enumerate(argv[:-1]):
+                if argument == "-c":
+                    settings.update(tomllib.loads(argv[index + 1]))
+            prompt = Path(settings["model_instructions_file"]).read_bytes()
             payload = json.loads(prompt)
             assert payload["task"] == task
             assert payload["source_authority"]
@@ -3083,11 +3087,6 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             assert evidence["capture_identity"] not in candidate_identities
             candidate_identities.append(evidence["capture_identity"])
             native_occurrences.append(payload["identity"]["reviewer"])
-            settings: dict[str, Any] = {}
-            for index, argument in enumerate(argv[:-1]):
-                if argument == "-c":
-                    settings.update(tomllib.loads(argv[index + 1]))
-            assert Path(settings["model_instructions_file"]).read_bytes() == prompt
             assert settings["model"] == model
             assert settings["model_reasoning_effort"] == "low"
             assert "openai_base_url" not in settings and "chatgpt_base_url" not in settings
@@ -3197,7 +3196,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                     )
                     else "other"
                 }
-                if item.get("status") in ("in_progress", "completed", "failed"):
+                if item.get("status") in ("in_progress", "completed", "failed", "declined"):
                     fact["status"] = item["status"]
                 if type(item.get("exit_code")) is int:
                     fact["exit_code"] = item["exit_code"]

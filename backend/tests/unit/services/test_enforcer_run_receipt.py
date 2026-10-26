@@ -41,6 +41,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanRetainedContentEvidence,
     PlanSnapshotEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
     PlanToolEvidence,
     PresentPlanArtifact,
     PublishedPlanOutputEvidence,
@@ -168,6 +169,9 @@ def _detail(tmp_path: Path, *, native: bool = False, uv_base: bool = False) -> F
     step = CompletedPlanStepExecution(
         step_id="tests",
         kind=planned.kind,
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         returncode=0,
         stdout_evidence=_output(),
         stderr_evidence=_output(),

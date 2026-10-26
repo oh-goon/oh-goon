@@ -513,7 +513,7 @@ class Journal:
         Execution owners use this form so ownership proof and Journal mutation share one
         BEGIN IMMEDIATE boundary.  The Journal still owns validation and fact shape.
         """
-        canonical = report.model_copy(deep=True)
+        canonical = OperationReport.model_validate(report.model_dump(exclude_computed_fields=True))
         operation_id = canonical.provenance.operation_id
         view = self._facts.read_view(connection)
         existing = view.operation(operation_id)

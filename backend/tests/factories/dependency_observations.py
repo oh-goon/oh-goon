@@ -13,6 +13,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     FleetPlanResult,
     PlanOutputEvidence,
+    PlanStepSettlementEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import InspectionExecutionPolicy
 from oh_goon.core.models.goon_plan_source import PlanFileSource
@@ -78,6 +79,9 @@ def dependency_report(
     step = CompletedPlanStepExecution(
         step_id="observe-dependencies",
         kind="dependency_inventory",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_IN_PROCESS"
+        ),
         started_at=now,
         finished_at=now,
         stdout_evidence=output,

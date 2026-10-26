@@ -23,6 +23,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanOutputEvidence,
     PlanResourceEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.goon_plan_source import PlanFileSource
@@ -110,6 +111,9 @@ def _detail(
     execution = CompletedPlanStepExecution(
         step_id="pytest",
         kind="command",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         started_at=now,
         finished_at=now + timedelta(seconds=1),
         argv=("pytest",),
