@@ -298,6 +298,14 @@ UTF-8 file/stdin CLI checks reject invalid and non-finite input without partial
 stdout or input-file writes. Select `-k document-patch`; verifier data stays
 outside source and the same frozen Skill/Hashmarks and original Run checks apply.
 
+The async-window case repairs an asynchronous ETL mapping library. Independent
+checks cover concurrent ordered results/errors, one-pass bounded submission,
+native awaitables, source failures and awaited worker cleanup on explicit close
+or caller cancellation. Event barriers prove concurrency without timing-based
+speed claims; an eager-input tripwire bounds the broken fixture. Select
+`-k async-window`; only its mapper module may change, with the same original
+Run, immutable verifier, qualified Hashmarks and frozen Skill boundaries.
+
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \
 OH_GOON_LIVE_CODEX_HOME=/path/to/existing/.codex \
