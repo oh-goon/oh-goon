@@ -6,6 +6,7 @@ import shutil
 import tarfile
 import tempfile
 from collections.abc import Callable
+from copy import copy
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO
@@ -20,6 +21,7 @@ from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations._copy_transport import copy_regular_file
 
 Cancel = Callable[[], bool] | None
+ArchiveSymlinkMaterializer = Callable[[Path, Path], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +60,7 @@ def replace_tree_from_tar_gz_stream(
     destination: Path,
     *,
     label: str,
+    materialize_external_symlink: ArchiveSymlinkMaterializer | None = None,
 ) -> SnapshotIdentity:
     """Validate one archive stream completely before publishing its prepared tree.
 
@@ -66,13 +69,21 @@ def replace_tree_from_tar_gz_stream(
     special filesystem entry before publication begins. Publication is failure-visible
     and restores an existing destination after an ordinary final-rename failure; this
     portable two-directory sequence deliberately does not claim crash atomicity.
+    An explicit runtime owner may materialize a rejected external symlink from
+    frozen authority after native tarfile proves the member destination contained.
+    The final owned-tree validation and default archive policy remain identical.
     """
 
     destination = canonical_path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".fleet-restore-", dir=destination.parent))
     try:
-        _extract_validated_archive(stream, staging, label=label)
+        _extract_validated_archive(
+            stream,
+            staging,
+            label=label,
+            materialize_external_symlink=materialize_external_symlink,
+        )
         space = RepositoryPathSpace.from_root(staging)
         space.require_owned_tree()
         identity = snapshot_identity(staging)
@@ -87,7 +98,13 @@ def replace_tree_from_tar_gz_stream(
             _remove_path(staging)
 
 
-def _extract_validated_archive(stream: BinaryIO, staging: Path, *, label: str) -> None:
+def _extract_validated_archive(
+    stream: BinaryIO,
+    staging: Path,
+    *,
+    label: str,
+    materialize_external_symlink: ArchiveSymlinkMaterializer | None = None,
+) -> None:
     seen: set[PurePosixPath] = set()
     with tarfile.open(fileobj=stream, mode="r:gz") as archive:
         for member in archive.getmembers():
@@ -95,7 +112,36 @@ def _extract_validated_archive(stream: BinaryIO, staging: Path, *, label: str) -
             if relative in seen:
                 raise FleetPlanInvalid(f"{label} archive contains duplicate path: {relative}")
             seen.add(relative)
-        archive.extractall(staging, filter="data")
+        if materialize_external_symlink is None:
+            archive.extractall(staging, filter="data")
+            return
+
+        def materializing_filter(
+            member: tarfile.TarInfo, destination: str
+        ) -> tarfile.TarInfo | None:
+            try:
+                return tarfile.data_filter(member, destination)
+            except (tarfile.AbsoluteLinkError, tarfile.LinkOutsideDestinationError) as error:
+                if not member.issym():
+                    raise
+                # Native tarfile first proves that this member and every prior
+                # parent alias stay inside private staging. The optional owner
+                # may replace only the link target, never relax path admission.
+                surrogate = copy(member)
+                surrogate.type = tarfile.REGTYPE
+                surrogate.linkname = ""
+                tarfile.data_filter(surrogate, destination)
+                relative = repository_relative_parts(member.name, label=f"{label} archive member")
+                entry = staging.joinpath(*relative.parts)
+                entry.parent.mkdir(parents=True, exist_ok=True)
+                entry.symlink_to(member.linkname)
+                if not materialize_external_symlink(staging, entry):
+                    raise
+                if entry.is_symlink() or not (entry.is_file() or entry.is_dir()):
+                    raise FleetPlanInvalid(f"{label} external link was not materialized") from error
+                return None
+
+        archive.extractall(staging, filter=materializing_filter)
 
 
 def snapshot_file(

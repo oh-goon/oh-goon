@@ -25,10 +25,11 @@ from oh_goon.core.errors import (
 )
 from oh_goon.core.models.caller_input_file import CallerInputFileIdentity
 from oh_goon.core.models.diagnostic import DiagnosticEvent
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FleetRunState
 from oh_goon.core.models.target import FleetPlanTarget, GoonProjectDeliveryReference
-from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.path_layouts import ApplicationStatePathLayout, RunPathLayout
 from oh_goon.core.product_identity import (
     repository_id,
     schedule_repository_fleet_run_id,
@@ -292,11 +293,21 @@ def test_cancellation_after_unsettled_native_receipt_preserves_package_resources
         ]
     assert len(retained) == 1
     assert retained[0]["repository_id"] == repository_id(repository)
+    retained_root = Path(retained[0]["message"].rpartition(": ")[2])
+    assert retained_root.is_dir()
+    assert isinstance(cancelled.run.target, FleetPlanTarget)
+    package_step = cancelled.run.target.plan.steps[0]
+    assert isinstance(package_step, ResolvedCommandStep) and package_step.project_source is not None
+    captured_source = RunPathLayout.from_root(retained_root).package_source(
+        package_step.project_source.content_sha256
+    )
+    assert captured_source.is_dir()
     for workspace, environment, source in roots:
         assert workspace.is_dir()
         assert environment.is_dir()
         assert source.is_dir()
-        assert str(source.parents[2]) in retained[0]["message"]
+        assert all(path.is_relative_to(retained_root) for path in (workspace, environment, source))
+        assert source != captured_source
     assert not (repository / ".venv").exists()
     assert not (repository / ".showcase").exists()
 

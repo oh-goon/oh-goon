@@ -140,6 +140,55 @@ def test_prepared_physical_package_attempt_creates_output_working_directory(tmp_
     assert marker.read_text() == "selected target"
 
 
+def test_untrusted_package_attempt_copies_only_verified_source_for_writable_builds(
+    tmp_path: Path,
+) -> None:
+    """Physical source transport proof, without claiming admitted VM execution."""
+    from oh_goon.core.errors import FleetPlanInvalid
+    from oh_goon.integrations.fleet_plan_managed_runtime import UvProjectManagedRuntime
+
+    project = tmp_path / "authoring"
+    shutil.copytree(
+        SHOWCASE,
+        project,
+        ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache", ".showcase"),
+    )
+    goon = project / "goon.yml"
+    declaration = yaml.safe_load(goon.read_text())
+    declaration["execution"] = {"purpose": "cicd", "trust_repository_code": False}
+    goon.write_text(yaml.safe_dump(declaration))
+    plan = FleetPlanResolver().resolve(goon)
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "subject.txt").write_text("selected target")
+    step = plan.steps[0]
+    with prepare_physical_test_run(
+        RepositoryIdentity.model_validate({"path": target}), plan
+    ) as prepared:
+        first = prepared.create_attempt(step, 1)
+        managed = first.managed_runtime
+        assert isinstance(managed, UvProjectManagedRuntime)
+        assert managed.isolated_preparation and managed.package_source is not None
+        source = managed.package_source / "src/orders_pipeline/data/official.json"
+        original = source.read_bytes()
+        private = first.paths.uv_build_project / "src/orders_pipeline/data/official.json"
+        assert private.read_bytes() == original
+        private.write_text("backend-generated content in owned build copy")
+        assert source.read_bytes() == original
+        second = prepared.create_attempt(step, 2)
+        assert (
+            second.paths.uv_build_project / "src/orders_pipeline/data/official.json"
+        ).read_bytes() == original
+        frozen = next(
+            binding
+            for binding in first.sandbox_bindings
+            if binding.declared_path == managed.package_source
+        )
+        (frozen.snapshot_path / "src/orders_pipeline/data/official.json").write_text("tampered")
+        with pytest.raises(FleetPlanInvalid, match="source changed.*isolated build project"):
+            prepared.create_attempt(step, 3)
+
+
 @pytest.mark.parametrize("quiescent", (True, False))
 def test_preparation_cancellation_retains_run_scratch_only_for_unsettled_processes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quiescent: bool

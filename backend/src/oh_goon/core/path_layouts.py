@@ -205,6 +205,10 @@ class AttemptPathLayout:
         return self.root / "cache"
 
     @property
+    def uv_build_project(self) -> Path:
+        return self.cache / "uv-build-project"
+
+    @property
     def config(self) -> Path:
         return self.root / "config"
 

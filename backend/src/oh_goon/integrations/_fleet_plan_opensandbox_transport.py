@@ -6,12 +6,16 @@ import shutil
 import tarfile
 import tempfile
 from collections.abc import Callable
+from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.path_authority import RepositoryPathSpace
+from oh_goon.core.path_layouts import SANDBOX_PATHS
 from oh_goon.engine.command import (
     CommandOutputObserver,
     CommandResult,
@@ -21,7 +25,11 @@ from oh_goon.engine.command import (
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_resource_evidence
 from oh_goon.integrations._fleet_plan_sandbox_launch import sandbox_process_launch
-from oh_goon.integrations.content_snapshot import replace_tree_from_tar_gz_stream, verify_snapshot
+from oh_goon.integrations.content_snapshot import (
+    ArchiveSymlinkMaterializer,
+    replace_tree_from_tar_gz_stream,
+    verify_snapshot,
+)
 from oh_goon.integrations.fleet_plan_opensandbox_isolation import (
     _RUNNER_PROTOCOL,
     OpenSandboxSettings,
@@ -30,12 +38,16 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
     IsolatedProcessRequest,
 )
+from oh_goon.integrations.fleet_plan_run import materialize_generated_runtime_archive_symlink
 from oh_goon.integrations.fleet_plan_runtime_authority import require_runtime_authority_observation
 
 _RUNNER_COMMAND = ("/opt/oh-goon/attempt-runner", "/fleet/request.json", "/fleet/result.json")
 _API_TIMEOUT_SECONDS = 10.0
 _REMOTE_INPUT_ROOT = "/fleet/input"
 _REMOTE_OUTPUT_ROOT = "/fleet/output"
+# Two bounded output streams can each expand sixfold when JSON-escaped, plus
+# the small fixed execution/authority metadata emitted by the original helper.
+_MAX_REMOTE_RESULT_BYTES = 16 * 1024 * 1024
 
 
 class OpenSandboxCliTransport:
@@ -74,8 +86,10 @@ class OpenSandboxCliTransport:
                 "OpenSandbox backend does not prove Fleet max_processes enforcement"
             )
         sandbox_id = _create_sandbox(settings, resources=resources, timeout=timeout)
+        result: CommandResult | None = None
+        primary_error: BaseException | None = None
         try:
-            return _execute_open_sandbox_attempt(
+            result = _execute_open_sandbox_attempt(
                 settings,
                 request,
                 sandbox_id=sandbox_id,
@@ -84,9 +98,44 @@ class OpenSandboxCliTransport:
                 cancel_requested=cancel_requested,
                 stream_output=stream_output,
             )
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
-            write_remote_resource_evidence(request.attempt.paths.root, resources)
-            _destroy_sandbox(settings, sandbox_id)
+            failures: list[tuple[str, Exception]] = []
+            try:
+                write_remote_resource_evidence(request.attempt.paths.root, resources)
+            except Exception as error:
+                failures.append(("resource evidence", error))
+            try:
+                _destroy_sandbox(settings, sandbox_id)
+            except Exception as error:
+                failures.append(("sandbox cleanup", error))
+            for phase, failure in failures:
+                diagnostic = f"OpenSandbox {phase} incomplete for sandbox {sandbox_id[:200]!r}"
+                if request.diagnostics is not None:
+                    request.diagnostics.emit(
+                        DiagnosticEvent(
+                            severity="WARNING",
+                            source="fleet_plan_opensandbox_transport",
+                            owner="OpenSandboxCliTransport",
+                            operation="cleanup_remote_attempt",
+                            message=diagnostic,
+                            execution_affected=False,
+                            failure_class="provider_cleanup_incomplete",
+                            exception_type=type(failure).__name__,
+                            fleet_run_id=request.fleet_run_id,
+                            step_id=request.step_id,
+                        )
+                    )
+                if primary_error is not None:
+                    primary_error.add_note(diagnostic)
+                elif result is not None:
+                    # Provider resource cleanup is distinct from both the native
+                    # workload's result and its process-group supervisor fact.
+                    result = replace(result, stderr=result.stderr.rstrip() + "\n" + diagnostic)
+        assert result is not None
+        return result
 
 
 def _execute_open_sandbox_attempt(
@@ -205,11 +254,17 @@ def _execute_open_sandbox_attempt(
 
 def _read_remote_result(result_file: Path) -> dict[str, object]:
     try:
-        result = json.loads(result_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        with result_file.open("rb") as stream:
+            captured = stream.read(_MAX_REMOTE_RESULT_BYTES + 1)
+        if len(captured) > _MAX_REMOTE_RESULT_BYTES:
+            raise FleetPlanInvalid("OpenSandbox Fleet runner result exceeds its source-size bound")
+        result = json.loads(captured)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise FleetPlanInvalid("OpenSandbox Fleet runner result is not valid JSON") from exc
     if not isinstance(result, dict):
         raise FleetPlanInvalid("OpenSandbox Fleet runner result must be a JSON object")
+    if type(result.get("protocol")) is not int or result["protocol"] != _RUNNER_PROTOCOL:
+        raise FleetPlanInvalid("OpenSandbox Fleet runner result has an unsupported protocol")
     return result
 
 
@@ -346,8 +401,9 @@ def _create_sandbox(
 
 
 def _destroy_sandbox(settings: OpenSandboxSettings, sandbox_id: str) -> None:
-    # Cleanup is best effort only after durable resource evidence is emitted. Prefer the
-    # lifecycle API so cleanup does not depend on CLI output format/version.
+    # Native provider semantics own convergence. A failed API may use the same
+    # provider's kill command, but neither failed transport nor a nonzero exit is
+    # evidence that the disposable sandbox was destroyed.
     try:
         httpx2 = _httpx2()
         response = httpx2.delete(
@@ -355,17 +411,20 @@ def _destroy_sandbox(settings: OpenSandboxSettings, sandbox_id: str) -> None:
             headers=_api_headers(settings),
             timeout=_API_TIMEOUT_SECONDS,
         )
-        if response.status_code not in {204, 404}:
-            _run_osb(
-                settings, "sandbox", "kill", sandbox_id, "-o", "json", timeout=_API_TIMEOUT_SECONDS
-            )
+        if response.status_code in {204, 404}:
+            return
     except Exception:
-        try:
-            _run_osb(
-                settings, "sandbox", "kill", sandbox_id, "-o", "json", timeout=_API_TIMEOUT_SECONDS
-            )
-        except Exception:
-            pass
+        pass
+    try:
+        result = _run_osb(
+            settings, "sandbox", "kill", sandbox_id, "-o", "json", timeout=_API_TIMEOUT_SECONDS
+        )
+    except Exception as error:
+        raise FleetPlanInvalid("OpenSandbox sandbox cleanup could not be established") from error
+    if result.returncode != 0:
+        raise FleetPlanInvalid(
+            f"OpenSandbox sandbox cleanup did not converge: provider kill exit={result.returncode}"
+        )
 
 
 def _osb_environment(settings: OpenSandboxSettings) -> dict[str, str]:
@@ -541,14 +600,29 @@ def _restore_result_archives(
         archive = result_archives.get(key)
         if not isinstance(remote, str) or archive is None:
             raise FleetPlanInvalid(f"OpenSandbox Fleet runner result is missing {key}")
-        _replace_tree_from_archive(destination, archive)
+        materialize = partial(
+            materialize_generated_runtime_archive_symlink,
+            request.attempt,
+            sandbox_root=SANDBOX_PATHS.workspace
+            if key == "workspace_archive"
+            else SANDBOX_PATHS.cache,
+        )
+        _replace_tree_from_archive(destination, archive, materialize_external_symlink=materialize)
 
 
-def _replace_tree_from_archive(destination: Path, archive: Path) -> None:
+def _replace_tree_from_archive(
+    destination: Path,
+    archive: Path,
+    *,
+    materialize_external_symlink: ArchiveSymlinkMaterializer | None = None,
+) -> None:
     try:
         with archive.open("rb") as stream:
             replace_tree_from_tar_gz_stream(
-                stream, destination, label="OpenSandbox Fleet runner archive"
+                stream,
+                destination,
+                label="OpenSandbox Fleet runner archive",
+                materialize_external_symlink=materialize_external_symlink,
             )
     except (FleetPlanInvalid, OSError, tarfile.TarError, ValueError) as exc:
         raise FleetPlanInvalid("OpenSandbox Fleet runner archive is invalid") from exc

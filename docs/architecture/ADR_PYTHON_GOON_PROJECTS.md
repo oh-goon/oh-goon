@@ -199,13 +199,28 @@ The Iris Plan keeps `purpose: cicd`, existing artifact retention and strict
 execution requirements. Ordinary package execution gains no global strict-host
 qualification requirement. See [execution first](ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md).
 
-Package-owned Python runtime currently supports trusted package code. Native
-build/install preparation runs on the host before isolated application Steps.
-An explicit strict `trust_repository_code: false` therefore refuses during Plan
-resolution, with a defensive preparation check, before a package build starts.
-Isolated preparation for untrusted Python packages is not implemented. The
-default trusted policy and ordinary local execution keep their existing behavior;
-successful preparation does not establish APP or strict/native qualification.
+An explicit strict `trust_repository_code: false` applies the selected isolation
+boundary to native dependency installation and package builds as well as the
+application command. Run preparation selects uv and its system Python without
+running the project's build backend on the host. Native `uv sync --locked` runs
+inside the original isolated Step process owner, with the Step's selected
+environment, network and resource authority.
+
+Captured package source stays read-only. Each attempt verifies a private build
+copy in its writable cache and installs it non-editably into its own environment;
+native build backends can write build state without changing captured source,
+the developer's checkout or another attempt. Preparation and application failure,
+cancellation and cleanup retain the original Step/Run lifecycle.
+
+The existing untrusted-code isolation requirements still apply: application-kernel
+or VM isolation, with VM-only deny-all networking for the current remote provider.
+An unavailable backend refuses before build execution. Untrusted attempts start
+with an empty owned uv cache and do not inherit the host's cache or credentials.
+A deny-all workload must contain the dependencies needed by native uv, or use its
+bundled build backend where applicable. Registry-only dependencies fail natively
+when they cannot be acquired; execution never retries the build on the host.
+Ordinary trusted execution keeps its existing preparation behavior. Successful
+package installation does not establish APP or strict/native qualification.
 
 ## Explicit pinned Git acquisition
 
@@ -284,12 +299,19 @@ Focused regressions cover standalone package installation, real installed
 command execution/readback, base-only versus explicit development groups,
 developer-environment preservation, complete-project freshness, repeated
 imports, distinct outputs, missing/escaping source and native lock failures.
+Native namespace regressions execute a self-contained PEP 517 backend and its
+installed command, proving writable private builds, immutable captured source,
+unmounted host-file and loopback isolation, base-only installation and stale-lock
+refusal before application launch. Trusted repeated imports also build and run
+separate private copies without changing their shared captured source.
 Git regressions run both a single imported package and a complete example,
 including a moved branch, explicit pin refresh and exact-commit cache recovery.
 Iris certification/integration consumes the canonical project rather than a
 second fixture implementation. The Airflow showcase uses package runtime for
 its three installed-command Steps.
 
+The namespace proof uses a shared host kernel; it does not qualify the stronger
+application-kernel or VM boundary required for untrusted strict admission.
 These tested boundaries do not establish APP PASS, privileged strict/native
 qualification, or an Airflow scheduler/worker deployment. Completing the Iris
 `purpose: cicd` Plan requires actual selected strict execution and retained

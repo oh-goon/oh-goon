@@ -4,7 +4,7 @@ Classification: runnable-with-prerequisites
 
 This selection fetches one explicit revision of this repository, captures the named Plan and its local Iris Goon project, and runs the installed `iris-train` command against an explicitly registered target. The Plan's relative import is confined to the selected Git authoring root. It cannot substitute an installed catalog package for the project at that revision.
 
-Use the [headless registration guide](../../templates/README.md#first-local-python-run) to obtain the target's canonical repository ID. Copy this directory's `run.yml` into a fresh workflow directory, replace `REPOSITORY_ID`, and choose caller values there. The installed OH-Goon version must support Python Goon projects. Before this feature is merged, select the feature branch explicitly in `source.ref`.
+Use the [headless registration guide](../../templates/README.md#first-local-python-run) to obtain the target's canonical repository ID. Copy this directory's `run.yml` into a fresh workflow directory, replace `REPOSITORY_ID`, and choose caller values there. Use an installed OH-Goon version that supports Python Goon projects.
 
 ```sh
 oh-goon lock ./workflow/run.yml

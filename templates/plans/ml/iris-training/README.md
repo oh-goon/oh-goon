@@ -38,8 +38,13 @@ project owns Python dependencies, build configuration, installed command and
 tests. Native uv installs its base runtime dependencies in an owned execution
 environment, leaving developer environments alone.
 The Plan retains its default trusted-code policy. Explicit
-`trust_repository_code: false` refuses package preparation before build;
-isolated builds for untrusted Python packages are unavailable.
+`trust_repository_code: false` runs native installation and builds inside the
+selected Step isolation boundary, using a verified private build copy and
+attempt-owned environment. The current remote untrusted profile is a deny-all
+VM with an empty uv cache. This package's registry dependencies require a
+self-contained source variant for that profile; otherwise native installation
+fails before training. The shipped Plan retains its trusted-code selection,
+without a host-build fallback for strict attempts.
 
 **Expected outputs:** `ml-output/iris-training-metrics.json` is evidence;
 `ml-output/iris-model-parameters.json` has retained content-store bytes. Native

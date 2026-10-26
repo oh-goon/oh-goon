@@ -32,7 +32,12 @@ from oh_goon.integrations._fleet_plan_step_local_execution import (
     validate_extension,
     validate_pre_commit_runtime,
 )
-from oh_goon.integrations.content_snapshot import SnapshotBinding, snapshot_identity
+from oh_goon.integrations.content_snapshot import (
+    SnapshotBinding,
+    SnapshotIdentity,
+    copy_frozen_directory,
+    snapshot_identity,
+)
 from oh_goon.integrations.uv_python_runtime import find_uv_system_python
 
 _UV_PREPARATION_OWNED_ENVIRONMENT = frozenset(
@@ -102,9 +107,10 @@ class UvProjectManagedRuntime:
     """Native uv acquisition authority prepared for one source-isolated project Step.
 
     The live checkout's ``.venv`` is never transported. Preparation validates the
-    exact admitted project and warms a run-owned native uv cache. Each physical
-    attempt then materializes its own environment outside immutable source from
-    that cache before application work begins.
+    exact admitted project and warms a run-owned native uv cache for trusted
+    code. Untrusted code receives an empty cache and defers native preparation
+    to its admitted isolated Step. Each physical attempt owns its environment
+    outside immutable source before application work begins.
     """
 
     project: str
@@ -112,6 +118,7 @@ class UvProjectManagedRuntime:
     cache: Path
     python: Path
     package_source: Path | None = None
+    isolated_preparation: bool = False
 
     @property
     def readonly_paths(self) -> tuple[Path, ...]:
@@ -165,13 +172,13 @@ def prepare_uv_project_runtimes(
     python_resolver: Callable[[Path], Path | None] = find_uv_system_python,
     host_environment: Mapping[str, str] | None = None,
 ) -> dict[str, UvProjectManagedRuntime]:
-    """Let native uv validate/acquire each strict project before Step work begins.
+    """Bind native uv inputs; trusted projects may acquire before Step work begins.
 
-    This preparation intentionally does not transport the resulting virtualenv.
-    Only uv's run-owned cache is frozen. A physical attempt creates its own
-    attempt-owned environment offline, so editable project paths always bind to
-    the exact isolated workspace rather than to the live checkout or preparation
-    tree while generated environment bytes stay outside immutable source.
+    This preparation intentionally does not transport a resulting virtualenv.
+    Only uv's run-owned cache is frozen. Trusted projects warm that cache for
+    offline attempt installation; untrusted projects defer every install/build
+    to the admitted isolated process. The physical attempt always owns its
+    environment outside immutable source and the developer's live environment.
     """
 
     steps = tuple(
@@ -179,14 +186,9 @@ def prepare_uv_project_runtimes(
     )
     if not steps:
         return {}
-    if (
-        isinstance(plan.execution, CicdExecutionPolicy)
-        and not plan.execution.trust_repository_code
-        and any(step.project_source is not None for step in steps)
-    ):
-        raise FleetPlanInvalid(
-            "Untrusted Python Goon package preparation requires isolated builds, which are unavailable"
-        )
+    isolated_preparation = (
+        isinstance(plan.execution, CicdExecutionPolicy) and not plan.execution.trust_repository_code
+    )
 
     preparation = ManagedPreparationPathLayout.from_root(run_root)
     preparation.ensure()
@@ -194,18 +196,23 @@ def prepare_uv_project_runtimes(
     cache = preparation.cache / "uv"
     cache.mkdir(parents=True, exist_ok=True)
     env_root = ensure_private_directory(preparation.root / "uv-environments")
+    project_root = ensure_private_directory(preparation.root / "uv-projects")
     python = python_resolver(uv)
     if python is None:
         raise FleetPlanInvalid(
             "Strict native uv preparation could not select one system Python authority"
         )
-    prepared: dict[tuple[str, str | None, str | None], Path] = {}
+    prepared: set[tuple[str, str | None, str | None]] = set()
     runtimes: dict[str, UvProjectManagedRuntime] = {}
-    native_uv = capture_native_uv_authority(
-        host_environment, owned_uv_names=_UV_PREPARATION_OWNED_ENVIRONMENT
+    native_uv = (
+        None
+        if isolated_preparation
+        else capture_native_uv_authority(
+            host_environment, owned_uv_names=_UV_PREPARATION_OWNED_ENVIRONMENT
+        )
     )
 
-    owned_environments: set[Path] = set()
+    owned_directories: set[Path] = set()
     primary_error: BaseException | None = None
     try:
         for step in steps:
@@ -229,44 +236,66 @@ def prepare_uv_project_runtimes(
                     kind="directory",
                     require_exists=True,
                 )
-                environment = env_root / stable_id(
+                selection_id = stable_id(
                     "fleet-uv-preparation",
                     {"project": step.uv.project, "group": step.uv.group, "package": key[2]},
                 ).removeprefix("sha256:")
-                env = _uv_preparation_environment(
-                    preparation,
-                    environment=environment,
-                    cache=cache,
-                    python=python,
-                    native_uv=native_uv,
-                )
-                owned_environments.add(environment)
-                result = command_runner(
-                    str(uv),
-                    "sync",
-                    "--project",
-                    str(project),
-                    "--locked",
-                    "--no-default-groups",
-                    *(["--group", step.uv.group] if step.uv.group is not None else []),
-                    *(["--no-editable"] if package_source is not None else []),
-                    cwd=project,
-                    timeout=900.0,
-                    cancel_requested=cancel_requested,
-                    env=env,
-                )
-                if (
-                    result.supervisor is None
-                    or result.supervisor.final_process_group_quiescent is not True
-                ):
-                    raise UvPreparationIncomplete(result.supervisor)
-                if result.returncode != 0:
-                    detail = (result.stderr or result.stdout or "native uv sync failed").strip()
-                    raise FleetPlanInvalid(
-                        f"Native uv preparation rejected project {step.uv.project!r} "
-                        f"group {step.uv.group!r}: {detail}"
+                environment = env_root / selection_id
+                if not isolated_preparation:
+                    assert native_uv is not None
+                    if package_source is not None:
+                        assert step.project_source is not None
+                        project = project_root / selection_id
+                        owned_directories.add(project)
+                        observed = copy_frozen_directory(
+                            package_source,
+                            project,
+                            label=f"Python Goon {step.step_id} native preparation project",
+                            cancel_requested=cancel_requested,
+                        )
+                        expected = step.project_source
+                        if observed != SnapshotIdentity(
+                            sha256=expected.content_sha256,
+                            byte_count=expected.byte_count,
+                            entry_count=expected.entry_count,
+                        ):
+                            raise FleetPlanInvalid(
+                                "Python Goon source changed while creating its preparation project"
+                            )
+                    env = _uv_preparation_environment(
+                        preparation,
+                        environment=environment,
+                        cache=cache,
+                        python=python,
+                        native_uv=native_uv,
                     )
-                prepared[key] = environment
+                    owned_directories.add(environment)
+                    result = command_runner(
+                        str(uv),
+                        "sync",
+                        "--project",
+                        str(project),
+                        "--locked",
+                        "--no-default-groups",
+                        *(["--group", step.uv.group] if step.uv.group is not None else []),
+                        *(["--no-editable"] if package_source is not None else []),
+                        cwd=project,
+                        timeout=900.0,
+                        cancel_requested=cancel_requested,
+                        env=env,
+                    )
+                    if (
+                        result.supervisor is None
+                        or result.supervisor.final_process_group_quiescent is not True
+                    ):
+                        raise UvPreparationIncomplete(result.supervisor)
+                    if result.returncode != 0:
+                        detail = (result.stderr or result.stdout or "native uv sync failed").strip()
+                        raise FleetPlanInvalid(
+                            f"Native uv preparation rejected project {step.uv.project!r} "
+                            f"group {step.uv.group!r}: {detail}"
+                        )
+                prepared.add(key)
 
             runtimes[step.step_id] = UvProjectManagedRuntime(
                 project=step.uv.project,
@@ -274,6 +303,7 @@ def prepare_uv_project_runtimes(
                 cache=cache,
                 python=python,
                 package_source=package_source,
+                isolated_preparation=isolated_preparation,
             )
 
         return runtimes
@@ -290,22 +320,20 @@ def prepare_uv_project_runtimes(
             primary_error.add_note(
                 f"Native uv preparation scratch retained while process cleanup is incomplete: {preparation.root}"
             )
-        for environment in () if unsettled else sorted(owned_environments):
+        for directory in () if unsettled else sorted(owned_directories):
             try:
-                if environment.exists() or environment.is_symlink():
-                    shutil.rmtree(environment)
+                if directory.exists() or directory.is_symlink():
+                    shutil.rmtree(directory)
             except OSError as error:
                 failures.append(error)
         if failures:
             if primary_error is not None:
                 for cleanup_error in failures:
-                    primary_error.add_note(
-                        f"native uv preparation environment cleanup failed: {cleanup_error}"
-                    )
+                    primary_error.add_note(f"native uv preparation cleanup failed: {cleanup_error}")
             else:
-                raise FleetPlanInvalid(
-                    "Native uv preparation environment cleanup is incomplete"
-                ) from failures[0]
+                raise FleetPlanInvalid("Native uv preparation cleanup is incomplete") from failures[
+                    0
+                ]
 
 
 def _uv_preparation_environment(

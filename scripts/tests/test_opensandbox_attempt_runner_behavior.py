@@ -7,6 +7,7 @@ import sys
 import io
 import json
 import os
+import shutil
 import signal
 import stat
 import subprocess
@@ -17,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from oh_goon.repository_tooling import opensandbox_attempt_runner as runner
+from oh_goon.integrations.fleet_plan_opensandbox_isolation import _RUNNER_PROTOCOL
 from oh_goon.repository_tooling._opensandbox_attempt_io import (
     archive_tree,
     extract_tree,
@@ -477,6 +479,9 @@ def test_execute_attempt_does_not_archive_when_quiescence_cannot_be_proven(
     root = tmp_path / "root"
     monkeypatch.setattr(runner, "_prepare_root", lambda _payload, _root: None)
     monkeypatch.setattr(
+        runner, "_prepare_workload_filesystem", lambda _payload, _root: None
+    )
+    monkeypatch.setattr(
         runner,
         "_bind_runtime_execution",
         lambda _payload, _root: {"authority": {}},
@@ -495,6 +500,32 @@ def test_execute_attempt_does_not_archive_when_quiescence_cannot_be_proven(
     monkeypatch.setattr(runner, "_archive_result_trees", forbidden_archive)
     with pytest.raises(runner._AttemptQuiescenceError, match="survivors-detected"):
         runner._execute_attempt({}, root)
+
+
+def test_unexpected_post_launch_error_cannot_publish_mutable_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner, "_prepare_root", lambda _payload, _root: None)
+    monkeypatch.setattr(
+        runner, "_prepare_workload_filesystem", lambda _payload, _root: None
+    )
+    monkeypatch.setattr(
+        runner, "_bind_runtime_execution", lambda _payload, _root: {"authority": {}}
+    )
+    closed: list[object] = []
+    monkeypatch.setattr(runner, "_close_runtime_binding", closed.append)
+
+    def failed_run(*_args: object) -> None:
+        raise OSError("unexpected native launch failure")
+
+    def forbidden_archive(_root: Path) -> dict[str, str]:
+        pytest.fail("uncertain native launch cannot publish mutable outputs")
+
+    monkeypatch.setattr(runner, "_run", failed_run)
+    monkeypatch.setattr(runner, "_archive_result_trees", forbidden_archive)
+    with pytest.raises(OSError, match="unexpected native launch failure"):
+        runner._execute_attempt({}, tmp_path / "root")
+    assert closed == [{"authority": {}}]
 
 
 def test_result_archives_and_failure_observation_are_explicit(tmp_path: Path) -> None:
@@ -545,7 +576,7 @@ def test_main_validates_protocol_egress_and_writes_result(
         runner.main()
 
     request.write_text(
-        json.dumps({"protocol": runner._PROTOCOL, "egress": {"mode": "none"}}),
+        json.dumps({"protocol": _RUNNER_PROTOCOL, "egress": {"mode": "none"}}),
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -560,3 +591,255 @@ def test_main_validates_protocol_egress_and_writes_result(
         "stdout": "ok",
         "stderr": "",
     }
+
+
+def test_unprivileged_helper_refuses_before_workload_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    with pytest.raises(ValueError, match="VM-root custody"):
+        runner._prepare_workload_filesystem({}, root)
+
+
+def test_privilege_drop_failure_prevents_native_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse_identity() -> None:
+        raise PermissionError("identity drop refused")
+
+    def forbidden_exec(*_args: object) -> None:
+        os._exit(99)
+
+    monkeypatch.setattr(os, "chroot", lambda _root: None)
+    monkeypatch.setattr(runner, "_restore_atomic_interpreter", lambda _binding: None)
+    monkeypatch.setattr(runner, "_drop_workload_privileges", refuse_identity)
+    monkeypatch.setattr(runner, "_fexecve", forbidden_exec)
+    pid, stdout, stderr = runner._fork_atomic_child(
+        root=tmp_path,
+        cwd=str(tmp_path),
+        env={},
+        binding={},
+        descriptor=-1,
+        exec_argv=["tool"],
+    )
+    result = runner._collect_atomic_child(pid, ["tool"], 5, stdout, stderr)
+    assert result.returncode == 125
+    assert "identity drop refused" in result.stderr
+
+
+@pytest.mark.certification
+@pytest.mark.skipif(
+    os.geteuid() != 0, reason="Native VM helper identity proof requires root"
+)
+def test_native_unprivileged_workload_cannot_mutate_immutable_inputs(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.integrations._fleet_plan_host_resources import HostToolBinding
+    from oh_goon.integrations._fleet_plan_runtime_root import capture_runtime_root
+    from oh_goon.integrations.content_snapshot import snapshot_identity
+
+    root = tmp_path / "root"
+    payload = _base_payload(tmp_path)
+    runtime = tmp_path / "native-runtime"
+    shell = Path("/bin/sh").resolve(strict=True)
+    inspector = shutil.which("ldd")
+    assert inspector is not None
+    capture_runtime_root(
+        (HostToolBinding("sh", shell, shell, snapshot_identity(shell)),),
+        {},
+        runtime,
+        runtime_inspector=Path(inspector).resolve(strict=True),
+        network_enabled=False,
+        cancel_requested=None,
+    )
+    archive = tmp_path / "input/native-runtime.tar.gz"
+    archive_tree(runtime, archive)
+    payload["runtime_root_archive"] = "input/native-runtime.tar.gz"
+    shutil.copyfile(shell, tmp_path / "input/sh")
+    payload["toolchain"] = [{"name": "sh", "source": "input/sh", "mode": 0o555}]
+    source_archive = _tree_archive(tmp_path, **{"source.txt": "captured-source"})
+    payload["readonly_inputs"] = [
+        {"declared_path": "/managed/source", "kind": "tree", "source": source_archive}
+    ]
+    payload["argv"] = [
+        "/toolchain/bin/sh",
+        "-c",
+        "set -eu; "
+        "if printf changed > /managed/source/source.txt 2>/dev/null; then exit 10; fi; "
+        "if printf replaced > /managed/new-source 2>/dev/null; then exit 11; fi; "
+        "if printf changed > /bin/sh 2>/dev/null; then exit 12; fi; "
+        "printf application > /workspace/result.txt; "
+        "printf cache > /cache/prepared.txt; "
+        "printf home > /home/fleet/owned.txt; "
+        "printf temporary > /tmp/owned.txt; "
+        "printf configuration > /config/owned.txt; "
+        "printf portable > /dev/null",
+    ]
+    result = runner._execute_attempt(payload, root)
+    assert result["returncode"] == 0, result["stderr"]
+    assert (root / "managed/source/source.txt").read_text() == "captured-source"
+    assert (root / "workspace/result.txt").read_text() == "application"
+    assert (root / "workspace/result.txt").stat().st_uid == 65534
+    assert (root / "managed/source/source.txt").stat().st_uid == 0
+
+
+@pytest.mark.certification
+@pytest.mark.skipif(
+    os.geteuid() != 0, reason="Native VM helper build proof requires root"
+)
+@pytest.mark.parametrize("build_backend", ("in-tree", "uv-build"))
+def test_native_helper_builds_and_runs_captured_python_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, build_backend: str
+) -> None:
+    from oh_goon.integrations._fleet_plan_host_resources import HostToolBinding
+    from oh_goon.integrations._fleet_plan_opensandbox_transport import (
+        _restore_result_archives,
+    )
+    from oh_goon.integrations._fleet_plan_runtime_root import capture_runtime_root
+    from oh_goon.integrations.content_snapshot import snapshot_identity
+    from oh_goon.integrations.executable_materialization_authority import (
+        StepExecutableMaterializationReceipt,
+    )
+    from oh_goon.integrations.fleet_plan_managed_runtime import UvProjectManagedRuntime
+    from oh_goon.integrations.fleet_plan_process_isolation import IsolatedProcessRequest
+    from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
+    from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
+    from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
+    from oh_goon.core.models.fleet_plan_step_contract import DeniedPlanEgress
+    from oh_goon.core.path_layouts import AttemptPathLayout
+    from tests.factories.python_goon_projects import write_isolated_build_project
+
+    monkeypatch.setenv("UV_PYTHON", sys.executable)
+    project = tmp_path / "captured-project"
+    write_isolated_build_project(project)
+    if build_backend == "uv-build":
+        metadata = project / "pyproject.toml"
+        metadata.write_text(
+            metadata.read_text().replace(
+                'requires = []\nbuild-backend = "backend"\nbackend-path = ["."]',
+                'requires = ["uv_build>=0.12,<0.13"]\nbuild-backend = "uv_build"\n'
+                '[tool.uv.build-backend]\nmodule-name = "isolated_app"\nmodule-root = ""',
+            )
+        )
+        package = project / "isolated_app"
+        package.mkdir()
+        shutil.copyfile(project / "isolated_app.py", package / "__init__.py")
+    uv_name = shutil.which("uv")
+    ldd_name = shutil.which("ldd")
+    assert uv_name is not None and ldd_name is not None
+    uv = Path(uv_name).resolve(strict=True)
+    base_executable = getattr(sys, "_base_executable", None)
+    assert isinstance(base_executable, str)
+    python = Path(base_executable).resolve(strict=True)
+    payload = _base_payload(tmp_path)
+    runtime = tmp_path / "native-runtime"
+    tool = HostToolBinding("uv", uv, uv, snapshot_identity(uv))
+    runtime_binding = capture_runtime_root(
+        (tool,),
+        {"build": UvProjectManagedRuntime(".", None, tmp_path / "cache", python)},
+        runtime,
+        runtime_inspector=Path(ldd_name).resolve(strict=True),
+        network_enabled=False,
+        cancel_requested=None,
+    )
+    archive_tree(runtime, tmp_path / "input/native-runtime.tar.gz")
+    payload["runtime_root_archive"] = "input/native-runtime.tar.gz"
+    shutil.copyfile(uv, tmp_path / "input/uv")
+    payload["toolchain"] = [{"name": "uv", "source": "input/uv", "mode": 0o555}]
+    cache = tmp_path / "input-cache"
+    cache.mkdir()
+    shutil.copytree(project, cache / "uv-build-project")
+    archive_tree(cache, tmp_path / "input/native-cache.tar.gz")
+    payload["cache_archive"] = "input/native-cache.tar.gz"
+    archive_tree(project, tmp_path / "input/source.tar.gz")
+    payload["readonly_inputs"] = [
+        {
+            "declared_path": "/managed/source",
+            "kind": "tree",
+            "source": "input/source.tar.gz",
+        }
+    ]
+    payload["env"] = {
+        "PATH": "/toolchain/bin",
+        "HOME": "/home/fleet",
+        "TMPDIR": "/tmp",
+        "UV_PYTHON": str(python),
+        "UV_PYTHON_DOWNLOADS": "never",
+        "UV_NO_MANAGED_PYTHON": "1",
+        "UV_PROJECT_ENVIRONMENT": "/cache/uv-project-environment",
+        "UV_CACHE_DIR": "/cache/uv",
+        "UV_OFFLINE": "1",
+    }
+    payload["argv"] = [
+        "/toolchain/bin/uv",
+        "sync",
+        "--locked",
+        "--no-default-groups",
+        "--no-editable",
+        "--link-mode",
+        "copy",
+        "--project",
+        "/cache/uv-build-project",
+    ]
+    root = tmp_path / "root"
+    result = runner._execute_attempt(payload, root)
+    assert result["returncode"] == 0, result["stderr"]
+    if build_backend == "in-tree":
+        assert json.loads(
+            (root / "cache/uv-build-project/backend-build.json").read_text()
+        ) == {"private_write": True}
+    assert not (root / "managed/source/backend-build.json").exists()
+    assert not (project / "backend-build.json").exists()
+    receiving = AttemptPathLayout.from_root(tmp_path / "receiving-attempt")
+    receiving.workspace.mkdir(parents=True)
+    receiving.cache.mkdir()
+    attempt = FleetPlanStepAttempt(
+        paths=receiving,
+        cache_identity=snapshot_identity(receiving.cache),
+        egress=DeniedPlanEgress(),
+        host_tools=(tool,),
+        sandbox_bindings=(),
+        managed_runtime=None,
+        host_environment={},
+        runtime_root=runtime_binding,
+        isolation_backend=PlanIsolationBackendEvidence(
+            backend_id="native-helper-test",
+            configuration_id="native-helper-test",
+            kernel_boundary="shared_host_kernel",
+            remote_execution=False,
+            experimental=False,
+        ),
+        resources=CicdResourcePolicy(),
+        nested_strict_execution=False,
+        executable_materialization=StepExecutableMaterializationReceipt(),
+        attempt_number=1,
+    )
+    _restore_result_archives(
+        IsolatedProcessRequest(attempt, ("uv",), receiving.workspace, {}),
+        {"protocol": _RUNNER_PROTOCOL, **result},
+        {
+            name: root.parent / str(result[name])
+            for name in ("workspace_archive", "cache_archive")
+        },
+    )
+    interpreter = receiving.cache / "uv-project-environment/bin/python"
+    assert interpreter.is_file() and not interpreter.is_symlink()
+    assert interpreter.read_bytes() == python.read_bytes()
+    # The next provider process consumes exactly the validated restored cache.
+    archive_tree(receiving.cache, tmp_path / "input/restored-cache.tar.gz")
+    payload["cache_archive"] = "input/restored-cache.tar.gz"
+    payload["argv"] = [
+        "/toolchain/bin/uv",
+        "run",
+        "--no-sync",
+        "--project",
+        "/cache/uv-build-project",
+        "/cache/uv-project-environment/bin/isolated-build",
+    ]
+    application = runner._execute_attempt(payload, root)
+    assert application["returncode"] == 0, application["stderr"]
+    assert json.loads((root / "workspace/isolated-result.json").read_text())[
+        "dev_dependency_absent"
+    ]

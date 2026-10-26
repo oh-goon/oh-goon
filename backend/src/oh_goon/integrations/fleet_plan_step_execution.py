@@ -92,6 +92,7 @@ from oh_goon.integrations._fleet_plan_step_outcome import (
     from_command,
     process_boundary_settled,
 )
+from oh_goon.integrations.content_snapshot import SnapshotIdentity, copy_frozen_directory
 from oh_goon.integrations.executable_materialization_authority import (
     verify_step_executable_materialization,
 )
@@ -257,6 +258,7 @@ class _StepProcess:
     command_runner: CommandRunner
     git_command_runner: CommandRunner
     managed_runtime: ManagedRuntimeSpec | None
+    package_project: Path | None = None
     # Safe controller diagnostics only; native protocol/source bytes stay private.
     diagnostic_output: StepDiagnosticObserver | None = None
     redact_visible_output: Callable[[str], str] | None = None
@@ -414,6 +416,7 @@ def execute_strict_step(
         process_isolation,
         termination_requested=runtime.termination_requested,
         fleet_run_id=runtime.fleet_run_id,
+        diagnostics=runtime.diagnostics,
         local_resource_intent_for=runtime.local_resource_intent_for,
         trusted_local_consent=runtime.trusted_local_consent,
         trusted_local_scope=runtime.trusted_local_scope,
@@ -1067,13 +1070,14 @@ def _execute_command_step(
 ) -> StepOutcome:
     argv = step.argv
     managed = process.managed_runtime
-    package = (
-        managed.package_source
-        if isinstance(managed, UvProjectManagedRuntime)
-        else runtime.project_sources.get(step.project_source.content_sha256)
-        if step.project_source is not None
-        else None
+    package_runtime = (
+        step.project_source is not None
+        or isinstance(managed, UvProjectManagedRuntime)
+        and managed.package_source is not None
     )
+    package = process.package_project if package_runtime else None
+    if package_runtime and package is None:
+        raise FleetPlanInvalid("Python Goon application requires its prepared project binding")
     if isinstance(managed, UvProjectManagedRuntime) or package is not None:
         if argv[:2] != ("uv", "run"):
             raise FleetPlanInvalid(
@@ -1133,6 +1137,20 @@ def _prepare_python_project_attempt(
     source = runtime.project_sources.get(step.project_source.content_sha256)
     if source is None:
         raise FleetPlanInvalid("Python Goon execution requires its captured package source")
+    project = process.paths.uv_build_project
+    observed = copy_frozen_directory(
+        source,
+        project,
+        label=f"Python Goon {step.step_id} build project",
+        cancel_requested=runtime.cancel_requested,
+    )
+    expected = step.project_source
+    if observed != SnapshotIdentity(
+        sha256=expected.content_sha256,
+        byte_count=expected.byte_count,
+        entry_count=expected.entry_count,
+    ):
+        raise FleetPlanInvalid("Python Goon source changed while creating its build project")
     native = capture_native_uv_authority(
         process.host_environment,
         owned_uv_names=frozenset({"UV_PROJECT_ENVIRONMENT", "UV_CACHE_DIR", "UV_OFFLINE"}),
@@ -1143,12 +1161,12 @@ def _prepare_python_project_attempt(
         cache=process.paths.cache / "uv",
     )
     environment.update(process.environment)
-    prepared = replace(process, environment=environment)
+    prepared = replace(process, environment=environment, package_project=project)
     result = prepared.command_runner(
         "uv",
         "sync",
         "--project",
-        str(source),
+        str(project),
         "--locked",
         "--no-default-groups",
         "--no-editable",
@@ -1157,6 +1175,7 @@ def _prepare_python_project_attempt(
         timeout=_command_timeout(step, runtime),
         cancel_requested=runtime.cancel_requested,
         env=environment,
+        runtime_supervision=runtime.runtime_supervision,
     )
     outcome = from_command(result)
     return prepared, outcome if outcome.returncode != 0 or process_boundary_settled(
@@ -1176,33 +1195,49 @@ def _prepare_strict_uv_attempt(
     if step.uv is None:
         raise FleetPlanInvalid(f"Managed uv runtime is bound to non-uv step {step.step_id}")
 
-    project = managed.package_source or RepositoryPathSpace.from_root(repository).resolve(
-        managed.project,
-        label=f"Fleet uv project for step {step.step_id}",
-        kind="directory",
-        require_exists=True,
-    )
+    if managed.package_source is not None:
+        project = RepositoryPathSpace.from_root(process.paths.cache).resolve(
+            process.paths.uv_build_project.relative_to(process.paths.cache).as_posix(),
+            label=f"Fleet uv build project for step {step.step_id}",
+            kind="directory",
+            require_exists=True,
+        )
+    else:
+        project = managed.package_source or RepositoryPathSpace.from_root(repository).resolve(
+            managed.project,
+            label=f"Fleet uv project for step {step.step_id}",
+            kind="directory",
+            require_exists=True,
+        )
     environment = process.paths.cache / "uv-project-environment"
     env = dict(process.environment)
     env["UV_PROJECT_ENVIRONMENT"] = str(environment)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    prepared = replace(process, environment=env)
+    prepared = replace(
+        process,
+        environment=env,
+        package_project=project if managed.package_source is not None else None,
+    )
     result = prepared.command_runner(
         "uv",
         "sync",
         "--project",
         str(project),
-        "--frozen",
-        "--offline",
+        *(["--locked"] if managed.isolated_preparation else ["--frozen", "--offline"]),
         "--link-mode",
         "copy",
         "--no-default-groups",
         *(["--group", managed.group] if managed.group is not None else []),
         *(["--no-editable"] if managed.package_source is not None else []),
         cwd=repository,
-        timeout=min(step.timeout_seconds or 900.0, 900.0),
+        timeout=(
+            None
+            if runtime.runtime_supervision is not None
+            else min(step.timeout_seconds or 900.0, 900.0)
+        ),
         cancel_requested=runtime.cancel_requested,
         env=env,
+        runtime_supervision=runtime.runtime_supervision,
     )
     outcome = from_command(result)
     if outcome.returncode != 0 or process_boundary_settled(outcome) is not True:
@@ -1426,13 +1461,10 @@ def _with_output_observer(
     def redact_visible_output(text: str) -> str:
         return redact_diagnostic_text(redact_host_secret_text(step, text, process.host_environment))
 
-    return _StepProcess(
-        paths=process.paths,
-        environment=process.environment,
-        host_environment=process.host_environment,
+    return replace(
+        process,
         command_runner=command_runner,
         git_command_runner=command_runner if observer is not None else process.git_command_runner,
-        managed_runtime=process.managed_runtime,
         diagnostic_output=observed_step_diagnostic(
             step=step,
             attempt_number=attempt_number,
@@ -1469,16 +1501,10 @@ def _with_lifecycle_observer(
         attempt_number=attempt_number,
         observer=observer,
     )
-    return _StepProcess(
-        paths=process.paths,
-        environment=process.environment,
-        host_environment=process.host_environment,
+    return replace(
+        process,
         command_runner=runner,
         git_command_runner=runner,
-        managed_runtime=process.managed_runtime,
-        diagnostic_output=process.diagnostic_output,
-        redact_visible_output=process.redact_visible_output,
-        visible_output=process.visible_output,
     )
 
 
@@ -1489,6 +1515,7 @@ def _isolated_command_runner(
     *,
     termination_requested: Callable[[], TerminationSignal | None] | None,
     fleet_run_id: str | None = None,
+    diagnostics: DiagnosticEmitter | None = None,
     local_resource_intent_for: Callable[
         [ResolvedPlanStep, FleetPlanStepAttempt, int], LocalLaceIntentReservation
     ]
@@ -1529,6 +1556,7 @@ def _isolated_command_runner(
             fleet_run_id=fleet_run_id,
             step_id=step.step_id,
             command_ordinal=command_ordinal,
+            diagnostics=diagnostics,
             trusted_local_consent=trusted_local_consent,
             trusted_local_scope=trusted_local_scope,
             # No effect authority here until the original Enforcer/LACE owner

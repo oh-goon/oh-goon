@@ -8,7 +8,7 @@ from pydantic import TypeAdapter
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_output_refs import step_output_references
 from oh_goon.core.models.agent_providers import ResolvedNativeAgent
-from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy, ExecutionPurpose
+from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
 from oh_goon.core.models.fleet_plan_step_contract import (
     RetainedPlanCacheSource,
     StepPlanCacheSource,
@@ -85,16 +85,6 @@ def _validate_step_structure(
     elif finalizers_started:
         raise ValueError("Resolved Fleet finalizer steps must form one trailing suffix")
     source = step.workspace.source
-    if (
-        step.kind == "command"
-        and step.project_source is not None
-        and isinstance(plan.execution, CicdExecutionPolicy)
-        and not plan.execution.trust_repository_code
-    ):
-        raise ValueError(
-            "Package-owned Python runtime does not support untrusted strict preparation; "
-            "isolated package builds are unavailable"
-        )
     if step.kind == "command" and step.uv is not None and isinstance(source, StepWorkspaceSource):
         raise ValueError(
             f"Resolved Fleet uv-managed command step {step.step_id} must use repository workspace source; "

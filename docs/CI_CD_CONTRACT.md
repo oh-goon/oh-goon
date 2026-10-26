@@ -309,11 +309,21 @@ before workload; the command never falls back to host execution. Deployment inte
 provisioner; their owner retains asynchronous execution semantics.
 
 Within strict CI/CD, repository code is trusted by default and CPU, memory, and PID caps are unspecified.
-Package-owned `runtime: python` currently requires trusted package code:
-explicit `trust_repository_code: false` refuses during resolution before native
-build/install preparation. Host preparation cannot establish the selected
-untrusted isolation, and isolated package builds are unavailable. This boundary
-does not change ordinary local execution or claim APP qualification.
+With explicit `trust_repository_code: false`, native uv dependency installation
+and build backends execute through the original strict isolated Step owner,
+including package-owned `runtime: python` and target-project uv workloads.
+Host preparation selects the exact uv/system Python authority without executing
+project code. Package source remains read-only, while each attempt uses a verified
+private build copy and non-editable environment in its writable cache. Preparation
+uses the same selected environment, network and resource authority as the Step.
+Untrusted attempts start with an empty owned cache; host caches and ambient
+credentials are not transported. The current remote untrusted provider remains
+VM-only with deny-all networking. Such workloads need dependencies contained in
+the captured project or supplied by native uv, including its bundled backend
+where applicable. Missing isolation prerequisites refuse before a build; missing
+dependencies produce a native uv failure. There is no host-build fallback.
+Ordinary trusted execution keeps its existing preparation behavior. Successful
+installation alone does not establish APP qualification.
 There are no hidden static CPU/RAM/PID defaults. Omitted caps inherit the capacity available from the
 selected executor for that admitted run, and the exact reserved capacity is bound into admission and
 Enforcer evidence. A later run may legitimately observe different available capacity.
