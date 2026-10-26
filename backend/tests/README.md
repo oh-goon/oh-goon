@@ -290,6 +290,14 @@ check repeated drains without listener warnings and complete output on late fail
 `-k frames-node` with the same explicit public Node executable. This case claims
 a per-frame limit and incremental consumption, not a global process-memory bound.
 
+The document-patch case repairs a Python configuration patcher with an explicit
+four-operation JSON Patch subset. Independent checks cover pointer escapes,
+ordered array/object edits, root/null boundaries, recursive JSON type equality,
+detached values and failure atomicity for one-pass operation iterators. Native
+UTF-8 file/stdin CLI checks reject invalid and non-finite input without partial
+stdout or input-file writes. Select `-k document-patch`; verifier data stays
+outside source and the same frozen Skill/Hashmarks and original Run checks apply.
+
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \
 OH_GOON_LIVE_CODEX_HOME=/path/to/existing/.codex \

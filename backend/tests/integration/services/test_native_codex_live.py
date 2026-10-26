@@ -1846,6 +1846,338 @@ console.log('Framed JSON stream, cancellation and binary CLI contract verified')
 """
 
 
+_DOCUMENT_PATCH_SOURCES: dict[str, str] = {
+    "docpatch/__init__.py": "",
+    "docpatch/pointer.py": """def parse_pointer(path):
+    return path.strip('/').split('/')
+""",
+    "docpatch/patch.py": """from .pointer import parse_pointer
+
+
+def apply_patch(document, operations):
+    for operation in operations:
+        key = parse_pointer(operation['path'])[-1]
+        if operation['op'] == 'remove':
+            document.pop(key, None)
+        elif operation['op'] != 'test':
+            document[key] = operation.get('value')
+    return document
+""",
+    "docpatch/__main__.py": """import json
+import sys
+
+from .patch import apply_patch
+
+with open(sys.argv[1]) as document, open(sys.argv[2]) as patch:
+    print(json.dumps(apply_patch(json.load(document), json.load(patch))))
+""",
+    "README.md": """# Document patch subset
+
+Repair this standard-library JSON configuration patcher. The supported operations
+are add, remove, replace and test; other operations are errors. This is a limited
+application contract, with JSON Pointer syntax and the named operation semantics
+from https://www.rfc-editor.org/rfc/rfc6901 and https://www.rfc-editor.org/rfc/rfc6902.
+Root removal is deliberately rejected; add/replace/test at the root are supported.
+
+docpatch.pointer.parse_pointer(path) returns a tuple of decoded tokens. The empty
+string selects the root; otherwise a string starts with /. Decode ~1 as slash and
+~0 as tilde exactly once: ~01 means the literal ~1. Reject dangling/other tilde
+escapes and non-string paths with ValueError. Empty tokens, Unicode and NUL keys
+are allowed. Do not decode percent escapes, URI fragments or normalize Unicode.
+
+docpatch.patch.apply_patch(document, operations) returns a detached new JSON tree.
+Inputs are JSON-compatible trees with finite numbers. Never mutate document,
+operation dictionaries or their values, including on failure or an empty patch.
+Copy each inserted/replacement value independently. Consume an iterable of
+operations once, in order; stop at its first invalid operation and propagate
+iterator failures. Every operation is a dict with string op/path; add/replace/test
+require a value member, where null is valid. Ignore unrelated members.
+
+Traverse existing dict/list parents only; do not create parents. For dicts, add
+creates or replaces a key; remove/replace/test require that key to exist. Any
+string token (including empty, 00 or -) is an ordinary object key. For lists,
+indices are ASCII 0 or a nonzero digit followed by ASCII digits. Add inserts at
+0..len or appends with -; other operations require 0..len-1. Reject signs,
+leading zeros, whitespace, Unicode digits, missing parents and scalar traversal.
+Test compares JSON types recursively: booleans differ from numbers, numbers
+compare numerically (1 equals 1.0), object order is immaterial, and arrays retain
+order. Invalid operations/addresses, root removal and failed tests raise ValueError.
+
+python -m docpatch DOCUMENT PATCH reads UTF-8 JSON files; PATCH=- reads stdin.
+The CLI requires exactly two arguments and a patch array. Native json owns JSON
+decoding/encoding. Reject every non-finite decoded number, including exponent
+overflow, ignored fields and values later overwritten by duplicate keys. Finite
+duplicate keys retain native json last-value behavior. Serialize a complete finite
+result before writing stdout. Success prints one JSON value plus newline, exits 0
+and has no stderr. Input, policy and serialization errors exit 2, diagnose stderr
+and leave stdout empty. Never rewrite input files. No third-party dependencies.
+""",
+}
+
+_DOCUMENT_PATCH_TASK = (
+    "Repair the JSON document patch package according to README.md. Preserve the "
+    "public parse_pointer and apply_patch functions and module CLI. Handle escaped "
+    "pointers, sequential array/object operations, detached results, recursive JSON "
+    "equality and failure atomicity. Use native json and only the Python standard "
+    "library. Before editing, execute the exact repository_tools.list Hashmarks "
+    "command from the supplied instructions and read the frozen Skill resource. "
+    "Change only docpatch/pointer.py, docpatch/patch.py and docpatch/__main__.py. "
+    "Independent verification runs after your coding Step."
+)
+
+_DOCUMENT_PATCH_VERIFICATION = r"""import copy
+import json
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+
+ROOT = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(ROOT))
+from docpatch.pointer import parse_pointer
+from docpatch.patch import apply_patch
+
+
+class DocumentPatchContract(unittest.TestCase):
+    def test_pointer_decoding_and_literal_keys(self):
+        cases = {'': (), '/': ('',), '//': ('', ''), '/a~1b/m~0n': ('a/b', 'm~n'),
+                 '/~01': ('~1',), '/~00': ('~0',), '/~1~0': ('/~',),
+                 '/%2F/雪/\x00': ('%2F', '雪', '\x00'), '/00': ('00',)}
+        for pointer, expected in cases.items():
+            with self.subTest(pointer=pointer):
+                self.assertEqual(parse_pointer(pointer), expected)
+        for pointer in (None, 1, False, [], {}, 'a', '#/a', '/a~', '/~2', '/~0~9'):
+            with self.subTest(pointer=pointer):
+                with self.assertRaises(ValueError):
+                    parse_pointer(pointer)
+
+    def test_ordered_mixed_edits_and_input_nonmutation(self):
+        document = {'services': [{'id': 'α', 'enabled': False}, {'id': 'b'}],
+                    'meta': {'owner': 'old'}}
+        operations = [
+            {'op': 'test', 'path': '/services/0/enabled', 'value': False},
+            {'op': 'add', 'path': '/services/1', 'value': {'id': 'new', 'flags': []}},
+            {'op': 'replace', 'path': '/services/2/id', 'value': 'β'},
+            {'op': 'add', 'path': '/services/-', 'value': None},
+            {'op': 'add', 'path': '/meta/owner', 'value': 'updated'},
+            {'op': 'test', 'path': '/meta/owner', 'value': 'updated'},
+            {'op': 'remove', 'path': '/meta/owner'},
+            {'op': 'add', 'path': '/meta/new', 'value': {'v': 1}},
+            {'op': 'test', 'path': '/meta/new', 'value': {'v': 1.0}},
+        ]
+        before = copy.deepcopy((document, operations))
+        result = apply_patch(document, operations)
+        self.assertEqual(result, {'services': [{'id': 'α', 'enabled': False},
+            {'id': 'new', 'flags': []}, {'id': 'β'}, None], 'meta': {'new': {'v': 1}}})
+        self.assertEqual((document, operations), before)
+        result['services'][1]['flags'].append('changed')
+        result['services'][0]['id'] = 'changed'
+        self.assertEqual((document, operations), before)
+
+    def test_independent_insertions_and_empty_patch(self):
+        value = {'nested': []}
+        operations = [{'op': 'add', 'path': '/' + name, 'value': value}
+                      for name in ('left', 'right')]
+        result = apply_patch({}, operations)
+        result['left']['nested'].append(1)
+        self.assertEqual(result['right'], {'nested': []})
+        self.assertEqual(value, {'nested': []})
+        original = {'nested': []}
+        detached = apply_patch(original, [])
+        detached['nested'].append(1)
+        self.assertEqual(original, {'nested': []})
+        replacement = {'nested': []}
+        result = apply_patch({'target': 0}, [
+            {'op': 'replace', 'path': '/target', 'value': replacement}])
+        result['target']['nested'].append(1)
+        self.assertEqual(replacement, {'nested': []})
+
+    def test_root_operations_and_existing_null(self):
+        for value in (None, False, 7, 'root', [1], {'nested': []}):
+            for operation in ('add', 'replace'):
+                result = apply_patch(None, [{'op': operation, 'path': '', 'value': value}])
+                self.assertEqual(result, value)
+        for operation in ('add', 'replace'):
+            for value in ([{'nested': []}], {'nested': []}):
+                document = {'old': []}
+                before = copy.deepcopy(value)
+                result = apply_patch(document, [{'op': operation, 'path': '', 'value': value}])
+                (result[0]['nested'] if isinstance(result, list) else result['nested']).append(1)
+                self.assertEqual(value, before)
+                self.assertEqual(document, {'old': []})
+        self.assertIsNone(apply_patch(None, [{'op': 'test', 'path': '', 'value': None}]))
+        self.assertEqual(apply_patch(0, [{'op': 'replace', 'path': '', 'value': []},
+                                       {'op': 'add', 'path': '/0', 'value': 'x'}]), ['x'])
+        self.assertEqual(apply_patch({'x': None}, [{'op': 'test', 'path': '/x', 'value': None},
+                                                  {'op': 'remove', 'path': '/x'}]), {})
+        with self.assertRaises(ValueError):
+            apply_patch({}, [{'op': 'test', 'path': '/x', 'value': None}])
+        with self.assertRaises(ValueError):
+            apply_patch({}, [{'op': 'remove', 'path': ''}])
+
+    def test_object_keys_are_not_array_indices(self):
+        document = {'': {'a/b': {'~1': 0}}, '-': 1, '00': 2, '%2F': 3,
+                    'é': 4, 'e\u0301': 5, '\x00': 6}
+        operations = [{'op': 'replace', 'path': path, 'value': index}
+                      for index, path in enumerate(('//a~1b/~01', '/-', '/00', '/%2F',
+                                                    '/e\u0301', '/\x00'), 10)]
+        result = apply_patch(document, operations)
+        self.assertEqual(result, {'': {'a/b': {'~1': 10}}, '-': 11, '00': 12,
+                                 '%2F': 13, 'é': 4, 'e\u0301': 14, '\x00': 15})
+
+    def test_array_boundaries_and_duplicate_operations(self):
+        operations = [{'op': 'add', 'path': '/0', 'value': 'a'},
+                      {'op': 'add', 'path': '/0', 'value': 'b'},
+                      {'op': 'add', 'path': '/2', 'value': 'c'},
+                      {'op': 'remove', 'path': '/1'},
+                      {'op': 'test', 'path': '/1', 'value': 'c'}]
+        self.assertEqual(apply_patch([], operations), ['b', 'c'])
+        for token in ('00', '01', '-1', '+1', ' 0', '0 ', '0\n', '١', '０', '', '9' * 60):
+            for operation in ('add', 'remove', 'replace', 'test'):
+                with self.subTest(token=token, operation=operation), self.assertRaises(ValueError):
+                    apply_patch([0], [{'op': operation, 'path': '/' + token, 'value': 0}])
+        for operation in ('remove', 'replace', 'test'):
+            for token in ('1', '-'):
+                with self.subTest(token=token, operation=operation), self.assertRaises(ValueError):
+                    apply_patch([0], [{'op': operation, 'path': '/' + token, 'value': 0}])
+
+    def test_recursive_json_equality(self):
+        same = [({'a': [1, {'flag': False}]}, {'a': [1.0, {'flag': False}]}),
+                ({'a': 1, 'b': 2}, {'b': 2.0, 'a': 1.0})]
+        for document, value in same:
+            self.assertEqual(apply_patch(document, [{'op': 'test', 'path': '', 'value': value}]),
+                             document)
+        different = [(True, 1), (False, 0), ([{'flag': True}], [{'flag': 1}]),
+                     ({'a': [False]}, {'a': [0]}), ([1, 2], [2, 1]),
+                     ({'a': None}, {}), ('1', 1)]
+        for document, value in different:
+            with self.subTest(document=document, value=value), self.assertRaises(ValueError):
+                apply_patch(document, [{'op': 'test', 'path': '', 'value': value}])
+
+    def test_invalid_operations_are_atomic(self):
+        bad = [None, [], 'add', {}, {'op': 'add'}, {'path': '/new'},
+               {'op': True, 'path': '/new'}, {'op': [], 'path': '/new'},
+               {'op': {}, 'path': '/new'}, {'op': 'add', 'path': None, 'value': 0},
+               {'op': 'copy', 'path': '/new', 'from': '/x'},
+               {'op': 'move', 'path': '/new', 'from': '/x'},
+               {'op': 'unknown', 'path': '/new'},
+               *({'op': op, 'path': '/x'} for op in ('add', 'replace', 'test')),
+               {'op': 'remove', 'path': '/missing'},
+               {'op': 'replace', 'path': '/missing', 'value': 0},
+               {'op': 'add', 'path': '/missing/child', 'value': 0},
+               {'op': 'add', 'path': '/x/child', 'value': 0}]
+        for invalid in bad:
+            document = {'x': None, 'keep': []}
+            operations = [{'op': 'add', 'path': '/new', 'value': {'data': []}}, invalid]
+            before = copy.deepcopy((document, operations))
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                apply_patch(document, operations)
+            self.assertEqual((document, operations), before)
+
+    def test_single_pass_and_iterator_failure(self):
+        class Once:
+            visits = 0
+            def __iter__(self):
+                self.visits += 1
+                if self.visits != 1:
+                    raise AssertionError('operations iterated more than once')
+                yield {'op': 'add', 'path': '/created', 'value': [1]}
+                yield {'op': 'test', 'path': '/created/0', 'value': 1.0}
+                yield {'op': 'remove', 'path': '/created/0', 'ignored': True}
+        operations = Once()
+        self.assertEqual(apply_patch({}, operations), {'created': []})
+        self.assertEqual(operations.visits, 1)
+        sentinel = RuntimeError('operation source canary')
+        document = {'keep': []}
+        def interrupted():
+            yield {'op': 'add', 'path': '/new', 'value': []}
+            raise sentinel
+        with self.assertRaises(RuntimeError) as caught:
+            apply_patch(document, interrupted())
+        self.assertIs(caught.exception, sentinel)
+        self.assertEqual(document, {'keep': []})
+        def stop_at_error():
+            yield {'op': 'unknown', 'path': ''}
+            raise AssertionError('read past rejected operation')
+        with self.assertRaises(ValueError):
+            apply_patch({}, stop_at_error())
+
+    def test_cli_files_stdin_and_atomic_error_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            document = base / 'café config.json'
+            patch = base / '雪 patch.json'
+            document.write_text('{"items":[],"雪":true}', encoding='utf-8')
+            patch.write_text('[{"op":"add","path":"/items/-","value":{"v":"café"}},'
+                             '{"op":"test","path":"/items/0/v","value":"café"}]',
+                             encoding='utf-8')
+            original = {p: p.read_bytes() for p in (document, patch)}
+            def cli(*args, input=None):
+                return subprocess.run([sys.executable, '-B', '-m', 'docpatch', *map(str, args)],
+                    cwd=ROOT, input=input, capture_output=True, encoding='utf-8', timeout=10)
+            expected = {'items': [{'v': 'café'}], '雪': True}
+            for result in (cli(document, patch), cli(document, '-', input=patch.read_text())):
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), expected)
+                self.assertTrue(result.stdout.endswith('\n'))
+                self.assertEqual(result.stderr, '')
+            for raw in (b'{}', b'null', b'[{}]', b'[{"op":"test","path":"/missing","value":null}]',
+                        b'[{"op":"add","path":"/x","value":NaN}]', b'not JSON', b'\xff'):
+                bad = base / 'bad patch.json'; bad.write_bytes(raw)
+                result = cli(document, bad)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, '')
+                self.assertTrue(result.stderr.strip())
+            for raw in ('[{"op":"add","path":"/new","value":1},'
+                        '{"op":"test","path":"/missing","value":null}]',
+                        '[{"op":"test","path":"/雪","value":true,"ignored":NaN}]',
+                        '[{"op":"test","path":"/雪","value":true,"ignored":1e999}]'):
+                result = cli(document, '-', input=raw)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, '')
+                self.assertTrue(result.stderr.strip())
+            empty_patch = base / 'empty patch.json'
+            empty_patch.write_text('[]', encoding='utf-8')
+            null_document = base / 'null document.json'
+            null_document.write_text('null', encoding='utf-8')
+            null_result = cli(null_document, empty_patch)
+            self.assertEqual(null_result.returncode, 0, null_result.stderr)
+            self.assertIsNone(json.loads(null_result.stdout))
+            self.assertTrue(null_result.stdout.endswith('\n'))
+            self.assertEqual(null_result.stderr, '')
+            finite_duplicates = base / 'duplicate keys.json'
+            finite_duplicates.write_text('{"x":1,"x":2}', encoding='utf-8')
+            duplicated = cli(finite_duplicates, empty_patch)
+            self.assertEqual(duplicated.returncode, 0, duplicated.stderr)
+            self.assertEqual(json.loads(duplicated.stdout), {'x': 2})
+            self.assertEqual(duplicated.stderr, '')
+            for raw in (b'\xff', b'{', b'{"good":1,"bad":1e999}', b'{"bad":Infinity}',
+                        b'{"x":1e999,"x":0}'):
+                bad = base / 'bad document.json'; bad.write_bytes(raw)
+                result = cli(bad, empty_patch)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, '')
+                self.assertTrue(result.stderr.strip())
+            bad.write_text('{"unused":1e999}', encoding='utf-8')
+            discarded = cli(bad, '-', input='[{"op":"replace","path":"","value":0}]')
+            self.assertEqual(discarded.returncode, 2)
+            self.assertEqual(discarded.stdout, '')
+            self.assertTrue(discarded.stderr.strip())
+            for args in ((), (document,), (document, patch, patch),
+                         (base / 'missing', patch), (document, base / 'missing')):
+                result = cli(*args)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, '')
+                self.assertTrue(result.stderr.strip())
+            for path, data in original.items():
+                self.assertEqual(path.read_bytes(), data)
+
+
+unittest.main(argv=['live-document-patch-verification'])
+"""
+
+
 @pytest.mark.certification
 @pytest.mark.parametrize(
     "scenario",
@@ -1858,6 +2190,7 @@ console.log('Framed JSON stream, cancellation and binary CLI contract verified')
         "safe-zip",
         "http-node",
         "frames-node",
+        "document-patch",
     ],
 )
 def test_legacy_live_chatgpt_coding_uses_original_run(
@@ -1892,6 +2225,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         "safe-zip": _SAFE_ZIP_SOURCES,
         "http-node": _HTTP_NODE_SOURCES,
         "frames-node": _FRAMES_NODE_SOURCES,
+        "document-patch": _DOCUMENT_PATCH_SOURCES,
     }[scenario]
     for relative, text in source_files.items():
         path = repo / relative
@@ -1914,6 +2248,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             "safe-zip": _SAFE_ZIP_VERIFICATION,
             "http-node": _HTTP_NODE_VERIFICATION,
             "frames-node": _FRAMES_NODE_VERIFICATION,
+            "document-patch": _DOCUMENT_PATCH_VERIFICATION,
         }[scenario],
         encoding="utf-8",
     )
@@ -2008,6 +2343,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         task = _HTTP_NODE_TASK + f"\nSelected public Node executable: {node_program}\n"
     elif scenario == "frames-node":
         task = _FRAMES_NODE_TASK + f"\nSelected public Node executable: {node_program}\n"
+    elif scenario == "document-patch":
+        task = _DOCUMENT_PATCH_TASK
     task_file = tmp_path / "task.txt"
     task_file.write_text(task, encoding="utf-8")
     catalog = tmp_path / "providers.json"
@@ -2322,6 +2659,11 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                 "safe-zip": {"bundle_unpack/extract.py", "bundle_unpack/__main__.py"},
                 "http-node": {"byte_asset/range.mjs", "byte_asset/handler.mjs"},
                 "frames-node": {"telemetry/codec.mjs", "telemetry/cli.mjs"},
+                "document-patch": {
+                    "docpatch/pointer.py",
+                    "docpatch/patch.py",
+                    "docpatch/__main__.py",
+                },
                 "deploy-order": {"deploy_order/graph.py", "deploy_order/__main__.py"},
                 "eventlog": {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"},
                 "stocktake": {
