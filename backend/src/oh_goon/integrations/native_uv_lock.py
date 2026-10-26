@@ -1,7 +1,9 @@
-"""Native uv owner for one selected locked project (read-only, offline).
+"""Native uv owner for one selected locked project (offline).
 
 This observes uv's authority; it never decides dependency graph semantics or
 modifies the lock. It is shared by the installed issuer and tooling adapter.
+Native metadata checks can execute project build hooks, so callers must retain
+the selected code-trust boundary rather than treating this as pure inspection.
 """
 
 from __future__ import annotations

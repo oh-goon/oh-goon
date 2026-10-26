@@ -26,6 +26,7 @@ from oh_goon.services.fleet_native_run_contract_compiler import (
     DeploymentRunContractPolicy,
     compile_native_prework_run_contract,
 )
+from tests.factories.python_goon_projects import write_dynamic_metadata_probe
 from tests.unit.services.test_group_a_precommit_native_issuer_migration import _capture, _setup
 
 
@@ -146,6 +147,68 @@ def test_compiles_original_plan_and_six_native_claims_without_admission(tmp_path
         assert connection.total_changes == prework.total_changes
     assert journal.read_view().run_detail(event.fleet_run_id) is None
     assert readings.count("uv") == 2 and readings.count("tools") == 2
+
+
+def test_compiler_untrusted_locked_selection_refuses_before_native_metadata_or_admission(
+    tmp_path, monkeypatch
+):
+    from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+    from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
+    from oh_goon.core.models.fleet_plan_requirements import UvProjectRequirement
+    from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
+    from oh_goon.core.vocabulary import OperationAction
+    from tests.factories.capabilities import capability_snapshot
+    from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+
+    selected = lock_owner._selected_projects
+    measure = lock_owner._measure
+    journal, intent, event, authority, profile, _ = setup_native(tmp_path, monkeypatch)
+    # Restore the real UV owner; only unavailable backend/tool observations keep
+    # the existing fixture adapters.
+    monkeypatch.setattr(lock_owner, "_selected_projects", selected)
+    monkeypatch.setattr(lock_owner, "_measure", measure)
+    original = intent.target
+    plan = ResolvedFleetPlan.create(
+        name=original.plan.name,
+        description=original.plan.description,
+        execution=CicdExecutionPolicy(trust_repository_code=False),
+        requirements=(UvProjectRequirement(lock_mode="locked"),),
+        steps=original.plan.steps,
+        imports=original.plan.imports,
+        step_sources=original.plan.step_sources,
+    )
+    target = structural_fleet_plan_target(plan, source=original.source)
+    admissions = tuple(
+        PlanRepositoryAdmissionEvidence.create(
+            repository_id=item.repository_id,
+            plan_id=plan.plan_id,
+            semantic_preview_id=item.semantic_preview_id,
+            source_authority=item.source_authority,
+            active_step_ids=item.active_step_ids,
+            import_applicability=item.import_applicability,
+        )
+        for item in intent.repository_admissions
+    )
+    intent = intent.model_copy(
+        update={
+            "target": target,
+            "repository_admissions": admissions,
+            "capability": capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+        }
+    )
+    markers = tuple(write_dynamic_metadata_probe(item.path) for item in event.targets)
+    with journal._database.transaction(write=True) as connection:
+        before = connection.total_changes
+        prework = _capture(journal, connection, intent, event)
+        with pytest.raises(TrustProtocolError, match="requires isolated native freshness"):
+            compile_native_prework_run_contract(
+                prework=prework,
+                deployment_policy=DeploymentRunContractPolicy.freeze(profile),
+                path_authority=authority,
+            )
+        assert connection.total_changes == before
+        assert journal.read_view_from_connection(connection).run_detail(event.fleet_run_id) is None
+    assert all(not marker.exists() for marker in markers)
 
 
 @pytest.mark.parametrize(

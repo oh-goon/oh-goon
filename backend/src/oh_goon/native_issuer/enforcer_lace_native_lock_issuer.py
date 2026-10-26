@@ -25,6 +25,7 @@ from oh_goon.core.enforcer_lace_trust import (
     canonical_bytes,
     digest,
 )
+from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_requirements import UvLockMode, UvProjectRequirement
 from oh_goon.core.models.run_events import RunAdmittedEvent
 from oh_goon.core.models.target import FleetPlanTarget
@@ -48,6 +49,15 @@ def _selected_projects(
     requirements = tuple(r for r in target.plan.requirements if isinstance(r, UvProjectRequirement))
     if not requirements:
         raise TrustProtocolError("admitted Plan has no selected native uv lock authority")
+    if (
+        isinstance(target.plan.execution, CicdExecutionPolicy)
+        and not target.plan.execution.trust_repository_code
+        and any(requirement.lock_mode == "locked" for requirement in requirements)
+    ):
+        raise TrustProtocolError(
+            "Untrusted locked repository UV requires isolated native freshness before "
+            "pre-admission proof; host metadata checks are unsupported"
+        )
     pairs = tuple(
         sorted(
             ((r.project, r.group, r.lock_mode) for r in requirements),

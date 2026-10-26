@@ -198,6 +198,17 @@ explicit imports of those switches are refused for managed UV Steps. Other nativ
 UV configuration, credentials, certificates and transport settings retain their
 native ownership.
 
+The fixed native pre-admission issuer refuses an untrusted repository-owned UV
+selection in locked mode. Native `uv lock --check --offline` can execute PEP 517
+metadata/build hooks on the controller host, and this issuer cannot establish
+that freshness inside the selected isolation boundary. It refuses before the
+native check rather than signing a weaker proof. Trusted locked selections keep
+their native freshness check; frozen untrusted selections retain exact byte/mode
+identity without one. Package-owned runtimes remain outside repository UV
+requirements and perform their selected preparation inside the original Step
+boundary. The native issuer restriction is separate from the existing isolated
+`uv sync --locked` execution capability.
+
 Resolved Plan contract 46 requires explicit lock mode. Database schema 90 rejects
 older schema-89 state before decoding incompatible contract-45 Journal payloads;
 they are not corruption and are never reinterpreted as frozen. Quiesce the old writer before

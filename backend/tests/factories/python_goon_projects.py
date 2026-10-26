@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 from collections.abc import Iterator
@@ -19,6 +21,57 @@ from oh_goon.runtime import goon_templates
 from oh_goon.runtime.league_folders import LeagueFolderStore
 
 SHOWCASE = Path(__file__).resolve().parents[3] / "templates/goons/general/orders-taskflow"
+
+
+def write_dynamic_metadata_probe(path: Path) -> Path:
+    """A benign native backend whose metadata work exposes host execution."""
+    path.mkdir(parents=True, exist_ok=True)
+    marker = path / "native-metadata-marker"
+    metadata = (
+        '[project]\nname="native-metadata-probe"\ndynamic=["version"]\n'
+        'requires-python=">=3.12"\n[build-system]\nrequires=[]\n'
+        'build-backend="metadata_probe"\nbackend-path=["."]\n'
+    )
+    (path / "pyproject.toml").write_text(metadata)
+    (path / "metadata_probe.py").write_text(
+        dedent("""\
+        from pathlib import Path
+        import zipfile
+
+        def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+            Path(__file__).with_name("native-metadata-marker").write_text("native backend ran")
+            filename = "native_metadata_probe-1.0.0-py3-none-any.whl"
+            with zipfile.ZipFile(Path(wheel_directory) / filename, "w") as wheel:
+                wheel.writestr("native_metadata_probe.py", "VALUE = 1\\n")
+                wheel.writestr("native_metadata_probe-1.0.0.dist-info/METADATA", "Metadata-Version: 2.1\\nName: native-metadata-probe\\nVersion: 1.0.0\\n")
+                wheel.writestr("native_metadata_probe-1.0.0.dist-info/WHEEL", "Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n")
+                wheel.writestr("native_metadata_probe-1.0.0.dist-info/RECORD", "")
+            return filename
+
+        build_editable = build_wheel
+        """)
+    )
+    uv = shutil.which("uv")
+    assert uv is not None, "native uv is required"
+    with tempfile.TemporaryDirectory(prefix="oh-goon-dynamic-metadata-lock-") as directory:
+        subprocess.run(
+            [uv, "lock", "--project", str(path), "--offline"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={
+                "PATH": os.defpath,
+                "HOME": directory,
+                "UV_CACHE_DIR": directory,
+                "UV_PYTHON": sys.executable,
+                "UV_PYTHON_DOWNLOADS": "never",
+            },
+        )
+    assert marker.is_file(), "the positive native metadata baseline must execute the backend"
+    marker.unlink()
+    (path / "pyproject.toml").write_text(metadata + "\n[dependency-groups]\nmetadata-audit=[]\n")
+    return marker
 
 
 def write_isolated_build_project(path: Path, *, stale_lock: bool = False) -> None:

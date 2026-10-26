@@ -201,10 +201,9 @@ def _failure_reason(
         return f"Executable not found: {executable}."
     if returncode != PLAN_TIMEOUT_RETURN_CODE:
         return None
-    timeout = getattr(step, "timeout_seconds", None)
-    if isinstance(timeout, (int, float)):
-        rendered = f"{timeout:g}"
-        return f"Step timed out after {rendered} seconds."
+    # The authored timeout is not the effective budget: execution can apply a
+    # shorter Run/repair deadline, and elapsed time can include process cleanup.
+    # No effective budget is retained in this execution evidence.
     return "Step timed out."
 
 
