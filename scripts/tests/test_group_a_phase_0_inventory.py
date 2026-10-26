@@ -38,6 +38,7 @@ EXPECTED_MUTATION_ROUTES = {
             "preview_shared_plan_lock",
             "preview_shared_plan",
             "run_shared_plan",
+            "repair_shared_plan",
             "save_lineup",
         }
     ),
@@ -141,6 +142,24 @@ def test_canonical_call_edges_and_current_migration_seams_still_exist() -> None:
             "FleetPlanService.run_reviewed",
             {
                 "self.prepare_reviewed_execution_target",
+                "self._runs.start_prepared_plan",
+            },
+        ),
+        (
+            "services/shared_plans.py",
+            "SharedPlanService.repair",
+            {
+                "self._plans.require_plan_ingress_preparation",
+                "self._store.read",
+                "self._plans.repair",
+            },
+        ),
+        (
+            "services/fleet_plans.py",
+            "FleetPlanService.repair",
+            {
+                "self.require_plan_ingress_preparation",
+                "self._runs.begin_agent_campaign",
                 "self._runs.start_prepared_plan",
             },
         ),

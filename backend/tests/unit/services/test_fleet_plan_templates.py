@@ -36,6 +36,7 @@ def test_shipped_template_classification_is_category_owned() -> None:
     expected = {
         "agents": TemplateClassification.PRODUCTION,
         "advanced": TemplateClassification.TEACHING_EXAMPLE,
+        "general": TemplateClassification.TEACHING_EXAMPLE,
         "kubernetes": TemplateClassification.PRODUCTION,
         "ml": TemplateClassification.TEACHING_EXAMPLE,
         "oci": TemplateClassification.PRODUCTION,
@@ -45,12 +46,10 @@ def test_shipped_template_classification_is_category_owned() -> None:
     }
 
     for catalog in (GOONS.catalog().templates, PLANS.catalog().templates):
-        observed: dict[str, TemplateClassification] = {}
+        assert catalog
         for template in catalog:
             category = template.template_key.split("/", 1)[0]
-            previous = observed.setdefault(category, template.classification)
-            assert previous is template.classification
-        assert observed == expected
+            assert template.classification is expected[category], template.template_key
 
 
 def test_every_shipped_plan_is_a_small_ordered_goon_roster() -> None:

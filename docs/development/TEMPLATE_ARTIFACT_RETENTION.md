@@ -40,6 +40,10 @@ and references are repository-scoped: an SHA alone is not retrieval authority.
 
 ### Concrete shipped choices
 
+- [`general/orders-taskflow`](../../templates/goons/general/orders-taskflow/goon.yml):
+  the extracted, transformed and final JSON files are evidence. Scalar outputs
+  carry this Run's values into later Steps; these declarations do not retain
+  downloadable bytes after attempt scratch is disposed.
 - [`python/test`](../../templates/goons/python/test/goon.yml): the JUnit report
   provides test *evidence*; coverage policy and optional reports belong to native
   project configuration. No durable bytes are requested.
