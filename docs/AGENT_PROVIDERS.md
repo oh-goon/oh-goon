@@ -635,6 +635,18 @@ remain supported. Responses
 `instructions`, inline `input`, `prompt_cache_key`, `previous_response_id`, and
 `conversation` retain their native wire meaning. See the native [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
+The broker injects the captured repository evidence and Skill on each request;
+it does not bind provider-held history references to that capture or establish
+their ownership. A fresh Step broker retains the selected provider credentials.
+History available through those credentials therefore remains part of the
+provider's trust boundary. Workloads requiring separate history need
+provider/account/project separation enforced by the provider. The existing
+catalog selects endpoints and credential references; it does not establish
+storage isolation. Qualify the selected provider's actual behavior before relying
+on that isolation. For OpenAI, [conversation state](https://developers.openai.com/api/docs/guides/conversation-state)
+documents durable conversations and response chaining; the broker's transport
+tests establish field preservation, not live retrieval or history isolation.
+
 For Pi's retained explicit configuration surface, native inference must target
 `http://127.0.0.1:18743` inside the namespace, use the selected API path/model and either no client key or the dummy
 key `oh-goon-local` (also supplied as `OH_GOON_NATIVE_BROKER_KEY`). The broker
