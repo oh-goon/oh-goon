@@ -284,7 +284,6 @@ def completed_phase_steps(
     for step in evidence.steps:
         if (
             step.status != "COMPLETED"
-            or step.returncode != 0
             or len(step.attempts) != 1
             or step.attempts[0].supervisor is None
             or step.attempts[0].supervisor.final_process_group_quiescent is not True

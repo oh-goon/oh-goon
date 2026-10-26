@@ -20,6 +20,10 @@ from oh_goon.integrations.fleet_plan_compilation import parse_goon_template
 from oh_goon.integrations.python_goon_projects import python_goon_generated_paths
 from oh_goon.integrations.source_snapshot import snapshot_source_directory
 from oh_goon.runtime.template_discovery import discover_template_packages
+from oh_goon.services.template_plan_drafts import (
+    AGENT_REVIEW_EXAMPLE,
+    agent_review_companion_files,
+)
 
 ROOT = Path(__file__).resolve().parents[5]
 CATALOG_ARCHIVE_ENV = "OH_GOON_RELEASE_CATALOG_ARCHIVE"
@@ -38,9 +42,13 @@ def staged_template_catalogs(root: Path) -> Iterator[Path]:
     goons = root / "templates/goons"
     generated: list[str] = []
     yaml_identities: dict[str, str] = {}
-    for key, package in discover_template_packages(
-        goons, source_name="goon.yml", kind="Goon"
-    ).items():
+    packages = discover_template_packages(goons, source_name="goon.yml", kind="Goon")
+    companions = (
+        agent_review_companion_files(root)
+        if "agents/agentic-review-repair-loop" in packages
+        else {}
+    )
+    for key, package in packages.items():
         source = package / "goon.yml"
         with source.open("r", encoding="utf-8", newline="") as stream:
             content = stream.read()
@@ -55,6 +63,12 @@ def staged_template_catalogs(root: Path) -> Iterator[Path]:
             snapshot_source_directory(
                 source, stage / name, label=f"release {name} catalog", exclude_paths=exclusions
             )
+        examples = stage / "examples"
+        examples.mkdir()
+        for relative, content in companions.items():
+            destination = examples / AGENT_REVIEW_EXAMPLE / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content.encode("utf-8"))
         for key, expected in yaml_identities.items():
             if sha256_file(stage / "goons" / key / "goon.yml") != expected:
                 raise FleetPlanInvalid("Goon changed while release catalog source was captured")
@@ -64,7 +78,7 @@ def staged_template_catalogs(root: Path) -> Iterator[Path]:
 def _archive_catalogs(stage: Path) -> tuple[Path, str]:
     archive_path = stage.parent / "catalogs.tar"
     with tarfile.open(archive_path, mode="w") as archive:
-        for name in ("goons", "plans"):
+        for name in ("goons", "plans", "examples"):
             archive.add(stage / name, arcname=name)
     return archive_path, sha256_file(archive_path)
 

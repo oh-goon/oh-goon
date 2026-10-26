@@ -15,6 +15,12 @@ def add_plan_commands(
         )
         command.add_argument("configuration", type=Path)
         command.add_argument("--json", action="store_true", dest="as_json")
+        if name == "inspect":
+            command.add_argument(
+                "--acquire",
+                action="store_true",
+                help="Explicitly acquire selected Git source to inspect its contract without locking or execution",
+            )
     run = subparsers.add_parser("run", help="Execute one locked run.yml through Fleet")
     run.add_argument("configuration", type=Path)
     run.add_argument("--json", action="store_true", dest="as_json")

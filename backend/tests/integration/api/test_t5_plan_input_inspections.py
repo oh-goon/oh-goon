@@ -49,8 +49,9 @@ def test_inspection_accepted_reports_source_identity_but_never_lock_or_run():
         "python-quality",
         expected_revision=REV,
         inputs={"coverage_threshold": "85"},
+        agent=None,
+        repository_ids=set(),
     )
-    assert service.mock_calls == [service.inspect_inputs.call_args] or not service.run.called
     service.lock_preview.assert_not_called()
     service.run.assert_not_called()
 

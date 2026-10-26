@@ -84,6 +84,36 @@ def _inspect(client, document, inputs, revision=None):
     )
 
 
+@pytest.mark.parametrize(
+    "inputs,expected_status",
+    [
+        ({}, 200),
+        ({"typechecker": "pyright"}, 200),
+        ({"project": ""}, 400),
+        ({"dependency_group": None}, 200),
+        ({"project": None}, 400),
+    ],
+)
+def test_shared_plan_http_preserves_omitted_equal_empty_and_null_caller_values(
+    journey, inputs, expected_status
+):
+    client, store, plans, runs, _, _ = journey
+    document = _create_from_shipped(client, "python/quality")
+    response = client.post(
+        f"{API}/shared-plan-lock-previews",
+        json={
+            "plan_key": document["plan_key"],
+            "expected_revision": document["sha256"],
+            "inputs": inputs,
+        },
+    )
+    assert response.status_code == expected_status, response.text
+    assert plans.resolve_with_source.call_args.kwargs["inputs"] == inputs
+    plans.resolve_with_source.assert_called_once()
+    runs.history.assert_not_called()
+    assert not (store.path(document["plan_key"]).parent / "goon.lock").exists()
+
+
 def _assert_rejected(response, expected_code, expected_input=None):
     assert response.status_code == 200, response.text
     body = response.json()

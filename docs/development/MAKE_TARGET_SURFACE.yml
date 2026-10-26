@@ -81,6 +81,7 @@ noncanonical_make_target_classes:
   - test-python-complete
   - test-python-core-diagnostic
   - test-python-dependency-complete
+  - test-python-projects
   - test-real-lifecycle
   - test-real-world
   - test-real-world-parallel

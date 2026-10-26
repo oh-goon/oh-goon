@@ -61,10 +61,13 @@ workspace member/exclusion and virtual lock-source paths must all stay inside
 the captured package so relocation preserves their native project authority.
 
 The existing source-snapshot and Hashmarks owners capture authored package
-contents. Generated environments/caches, declared output locations and
-`goon.lock` are excluded. Local sync, tests and training therefore do not add
-those generated files to package identity. There is no separately authored
-file manifest or second package-content hash engine.
+contents. Generated environments/caches, Python distribution metadata
+(`*.egg-info`, `*.dist-info` and `.eggs`), declared output locations and
+`goon.lock` are excluded by the canonical source-membership policy. Git ignore
+files do not select authored membership. Local sync, tests and training therefore
+do not add those generated files to package identity. Authored directories named
+`build` or `dist` remain source unless an output declaration excludes them.
+There is no separately authored file manifest or second package-content hash engine.
 
 ## Explicit inputs and installed commands
 

@@ -140,16 +140,40 @@ def test_async_human_run_reports_the_admitted_run(capsys):
     ]
 
 
-def test_wait_interruption_requests_original_durable_cancellation(monkeypatch, capsys):
+@pytest.mark.parametrize("status", [FleetRunStatus.RUNNING, FleetRunStatus.CANCELLED])
+def test_wait_interruption_requests_original_durable_cancellation(monkeypatch, capsys, status):
     from unittest.mock import Mock
 
     from oh_goon import cli_runtime_plans as command
 
     runtime = _runtime()
-    runtime.runs.cancel = Mock()
+    runtime.runs.cancel = Mock(return_value=SimpleNamespace(status=status))
     monkeypatch.setattr(
         command, "_wait_for_terminal_with_progress", Mock(side_effect=KeyboardInterrupt)
     )
     assert _run(runtime, _args("--json")) == 130
     runtime.runs.cancel.assert_called_once_with("fleet-1")
-    assert json.loads(capsys.readouterr().out)["status"] == "interrupted"
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["status"] == "interrupted"
+    assert receipt["cancellation_requested"] is True
+    assert receipt["execution_status"] == status.value
+    assert receipt["execution_terminal"] is status.terminal
+    assert receipt["cleanup"] == "not-established-by-interruption"
+    assert receipt["readback_argv"] == ["oh-goon", "plan", "handoff", "fleet-1", "--json"]
+
+
+def test_interrupted_cancel_refusal_retains_durable_readback_and_uncertainty(monkeypatch, capsys):
+    from unittest.mock import Mock
+
+    from oh_goon import cli_runtime_plans as command
+
+    runtime = _runtime()
+    runtime.runs.cancel = Mock(side_effect=InvalidRequest("Unavailable cancellation"))
+    monkeypatch.setattr(
+        command, "_wait_for_terminal_with_progress", Mock(side_effect=KeyboardInterrupt)
+    )
+    assert _run(runtime, _args("--json")) == 130
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["cancellation_requested"] is False
+    assert receipt["execution_status"] is receipt["execution_terminal"] is None
+    assert receipt["readback_argv"][3] == "fleet-1"

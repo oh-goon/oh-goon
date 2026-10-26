@@ -1,4 +1,5 @@
 import { FleetRepositoryScope } from "@generated/enums";
+import { decodeResponse, operations } from "@generated/operations";
 
 import { BrowserFixtureApiClient } from "../BrowserFixtureApiClient";
 import { FIXTURE_REPOSITORIES, FIXTURE_REPOSITORY_LIST } from "./identities";
@@ -6,6 +7,15 @@ import { FIXTURE_PLANS, FIXTURE_SHA } from "./plans";
 import { DEFAULT_RUN_ID } from "./runIds";
 
 describe("BrowserFixtureApiClient canonical fixture contracts", () => {
+  it("serves a campaign without fabricating a Run and validates its generated response contract", async () => {
+    const client = new BrowserFixtureApiClient();
+    const campaign = decodeResponse(operations.get_agent_campaign.operationId, await client.agentCampaign("campaign-browser-refused"));
+    expect(campaign.runs).toEqual([]);
+    expect(campaign.decision_history.map((record) => record.fact.kind)).toEqual(["intent", "decision"]);
+    expect(campaign.unstarted_selection?.selected_step_ids).toEqual(["refused-review-step"]);
+    await expect(client.agentCampaign("unknown-campaign")).rejects.toThrow("Unknown fixture campaign");
+  });
+
   it("scripts T5/T6 inspection envelopes without granting execution authority", async () => {
     const client = new BrowserFixtureApiClient();
     const document = FIXTURE_PLANS.document("python-quality");

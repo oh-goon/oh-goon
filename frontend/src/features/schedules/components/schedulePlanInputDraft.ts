@@ -20,7 +20,7 @@ export function editSchedulePlanInput(
   defaults: Readonly<ExecutionPlanInputValues>,
   previous: SchedulePlanInputDraft | null,
   name: string,
-  value: string | null,
+  value: string | null | undefined,
 ): SchedulePlanInputDraft {
   return {
     documentIdentity,

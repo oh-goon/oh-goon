@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useMutationBusy, usePresentationLocationAuthority } from "@/app/ApiClientProvider";
-import { readLocationHash } from "@/app/navigation";
+import { appLocationHash, readLocationHash } from "@/app/navigation";
 import { useFleetRunActions, useFleetRunStatus, useFleetSnapshot } from "@/app/FleetRunProvider";
 import { reviewChildRunId } from "@/app/fleetRun/runMutationHandoff";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -266,7 +266,7 @@ export function RunsPage({
   };
 
   return <main className="page">
-    <PageHeading eyebrow={t("runsPage.eyebrow")} title={t("runsPage.title")} description={t("runsPage.description")} action={<button className="button button--primary" type="button" onClick={onOpenSharedRuns}>{t("runsPage.newRun")}</button>} />
+    <PageHeading eyebrow={t("runsPage.eyebrow")} title={t("runsPage.title")} description={t("runsPage.description")} action={<div className="button-row"><a className="button button--secondary" href={appLocationHash("runs", { campaign: "" })}>{t("gameTape.campaign.open")}</a><button className="button button--primary" type="button" onClick={onOpenSharedRuns}>{t("runsPage.newRun")}</button></div>} />
     {error ? <ErrorBanner message={error} /> : null}
     {requestedReview.historyOutcome || requestedReview.historyStatus || requestedReview.historySource || requestedReview.historyRepositoryId || requestedReview.historyFromAt || requestedReview.historyPlanQuery ? <div className="panel compact-card execution-filter-context" role="status">
       <div><strong>{t("runsPage.filteredTitle")}</strong><small>{requestedReview.historyRepositoryId ? t("runsPage.repositoryFilter", { repository: requestedReview.historyRepositoryId }) : requestedReview.historyPlanQuery ? requestedReview.historyPlanQuery : requestedReview.historyFromAt ? t("executionOverview.timeline.filteredPeriod") : requestedReview.historySource ? t(`history.sources.${requestedReview.historySource}`) : t(executionFilterKey(requestedReview.historyOutcome, requestedReview.historyStatus))}</small></div>

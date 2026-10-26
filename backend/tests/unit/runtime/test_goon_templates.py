@@ -120,6 +120,27 @@ def test_goon_package_is_exact_two_file_source(tmp_path: Path) -> None:
         store.read("general/valid")
 
 
+def test_python_goon_missing_lock_names_its_project_authority(tmp_path: Path) -> None:
+    directory = _package(
+        tmp_path, "general/native-demo", "runtime: python\nsteps:\n- run: native-demo\n"
+    )
+    (directory / "pyproject.toml").write_text('[project]\nname = "native-demo"\n')
+    for name in ("src", "tests", "resources"):
+        (directory / name).mkdir()
+    (directory / "uv.lock").write_text("version = 1\n")
+    store = GoonTemplateStore(tmp_path)
+    assert store.source("general/native-demo").compiled.runtime == "python"
+
+    (directory / "uv.lock").unlink()
+    with pytest.raises(FleetPlanSourceNotFound) as error:
+        store.source("general/native-demo")
+    message = str(error.value)
+    assert "missing uv.lock" in message
+    assert "standalone Python project" in message
+    assert "unexpected" not in message
+    assert "exactly goon.yml and README.md" not in message
+
+
 def test_goon_catalog_ignores_only_windows_zone_identifier_transport_sidecars(
     tmp_path: Path,
 ) -> None:

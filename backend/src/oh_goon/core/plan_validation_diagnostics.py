@@ -8,7 +8,11 @@ from __future__ import annotations
 import re
 from typing import NotRequired, TypedDict
 
-from oh_goon.core.errors import FleetPlanInputRejected, RunConfigurationInvalid
+from oh_goon.core.errors import (
+    FleetPlanInputRejected,
+    FleetPlanSourceAcquisitionRequired,
+    RunConfigurationInvalid,
+)
 
 _SCHEMA = "oh-goon.plan-validation-diagnostic/v1"
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,63}\Z")
@@ -70,6 +74,7 @@ class SafePlanValidationDiagnostic(TypedDict):
 def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
     """Project a *single* received rejection without a second semantic decision."""
     fields: list[str] = []
+    inputs: list[str]
     if isinstance(exc, RunConfigurationInvalid) and exc.diagnostic_code in _CONFIG_ACTIONS:
         code = exc.diagnostic_code
         inputs = []
@@ -81,6 +86,14 @@ def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
                 for field in exc.fields
                 if field and all(part in _CONFIG_FIELDS for part in field.split("."))
             }
+        )
+    elif isinstance(exc, FleetPlanSourceAcquisitionRequired):
+        code = "SOURCE_ACQUISITION_REQUIRED"
+        inputs = []
+        stage = "plan_resolution"
+        action = (
+            "Inspect the selected Git contract with 'oh-goon config inspect run.yml --acquire', "
+            "or freeze its source and values with 'oh-goon lock run.yml'."
         )
     elif isinstance(exc, FleetPlanInputRejected) and exc.diagnostic_code in _NEXT_ACTIONS:
         code = exc.diagnostic_code

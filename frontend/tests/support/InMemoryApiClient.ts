@@ -202,6 +202,8 @@ export class InMemoryApiClient implements ApiClient {
   fleetFailureRepositories(..._args: Parameters<ApiClient["fleetFailureRepositories"]>): Promise<FleetFailureRepositoryPage> { return unsupported("fleetFailureRepositories"); }
   fleetRunHistory(..._args: Parameters<ApiClient["fleetRunHistory"]>): ReturnType<ApiClient["fleetRunHistory"]> { return unsupported("fleetRunHistory"); }
   fleetRunDetail(..._args: Parameters<ApiClient["fleetRunDetail"]>): ReturnType<ApiClient["fleetRunDetail"]> { return unsupported("fleetRunDetail"); }
+  agentCampaign(..._args: Parameters<ApiClient["agentCampaign"]>): ReturnType<ApiClient["agentCampaign"]> { return unsupported("agentCampaign"); }
+  repairSharedPlan(..._args: Parameters<ApiClient["repairSharedPlan"]>): ReturnType<ApiClient["repairSharedPlan"]> { return unsupported("repairSharedPlan"); }
   compareFleetRuns(..._args: Parameters<ApiClient["compareFleetRuns"]>): ReturnType<ApiClient["compareFleetRuns"]> { return unsupported("compareFleetRuns"); }
   gameTapePerformance(..._args: Parameters<ApiClient["gameTapePerformance"]>): ReturnType<ApiClient["gameTapePerformance"]> { return unsupported("gameTapePerformance"); }
   gameTapeFailureHistory(..._args: Parameters<ApiClient["gameTapeFailureHistory"]>): ReturnType<ApiClient["gameTapeFailureHistory"]> { return unsupported("gameTapeFailureHistory"); }

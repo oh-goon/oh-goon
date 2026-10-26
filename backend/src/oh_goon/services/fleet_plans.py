@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import time
 from collections.abc import Callable, Mapping
@@ -22,7 +23,11 @@ from oh_goon.core.errors import (
     StateConflict,
 )
 from oh_goon.core.execution_lock_identity import build_execution_lock, verify_execution_lock
-from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
+from oh_goon.core.models.agent_providers import (
+    AgentConnection,
+    AgentProvidersConfig,
+    ResolvedNativeAgent,
+)
 from oh_goon.core.models.agent_repair import (
     MAX_AGENT_CAMPAIGN_MESSAGE_CHARS,
     TRUNCATED_AGENT_CAMPAIGN_MESSAGE,
@@ -68,6 +73,7 @@ from oh_goon.core.models.goon_plan_source import (
     TeamGoonSource,
 )
 from oh_goon.core.models.run import FleetRunDetail, FleetRunState
+from oh_goon.core.models.run_configuration import RunAgentSelection
 from oh_goon.core.models.schedule import (
     ScheduleCreate,
     ScheduleDefinition,
@@ -108,6 +114,7 @@ from oh_goon.services.fleet_plan_repair import (
 from oh_goon.services.fleet_plan_resolution_context import (
     AgentCaptureOptions,
     AgentConnectionSelection,
+    PreparedAgentPlan,
 )
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
@@ -324,6 +331,7 @@ class FleetPlanService:
                 all_repositories=False,
                 fleet_run_id=fleet_run_id,
                 source=FleetRunSource.MANUAL,
+                created_agent_deliveries=target.agent_deliveries,
             )
 
     def _prepare_native_agent(
@@ -441,6 +449,186 @@ class FleetPlanService:
     def require_plan_ingress_preparation(self, fleet_run_id: str | None) -> None:
         """Pre-resolution Run enrollment for CLI/HTTP; final admission is separate."""
         self._runs.require_plan_ingress_preparation(fleet_run_id)
+
+    def prepare_agent_plan(
+        self,
+        plan_path: Path,
+        *,
+        selection: RunAgentSelection,
+        repository: Path,
+        inputs: dict[str, PlanInputValue],
+        root_expected_name: str,
+        require_review_phases: bool | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> PreparedAgentPlan:
+        """Capture an explicit HTTP selection with the same canonical Agent resolver as CLI."""
+        from oh_goon.runtime.agent_providers import (
+            agent_providers_path,
+            load_agent_providers,
+            resolve_native_agent,
+        )
+
+        if not self._standard_local_fleet or self._content_store is None:
+            raise FleetPlanInvalid("Agent Plans require ordinary local Fleet execution")
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Agent preparation cancelled")
+        try:
+            selected_inputs = selection.caller_inputs(inputs)
+        except ValueError as exc:
+            raise FleetPlanInvalid(str(exc)) from exc
+        roots = []
+        for value in (selection.repository_root, selection.skill_root):
+            path = Path(value)
+            try:
+                if not path.is_absolute() or ".." in path.parts:
+                    raise ValueError("absolute root required")
+                resolved = path.resolve(strict=True)
+                if not resolved.is_dir() or resolved != path:
+                    raise ValueError("direct directory required")
+            except (OSError, RuntimeError, ValueError):
+                raise FleetPlanInvalid(
+                    "Shared Agent repository/Skill roots require existing absolute directories without symlinks"
+                ) from None
+            roots.append(resolved)
+        graph = self._resolver.analyze_source(plan_path, root_expected_name=root_expected_name)
+        graph.validate_agent_selection(
+            native_selected=selection.implementation is not None,
+            model_selected=selection.model_profile is not None,
+            require_review_phases=require_review_phases,
+        )
+        native = None
+        connection = None
+        if selection.implementation is not None:
+            config_path = agent_providers_path(os.environ)
+            config = (
+                load_agent_providers(config_path)
+                if config_path.exists()
+                else AgentProvidersConfig()
+            )
+            assert selection.profile is not None
+            native = resolve_native_agent(
+                config,
+                selection.implementation,
+                selection.profile,
+                workspace=repository,
+                environment=os.environ,
+            )
+            read_only_workspace = all(
+                step.requested_effects.repository_access == "read_only"
+                for owner, identifier in graph.agent_step_sources()
+                for step in graph.node(owner).compiled.steps
+                if isinstance(step, AgentPlanStep) and step.step_id == identifier
+            )
+            native = self._prepare_native_agent(
+                native, repository, read_only_workspace=read_only_workspace
+            )
+        elif selection.model_profile is not None:
+            connection = AgentConnection.select(
+                load_agent_providers(agent_providers_path(os.environ)), selection.model_profile
+            )
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Agent preparation cancelled")
+        skill_lock_path = roots[1] / LOCK_FILE_NAME
+        locked_skills = (
+            load_execution_lock(skill_lock_path).skill_sources
+            if os.path.lexists(skill_lock_path)
+            else ()
+        )
+        options: AgentCaptureOptions = dict(
+            inputs=selected_inputs,
+            repository_root=roots[0],
+            skill_root=roots[1],
+            allowed_acceptance=(selection.acceptance,),
+            extensions_path=None,
+            cancel_requested=cancel_requested,
+            connection=connection,
+            locked_skills=locked_skills,
+            native_agent=native,
+            repository=repository,
+            git_service=self._git_service,
+            source_graph=graph,
+            require_review_phases=require_review_phases,
+            root_expected_name=root_expected_name,
+        )
+        plan, handoffs, source_sha256 = self._resolver.resolve_frozen_agents(plan_path, **options)
+        captured = roots[0] / next(
+            iter(handoffs.values())
+        ).source.repository_reference.removeprefix("local:")
+        if captured.resolve(strict=True) != repository.resolve(strict=True):
+            raise FleetPlanInvalid("Captured Agent repository differs from the selected Team")
+        # The selected Skill pins travel with this capture and every later campaign capture.
+        options["locked_skills"] = plan.skill_sources
+        return PreparedAgentPlan(plan, handoffs, source_sha256, repository, options)
+
+    def run_prepared_agent(
+        self,
+        prepared: PreparedAgentPlan,
+        *,
+        source: SharedPlanSource,
+        expected_plan_id: str,
+        expected_execution_digest: str,
+        repository_ids: set[str],
+        expected_repository_instance_ids: dict[str, str],
+        fleet_run_id: str | None,
+        requested_priority: SchedulingPriority,
+    ) -> FleetRunState:
+        self.require_plan_ingress_preparation(fleet_run_id)
+        self._require_reviewed_agent(
+            prepared,
+            source,
+            expected_plan_id,
+            expected_execution_digest,
+            repository_ids,
+            expected_repository_instance_ids,
+        )
+        from oh_goon.core.agent_review_plan import agent_review_phases
+
+        if agent_review_phases(prepared.plan) or any(
+            agent_phase_role(step) in ("adjudication", "proposal") for step in prepared.plan.steps
+        ):
+            raise FleetPlanInvalid(
+                "Phase-classified Agent Plans require an explicitly authorized bounded repair"
+            )
+        target = self._agent_target(
+            prepared.plan,
+            prepared.handoffs,
+            prepared.source_sha256,
+            next(iter(repository_ids)),
+            source=source,
+        )
+        return self._runs.start_prepared_plan(
+            target,
+            repository_ids=repository_ids,
+            fleet_run_id=fleet_run_id,
+            expected_repository_instance_ids=expected_repository_instance_ids,
+            requested_priority=requested_priority,
+            source=FleetRunSource.SHARED_RUN,
+            created_agent_deliveries=target.agent_deliveries,
+        )
+
+    def _require_reviewed_agent(
+        self,
+        prepared: PreparedAgentPlan,
+        source: SharedPlanSource,
+        expected_plan_id: str,
+        expected_execution_digest: str,
+        repository_ids: set[str],
+        expected_repository_instance_ids: dict[str, str],
+    ) -> None:
+        from oh_goon.core.product_identity import repository_id, repository_subject_instance_id
+
+        if (
+            repository_ids != {repository_id(prepared.repository)}
+            or set(expected_repository_instance_ids) != repository_ids
+            or expected_repository_instance_ids[repository_id(prepared.repository)]
+            != repository_subject_instance_id(prepared.repository)
+        ):
+            raise FleetPlanInvalid("Agent Team instance changed after preview")
+        if source.sha256 != prepared.source_sha256:
+            raise FleetPlanInvalid("Shared Agent source changed after review")
+        _require_expected_plan_identity(prepared.plan, expected_plan_id)
+        if build_execution_lock(prepared.plan).digest != expected_execution_digest:
+            raise FleetPlanInvalid("Agent execution identity changed after preview; preview again")
 
     def resolve(
         self,
@@ -935,6 +1123,7 @@ class FleetPlanService:
                 if isinstance(invocation_source, SharedPlanSource)
                 else FleetRunSource.MANUAL
             ),
+            created_agent_deliveries=target.agent_deliveries if agent_selected else (),
         )
 
     def _agent_target(
@@ -948,6 +1137,7 @@ class FleetPlanService:
         caller_input_file: CallerInputFileIdentity | None = None,
         repository_goon: bool = False,
         lock_artifacts: tuple[LockedExternalArtifact, ...] = (),
+        source: SharedPlanSource | None = None,
     ) -> FleetPlanTarget:
         if self._content_store is None:
             raise FleetPlanInvalid("frozen Agent delivery requires an available content store")
@@ -979,9 +1169,8 @@ class FleetPlanService:
             return FleetPlanTarget(
                 kind="fleet_plan",
                 plan=plan,
-                source=(TeamGoonSource if repository_goon else PlanFileSource)(
-                    sha256=source_sha256
-                ),
+                source=source
+                or (TeamGoonSource if repository_goon else PlanFileSource)(sha256=source_sha256),
                 identity=ExecutionIdentity(
                     digest=build_execution_lock(plan, external_identities=lock_artifacts).digest
                 ),
@@ -1024,6 +1213,12 @@ class FleetPlanService:
         repository_goon: bool = False,
         source_graph: FleetPlanSourceGraph | None = None,
         repository: Path | None = None,
+        agent_selection: RunAgentSelection | None = None,
+        root_expected_name: str | None = None,
+        reviewed_source: SharedPlanSource | None = None,
+        expected_plan_id: str | None = None,
+        expected_execution_digest: str | None = None,
+        expected_repository_instance_ids: dict[str, str] | None = None,
     ) -> AgentRepairResult:
         """Bounded caller-authorized repair, using only original separately admitted Runs.
 
@@ -1036,6 +1231,36 @@ class FleetPlanService:
         if native_workspace is not None and native_agent is None:
             raise FleetPlanInvalid("A native workspace requires its frozen native selection")
         self.require_plan_ingress_preparation(repair_id)
+        if agent_selection is not None:
+            if (
+                native_agent is not None
+                or native_workspace is not None
+                or agent_connection is not None
+            ):
+                raise FleetPlanInvalid(
+                    "Shared Agent selection cannot be mixed with resolved provider authority"
+                )
+            if (
+                reviewed_source is None
+                or expected_plan_id is None
+                or expected_execution_digest is None
+                or expected_repository_instance_ids is None
+                or selected_repository is None
+                or root_expected_name is None
+            ):
+                raise FleetPlanInvalid(
+                    "Reviewed Agent repair requires complete source and target authority"
+                )
+        elif any(
+            value is not None
+            for value in (
+                reviewed_source,
+                expected_plan_id,
+                expected_execution_digest,
+                expected_repository_instance_ids,
+            )
+        ):
+            raise FleetPlanInvalid("Reviewed Agent repair requires its exact captured selection")
         if selected_repository is not None:
             from oh_goon.core.product_identity import repository_id as identify_context_repository
 
@@ -1179,7 +1404,49 @@ class FleetPlanService:
 
         if (stop := stop_requested()) is not None:
             return result(stop)
-        lock = load_execution_lock(lock_path or (plan_path.parent / LOCK_FILE_NAME))
+        prepared_agent_plan = None
+        if agent_selection is not None:
+            assert selected_repository is not None and root_expected_name is not None
+            try:
+                prepared_agent_plan = self.prepare_agent_plan(
+                    plan_path,
+                    selection=agent_selection,
+                    repository=selected_repository,
+                    inputs=selected_inputs,
+                    root_expected_name=root_expected_name,
+                    require_review_phases=review_write_roots is not None,
+                    cancel_requested=lambda: stop_requested() is not None,
+                )
+            except OperationCancelledError:
+                return result(stop_requested() or RepairStop.CANCELLED)
+            if (stop := stop_requested()) is not None:
+                return result(stop)
+            assert reviewed_source is not None
+            assert expected_plan_id is not None and expected_execution_digest is not None
+            assert expected_repository_instance_ids is not None
+            self._require_reviewed_agent(
+                prepared_agent_plan,
+                reviewed_source,
+                expected_plan_id,
+                expected_execution_digest,
+                {repository_id},
+                expected_repository_instance_ids,
+            )
+            selected_inputs = prepared_agent_plan.capture_options["inputs"]
+            agent_repository_root = prepared_agent_plan.capture_options["repository_root"]
+            agent_skill_root = prepared_agent_plan.capture_options["skill_root"]
+            accepted = prepared_agent_plan.capture_options["allowed_acceptance"]
+            native_agent = prepared_agent_plan.capture_options.get("native_agent")
+            if native_agent is not None:
+                native_workspace = prepared_agent_plan.repository
+                require_native_workspace_runtime_separation(
+                    native_workspace, read_only_workspace=False
+                )
+        lock = (
+            build_execution_lock(prepared_agent_plan.plan)
+            if prepared_agent_plan is not None
+            else load_execution_lock(lock_path or (plan_path.parent / LOCK_FILE_NAME))
+        )
         capture_options: AgentCaptureOptions = dict(
             inputs=selected_inputs,
             repository_root=agent_repository_root,
@@ -1197,11 +1464,20 @@ class FleetPlanService:
             repository=native_workspace if native_agent is not None else selected_repository,
             git_service=self._git_service if native_agent is not None else None,
         )
+        if prepared_agent_plan is not None:
+            capture_options = prepared_agent_plan.capture_options.copy()
+            capture_options["cancel_requested"] = lambda: stop_requested() is not None
         target_handoff: FrozenAgentStepHandoff | dict[str, FrozenAgentStepHandoff]
         try:
             if review_write_roots is not None:
-                plan, handoffs, source_sha = self._resolver.resolve_frozen_agents(
-                    plan_path, **capture_options
+                plan, handoffs, source_sha = (
+                    (
+                        prepared_agent_plan.plan,
+                        prepared_agent_plan.handoffs,
+                        prepared_agent_plan.source_sha256,
+                    )
+                    if prepared_agent_plan is not None
+                    else self._resolver.resolve_frozen_agents(plan_path, **capture_options)
                 )
                 campaign = AgentReviewRepairCampaign(
                     plan,
@@ -1321,6 +1597,7 @@ class FleetPlanService:
                         caller_input_file=caller_input_file,
                         repository_goon=repository_goon,
                         lock_artifacts=lock.external,
+                        source=reviewed_source,
                     )
                 except (OSError, FleetPlanInvalid) as exc:
                     return result(RepairStop.EXECUTION_UNRESOLVED, str(exc))
@@ -1354,9 +1631,15 @@ class FleetPlanService:
                         target,
                         repository_ids={repository_id},
                         fleet_run_id=selected_run_id,
-                        expected_repository_instance_ids=instances,
+                        expected_repository_instance_ids=(
+                            expected_repository_instance_ids
+                            if ordinal == 1 and expected_repository_instance_ids is not None
+                            else instances
+                        ),
                         requested_priority=requested_priority,
-                        source=FleetRunSource.CICD if repository_goon else FleetRunSource.MANUAL,
+                        source=FleetRunSource.SHARED_RUN
+                        if reviewed_source is not None
+                        else (FleetRunSource.CICD if repository_goon else FleetRunSource.MANUAL),
                     )
                     if started.fleet_run_id != selected_run_id or started.target != target:
                         raise StateConflict(

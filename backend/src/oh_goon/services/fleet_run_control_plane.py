@@ -34,6 +34,7 @@ from oh_goon.core.models.agent_repair import (
     AgentRepairResult,
 )
 from oh_goon.core.models.capability import CapabilitySnapshot
+from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
 from oh_goon.core.models.fleet_failures import (
     FleetFailureGroupPage,
@@ -60,13 +61,14 @@ from oh_goon.core.models.run_admission import (
 )
 from oh_goon.core.models.run_events import FleetRunEventBatch
 from oh_goon.core.models.scheduling import SchedulingPriority
-from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
+from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget, OperationTarget
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.product_identity import new_fleet_run_id, repository_subject_instance_id
 from oh_goon.core.projections.agent_campaign import project_agent_campaign
 from oh_goon.core.run_identity import (
     require_fleet_run_detail_binding,
     require_fleet_run_scheduling_binding,
+    with_retained_agent_deliveries,
     with_retained_project_deliveries,
 )
 from oh_goon.core.vocabulary import (
@@ -206,21 +208,65 @@ class FleetRunControlPlane:
         source: FleetRunSource = FleetRunSource.MANUAL,
         expected_repository_instance_ids: dict[str, str] | None = None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
+        created_agent_deliveries: tuple[AgentStepDeliveryReference, ...] = (),
     ) -> FleetRunState:
         """Start only a Fleet Plan target already frozen by FleetPlanService."""
-        intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)
-        return self._start_intent(
-            intent,
-            repository_scope=_requested_repository_scope(
-                intent, repository_ids=repository_ids, all_repositories=all_repositories
-            ),
-            fleet_run_id=fleet_run_id,
-            expected_repository_instance_ids=expected_repository_instance_ids,
-            source=source,
-            readmitted_from_run_id=None,
-            rerun_from_run_id=None,
-            requested_priority=requested_priority,
-        )
+        if created_agent_deliveries and (
+            repository_ids is None
+            or len(repository_ids) != 1
+            or any(item not in target.agent_deliveries for item in created_agent_deliveries)
+        ):
+            raise FleetPlanInvalid("New Agent delivery custody requires its exact target and Team")
+        selected_run_id = fleet_run_id or new_fleet_run_id()
+        failure: BaseException | None = None
+        try:
+            intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)
+            return self._start_intent(
+                intent,
+                repository_scope=_requested_repository_scope(
+                    intent, repository_ids=repository_ids, all_repositories=all_repositories
+                ),
+                fleet_run_id=selected_run_id,
+                expected_repository_instance_ids=expected_repository_instance_ids,
+                source=source,
+                readmitted_from_run_id=None,
+                rerun_from_run_id=None,
+                requested_priority=requested_priority,
+            )
+        except BaseException as exc:
+            failure = exc
+            raise
+        finally:
+            if created_agent_deliveries:
+                assert repository_ids is not None
+                try:
+                    self._lifecycle.release_unadmitted_agent_deliveries(
+                        selected_run_id,
+                        created_agent_deliveries,
+                        owner_repository_id=next(iter(repository_ids)),
+                    )
+                except Exception as exc:
+                    if failure is not None:
+                        failure.add_note(f"Unadmitted Agent source cleanup failed: {exc}")
+                    event = DiagnosticEvent.from_exception(
+                        exc,
+                        severity="WARNING",
+                        source="agent_source_transport",
+                        owner="FleetRunLifecycle",
+                        operation="release_unadmitted_agent_deliveries",
+                        execution_affected=False,
+                        failure_class="resource_cleanup_failed",
+                        fleet_run_id=selected_run_id,
+                    )
+                    if self._diagnostics is not None:
+                        self._diagnostics.emit(event)
+                    else:
+                        from oh_goon.runtime.diagnostics import (
+                            DiagnosticRouter,
+                            StderrDiagnosticSink,
+                        )
+
+                        DiagnosticRouter((StderrDiagnosticSink(),)).emit(event)
 
     def repository_instance_ids_for_prepared_plan(
         self, target: FleetPlanTarget, *, repository_ids: set[str]
@@ -926,6 +972,7 @@ def _matching_existing_run(
     target = intent.target
     if isinstance(target, FleetPlanTarget) and isinstance(detail.run.target, FleetPlanTarget):
         target = with_retained_project_deliveries(target, detail.run.target)
+        target = with_retained_agent_deliveries(target, detail.run.target)
     require_fleet_run_detail_binding(
         detail,
         source=source,

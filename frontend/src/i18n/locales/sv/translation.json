@@ -1402,7 +1402,14 @@
       "selectedRun": "Vald körningsidentitet",
       "admissionStatus": "Antagningsstatus",
       "membershipCount": "Bevarade steg: {{count}}",
-      "membershipPagination": "{{label}} sidor"
+      "membershipPagination": "{{label}} sidor",
+      "description": "Läs kampanjens ursprungliga avsikt, beslut och valda arbete via kampanj-ID, även när antagning nekades utan en Run.",
+      "loadFailed": "Kampanjens sparade resultat kunde inte läsas.",
+      "open": "Öppna kampanj",
+      "loading": "Läser sparad kampanj…",
+      "result": "Kampanjresultat",
+      "noRuns": "Inga Runs antogs för denna kampanj.",
+      "structuredResult": "Strukturerat kampanjresultat"
     }
   },
   "attention": {
@@ -2213,19 +2220,48 @@
     },
     "inputs": {
       "title": "Plan-indata",
-      "help": "Dessa värden krävs av den valda Planen. Standardvärden kommer från Planen; backend löser exekveringen.",
+      "help": "Standardvärden visas utan att skickas som indata. Välj värdets källa för att ändra ett standardvärde eller ange null; backend validerar det valda värdet.",
       "loading": "Läser Plan-indata…",
       "completeRequired": "Fyll i obligatorisk Plan-indata innan repositories kontrolleras.",
       "loadFailed": "Indatakontraktet för vald Plan kunde inte läsas.",
       "chooseValue": "Välj ett värde",
       "useNone": "Använd inget värde",
-      "retryLoad": "Försök läsa Planen igen"
+      "retryLoad": "Försök läsa Planen igen",
+      "valueSource": "Värdets källa",
+      "useDefault": "Använd deklarerat standardvärde / utelämna",
+      "explicitValue": "Ange ett värde",
+      "explicitNull": "Ange null"
     },
     "changePlan": "Byt Plan",
     "run_one": "Kör på {{count}} repository",
     "run_other": "Kör på {{count}} repositories",
     "savedPlanChoice": "Sparad Plan",
-    "noSavedPlansPrimary": "Det finns inga sparade Plans ännu. Öppna Planer för att skapa en."
+    "noSavedPlansPrimary": "Det finns inga sparade Plans ännu. Öppna Planer för att skapa en.",
+    "agent": {
+      "title": "Agent och begränsad reparation",
+      "help": "Använd samma Agent-val som i run.yml. Välj ett registrerat repository. Repository- och Skill-rötter måste vara absoluta sökvägar på backend-värden. Leverantörsarbetsflöden kräver en uttrycklig modellprofil; lämna den tom endast för lokal källsökning. Native-profiler äger modellinställningar och inloggning.",
+      "enabled": "Välj ett Agent-arbetsflöde",
+      "implementation": "Agent-implementation",
+      "providerModel": "Konfigurerad leverantörsmodell",
+      "profile": "Native-profil",
+      "modelProfile": "Modellprofil (leverantörsarbetsflöden)",
+      "acceptance": "Acceptansprofil",
+      "repositoryRoot": "Repository-rot (absolut)",
+      "skillRoot": "Skill-rot (absolut)",
+      "repair": "Kör hela den begränsade gransknings- och reparationskampanjen",
+      "reviewPasses": "Maximalt antal granskningspass",
+      "writeRoots": "Tillåtna skrivrötter (en per rad)",
+      "timeout": "Kampanjens tidsgräns (sekunder)",
+      "stepTimeout": "Stegets tidsgräns (sekunder)",
+      "authorize": "Godkänn exakt denna begränsade reparationsbegäran",
+      "runRepair": "Starta godkänd reparationskampanj",
+      "handoff": "Kampanj-ID:",
+      "unrecorded": "Ingen sparad kampanjavsikt finns för detta resultat. Granska det ofullständiga anropsresultatet innan ett nytt anrop startas.",
+      "invocationStopped": "Anropet stoppades: {{reason}}",
+      "transportUncertain": "Svaret är inte tillgängligt. Läs det ursprungliga utfallet via detta kampanj-ID innan en ny körning startas.",
+      "completeSelection": "Fyll i Agent-valet och välj exakt ett repository innan kontroll.",
+      "repairAuthorization": "Granska valda skrivrötter och gränser och godkänn sedan denna begäran."
+    }
   },
   "schedules": {
     "eyebrow": "Schemalagd exekvering",

@@ -22,7 +22,7 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.fleet_plan_executor import prepare_physical_test_run
 from tests.factories.path_authority import test_path_authority_for_plan as path_authority_for_plan
 
-SHOWCASE = Path(__file__).resolve().parents[4] / "examples/airflow-taskflow-showcase"
+SHOWCASE = Path(__file__).resolve().parents[4] / "templates/goons/general/orders-taskflow"
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="native uv required")

@@ -6,6 +6,7 @@ from oh_goon.api.dependencies import (
     league_service,
     shared_plan_service,
 )
+from oh_goon.api.schemas.fleet import AgentCampaignInvocationResult, AgentCampaignResult
 from oh_goon.api.schemas.league import (
     LeagueLineupSaveRequest,
     SafePlanInputDiagnostic,
@@ -13,6 +14,7 @@ from oh_goon.api.schemas.league import (
     SharedPlanInputInspection,
     SharedPlanLockPreviewRequest,
     SharedPlanPreviewRequest,
+    SharedPlanRepairRequest,
     SharedPlanRunRequest,
     SharedPlanSaveRequest,
     TeamRunRequest,
@@ -33,6 +35,7 @@ from oh_goon.core.models.shared_plan import (
     SharedPlanRunHistory,
 )
 from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
+from oh_goon.core.projections.agent_campaign import project_agent_campaign
 from oh_goon.services.goon import GoonService
 from oh_goon.services.league import LeagueService
 from oh_goon.services.league_lineups import LeagueLineupService
@@ -150,7 +153,11 @@ def preview_shared_plan_lock(
 ) -> SharedPlanLockPreview:
     """Render the exact backend-resolved goon.lock for one Shared Plan input set."""
     return service.lock_preview(
-        request.plan_key, inputs=request.inputs, expected_revision=request.expected_revision
+        request.plan_key,
+        inputs=request.inputs,
+        expected_revision=request.expected_revision,
+        agent=request.agent,
+        repository_ids=set(request.repository_ids),
     )
 
 
@@ -170,6 +177,8 @@ def inspect_shared_plan_inputs(
             request.plan_key,
             expected_revision=request.expected_revision,
             inputs=request.inputs,
+            agent=request.agent,
+            repository_ids=set(request.repository_ids),
         )
     except FleetPlanInvalid as exc:
         return SharedPlanInputInspection(
@@ -196,6 +205,7 @@ def preview_shared_plan(
         repository_ids=set(request.repository_ids),
         inputs=request.inputs,
         expected_revision=request.expected_revision,
+        agent=request.agent,
     )
 
 
@@ -220,6 +230,7 @@ def run_shared_plan(
             expected_execution_digest=request.expected_execution_digest,
             expected_plan_revision=request.expected_plan_revision,
             repository_instance_ids=request.repository_instance_ids,
+            agent=request.agent,
         )
     except TrustProtocolError as exc:
         # Trust is enforced by the original lifecycle, not by HTTP. Present a
@@ -227,6 +238,55 @@ def run_shared_plan(
         raise StateConflict(
             "Fleet Plan execution requires valid authenticated admission authority"
         ) from exc
+
+
+@router.post(
+    "/shared-plan-repairs",
+    response_model=AgentCampaignResult,
+    operation_id="repair_shared_plan",
+)
+def repair_shared_plan(
+    request: SharedPlanRepairRequest,
+    service: SharedPlanService = Depends(shared_plan_service),
+) -> AgentCampaignResult:
+    """Run explicitly authorized bounded repair through the original campaign owner."""
+    try:
+        result = service.repair(
+            request.plan_key,
+            agent=request.agent,
+            repair=request.repair,
+            authorize_repair=request.authorize_repair,
+            repository_ids=set(request.repository_ids),
+            inputs=request.inputs,
+            fleet_run_id=request.fleet_run_id,
+            expected_plan_id=request.expected_plan_id,
+            expected_execution_digest=request.expected_execution_digest,
+            expected_plan_revision=request.expected_plan_revision,
+            repository_instance_ids=request.repository_instance_ids,
+        )
+    except TrustProtocolError as exc:
+        raise StateConflict(
+            "Fleet Plan execution requires valid authenticated admission authority"
+        ) from exc
+    response = AgentCampaignResult.model_validate(
+        project_agent_campaign(
+            result.repair_id,
+            result.attempts,
+            journal_revision=result.journal_revision,
+            campaign=result.campaign_journal,
+        )
+    )
+    if response.journal_revision is None:
+        response = response.model_copy(
+            update={
+                "invocation_result": AgentCampaignInvocationResult(
+                    stop_reason=result.stop_reason,
+                    budget=result.budget,
+                    message=result.message,
+                )
+            }
+        )
+    return response
 
 
 @router.get("/lineups", response_model=LeagueLineupCatalog, operation_id="league_lineups")

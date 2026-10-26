@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 
 from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceStale, ScheduleNotFound
+from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.models.goon_plan_source import SharedPlanSource
 from oh_goon.core.models.schedule import ScheduleCreate, ScheduleDefinition
 from oh_goon.core.product_identity import repository_subject_instance_id
@@ -40,7 +41,7 @@ class SharedPlanScheduleService:
         expected_execution_digest: str,
         interval_minutes: int,
         state: ScheduleState = ScheduleState.ACTIVE,
-        inputs: dict[str, str] | None = None,
+        inputs: dict[str, PlanInputValue] | None = None,
     ) -> ScheduleDefinition:
         current_repositories = {item.repository_id: item for item in self._league.repositories()}
         available = set(current_repositories)

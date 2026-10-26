@@ -82,6 +82,33 @@ Game Tape
 
 There is no separate Shared-Run executor, source merger, or hidden workflow engine.
 
+Shared Plans also support explicit Agent selections through the same captured
+Agent resolver used by the CLI. Select one registered Team, an acceptance
+profile, existing absolute repository and Skill roots on the server, and either
+an explicit model profile or a native implementation/profile. Recipient-free
+read-only local-search needs no model connection. Shared Plan storage owns
+only `plan.yml`; Skill registries/resources remain with the explicitly selected
+Skill root. Native authentication and execution configuration retain their
+existing owners.
+
+Input inspection, lock preview and Team preview consume that selection. Starting
+an Agent Run rechecks the exact saved revision, Plan identity, reviewed execution
+digest and Team instance before storing source delivery or admitting work.
+Phase-classified review-repair Plans require the separate bounded-repair action:
+explicit review passes, write roots, campaign and Step deadlines, and fresh
+authorization for that submission. It uses the existing campaign driver and
+separately admitted Fleet Runs. Each phase retains the original Shared Plan
+source fact. Editing the form invalidates its reviewed selection and repair
+authorization.
+
+The browser displays the selected campaign ID before submitting repair. A lost
+HTTP response does not establish cancellation or failure: reopen that same ID
+from Runs, including campaigns with zero admitted Runs. The campaign view reads
+the original Journal and never resumes or retries work.
+If cancellation or the deadline stops initial capture before durable intent is
+recorded, the response reports an incomplete invocation with no Journal
+revision. That observation is separate from a committed campaign decision.
+
 ## Lineups
 
 A Lineup stores only a reusable explicit repository selection. It does not contain executable work, a Plan, scheduling state, or run state. Selecting a Lineup plus one Shared Plan still requires an explicit preview/run action.

@@ -13,6 +13,12 @@ seven routine checks. Six parallel matrix jobs materialize the committed uv/npm
 locks through `make init`, then invoke `backend-check`, `frontend-check`,
 `tooling-check`, `architecture`, `check-generated` or `test-integration`.
 The integration target executes both backend and cross-owner integration tests.
+That required job also runs `make test-python-projects`: each shipped Python
+application's own tests use its committed native uv lock and an owned external
+environment. Iris selects its development group; orders explicitly selects its
+Airflow test group, where a missing Airflow installation is a failure. The
+standalone setup stays outside the strict qualification rings. Ordinary
+`make release-check` includes the same project check.
 The seventh stable check name remains `build-release`; its job uses GitHub's
 `needs: checks` to wait for all six successful matrix jobs in the same workflow.
 Every checkout explicitly selects the same `github.sha`.

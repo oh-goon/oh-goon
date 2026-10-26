@@ -25,6 +25,10 @@ resolution. Local development includes `dev`; package execution installs only
 the project and runtime dependencies by default. The Goon owns workflow input
 defaults and constraints; the CLI requires explicit arguments.
 
+The required integration CI check and ordinary `make release-check` run this
+project's own pytest suite through `make test-python-projects`, using its native
+lock and a disposable environment outside the checkout.
+
 The command fits scaling and logistic regression on the training partition and
 evaluates held-out rows from scikit-learn's bundled Iris dataset. The default
 split uses 120 training and 30 evaluation examples. It writes both declared

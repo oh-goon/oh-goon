@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -19,7 +20,7 @@ from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.integrations.python_goon_projects import materialize_python_goon_project
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
-SHOWCASE = Path(__file__).resolve().parents[4] / "examples/airflow-taskflow-showcase"
+SHOWCASE = Path(__file__).resolve().parents[4] / "templates/goons/general/orders-taskflow"
 
 
 @pytest.fixture
@@ -104,6 +105,55 @@ def test_generated_state_does_not_change_authored_package_identity(project: Path
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text("generated")
     assert build_execution_lock(resolver.resolve(project / "goon.yml")) == original
+
+
+@pytest.mark.process
+@pytest.mark.host_dns
+def test_native_setuptools_sync_preserves_authored_package_identity(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    implementation = project / "src/native_demo"
+    implementation.mkdir(parents=True)
+    (implementation / "__init__.py").write_text("def main():\n    print('native demo')\n")
+    (project / "goon.yml").write_text("runtime: python\nsteps:\n- run: native-demo\n")
+    (project / "README.md").write_text("# general/native-demo\n")
+    (project / ".gitignore").write_text("*.egg-info/\n.venv/\nbuild/\ndist/\n")
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "native-demo"\nversion = "0.1.0"\n'
+        'requires-python = ">=3.12"\n'
+        '[project.scripts]\nnative-demo = "native_demo:main"\n'
+        '[build-system]\nrequires = ["setuptools==80.9.0"]\n'
+        'build-backend = "setuptools.build_meta"\n'
+        '[tool.setuptools.packages.find]\nwhere = ["src"]\n'
+    )
+    for name in ("build/recipe.txt", "dist/fixture.json"):
+        authored = project / name
+        authored.parent.mkdir()
+        authored.write_text("authored resource\n")
+
+    def native_uv(*arguments: str) -> None:
+        result = subprocess.run(
+            ["uv", *arguments, "--project", str(project), "--python", sys.executable],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={**os.environ, "UV_PROJECT_ENVIRONMENT": str(project / ".venv")},
+        )
+        assert result.returncode == 0, result.stderr
+
+    native_uv("lock", "--offline")
+    resolver = FleetPlanResolver()
+    before = resolver.analyze_source(project / "goon.yml").python_projects()[0]
+    native_uv("sync", "--locked", "--no-default-groups")
+    assert (project / "src/native_demo.egg-info/PKG-INFO").is_file()
+    after = resolver.analyze_source(project / "goon.yml").python_projects()[0]
+    assert after.identity == before.identity
+    assert after.archive == before.archive
+    receiver = tmp_path / "receiver"
+    materialize_python_goon_project(after.archive, after.identity, receiver)
+    assert not (receiver / "src/native_demo.egg-info").exists()
+    assert (receiver / "build/recipe.txt").read_text() == "authored resource\n"
+    assert (receiver / "dist/fixture.json").read_text() == "authored resource\n"
+    assert (project / "src/native_demo.egg-info/PKG-INFO").is_file()
 
 
 def test_nonroot_working_directory_generated_outputs_do_not_change_source_identity(

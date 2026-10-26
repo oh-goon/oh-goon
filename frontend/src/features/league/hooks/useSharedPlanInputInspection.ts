@@ -1,23 +1,25 @@
+import type { SharedPlanInputs } from "@/domain/api/ApiClient";
 import { useCallback } from "react";
 
 import { useApiClient } from "@/app/ApiClientProvider";
 import { useReadResource } from "@/app/reads/useReadResource";
 import { canonicalIdentity } from "@/domain/identity/canonicalValue";
-import type { SharedPlanInputInspection } from "@generated/models";
+import type { RunAgentSelection, SharedPlanInputInspection } from "@generated/models";
 
 /** Inspection never gates execution; preview and lock receipts retain all authority. */
 export function useSharedPlanInputInspection(
-  planKey: string, planRevision: string, inputs: Record<string, string>, enabled: boolean,
+  planKey: string, planRevision: string, inputs: SharedPlanInputs, enabled: boolean,
+  agent?: RunAgentSelection | null, repositoryIds?: string[],
 ) {
   const client = useApiClient();
   const request = useCallback(
-    (signal: AbortSignal) => client.inspectSharedPlanInputs(planKey, planRevision, inputs, { signal }),
-    [client, inputs, planKey, planRevision],
+    (signal: AbortSignal) => client.inspectSharedPlanInputs(planKey, planRevision, inputs, { signal }, agent, repositoryIds),
+    [client, inputs, planKey, planRevision, agent, repositoryIds],
   );
   return useReadResource<SharedPlanInputInspection>({
     scope: "shared-plan-input-inspection",
     source: "POST /league/shared-plan-input-inspections",
-    identity: enabled ? canonicalIdentity({ planKey, planRevision, inputs }) : null,
+    identity: enabled ? canonicalIdentity({ planKey, planRevision, inputs, agent: agent ?? null, repositoryIds: agent ? repositoryIds : null }) : null,
     enabled, debounceMs: 200, errorMessage: "Plan input inspection unavailable",
     request,
     validate: (value) => {

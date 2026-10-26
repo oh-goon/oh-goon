@@ -19,7 +19,11 @@ policy, never README or YAML metadata.
 The discovery owner sorts canonical keys and rejects noncanonical directory
 names, unexpected members of two-file packages, and symlink package paths.
 Python package capture uses the existing authored-source snapshot and Hashmarks
-owners; it excludes generated environments, caches and declared output locations.
+owners; it excludes generated environments, caches, Python distribution metadata
+(`*.egg-info`, `*.dist-info` and `.eggs`) and declared output locations.
+Release catalog staging consumes the same membership policy. Git ignore files
+do not select source membership, and authored `build` and `dist` directories
+remain included unless they are declared output locations.
 Known transport
 sidecars are discarded by the common authored-source-membership owner, not by
 ad-hoc catalog logic. A syntactically similar package name is never a fallback

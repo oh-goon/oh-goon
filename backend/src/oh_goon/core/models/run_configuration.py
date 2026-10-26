@@ -82,6 +82,11 @@ class RunAgentSelection(_SelectionModel):
             raise ValueError("native agents own model settings; model_profile is incompatible")
         return self
 
+    def caller_inputs(self, inputs: dict[str, PlanInputValue]) -> dict[str, PlanInputValue]:
+        if "acceptance" in inputs:
+            raise ValueError("select acceptance only in agent.acceptance")
+        return {**inputs, "acceptance": self.acceptance}
+
 
 class RunRepairSelection(_SelectionModel):
     review_passes: int = Field(ge=1, le=32)
@@ -139,14 +144,11 @@ class RunConfiguration(_SelectionModel):
 
     @model_validator(mode="after")
     def validate_groups(self) -> RunConfiguration:
-        if self.agent is not None and any(name == "acceptance" for name, _ in self.inputs):
-            raise ValueError("select acceptance only in agent.acceptance")
+        self.caller_inputs()
         if self.repair is not None and self.agent is None:
             raise ValueError("repair requires an explicit agent selection")
         return self
 
     def caller_inputs(self) -> dict[str, PlanInputValue]:
         values = dict(self.inputs)
-        if self.agent is not None:
-            values["acceptance"] = self.agent.acceptance
-        return values
+        return self.agent.caller_inputs(values) if self.agent is not None else values

@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 
+from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.vocabulary import ScheduleState
 
 
@@ -19,7 +20,7 @@ class SharedPlanScheduleCreateRequest(BaseModel):
     expected_execution_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     interval_minutes: int = Field(ge=1, le=10080)
     state: ScheduleState = ScheduleState.ACTIVE
-    inputs: dict[str, str] = Field(default_factory=dict)
+    inputs: dict[str, PlanInputValue] = Field(default_factory=dict)
 
     @field_validator("repository_ids")
     @classmethod

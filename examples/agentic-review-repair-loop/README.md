@@ -9,10 +9,11 @@ Run four ordered pinned agentsCookbook reviews, adjudication, proposal, scoped n
 Initialize a new workflow using the shipped Plan:
 
 ```sh
-oh-goon templates init agents/agentic-review-repair-loop --kind plan --output ./workflow
+oh-goon templates init agents/agentic-review-repair-loop --kind plan --output ./workflow \
+  --repository /absolute/path/to/registered-repository
 ```
 
-Copy this example’s `.goonskills.yml` and `skills/` tree into the workflow. Edit `workflow/run.yml` using [the complete provider selection](run.yml): set the exact target ID, repository reference/root, configured `agent.model_profile`, executable check paths and bounded `repair` group. Do not copy provider endpoints, keys or native settings into this file. `.goonskills.yml` declares the cookbook source once; `goon.lock` owns the captured commit. The local adjudication/repair Skills are product fixtures, not a review catalog.
+The initializer includes the existing `.goonskills.yml` and local phase Skills, and fills the target identity and repository reference/root through League discovery. Edit `workflow/run.yml` using [the complete provider selection](run.yml): choose the configured `agent.model_profile`, executable check paths and bounded `repair` group. Do not copy provider endpoints, keys or native settings into this file. `.goonskills.yml` declares the cookbook source once; `goon.lock` owns the captured commit. The local adjudication/repair Skills are product fixtures, not a review catalog.
 
 ```sh
 oh-goon config inspect ./workflow/run.yml
@@ -35,7 +36,7 @@ oh-goon templates init agents/agentic-review-repair-loop --kind plan --output ./
   --review consumers=cookbook/canonical-consumer-contract-review
 ```
 
-This writes an ordinary project-owned Composite at `goons/agents/review-repair/`, a Plan selecting it and a `run.yml` selecting that contained Plan. The Composite owns the ordered `phase: review` imports and retains the canonical adjudicate/repair/regression/verification edges. `.goonskills.yml` remains the sole Skill-source registry; copy it and required local Skill resources separately before locking. No cookbook Skill bodies are generated.
+This writes an ordinary project-owned Composite at `goons/agents/review-repair/`, a Plan selecting it and a `run.yml` selecting that contained Plan. The Composite owns the ordered `phase: review` imports and retains the canonical adjudicate/repair/regression/verification edges. Initialization includes the local phase fixtures and the existing cookbook registry when selected. Custom review Skill resources remain caller-owned. `.goonskills.yml` remains the sole Skill-source registry; no cookbook Skill bodies are generated.
 
 Edit the ordinary imports to replace, append or reorder reviews. Duplicate/missing aliases and invalid Skill references reject before publication. There is no runtime reviewer array or second scheduler. `run.yml` is published last as the completion marker; interrupted output without it is incomplete and is never overwritten or automatically removed.
 
@@ -51,11 +52,15 @@ Choose a complete supported public Codex installation outside private native sta
 
 Set `inputs.goal` to the task’s actual scope and phase contract: reviews apply only the selected Skill and report proven in-class findings; adjudication accounts for those findings; proposal supplies scoped repair data with behavioral regressions. The read-only phases never apply edits.
 
-Keep the workflow and report outside the source checkout. Save the invocation's
-JSON result: it includes the actual controller stop reason and structured
-campaign view. `oh-goon plan campaign RUN_ID --json` reads retained linked Runs;
-its controller result remains unavailable because the final stop receipt is
-invocation-only. Neither report authorizes continuation or PR publication.
+Keep the workflow and report outside the source checkout. The invocation's JSON
+result includes the controller stop reason and structured campaign view.
+`oh-goon plan campaign CAMPAIGN_OR_RUN_ID --json` reopens the committed intent,
+linked Runs and controller decisions from the original Journal after restart.
+The campaign ID also works when initial admission was refused and no Run exists.
+The browser's campaign route uses the same durable read owner through
+`GET /api/fleet/runs/campaigns/{campaign_id}`. Successful child verification without
+a committed controller decision remains incomplete. Readback never resumes work
+or authorizes PR publication.
 
 For a controlled Hashmarks workload, start from a disposable public-source
 export with an independent Git database. Exclude native project configuration

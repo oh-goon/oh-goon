@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceAcquisitionRequired
 from oh_goon.core.models.fleet_plan import (
     CompiledExecutionTemplate,
     CompiledGoonImportStep,
@@ -399,7 +399,10 @@ def _load_goon_child(
             None,
         )
         if frozen is None and not build.acquire_goons:
-            raise FleetPlanInvalid("Git Goon source requires explicit acquisition with lock")
+            raise FleetPlanSourceAcquisitionRequired(
+                "Git Goon source requires explicit acquisition with lock; "
+                "inspect its contract first with 'oh-goon config inspect run.yml --acquire'"
+            )
         source_key = (selection.git, selection.ref)
         if source_key not in build.acquired_git:
             build.acquired_git[source_key] = build.acquisitions.enter_context(

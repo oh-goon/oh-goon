@@ -18,7 +18,7 @@ from oh_goon.core.product_identity import repository_id, repository_subject_inst
 from oh_goon.runtime import goon_templates
 from oh_goon.runtime.league_folders import LeagueFolderStore
 
-SHOWCASE = Path(__file__).resolve().parents[3] / "examples/airflow-taskflow-showcase"
+SHOWCASE = Path(__file__).resolve().parents[3] / "templates/goons/general/orders-taskflow"
 
 
 def write_isolated_build_project(path: Path, *, stale_lock: bool = False) -> None:

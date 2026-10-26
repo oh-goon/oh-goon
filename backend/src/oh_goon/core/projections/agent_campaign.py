@@ -209,7 +209,6 @@ def project_agent_campaign(
                 if not any(
                     step["step_id"] == step_id
                     and step["status"] == "COMPLETED"
-                    and step["exit_code"] == 0
                     and step["settlement"]["outcome"] == "SUCCESS"
                     and step["settlement"]["cleanup"] == "VERIFIED"
                     for step in executed

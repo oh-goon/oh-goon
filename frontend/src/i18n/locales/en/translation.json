@@ -1402,7 +1402,14 @@
       "selectedRun": "Selected Run identity",
       "admissionStatus": "Admission status",
       "membershipCount": "Retained Steps: {{count}}",
-      "membershipPagination": "{{label}} pages"
+      "membershipPagination": "{{label}} pages",
+      "description": "Read the original campaign intent, decisions and selected work by campaign ID, including refused admission without a Run.",
+      "loadFailed": "Campaign readback could not be loaded.",
+      "open": "Open campaign",
+      "loading": "Loading retained campaign…",
+      "result": "Campaign result",
+      "noRuns": "No Runs were admitted for this campaign.",
+      "structuredResult": "Structured campaign result"
     }
   },
   "attention": {
@@ -2213,19 +2220,48 @@
     },
     "inputs": {
       "title": "Plan inputs",
-      "help": "These values are required by the selected Plan. Defaults come from the Plan; execution is resolved by the backend.",
+      "help": "Defaults are displayed without being supplied. Choose a value source to override a default or supply null; the backend validates the selected value.",
       "loading": "Loading Plan inputs…",
       "completeRequired": "Complete the required Plan inputs before checking repositories.",
       "loadFailed": "The selected Plan input contract could not be loaded.",
       "chooseValue": "Choose a value",
       "useNone": "Use no value",
-      "retryLoad": "Try loading the Plan again"
+      "retryLoad": "Try loading the Plan again",
+      "valueSource": "Value source",
+      "useDefault": "Use declared default / omit",
+      "explicitValue": "Supply a value",
+      "explicitNull": "Supply null"
     },
     "changePlan": "Change Plan",
     "run_one": "Run on {{count}} repository",
     "run_other": "Run on {{count}} repositories",
     "savedPlanChoice": "Saved Plan",
-    "noSavedPlansPrimary": "No saved Plans yet. Open Plans to create one."
+    "noSavedPlansPrimary": "No saved Plans yet. Open Plans to create one.",
+    "agent": {
+      "title": "Agent and bounded repair selection",
+      "help": "Use the same Agent selection as run.yml. Select one registered repository. Repository and Skill roots must be absolute paths on the backend host. Provider workflows require an explicit model profile; leave it empty only for source-only local-search. Native profiles own model settings and sign-in.",
+      "enabled": "Select an Agent workflow",
+      "implementation": "Agent implementation",
+      "providerModel": "Configured provider model",
+      "profile": "Native profile",
+      "modelProfile": "Model profile (provider workflows)",
+      "acceptance": "Acceptance profile",
+      "repositoryRoot": "Repository root (absolute)",
+      "skillRoot": "Skill root (absolute)",
+      "repair": "Run the complete bounded review-and-repair campaign",
+      "reviewPasses": "Maximum review passes",
+      "writeRoots": "Authorized write roots (one per line)",
+      "timeout": "Campaign timeout (seconds)",
+      "stepTimeout": "Step timeout (seconds)",
+      "authorize": "Authorize this exact bounded repair submission",
+      "runRepair": "Start authorized repair campaign",
+      "handoff": "Campaign ID:",
+      "unrecorded": "No durable campaign intent is available for this result. Inspect the incomplete invocation result before starting another invocation.",
+      "invocationStopped": "This invocation stopped: {{reason}}",
+      "transportUncertain": "The response is unavailable. Inspect this campaign ID for the original outcome before starting another invocation.",
+      "completeSelection": "Complete the Agent selection and select exactly one repository before checking.",
+      "repairAuthorization": "Review the selected write roots and limits, then authorize this submission."
+    }
   },
   "schedules": {
     "eyebrow": "Scheduled execution",

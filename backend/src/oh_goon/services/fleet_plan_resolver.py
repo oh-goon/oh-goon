@@ -162,6 +162,7 @@ class FleetPlanResolver:
         native_agent: ResolvedNativeAgent | None = None,
         repository: Path | None = None,
         git_service: GitService | None = None,
+        root_expected_name: str | None = None,
     ) -> tuple[ResolvedFleetPlan, dict[str, FrozenAgentStepHandoff], str]:
         """Freeze each occurrence while the canonical compiler binds its inputs.
 
@@ -185,9 +186,15 @@ class FleetPlanResolver:
             if native_agent is not None and native_agent.profile.codex_service is not None
             else ()
         )
-        graph = source_graph if source_graph is not None else self.analyze_source(plan_path)
+        graph = (
+            source_graph
+            if source_graph is not None
+            else self.analyze_source(plan_path, root_expected_name=root_expected_name)
+        )
         if graph.root.path != navigation_path(plan_path):
             raise FleetPlanInvalid("Captured source graph differs from the selected Plan")
+        if root_expected_name is not None and graph.root.compiled.name != root_expected_name:
+            raise FleetPlanInvalid("Captured Agent source differs from the selected Plan name")
         graph.validate_agent_selection(
             native_selected=native_agent is not None, require_review_phases=require_review_phases
         )

@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Response
 
 from oh_goon.api.dependencies import fleet_run_control_plane
-from oh_goon.api.schemas.fleet import FleetRunChildRequest, FleetRunRequest
+from oh_goon.api.schemas.fleet import AgentCampaignResult, FleetRunChildRequest, FleetRunRequest
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
 from oh_goon.core.models.fleet_failures import (
     FleetFailureGroupPage,
@@ -59,6 +59,18 @@ def fleet_run_overview(
     control_plane: FleetRunControlPlane = Depends(fleet_run_control_plane),
 ) -> FleetRunOverview:
     return control_plane.overview()
+
+
+@router.get(
+    "/campaigns/{campaign_id}",
+    response_model=AgentCampaignResult,
+    operation_id="get_agent_campaign",
+)
+def get_agent_campaign(
+    campaign_id: str,
+    control_plane: FleetRunControlPlane = Depends(fleet_run_control_plane),
+) -> AgentCampaignResult:
+    return AgentCampaignResult.model_validate(control_plane.agent_campaign(campaign_id))
 
 
 @router.get(

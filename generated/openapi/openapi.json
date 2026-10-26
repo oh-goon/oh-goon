@@ -332,6 +332,34 @@
         "title": "AgentCampaignIntent",
         "type": "object"
       },
+      "AgentCampaignInvocationResult": {
+        "description": "Observed pre-intent invocation outcome, without Journal decision authority.",
+        "properties": {
+          "authority": {
+            "const": "invocation-observation;not-a-committed-controller-decision",
+            "default": "invocation-observation;not-a-committed-controller-decision",
+            "title": "Authority",
+            "type": "string"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/AgentRepairBudget"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "stop_reason": {
+            "$ref": "#/components/schemas/AgentRepairStopReason"
+          }
+        },
+        "required": [
+          "stop_reason",
+          "budget",
+          "message"
+        ],
+        "title": "AgentCampaignInvocationResult",
+        "type": "object"
+      },
       "AgentCampaignPhase": {
         "additionalProperties": false,
         "description": "Exact selected membership, appended in the Run admission transaction.",
@@ -462,6 +490,233 @@
           "fact"
         ],
         "title": "AgentCampaignRecord",
+        "type": "object"
+      },
+      "AgentCampaignResult": {
+        "description": "HTTP transport of the existing canonical campaign projection.",
+        "properties": {
+          "adjudications": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Adjudications",
+            "type": "array"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "claim_authority": {
+            "title": "Claim Authority",
+            "type": "string"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "continuation_authority": {
+            "title": "Continuation Authority",
+            "type": "string"
+          },
+          "controller_result": {
+            "additionalProperties": true,
+            "title": "Controller Result",
+            "type": "object"
+          },
+          "decision_history": {
+            "items": {
+              "$ref": "#/components/schemas/AgentCampaignRecord"
+            },
+            "title": "Decision History",
+            "type": "array"
+          },
+          "final_candidate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Candidate"
+          },
+          "findings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Findings",
+            "type": "array"
+          },
+          "incomplete_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Incomplete Reasons",
+            "type": "array"
+          },
+          "initial_candidate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Candidate"
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentCampaignIntent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invocation_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentCampaignInvocationResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "journal_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Journal Revision"
+          },
+          "last_admitted_candidate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Admitted Candidate"
+          },
+          "original_execution_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Execution Digest"
+          },
+          "repair_attempts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Repair Attempts",
+            "type": "array"
+          },
+          "repositories": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryIdentity"
+            },
+            "title": "Repositories",
+            "type": "array"
+          },
+          "result": {
+            "enum": [
+              "converged",
+              "test_passed",
+              "failed",
+              "incomplete"
+            ],
+            "title": "Result",
+            "type": "string"
+          },
+          "reviews": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Reviews",
+            "type": "array"
+          },
+          "runs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "safe_next_action": {
+            "title": "Safe Next Action",
+            "type": "string"
+          },
+          "schema": {
+            "const": "oh-goon.agent-campaign-result/v2",
+            "title": "Schema",
+            "type": "string"
+          },
+          "unstarted_selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentCampaignUnstartedSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verification": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Verification",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema",
+          "campaign_id",
+          "journal_revision",
+          "result",
+          "incomplete_reasons",
+          "controller_result",
+          "intent",
+          "complete",
+          "safe_next_action",
+          "unstarted_selection",
+          "decision_history",
+          "original_execution_digest",
+          "repositories",
+          "initial_candidate",
+          "last_admitted_candidate",
+          "final_candidate",
+          "runs",
+          "reviews",
+          "findings",
+          "adjudications",
+          "repair_attempts",
+          "verification",
+          "claim_authority",
+          "continuation_authority"
+        ],
+        "title": "AgentCampaignResult",
         "type": "object"
       },
       "AgentCampaignRunEvidence": {
@@ -25412,6 +25667,78 @@
         "title": "RunAdmittedEvent",
         "type": "object"
       },
+      "RunAgentSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptance": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Acceptance",
+            "type": "string"
+          },
+          "implementation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pi",
+                  "opencode",
+                  "codex"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Implementation"
+          },
+          "model_profile": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Profile"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
+          },
+          "repository_root": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Repository Root",
+            "type": "string"
+          },
+          "skill_root": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Skill Root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "acceptance",
+          "repository_root",
+          "skill_root"
+        ],
+        "title": "RunAgentSelection",
+        "type": "object"
+      },
       "RunCancelRequestedEvent": {
         "additionalProperties": false,
         "properties": {
@@ -25542,6 +25869,45 @@
           "failure"
         ],
         "title": "RunFailedEvent",
+        "type": "object"
+      },
+      "RunRepairSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "review_passes": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Review Passes",
+            "type": "integer"
+          },
+          "step_timeout_seconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 21600.0,
+            "title": "Step Timeout Seconds",
+            "type": "number"
+          },
+          "timeout_seconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 86400.0,
+            "title": "Timeout Seconds",
+            "type": "number"
+          },
+          "write_roots": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Write Roots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "review_passes",
+          "write_roots",
+          "timeout_seconds",
+          "step_timeout_seconds"
+        ],
+        "title": "RunRepairSelection",
         "type": "object"
       },
       "RunStartedEvent": {
@@ -25689,7 +26055,8 @@
               "INVALID_INPUT_DEFAULT",
               "UNOWNED_PROJECTED_INPUT",
               "AMBIGUOUS_PROJECTED_INPUT",
-              "PLAN_RESOLUTION_REJECTED"
+              "PLAN_RESOLUTION_REJECTED",
+              "SOURCE_ACQUISITION_REQUIRED"
             ],
             "title": "Code",
             "type": "string"
@@ -29261,7 +29628,18 @@
         "type": "object"
       },
       "SharedPlanLockPreviewRequest": {
+        "additionalProperties": false,
         "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunAgentSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expected_revision": {
             "maxLength": 64,
             "minLength": 64,
@@ -29270,7 +29648,20 @@
           },
           "inputs": {
             "additionalProperties": {
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "title": "Inputs",
             "type": "object"
@@ -29280,6 +29671,14 @@
             "minLength": 1,
             "title": "Plan Key",
             "type": "string"
+          },
+          "repository_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Repository Ids",
+            "type": "array"
           }
         },
         "required": [
@@ -29379,7 +29778,18 @@
         "type": "object"
       },
       "SharedPlanPreviewRequest": {
+        "additionalProperties": false,
         "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunAgentSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expected_revision": {
             "maxLength": 64,
             "minLength": 64,
@@ -29388,7 +29798,20 @@
           },
           "inputs": {
             "additionalProperties": {
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "title": "Inputs",
             "type": "object"
@@ -29414,6 +29837,98 @@
           "repository_ids"
         ],
         "title": "SharedPlanPreviewRequest",
+        "type": "object"
+      },
+      "SharedPlanRepairRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/RunAgentSelection"
+          },
+          "authorize_repair": {
+            "const": true,
+            "title": "Authorize Repair",
+            "type": "boolean"
+          },
+          "expected_execution_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Expected Execution Digest",
+            "type": "string"
+          },
+          "expected_plan_id": {
+            "minLength": 1,
+            "title": "Expected Plan Id",
+            "type": "string"
+          },
+          "expected_plan_revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Plan Revision",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Inputs",
+            "type": "object"
+          },
+          "plan_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Plan Key",
+            "type": "string"
+          },
+          "repair": {
+            "$ref": "#/components/schemas/RunRepairSelection"
+          },
+          "repository_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Repository Ids",
+            "type": "array"
+          },
+          "repository_instance_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "minProperties": 1,
+            "title": "Repository Instance Ids",
+            "type": "object"
+          }
+        },
+        "required": [
+          "plan_key",
+          "expected_plan_id",
+          "expected_plan_revision",
+          "expected_execution_digest",
+          "repository_ids",
+          "repository_instance_ids",
+          "fleet_run_id",
+          "agent",
+          "repair",
+          "authorize_repair"
+        ],
+        "title": "SharedPlanRepairRequest",
         "type": "object"
       },
       "SharedPlanRunHistory": {
@@ -29458,7 +29973,18 @@
         "type": "object"
       },
       "SharedPlanRunRequest": {
+        "additionalProperties": false,
         "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunAgentSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expected_execution_digest": {
             "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Expected Execution Digest",
@@ -29481,7 +30007,20 @@
           },
           "inputs": {
             "additionalProperties": {
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "title": "Inputs",
             "type": "object"
@@ -29575,7 +30114,20 @@
           },
           "inputs": {
             "additionalProperties": {
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "title": "Inputs",
             "type": "object"
@@ -34123,6 +34675,88 @@
         ]
       }
     },
+    "/api/fleet/runs/campaigns/{campaign_id}": {
+      "get": {
+        "operationId": "get_agent_campaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCampaignResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Get Agent Campaign",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/runs/failures": {
       "get": {
         "operationId": "fleet_failure_inventory",
@@ -36543,6 +37177,88 @@
           }
         },
         "summary": "Preview Shared Plan",
+        "tags": [
+          "league"
+        ]
+      }
+    },
+    "/api/league/shared-plan-repairs": {
+      "post": {
+        "description": "Run explicitly authorized bounded repair through the original campaign owner.",
+        "operationId": "repair_shared_plan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SharedPlanRepairRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCampaignResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Repair Shared Plan",
         "tags": [
           "league"
         ]

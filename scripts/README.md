@@ -65,3 +65,10 @@ Normal dependency materialization invokes native tools once. Oh-Goon does not wr
 Lock authoring remains native: backend uses `uv lock`, frontend uses
 `npm install --package-lock-only`, and validation/materialization uses native uv/npm commands.
 Oh-Goon does not retain a parallel lock-authoring implementation.
+
+`make test-python-projects` runs the Iris and orders packages' own pytest suites
+under their committed native locks. The orders suite explicitly selects its optional
+Airflow group and requires the native adapter test to run. Disposable environments
+stay outside the checkout and are cleaned on completion. The required hosted
+integration check and ordinary `make release-check` select this target; canonical
+strict integration rings continue to consume their already prepared environment.

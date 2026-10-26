@@ -28,6 +28,31 @@ from oh_goon.services.fleet_plan_input_inspection import InputInspection, inspec
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.template_plan_draft_comparison import compare_resolved_drafts
 
+AGENT_REVIEW_EXAMPLE = "agentic-review-repair-loop"
+AGENT_REVIEW_COMPANION_PATHS = (
+    ".goonskills.yml",
+    "skills/adjudicate/SKILL.md",
+    "skills/repair/SKILL.md",
+)
+
+
+def agent_review_companion_files(root: Path) -> dict[str, str]:
+    """Capture the existing example's bounded authoring resources exactly once."""
+    from oh_goon.services.fleet_caller_file_freshness import (
+        locate_caller_file,
+        read_caller_file_bytes,
+        stat_caller_file,
+    )
+
+    example = root / "examples" / AGENT_REVIEW_EXAMPLE
+    files = {}
+    for relative in AGENT_REVIEW_COMPANION_PATHS:
+        path, _ = locate_caller_file(Path(relative), root=example)
+        files[relative] = read_caller_file_bytes(path, expected=stat_caller_file(path)).decode(
+            "utf-8"
+        )
+    return files
+
 
 def initialize_run_configuration(
     key: str,
@@ -35,6 +60,7 @@ def initialize_run_configuration(
     *,
     kind: Literal["plan", "goon"],
     reviewers: Sequence[tuple[str, str]] = (),
+    repository: Path | None = None,
 ) -> Path:
     """Author one selection and necessary Plan intent; never admit effects."""
     import tempfile
@@ -44,6 +70,8 @@ def initialize_run_configuration(
         DEFAULT_NATIVE_AGENT_PROFILE,
     )
     from oh_goon.core.models.fleet_plan import AgentPlanStep
+    from oh_goon.core.models.fleet_plan_composition import PlanInputType
+    from oh_goon.core.models.repository import RepositoryIdentity
     from oh_goon.core.template_identity import TemplateClassification
     from oh_goon.integrations.exact_file_write import (
         prepared_text_file,
@@ -66,7 +94,19 @@ def initialize_run_configuration(
         raise FleetPlanInvalid("Internal templates use their owning Make/certification command")
     if reviewers and key != "agents/agentic-review-repair-loop":
         raise FleetPlanInvalid("Reviewer authoring requires agents/agentic-review-repair-loop")
-    goons = _FrozenGoonSources(GoonTemplateStore())
+    target = None
+    if repository is not None:
+        from oh_goon.runtime.league_folders import LeagueFolderStore
+        from oh_goon.services.repository_discovery import RepositoryDiscoveryService
+
+        root = RepositoryDiscoveryService().containing_git_root(
+            LeagueFolderStore().list(), repository
+        )
+        if root is None:
+            raise FleetPlanInvalid("--repository must select a registered League repository path")
+        target = RepositoryIdentity.model_validate({"path": root})
+    goon_store = GoonTemplateStore()
+    goons = _FrozenGoonSources(goon_store)
     source = PlanTemplateStore().source(key) if kind == "plan" else goons.source(key)
     resolver = FleetPlanResolver(goon_templates=goons)
     files: dict[str, str] = {}
@@ -94,11 +134,11 @@ def initialize_run_configuration(
         payload: dict[str, Any] = {
             "version": 1,
             "source": {"kind": "file-plan", "path": "plan.yml"}
-            if files
+            if "plan.yml" in files
             else {"kind": "catalog-plan", "name": key},
-            "target": {"repository_id": "REPOSITORY_ID"},
+            "target": {"repository_id": target.repository_id if target else "REPOSITORY_ID"},
         }
-        required = {
+        required: dict[str, PlanInputValue] = {
             item.definition.name: f"REQUIRED_{item.definition.name}"
             for item in interface
             if item.definition.required and item.definition.default is None
@@ -119,6 +159,11 @@ def initialize_run_configuration(
                     collect_phases(graph.goon(owner, step).path)
 
         collect_phases(graph.root.path)
+        if key == "agents/agentic-review-repair-loop":
+            companions = agent_review_companion_files(goon_store.root.parent.parent)
+            if reviewers and all(reference.startswith("local:") for _, reference in reviewers):
+                companions.pop(".goonskills.yml")
+            files.update(companions)
         if graph.has_agent_source_contract():
             required.pop("acceptance", None)
             acceptance = next(
@@ -137,9 +182,17 @@ def initialize_run_configuration(
             payload["agent"] = {
                 **selection,
                 "acceptance": acceptance or "REQUIRED_ACCEPTANCE",
-                "repository_root": "/approved/repositories",
+                "repository_root": str(target.path.parent) if target else "/approved/repositories",
                 "skill_root": ".",
             }
+            if target is not None:
+                for item in interface:
+                    if item.definition.input_type is PlanInputType.REPOSITORY_REFERENCE:
+                        required[item.definition.name] = coerce_input(
+                            item.definition,
+                            f"local:{target.path.name}",
+                            context="selected repository",
+                        )
         if required:
             payload["inputs"] = required
         if "repair" in phases:

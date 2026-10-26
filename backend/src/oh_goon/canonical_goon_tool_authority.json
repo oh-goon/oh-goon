@@ -29,6 +29,11 @@
     "agents/verification": {
       "check": []
     },
+    "general/orders-taskflow": {
+      "extract": [],
+      "load": [],
+      "transform": []
+    },
     "kubernetes/release": {},
     "kubernetes/rollout-verify": {
       "verify": []

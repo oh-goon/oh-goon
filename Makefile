@@ -37,6 +37,7 @@ CERTIFICATION_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_
 .PHONY: a1-native-kernel-custody-test backend-python-capability-check python-static-sanity ruff-repair phase-evidence-convergence-check native-qualification-boundary-check candidate-convergence-preflight pre-commit pre-commit-acquire help init verify diagnostic-dependency-check backend-lock-check backend-package-build-check source-transport-clean sync venv-clean strict-executor-setup certification-preflight certification-database-preflight repository-understanding-test-batch repository-understanding-tests-batched certification-state-reset logs test-log certify-log diagnostics-log local-state-prelaunch-check local-state-reset storage-status storage-prune acceptance-release acceptance-browser-container acceptance-container acceptance-product acceptance-scale local-runtime-verification strict-local-runtime-acceptance release-locks-check release-version-set release-source-clean release-source-package-artifact frontend-install backend-dependencies-check frontend-functional-certification template-startability-certification frontend-lock start local-state-check local-state-path diagnostics-path local-state-reset dev release-accept docker-prepare docker-up docker-up-opensuse docker-down docker-accept docker-accept-opensuse lint i18n-check format format-check typecheck architecture goon-compile api-schema api-types goon-tool-authority contracts generate check-generated test test-python test-tooling test-tooling-complete test-frontend frontend-typecheck frontend-architecture frontend-build test-integration test-sqlite-real-usage test-real-lifecycle test-real-world test-real-world-parallel coverage-python coverage-report test-sqlite-coverage test-journal-coverage quality-check quality-raise check check-backend check-tooling check-frontend backend-check tooling-check frontend-check build-release assemble-release scout-load-probe scout-http-load-probe scout-network-certification scout-proxy-certification scout-overhead-certification scout-crash-restart-certification scout-failure-isolation-certification scout-corruption-recovery-certification scout-retention-checkpoint-certification diagnostic-system-check cli-install diagnostic-startup-check frontend-lock-check browser-setup browser-localhost-transport-preflight browser-preflight browser-harness-preflight browser-system-deps browser-runtime-preflight browser-targeted-certification browser-required-certification browser-test browser-check-system-chromium certification-explain repository-understanding-exam prepare-release certify test-execution-fast test-python-core-diagnostic test-python-dependency-complete test-python-complete verify-p0 verify-p1 verify-local init-doctor goon-static-admission backend-install theme-contrast test-python-profile tool-session-qualification tool-session-qualification-status recovery-status recovery-checkpoint recovery-resume qualify-native-wsl frontend-schedule-plan-input-regression
 
 .PHONY: release-check
+.PHONY: test-python-projects
 
 .DEFAULT:
 	@case " $(MAKECMDGOALS) " in \
@@ -578,6 +579,9 @@ test-integration:
 	@$(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- sh -c 'cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "$(CHECK_PYTEST_MARKER)" tests/integration'
 	@$(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- backend/.venv/bin/oh-goon-qualification-exec pytest -c backend/pyproject.toml -m "$(CHECK_PYTEST_MARKER)" tests/integration
 
+test-python-projects:
+	@$(RUN_STEP) 'STANDALONE PYTHON PROJECT TESTS' 'Owner: native uv | Iris and orders application + Airflow adapter' -- uv run --offline --frozen --no-sync --project backend oh-goon-python-project-checks
+
 # Compact production-shaped SQLite lifetime gate. This deliberately crosses the
 # worker/wait/restart boundary and complements component/fault-matrix coverage.
 test-sqlite-real-usage:
@@ -785,7 +789,7 @@ assemble-release:
 
 # Exhaustive portable regression is a release action, separate from APP/native qualification.
 release-check:
-	$(MAKE) backend-check tooling-check test-integration frontend-check architecture check-generated BACKEND_CHECK_TEST_ROOTS="tests/unit tests/dependency_complete" CHECK_PYTEST_MARKER="not certification"
+	$(MAKE) backend-check tooling-check test-integration test-python-projects frontend-check architecture check-generated BACKEND_CHECK_TEST_ROOTS="tests/unit tests/dependency_complete" CHECK_PYTEST_MARKER="not certification"
 
 acceptance-release:
 	$(MAKE) repository-understanding-exam

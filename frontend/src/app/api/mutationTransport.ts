@@ -1,5 +1,5 @@
 import { appDiagnosticStore } from "@/domain/diagnostics/appDiagnosticStore";
-import { executeOperation } from "@/app/api/httpTransport";
+import { executeOperation, type OperationTransportOptions } from "@/app/api/httpTransport";
 import { ApiError, ApiUnavailableError } from "@/domain/api/ApiError";
 import {
   operations,
@@ -20,10 +20,11 @@ export function writeOperation<Name extends OperationName>(
   scope: MutationScope,
   name: Name,
   call: OperationCall<Name>,
+  options?: OperationTransportOptions,
 ): Promise<WriteCommandResult<OperationResponse<Name>>> {
   const metadata = operations[name];
   const source = `${metadata.method} ${operationUrl(name, call)}`;
-  return writeCommand(mutations, scope, source, () => executeOperation(name, call));
+  return writeCommand(mutations, scope, source, () => executeOperation(name, call, undefined, options));
 }
 
 async function writeCommand<Result>(

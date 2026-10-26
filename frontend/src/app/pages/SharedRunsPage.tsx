@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useMutationBusy } from "@/app/ApiClientProvider";
-import { queryParamsFromHash } from "@/app/navigation";
+import { queryParamsFromHash, writeAppLocation } from "@/app/navigation";
 import { useFleetRunActions, useFleetRunStatus } from "@/app/FleetRunProvider";
 import { ErrorBanner } from "@/components/common/ErrorBanner";
 import { PageHeading } from "@/components/common/PageHeading";
@@ -71,12 +71,13 @@ export function SharedRunsPage({ onOpenRun, onOpenPlans }: Props) {
       key={selection.data?.query_id ?? "shared-run"}
       league={league.resource.data}
       actionsDisabled={actionsDisabled}
-      onRun={(planKey, repositoryIds, expectedPlanId, expectedPlanRevision, expectedExecutionDigest, repositoryInstanceIds, inputs) =>
-        runActions.runSharedPlan(planKey, repositoryIds, expectedPlanId, expectedPlanRevision, expectedExecutionDigest, repositoryInstanceIds, inputs)}
+      onRun={(planKey, repositoryIds, expectedPlanId, expectedPlanRevision, expectedExecutionDigest, repositoryInstanceIds, inputs, agent) =>
+        runActions.runSharedPlan(planKey, repositoryIds, expectedPlanId, expectedPlanRevision, expectedExecutionDigest, repositoryInstanceIds, inputs, agent)}
       onAcceptedRun={setSubmittedSharedRunId}
       initialRepositoryIds={selection.data?.repo_ids ?? []}
       initialRepositoryInstanceIds={selection.data?.repository_instance_ids}
       onOpenPlans={onOpenPlans}
+      onOpenCampaign={(campaignId) => writeAppLocation("push", "runs", { campaign: campaignId })}
     />
   </main>;
 }

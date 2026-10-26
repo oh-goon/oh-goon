@@ -3,7 +3,8 @@ import { useState } from "react";
 import { AppShell } from "@/app/AppShell";
 import { useReadController } from "@/app/ApiClientProvider";
 import { ComponentErrorBoundary } from "@/app/errors/ComponentErrorBoundary";
-import { useAppNavigation } from "@/app/navigation";
+import { queryParamsFromHash, useAppNavigation } from "@/app/navigation";
+import { CampaignPage } from "@/app/pages/CampaignPage";
 import { OverviewPage } from "@/app/pages/OverviewPage";
 import { PlansPage } from "@/app/pages/PlansPage";
 import { HelpPage } from "@/app/pages/HelpPage";
@@ -36,7 +37,7 @@ export function App() {
       {page === "plans" ? <PlansPage /> : null}
       {page === "shared-runs" ? <SharedRunsPage onOpenPlans={() => navigate("plans")} onOpenRun={(runId, repositoryId) => navigate("runs", { run: runId, ...(repositoryId ? { repository: repositoryId } : {}) })} /> : null}
       {page === "schedules" ? <SchedulesPage onOpenRun={(runId) => navigate("runs", { run: runId })} onOpenRepositories={() => navigate("repositories")} onOpenPlans={() => navigate("plans")} /> : null}
-      {page === "runs" ? <RunsPage onOpenRecovery={() => navigate("recovery")} onOpenRepositories={() => navigate("repositories")} onOpenSharedRuns={() => navigate("shared-runs")} /> : null}
+      {page === "runs" ? queryParamsFromHash().has("campaign") ? <CampaignPage key={queryParamsFromHash().get("campaign") ?? ""} /> : <RunsPage onOpenRecovery={() => navigate("recovery")} onOpenRepositories={() => navigate("repositories")} onOpenSharedRuns={() => navigate("shared-runs")} /> : null}
       {page === "scout" ? <ScoutPage navigate={navigate} /> : null}
       {page === "recovery" ? <RecoveryPage /> : null}
       {page === "tools" ? <ToolsPage experience={experience} onOpenSettings={() => navigate("settings")} onOpenDependencies={(packageName) => navigate("dependencies", { q: packageName, package: packageName })} /> : null}

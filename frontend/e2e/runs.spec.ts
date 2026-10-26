@@ -5,6 +5,23 @@ import { DEFAULT_RUN_ID, FAILED_RUN_ID } from "./fixtures/runIds";
 import { openFixture, openRunFixture } from "./helpers/navigation";
 import { gameTapeFlow, gameTapeFlowSearch, gameTapeInspector, gameTapeRegion, runHistoryRegion } from "./helpers/locators";
 
+test("A refused campaign without Runs opens by ID and survives browser reload", async ({ page }) => {
+  await openFixture(page, "runs");
+  await page.getByRole("link", { name: "Open campaign", exact: true }).click();
+  await page.getByLabel("Campaign", { exact: true }).fill("campaign-browser-refused");
+  await page.getByRole("button", { name: "Open campaign", exact: true }).click();
+  await expect(page.getByText("No Runs were admitted for this campaign.")).toBeVisible();
+  const campaign = page.getByRole("region", { name: "Agent campaign Journal", exact: true });
+  await expect(campaign.getByText("Initial admission was refused before any Run started.").first()).toBeVisible();
+  await campaign.locator("summary").click();
+  await expect(campaign.getByText("refused-review-step", { exact: true }).last()).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("No Runs were admitted for this campaign.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Campaign result: incomplete", exact: true })).toBeVisible();
+  await campaign.locator("summary").click();
+  await expect(campaign.getByText("initial-refusal", { exact: true })).toBeVisible();
+});
+
 test("Campaign Journal readback and settled Step results stay visible after reload", async ({ page }) => {
   await openRunFixture(page, { scenario: "agent-campaign", view: "summary" });
   const tape = gameTapeRegion(page);

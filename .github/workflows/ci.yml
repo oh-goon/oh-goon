@@ -144,6 +144,9 @@ jobs:
               ;;
           esac
           make "${{ matrix.target }}"
+          if [ "${{ matrix.target }}" = test-integration ]; then
+            make test-python-projects
+          fi
   release:
     # A draft must never publish a skipped success under a required check name.
     name: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && 'release-pending-review' || 'build-release' }}

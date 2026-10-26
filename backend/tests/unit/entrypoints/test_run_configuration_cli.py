@@ -113,6 +113,120 @@ def test_template_initialization_requires_an_explicit_kind(tmp_path):
     assert not output.exists()
 
 
+@pytest.mark.parametrize("key", ["python/quality", "agents/agentic-review-repair-loop"])
+def test_initialization_selects_registered_repository_path_without_runtime(
+    workflow, monkeypatch, capsys, key
+):
+    import oh_goon.cli as cli
+
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
+    )
+    repository = workflow.parent.parent / "repository"
+    nested = repository / "nested"
+    nested.mkdir()
+    output = workflow.parent.parent / "selected"
+    assert (
+        main(
+            [
+                "templates",
+                "init",
+                key,
+                "--kind",
+                "plan",
+                "--output",
+                str(output),
+                "--repository",
+                str(nested),
+            ]
+        )
+        == 0
+    )
+    selected = yaml.safe_load((output / "run.yml").read_text())
+    assert selected["target"] == yaml.safe_load(workflow.read_text())["target"]
+    if key.startswith("agents/"):
+        assert selected["inputs"]["repo"] == "local:repository"
+        assert selected["agent"]["repository_root"] == str(repository.parent)
+        assert selected["agent"]["model_profile"] == "REQUIRED_MODEL_PROFILE"
+        assert selected["inputs"]["regression_command"] == "REQUIRED_regression_command"
+    assert "REPOSITORY_ID" not in (output / "run.yml").read_text()
+
+
+def test_initializer_never_uses_same_name_as_repository_lookup(tmp_path, monkeypatch):
+    folders = []
+    for name in ("left", "right"):
+        root = tmp_path / name / "repository"
+        (root / ".git").mkdir(parents=True)
+        folders.append(root)
+    preferences = tmp_path / "league.yml"
+    preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(tmp_path)]}))
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.chdir(tmp_path)
+    refused = tmp_path / "refused"
+    assert (
+        main(
+            [
+                "templates",
+                "init",
+                "python/quality",
+                "--kind",
+                "plan",
+                "--output",
+                str(refused),
+                "--repository",
+                "repository",
+            ]
+        )
+        == 2
+    )
+    assert not refused.exists()
+    output = tmp_path / "selected"
+    assert (
+        main(
+            [
+                "templates",
+                "init",
+                "python/quality",
+                "--kind",
+                "plan",
+                "--output",
+                str(output),
+                "--repository",
+                str(folders[1]),
+            ]
+        )
+        == 0
+    )
+    selected = yaml.safe_load((output / "run.yml").read_text())
+    assert (
+        selected["target"]["repository_id"]
+        == RepositoryIdentity.model_validate({"path": folders[1]}).repository_id
+    )
+
+
+def test_initializer_refuses_unregistered_repository_before_publication(workflow):
+    outside = workflow.parent.parent / "unregistered"
+    (outside / ".git").mkdir(parents=True)
+    output = workflow.parent.parent / "refused"
+    assert (
+        main(
+            [
+                "templates",
+                "init",
+                "agents/agentic-review-repair-loop",
+                "--kind",
+                "plan",
+                "--output",
+                str(output),
+                "--repository",
+                str(outside),
+            ]
+        )
+        == 2
+    )
+    assert not output.exists()
+
+
 def test_inspection_and_validation_use_the_same_owner_report_without_runtime(
     workflow, monkeypatch, capsys
 ):
