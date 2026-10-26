@@ -4,6 +4,7 @@ MAKEFLAGS += --no-print-directory
 DEVELOPMENT_TEST_RUNNER = bash scripts/development_test.sh
 DEVELOPMENT_CHECK_RUNNER = bash scripts/development_check.sh
 APPLICATION_VERIFY_RUNNER = bash scripts/application_verify.sh
+DEVELOPMENT_RESOURCE_RUNNER = bash scripts/development_test_resources.sh
 DEPENDENCY_POLICY = uv run --no-project python backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py
 PRE_COMMIT_REQUIREMENT = pre-commit>=4.0
 DIAGNOSTIC_SURFACE ?= all
@@ -30,8 +31,8 @@ PLAYWRIGHT_BROWSERS_PATH := $(CURDIR)/frontend/.oh-goon-playwright-browsers
 COMMAND_BANNER = sh scripts/command_banner.sh
 RUN_STEP = sh scripts/run_step.sh
 INIT_DOCTOR = sh scripts/init_doctor.sh
-DEVELOPMENT_TEST_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh test $(DEVELOPMENT_TEST_RUNNER)
-CERTIFICATION_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh certify $(CERTIFICATION_RUNNER)
+DEVELOPMENT_TEST_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh test $(DEVELOPMENT_RESOURCE_RUNNER) $(DEVELOPMENT_TEST_RUNNER)
+CERTIFICATION_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh certify $(DEVELOPMENT_RESOURCE_RUNNER) $(CERTIFICATION_RUNNER)
 
 
 .PHONY: a1-native-kernel-custody-test backend-python-capability-check python-static-sanity ruff-repair phase-evidence-convergence-check native-qualification-boundary-check candidate-convergence-preflight pre-commit pre-commit-acquire help init verify diagnostic-dependency-check backend-lock-check backend-package-build-check source-transport-clean sync venv-clean strict-executor-setup certification-preflight certification-database-preflight repository-understanding-test-batch repository-understanding-tests-batched certification-state-reset logs test-log certify-log diagnostics-log local-state-prelaunch-check local-state-reset storage-status storage-prune acceptance-release acceptance-browser-container acceptance-container acceptance-product acceptance-scale local-runtime-verification strict-local-runtime-acceptance release-locks-check release-version-set release-source-clean release-source-package-artifact frontend-install backend-dependencies-check frontend-functional-certification template-startability-certification frontend-lock start local-state-check local-state-path diagnostics-path local-state-reset dev release-accept docker-prepare docker-up docker-up-opensuse docker-down docker-accept docker-accept-opensuse lint i18n-check format format-check typecheck architecture goon-compile api-schema api-types goon-tool-authority contracts generate check-generated test test-python test-tooling test-tooling-complete test-frontend frontend-typecheck frontend-architecture frontend-build test-integration test-sqlite-real-usage test-real-lifecycle test-real-world test-real-world-parallel coverage-python coverage-report test-sqlite-coverage test-journal-coverage quality-check quality-raise check check-backend check-tooling check-frontend backend-check tooling-check frontend-check build-release assemble-release scout-load-probe scout-http-load-probe scout-network-certification scout-proxy-certification scout-overhead-certification scout-crash-restart-certification scout-failure-isolation-certification scout-corruption-recovery-certification scout-retention-checkpoint-certification diagnostic-system-check cli-install diagnostic-startup-check frontend-lock-check browser-setup browser-localhost-transport-preflight browser-preflight browser-harness-preflight browser-system-deps browser-runtime-preflight browser-targeted-certification browser-required-certification browser-test browser-check-system-chromium certification-explain repository-understanding-exam prepare-release certify test-execution-fast test-python-core-diagnostic test-python-dependency-complete test-python-complete verify-p0 verify-p1 verify-local init-doctor goon-static-admission backend-install theme-contrast test-python-profile tool-session-qualification tool-session-qualification-status recovery-status recovery-checkpoint recovery-resume qualify-native-wsl frontend-schedule-plan-input-regression
@@ -232,7 +233,7 @@ goon-static-admission:
 	@backend/.venv/bin/oh-goon-goon-compile
 
 certification-database-preflight:
-	@$(RUN_STEP) 'CERTIFICATION DATABASE PREFLIGHT' 'Owner: SQLite + Oh-Goon | current schema, DELETE journal, 600 fresh-connection stress reads, integrity + FK checks' -- backend/.venv/bin/oh-goon dev preflight-certification-database --state-root "$(STATE_HOME)"
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CERTIFICATION DATABASE PREFLIGHT' 'Owner: SQLite + Oh-Goon | current schema, DELETE journal, 600 fresh-connection stress reads, integrity + FK checks' -- backend/.venv/bin/oh-goon dev preflight-certification-database --state-root "$(STATE_HOME)"
 
 certification-preflight: goon-static-admission certification-database-preflight
 	@$(COMMAND_BANNER) 'CERTIFICATION PREFLIGHT PASSED' 'Static admission and control-state preflight passed; next: make certify'
@@ -242,7 +243,7 @@ backend-install:
 
 # OH_GOON_OPAQUE_TOOLS: git ldd uv
 verify-p0: python-static-sanity
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest \
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 \
 		tests/unit/services/test_fleet_plan_input_resolution.py \
 		tests/unit/services/test_execution_boundary_contract.py \
 		tests/unit/services/test_execution_lock.py \
@@ -255,18 +256,18 @@ verify-p0: python-static-sanity
 		tests/unit/runtime/test_readmission_lineage.py \
 		tests/unit/integrations/test_fleet_plan_cicd_isolation.py \
 		tests/unit/entrypoints/test_python_source_file_smoke.py
-	backend/.venv/bin/oh-goon-qualification-exec pytest -c backend/pyproject.toml \
+	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-test-batches --qualified --show-output --marker "" --workers 1 --batch-size 4 --batch-timeout 180 \
 		scripts/tests/test_simple_template_contract.py \
 		scripts/tests/test_native_command.py
-	backend/.venv/bin/oh-goon-check-generated
+	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-check-generated
 
 # OH_GOON_OPAQUE_TOOLS: ldd sh true uv
 template-startability-certification:
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest -q tests/integration/services/test_catalog_template_startability.py
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 tests/integration/services/test_catalog_template_startability.py
 
 # OH_GOON_OPAQUE_TOOLS: bash git sh
 verify-p1:
-	backend/.venv/bin/oh-goon-repository-authoring
+	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-repository-authoring
 
 verify-local: verify-p0 verify-p1
 
@@ -283,7 +284,7 @@ backend-dependencies-check:
 # in the per-source-file pytest closure. Qualification never mutates candidate source.
 python-static-sanity:
 	@printf '%s\n' '=== PYTHON RUFF ADVISORY ===' 'Owner: Ruff/Pyflakes | safe-fix noise summarized; review-required E9,F findings shown'
-	@sh -c 'cd backend; .venv/bin/ruff check --select E9,F --output-format json src tests ../scripts ../tests/integration | .venv/bin/oh-goon-ruff-advisory || printf "%s\n" "RUFF ADVISORY: structured report unavailable; locally runnable import/global-name tests remain authoritative." >&2; exit 0'
+	@$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend; .venv/bin/ruff check --select E9,F --output-format json src tests ../scripts ../tests/integration | .venv/bin/oh-goon-ruff-advisory || printf "%s\n" "RUFF ADVISORY: structured report unavailable; locally runnable import/global-name tests remain authoritative." >&2; exit 0'
 
 # Explicit mutating repair lane. Safe Ruff fixes and canonical formatting are applied only
 # when the operator asks for them; test/verify/certify paths remain read-only.
@@ -299,34 +300,34 @@ frontend-install:
 
 # OH_GOON_OPAQUE_TOOLS: node
 frontend-functional-certification:
-	cd frontend && npm run verify:functional
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run verify:functional
 
 browser-setup:
 	cd frontend && PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" npm run browser:install
 
 # OH_GOON_OPAQUE_TOOLS: node
 browser-localhost-transport-preflight:
-	cd frontend && npm run browser:transport-preflight
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run browser:transport-preflight
 
 # OH_GOON_OPAQUE_TOOLS: node
 browser-preflight:
-	cd frontend && PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" npm run browser:preflight
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh env PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" npm run browser:preflight
 
 # OH_GOON_OPAQUE_TOOLS: node
 browser-harness-preflight:
-	cd frontend && npm run browser:harness-preflight
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run browser:harness-preflight
 
 # OH_GOON_OPAQUE_TOOLS: node
 browser-runtime-preflight:
-	cd frontend && PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" OH_GOON_BROWSER_REUSE_SERVER=0 npm run browser:runtime-preflight
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh env PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" OH_GOON_BROWSER_REUSE_SERVER=0 npm run browser:runtime-preflight
 
 # OH_GOON_OPAQUE_TOOLS: node npm
 local-runtime-verification:
-	backend/.venv/bin/oh-goon-dev-runtime-acceptance verification
+	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-dev-runtime-acceptance verification
 
 # OH_GOON_OPAQUE_TOOLS: bash kill mkdir node npm sh xargs
 strict-local-runtime-acceptance:
-	backend/.venv/bin/oh-goon-dev-runtime-acceptance strict
+	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-dev-runtime-acceptance strict
 
 browser-system-deps:
 	@printf '%s\n' 'Installing Playwright operating-system dependencies; this operation may require sudo/root.'
@@ -337,7 +338,7 @@ browser-targeted-certification: browser-runtime-preflight
 	@set -eu; \
 	for spec in shared-runs runs fleet-scale schedules accessibility content-visibility theme-integrity; do \
 		printf '\n== Gate D Chromium: %s.spec.ts ==\n' "$$spec"; \
-		(cd frontend && PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" OH_GOON_BROWSER_REUSE_SERVER=0 npm run browser:test -- "e2e/$$spec.spec.ts" --project=chromium --workers=1 --max-failures=1); \
+		$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh env PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" OH_GOON_BROWSER_REUSE_SERVER=0 npm run browser:test -- "e2e/$$spec.spec.ts" --project=chromium --workers=1 --max-failures=1; \
 	done
 
 certification-explain:
@@ -352,18 +353,18 @@ prepare-release:
 
 # OH_GOON_OPAQUE_TOOLS: node
 browser-required-certification: browser-runtime-preflight
-	cd frontend && PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" OH_GOON_BROWSER_REUSE_SERVER=0 npm run browser:test
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh env PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" OH_GOON_BROWSER_REUSE_SERVER=0 npm run browser:test
 
 browser-test:
 	$(MAKE) browser-required-certification
 
 browser-check-system-chromium:
 	@test -n "$(OH_GOON_CHROMIUM_EXECUTABLE)" || { echo "OH_GOON_CHROMIUM_EXECUTABLE is required" >&2; exit 2; }
-	cd frontend && PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" OH_GOON_BROWSER_ENGINE=chromium OH_GOON_CHROMIUM_EXECUTABLE="$(OH_GOON_CHROMIUM_EXECUTABLE)" npm run browser:preflight
-	cd frontend && PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" OH_GOON_CHROMIUM_EXECUTABLE="$(OH_GOON_CHROMIUM_EXECUTABLE)" npm run browser:test -- --project=chromium
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh env PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" OH_GOON_BROWSER_ENGINE=chromium OH_GOON_CHROMIUM_EXECUTABLE="$(OH_GOON_CHROMIUM_EXECUTABLE)" npm run browser:preflight
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh env PLAYWRIGHT_BROWSERS_PATH="$(PLAYWRIGHT_BROWSERS_PATH)" OH_GOON_CHROMIUM_EXECUTABLE="$(OH_GOON_CHROMIUM_EXECUTABLE)" npm run browser:test -- --project=chromium
 
 theme-contrast:
-	uv run --offline --frozen --no-sync --project backend oh-goon-theme-contrast
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-theme-contrast
 
 
 frontend-lock:
@@ -393,12 +394,12 @@ dev:
 	bash scripts/dev.sh
 
 lint:
-	cd backend && uv run --offline --frozen --no-sync --group quality ruff check src tests
-	uv run --offline --frozen --no-sync --group quality --project backend ruff check scripts tests/integration
-	cd frontend && npm run lint
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality ruff check src tests
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --group quality --project backend ruff check scripts tests/integration
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run lint
 
 i18n-check:
-	cd frontend && npm run i18n:check
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run i18n:check
 
 format:
 	cd backend && uv run --offline --frozen --no-sync --group quality ruff format src tests
@@ -406,15 +407,15 @@ format:
 	cd frontend && npm run lint:fix
 
 format-check:
-	cd backend && uv run --offline --frozen --no-sync --group quality ruff format --check src tests
-	uv run --offline --frozen --no-sync --group quality --project backend ruff format --check scripts tests/integration
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality ruff format --check src tests
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --group quality --project backend ruff format --check scripts tests/integration
 
 typecheck:
-	uv run --offline --frozen --no-sync --group quality --project backend mypy --config-file backend/pyproject.toml scripts/tests tests/integration
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --group quality --project backend mypy --config-file backend/pyproject.toml scripts/tests tests/integration
 
 
 repository-understanding-exam:
-	uv run --offline --frozen --no-sync --project backend oh-goon-repository-understanding-exam verify
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-repository-understanding-exam verify
 
 pre-commit-acquire:
 	uvx --from '$(PRE_COMMIT_REQUIREMENT)' pre-commit --version
@@ -438,7 +439,7 @@ candidate-convergence-preflight:
 	backend/.venv/bin/oh-goon-repository-understanding-exam verify --quiet
 
 architecture:
-	backend/.venv/bin/oh-goon-architecture
+	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-architecture
 
 goon-compile:
 	backend/.venv/bin/oh-goon-goon-compile
@@ -467,13 +468,13 @@ release-source-package-artifact:
 	uv run --project backend --locked --no-default-groups --group build oh-goon-package-source
 
 check-generated:
-	backend/.venv/bin/oh-goon-check-generated
+	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-check-generated
 
 # Fast inner loop for the execution-integrity boundary. Keep this list deliberately
 # focused: semantic lock/identity/admission/schedule contracts, not release or real
 # child-process lifecycle tests.
 test-execution-fast:
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "not slow and not process and not scale" \
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "not slow and not process and not scale" --workers 1 --batch-size 4 --batch-timeout 180 \
 		tests/unit/services/test_execution_boundary_contract.py \
 		tests/unit/services/test_execution_lock.py \
 		tests/unit/services/test_fleet_plan_preparation_no_magic.py \
@@ -503,49 +504,49 @@ test-execution-fast:
 # DIAGNOSTIC_SURFACE / DIAGNOSTIC_BATCH / DIAGNOSTIC_BATCH_LIMIT can widen a hosted investigation;
 # complete backend/generated ownership remains native uv + backend/.venv.
 test-python-core-diagnostic:
-	@$(RUN_STEP) 'PRE-DEPENDENCY TEST DIAGNOSTIC' 'Owner: host pytest | bounded dependency-light diagnostic; never certification authority' -- env OH_GOON_HOSTED_DIAGNOSTIC_RECEIPT="$(RUN_LOG_DIR)/test/hosted-diagnostic-receipt.json" OH_GOON_HOSTED_DIAGNOSTIC_STATUS="$(RUN_LOG_DIR)/test/hosted-diagnostic-exit.status" DIAGNOSTIC_SURFACE="$(DIAGNOSTIC_SURFACE)" DIAGNOSTIC_BATCH="$(DIAGNOSTIC_BATCH)" DIAGNOSTIC_BATCH_LIMIT="$(DIAGNOSTIC_BATCH_LIMIT)" bash scripts/backend_core_test_diagnostic.sh
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'PRE-DEPENDENCY TEST DIAGNOSTIC' 'Owner: host pytest | bounded dependency-light diagnostic; never certification authority' -- env OH_GOON_HOSTED_DIAGNOSTIC_RECEIPT="$(RUN_LOG_DIR)/test/hosted-diagnostic-receipt.json" OH_GOON_HOSTED_DIAGNOSTIC_STATUS="$(RUN_LOG_DIR)/test/hosted-diagnostic-exit.status" DIAGNOSTIC_SURFACE="$(DIAGNOSTIC_SURFACE)" DIAGNOSTIC_BATCH="$(DIAGNOSTIC_BATCH)" DIAGNOSTIC_BATCH_LIMIT="$(DIAGNOSTIC_BATCH_LIMIT)" bash scripts/backend_core_test_diagnostic.sh
 
 # The leaf transport compatibility surface intentionally waits until backend dependencies
 # are complete. Missing httpx2 must block this late job, never the unrelated core suite.
 # Process lifecycle proofs use their own serialized lane and native timeout budget.
 test-python-dependency-complete:
-	@$(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | complete non-process qualification' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 2 --workers 1 --batch-timeout 60 --suite-timeout 120 --marker 'not process'
-	@$(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE PROCESS TESTS' 'Owner: Oh-Goon pytest batches | semantic process supervision is serialized' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 1 --workers 1 --batch-timeout 180 --suite-timeout 600 --marker 'process'
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | complete non-process qualification' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 2 --workers 1 --batch-timeout 60 --suite-timeout 120 --marker 'not process'
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE PROCESS TESTS' 'Owner: Oh-Goon pytest batches | semantic process supervision is serialized' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 1 --workers 1 --batch-timeout 180 --suite-timeout 600 --marker 'process'
 
 # Profiling is diagnostic, never part of the normal gate. It exposes accidental
 # suite growth without making wall-clock timing a correctness assertion.
 test-python-profile:
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest tests/unit tests/dependency_complete --durations=40 --durations-min=0.05
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 tests/unit tests/dependency_complete --show-output --pytest-arg=--durations=40 --pytest-arg=--durations-min=0.05
 
 # Fast backend repair/development gate. Selection is semantic: real-process, scale,
 # certification and explicitly slow tests stay outside the inner loop. Scheduling itself
 # is generic; timeout refinement owns any coarse shard that proves too large at runtime.
 # OH_GOON_OPAQUE_TOOLS: git ldd node npm true uv
 test-python: python-static-sanity
-	@$(RUN_STEP) 'BACKEND FAST UNIT TESTS' 'Owner: Oh-Goon pytest batches | semantic selection + adaptive timeout refinement' -- backend/.venv/bin/oh-goon-test-batches backend/tests/unit --granularity files --batch-size 4 --workers 4 --batch-timeout 120 --suite-timeout 1200 $(PYTEST_RESUME) --resume-key backend-fast-unit-files --marker 'not slow and not process and not scale and not certification'
-	@$(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | 60s hard timeout' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 2 --workers 1 --batch-timeout 60 --suite-timeout 120 --marker 'not slow and not process and not scale and not certification'
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND FAST UNIT TESTS' 'Owner: Oh-Goon pytest batches | semantic selection + adaptive timeout refinement' -- backend/.venv/bin/oh-goon-test-batches backend/tests/unit --granularity files --batch-size 4 --workers 4 --batch-timeout 120 --suite-timeout 1200 $(PYTEST_RESUME) --resume-key backend-fast-unit-files --marker 'not slow and not process and not scale and not certification'
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND DEPENDENCY-COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | 60s hard timeout' -- backend/.venv/bin/oh-goon-test-batches backend/tests/dependency_complete --granularity files --batch-size 2 --workers 1 --batch-timeout 60 --suite-timeout 120 --marker 'not slow and not process and not scale and not certification'
 
 # Complete backend qualification uses one generic non-process lane. Process-supervision
 # tests own the explicit ``process`` semantic marker and are serialized as a distinct
 # execution class; filenames never select batching, workers, or timeout policy.
 # OH_GOON_OPAQUE_TOOLS: git ldd node npm true uv
 test-python-complete: python-static-sanity
-	@$(RUN_STEP) 'BACKEND COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | complete non-process qualification' -- backend/.venv/bin/oh-goon-test-batches backend/tests/unit --granularity files --batch-size 4 --workers 2 --batch-timeout 180 --suite-timeout 1200 --environment-retries 1 --marker 'not process'
-	@$(RUN_STEP) 'BACKEND COMPLETE PROCESS TESTS' 'Owner: Oh-Goon pytest batches | semantic process supervision is serialized' -- backend/.venv/bin/oh-goon-test-batches backend/tests/unit --granularity files --batch-size 1 --workers 1 --batch-timeout 180 --suite-timeout 600 --environment-retries 1 --marker 'process'
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND COMPLETE UNIT TESTS' 'Owner: Oh-Goon pytest batches | complete non-process qualification' -- backend/.venv/bin/oh-goon-test-batches backend/tests/unit --granularity files --batch-size 4 --workers 2 --batch-timeout 180 --suite-timeout 1200 --environment-retries 1 --marker 'not process'
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND COMPLETE PROCESS TESTS' 'Owner: Oh-Goon pytest batches | semantic process supervision is serialized' -- backend/.venv/bin/oh-goon-test-batches backend/tests/unit --granularity files --batch-size 1 --workers 1 --batch-timeout 180 --suite-timeout 600 --environment-retries 1 --marker 'process'
 	@$(MAKE) test-python-dependency-complete
 
 repository-understanding-test-batch:
 	@test -n "$(BATCH)" || { echo "BATCH=1..7 is required" >&2; exit 2; }
-	@$(RUN_STEP) 'REPOSITORY UNDERSTANDING TEST BATCH' 'Owner: Oh-Goon | one bounded agent-safe pytest batch' -- backend/.venv/bin/oh-goon-test-batches scripts/tests/test_repository_understanding_certification.py --granularity tests --batch-size 4 --workers 1 --batch-timeout 90 $(PYTEST_RESUME) --resume-key repository-understanding-batched --batch "$(BATCH)"
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'REPOSITORY UNDERSTANDING TEST BATCH' 'Owner: Oh-Goon | one bounded agent-safe pytest batch' -- backend/.venv/bin/oh-goon-test-batches scripts/tests/test_repository_understanding_certification.py --granularity tests --batch-size 4 --workers 1 --batch-timeout 90 $(PYTEST_RESUME) --resume-key repository-understanding-batched --batch "$(BATCH)"
 
 repository-understanding-tests-batched:
-	@$(RUN_STEP) 'REPOSITORY UNDERSTANDING TEST BATCHES' 'Owner: Oh-Goon | deterministic node-level pytest timeout firewall' -- backend/.venv/bin/oh-goon-test-batches scripts/tests/test_repository_understanding_certification.py --granularity tests --batch-size 4 --workers 1 --batch-timeout 90 $(PYTEST_RESUME) --resume-key repository-understanding-batched
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'REPOSITORY UNDERSTANDING TEST BATCHES' 'Owner: Oh-Goon | deterministic node-level pytest timeout firewall' -- backend/.venv/bin/oh-goon-test-batches scripts/tests/test_repository_understanding_certification.py --granularity tests --batch-size 4 --workers 1 --batch-timeout 90 $(PYTEST_RESUME) --resume-key repository-understanding-batched
 
 # Development/repair tooling gate. Selection is semantic; the generic batch runner owns
 # concurrency, timeout enforcement, and deterministic timeout refinement. A test filename
 # never grants a different execution profile.
 test-tooling:
-	@$(RUN_STEP) 'TOOLING FAST TESTS' 'Owner: Oh-Goon pytest batches | semantic selection + adaptive timeout refinement' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --granularity files --batch-size 1 --workers 2 --batch-timeout 90 --suite-timeout 1200 $(PYTEST_RESUME) $(TOOLING_TEST_RESUME_CONTEXT) --resume-key tooling-fast-files --marker 'not certification and not process and not slow'
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING FAST TESTS' 'Owner: Oh-Goon pytest batches | semantic selection + adaptive timeout refinement' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --granularity files --batch-size 4 --workers 2 --batch-timeout 90 --suite-timeout 1200 $(PYTEST_RESUME) $(TOOLING_TEST_RESUME_CONTEXT) --resume-key tooling-fast-files --marker 'not certification and not process and not slow'
 
 # A1k: optional read-only disposable-kernel custody proof. This is deliberately
 # independent of the original M209 diagnostic sequence: normal WSL users are
@@ -555,37 +556,37 @@ test-tooling:
 a1-native-kernel-custody-test:
 	@test "$$(id -u)" = 0 && test "$$(uname -s)" = Linux && test "$$(uname -m)" = x86_64 || { echo 'A1 KERNEL CUSTODY BLOCKED: Linux x86_64 root required' >&2; exit 2; }
 	@command -v setpriv >/dev/null && command -v uv >/dev/null && test -d /opt && test -w /opt && test -x backend/.venv/bin/oh-goon-qualification-exec || { echo 'A1 KERNEL CUSTODY BLOCKED: root-owned /opt, setpriv, uv and locked backend required' >&2; exit 2; }
-	@bash scripts/a1_kernel_custody.sh "$(A1_KERNEL_EVIDENCE_DIR)" scripts/tests/test_a1h_real_linux_process_custody.py
+	@$(DEVELOPMENT_RESOURCE_RUNNER) bash scripts/a1_kernel_custody.sh "$(A1_KERNEL_EVIDENCE_DIR)" scripts/tests/test_a1h_real_linux_process_custody.py
 
 # Complete repository-tooling qualification uses the same generic scheduling authority.
 # Certification-marked recursive tests remain owned by APP certification.
 # OH_GOON_OPAQUE_TOOLS: bash dd git node uv
 test-tooling-complete:
-	@$(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --granularity files --batch-size 2 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker "$(TOOLING_COMPLETE_TEST_MARKER)"
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --granularity files --batch-size 4 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker "$(TOOLING_COMPLETE_TEST_MARKER)"
 
 test-frontend:
-	cd frontend && npm run test
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run test
 
 frontend-typecheck:
-	cd frontend && npm run typecheck
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run typecheck
 
 frontend-architecture:
-	cd frontend && npm run architecture
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run architecture
 
 frontend-build:
-	cd frontend && npm run build
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run build
 
 test-integration:
-	@$(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- sh -c 'cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "$(CHECK_PYTEST_MARKER)" tests/integration'
-	@$(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualification execution -> pytest' -- backend/.venv/bin/oh-goon-qualification-exec pytest -c backend/pyproject.toml -m "$(CHECK_PYTEST_MARKER)" tests/integration
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualified native pytest batches | original serial selection' -- sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml tests/integration --workers 1 --batch-size 4 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualified native pytest batches' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output tests/integration --workers 1 --batch-size 4 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
 
 test-python-projects:
-	@$(RUN_STEP) 'STANDALONE PYTHON PROJECT TESTS' 'Owner: native uv | Iris and orders application tests' -- uv run --offline --frozen --no-sync --project backend oh-goon-python-project-checks
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'STANDALONE PYTHON PROJECT TESTS' 'Owner: native uv | Iris and orders application tests' -- uv run --offline --frozen --no-sync --project backend oh-goon-python-project-checks
 
 # Compact production-shaped SQLite lifetime gate. This deliberately crosses the
 # worker/wait/restart boundary and complements component/fault-matrix coverage.
 test-sqlite-real-usage:
-	@$(RUN_STEP) 'SQLITE REAL-USAGE QA' 'Owner: Oh-Goon | active wait -> terminal handoff -> restart -> durable reread' -- backend/.venv/bin/oh-goon-test-batches \
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'SQLITE REAL-USAGE QA' 'Owner: Oh-Goon | active wait -> terminal handoff -> restart -> durable reread' -- backend/.venv/bin/oh-goon-test-batches \
 		backend/tests/integration/api/test_sqlite_real_usage_lifecycle.py \
 		backend/tests/unit/runtime/test_terminal_completion_handoff.py \
 		backend/tests/unit/runtime/test_certification_wait_sqlite_pressure.py \
@@ -595,7 +596,7 @@ test-sqlite-real-usage:
 # Golden production-shaped journeys. This gate intentionally crosses owner boundaries
 # and includes adversarial/mutation proofs; raw unit-test count is not its success metric.
 test-real-lifecycle:
-	@$(RUN_STEP) 'REAL LIFECYCLE QA' 'Owner: qualification execution -> pytest | public entrypoints -> authority -> durability -> teardown/reload -> observed state' -- backend/.venv/bin/oh-goon-qualification-exec pytest -q -c backend/pyproject.toml \
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'REAL LIFECYCLE QA' 'Owner: qualification execution -> pytest | public entrypoints -> authority -> durability -> teardown/reload -> observed state' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output --marker "" --granularity tests --workers 1 --batch-size 8 --batch-timeout 180 \
 		scripts/tests/test_real_lifecycle_qa_contract.py \
 		scripts/tests/test_init_hostile_clean_extraction.py \
 		scripts/tests/test_native_real_lifecycle_artifact_contract.py \
@@ -645,14 +646,14 @@ test-real-world-parallel:
 # executes one exact-identity unit; rerun until COMPLETE. Existing authoritative checks
 # remain the owners of pass/fail truth.
 tool-session-qualification:
-	backend/.venv/bin/oh-goon-tool-session-batches --max-units 1
+	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-tool-session-batches --max-units 1
 
 tool-session-qualification-status:
 	backend/.venv/bin/oh-goon-tool-session-batches --status
 
 
 coverage-python:
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest -c pyproject.toml tests ../scripts/tests -m "not certification" --cov=src/oh_goon --cov-branch --cov-fail-under=0 --cov-report=json:../coverage-python.json
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --workers 1 --batch-size 4 --batch-timeout 180 tests ../scripts/tests --marker "not certification" --coverage-source=src/oh_goon --coverage-data-file="$(CURDIR)/backend/.coverage" --coverage-fail-under=0 --coverage-report=json:../coverage-python.json
 
 coverage-report:
 	@test -f backend/.coverage || { echo "No backend coverage data exists; run make quality-check first." >&2; exit 2; }
@@ -663,7 +664,7 @@ coverage-report:
 # invalidate a run or create reconnect pressure, and treats leaked sqlite handles as failures.
 test-sqlite-coverage:
 	@mkdir -p "$(STATE_HOME)/oh-goon/coverage"
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest -W error::ResourceWarning \
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 --pytest-arg=-W --pytest-arg=error::ResourceWarning \
 	  tests/unit/runtime/test_database_path_ownership.py \
 	  tests/unit/runtime/test_execution_connection_scope.py \
 	  tests/unit/runtime/test_execution_lease.py \
@@ -674,18 +675,18 @@ test-sqlite-coverage:
 	  tests/unit/runtime/test_sqlite_adversarial_identity.py \
 	  tests/unit/runtime/test_sqlite_fault_matrix.py \
 	  tests/unit/runtime/test_sqlite_authority_edge_cases.py \
-	  --cov=oh_goon.runtime.database \
-	  --cov=oh_goon.runtime.execution.sqlite_lease \
-	  --cov=oh_goon.runtime._sqlite_access_diagnostics \
-	  --cov-branch --cov-fail-under=90 --cov-report=term-missing \
-	  --cov-report=json:"$(STATE_HOME)/oh-goon/coverage/sqlite-core.json"
+	  --coverage-source=oh_goon.runtime.database \
+	  --coverage-source=oh_goon.runtime.execution.sqlite_lease \
+	  --coverage-source=oh_goon.runtime._sqlite_access_diagnostics \
+	  --coverage-data-file="$(CURDIR)/backend/.coverage" --coverage-fail-under=90 --coverage-report=term-missing \
+	  --coverage-report=json:"$(STATE_HOME)/oh-goon/coverage/sqlite-core.json"
 
 # Durable Journal authority coverage is intentionally separate from journal_view read-side
 # projection coverage. This gate proves fact encoding/hash-chain validation, append/store/index
 # behavior, lineage admission guards, incremental observation, and recovery-facing Journal writes.
 test-journal-coverage:
 	@mkdir -p "$(STATE_HOME)/oh-goon/coverage"
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest -W error::ResourceWarning \
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 --pytest-arg=-W --pytest-arg=error::ResourceWarning \
 	  tests/unit/runtime/test_journal.py \
 	  tests/unit/runtime/test_journal_integrity.py \
 	  tests/unit/runtime/test_journal_operation_state.py \
@@ -699,21 +700,21 @@ test-journal-coverage:
 	  tests/unit/runtime/test_result_lifecycle.py \
 	  tests/unit/runtime/test_crash_consistency.py \
 	  tests/unit/runtime/test_durable_capability_provenance.py \
-	  --cov=oh_goon.runtime.journal \
-	  --cov=oh_goon.runtime.journal_store \
-	  --cov=oh_goon.runtime.journal_index \
-	  --cov=oh_goon.runtime.journal_codec \
-	  --cov=oh_goon.runtime.journal_facts \
-	  --cov-branch --cov-fail-under=93 --cov-report=term-missing \
-	  --cov-report=json:"$(STATE_HOME)/oh-goon/coverage/journal-durability.json"
+	  --coverage-source=oh_goon.runtime.journal \
+	  --coverage-source=oh_goon.runtime.journal_store \
+	  --coverage-source=oh_goon.runtime.journal_index \
+	  --coverage-source=oh_goon.runtime.journal_codec \
+	  --coverage-source=oh_goon.runtime.journal_facts \
+	  --coverage-data-file="$(CURDIR)/backend/.coverage" --coverage-fail-under=93 --coverage-report=term-missing \
+	  --coverage-report=json:"$(STATE_HOME)/oh-goon/coverage/journal-durability.json"
 
 quality-check: coverage-python
-	uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet check --area python
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet check --area python
 
 quality-raise:
 	@$(MAKE) coverage-python
-	cd frontend && npm run test:coverage
-	uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet raise
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run test:coverage
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet raise
 
 test:
 	@$(DEVELOPMENT_TEST_FRONTDOOR)
@@ -750,35 +751,35 @@ logs:
 	@if [ ! -d "$(RUN_LOG_DIR)" ]; then echo "No Oh-Goon run logs exist yet."; else find "$(RUN_LOG_DIR)" -maxdepth 2 -type f -name '*.log' -printf '%TY-%Tm-%Td %TH:%TM  %p\n' | sort -r; fi
 
 check-backend:
-	cd backend && uv run --offline --frozen --no-sync --group quality ruff check src tests
-	cd backend && uv run --offline --frozen --no-sync --group quality ruff format --check src tests
-	cd backend && uv run --offline --frozen --no-sync --group quality mypy
-	uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet guard
-	cd backend && .venv/bin/oh-goon-qualification-exec pytest -m "$(CHECK_PYTEST_MARKER)" $(BACKEND_CHECK_TEST_ROOTS)
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality ruff check src tests
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality ruff format --check src tests
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality mypy
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet guard
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --workers 1 --batch-size 4 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(BACKEND_CHECK_TEST_ROOTS)
 
 backend-check: check-backend
 
 check-tooling:
-	@$(RUN_STEP) 'TOOLING QUALITY [1/4]' 'Owner: ruff | lint' -- uv run --offline --frozen --no-sync --group quality --project backend ruff check scripts tests/integration
-	@$(RUN_STEP) 'TOOLING QUALITY [2/4]' 'Owner: ruff | format check' -- uv run --offline --frozen --no-sync --group quality --project backend ruff format --check scripts tests/integration
-	@$(RUN_STEP) 'TOOLING QUALITY [3/4]' 'Owner: mypy | type check' -- uv run --offline --frozen --no-sync --group quality --project backend mypy --config-file backend/pyproject.toml scripts/tests tests/integration
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING QUALITY [1/4]' 'Owner: ruff | lint' -- uv run --offline --frozen --no-sync --group quality --project backend ruff check scripts tests/integration
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING QUALITY [2/4]' 'Owner: ruff | format check' -- uv run --offline --frozen --no-sync --group quality --project backend ruff format --check scripts tests/integration
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING QUALITY [3/4]' 'Owner: mypy | type check' -- uv run --offline --frozen --no-sync --group quality --project backend mypy --config-file backend/pyproject.toml scripts/tests tests/integration
 	@$(RUN_STEP) 'TOOLING QUALITY [4/4]' 'Owner: Oh-Goon | bounded tooling tests' -- $(MAKE) test-tooling-complete TOOLING_COMPLETE_TEST_MARKER="$(CHECK_PYTEST_MARKER)"
 
 tooling-check: check-tooling
 
 check-frontend: theme-contrast
-	cd frontend && npm run check
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run check
 
 frontend-check: check-frontend
 
 check:
-	@OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh check $(DEVELOPMENT_CHECK_RUNNER)
+	@OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh check $(DEVELOPMENT_RESOURCE_RUNNER) $(DEVELOPMENT_CHECK_RUNNER)
 
 # Exhaustive diagnostic projection of every canonical APP certification Goon.
 # Independent failures continue so one run reports the whole application state.
 # This target cannot create APP PASS; `make certify` remains unchanged.
 verify:
-	@OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh verify $(APPLICATION_VERIFY_RUNNER)
+	@OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh verify $(DEVELOPMENT_RESOURCE_RUNNER) $(APPLICATION_VERIFY_RUNNER)
 
 build-release:
 	bash scripts/release/build_release.sh
@@ -891,7 +892,7 @@ recovery-resume:
 # the locked npm materialization produced by make sync; no fallback npx fetch.
 # Not release authority and never a substitute for the full frontend suite.
 frontend-schedule-plan-input-regression:
-	cd frontend && npm run test -- src/features/schedules/components/ScheduleCreatePanel.test.tsx src/features/schedules/components/schedulePlanInputDraft.test.ts
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run test -- src/features/schedules/components/ScheduleCreatePanel.test.tsx src/features/schedules/components/schedulePlanInputDraft.test.ts
 
 # M209: diagnostic-only WSL evidence frontdoor. This does not replace the
 # canonical make init/test/certify or grant enrollment/release authority.

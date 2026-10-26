@@ -63,7 +63,9 @@ def test_plan_identity(members: Iterable[str], *, root: Path) -> str:
     for member in members:
         path = _member_file(member, root=root)
         key = str(path.resolve())
-        identity = file_identities.setdefault(key, _file_identity(path))
+        if key not in file_identities:
+            file_identities[key] = _file_identity(path)
+        identity = file_identities[key]
         ordered.append({"member": member, "test_file_sha256": identity})
     return _canonical_identity({"schema": "oh-goon.pytest-plan/v1", "members": ordered})
 
@@ -147,13 +149,16 @@ def build_resume_context(
     granularity: str,
     marker: str | None,
     extra_context: tuple[str, ...] = (),
+    member_root: Path | None = None,
 ) -> ResumeContext:
     # Lazy import is deliberate: parsing/inspecting receipts must not import the source
     # packager or the repository-understanding graph.
     from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 
     source_identity = canonical_source_identity(root)
-    plan_identity = test_plan_identity(members, root=root)
+    plan_identity = test_plan_identity(
+        members, root=member_root if member_root is not None else root
+    )
     toolchain_identity = python_toolchain_identity()
     normalized_extra = tuple(extra_context)
     # Correctness identity deliberately excludes execution grouping/budgets. A completed
@@ -200,24 +205,26 @@ def execution_plan_identity(
     selected_batch: int | None,
     scheduled_members: tuple[str, ...],
     reused_members: tuple[str, ...],
+    resource_budget: dict[str, object] | None = None,
 ) -> str:
     """Bind actual execution/performance provenance separately from correctness."""
 
-    return _canonical_identity(
-        {
-            "schema": EXECUTION_PLAN_SCHEMA,
-            "suite_identity": suite_identity,
-            "batch_size": batch_size,
-            "batch_timeout": batch_timeout,
-            "timeout_bisection": timeout_bisection,
-            "workers": workers,
-            "suite_timeout": suite_timeout,
-            "environment_retries": environment_retries,
-            "selected_batch": selected_batch,
-            "scheduled_members": list(scheduled_members),
-            "reused_members": list(reused_members),
-        }
-    )
+    payload: dict[str, object] = {
+        "schema": EXECUTION_PLAN_SCHEMA,
+        "suite_identity": suite_identity,
+        "batch_size": batch_size,
+        "batch_timeout": batch_timeout,
+        "timeout_bisection": timeout_bisection,
+        "workers": workers,
+        "suite_timeout": suite_timeout,
+        "environment_retries": environment_retries,
+        "selected_batch": selected_batch,
+        "scheduled_members": list(scheduled_members),
+        "reused_members": list(reused_members),
+    }
+    if resource_budget is not None:
+        payload["resource_budget"] = resource_budget
+    return _canonical_identity(payload)
 
 
 def batch_identity(members: tuple[str, ...]) -> str:

@@ -36,6 +36,16 @@ jobs:
         with:
           version: "0.12.5"
           enable-cache: false
+      - name: Prepare native test CPU control
+        run: |
+          # This disposable runner owns its native systemd user manager.
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          runner_uid=$(id -u)
+          sudo loginctl enable-linger "$runner_uid"
+          sudo systemctl start "user@$runner_uid.service"
+          test -S "/run/user/$runner_uid/bus"
+          printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
+          printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
       - name: Materialize committed locks
         run: make init
       - name: Run draft feedback
@@ -84,6 +94,16 @@ jobs:
           sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
           # Native Bubblewrap tests need user namespaces on this disposable VM.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Prepare native test CPU control
+        run: |
+          # This disposable runner owns its native systemd user manager.
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          runner_uid=$(id -u)
+          sudo loginctl enable-linger "$runner_uid"
+          sudo systemctl start "user@$runner_uid.service"
+          test -S "/run/user/$runner_uid/bus"
+          printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
+          printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
       - name: Materialize committed locks
         run: make init
       - name: Run required check
@@ -170,6 +190,16 @@ jobs:
         with:
           version: "0.12.5"
           enable-cache: false
+      - name: Prepare native test CPU control
+        run: |
+          # This disposable runner owns its native systemd user manager.
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          runner_uid=$(id -u)
+          sudo loginctl enable-linger "$runner_uid"
+          sudo systemctl start "user@$runner_uid.service"
+          test -S "/run/user/$runner_uid/bus"
+          printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
+          printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
       - name: Materialize committed locks
         run: make init
       - name: Assemble checked source

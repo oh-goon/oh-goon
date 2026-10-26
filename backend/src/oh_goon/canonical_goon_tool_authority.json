@@ -55,13 +55,18 @@
       "assert": []
     },
     "oh-goon/architecture": {
-      "make": []
+      "make": [
+        "bash",
+        "systemd-run"
+      ]
     },
     "oh-goon/backend-p0": {
       "make": [
+        "bash",
         "git",
         "ldd",
         "sh",
+        "systemd-run",
         "uv"
       ]
     },
@@ -69,86 +74,116 @@
       "make": [
         "bash",
         "git",
-        "sh"
+        "sh",
+        "systemd-run"
       ]
     },
     "oh-goon/backend-tests": {
       "make": [
+        "bash",
         "git",
         "ldd",
         "node",
         "npm",
         "sh",
+        "systemd-run",
         "true",
         "uv"
       ]
     },
     "oh-goon/browser-engine-preflight": {
       "make": [
+        "bash",
+        "env",
         "node",
         "npm",
-        "sh"
+        "sh",
+        "systemd-run"
       ]
     },
     "oh-goon/browser-harness-preflight": {
       "make": [
+        "bash",
         "node",
         "npm",
-        "sh"
+        "sh",
+        "systemd-run"
       ]
     },
     "oh-goon/browser-localhost-transport-preflight": {
       "make": [
+        "bash",
         "node",
         "npm",
-        "sh"
+        "sh",
+        "systemd-run"
       ]
     },
     "oh-goon/browser-required": {
       "make": [
+        "bash",
+        "env",
         "node",
         "npm",
-        "sh"
+        "sh",
+        "systemd-run"
       ]
     },
     "oh-goon/browser-runtime-preflight": {
       "make": [
+        "bash",
+        "env",
         "node",
         "npm",
-        "sh"
+        "sh",
+        "systemd-run"
       ]
     },
     "oh-goon/browser-targeted": {
       "make": [
+        "bash",
+        "env",
         "node",
         "npm",
-        "sh"
+        "sh",
+        "systemd-run"
       ]
     },
     "oh-goon/frontend-functional": {
       "make": [
+        "bash",
         "node",
         "npm",
-        "sh"
+        "sh",
+        "systemd-run"
       ]
     },
     "oh-goon/generated-contracts": {
-      "make": []
+      "make": [
+        "bash",
+        "systemd-run"
+      ]
     },
     "oh-goon/integration-contract": {
       "make": [
-        "sh"
+        "bash",
+        "sh",
+        "systemd-run"
       ]
     },
     "oh-goon/integration-tests": {
       "make": [
-        "sh"
+        "bash",
+        "sh",
+        "systemd-run"
       ]
     },
     "oh-goon/local-runtime": {
       "make": [
+        "bash",
         "node",
-        "npm"
+        "npm",
+        "systemd-run"
       ]
     },
     "oh-goon/release-identity": {
@@ -169,8 +204,10 @@
     },
     "oh-goon/template-startability": {
       "make": [
+        "bash",
         "ldd",
         "sh",
+        "systemd-run",
         "true",
         "uv"
       ]
@@ -182,6 +219,7 @@
         "git",
         "node",
         "sh",
+        "systemd-run",
         "uv"
       ]
     },

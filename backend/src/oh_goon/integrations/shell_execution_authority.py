@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from oh_goon.integrations._shell_authority_syntax import (
     find_exec_child_words,
     forward_position,
     function_names,
+    literal_cwd_forwarded_argv,
     logical_lines,
     mask_noncommand_expansions,
     materialized_executable_identity,
@@ -58,6 +60,7 @@ class _Builder:
     package_sources: set[str] = field(default_factory=set)
     materialized_executables: set[str] = field(default_factory=set)
     visiting: list[str] = field(default_factory=list)
+    argv_forwarding_proven: bool = False
 
     def require(self, tool: str, chain: tuple[str, ...]) -> None:
         self.tools.add(tool)
@@ -111,15 +114,21 @@ def _scan_script_body(
     environment: dict[str, str],
 ) -> None:
     functions = function_names(lines)
+    position = forward_position(lines, relative)
     _scan_forwarded_argv(
         builder,
         argv,
-        forward_position(lines, relative),
+        position,
         (*chain, "<argv-forward>"),
         environment,
     )
-    for command in commands_from_script_lines(lines, environment):
-        _scan_fragment(builder, command, chain, functions, environment)
+    previous = builder.argv_forwarding_proven
+    builder.argv_forwarding_proven = position is not None
+    try:
+        for command in commands_from_script_lines(lines, environment):
+            _scan_fragment(builder, command, chain, functions, environment)
+    finally:
+        builder.argv_forwarding_proven = previous
 
 
 def _scan_owned_script(
@@ -184,11 +193,39 @@ def _scan_shell_command(
         if cursor >= len(words):
             builder.reject(f"{shell} -c command is missing", chain)
             return
-        _scan_fragment(builder, words[cursor], (*chain, f"{shell} -c"), functions, environment)
+        shell_chain = (*chain, f"{shell} -c")
+        forwarded = literal_cwd_forwarded_argv(
+            words[cursor], tuple(words[cursor + 1 :]), working_directory=builder.working_directory
+        )
+        if forwarded is not None:
+            child_cwd, child = forwarded
+            previous_cwd = builder.working_directory
+            previous_forwarding = builder.argv_forwarding_proven
+            builder.working_directory = child_cwd
+            builder.argv_forwarding_proven = False
+            try:
+                builder.materialized_executables.update(
+                    materialized_executables_in_shell(
+                        shlex.join(child), working_directory=child_cwd
+                    )
+                )
+                _scan_words(
+                    builder, child, (*shell_chain, "<argv-forward>"), functions, environment
+                )
+            finally:
+                builder.working_directory = previous_cwd
+                builder.argv_forwarding_proven = previous_forwarding
+            return
+        previous = builder.argv_forwarding_proven
+        builder.argv_forwarding_proven = False
+        try:
+            _scan_fragment(builder, words[cursor], shell_chain, functions, environment)
+        finally:
+            builder.argv_forwarding_proven = previous
         return
     if cursor >= len(words):
         return
-    script = project_path(builder.root, words[cursor])
+    script = project_path(builder.root, words[cursor], working_directory=builder.working_directory)
     if script is None:
         _reject_unresolved_shell_operand(builder, shell, words[cursor], chain)
         return
@@ -366,7 +403,7 @@ def _scan_dynamic_command(builder: _Builder, command: str, chain: tuple[str, ...
         return True
     if not command.startswith(("$", "${")):
         return False
-    if command not in {'"$@"', "$@", '"${@}"', "${@}"}:
+    if command not in {'"$@"', "$@", '"${@}"', "${@}"} or not builder.argv_forwarding_proven:
         builder.reject(f"unresolved executable variable: {command}", chain)
     return True
 
@@ -379,14 +416,17 @@ def _scan_owned_command(
     chain: tuple[str, ...],
     environment: dict[str, str],
 ) -> bool:
-    if materialized_executable_identity(command) is not None:
+    if (
+        materialized_executable_identity(command, working_directory=builder.working_directory)
+        is not None
+    ):
         # uv/npm own these generated executable wrappers. Treating a materialized
         # Python console entry point as shell made authority depend on whether
         # `make init` had already run (e.g. `__name__` became a fake host tool).
         # Canonical dependency identity is collected by the cwd-aware shell pass
         # before this owned-source guard runs.
         return True
-    owned = project_path(builder.root, command)
+    owned = project_path(builder.root, command, working_directory=builder.working_directory)
     if owned is None or owned.suffix not in {".sh", ""} or not owned.is_file():
         return False
     _scan_owned_script(builder, owned, tuple(words[index + 1 :]), chain, environment, direct=True)
@@ -394,7 +434,7 @@ def _scan_owned_command(
 
 
 def _scan_external_command(builder: _Builder, command: str, chain: tuple[str, ...]) -> None:
-    tool = external_tool(builder.root, command)
+    tool = external_tool(builder.root, command, working_directory=builder.working_directory)
     if tool is not None:
         builder.require(tool, chain)
         return

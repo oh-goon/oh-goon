@@ -100,6 +100,22 @@ def test_execution_report_projection_follows_schema_owner_mutation(
     )
 
     assert payload["schema"] == f"{FAMILY}/v7"
+    assert "diagnostics" not in payload
+    diagnostics = {
+        "resource_budget": {"requested_workers": 4, "effective_workers": 2},
+        "native_collection_duration_ms": 125,
+        "usage": {"cpu_seconds": {"total_seconds": 1.5}},
+    }
+    with_diagnostics = pytest_batch_orchestration._execution_report(
+        args,
+        cast(pytest_batch_orchestration._BatchPlan, plan),
+        cast(pytest_batch_orchestration._BatchRunState, state),
+        receipt,
+        Path("receipt.json"),
+        0.1,
+        diagnostics=diagnostics,
+    )
+    assert with_diagnostics == {**payload, "diagnostics": diagnostics}
 
 
 def test_execution_report_persistence_rejects_stale_schema(

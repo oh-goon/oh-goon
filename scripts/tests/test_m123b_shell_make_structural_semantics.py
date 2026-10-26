@@ -61,10 +61,11 @@ def _tooling_messages(tmp_path: Path, makefile: str) -> list[str]:
 def _workflow_makefile() -> str:
     return """\
 DEV = bash scripts/development_test.sh
+RESOURCES = bash scripts/development_test_resources.sh
 FLOW = backend/.venv/bin/oh-goon-workflow
 LOGGER = bash scripts/run_logged.sh
-TEST_GATE = OH_GOON_RUN_LOG_DIR=/tmp/log $(LOGGER) test $(DEV)
-CERT_GATE = OH_GOON_RUN_LOG_DIR=/tmp/log $(LOGGER) certify $(FLOW)
+TEST_GATE = OH_GOON_RUN_LOG_DIR=/tmp/log $(LOGGER) test $(RESOURCES) $(DEV)
+CERT_GATE = OH_GOON_RUN_LOG_DIR=/tmp/log $(LOGGER) certify $(RESOURCES) $(FLOW)
 
 test:
 \t@$(TEST_GATE)
@@ -257,11 +258,21 @@ def test_workflow_make_private_variable_names_are_representation_only(
 def test_workflow_make_helper_variable_extraction_is_representation_only(
     tmp_path: Path,
 ) -> None:
-    makefile = _workflow_makefile().replace(
-        "LOGGER = bash scripts/run_logged.sh",
-        "SHELL = bash\nLOG_SCRIPT = scripts/run_logged.sh\nLOGGER = $(SHELL) $(LOG_SCRIPT)",
+    root = _workflow_root(tmp_path)
+    assert check_make_single_path(root) == []
+
+    makefile = (
+        _workflow_makefile()
+        .replace(
+            "LOGGER = bash scripts/run_logged.sh",
+            "SHELL = bash\nLOG_SCRIPT = scripts/run_logged.sh\nLOGGER = $(SHELL) $(LOG_SCRIPT)",
+        )
+        .replace(
+            "RESOURCES = bash scripts/development_test_resources.sh",
+            "RESOURCE_SCRIPT = scripts/development_test_resources.sh\nRESOURCES = $(SHELL) $(RESOURCE_SCRIPT)",
+        )
     )
-    root = _workflow_root(tmp_path, makefile)
+    _write(root, "Makefile", makefile)
     assert check_make_single_path(root) == []
 
 

@@ -1,20 +1,75 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shlex
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
+from unittest.mock import patch
+
+from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _target_body(name: str) -> str:
-    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    start = makefile.index(f"{name}:")
-    next_target = makefile.find("\n\n", start)
-    return makefile[start : len(makefile) if next_target < 0 else next_target]
+def _native_commands(target: str, *overrides: str) -> list[list[str]]:
+    environment = os.environ.copy()
+    for name in (
+        "BACKEND_CHECK_TEST_ROOTS",
+        "CHECK_PYTEST_MARKER",
+        "TOOLING_COMPLETE_TEST_MARKER",
+        "MAKEFLAGS",
+        "MFLAGS",
+        "MAKEOVERRIDES",
+    ):
+        environment.pop(name, None)
+    result = subprocess.run(
+        ["make", "--no-print-directory", "--dry-run", target, *overrides],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return [
+        shlex.split(line)
+        for line in result.stdout.replace("\\\n", " ").splitlines()
+        if line.strip()
+    ]
+
+
+def _batch_options(commands: list[list[str]]) -> list[argparse.Namespace]:
+    options = []
+    for command in commands:
+        runner = next(
+            (
+                index
+                for index, argument in enumerate(command)
+                if argument.endswith("/oh-goon-test-batches")
+            ),
+            None,
+        )
+        if runner is None:
+            continue
+        assert command[:runner] == [
+            "bash",
+            "scripts/development_test_resources.sh",
+            "sh",
+            "-c",
+            'cd backend && exec "$@"',
+            "sh",
+        ]
+        with patch.object(sys, "argv", command[runner:]):
+            _parser, arguments = parse_batch_args()
+        assert arguments.qualified is True
+        assert arguments.show_output is True
+        assert arguments.pytest_config == Path("pyproject.toml")
+        options.append(arguments)
+    return options
 
 
 def test_backend_coverage_measures_real_tooling_subprocesses_and_both_test_surfaces() -> (
@@ -31,12 +86,11 @@ def test_backend_coverage_measures_real_tooling_subprocesses_and_both_test_surfa
     assert run["patch"] == ["subprocess"]
     assert report["fail_under"] >= 80
 
-    coverage = _target_body("coverage-python")
-    assert (
-        'pytest -c pyproject.toml tests ../scripts/tests -m "not certification"'
-        in coverage
-    )
-    assert "--cov=src/oh_goon --cov-branch" in coverage
+    (coverage,) = _batch_options(_native_commands("coverage-python"))
+    assert coverage.paths == [Path("tests"), Path("../scripts/tests")]
+    assert coverage.marker == "not certification"
+    assert coverage.coverage_source == ["src/oh_goon"]
+    assert coverage.coverage_data_file == ROOT / "backend/.coverage"
 
 
 def test_backend_coverage_floor_and_ratchet_never_drop_below_eighty_percent() -> None:
@@ -59,64 +113,51 @@ def test_frontend_coverage_policy_is_unchanged_by_backend_maturity_phase() -> No
 def test_normal_coverage_paths_collect_json_without_printing_the_per_file_table() -> (
     None
 ):
-    coverage = _target_body("coverage-python")
-    assert "--cov=src/oh_goon --cov-branch" in coverage
-    assert "--cov-report=json:../coverage-python.json" in coverage
-    assert "--cov-report=term" not in coverage
+    (coverage,) = _batch_options(_native_commands("coverage-python"))
+    assert coverage.coverage_source == ["src/oh_goon"]
+    assert coverage.coverage_report == ["json:../coverage-python.json"]
+    assert coverage.coverage_fail_under == 0
 
-    report = _target_body("coverage-report")
-    assert ".venv/bin/coverage report -m" in report
-    assert "pytest" not in report
+    commands = _native_commands("coverage-report")
+    assert any(
+        command[-3:] == [".venv/bin/coverage", "report", "-m"] for command in commands
+    )
+    assert not _batch_options(commands)
 
 
 def test_explicit_coverage_checks_and_floor_authoring_use_complete_native_coverage() -> (
     None
 ):
     for target in ("quality-check", "quality-raise"):
-        result = subprocess.run(
-            ["make", "--no-print-directory", "--dry-run", target],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        commands = [
-            shlex.split(line) for line in result.stdout.splitlines() if "pytest" in line
-        ]
-        coverage = [argv for argv in commands if "--cov=src/oh_goon" in argv]
-        assert len(coverage) == 1
-        assert coverage[0][
-            coverage[0].index("pyproject.toml") + 1 : coverage[0].index("-m")
-        ] == ["tests", "../scripts/tests"]
-        assert coverage[0][coverage[0].index("-m") + 1] == "not certification"
-        assert "--cov-fail-under=0" in coverage[0]
-        assert coverage[0][coverage[0].index("-c") + 1] == "pyproject.toml"
+        (coverage,) = _batch_options(_native_commands(target))
+        assert coverage.paths == [Path("tests"), Path("../scripts/tests")]
+        assert coverage.marker == "not certification"
+        assert coverage.coverage_source == ["src/oh_goon"]
+        assert coverage.coverage_fail_under == 0
+        assert coverage.coverage_report == ["json:../coverage-python.json"]
 
 
 def test_ordinary_backend_gate_measures_correctness_without_coverage_targets() -> None:
-    environment = os.environ.copy()
-    for name in (
-        "BACKEND_CHECK_TEST_ROOTS",
-        "CHECK_PYTEST_MARKER",
-        "TOOLING_COMPLETE_TEST_MARKER",
-        "MAKEFLAGS",
-        "MFLAGS",
-        "MAKEOVERRIDES",
-    ):
-        environment.pop(name, None)
-    result = subprocess.run(
-        ["make", "--no-print-directory", "--dry-run", "backend-check"],
-        cwd=ROOT,
-        env=environment,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    commands = [shlex.split(line) for line in result.stdout.splitlines()]
-    tests = [argv for argv in commands if "pytest" in argv]
+    commands = _native_commands("backend-check")
+    tests = _batch_options(commands)
     assert len(tests) == 1
-    assert tests[0][tests[0].index("-m") + 1] == "not certification and not slow"
-    assert not any(arg.startswith("--cov") for arg in tests[0])
+    assert tests[0].paths == []
+    assert tests[0].marker == "not certification and not slow"
+    assert tests[0].workers == 1
+    assert tests[0].batch_size == 4
+    assert all(not test.coverage_source for test in tests)
     assert not any("check" in argv and "--area" in argv for argv in commands)
+
+
+def test_backend_gate_preserves_explicit_roots_and_caller_marker() -> None:
+    tests = _batch_options(
+        _native_commands(
+            "backend-check",
+            "BACKEND_CHECK_TEST_ROOTS=tests/unit tests/dependency_complete",
+            "CHECK_PYTEST_MARKER=not certification",
+        )
+    )
+    (test,) = tests
+    assert test.paths == [Path("tests/unit"), Path("tests/dependency_complete")]
+    assert test.marker == "not certification"
+    assert test.workers == 1

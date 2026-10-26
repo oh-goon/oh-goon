@@ -52,7 +52,7 @@ def _native_batch_commands(target: str) -> list[list[str]]:
         timeout=10,
     )
     commands = []
-    for line in result.stdout.splitlines():
+    for line in result.stdout.replace("\\\n", " ").splitlines():
         words = shlex.split(line)
         for index, word in enumerate(words):
             if word.endswith("/oh-goon-test-batches"):
@@ -591,7 +591,45 @@ def test_preexec_usage_is_confined_to_single_threaded_opensandbox_chroot_boundar
     assert "os.setsid()" in runner
 
 
-def test_python_profile_uses_project_qualification_entrypoint() -> None:
-    profile = _target_body("test-python-profile")
-    assert ".venv/bin/oh-goon-qualification-exec pytest" in profile
-    assert ".venv/bin/python -m pytest" not in profile
+def test_python_profile_uses_qualified_native_batches_and_retains_duration_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
+
+    (command,) = _native_batch_commands("test-python-profile")
+    monkeypatch.setattr(sys, "argv", command)
+    _parser, options = parse_batch_args()
+
+    assert options.qualified is True
+    assert options.pytest_config == Path("pyproject.toml")
+    assert options.paths == [Path("tests/unit"), Path("tests/dependency_complete")]
+    assert options.marker == ""
+    assert options.pytest_arg == ["--durations=40", "--durations-min=0.05"]
+    assert options.show_output is True
+    assert not options.coverage_source
+
+
+def test_integration_gates_keep_original_serial_selection_in_both_owners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
+
+    profiles = []
+    for command in _native_batch_commands("test-integration"):
+        monkeypatch.setattr(sys, "argv", command)
+        _parser, options = parse_batch_args()
+        profiles.append(options)
+
+    assert len(profiles) == 2
+    assert all(profile.qualified for profile in profiles)
+    assert all(profile.show_output for profile in profiles)
+    assert [profile.paths for profile in profiles] == [[Path("tests/integration")]] * 2
+    assert [profile.pytest_config for profile in profiles] == [
+        Path("pyproject.toml"),
+        Path("backend/pyproject.toml"),
+    ]
+    assert [profile.marker for profile in profiles] == [
+        "not certification and not slow"
+    ] * 2
+    assert [profile.workers for profile in profiles] == [1, 1]
+    assert [profile.batch_size for profile in profiles] == [4, 4]

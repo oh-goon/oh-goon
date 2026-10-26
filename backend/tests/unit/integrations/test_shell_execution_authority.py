@@ -118,6 +118,135 @@ shift
     assert set(authority.tools) == {"env", "rm", "sh"}
 
 
+def test_bash_control_groups_keep_substitutions_and_following_executables(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    (root / "scripts/wrapper.sh").write_text(
+        "#!/bin/bash\n# OH_GOON_FORWARD_ARGV_FROM: 1\n"
+        'if [[ -z "$(id -u)" || "${VALUE:-}" == none ]]; then\n'
+        "  (( child = $(getconf _NPROCESSORS_ONLN) )); git --version\n"
+        "fi\n"
+        "(( cpus > 0 )) || return 2\n"
+        'exec systemd-run -- "$@"\n',
+        encoding="utf-8",
+    )
+
+    authority = derive_shell_fragment_authority(
+        root, "bash scripts/wrapper.sh env MODE=1 rm -f artifact", chain=("target",)
+    )
+
+    assert authority.unresolved == ()
+    assert set(authority.tools) == {"bash", "env", "getconf", "git", "id", "rm", "systemd-run"}
+
+
+def test_arithmetic_variable_names_still_require_authority_when_executed(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+
+    authority = derive_shell_fragment_authority(
+        root, "(( cpus > 0 )); child --version; cpus --version", chain=("target",)
+    )
+
+    assert authority.unresolved == ()
+    assert authority.tools == ("child", "cpus")
+
+
+def test_bash_group_spelling_in_arguments_cannot_hide_later_commands(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+
+    authority = derive_shell_fragment_authority(
+        root, "printf '%s' [[ value || curl --version ]]", chain=("target",)
+    )
+
+    assert authority.unresolved == ()
+    assert authority.tools == ("curl",)
+
+
+def test_literal_cwd_shell_forwarding_skips_zero_and_retains_environment_and_child(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+
+    authority = derive_shell_fragment_authority(
+        root,
+        "sh -c 'cd backend && exec \"$@\"' ignored-zero env MODE=1 git status --porcelain",
+        chain=("target",),
+    )
+
+    assert authority.unresolved == ()
+    assert authority.tools == ("env", "git", "sh")
+
+
+def test_literal_cwd_shell_forwarding_binds_materialized_child_and_preserves_outer_cwd(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+
+    authority = derive_shell_fragment_authority(
+        root,
+        "sh -c 'cd backend && exec \"$@\"' sh env MODE=1 .venv/bin/private-tool; "
+        "frontend/node_modules/.bin/other-tool",
+        chain=("target",),
+    )
+
+    assert authority.unresolved == ()
+    assert authority.tools == ("env", "sh")
+    assert authority.materialized_executables == (
+        "backend/.venv/bin/private-tool",
+        "frontend/node_modules/.bin/other-tool",
+    )
+
+
+def test_literal_cwd_shell_forwarding_reads_owned_sources_from_that_directory(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    (root / "backend/scripts").mkdir(parents=True)
+    (root / "backend/scripts/worker.sh").write_text("#!/bin/sh\nrm -f artifact\n")
+    (root / "scripts/worker.sh").write_text("#!/bin/sh\ncurl https://example.invalid\n")
+
+    authority = derive_shell_fragment_authority(
+        root, "sh -c 'cd backend && exec \"$@\"' sh sh scripts/worker.sh", chain=("target",)
+    )
+
+    assert authority.unresolved == ()
+    assert authority.tools == ("rm", "sh")
+    assert authority.scripts == ("backend/scripts/worker.sh",)
+
+
+@pytest.mark.parametrize(
+    "program",
+    (
+        'cd "$DIR" && exec "$@"',
+        'cd ../.. && exec "$@"',
+        'cd backend || exec "$@"',
+        "cd backend && exec '$@'",
+        'cd backend && exec "$1"',
+        'cd backend && "$@"',
+        'cd backend && exec "$@"; curl https://example.invalid',
+    ),
+)
+def test_unproven_shell_positional_forwarding_remains_admission_fatal(
+    tmp_path: Path, program: str
+) -> None:
+    import shlex
+
+    root = _repo(tmp_path)
+    baseline = derive_shell_fragment_authority(
+        root, "sh -c 'cd backend && exec \"$@\"' sh git status", chain=("target",)
+    )
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git", "sh")
+    authority = derive_shell_fragment_authority(
+        root, f"sh -c {shlex.quote(program)} sh git status", chain=("target",)
+    )
+
+    assert authority.unresolved
+    assert any("unresolved executable" in item for item in authority.unresolved)
+
+
 def test_authority_identity_inputs_change_when_owned_script_bytes_change(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / "Makefile").write_text("target:\n\tsh scripts/task.sh\n", encoding="utf-8")

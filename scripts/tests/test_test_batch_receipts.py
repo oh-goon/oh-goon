@@ -4,6 +4,7 @@ import ast
 import json
 from pathlib import Path
 from typing import TypedDict
+from unittest.mock import call, patch
 
 import pytest
 
@@ -25,6 +26,53 @@ def _fix_source_identity(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
         "canonical_source_identity",
         lambda _root: "sha256:" + value * 64,
     )
+
+
+def test_plan_identity_reads_each_unique_file_once(tmp_path: Path) -> None:
+    from oh_goon.repository_tooling.test_batch_receipts import test_plan_identity
+
+    first = tmp_path / "test_first.py"
+    second = tmp_path / "test_second.py"
+    first.write_text("def test_first(): pass\n", encoding="utf-8")
+    second.write_text("def test_second(): pass\n", encoding="utf-8")
+    members = (
+        "test_first.py::test_first[one]",
+        f"{first}::TestGroup::test_other",
+        "test_second.py::test_second",
+        "test_first.py::test_first[one]",
+    )
+
+    with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
+        test_plan_identity(members, root=tmp_path)
+
+    assert opened.call_args_list == [call(first, "rb"), call(second, "rb")]
+
+
+def test_plan_identity_preserves_order_duplicates_and_current_file_bytes(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.test_batch_receipts import test_plan_identity
+
+    first = tmp_path / "test_first.py"
+    second = tmp_path / "test_second.py"
+    first.write_text("def test_first(): pass\n", encoding="utf-8")
+    second.write_text("def test_second(): pass\n", encoding="utf-8")
+    members = (
+        "test_first.py::test_first",
+        "test_second.py::test_second",
+        "test_first.py::test_first",
+    )
+    identity = test_plan_identity(members, root=tmp_path)
+
+    assert test_plan_identity(iter(members), root=tmp_path) == identity
+    assert (
+        test_plan_identity((members[1], members[0], members[2]), root=tmp_path)
+        != identity
+    )
+    assert test_plan_identity(members[:-1], root=tmp_path) != identity
+
+    first.write_text("def test_first(): True\n", encoding="utf-8")
+    assert test_plan_identity(members, root=tmp_path) != identity
 
 
 def test_resume_context_changes_with_correctness_inputs_but_not_batch_grouping(

@@ -246,26 +246,46 @@ def _resolve_variable_command(
 
 
 def _expand_segment_command(segment: str, variables: dict[str, str]) -> str:
-    try:
-        words = shlex.split(segment, posix=True)
-    except ValueError:
-        return segment
-    index = _command_index(words)
-    if index >= len(words):
-        return segment
-    variable = _VAR.fullmatch(words[index])
-    if variable is None or variable.group("name") == "MAKE":
-        return _VAR.sub("__OH_GOON_MAKEVAR__", segment)
-    replacement = variables.get(variable.group("name"))
-    if replacement is None:
-        return _VAR.sub("__OH_GOON_MAKEVAR__", segment)
-    try:
-        replacement_words = shlex.split(replacement, posix=True)
-    except ValueError:
-        return segment
-    expanded_words = [*words[:index], *replacement_words, *words[index + 1 :]]
-    rendered = shlex.join(expanded_words)
-    return _VAR.sub("__OH_GOON_MAKEVAR__", rendered)
+    """Substitute bounded authored literals before shell quoting loses their shape.
+
+    This does not evaluate Make functions or consult ambient variable values.
+    Unproved bindings remain parameter expansions: data stays data, while an
+    executable forwarded through a wrapper fails closed in the shell owner.
+    """
+    unknown = "${__OH_GOON_MAKEVAR__}"
+    resolved: dict[str, str] = {}
+
+    def expand(value: str, active: tuple[str, ...]) -> str:
+        pieces: list[str] = []
+        length = 0
+        cursor = 0
+        for match in _VAR.finditer(value):
+            name = match.group("name")
+            replacement = unknown
+            if name == "MAKE":
+                replacement = match.group(0)
+            elif name in resolved:
+                replacement = resolved[name]
+            elif name not in active and len(active) < 16 and name in variables:
+                authored = variables[name]
+                # Anything beyond the existing simple-reference grammar belongs
+                # to native Make. Do not reinterpret it as a shell executable.
+                if "$" not in _VAR.sub("", authored):
+                    replacement = expand(authored, (*active, name))
+                resolved[name] = replacement
+            literal = value[cursor : match.start()]
+            length += len(literal) + len(replacement)
+            if length > 65536:
+                return unknown
+            pieces.extend((literal, replacement))
+            cursor = match.end()
+        tail = value[cursor:]
+        if length + len(tail) > 65536:
+            return unknown
+        pieces.append(tail)
+        return "".join(pieces)
+
+    return expand(segment, ()).replace("$$", "$")
 
 
 def _classify_tool(word: str) -> tuple[str | None, str | None]:
@@ -336,19 +356,19 @@ class _AuthorityBuilder:
                 )
 
     def _scan_recipe(self, recipe: str, chain: tuple[str, ...]) -> None:
-        if _recipe_requires_shell(recipe, self.variables):
+        expanded_recipe = _expand_segment_command(recipe, self.variables)
+        if _recipe_requires_shell(expanded_recipe, self.variables):
             self.require("sh", (*chain, "<recipe-shell>"))
         self._visit_recursive_make(recipe, chain)
-        for segment in _segments(recipe):
+        for segment in _segments(expanded_recipe):
             tool, issue = _command_tool(segment, self.variables)
             if tool is not None:
                 self.require(tool, chain)
             if issue is not None:
                 self.unresolved.add(" -> ".join(chain) + ": " + issue)
-            expanded = _expand_segment_command(segment, self.variables)
-            if "$(MAKE)" in expanded or "${MAKE}" in expanded:
+            if "$(MAKE)" in segment or "${MAKE}" in segment:
                 continue
-            shell = derive_shell_fragment_authority(self.root, expanded, chain=chain)
+            shell = derive_shell_fragment_authority(self.root, segment, chain=chain)
             self.tools.update(shell.tools)
             self.provenance.update(shell.provenance)
             self.unresolved.update(shell.unresolved)

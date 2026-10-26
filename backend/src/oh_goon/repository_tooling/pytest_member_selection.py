@@ -5,14 +5,17 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from oh_goon.engine.command import run_command
-from oh_goon.repository_tooling.pytest_process_environment import isolated_pytest_environment
+from oh_goon.repository_tooling.pytest_process_environment import (
+    PytestInvocation,
+    resolve_pytest_invocation,
+)
 
 _COLLECTION_ENV = "OH_GOON_PYTEST_COLLECTION_OUTPUT"
 _DESELECTED: list[dict[str, str]] = []
@@ -89,22 +92,24 @@ def collect_native_pytest(
     excludes: tuple[str, ...] = (),
     marker: str | None = None,
     timeout: float = 120,
+    invocation: PytestInvocation | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> NativePytestCollection:
     """Run native collection with exactly the execution configuration/environment."""
     with tempfile.TemporaryDirectory(prefix="oh-goon-pytest-collection-") as directory:
         output = Path(directory) / "collection.json"
-        environment = isolated_pytest_environment()
-        environment[_COLLECTION_ENV] = str(output)
+        invocation = invocation or resolve_pytest_invocation()
+        child_environment = dict(invocation.environment if environment is None else environment)
+        child_environment[_COLLECTION_ENV] = str(output)
         command = [
-            sys.executable,
-            "-m",
-            "pytest",
+            *invocation.command_prefix,
             "--collect-only",
             "-qq",
             "-c",
-            "backend/pyproject.toml",
+            str(invocation.config_file),
             "-p",
             "oh_goon.repository_tooling.pytest_member_selection",
+            *invocation.pytest_args,
         ]
         for excluded in excludes:
             command += ["--ignore", excluded]
@@ -114,8 +119,8 @@ def collect_native_pytest(
         try:
             result = run_command(
                 *command,
-                cwd=Path.cwd(),
-                env=environment,
+                cwd=invocation.cwd,
+                env=child_environment,
                 timeout=timeout,
                 merge_stderr=True,
                 require_process_group_quiescence=True,

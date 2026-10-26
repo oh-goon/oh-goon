@@ -18,16 +18,6 @@ from oh_goon.repository_tooling.architecture.shell_semantics import (
     make_semantic_facts,
 )
 
-_CANONICAL_MAKE_VARIABLES = {
-    "DEVELOPMENT_TEST_RUNNER": "bash scripts/development_test.sh",
-    "CERTIFICATION_RUNNER": "backend/.venv/bin/oh-goon-workflow",
-    "DEVELOPMENT_TEST_FRONTDOOR": (
-        'OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh test $(DEVELOPMENT_TEST_RUNNER)'
-    ),
-    "CERTIFICATION_FRONTDOOR": (
-        'OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh certify $(CERTIFICATION_RUNNER)'
-    ),
-}
 _WORKFLOW_MODULE = Path("backend/src/oh_goon/workflow.py")
 _WORKFLOW_ENTRYPOINT_TARGET = "oh_goon.services.certification_frontdoor:main"
 _WORKFLOW_ALLOWED_PRODUCT_IMPORTS = frozenset(
@@ -287,7 +277,14 @@ def _check_make_frontdoors(root: Path, path: Path, facts: MakeSemanticFacts) -> 
 
     test_commands = _target_commands(facts, "test")
     if len(test_commands) != 1 or not _is_logged_frontdoor(
-        test_commands[0], "test", ("bash", "scripts/development_test.sh")
+        test_commands[0],
+        "test",
+        (
+            "bash",
+            "scripts/development_test_resources.sh",
+            "bash",
+            "scripts/development_test.sh",
+        ),
     ):
         violations.append(
             Violation(
@@ -300,7 +297,15 @@ def _check_make_frontdoors(root: Path, path: Path, facts: MakeSemanticFacts) -> 
     cert_frontdoors = [
         command
         for command in certify_commands
-        if _is_logged_frontdoor(command, "certify", ("backend/.venv/bin/oh-goon-workflow",))
+        if _is_logged_frontdoor(
+            command,
+            "certify",
+            (
+                "bash",
+                "scripts/development_test_resources.sh",
+                "backend/.venv/bin/oh-goon-workflow",
+            ),
+        )
     ]
     if len(cert_frontdoors) != 1:
         violations.append(

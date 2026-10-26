@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -22,6 +25,60 @@ from tests.factories.shipped_templates import GOON_TEMPLATES as SHIPPED_GOONS
 from tests.factories.shipped_templates import PLAN_TEMPLATES as SHIPPED_PLANS
 
 ROOT = Path(__file__).resolve().parents[4]
+
+
+def _load_shipped_template_fixtures() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        "_oh_goon_test_shipped_templates", ROOT / "backend/tests/factories/shipped_templates.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_generic_shipped_fixture_import_does_not_discover_agent_plans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_keys = Mock(side_effect=AssertionError("Import must not scan the shipped Plan catalog"))
+    analyze = Mock(side_effect=AssertionError("Import must not analyze shipped Plan sources"))
+    monkeypatch.setattr(PlanTemplateStore, "keys", plan_keys)
+    monkeypatch.setattr(FleetPlanResolver, "analyze_source", analyze)
+
+    _load_shipped_template_fixtures()
+
+    plan_keys.assert_not_called()
+    analyze.assert_not_called()
+
+
+def test_agent_plan_fixture_membership_uses_compiler_results_once_on_demand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixtures = _load_shipped_template_fixtures()
+    agent_sources = {
+        "general/agent": ("review",),
+        "agents/source-only": (),
+        "general/tool": (),
+        "general/another-agent": ("review", "coding"),
+    }
+    plans = SimpleNamespace(
+        keys=lambda: tuple(agent_sources),
+        source=lambda key: SimpleNamespace(path=Path(key)),
+    )
+    analyze = Mock(
+        side_effect=lambda path: SimpleNamespace(
+            agent_step_sources=lambda: agent_sources[path.as_posix()]
+        )
+    )
+    monkeypatch.setattr(fixtures, "PLAN_TEMPLATES", plans)
+    monkeypatch.setattr(FleetPlanResolver, "analyze_source", analyze)
+
+    members = fixtures.agent_plan_template_keys()
+
+    assert members == ("general/agent", "general/another-agent")
+    assert analyze.call_args_list == [call(Path(key)) for key in agent_sources]
+    assert fixtures.agent_plan_template_keys() is members
+    assert analyze.call_count == len(agent_sources)
 
 
 def _workload_tools(owner: str) -> tuple[str, ...]:

@@ -13,7 +13,7 @@ from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.run_configuration import load_run_configuration
 from tests.factories.agent_review import agent_review_case
-from tests.factories.shipped_templates import AGENT_PLAN_TEMPLATES
+from tests.factories.shipped_templates import agent_plan_template_keys
 
 
 def package(root: Path, key: str, content: str) -> Path:
@@ -350,6 +350,7 @@ steps:
 def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
     plans = PlanTemplateStore()
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
+    agent_plans = agent_plan_template_keys()
     for key in plans.keys():
         source = plans.source(key)
         guide = source.path.with_name("README.md").read_text()
@@ -362,7 +363,7 @@ def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
         selection.write_text(example.group(1))
         snapshot = load_run_configuration(selection)
         assert snapshot.source_path(plan_templates=plans) == source.path
-        if key in AGENT_PLAN_TEMPLATES:
+        if key in agent_plans:
             agent_resolver, path, repository, options = agent_review_case(
                 tmp_path / key, plan_template=key
             )
