@@ -283,10 +283,10 @@ wheels = [
 
 [[package]]
 name = "hashmarks"
-version = "0.32.0"
-source = { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.32.0/hashmarks-0.32.0-py3-none-any.whl" }
+version = "0.32.1"
+source = { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.32.1/hashmarks-0.32.1-py3-none-any.whl" }
 wheels = [
-    { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.32.0/hashmarks-0.32.0-py3-none-any.whl", hash = "sha256:4ddef76d7c4e3b622dfbfc1ce283f5a895ec13f6eaee30381436c084500de9c4" },
+    { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.32.1/hashmarks-0.32.1-py3-none-any.whl", hash = "sha256:a0329e0db77b90bf190862032c769342570f013fbf5fd3e9520c5bd729146931" },
 ]
 
 [package.metadata]
@@ -529,7 +529,7 @@ quality = [
 requires-dist = [
     { name = "cryptography", specifier = ">=46.0.4" },
     { name = "fastapi", specifier = ">=0.128.2" },
-    { name = "hashmarks", url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.32.0/hashmarks-0.32.0-py3-none-any.whl" },
+    { name = "hashmarks", url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.32.1/hashmarks-0.32.1-py3-none-any.whl" },
     { name = "httpx2", extras = ["ws"], specifier = ">=2.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pyyaml", specifier = ">=6.0.3" },
