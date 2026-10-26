@@ -96,11 +96,14 @@ PlanStepExecution. Untouched later Steps remain NOT_RUN. A started terminal
 repository without its operation result cannot remain RUNNING or become PASSED.
 The ledger never adds contradictory not-reached/not-run entries for observed work.
 
-These statuses do not reconstruct attempts, exit codes, output bytes, supervisor
-receipts or filesystem-cleanup proof. Cancelled/crashed Steps without a retained
-attempt result still lack that detailed receipt, and cleanup remains unverified.
-The original recovery outcome is preserved; observing that processes have stopped
-later cannot manufacture an earlier execution result.
+Detailed cleanup requires an original Step result or its typed cancellation
+receipt. `STEP_CANCELLED` may retain the original supervisor, acknowledged isolation
+and accepted settlement, bound to that Step's recorded physical execution.
+Game Tape projects that exact receipt without reconstructing attempts, output
+bytes or source state after cancellation. Missing or invalid receipts remain
+incomplete; interrupted Bubblewrap execution without its final acknowledgement
+does not establish isolation proof. The original recovery outcome is preserved;
+observing stopped processes later cannot manufacture an earlier result.
 
 ## Timing
 

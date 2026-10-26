@@ -13,8 +13,13 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedGitStep,
 )
 from oh_goon.core.models.fleet_plan_evidence import PlanStepSettlementEvidence
-from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
-from oh_goon.integrations._fleet_plan_step_evidence import attempt_evidence, step_evidence
+from oh_goon.engine.command import CommandCancelledError, CommandResult, CommandSupervisorReceipt
+from oh_goon.engine.errors import OperationCancelledError
+from oh_goon.integrations._fleet_plan_step_evidence import (
+    attempt_evidence,
+    cancellation_evidence,
+    step_evidence,
+)
 from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
     from_command,
@@ -113,6 +118,39 @@ def test_cleanup_failure_keeps_observed_exit_separate_from_rejected_step():
         worktree_files_after=(),
     )
     assert attempt.returncode != 0 and attempt.observed_returncode == 0
+
+
+@pytest.mark.parametrize("missing", ["supervisor", "reason", "request", "identity"])
+def test_cancellation_without_bound_valid_supervision_retains_uncertainty(missing):
+    step = ResolvedCommandStep(step_id="native", argv=("native-work",))
+    error = OperationCancelledError("cancelled")
+    if missing != "supervisor":
+        error.__cause__ = CommandCancelledError(
+            "private raw control error",
+            stdout="PRIVATE_NATIVE_OUTPUT",
+            physical_execution_id=None if missing == "identity" else "original-physical",
+            supervisor=CommandSupervisorReceipt(
+                process_group_cleanup_requested=missing != "request",
+                cleanup_reason="invalid" if missing == "reason" else "cancel",
+            ),
+        )
+    receipt = cancellation_evidence(step, error)
+    assert receipt.settlement.outcome == "INCOMPLETE"
+    assert receipt.settlement.cleanup == "UNAVAILABLE"
+    assert receipt.settlement.reason == "SUPERVISION_UNAVAILABLE"
+    assert "PRIVATE_NATIVE_OUTPUT" not in receipt.model_dump_json()
+
+
+def test_cancellation_receipt_rejects_upgrading_missing_cleanup_to_verified():
+    from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
+
+    with pytest.raises(ValidationError, match="original verified cleanup"):
+        PlanStepCancellationEvidence(
+            settlement=PlanStepSettlementEvidence(
+                outcome="CANCELLED", reason="CALLER_CANCELLED", cleanup="VERIFIED"
+            ),
+            physical_execution_id="claimed-original-physical",
+        )
 
 
 def test_process_free_inventory_succeeds_without_a_fabricated_supervisor(tmp_path):

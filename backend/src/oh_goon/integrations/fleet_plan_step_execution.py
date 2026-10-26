@@ -52,7 +52,10 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedPreCommitStep,
     ResolvedProviderAgentWorkload,
 )
-from oh_goon.core.models.fleet_plan_evidence import PlanUvPreparationEvidence
+from oh_goon.core.models.fleet_plan_evidence import (
+    PlanStepCancellationEvidence,
+    PlanUvPreparationEvidence,
+)
 from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits, PlanExecutionPolicy
 from oh_goon.core.models.fleet_plan_observation_steps import ResolvedDependencyInventoryStep
 from oh_goon.core.models.fleet_plan_requirements import UV_PROJECT_SELECTION_SWITCHES
@@ -215,6 +218,7 @@ class StepLifecycleObserver(Protocol):
         returncode: int | None = None,
         termination_reason: str | None = None,
         output_count: int | None = None,
+        cancellation: PlanStepCancellationEvidence | None = None,
     ) -> None: ...
 
 

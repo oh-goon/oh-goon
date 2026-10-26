@@ -672,13 +672,53 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
             "os.fork",
         }
     )
+    native_protocol_owners = {
+        package / "integrations/agent_native_execution.py",
+        package / "integrations/agent_codex_service.py",
+        package / "integrations/agent_codex_service_execution.py",
+        package / "integrations/agent_opencode_service.py",
+        package / "integrations/fleet_plan_native_steps.py",
+    }
+    service_protocol_modules = (
+        "oh_goon.integrations.agent_codex_service",
+        "oh_goon.integrations.agent_opencode_service",
+    )
+    native_event_contracts = (
+        "oh_goon.integrations.agent_native_execution.NativeAgentEvents",
+        "oh_goon.integrations.agent_native_execution.NativeAgentEventParser",
+        "oh_goon.integrations.agent_native_execution.parse_native_agent_events",
+    )
     for path in package.rglob("*.py"):
-        if not any(path.is_relative_to(package / part) for part in CONTROL_DIRS):
+        if path.is_relative_to(package / "repository_tooling"):
             continue
         try:
             parsed.get(path) or python_ast(path)
         except (OSError, SyntaxError):
             issues.append(Violation(path, "X0 AG-00 control source cannot be inspected"))
+            continue
+        facts = python_semantic_facts(path, imported_only=True)
+        if path not in native_protocol_owners:
+            # Native wire/event meaning belongs to the adapters. Shared Step
+            # acceptance, publication, campaign and domain owners consume the
+            # normalized observations instead. Pure preparation and validation
+            # functions remain usable by provider/resolution owners.
+            forbidden = native_event_contracts + (
+                "oh_goon.integrations.agent_codex_service_execution",
+            )
+            if path != package / "cli_agent_services.py":
+                # The explicit service command only probes bounded readiness;
+                # it neither submits a native session nor admits a Run.
+                forbidden += service_protocol_modules
+            for imported in sorted(facts.imports | facts.references):
+                if any(
+                    imported == owner or imported.startswith(owner + ".") for owner in forbidden
+                ):
+                    issues.append(
+                        Violation(
+                            path, f"X0 native agent protocol outside adapter owner: {imported}"
+                        )
+                    )
+        if not any(path.is_relative_to(package / part) for part in CONTROL_DIRS):
             continue
         agent_file = "agent" in path.stem.lower()
         # A private declaration's spelling grants no authority. Check imports,
@@ -691,7 +731,6 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
         )
         campaign = path == package / "services/fleet_plan_repair.py"
         if agent_file or adapter or campaign:
-            facts = python_semantic_facts(path, imported_only=True)
             for target, _node in facts.calls:
                 if target in effect_calls:
                     issues.append(

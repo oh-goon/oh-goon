@@ -57,20 +57,64 @@ providing the selected facilities. Use `scripts/qualify_agent_local_model.sh`
 for actual Ollama inference. Unavailable native facilities remain unverified for
 that optional profile; a portable pass grants no strict-execution qualification.
 
-The installed OpenCode MCP probe uses the original managed Run and a deterministic
-HTTP model fixture. It checks native MCP discovery/calling and descendant
-isolation; it does not prove model coding quality. Select a compatible installed
-OpenCode executable and its public runtime directory explicitly, on a host with
-the ordinary Bubblewrap facilities:
+The installed OpenCode/Pi read-only CLI probe uses the original managed Run, its
+disposable managed configuration bootstrap and a deterministic HTTP model
+fixture. It requests the advertised native shell, checks source/Git/private-path
+and loopback denials, preserves task/Skill/Hashmarks delivery, and accepts the
+typed review through the original Step. Select the installed public executable
+and its complete public runtime explicitly on a host with ordinary Bubblewrap
+facilities. A second original verification Step runs an independent native Python
+check and retains its own successful process/cleanup evidence:
 
 ```sh
 OH_GOON_NATIVE_OPENCODE=/opt/native-tools/bin/opencode \
 OH_GOON_NATIVE_OPENCODE_RUNTIME_ROOT=/opt/native-tools \
-uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_opencode_mcp.py
+uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_cli_readonly.py -k opencode
+```
+
+Pi requires the exact public release entrypoint and complete release root. Its
+user launcher may read installation metadata outside the launcher directory;
+selecting that directory does not establish a complete runtime. Keep both
+release inputs separate from native authentication/configuration stores:
+
+```sh
+OH_GOON_NATIVE_PI=/opt/native-pi/node_modules/.bin/pi \
+OH_GOON_NATIVE_PI_RUNTIME_ROOT=/opt/native-pi \
+uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_cli_readonly.py -k pi
 ```
 
 The paths are public execution inputs, never credential or unrelated repository
-stores. Without an explicit selection, this optional probe skips.
+stores. Without an explicit selection, this optional probe skips. The former
+configured-MCP fixture used the retired `configuration_directory` route and was
+removed; it is not current MCP conformance evidence. The supported probe supplies
+no native credential/configuration mount and proves no live model quality,
+complete native-store exclusion or CLI cancellation.
+
+The separate OpenCode service probes use synthetic private state and no model.
+They establish authenticated readiness, matching original process identity,
+client closure preserving a running service, and original-owner cancellation.
+The `--stdio` case executes the real prepared recipe, bounds first-stdout-JSON
+endpoint discovery and proves native exit 0 and process quiescence after the
+parent closes its stdin lease. These are readiness/lifetime proofs; service
+session execution remains unsupported:
+
+```sh
+OH_GOON_NATIVE_OPENCODE=/opt/native-tools/bin/opencode \
+uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_opencode_service.py
+```
+
+The installed OpenCode CLI lifecycle cases separately exercise completed text,
+a later native streaming error, caller cancellation and an active-stream
+deadline through original Run/Step supervision. A model claim cannot override
+failed/cancelled/timed-out settlement. Original process receipts retain observed
+quiescence; an interrupted Bubblewrap exchange without its final execution
+acknowledgement does not acquire an isolation receipt:
+
+```sh
+OH_GOON_NATIVE_OPENCODE=/opt/native-tools/bin/opencode \
+OH_GOON_NATIVE_OPENCODE_RUNTIME_ROOT=/opt/native-tools \
+uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_opencode_lifecycle.py
+```
 
 The installed Codex permission probe uses a synthetic authentication home and no
 model connection. It checks the exact native tool policy used by explicit
@@ -96,6 +140,14 @@ OH_GOON_NATIVE_CODEX=/opt/native-codex/bin/codex \
 OH_GOON_NATIVE_CODEX_RUNTIME_ROOT=/opt/native-codex \
 uv run --offline --frozen --no-sync --project backend pytest -q -m certification backend/tests/integration/services/test_native_codex_service.py backend/tests/integration/services/test_native_codex_service_run.py
 ```
+
+The continuation test also checks absent/populated workspace `.codex` through
+the production native policy. Configuration reads and mutations stay denied
+with a writable repository, while an ordinary repository-write canary succeeds.
+The synthetic reserved contents remain unchanged through native follow-up,
+resume, compaction and process cleanup. A direct-directory-deny replacement
+fails native Bubblewrap startup for the absent directory on Codex 0.164.0;
+retain the [documented adaptation](../../docs/development/AGENT_HARNESS_COMPATIBILITY.md#codex-service-reserved-directory--retain-native-replacement-fails).
 
 Select one node when iterating on one defect. The public runtime must remain
 outside native stores. The same service Run module includes complete bounded
@@ -186,15 +238,6 @@ Linux Bubblewrap and the selected complete public native installation:
 OH_GOON_NATIVE_CODEX=/opt/native-codex/bin/codex \
 OH_GOON_NATIVE_CODEX_RUNTIME_ROOT=/opt/native-codex \
 uv run --offline --frozen --no-sync --project backend pytest -m certification backend/tests/integration/services/test_native_codex_context.py -k installed_protected_managed_codex
-```
-
-The existing OpenCode file also has an independent typed read-only review case
-using its advertised native shell and the same physical source boundary:
-
-```sh
-OH_GOON_NATIVE_OPENCODE=/opt/native-tools/bin/opencode \
-OH_GOON_NATIVE_OPENCODE_RUNTIME_ROOT=/opt/native-tools \
-uv run --offline --frozen --no-sync --project backend pytest -m certification backend/tests/integration/services/test_native_opencode_mcp.py -k reviews_through_the_read_only_boundary
 ```
 
 These synthetic probes do not access real credentials or establish live account

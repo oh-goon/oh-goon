@@ -17,7 +17,7 @@ from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
 )
-from oh_goon.core.models.fleet_observation import FleetObservationEvidence
+from oh_goon.core.models.fleet_observation import FleetObservationEvidence, NativeAgentObservation
 from oh_goon.core.models.fleet_plan_release_evidence import (
     KubernetesRolloutVerificationEvidence,
     KubernetesRolloutVerificationOutcome,
@@ -453,6 +453,37 @@ class PlanStepSettlementEvidence(ImmutableModel):
             self.cleanup != "VERIFIED" or self.observed_returncode is not None
         ):
             raise ValueError("Known launch refusal requires no owned process or observed exit")
+        return self
+
+
+class PlanStepCancellationEvidence(ImmutableModel):
+    """Original cancellation facts; no post-cancellation source observation is claimed."""
+
+    settlement: PlanStepSettlementEvidence
+    supervisor: PlanExecutionSupervisorEvidence | None = None
+    standard_isolation: PlanStandardIsolationEvidence | None = None
+    physical_execution_id: str | None = Field(default=None, min_length=1)
+    duration_ms: int = Field(default=0, ge=0)
+    native_agent_observations: tuple[NativeAgentObservation, ...] = Field(default=(), max_length=8)
+
+    @model_validator(mode="after")
+    def require_cancellation_authority(self) -> PlanStepCancellationEvidence:
+        if self.settlement.outcome not in {"CANCELLED", "INCOMPLETE"}:
+            raise ValueError("Cancellation evidence cannot establish another Step outcome")
+        if self.settlement.outcome == "INCOMPLETE" and self.settlement.cleanup == "VERIFIED":
+            raise ValueError("Incomplete cancellation cannot claim verified cleanup")
+        if self.settlement.outcome == "CANCELLED" and (
+            self.settlement.cleanup != "VERIFIED"
+            or self.physical_execution_id is None
+            or self.supervisor is None
+            or self.supervisor.cleanup_reason != "cancel"
+            or self.supervisor.final_process_group_quiescent is not True
+            or (
+                self.standard_isolation is not None
+                and self.standard_isolation.filesystem_cleanup != "verified"
+            )
+        ):
+            raise ValueError("Cancelled Step settlement requires its original verified cleanup")
         return self
 
 

@@ -279,7 +279,7 @@ def test_pi_failed_assistant_or_aborted_native_loop_remains_failure(stop_reason:
     )
 
 
-def test_opencode_requires_the_runner_exit_and_does_not_reuse_previous_step_text() -> None:
+def test_opencode_requires_the_runner_exit() -> None:
     output = events(
         {"type": "step_start"},
         {"type": "text", "part": {"text": "old", "time": {"end": 123}}},
@@ -289,27 +289,56 @@ def test_opencode_requires_the_runner_exit_and_does_not_reuse_previous_step_text
     assert parse_native_agent_events("opencode", output, returncode=0).settled
     failed = parse_native_agent_events("opencode", output, returncode=1)
     assert failed.failed and not failed.settled
-    result = parse_native_agent_events(
-        "opencode", output + events({"type": "step_start"}, {"type": "step_finish"}), returncode=0
-    )
-    assert result.final_text == ""
 
 
-def test_codex_final_text_is_claim_and_nonzero_physical_exit_still_fails() -> None:
-    result = parse_native_agent_events(
-        "codex",
-        events(
+@pytest.mark.parametrize(
+    "agent,start,claim,terminal",
+    [
+        (
+            "codex",
             {"type": "turn.started"},
-            {
-                "type": "item.completed",
-                "item": {"type": "agent_message", "text": "untrusted role payload"},
-            },
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "claim"}},
             {"type": "turn.completed"},
         ),
-        returncode=17,
-    )
-    assert result.settled and result.failed
-    assert result.final_text == "untrusted role payload"
+        (
+            "opencode",
+            {"type": "step_start"},
+            {"type": "text", "part": {"text": "claim", "time": {"end": 123}}},
+            {"type": "step_finish"},
+        ),
+        (
+            "pi",
+            {"type": "agent_start"},
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "content": "claim", "stopReason": "stop"},
+            },
+            {"type": "agent_settled", "aborted": False},
+        ),
+    ],
+)
+def test_native_cycle_cannot_inherit_previous_claim_or_override_failed_process(
+    agent: NativeAgentName,
+    start: dict[str, object],
+    claim: dict[str, object],
+    terminal: dict[str, object],
+) -> None:
+    completed = events(start, claim, terminal)
+    baseline = parse_native_agent_events(agent, completed, returncode=0)
+    assert baseline.settled and not baseline.failed and baseline.final_text == "claim"
+
+    # A native follow-up cycle that loses its terminal response cannot borrow
+    # either the previous cycle's completion or its role payload.
+    interrupted = parse_native_agent_events(agent, completed + events(start), returncode=0)
+    assert not interrupted.settled and interrupted.final_text == ""
+    empty = parse_native_agent_events(agent, completed + events(start, terminal), returncode=0)
+    assert empty.final_text == ""
+
+    # Native completion is still a claim when the command owner reports a
+    # failed or signal-terminated process.
+    for returncode in (17, -15):
+        failed = parse_native_agent_events(agent, completed, returncode=returncode)
+        assert failed.failed and failed.final_text == "claim"
 
 
 def test_codex_recovered_diagnostic_preserves_successful_terminal_result() -> None:

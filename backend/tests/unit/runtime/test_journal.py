@@ -1,7 +1,9 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from oh_goon.core.errors import InvalidRunTransition, JournalConflict, RunNotFound
 from oh_goon.core.models.explanation import ReasonCode
@@ -120,6 +122,100 @@ def test_execution_lifecycle_conflicting_replay_fails_without_mutation(tmp_path:
     after = journal.run_events("run-1")
     assert after.events == before.events
     assert after.journal_revision == before.journal_revision
+
+
+def test_cancelled_step_preserves_original_receipt_and_rejects_other_process(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.core.models.fleet_plan_evidence import (
+        PlanExecutionSupervisorEvidence,
+        PlanStepCancellationEvidence,
+        PlanStepSettlementEvidence,
+    )
+
+    journal, identity = running_journal(tmp_path)
+    operation_id = start_repository(journal, "run-1", identity)
+    observer = journal.execution_lifecycle_observer("run-1", identity.repository_id, operation_id)
+    observer("native", 1, "STEP_REACHED")
+    observer("native", 1, "STEP_STARTED")
+    observer("native", 1, "STEP_ATTEMPT_CREATED", attempt_number=1)
+    physical = {"attempt_number": 1, "physical_execution_id": "original-physical"}
+    observer("native", 1, "PROCESS_STARTING", **physical)
+    physical.update(pid=123, process_identity="original-process-birth")
+    observer("native", 1, "PROCESS_STARTED", **physical)
+    observer("native", 1, "PROCESS_EXITED", **physical, returncode=-15)
+    observer("native", 1, "DESCENDANTS_QUIESCENT", **physical)
+    receipt = PlanStepCancellationEvidence(
+        settlement=PlanStepSettlementEvidence(
+            outcome="CANCELLED", reason="CALLER_CANCELLED", cleanup="VERIFIED"
+        ),
+        physical_execution_id="original-physical",
+        supervisor=PlanExecutionSupervisorEvidence(
+            process_group_cleanup_requested=True,
+            cleanup_reason="cancel",
+            final_process_group_quiescent=True,
+        ),
+    )
+    before = journal.run_events("run-1")
+    with pytest.raises(InvalidRunTransition, match="original Step process"):
+        observer(
+            "native",
+            1,
+            "STEP_CANCELLED",
+            cancellation=receipt.model_copy(update={"physical_execution_id": "other-process"}),
+        )
+    assert journal.run_events("run-1") == before
+    observer("native", 1, "STEP_CANCELLED", cancellation=receipt)
+    reopened = Journal(LocalDatabase(tmp_path / "state.db"))
+    assert reopened.run_events("run-1").events[-1].cancellation == receipt
+    revision = reopened.run_events("run-1").journal_revision
+    reopened.execution_lifecycle_observer("run-1", identity.repository_id, operation_id)(
+        "native", 1, "STEP_CANCELLED", cancellation=receipt
+    )
+    assert reopened.run_events("run-1").journal_revision == revision
+
+
+def test_incomplete_cancellation_cannot_publish_invented_verified_cleanup(tmp_path: Path) -> None:
+    from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
+    from oh_goon.core.models.run_events import StepCancelledEvent
+
+    receipt = {
+        "settlement": {
+            "outcome": "INCOMPLETE",
+            "reason": "SUPERVISION_UNAVAILABLE",
+            "cleanup": "UNAVAILABLE",
+        }
+    }
+    baseline = PlanStepCancellationEvidence.model_validate(receipt)
+    receipt["settlement"]["cleanup"] = "VERIFIED"
+    with pytest.raises(ValidationError, match="Incomplete cancellation cannot claim verified"):
+        PlanStepCancellationEvidence.model_validate(receipt)
+    journal, identity = running_journal(tmp_path)
+    operation_id = start_repository(journal, "run-1", identity)
+    observer = journal.execution_lifecycle_observer("run-1", identity.repository_id, operation_id)
+    observer("native", 1, "STEP_REACHED")
+    before = journal.run_events("run-1")
+    persisted = {
+        "event_type": "STEP_CANCELLED",
+        "sequence": before.next_sequence + 1,
+        "fleet_run_id": "run-1",
+        "repository_id": identity.repository_id,
+        "operation_id": operation_id,
+        "step_id": "native",
+        "step_order": 1,
+        "cancellation": receipt,
+    }
+    admitted_event = StepCancelledEvent.model_validate_json(
+        json.dumps({**persisted, "cancellation": baseline.model_dump(mode="json")})
+    )
+    assert admitted_event.cancellation == baseline
+    with pytest.raises(ValidationError, match="Incomplete cancellation cannot claim verified"):
+        StepCancelledEvent.model_validate_json(json.dumps(persisted))
+    with pytest.raises(ValidationError, match="Incomplete cancellation cannot claim verified"):
+        observer("native", 1, "STEP_CANCELLED", cancellation=receipt)
+    assert journal.run_events("run-1") == before
+    observer("native", 1, "STEP_CANCELLED", cancellation=baseline)
+    assert journal.run_events("run-1").events[-1].cancellation == baseline
 
 
 def test_execution_lifecycle_rejects_valid_attempt_under_wrong_repository(tmp_path: Path) -> None:

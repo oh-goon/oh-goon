@@ -21,6 +21,7 @@ from typing import Any, Literal
 import pytest
 
 from oh_goon.application import ApplicationRuntime
+from oh_goon.cli_plan_run_readback import run_handoff_projection
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
@@ -620,6 +621,168 @@ def test_native_run_keeps_every_model_turn_bound_and_retains_step_local_claims(
             server.shutdown()
             worker.join(timeout=5)
     assert not worker.is_alive()
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or shutil.which("bwrap") is None, reason="Bubblewrap required"
+)
+def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Protocol fixtures prove interchangeability through real supervised child Runs."""
+    repository = tmp_path / "repos" / "app"
+    repository.mkdir(parents=True)
+    (repository / "code.py").write_text("VALUE = 41\n")
+    (repository / "verify.py").write_text("from code import VALUE\nassert VALUE == 42\n")
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")
+    runtime: ApplicationRuntime | None = None
+    run_ids: list[str] = []
+    handoff: dict[str, Any] | None = None
+    try:
+        for agent in ("codex", "pi", "opencode"):
+            executable = tmp_path / f"native-{agent}"
+            previous_id = run_ids[-1] if run_ids else None
+            previous_agent = "codex" if agent == "pi" else "pi"
+            executable.write_text(
+                "#!/usr/bin/python3\n"
+                "import hashlib,json,pathlib,sys\n"
+                f"agent={agent!r}\nprevious_id={previous_id!r}\n"
+                "prompt=json.load(sys.stdin)\n"
+                "assert 'Hashmarks' in prompt['repository_evidence']\n"
+                "assert not any(flag in sys.argv for flag in ('resume','--resume','--session','--continue','--attach'))\n"
+                "context=prompt['context']\n"
+                "if previous_id is None:\n"
+                "    assert context == {}\n"
+                "else:\n"
+                "    assert context['authority']=='UNTRUSTED_PRIOR_RUN_CONTEXT'\n"
+                "    assert context['permission_authority']=='NONE; fresh source capture and phase admission required'\n"
+                "    prior=context['prior_run_handoff']\n"
+                "    assert prior['fleet_run_id']==previous_id\n"
+                f"    assert prior['recorded_steps']['steps'][0]['native_claims'][0]['agent']=={previous_agent!r}\n"
+                "    checks=prior['recorded_steps']['steps']\n"
+                "    assert checks[1]['status']==('FAILED' if agent=='pi' else 'PASSED')\n"
+                "    assert checks[1]['native_claims']==[]\n"
+                "    if agent=='pi':\n"
+                "        claims=json.dumps(checks[0]['native_claims'][0]['events'])\n"
+                "        assert 'wrong-value' in claims and 'VALUE must be 42' in claims\n"
+                "captured=pathlib.Path(prompt['captured_repository'],'code.py').read_text()\n"
+                "assert captured==('VALUE = 42\\n' if agent=='opencode' else 'VALUE = 41\\n')\n"
+                "if agent=='pi':\n"
+                "    assert '--no-session' in sys.argv\n"
+                "    pathlib.Path('code.py').write_text('VALUE = 42\\n')\n"
+                "    text='Repaired the independently failing value'\n"
+                "    events=[{'type':'agent_start'},{'type':'message_end','message':{'role':'assistant','content':text,'stopReason':'stop'}},{'type':'agent_settled','aborted':False}]\n"
+                "else:\n"
+                "    record={'schema':'oh-goon.agent-review/v1',**prompt['identity'],'verdict':'CLEAN','summary':'Reviewed the captured source','reviewed_paths':{'complete_scope':prompt['identity']['scope_identity']},'findings':[]}\n"
+                "    if agent=='codex':\n"
+                "        assert '--ephemeral' in sys.argv\n"
+                "        record.update(verdict='FINDING',findings=[{'finding_id':'wrong-value','explanation':'VALUE must be 42','evidence':[{'path':'repo/code.py','sha256':hashlib.sha256(captured.encode()).hexdigest(),'line':1}]}])\n"
+                "    text=json.dumps(record)\n"
+                "    if agent=='codex':\n"
+                "        events=[{'type':'item.completed','item':{'type':'agent_message','text':text}},{'type':'turn.completed'}]\n"
+                "    else:\n"
+                "        events=[{'type':'step_start'},{'type':'text','part':{'text':text,'time':{'end':1}}},{'type':'step_finish','part':{'reason':'stop'}}]\n"
+                "for event in events: print(json.dumps(event),flush=True)\n"
+            )
+            executable.chmod(0o700)
+            connection = AgentConnection.select(
+                AgentProvidersConfig.model_validate(
+                    {
+                        "providers": {
+                            "fixture": {
+                                "api": "openai-responses"
+                                if agent == "codex"
+                                else "openai-chat-completions",
+                                "base_url": "http://127.0.0.1:1/v1",
+                            }
+                        },
+                        "models": {"fixture": {"provider": "fixture", "model": "fixture"}},
+                    }
+                ),
+                "fixture",
+            )
+            selected = ResolvedNativeAgent(
+                agent=agent,
+                profile_name="isolated-fixture",
+                definition=NativeAgentDefinition(executable=str(executable)),
+                profile=NativeAgentProfile(
+                    backend="bubblewrap", inference_profile="fixture", timeout_seconds=30.0
+                ),
+                executable_sha256=native_executable_sha256(executable),
+                connection=connection,
+                backend_configuration_id=backend.configuration_identity(),
+            )
+            if runtime is None:
+                runner = native_profile_command_runner(
+                    repository,
+                    selected,
+                    backend,
+                    RepositoryWorkspaceAuthority.pin_repository_subject,
+                )
+                runtime = ApplicationRuntime.build(
+                    standard_local=True,
+                    standard_process_isolation=backend,
+                    git_service=GitService(
+                        command_runner=runner,
+                        observation_runner=partial(runner, read_only_workspace=True),
+                    ),
+                )
+                runtime.locations.add(repository)
+            admitted = runtime.plans.run_native_agent(
+                selected=selected,
+                workspace=repository,
+                skill=None,
+                task="Repair the value" if agent == "pi" else "Review the value",
+                role="report" if agent == "pi" else "review",
+                prior_context=json.dumps(handoff) if handoff is not None else None,
+                verification=((sys.executable, "verify.py"),),
+            )
+            run_ids.append(admitted.fleet_run_id)
+            detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=45)
+            assert detail.outcome is (
+                FleetRunOutcome.ATTENTION_REQUIRED if agent == "codex" else FleetRunOutcome.SUCCESS
+            ), runtime.runs.game_tape_live_output(admitted.fleet_run_id).model_dump_json()
+            steps = detail.game_tape.repositories[0].steps
+            assert steps[0].status is GameTapeStatus.PASSED
+            assert steps[0].native_agent_observations[0].agent == agent
+            assert steps[1].native_agent_observations == ()
+            handoff = run_handoff_projection(detail)
+        assert len(set(run_ids)) == 3
+    finally:
+        if runtime is not None:
+            runtime.shutdown(wait_for_runs=True)
+
+    # A new application instance reads the original Journal; no native session is reopened.
+    reloaded = ApplicationRuntime.build(standard_local=True)
+    try:
+        observations = []
+        snapshots = []
+        for run_id, agent in zip(run_ids, ("codex", "pi", "opencode"), strict=True):
+            detail = reloaded.runs.get(run_id)
+            assert detail.run.fleet_run_id == detail.game_tape.fleet_run_id == run_id
+            steps = detail.game_tape.repositories[0].steps
+            observations.append(steps[0].native_agent_observations[0])
+            snapshots.append(
+                detail.repository_admissions[0].source_authority.source_snapshot.sha256
+            )
+            assert observations[-1].agent == agent
+            if agent == "codex":
+                summaries = "\n".join(event.summary for event in observations[-1].events)
+                assert "wrong-value" in summaries and "VALUE must be 42" in summaries
+            assert steps[1].status is (
+                GameTapeStatus.FAILED if agent == "codex" else GameTapeStatus.PASSED
+            )
+        assert len({item.input_identity for item in observations}) == 3
+        assert len({item.source_identity for item in observations}) == 3
+        assert snapshots[0] == snapshots[1]
+        assert snapshots[2] != snapshots[1]
+        assert (repository / "code.py").read_text() == "VALUE = 42\n"
+    finally:
+        reloaded.shutdown(wait_for_runs=True)
 
 
 @pytest.mark.parametrize("mode", ["failure", "malformed", "timeout", "output_limit"])

@@ -120,6 +120,17 @@ def _validate_step(event: StepLifecycleEvent, step: Sequence[FleetRunEvent]) -> 
 def _settlement(event: StepTerminalLifecycleEvent, step: Sequence[FleetRunEvent]) -> None:
     if any(isinstance(x, _STEP_TERMINAL) for x in step):
         raise InvalidRunTransition("Step cannot settle more than once per repository attempt")
+    if (
+        isinstance(event, StepCancelledEvent)
+        and event.cancellation is not None
+        and event.cancellation.physical_execution_id is not None
+        and not any(
+            type(item) is ProcessStartedEvent
+            and item.physical_execution_id == event.cancellation.physical_execution_id
+            for item in step
+        )
+    ):
+        raise InvalidRunTransition("Cancellation evidence must belong to the original Step process")
     unquiet = [
         x
         for x in step

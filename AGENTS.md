@@ -141,6 +141,15 @@ repository-evidence provenance distinct from execution provenance and
 verification-selection authority distinct from verification-result authority.
 See `docs/development/HASHMARKS_EXECUTION_LAYER.md`.
 
+Native-agent integration changes must review the applicable
+[harness compatibility adaptations](docs/development/AGENT_HARNESS_COMPATIBILITY.md)
+against the selected installed implementation. Record a retain, simplify, remove,
+or unqualified disposition; remove obsolete adaptations with replacement
+conformance proof. Qualification is specific to harness, mode and environment;
+an upstream upgrade does not inherit old evidence. Harness changes require a
+separately resolved and admitted Run; handoffs carry untrusted recorded context,
+never another harness's native session or implicit fallback authority.
+
 Reusable development and review Skills are owned by **agentsCookbook**. Use
 its pinned canonical Skills as optional guidance; keep Oh-Goon ownership,
 contracts, and commands here. Oh-Goon must build, run, and test without a

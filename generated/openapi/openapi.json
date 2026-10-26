@@ -12507,6 +12507,16 @@
             "title": "Attempts",
             "type": "array"
           },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanStepCancellationEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "command": {
             "items": {
               "type": "string"
@@ -19998,6 +20008,67 @@
           }
         },
         "title": "PlanStepCache",
+        "type": "object"
+      },
+      "PlanStepCancellationEvidence": {
+        "additionalProperties": false,
+        "description": "Original cancellation facts; no post-cancellation source observation is claimed.",
+        "properties": {
+          "duration_ms": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "native_agent_observations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NativeAgentObservation"
+            },
+            "maxItems": 8,
+            "title": "Native Agent Observations",
+            "type": "array"
+          },
+          "physical_execution_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Physical Execution Id"
+          },
+          "settlement": {
+            "$ref": "#/components/schemas/PlanStepSettlementEvidence"
+          },
+          "standard_isolation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanStandardIsolationEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supervisor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanExecutionSupervisorEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "settlement"
+        ],
+        "title": "PlanStepCancellationEvidence",
         "type": "object"
       },
       "PlanStepCapabilities": {
@@ -30530,6 +30601,16 @@
       "StepCancelledEvent": {
         "additionalProperties": false,
         "properties": {
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanStepCancellationEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "event_type": {
             "const": "STEP_CANCELLED",
             "title": "Event Type",

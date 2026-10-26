@@ -16,6 +16,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanArtifactEvidence,
     PlanOutputEvidence,
     PlanStepAttemptEvidence,
+    PlanStepCancellationEvidence,
     PlanStepSettlementEvidence,
     PublishedPlanOutputEvidence,
 )
@@ -131,6 +132,7 @@ class GameTapeStepExecution(ImmutableModel):
     environment: tuple[GameTapeEnvironmentSource, ...] = Field(default_factory=tuple, max_length=64)
     exit_code: int | None = None
     settlement: PlanStepSettlementEvidence = Field(default_factory=PlanStepSettlementEvidence)
+    cancellation: PlanStepCancellationEvidence | None = None
     attempts: tuple[PlanStepAttemptEvidence, ...] = Field(default_factory=tuple, max_length=5)
     attempt_transitions: tuple[GameTapeAttemptTransition, ...] = Field(
         default_factory=tuple, max_length=4
