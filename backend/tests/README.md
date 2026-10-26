@@ -306,6 +306,13 @@ speed claims; an eager-input tripwire bounds the broken fixture. Select
 `-k async-window`; only its mapper module may change, with the same original
 Run, immutable verifier, qualified Hashmarks and frozen Skill boundaries.
 
+The CIDR-policy case repairs an offline IP access-policy library and CLI. Native
+`ipaddress` owns parsing and canonicalization; independent checks cover longest
+prefix selection, IPv4/IPv6 separation, conflicting duplicate networks, full
+one-pass rule validation, detached policy state and atomic file/stdin CLI errors.
+Select `-k cidr-policy`; only the policy and CLI modules may change, with the
+same original Run, qualified Hashmarks delivery and immutable verifier checks.
+
 ```sh
 OH_GOON_NATIVE_CODEX=/opt/native-tools/bin/codex \
 OH_GOON_LIVE_CODEX_HOME=/path/to/existing/.codex \
