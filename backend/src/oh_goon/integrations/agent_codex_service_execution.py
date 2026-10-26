@@ -34,7 +34,7 @@ from oh_goon.integrations._fleet_plan_step_outcome import (
     from_command,
     process_boundary_settled,
 )
-from oh_goon.integrations.agent_codex_service import CodexServiceClient
+from oh_goon.integrations.agent_codex_service import CodexServiceClient, codex_unix_socket_name
 from oh_goon.integrations.agent_native_execution import NativeAgentEvents
 from oh_goon.integrations.fleet_plan_process_isolation import native_runtime_read_only_mounts
 from oh_goon.integrations.fleet_plan_step_output_observation import StepDiagnosticObserver
@@ -363,6 +363,10 @@ def execute_codex_service_run(
     connection = selected.profile.codex_service
     if connection is None:
         raise FleetPlanInvalid("Codex service requires its resolved native selection")
+    private = control / "service-private"
+    scratch = control / "service-scratch"
+    socket = private / "agent.sock"
+    codex_unix_socket_name(socket)
     # Reuse the original runtime/mount owner, including uv's lexical Python
     # aliases. A native permission path needs the same source and target paths;
     # this does not discover another installation or widen to the host home.
@@ -376,11 +380,8 @@ def execute_codex_service_run(
             )
         )
     )
-    private = control / "service-private"
-    scratch = control / "service-scratch"
     private.mkdir(mode=0o700)
     scratch.mkdir(mode=0o700)
-    socket = private / "agent.sock"
     profile = "oh_goon_" + uuid4().hex
     argv = service_arguments(
         selected,

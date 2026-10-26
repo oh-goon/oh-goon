@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -548,10 +549,12 @@ def test_invalid_native_exchange_fails_without_private_payloads_or_leaking_resou
     fault: str,
 ) -> None:
     decisions: list[dict[str, Any]] = []
+    methods: list[str] = []
 
     async def endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
         message = await websocket.receive_json()
+        methods.append(message["method"])
         identifier = message["id"]
         try:
             if fault == "error":
@@ -586,9 +589,9 @@ def test_invalid_native_exchange_fails_without_private_payloads_or_leaking_resou
     endpoint_transport(monkeypatch, endpoint)
 
     async def check() -> None:
-        client = CodexServiceClient(tmp_path / "explicit.sock", timeout_seconds=0.03)
+        client = CodexServiceClient(tmp_path / "explicit.sock", timeout_seconds=1)
         with pytest.raises(AgentProviderError) as error:
-            async with asyncio.timeout(1):
+            async with asyncio.timeout(3):
                 await client.connect()
         assert "PRIVATE" not in str(error.value)
         if fault != "error":
@@ -598,6 +601,7 @@ def test_invalid_native_exchange_fails_without_private_payloads_or_leaking_resou
         await client.close()
 
     asyncio.run(check())
+    assert methods == ["initialize"]
     if fault == "interaction":
         assert decisions == [
             {"id": 90, "error": {"code": -32601, "message": "Client interaction is not supported"}}
@@ -766,6 +770,62 @@ def test_lost_turn_response_is_not_replayed_or_inherited_after_native_restart(
 def test_socket_selection_is_explicit_and_lexical(invalid: Path) -> None:
     with pytest.raises(AgentProviderError):
         CodexServiceClient(invalid)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux AF_UNIX pathname transport")
+@pytest.mark.parametrize("name", ["a" * 107, "é" * 53 + "a"])
+def test_linux_socket_rejects_oversized_encoded_path_before_transport(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unexpected_transport(**_kwargs: Any) -> ASGIWebSocketTransport:
+        pytest.fail("an inadmissible socket must not create a transport")
+
+    monkeypatch.setattr(
+        "oh_goon.integrations.agent_codex_service.httpx2.AsyncHTTPTransport",
+        unexpected_transport,
+    )
+    with pytest.raises(AgentProviderError, match="107-byte") as failure:
+        CodexServiceClient(Path("/" + name))
+    assert len(str(failure.value)) < 200
+    assert name not in str(failure.value)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux AF_UNIX pathname transport")
+@pytest.mark.parametrize("name", ["a" * 106, "é" * 53])
+def test_linux_socket_accepts_exact_encoded_path_limit(name: str) -> None:
+    client = CodexServiceClient(Path("/" + name))
+    assert client.metadata["status"] == "not_connected"
+
+
+def test_socket_byte_limit_does_not_restrict_native_home_or_working_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native_home = Path("/" + "h" * 200)
+    working_directory = Path("/" + "w" * 200)
+
+    async def endpoint(websocket: WebSocket) -> None:
+        await websocket.accept()
+        try:
+            request = await websocket.receive_json()
+            await websocket.send_json(
+                {"id": request["id"], "result": {**_INITIAL, "codexHome": str(native_home)}}
+            )
+            assert (await websocket.receive_json())["method"] == "initialized"
+            request = await websocket.receive_json()
+            assert request["params"]["cwd"] == str(working_directory)
+            await websocket.send_json({"id": request["id"], "result": {"data": []}})
+            await websocket.receive_json()
+        except WebSocketDisconnect:
+            pass
+
+    endpoint_transport(monkeypatch, endpoint)
+
+    async def check() -> None:
+        async with CodexServiceClient(Path("/tmp/owned.sock"), experimental_api=True) as client:
+            client.require_native_home_separation((working_directory,), expected_home=native_home)
+            assert (await client.list_permission_profiles(cwd=working_directory))["data"] == []
+
+    asyncio.run(check())
 
 
 def test_handshake_failure_is_redacted_without_reading_native_state(

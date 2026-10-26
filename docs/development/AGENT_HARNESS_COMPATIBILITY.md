@@ -117,6 +117,14 @@ implementation; they do not erase their invariants.
 | Obsolete implementation, already withdrawn | The [native-store contract](../AGENT_PROVIDERS.md#native-owned-authentication-and-configuration) rejects the former protected credential-file mount route. [Native tests][native-tests] and [resolver tests][resolver-tests] check refusal before native state/source access. Do not retain aliases or restore the removed refresh helper as compatibility. |
 | Obsolete OpenCode CLI fixture, removed | The configured-MCP fixture selected the retired `configuration_directory` route and failed before admission. Disposition: **removed** both immediate/delayed MCP variants and obsolete configuration-byte assertions; [read-only review][cli-readonly-tests] now uses the current disposable managed bootstrap. Fixture removal changed no native execution path and restored no native configuration mount. |
 
+For the Codex 0.164.0 direct Unix-socket mode, **retain** the existing protocol,
+native policy and reserved-directory adaptation. Linux socket admission now rejects
+paths above 107 filesystem-encoded bytes before owned private state or native work;
+the [transport tests][codex-service-tests] cover exact ASCII/UTF-8 boundaries and
+unrestricted non-socket directory fields, while the [execution tests][codex-execution-tests]
+prove refusal before private directories, version probing and daemon/model effects.
+This admission check adds no proxy, path fallback or authentication authority.
+
 ## Conformance matrix
 
 **A** identifies deterministic fixture coverage, including real child processes

@@ -393,6 +393,11 @@ including 0.163.0, are refused before service startup. A user-agent version
 from readiness is insufficient. Native RPC confirms disabled extension/browser/
 computer/delegation features, MCP exclusion on the actual workload thread, and
 the selected native profile.
+On Linux, the direct Unix-socket transport admits at most 107 filesystem-encoded
+pathname bytes, including its owned control directory and socket filename. An
+oversized path is refused before service-private directories, native version
+probing or daemon launch. Select a shorter execution temporary directory explicitly;
+Oh-Goon does not rewrite the caller's temporary root or select another transport.
 Native-home directory identity, including symlink aliases, must be separate from
 every readable tool root. No native file contents are inspected. A disposable
 canary verifies native private/read-only denial and allowed scratch output; this

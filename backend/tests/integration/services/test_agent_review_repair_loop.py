@@ -1535,19 +1535,20 @@ def _assert_started_crash_processes_exited(details):
         except ProcessLookupError:
             continue
         try:
-            if select.select([descriptor], [], [], 0)[0]:
-                continue
+            # Bind the descriptor before observing birth so PID reuse cannot
+            # redirect a cleanup signal to an unrelated process.
             birth = observe_process_birth(event.pid)
-            if birth is None:
-                assert select.select([descriptor], [], [], 5)[0], (
-                    "Recorded process birth is unavailable and native exit remains unverified"
-                )
-                continue
-            if f"{birth.boot_id}:{birth.start_ticks}" != event.process_identity:
-                continue  # The exact recorded process exited; its PID was reused.
+            if birth is not None and (
+                f"{birth.boot_id}:{birth.start_ticks}" != event.process_identity
+            ):
+                continue  # The recorded process exited; its PID was reused.
             # pidfd readiness is the native exit barrier; no sleep-based race.
             if not select.select([descriptor], [], [], 5)[0]:
-                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                assert birth is not None, "Cannot bind the recorded process for cleanup"
+                try:
+                    signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # Exit raced the failed parent-death deadline.
                 pytest.fail("Original parent-death guard did not stop its recorded process")
         finally:
             os.close(descriptor)
