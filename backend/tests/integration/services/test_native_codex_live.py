@@ -2520,6 +2520,311 @@ unittest.main(argv=['live-codex-async-window-verification'])
 """
 
 
+_CIDR_POLICY_SOURCES: dict[str, str] = {
+    "netpolicy/__init__.py": "from .policy import compile_policy\n",
+    "netpolicy/policy.py": """import ipaddress
+
+
+class Policy:
+    def __init__(self, rules, default):
+        self.rules = rules
+        self.default = default
+
+    def decide(self, address):
+        parsed = ipaddress.ip_address(address)
+        for rule in self.rules:
+            if parsed in ipaddress.ip_network(rule['network'], strict=False):
+                return {'action': rule['action'], 'network': rule['network']}
+        return {'action': self.default, 'network': None}
+
+
+def compile_policy(rules, *, default='deny'):
+    return Policy(list(rules), default)
+""",
+    "netpolicy/__main__.py": """import json
+from pathlib import Path
+import sys
+
+from .policy import compile_policy
+
+
+def main():
+    config = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+    policy = compile_policy(config['rules'], default=config.get('default', 'deny'))
+    for line in Path(sys.argv[2]).read_text(encoding='utf-8').splitlines():
+        print(json.dumps(policy.decide(line)))
+
+
+if __name__ == '__main__':
+    main()
+""",
+    "README.md": """# Offline IP access-policy lookup
+
+Repair compile_policy(rules, *, default='deny') and the returned policy.decide(address).
+Use only the Python standard library; ipaddress owns address/network parsing,
+strict host-bit validation, network membership and canonical text formatting.
+No DNS, networking or manual replacement parser is needed.
+
+Rules are a one-pass synchronous iterable of dicts with required string fields
+network and action. Actions/default are exactly 'allow' or 'deny'; reject all
+other values with ValueError, validating default before consuming rules.
+Require an explicit slash in network, reject scoped '%' forms, and use native
+ipaddress.ip_network(network, strict=True) for the remaining accepted syntax.
+Do not trim API strings. Ignore extra rule fields. Fully validate every rule,
+including unreachable or redundant ones, while consuming the iterable once.
+Identical canonical networks with equal actions are allowed; conflicting actions
+for the same canonical network raise ValueError. Iterator exceptions propagate
+unchanged, and validation stops at the first invalid rule.
+
+decide accepts only an unscoped IP address string, using native ip_address.
+Return a fresh dict {'action': ACTION, 'network': CANONICAL_NETWORK_OR_NONE}.
+Choose the matching rule with the longest prefix, regardless of input order.
+IPv4 and IPv6 stay separate; IPv4-mapped IPv6 remains IPv6. Without a matching
+rule, return the configured default and network None. Empty policies are valid.
+Never mutate caller input, retain mutable rule references or alias result dicts.
+Later caller edits and failed compilations must not change a compiled policy.
+
+CLI: python -m netpolicy POLICY QUERIES (exactly two arguments).
+POLICY is a UTF-8 JSON object with required rules array and optional default.
+Extra object fields are ignored. QUERIES is a UTF-8 text path, or '-' for stdin;
+strip each query line and ignore blanks, preserving order and duplicate queries.
+Emit exactly one JSON array plus newline. Each row contains address (native
+canonical text), action and network. Validate all input and serialize the whole
+array before stdout: any usage, I/O, decoding or validation failure exits 2,
+prints a useful stderr diagnostic, and leaves stdout empty. Empty queries emit [].
+Do not change input files. There is no global process-memory-bound claim.
+
+Only netpolicy/policy.py and netpolicy/__main__.py may change. Keep __init__.py
+and this README intact. Independent verification lives outside the source tree.
+""",
+}
+
+_CIDR_POLICY_TASK = (
+    "Repair the offline IP/CIDR access-policy lookup library and CLI described in README.md. "
+    "Preserve compile_policy and decide, use native ipaddress authority, enforce longest-prefix "
+    "and address-family semantics, validate the full one-pass rule source, detach policy state, "
+    "and keep CLI errors atomic. Use only the Python standard library. Edit netpolicy/policy.py "
+    "and netpolicy/__main__.py only. Before editing, execute the exact supplied "
+    "repository_tools.list Hashmarks command and read the frozen Skill reference. "
+    "Independent verification runs after your coding Step."
+)
+
+_CIDR_POLICY_VERIFICATION = r"""import copy
+import ipaddress
+import json
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+
+repo = pathlib.Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(repo))
+from netpolicy import compile_policy
+
+class PolicyTests(unittest.TestCase):
+    def test_longest_prefix_and_input_order(self):
+        rules = [
+            {'network': '0.0.0.0/0', 'action': 'deny'},
+            {'network': '10.0.0.0/8', 'action': 'allow'},
+            {'network': '10.20.0.0/16', 'action': 'deny'},
+            {'network': '10.20.30.0/24', 'action': 'allow'},
+            {'network': '10.20.30.7/32', 'action': 'deny'},
+        ]
+        expected = [
+            ('192.0.2.1', 'deny', '0.0.0.0/0'),
+            ('10.1.0.1', 'allow', '10.0.0.0/8'),
+            ('10.20.31.1', 'deny', '10.20.0.0/16'),
+            ('10.20.30.8', 'allow', '10.20.30.0/24'),
+            ('10.20.30.7', 'deny', '10.20.30.7/32'),
+        ]
+        original = copy.deepcopy(rules)
+        for source in (rules, list(reversed(rules)), rules[2:] + rules[:2]):
+            policy = compile_policy(source)
+            for address, action, network in expected:
+                self.assertEqual(policy.decide(address), {'action': action, 'network': network})
+        self.assertEqual(rules, original)
+
+    def test_native_canonical_networks_and_duplicate_conflicts(self):
+        policy = compile_policy([
+            {'network': '192.0.2.0/255.255.255.0', 'action': 'allow'},
+            {'network': '192.0.2.0/0.0.0.255', 'action': 'allow'},
+            {'network': '192.0.2.0/24', 'action': 'allow', 'ignored': []},
+            {'network': '2001:0db8:0000::/32', 'action': 'deny'},
+            {'network': '2001:db8::/32', 'action': 'deny'},
+        ])
+        self.assertEqual(policy.decide('192.0.2.255'), {'action': 'allow', 'network': '192.0.2.0/24'})
+        self.assertEqual(policy.decide('2001:db8::1'), {'action': 'deny', 'network': '2001:db8::/32'})
+        for networks in [('192.0.2.0/24', '192.0.2.0/255.255.255.0'),
+                         ('2001:0db8::/32', '2001:db8::/32')]:
+            def source():
+                for network, action in zip(networks, ['allow', 'deny']):
+                    yield {'network': network, 'action': action}
+                raise AssertionError('advanced past conflicting duplicate')
+            with self.subTest(networks=networks), self.assertRaises(ValueError):
+                compile_policy(source())
+
+    def test_address_family_default_and_boundaries(self):
+        rules = [
+            {'network': '0.0.0.0/0', 'action': 'allow'},
+            {'network': '::/0', 'action': 'deny'},
+            {'network': '2001:db8::/32', 'action': 'allow'},
+            {'network': '2001:db8::1/128', 'action': 'deny'},
+        ]
+        policy = compile_policy(rules)
+        self.assertEqual(policy.decide('255.255.255.255'), {'action': 'allow', 'network': '0.0.0.0/0'})
+        self.assertEqual(policy.decide('::ffff:192.0.2.1'), {'action': 'deny', 'network': '::/0'})
+        self.assertEqual(policy.decide('2001:db8::1'), {'action': 'deny', 'network': '2001:db8::1/128'})
+        self.assertEqual(policy.decide('2001:db8::2'), {'action': 'allow', 'network': '2001:db8::/32'})
+        for default in ['allow', 'deny']:
+            empty = compile_policy([], default=default)
+            for address in ['0.0.0.0', '::', '192.0.2.1']:
+                self.assertEqual(empty.decide(address), {'action': default, 'network': None})
+        v4_only = compile_policy([{'network': '0.0.0.0/0', 'action': 'deny'}], default='allow')
+        self.assertEqual(v4_only.decide('::ffff:192.0.2.1'), {'action': 'allow', 'network': None})
+
+    def test_single_pass_detached_state_and_fresh_results(self):
+        rules = [{'network': '192.0.2.0/24', 'action': 'allow'}]
+        class Source:
+            iterations = 0
+            def __iter__(self):
+                self.iterations += 1
+                if self.iterations != 1:
+                    raise AssertionError('source restarted')
+                return iter(rules)
+        source = Source()
+        policy = compile_policy(source)
+        self.assertEqual(source.iterations, 1)
+        rules[0].update(network='198.51.100.0/24', action='deny')
+        rules.append({'network': '0.0.0.0/0', 'action': 'allow'})
+        result = policy.decide('192.0.2.1')
+        self.assertEqual(result, {'action': 'allow', 'network': '192.0.2.0/24'})
+        result['action'] = 'corrupt'
+        self.assertEqual(policy.decide('192.0.2.1'), {'action': 'allow', 'network': '192.0.2.0/24'})
+        with self.assertRaises(ValueError):
+            compile_policy([{'network': '192.0.2.0/24', 'action': 'deny'},
+                            {'network': 'bad', 'action': 'deny'}])
+        self.assertEqual(policy.decide('192.0.2.1'), {'action': 'allow', 'network': '192.0.2.0/24'})
+        self.assertEqual(policy.decide('198.51.100.1'), {'action': 'deny', 'network': None})
+
+    def test_invalid_default_precedes_source_consumption(self):
+        class Untouched:
+            def __iter__(self):
+                raise AssertionError('source touched before default validation')
+        for default in [None, True, 1, [], {}, 'ALLOW', ' allow', '']:
+            with self.subTest(default=default), self.assertRaises(ValueError):
+                compile_policy(Untouched(), default=default)
+
+    def test_all_rules_validated_and_stop_at_first_invalid(self):
+        invalid = [None, [], {}, {'network': '192.0.2.0/24'},
+                   {'network': '192.0.2.0/24', 'action': []},
+                   {'network': '192.0.2.0/24', 'action': 'ALLOW'},
+                   {'network': 1, 'action': 'allow'},
+                   {'network': '192.0.2.1/24', 'action': 'allow'},
+                   {'network': '192.0.2.1', 'action': 'allow'},
+                   {'network': 'fe80::%zone/64', 'action': 'allow'},
+                   {'network': ' 192.0.2.0/24', 'action': 'allow'},
+                   {'network': '::/129', 'action': 'deny'}]
+        for bad in invalid:
+            def source():
+                yield {'network': '0.0.0.0/0', 'action': 'deny'}
+                yield bad
+                raise AssertionError('advanced past invalid rule')
+            with self.subTest(rule=bad), self.assertRaises(ValueError):
+                compile_policy(source())
+
+    def test_iterator_failure_keeps_original_exception(self):
+        marker = RuntimeError('rules producer failed late')
+        def source():
+            yield {'network': '0.0.0.0/0', 'action': 'allow'}
+            raise marker
+        with self.assertRaises(RuntimeError) as caught:
+            compile_policy(source())
+        self.assertIs(caught.exception, marker)
+
+    def test_invalid_addresses(self):
+        policy = compile_policy([])
+        for address in [None, True, 1, [], {}, b'192.0.2.1', b'\xc0\x00\x02\x01', '', '192.0.2.1/32',
+                        '192.0.2.256', ' 192.0.2.1', '192.0.2.1 ', '[::1]', 'fe80::1%zone']:
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                policy.decide(address)
+
+    def run_cli(self, config, queries, *, stdin=False, raw_config=None, raw_queries=None,
+                args=None, query_kind='file'):
+        with tempfile.TemporaryDirectory(prefix='policy café ') as directory:
+            policy_file = pathlib.Path(directory) / 'policy config.json'
+            query_file = pathlib.Path(directory) / 'addresses α.txt'
+            config_bytes = raw_config if raw_config is not None else json.dumps(config).encode()
+            query_bytes = raw_queries if raw_queries is not None else queries.encode()
+            policy_file.write_bytes(config_bytes)
+            query_file.write_bytes(query_bytes)
+            query_path = {'file': query_file, 'missing': pathlib.Path(directory) / 'missing.txt',
+                          'directory': pathlib.Path(directory)}[query_kind]
+            arguments = args if args is not None else [str(policy_file), '-' if stdin else str(query_path)]
+            result = subprocess.run([sys.executable, '-B', '-m', 'netpolicy', *arguments],
+                                    cwd=repo, input=query_bytes if stdin else None,
+                                    capture_output=True, timeout=5)
+            self.assertEqual(policy_file.read_bytes(), config_bytes)
+            self.assertEqual(query_file.read_bytes(), query_bytes)
+            return result
+
+    def test_cli_files_and_stdin(self):
+        config = {'rules': [{'network': '192.0.2.0/24', 'action': 'allow'},
+                            {'network': '2001:db8::/32', 'action': 'allow'}],
+                  'default': 'deny', 'note': 'nätverk'}
+        addresses = ['192.0.2.7', '2001:0db8:0000::1', '198.51.100.2', '192.0.2.7']
+        expected = [
+            {'address': str(ipaddress.ip_address(address)), 'action': action, 'network': network}
+            for address, action, network in zip(addresses,
+                ['allow', 'allow', 'deny', 'allow'],
+                ['192.0.2.0/24', '2001:db8::/32', None, '192.0.2.0/24'])]
+        for stdin in [False, True]:
+            result = self.run_cli(config, '\n  ' + '\r\n\n'.join(addresses) + '  \n', stdin=stdin)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stderr, b'')
+            self.assertTrue(result.stdout.endswith(b'\n'))
+            self.assertEqual(json.loads(result.stdout), expected)
+        result = self.run_cli({'rules': []}, '\n \n', stdin=True)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b'[]\n', b''))
+
+    def test_cli_late_errors_are_atomic(self):
+        invalid_configs = [None, [], {}, {'rules': {}}, {'rules': [], 'default': []},
+                           {'rules': [{'network': '0.0.0.0/0', 'action': 'allow'},
+                                      {'network': '192.0.2.1/24', 'action': 'deny'}]}]
+        for config in invalid_configs:
+            with self.subTest(config=config):
+                result = self.run_cli(config, '192.0.2.1\n')
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, b'')
+                self.assertTrue(result.stderr.strip())
+        for stdin in [False, True]:
+            result = self.run_cli({'rules': []}, '192.0.2.1\nnot-an-address\n', stdin=stdin)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, b'')
+            self.assertTrue(result.stderr.strip())
+        for keyword, invalid_bytes in [('raw_config', b'{'), ('raw_config', b'\xff'),
+                                       ('raw_queries', b'192.0.2.1\n\xff')]:
+            result = self.run_cli({'rules': []}, '', **{keyword: invalid_bytes})
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, b'')
+            self.assertTrue(result.stderr.strip())
+
+    def test_cli_usage_and_io_errors(self):
+        for args in [[], ['one'], ['one', 'two', 'three'], ['missing-policy', 'missing-queries']]:
+            result = self.run_cli({'rules': []}, '', args=args)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, b'')
+            self.assertTrue(result.stderr.strip())
+        for query_kind in ['missing', 'directory']:
+            result = self.run_cli({'rules': []}, '', query_kind=query_kind)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, b'')
+            self.assertTrue(result.stderr.strip())
+
+unittest.main(argv=['live-codex-cidr-policy-verification'])
+"""
+
+
 @pytest.mark.certification
 @pytest.mark.parametrize(
     "scenario",
@@ -2534,6 +2839,7 @@ unittest.main(argv=['live-codex-async-window-verification'])
         "frames-node",
         "document-patch",
         "async-window",
+        "cidr-policy",
     ],
 )
 def test_legacy_live_chatgpt_coding_uses_original_run(
@@ -2570,6 +2876,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         "frames-node": _FRAMES_NODE_SOURCES,
         "document-patch": _DOCUMENT_PATCH_SOURCES,
         "async-window": _ASYNC_WINDOW_SOURCES,
+        "cidr-policy": _CIDR_POLICY_SOURCES,
     }[scenario]
     for relative, text in source_files.items():
         path = repo / relative
@@ -2594,6 +2901,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             "frames-node": _FRAMES_NODE_VERIFICATION,
             "document-patch": _DOCUMENT_PATCH_VERIFICATION,
             "async-window": _ASYNC_WINDOW_VERIFICATION,
+            "cidr-policy": _CIDR_POLICY_VERIFICATION,
         }[scenario],
         encoding="utf-8",
     )
@@ -2694,6 +3002,8 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
         task = _DOCUMENT_PATCH_TASK
     elif scenario == "async-window":
         task = _ASYNC_WINDOW_TASK
+    elif scenario == "cidr-policy":
+        task = _CIDR_POLICY_TASK
     task_file = tmp_path / "task.txt"
     task_file.write_text(task, encoding="utf-8")
     catalog = tmp_path / "providers.json"
@@ -3014,6 +3324,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                     "docpatch/__main__.py",
                 },
                 "async-window": {"async_window/pipeline.py"},
+                "cidr-policy": {"netpolicy/policy.py", "netpolicy/__main__.py"},
                 "deploy-order": {"deploy_order/graph.py", "deploy_order/__main__.py"},
                 "eventlog": {"eventlog/records.py", "eventlog/summary.py", "eventlog/__main__.py"},
                 "stocktake": {
