@@ -1,18 +1,21 @@
 """Step consumers use accepted semantics, independent of native transport shape."""
 
+import json
 from dataclasses import replace
 
 import pytest
 from pydantic import ValidationError
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.game_tape_step_projection import project_steps
 from oh_goon.core.models.fleet_plan import (
     GitResultContract,
     ResolvedCommandStep,
     ResolvedDependencyInventoryStep,
     ResolvedGitStep,
 )
-from oh_goon.core.models.fleet_plan_evidence import PlanStepSettlementEvidence
+from oh_goon.core.models.fleet_plan_evidence import FleetPlanResult, PlanStepSettlementEvidence
+from oh_goon.core.vocabulary import GameTapeStatus
 from oh_goon.engine.command import CommandCancelledError, CommandResult, CommandSupervisorReceipt
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations._fleet_plan_step_evidence import (
@@ -118,6 +121,94 @@ def test_cleanup_failure_keeps_observed_exit_separate_from_rejected_step():
         worktree_files_after=(),
     )
     assert attempt.returncode != 0 and attempt.observed_returncode == 0
+
+
+@pytest.mark.parametrize(
+    "settlement",
+    [
+        None,
+        {},
+        {"outcome": "INCOMPLETE", "cleanup": "UNVERIFIED", "reason": "CLEANUP_UNVERIFIED"},
+        {"outcome": "FAILED", "cleanup": "VERIFIED", "reason": "FAILED_EXIT"},
+        {"outcome": "CANCELLED", "cleanup": "VERIFIED", "reason": "CALLER_CANCELLED"},
+        {"outcome": "TIMED_OUT", "cleanup": "VERIFIED", "reason": "DEADLINE_EXPIRED"},
+        {"outcome": "OUTPUT_LIMITED", "cleanup": "VERIFIED", "reason": "OUTPUT_LIMIT_EXCEEDED"},
+        {"outcome": "AUTHORITY_LOST", "cleanup": "VERIFIED", "reason": "AUTHORITY_REVOKED"},
+        {"outcome": "SKIPPED", "cleanup": "UNAVAILABLE", "reason": "NOT_STARTED"},
+    ],
+)
+def test_completed_verification_cannot_reopen_with_missing_or_rejected_settlement(
+    settlement: dict[str, str] | None,
+) -> None:
+    step = ResolvedCommandStep(step_id="verification", argv=("native-verifier",))
+    outcome = from_command(
+        CommandResult(
+            argv=step.argv,
+            returncode=0,
+            stdout="Independent verification passed",
+            stderr="",
+            supervisor=CommandSupervisorReceipt(final_process_group_quiescent=True),
+        )
+    )
+    completed = step_evidence(
+        step=step,
+        outcome=outcome,
+        repository_state_before="before",
+        repository_state_after="after",
+        worktree_files_after=(),
+        attempts=(),
+        artifacts=(),
+    )
+    result = FleetPlanResult(plan_id="plan", steps=(completed,))
+    payload = result.model_dump(mode="json", exclude_computed_fields=True)
+    reopened = FleetPlanResult.model_validate_json(json.dumps(payload))
+    projected = project_steps(
+        "run",
+        "repo",
+        (step,),
+        reopened.steps,
+        step_sources={},
+        source_label="goon.yml",
+        terminal=True,
+        operation_reason_code=None,
+    )[0]
+    assert reopened.successful and projected.status is GameTapeStatus.PASSED
+    assert projected.settlement == completed.settlement
+    if settlement is None:
+        payload["steps"][0].pop("settlement")
+    else:
+        payload["steps"][0]["settlement"] = settlement
+    with pytest.raises(ValidationError, match="accepted SUCCESS settlement"):
+        FleetPlanResult.model_validate_json(json.dumps(payload))
+
+
+def test_completed_evidence_preserves_an_explicitly_accepted_nonzero_exit() -> None:
+    step = ResolvedCommandStep(step_id="accepted", argv=("native-work",), success_codes=(0, 17))
+    outcome = from_command(
+        CommandResult(
+            argv=step.argv,
+            returncode=17,
+            stdout="",
+            stderr="",
+            supervisor=CommandSupervisorReceipt(final_process_group_quiescent=True),
+        )
+    )
+    completed = step_evidence(
+        step=step,
+        outcome=outcome,
+        attempts=(),
+        artifacts=(),
+        repository_state_before="before",
+        repository_state_after="after",
+        worktree_files_after=(),
+    )
+    reopened = type(completed).model_validate_json(
+        completed.model_dump_json(exclude_computed_fields=True)
+    )
+    assert reopened.status == "COMPLETED" and reopened.returncode == 17
+    assert reopened.settlement.outcome == "SUCCESS"
+    assert reopened.settlement.reason == "ACCEPTED_EXIT"
+    assert reopened.settlement.observed_returncode == 17
 
 
 @pytest.mark.parametrize("missing", ["supervisor", "reason", "request", "identity"])

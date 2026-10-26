@@ -39,6 +39,7 @@ class CodexResponsesFixture(AbstractContextManager["CodexResponsesFixture"]):
         model_info: dict[str, Any] | None = None,
         tool_commands: tuple[str, str] | None = None,
         completion: Callable[[], str] | None = None,
+        expected_task: str | None = None,
     ) -> None:
         self.transport = transport
         self.prompt = prompt
@@ -47,6 +48,7 @@ class CodexResponsesFixture(AbstractContextManager["CodexResponsesFixture"]):
         self.model_info = model_info
         self.tool_commands = tool_commands
         self.completion = completion
+        self.expected_task = expected_task
         self.model_requests = 0
         self.observations: list[dict[str, Any]] = []
         self.warmup_observations: list[dict[str, Any]] = []
@@ -381,6 +383,7 @@ class CodexResponsesFixture(AbstractContextManager["CodexResponsesFixture"]):
             "privileged_in_chain": privileged.count(original) == 1
             or bool(parent.get("privileged_in_chain")),
             "user_duplicate": original in user_texts,
+            "task_user_exact": self.expected_task is not None and self.expected_task in user_texts,
             "followup": "CONTEXT_FOLLOWUP_PROOF" in outputs.get("context_first", "")
             or bool(parent.get("followup")),
             "edit": "CONTEXT_EDIT_PROOF" in outputs.get("context_second", "")

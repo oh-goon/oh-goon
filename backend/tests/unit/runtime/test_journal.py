@@ -433,6 +433,138 @@ def test_failed_fleet_commit_persists_neither_report_nor_completion_event(tmp_pa
     assert after.run.progress.completed == 0
 
 
+@pytest.mark.parametrize("settlement_kind", ("missing", "timeout"))
+def test_copied_invalid_step_settlement_is_rejected_before_journal_mutation(
+    tmp_path: Path, settlement_kind: str
+) -> None:
+    from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+    from oh_goon.core.models.fleet_plan_evidence import FleetPlanResult, PlanStepSettlementEvidence
+    from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
+    from oh_goon.core.models.operation import FleetPlanOperationEvidence
+    from oh_goon.core.models.run_admission import (
+        DirectFleetExecutionAdmission,
+        FleetRunAdmissionIntent,
+        fleet_repository_scope,
+    )
+    from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
+    from oh_goon.integrations._fleet_plan_step_evidence import step_evidence
+    from oh_goon.integrations._fleet_plan_step_outcome import from_command
+    from tests.factories.capabilities import capability_snapshot
+    from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+    from tests.factories.journal import admit_run
+    from tests.factories.run_admission import repository_admissions_for
+
+    database_path = tmp_path / "state.db"
+    database = LocalDatabase(database_path)
+    journal = Journal(database)
+    repository = RepositoryIdentity.model_validate({"path": tmp_path / "repo"})
+    command = ResolvedCommandStep(step_id="verification", argv=("native-verifier",))
+    plan = ResolvedFleetPlan.create(
+        name="verified", description="", execution=VerificationExecutionPolicy(), steps=(command,)
+    )
+    target = structural_fleet_plan_target(plan)
+    completed = step_evidence(
+        step=command,
+        outcome=from_command(
+            CommandResult(
+                argv=command.argv,
+                returncode=0,
+                stdout="Independent verification passed",
+                stderr="",
+                supervisor=CommandSupervisorReceipt(final_process_group_quiescent=True),
+            )
+        ),
+        repository_state_before="before",
+        repository_state_after="after",
+        worktree_files_after=(),
+        attempts=(),
+        artifacts=(),
+    )
+    assert completed.status == "COMPLETED" and completed.settlement.outcome == "SUCCESS"
+
+    def prepare_report(run_id: str) -> OperationReport:
+        intent = FleetRunAdmissionIntent(
+            target=target,
+            capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+            execution=DirectFleetExecutionAdmission(),
+            repository_admissions=repository_admissions_for(target, (repository,)),
+        )
+        admit_run(
+            journal,
+            run_id,
+            intent,
+            fleet_repository_scope({repository.repository_id}),
+            [repository],
+        )
+        start_run(journal, run_id)
+        operation_id = start_repository(journal, run_id, repository)
+        observer = journal.execution_lifecycle_observer(
+            run_id, repository.repository_id, operation_id
+        )
+        observer(command.step_id, 1, "STEP_REACHED")
+        observer(command.step_id, 1, "STEP_STARTED")
+        observer(command.step_id, 1, "STEP_SUCCEEDED", returncode=0)
+        return make_operation_report(
+            repository,
+            OperationAction.EXECUTE_PLAN,
+            target=target,
+            fleet_run_id=run_id,
+            operation_id=operation_id,
+            evidence=FleetPlanOperationEvidence(
+                kind="FLEET_PLAN", plan=FleetPlanResult(plan_id=plan.plan_id, steps=(completed,))
+            ),
+        )
+
+    valid = prepare_report("valid")
+    commit_operation(journal, valid)
+    accepted = journal.read_view()
+    committed = accepted.require_operation(valid.provenance.operation_id)
+    assert committed == valid and committed is not valid
+    assert committed.evidence is not valid.evidence
+    commit_operation(journal, valid)
+    assert journal.read_view().revision == accepted.revision
+    terminalize_run(journal, "valid", FleetRunTerminalIntent.COMPLETE)
+    assert (
+        Journal(LocalDatabase(database_path)).require_operation(valid.provenance.operation_id)
+        == valid
+    )
+
+    pending = prepare_report("copied")
+    assert isinstance(pending.evidence, FleetPlanOperationEvidence)
+    settlement = (
+        PlanStepSettlementEvidence()
+        if settlement_kind == "missing"
+        else PlanStepSettlementEvidence(
+            outcome="TIMED_OUT",
+            cleanup="VERIFIED",
+            reason="DEADLINE_EXPIRED",
+            observed_returncode=-15,
+        )
+    )
+    copied_step = completed.model_copy(update={"settlement": settlement})
+    copied_result = pending.evidence.plan.model_copy(update={"steps": (copied_step,)})
+    copied_evidence = pending.evidence.model_copy(update={"plan": copied_result})
+    copied_report = pending.model_copy(update={"evidence": copied_evidence})
+    before = journal.read_view()
+    before_events = journal.run_events("copied")
+    with database.transaction(write=False) as connection:
+        before_rows = connection.execute("SELECT COUNT(*) FROM journal_entries").fetchone()[0]
+    with pytest.raises(ValidationError, match="accepted SUCCESS settlement"):
+        commit_operation(journal, copied_report)
+    with database.transaction(write=False) as connection:
+        assert (
+            connection.execute("SELECT COUNT(*) FROM journal_entries").fetchone()[0] == before_rows
+        )
+    assert journal.read_view().revision == before.revision
+    assert journal.operation(pending.provenance.operation_id) is None
+    assert journal.run_events("copied") == before_events
+    reopened = Journal(LocalDatabase(database_path))
+    assert reopened.read_view().revision == before.revision
+    assert reopened.require_operation(valid.provenance.operation_id) == valid
+    assert reopened.operation(pending.provenance.operation_id) is None
+    assert reopened.run_events("copied") == before_events
+
+
 def test_fleet_report_cannot_be_committed_without_owning_run(tmp_path: Path) -> None:
     journal = Journal(LocalDatabase(tmp_path / "state.db"))
     identity = RepositoryIdentity(name="api", path=tmp_path / "api")

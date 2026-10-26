@@ -666,7 +666,15 @@ class NativeAgentEventParser:
                         self._settled = False
                         self._observe("agent", "item.error")
                     elif item.get("type") in ("command_execution", "mcp_tool_call", "file_change"):
-                        self._observe("tool", str(item["type"]), item.get("id"))
+                        name = str(item["type"])
+                        if name == "command_execution" and item.get("status") in (
+                            "in_progress",
+                            "completed",
+                            "failed",
+                            "declined",
+                        ):
+                            name += f" status={item['status']}"
+                        self._observe("tool", name, item.get("id"))
 
 
 def _event_record(line: str) -> dict[str, Any]:

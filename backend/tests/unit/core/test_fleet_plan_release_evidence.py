@@ -10,6 +10,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanEgressEvidence,
     PlanOutputEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
 )
 from oh_goon.core.models.fleet_plan_release_evidence import (
     KubernetesSetImageReleaseEvidence,
@@ -48,6 +49,9 @@ def _completed(kind: str, *, release_effect=None) -> CompletedPlanStepExecution:
     return CompletedPlanStepExecution(
         step_id="release",
         kind=kind,
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         stdout_evidence=_output(),
         stderr_evidence=_output(),
         repository_state_before="before",

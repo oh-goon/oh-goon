@@ -372,6 +372,67 @@ def test_codex_recovered_diagnostic_preserves_successful_terminal_result() -> No
     assert any(item.kind == "tool" for item in result.observations)
 
 
+@pytest.mark.parametrize("returncode", [0, 7])
+def test_codex_command_status_claims_remain_distinct_from_turn_and_process_outcome(
+    returncode: int,
+) -> None:
+    records: list[dict[str, object]] = [{"type": "turn.started"}]
+    for status, exit_code in (("completed", 0), ("failed", 1), ("declined", None)):
+        records.append(
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": f"command-{status}",
+                    "type": "command_execution",
+                    "status": status,
+                    "exit_code": exit_code,
+                    "command": "PRIVATE_NATIVE_COMMAND",
+                    "aggregated_output": "PRIVATE_NATIVE_OUTPUT",
+                },
+            }
+        )
+    records.extend(
+        [
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "Done"}},
+            {"type": "turn.completed"},
+        ]
+    )
+    result = parse_native_agent_events("codex", events(*records), returncode=returncode)
+    assert result.settled and result.failed is (returncode != 0)
+    assert result.final_text == "Done"
+    tools = [item for item in result.observations if item.kind == "tool"]
+    assert [item.summary for item in tools] == [
+        "codex: command_execution status=completed",
+        "codex: command_execution status=failed",
+        "codex: command_execution status=declined",
+    ]
+    assert [item.native_event_id for item in tools] == [
+        "command-completed",
+        "command-failed",
+        "command-declined",
+    ]
+    assert "PRIVATE" not in str(result.observations)
+
+
+@pytest.mark.parametrize("status", [None, "PRIVATE_NATIVE_STATUS", ["PRIVATE_NATIVE_STATUS"]])
+def test_codex_unrecognized_command_status_stays_private(status: object) -> None:
+    result = parse_native_agent_events(
+        "codex",
+        events(
+            {
+                "type": "item.completed",
+                "item": {"type": "command_execution", "status": status},
+            },
+            {"type": "turn.completed"},
+        ),
+        returncode=0,
+    )
+    assert result.settled and not result.failed
+    assert [item.summary for item in result.observations if item.kind == "tool"] == [
+        "codex: command_execution"
+    ]
+
+
 @pytest.mark.parametrize(
     ("records", "returncode"),
     [

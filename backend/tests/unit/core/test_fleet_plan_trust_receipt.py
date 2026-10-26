@@ -19,6 +19,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanOutputEvidence,
     PlanSnapshotEvidence,
     PlanStepAttemptEvidence,
+    PlanStepSettlementEvidence,
     RequirementsRepositoryAdmissionEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
@@ -86,6 +87,9 @@ def _completed(step_id: str, kind: str = "run", *, attempt=None, teardown=None):
     return CompletedPlanStepExecution(
         step_id=step_id,
         kind=kind,
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         returncode=0,
         stdout_evidence=_output(),
         stderr_evidence=_output(),

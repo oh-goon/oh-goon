@@ -653,7 +653,7 @@ def execute_native_agent_step(
                     timeout=_remaining(deadline),
                     cancel_requested=runtime.cancel_requested,
                     runtime_supervision=runtime.runtime_supervision,
-                    input_data=prompt_data,
+                    input_data=prepared.task.encode("utf-8"),
                     retain_output_tail=True,
                     stream_output=consume_native_output,
                     preserve_native_executable_path=True,

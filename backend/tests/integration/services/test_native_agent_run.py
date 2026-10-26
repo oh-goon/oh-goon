@@ -272,7 +272,9 @@ def test_codex_login_uses_original_run_and_independent_verification(
     python_alias = tmp_path / "python-runtime-alias"
     python_base = Path(sys.base_prefix).resolve()
     python_alias.symlink_to(python_base, target_is_directory=True)
-    interpreter_suffix = Path(sys._base_executable).resolve().relative_to(python_base)
+    base_executable = getattr(sys, "_base_executable", None)
+    assert isinstance(base_executable, str)
+    interpreter_suffix = Path(base_executable).resolve().relative_to(python_base)
     monkeypatch.setattr(sys, "_base_executable", str(python_alias / interpreter_suffix))
     os.mkfifo(home / "auth.json")
     (tmp_path / "bin").mkdir()
@@ -290,8 +292,9 @@ def test_codex_login_uses_original_run_and_independent_verification(
         "assert not config['permissions']['oh_goon']['network']['enabled']\n"
         f"assert config['permissions']['oh_goon']['filesystem'][{str(python_alias)!r}] == 'read'\n"
         "assert '--ignore-user-config' in sys.argv and '--ignore-rules' in sys.argv\n"
-        "prompt=json.loads(sys.stdin.read())\n"
-        "assert json.loads(pathlib.Path(config['model_instructions_file']).read_text())==prompt\n"
+        "prompt=json.loads(pathlib.Path(config['model_instructions_file']).read_bytes())\n"
+        "assert sys.stdin.buffer.read()==prompt['task'].encode('utf-8')\n"
+        "assert prompt['task']=='Change VALUE to 42; retain the π canary'\n"
         "assert 'Hashmarks' in prompt['repository_evidence']\n"
         "assert 'Skill' in prompt['skill_instructions'] or 'supplied task' in prompt['skill_instructions']\n"
         "assert pathlib.Path(os.environ['CODEX_HOME'],'auth.json').is_fifo()\n"
@@ -329,7 +332,7 @@ def test_codex_login_uses_original_run_and_independent_verification(
             selected=selected,
             workspace=repo,
             skill=None,
-            task="Change VALUE to 42",
+            task="Change VALUE to 42; retain the π canary",
             verification=((sys.executable, "verify.py"),),
         )
         detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)

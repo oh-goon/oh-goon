@@ -10,6 +10,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     FleetPlanResult,
     MissingPlanArtifact,
     PlanOutputEvidence,
+    PlanStepSettlementEvidence,
     PresentPlanArtifact,
     PublishedPlanOutputEvidence,
 )
@@ -55,6 +56,9 @@ def test_game_tape_owns_step_artifacts_and_published_outputs(tmp_path: Path) -> 
     execution = CompletedPlanStepExecution(
         step_id="build",
         kind="command",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         started_at=now,
         finished_at=now,
         argv=("echo", "build"),
@@ -131,6 +135,9 @@ def test_run4_output_readback_uses_original_real_game_tape_evidence(tmp_path: Pa
     execution = CompletedPlanStepExecution(
         step_id="publish",
         kind="command",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         started_at=now,
         finished_at=now,
         argv=("echo", "out"),

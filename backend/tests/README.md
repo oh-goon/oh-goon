@@ -190,7 +190,9 @@ Run and an independent verification Step. A bounded local Responses fixture
 requests real tools, reports enough usage to trigger native automatic compaction,
 and checks frozen task, Skill and qualified Hashmarks instructions through the
 observed response chain and the continuation carrying the returned compaction item.
-The duplicate user prompt cannot satisfy that privileged instruction check.
+The user message carries the exact task, while the complete frozen payload stays
+in privileged instructions. The probe checks both independently, including
+continuation after compaction, and rejects a full-payload user duplicate.
 
 The four cases select API-key or ChatGPT authentication with HTTP or WebSocket
 transport. The ChatGPT cases use synthetic tokens, account discovery and a local

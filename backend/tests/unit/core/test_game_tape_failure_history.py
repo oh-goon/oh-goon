@@ -13,6 +13,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanExecutionInputEvidence,
     PlanIsolationBackendEvidence,
     PlanSnapshotEvidence,
+    PlanStepSettlementEvidence,
 )
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.repository import RepositoryIdentity
@@ -118,6 +119,9 @@ def _passed_detail(
     step = CompletedPlanStepExecution(
         step_id="test",
         kind="command",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
         started_at=now,
         finished_at=now + timedelta(milliseconds=duration_ms),
         argv=command,

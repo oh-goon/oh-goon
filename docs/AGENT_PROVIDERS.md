@@ -157,7 +157,9 @@ original isolation boundary.
 
 This is an original managed Run with headless report Steps. Oh-Goon configures
 Codex's native session instructions file with the exact frozen task, Hashmarks
-presentation and Skill; incremental tool context is disabled. Codex owns session,
+presentation and Skill. Stdin carries only the task's exact UTF-8 bytes;
+the full payload remains in privileged instructions. Incremental tool context
+is disabled. Codex owns session,
 follow-up and compaction behavior. Portable tests verify the emitted configuration.
 The explicitly selected installed-Codex context probe checks privileged instruction
 delivery through tool follow-up, native automatic compaction and continuation in
@@ -167,8 +169,9 @@ workspace discovery selects a different local HTTPS backend origin using a test 
 request hosts must match that discovered origin. Real credentials are never
 needed. WebSocket warm-up must carry the exact privileged instructions;
 follow-ups must reference that observed response chain, and continuation must
-restore the exact privileged instructions after compaction. A duplicate user
-prompt cannot satisfy this proof, and HTTP fallback cannot qualify WebSocket delivery. This proves installed client transport and
+restore the exact privileged instructions after compaction. The user message must
+contain the exact task without a second full-payload copy. HTTP fallback cannot
+qualify WebSocket delivery. This proves installed client transport and
 synthetic workspace routing, not live account access or model reasoning quality.
 The opt-in legacy live coding baseline retains the original local Run and
 immutable independent verification. Its private-home refresh checker has been

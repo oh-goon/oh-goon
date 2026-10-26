@@ -38,8 +38,15 @@ Step. The inspector shows implementation, profile, occurrence, captured source
 and harness-input identities, event kinds and omitted-observation counts. Native
 settled/failure flags remain `UNTRUSTED_HARNESS_CLAIM`; they cannot overrule the
 recorded process exit or verification Step. Event summaries contain protocol
-names rather than prompt, tool argument or response bodies. Raw output remains
-subject to the existing transient retention contract.
+names and recognized native command statuses rather than prompt, tool argument
+or response bodies. Raw output remains subject to the existing transient
+retention contract.
+
+Completed Step evidence requires a successful settlement with verified cleanup.
+Decoding rejects a completed record with missing or conflicting settlement;
+a terminal success event cannot repair that contradictory receipt.
+The Journal validates the incoming report's field representation before
+appending it, including reports built from copied model objects.
 
 Cancelled Steps retain only their original physical cancellation receipt:
 settlement, supervisor, acknowledged isolation and available process identity and

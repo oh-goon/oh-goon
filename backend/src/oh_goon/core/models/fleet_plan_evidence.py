@@ -529,6 +529,12 @@ class CompletedPlanStepExecution(_PlanStepExecutionBase):
     status: Literal["COMPLETED"] = "COMPLETED"
     returncode: int = 0
 
+    @model_validator(mode="after")
+    def validate_accepted_completion(self) -> CompletedPlanStepExecution:
+        if self.settlement.outcome != "SUCCESS":
+            raise ValueError("Completed Step evidence requires its accepted SUCCESS settlement")
+        return self
+
 
 class SkippedPlanStepExecution(_PlanStepExecutionBase):
     status: Literal["SKIPPED"] = "SKIPPED"
