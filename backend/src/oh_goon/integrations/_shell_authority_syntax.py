@@ -13,6 +13,7 @@ from oh_goon.core.source_tree_policy import (
 FORWARD = re.compile(r"^# OH_GOON_FORWARD_ARGV_FROM: (?P<position>[1-9][0-9]*)$")
 FUNCTION = re.compile(r"^\s*(?:function\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{")
 ASSIGNMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_ARRAY_ASSIGNMENT_PREFIX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=$")
 SIMPLE_TOOL = re.compile(r"^[A-Za-z0-9_.+-]+$")
 LOCAL_PREFIXES = ("./", "../", "backend/", "frontend/", "scripts/", "generated/", "templates/")
 CONTROL_WORDS = frozenset(
@@ -274,8 +275,25 @@ def _conditional_end(text: str, start: int) -> int | None:
     return None
 
 
+def _array_assignment_end(text: str, start: int) -> int | None:
+    depth = 1
+    index = start
+    quote: str | None = None
+    while index < len(text):
+        # These native execution forms are not owned by the command-substitution
+        # extractor. They cannot be discarded as array data without proof.
+        if (quote is None and text.startswith(("<(", ">("), index)) or (
+            quote != "'" and text[index] == "`"
+        ):
+            return None
+        index, quote, depth = _substitution_step(text, index, quote, depth)
+        if depth == 0:
+            return index
+    return None
+
+
 def _mask_shell_control_groups(fragment: str) -> str | None:
-    """Keep Bash tests/arithmetic out of executable positions during tokenization.
+    """Keep Bash tests/arithmetic and array data out of executable positions.
 
     Command substitutions are extracted separately by the shell authority owner,
     before these non-command groups are masked. Quoted text remains literal.
@@ -290,14 +308,35 @@ def _mask_shell_control_groups(fragment: str) -> str | None:
     def finish_word() -> None:
         nonlocal command_position
         if word:
+            value = "".join(word)
             if not (
                 command_position
-                and "".join(word) in {"if", "elif", "then", "while", "until", "do", "!", "for"}
+                and (
+                    value in {"if", "elif", "then", "while", "until", "do", "!", "for"}
+                    or ASSIGNMENT_NAME.match(value)
+                )
             ):
                 command_position = False
             word.clear()
 
     while index < len(fragment):
+        if (
+            quote is None
+            and command_position
+            and fragment[index] == "("
+            and _ARRAY_ASSIGNMENT_PREFIX.fullmatch("".join(word))
+        ):
+            end = _array_assignment_end(fragment, index + 1)
+            if end is None:
+                return None
+            # This assignment contributes no executable word. Its command
+            # substitutions are scanned separately; do not invent a literal
+            # environment value from the masked array contents.
+            del result[-len(word) :]
+            result.append(" ")
+            word.clear()
+            index = end
+            continue
         if (
             quote is None
             and not word
@@ -394,17 +433,10 @@ def segments(command: str) -> tuple[tuple[str, ...], ...] | None:
 
 def command_index(words: tuple[str, ...]) -> int:
     index = 0
-    while index < len(words) and ASSIGNMENT_NAME.match(words[index]):
-        index += 1
-    while index < len(words) and words[index] in {
-        "if",
-        "elif",
-        "then",
-        "while",
-        "until",
-        "do",
-        "!",
-    }:
+    while index < len(words) and (
+        ASSIGNMENT_NAME.match(words[index])
+        or words[index] in {"if", "elif", "then", "while", "until", "do", "!"}
+    ):
         index += 1
     return index
 

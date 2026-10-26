@@ -140,6 +140,118 @@ def test_bash_control_groups_keep_substitutions_and_following_executables(
     assert set(authority.tools) == {"bash", "env", "getconf", "git", "id", "rm", "systemd-run"}
 
 
+def test_control_prefix_assignments_and_reads_preserve_substitution_authority(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    fragment = (
+        "while IFS=: read -r hierarchy controllers relative; do :; done; "
+        'if ! IFS= read -r limit < input || [[ "$limit" != max ]]; then :; fi; '
+        'if ! root=$(realpath .) || ! directory=$(dirname "$root"); then :; fi; '
+        "if ! tasks_max=$(getconf CHILD_MAX); then :; fi"
+    )
+
+    authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
+
+    assert authority.unresolved == ()
+    assert authority.tools == ("dirname", "getconf", "realpath")
+
+
+@pytest.mark.parametrize(
+    ("prefix", "suffix"),
+    [("", ""), ("! ", ""), ("if ! ", "; then :; fi"), ("while ", "; do break; done")],
+)
+def test_assignment_prefixes_keep_actual_executables_and_unknown_variables(
+    tmp_path: Path, prefix: str, suffix: str
+) -> None:
+    root = _repo(tmp_path)
+    baseline = derive_shell_fragment_authority(
+        root, f"{prefix}MODE=scan git --version{suffix}", chain=("target",)
+    )
+
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    dynamic = derive_shell_fragment_authority(
+        root, f'{prefix}MODE=scan "$TOOL" --version{suffix}', chain=("target",)
+    )
+
+    assert any("unresolved executable variable: $TOOL" in item for item in dynamic.unresolved)
+
+
+def test_array_assignment_data_keeps_substitutions_and_following_commands(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    authority = derive_shell_fragment_authority(
+        root,
+        'MODE=scan values=(--limit "$limit" "a)b" "$(getconf CHILD_MAX)"); '
+        'values+=("literal || rm"); env MODE=scan git status',
+        chain=("target",),
+    )
+
+    assert authority.unresolved == ()
+    assert authority.tools == ("env", "getconf", "git")
+
+
+def test_array_assignment_cannot_hide_a_following_dynamic_executable(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    baseline = derive_shell_fragment_authority(
+        root, 'values=(--limit "$limit"); git --version', chain=("target",)
+    )
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    authority = derive_shell_fragment_authority(
+        root, 'values=(--limit "$limit"); "$TOOL" --version', chain=("target",)
+    )
+
+    assert any("unresolved executable variable: $TOOL" in item for item in authority.unresolved)
+
+
+def test_quoted_array_spelling_does_not_mask_shell_control_commands(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    authority = derive_shell_fragment_authority(
+        root, "printf '%s' 'values=(' value || curl --version", chain=("target",)
+    )
+
+    assert authority.unresolved == ()
+    assert authority.tools == ("curl",)
+
+
+def test_unclosed_array_assignment_remains_unproven(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    baseline = derive_shell_fragment_authority(root, 'values=(--limit "$limit")', chain=("target",))
+    assert baseline.unresolved == ()
+    assert baseline.tools == ()
+
+    authority = derive_shell_fragment_authority(root, 'values=(--limit "$limit"', chain=("target",))
+
+    assert any("unparseable shell fragment" in item for item in authority.unresolved)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["<(curl --version)", ">(curl --version)", "`curl --version`", '"`curl --version`"'],
+)
+def test_array_assignment_cannot_hide_unowned_native_execution_forms(
+    tmp_path: Path, payload: str
+) -> None:
+    root = _repo(tmp_path)
+    baseline = derive_shell_fragment_authority(
+        root,
+        "values=('`curl --version`' '<(curl --version)' '>(curl --version)' "
+        r"\`curl\` \<\(curl\)); git --version",
+        chain=("target",),
+    )
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    authority = derive_shell_fragment_authority(
+        root, f"values=({payload}); git --version", chain=("target",)
+    )
+
+    assert any("unparseable shell fragment" in item for item in authority.unresolved)
+
+
 def test_arithmetic_variable_names_still_require_authority_when_executed(
     tmp_path: Path,
 ) -> None:
