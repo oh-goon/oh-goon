@@ -1520,7 +1520,7 @@ def _assert_started_crash_processes_exited(details):
     import signal
 
     from oh_goon.core.models.run_events import ProcessStartedEvent
-    from oh_goon.core.process_birth import observe_process_birth, observe_process_liveness
+    from oh_goon.core.process_birth import observe_process_birth
 
     started = [
         event
@@ -1530,25 +1530,28 @@ def _assert_started_crash_processes_exited(details):
     ]
     for event in started:
         assert event.process_identity is not None
-        if observe_process_liveness(event.pid) is False:
-            continue
-        birth = observe_process_birth(event.pid)
-        assert birth is not None
-        if f"{birth.boot_id}:{birth.start_ticks}" != event.process_identity:
-            continue  # The exact recorded process exited; its PID was reused.
         try:
             descriptor = os.pidfd_open(event.pid)
         except ProcessLookupError:
-            assert observe_process_liveness(event.pid) is False
             continue
         try:
+            # Bind the descriptor before observing birth so PID reuse cannot
+            # redirect a cleanup signal to an unrelated process.
+            birth = observe_process_birth(event.pid)
+            if birth is not None and (
+                f"{birth.boot_id}:{birth.start_ticks}" != event.process_identity
+            ):
+                continue  # The recorded process exited; its PID was reused.
             # pidfd readiness is the native exit barrier; no sleep-based race.
             if not select.select([descriptor], [], [], 5)[0]:
-                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                assert birth is not None, "Cannot bind the recorded process for cleanup"
+                try:
+                    signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # Exit raced the failed parent-death deadline.
                 pytest.fail("Original parent-death guard did not stop its recorded process")
         finally:
             os.close(descriptor)
-        assert observe_process_liveness(event.pid) is False
     return started
 
 
