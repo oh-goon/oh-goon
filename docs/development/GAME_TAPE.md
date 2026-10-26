@@ -30,6 +30,14 @@ recorded process exit or verification Step. Event summaries contain protocol
 names rather than prompt, tool argument or response bodies. Raw output remains
 subject to the existing transient retention contract.
 
+Cancelled Steps retain only their original physical cancellation receipt:
+settlement, supervisor, acknowledged isolation and available process identity and
+duration. An observed exit must match that process's recorded exit. Cancellation
+without a launched process has unknown duration, rather than an observed zero.
+Native observations require an accepted Step result; interrupted output remains
+available only through the existing bounded, redacted diagnostic sink. A
+cancellation receipt cannot attach claims from another Agent or occurrence.
+
 PTY and native headless execution stream output while retaining a bounded tail.
 The command owner hashes and counts the complete stdout stream; the omission
 notice describes retained display text rather than changing those evidence facts.

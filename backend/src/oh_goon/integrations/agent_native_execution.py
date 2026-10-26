@@ -639,7 +639,7 @@ class NativeAgentEventParser:
                 self._observe("agent", "agent_settled")
             elif event_type in ("tool_execution_start", "tool_execution_end"):
                 self._observe("tool", event_type, record.get("toolCallId"))
-            elif event_type in ("auto_compaction_start", "auto_compaction_end"):
+            elif event_type in ("compaction_start", "compaction_end"):
                 self._observe("context", event_type)
         else:
             if event_type == "turn.started":

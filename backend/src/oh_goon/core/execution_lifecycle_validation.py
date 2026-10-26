@@ -131,6 +131,20 @@ def _settlement(event: StepTerminalLifecycleEvent, step: Sequence[FleetRunEvent]
         )
     ):
         raise InvalidRunTransition("Cancellation evidence must belong to the original Step process")
+    if (
+        isinstance(event, StepCancelledEvent)
+        and event.cancellation is not None
+        and event.cancellation.settlement.observed_returncode is not None
+        and not any(
+            isinstance(item, ProcessExitedEvent)
+            and item.physical_execution_id == event.cancellation.physical_execution_id
+            and item.returncode == event.cancellation.settlement.observed_returncode
+            for item in step
+        )
+    ):
+        raise InvalidRunTransition(
+            "Cancellation observed exit must match the original process exit"
+        )
     unquiet = [
         x
         for x in step

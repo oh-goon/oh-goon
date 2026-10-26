@@ -164,8 +164,6 @@ def _step_execution(
                 if isinstance(observation, NativeAgentObservation)
             )
             if execution is not None
-            else cancellation.native_agent_observations
-            if cancellation is not None
             else ()
         ),
         reason=(

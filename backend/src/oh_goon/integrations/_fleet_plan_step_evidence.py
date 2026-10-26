@@ -11,7 +11,7 @@ from oh_goon.core.models.execution_authority_diagnostics import (
 from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
-from oh_goon.core.models.fleet_observation import FleetObservationEvidence, NativeAgentObservation
+from oh_goon.core.models.fleet_observation import FleetObservationEvidence
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
     ResolvedAgentStep,
@@ -163,19 +163,20 @@ def cancellation_evidence(
             outcome="INCOMPLETE",
             cleanup="UNVERIFIED" if unverified else "UNAVAILABLE",
             reason="CLEANUP_UNVERIFIED" if unverified else "SUPERVISION_UNAVAILABLE",
-            observed_returncode=outcome.observed_returncode,
+            observed_returncode=outcome.observed_returncode
+            if outcome.physical_execution_id is not None
+            else None,
         )
     return PlanStepCancellationEvidence(
         settlement=settlement,
-        supervisor=_supervisor_evidence(outcome.supervisor),
-        standard_isolation=outcome.standard_isolation,
+        supervisor=_supervisor_evidence(outcome.supervisor)
+        if outcome.physical_execution_id is not None
+        else None,
+        standard_isolation=outcome.standard_isolation
+        if outcome.physical_execution_id is not None
+        else None,
         physical_execution_id=outcome.physical_execution_id,
-        duration_ms=outcome.duration_ms,
-        native_agent_observations=tuple(
-            item
-            for item in getattr(error, "native_observations", ())
-            if isinstance(item, NativeAgentObservation)
-        ),
+        duration_ms=outcome.duration_ms if outcome.physical_execution_id is not None else None,
     )
 
 

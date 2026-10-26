@@ -20015,19 +20015,16 @@
         "description": "Original cancellation facts; no post-cancellation source observation is claimed.",
         "properties": {
           "duration_ms": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Duration Ms",
-            "type": "integer"
-          },
-          "native_agent_observations": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/NativeAgentObservation"
-            },
-            "maxItems": 8,
-            "title": "Native Agent Observations",
-            "type": "array"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
           },
           "physical_execution_id": {
             "anyOf": [

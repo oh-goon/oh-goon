@@ -17,7 +17,7 @@ from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
 )
-from oh_goon.core.models.fleet_observation import FleetObservationEvidence, NativeAgentObservation
+from oh_goon.core.models.fleet_observation import FleetObservationEvidence
 from oh_goon.core.models.fleet_plan_release_evidence import (
     KubernetesRolloutVerificationEvidence,
     KubernetesRolloutVerificationOutcome,
@@ -463,8 +463,7 @@ class PlanStepCancellationEvidence(ImmutableModel):
     supervisor: PlanExecutionSupervisorEvidence | None = None
     standard_isolation: PlanStandardIsolationEvidence | None = None
     physical_execution_id: str | None = Field(default=None, min_length=1)
-    duration_ms: int = Field(default=0, ge=0)
-    native_agent_observations: tuple[NativeAgentObservation, ...] = Field(default=(), max_length=8)
+    duration_ms: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def require_cancellation_authority(self) -> PlanStepCancellationEvidence:
@@ -472,6 +471,13 @@ class PlanStepCancellationEvidence(ImmutableModel):
             raise ValueError("Cancellation evidence cannot establish another Step outcome")
         if self.settlement.outcome == "INCOMPLETE" and self.settlement.cleanup == "VERIFIED":
             raise ValueError("Incomplete cancellation cannot claim verified cleanup")
+        if self.physical_execution_id is None and (
+            self.duration_ms is not None
+            or self.settlement.observed_returncode is not None
+            or self.supervisor is not None
+            or self.standard_isolation is not None
+        ):
+            raise ValueError("Observed cancellation facts require the original physical execution")
         if self.settlement.outcome == "CANCELLED" and (
             self.settlement.cleanup != "VERIFIED"
             or self.physical_execution_id is None

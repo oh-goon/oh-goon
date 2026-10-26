@@ -23,7 +23,6 @@ from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
 from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNativeAgent
 from oh_goon.core.models.fleet_observation import (
     AgentHarnessObservation,
-    NativeAgentObservation,
     NativeServiceExecutionEvidence,
 )
 from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, PLAN_TIMEOUT_RETURN_CODE
@@ -145,16 +144,11 @@ class CodexServiceExecutionFailure(AgentProviderError):
 
 
 class CodexServiceExecutionCancelled(OperationCancelledError):
-    """Original cancellation with already-redacted native context and receipt."""
+    """Original cancellation retaining the physical owner's receipt."""
 
     def __init__(self, failure: CodexServiceExecutionFailure) -> None:
         super().__init__(failure.outcome.stderr)
         self.outcome = failure.outcome
-        self.safe_diagnostics = failure.safe_diagnostics
-        self.native_event_count = failure.native_event_count
-        self.omitted_observations = failure.omitted_observations
-        # The original native Step alone binds claims to admitted source/input.
-        self.native_observations: tuple[NativeAgentObservation, ...] = ()
 
 
 def _execution_failure(
