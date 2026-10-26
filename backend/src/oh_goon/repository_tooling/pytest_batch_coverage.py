@@ -298,15 +298,15 @@ class BatchCoverageSession:
             output += report_output
             if status != 0:
                 return status, output, time.monotonic() - started
-        arguments = [
+        threshold_arguments = (
             "report",
             f"--data-file={self._combined_data}",
             f"--rcfile={self.config_file}",
             "--ignore-errors",
             "--format=total",
             f"--fail-under={self._fail_under}",
-        ]
-        status, threshold_output = self._native(tuple(arguments))
+        )
+        status, threshold_output = self._native(threshold_arguments)
         return status, output + threshold_output, time.monotonic() - started
 
     def __exit__(

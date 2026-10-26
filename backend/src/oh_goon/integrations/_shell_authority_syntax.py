@@ -360,12 +360,12 @@ def _protect_escaped_find_terminators(command: str) -> str:
 
 
 def shell_tokens(command: str) -> tuple[str, ...] | None:
-    command = _mask_shell_control_groups(command)
-    if command is None:
+    masked_command = _mask_shell_control_groups(command)
+    if masked_command is None:
         return None
     try:
         lexer = shlex.shlex(
-            _protect_escaped_find_terminators(command), posix=True, punctuation_chars=";&|"
+            _protect_escaped_find_terminators(masked_command), posix=True, punctuation_chars=";&|"
         )
         lexer.whitespace_split = True
         lexer.commenters = "#"
@@ -571,12 +571,12 @@ def xargs_child_index(words: tuple[str, ...], index: int) -> int | None:
 
 
 def _grouped_shell_tokens(command: str) -> tuple[str, ...] | None:
-    command = _mask_shell_control_groups(command)
-    if command is None:
+    masked_command = _mask_shell_control_groups(command)
+    if masked_command is None:
         return None
     try:
         lexer = shlex.shlex(
-            _protect_escaped_find_terminators(command),
+            _protect_escaped_find_terminators(masked_command),
             posix=True,
             punctuation_chars=";&|()",
         )

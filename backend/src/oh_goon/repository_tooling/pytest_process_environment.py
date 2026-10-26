@@ -69,6 +69,7 @@ def resolve_pytest_invocation(
         config_identity = sha256_file(config)
     except OSError:
         config_identity = "missing"
+    prefix: tuple[str, ...]
     if qualified:
         from oh_goon.repository_tooling.qualification_exec import (
             _clean_environment,
