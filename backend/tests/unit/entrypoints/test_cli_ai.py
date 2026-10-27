@@ -3,6 +3,7 @@ import os
 import shutil
 import struct
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -169,8 +170,12 @@ def test_ai_uses_one_resolved_selection_and_original_run_wait(
     assert "Fleet Run ID: native-run" in output.err
 
 
-def test_ai_defaults_to_codex_with_the_explicit_signed_in_profile(
-    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("selection", ("explicit", "default", "default-tty", "interactive"))
+def test_ai_defaults_to_codex_with_the_selected_signed_in_profile(
+    native_cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    selection: str,
 ) -> None:
     public = native_cli.executable.parent / "public"
     public.mkdir()
@@ -180,8 +185,10 @@ def test_ai_defaults_to_codex_with_the_explicit_signed_in_profile(
     native_home = native_cli.executable.parent / "private-native-home"
     native_home.mkdir()
     payload = {
+        "default_native_profile": "unused" if selection == "explicit" else "signed-in",
         "native_agents": {"codex": {"executable": str(executable)}},
         "native_profiles": {
+            "unused": {"allowed_agents": ["pi"]},
             "signed-in": {
                 "allowed_agents": ["codex"],
                 "codex_login": {
@@ -189,23 +196,76 @@ def test_ai_defaults_to_codex_with_the_explicit_signed_in_profile(
                     "model": "gpt-6-luna",
                     "reasoning_effort": "low",
                 },
-            }
+            },
         },
     }
     native_cli.config.write_text(json.dumps(payload))
+    load = Mock(wraps=load_agent_providers)
+    monkeypatch.setattr(cli_ai, "load_agent_providers", load)
     monkeypatch.setattr(cli_ai, "_isolation", native_cli.isolation_factory)
+    terminal = Mock(side_effect=AssertionError("Headless sign-in must not acquire a terminal"))
+    monkeypatch.setattr(cli_ai, "_host_terminal", terminal)
     argv = list(native_cli.argv)
     del argv[1:3]
-    assert main([*argv, "--profile", "signed-in"]) == 0
+    if selection == "explicit":
+        argv.extend(("--profile", "signed-in"))
+    if selection in {"default-tty", "interactive"}:
+        argv.remove("--headless")
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    if selection == "interactive":
+        assert main([*argv, "--interactive"]) == 2
+        assert "headless" in capsys.readouterr().err
+        native_cli.build.assert_not_called()
+        load.assert_called_once_with(native_cli.config)
+        terminal.assert_not_called()
+        return
+    assert main(argv) == 0
+    load.assert_called_once_with(native_cli.config)
+    terminal.assert_not_called()
     selected = native_cli.runtime.plans.run_native_agent.call_args.kwargs["selected"]
     assert selected.agent == "codex"
     assert selected.definition.executable == str(executable)
     assert selected.profile_name == "signed-in"
     assert selected.connection is None
+    assert selected.interactive is False
     assert selected.profile.codex_login.model == "gpt-6-luna"
     assert selected.profile.codex_login.reasoning_effort == "low"
     assert list(native_home.iterdir()) == []
     native_cli.runtime.runs.wait_for_terminal.assert_called_once_with("native-run")
+
+
+def test_ai_missing_catalog_default_rejects_before_native_lookup_or_application_state(
+    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = json.loads(native_cli.config.read_text())
+    payload["default_native_profile"] = "isolated"
+    native_cli.config.write_text(json.dumps(payload))
+    assert main(native_cli.argv) == 0
+    native_cli.build.reset_mock()
+    payload["default_native_profile"] = "missing"
+    native_cli.config.write_text(json.dumps(payload))
+    lookup = Mock(side_effect=AssertionError("Invalid selection reached executable lookup"))
+    monkeypatch.setattr("oh_goon.runtime.agent_providers.shutil.which", lookup)
+    assert main(native_cli.argv) == 2
+    lookup.assert_not_called()
+    native_cli.build.assert_not_called()
+
+
+def test_ai_implicit_managed_terminal_keeps_native_interactive_mode(
+    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    terminal = object()
+    acquire = Mock(return_value=nullcontext(terminal))
+    monkeypatch.setattr(cli_ai, "_host_terminal", acquire)
+    argv = [argument for argument in native_cli.argv if argument != "--headless"]
+    assert main(argv) == 0
+    acquire.assert_called_once_with()
+    assert native_cli.build.call_args.kwargs["terminal"] is terminal
+    selected = native_cli.runtime.plans.run_native_agent.call_args.kwargs["selected"]
+    assert selected.interactive is True
 
 
 @pytest.mark.parametrize("agent", ["pi", "opencode"])

@@ -161,7 +161,7 @@ def _configuration_path(catalog: Path, value: str | None) -> str | None:
 def resolve_native_agent(
     config: AgentProvidersConfig,
     agent: str,
-    profile_name: str,
+    profile_name: str | None,
     *,
     workspace: Path,
     environment: Mapping[str, str],
@@ -175,6 +175,8 @@ def resolve_native_agent(
     """
     if agent not in ("opencode", "pi", "codex"):
         raise AgentProviderError("Select a supported native agent: opencode, pi or codex")
+    if profile_name is None:
+        profile_name = config.default_native_profile or DEFAULT_NATIVE_AGENT_PROFILE
     name = cast(NativeAgentName, agent)
     profile = config.native_profiles.get(profile_name)
     if profile is None:

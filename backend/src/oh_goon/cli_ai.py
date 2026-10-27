@@ -22,7 +22,6 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.agent_providers import (
     DEFAULT_NATIVE_AGENT,
-    DEFAULT_NATIVE_AGENT_PROFILE,
     AgentProviderError,
     AgentProvidersConfig,
     ResolvedNativeAgent,
@@ -56,7 +55,7 @@ def add_ai_command(
         help="Native coding agent (default: codex)",
     )
     parser.add_argument(
-        "--profile", default=DEFAULT_NATIVE_AGENT_PROFILE, help="Native execution profile"
+        "--profile", help="Native execution profile; otherwise use the catalog default"
     )
     parser.add_argument("--workspace", type=Path, default=Path(), help="Git repository root")
     parser.add_argument("--skill", type=Path, help="Caller-selected Skill source")
@@ -103,13 +102,14 @@ def _task(args: argparse.Namespace) -> str:
     return text
 
 
-def _interactive(args: argparse.Namespace) -> bool:
+def _interactive(args: argparse.Namespace) -> bool | None:
     terminal = sys.stdin.isatty() and sys.stdout.isatty()
     if args.interactive and (args.as_json or not terminal or os.name == "nt"):
         raise AgentProviderError("Interactive mode requires a POSIX terminal and cannot use --json")
-    return bool(
-        args.interactive
-        or (terminal and os.name != "nt" and not args.headless and not args.as_json)
+    if args.interactive:
+        return True
+    return (
+        None if terminal and os.name != "nt" and not args.headless and not args.as_json else False
     )
 
 
@@ -138,10 +138,10 @@ def _isolation(selected: ResolvedNativeAgent) -> ProcessIsolationBackend | None:
 def resolve_native_cli_selection(
     *,
     agent: str,
-    profile: str,
+    profile: str | None,
     workspace: Path,
     config_file: Path | None,
-    interactive: bool = False,
+    interactive: bool | None = False,
 ) -> tuple[ResolvedNativeAgent, ProcessIsolationBackend | None, GitService]:
     """Resolve a single catalog and native workload before application mutation."""
     from oh_goon.engine.git import GitService
@@ -158,6 +158,10 @@ def resolve_native_cli_selection(
     selected = resolve_native_agent(
         config, agent, profile, workspace=workspace, environment=os.environ
     )
+    if interactive is None:
+        interactive = (
+            selected.profile.codex_login is None and selected.profile.codex_service is None
+        )
     selected = replace(selected, interactive=interactive)
     require_native_agent_compatibility(selected, terminal_available=interactive)
     isolation = _isolation(selected)
@@ -189,7 +193,7 @@ def native_plan_selection(
     args.native_workspace = workspace
     return resolve_native_cli_selection(
         agent=args.native_agent,
-        profile=args.native_profile or DEFAULT_NATIVE_AGENT_PROFILE,
+        profile=args.native_profile,
         workspace=workspace,
         config_file=args.agent_providers_file,
     )
@@ -214,6 +218,7 @@ def run_ai_command(args: argparse.Namespace) -> int:
             config_file=args.config,
             interactive=interactive,
         )
+        interactive = selected.interactive
         with _host_terminal() if interactive else nullcontext(None) as terminal:
             runtime = ApplicationRuntime.build(
                 standard_local=True,

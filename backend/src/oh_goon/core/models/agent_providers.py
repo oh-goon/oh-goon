@@ -313,6 +313,7 @@ class AgentProvidersConfig(ImmutableModel):
     schema_uri: str | None = Field(default=None, alias="$schema", max_length=2048)
     version: int = Field(default=1, ge=1, le=1)
     default_model: str | None = None
+    default_native_profile: str | None = Field(default=None, exclude_if=lambda value: value is None)
     providers: dict[str, AgentProvider] = Field(default_factory=dict, max_length=64)
     models: dict[str, AgentModel] = Field(default_factory=dict, max_length=256)
     native_agents: dict[NativeAgentName, NativeAgentDefinition] = Field(
@@ -335,6 +336,11 @@ class AgentProvidersConfig(ImmutableModel):
             raise ValueError("every model profile must reference a declared provider")
         if self.default_model is not None and self.default_model not in self.models:
             raise ValueError("default_model must reference a declared model profile")
+        if (
+            self.default_native_profile is not None
+            and self.default_native_profile not in self.native_profiles
+        ):
+            raise ValueError("default_native_profile must reference a declared native profile")
         if any(
             profile.inference_profile is not None and profile.inference_profile not in self.models
             for profile in self.native_profiles.values()

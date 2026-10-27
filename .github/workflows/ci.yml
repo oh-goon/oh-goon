@@ -63,7 +63,12 @@ jobs:
     env:
       UV_PYTHON: "3.12"
       BACKEND_CHECK_TEST_ROOTS: ${{ matrix.backend_test_roots || '' }}
-      PYTEST_ADDOPTS: ${{ (matrix.target == 'backend-check' || matrix.target == 'test-integration') && '--maxfail=1 --durations=40 --durations-min=0.05' || '' }}
+      PYTEST_ADDOPTS: >-
+        ${{ matrix.target == 'test-integration'
+            && '-vv --maxfail=1 --durations=40 --durations-min=0.05 -o faulthandler_timeout=120 -o faulthandler_exit_on_timeout=false'
+            || matrix.target == 'backend-check'
+            && '--maxfail=1 --durations=40 --durations-min=0.05'
+            || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -73,6 +73,18 @@ def test_existing_catalog_wire_stays_unchanged_when_native_selection_is_absent()
     payload = AgentProvidersConfig().model_dump(mode="json")
     assert "native_agents" not in payload
     assert "native_profiles" not in payload
+    assert "default_native_profile" not in payload
+
+
+@pytest.mark.parametrize("profile", ("missing", "local", "isolated-managed"))
+def test_default_native_profile_requires_a_declared_selection(profile: str) -> None:
+    payload = {
+        "default_native_profile": "signed-in",
+        "native_profiles": {"signed-in": {"backend": "local"}},
+    }
+    assert AgentProvidersConfig.model_validate(payload).default_native_profile == "signed-in"
+    with pytest.raises(ValidationError, match="reference a declared native profile"):
+        AgentProvidersConfig.model_validate({**payload, "default_native_profile": profile})
 
 
 def test_native_catalog_reuses_resource_policy_and_keeps_native_settings_opaque() -> None:
