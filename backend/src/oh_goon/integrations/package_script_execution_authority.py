@@ -365,8 +365,8 @@ def _scan_script_body(builder: _Builder, script: str, body: str, chain: tuple[st
     cleaned, substitutions = extract_command_substitutions(body)
     for substitution in substitutions:
         _scan_script_body(builder, script, substitution, (*chain, "<command-substitution>"))
-    cleaned = mask_noncommand_expansions(cleaned)
-    parsed = segments(cleaned)
+    masked = mask_noncommand_expansions(cleaned)
+    parsed = segments(masked) if masked is not None else None
     if parsed is None:
         builder.reject(f"unparseable npm script body: {body}", chain)
         return

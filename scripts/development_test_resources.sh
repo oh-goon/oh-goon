@@ -69,16 +69,18 @@ oh_goon_test_cpu_budget_verified() {
 }
 
 oh_goon_test_scope_tasks_max() {
-  local root=$1 directory=$2 limit tasks_max=max
+  local root=$1 directory=$2 limit memory_control tasks_max=max
   while [[ "$directory" != "$root" ]]; do
     # This existing app.slice and its ancestors also contain the new user scope.
     [[ ${directory##*/} != app.slice ]] || break
-    if [[ -e "$directory/memory.max" ]]; then
-      if ! IFS= read -r limit < "$directory/memory.max" || [[ "$limit" != max ]]; then
-        printf 'TEST CPU BUDGET UNENFORCED: moving to app.slice cannot preserve the caller memory.max constraint; keep the existing scope or select OH_GOON_TEST_CPUS=0 explicitly\n' >&2
-        return 1
+    for memory_control in memory.max memory.high memory.swap.max memory.swap.high memory.zswap.max; do
+      if [[ -e "$directory/$memory_control" ]]; then
+        if ! IFS= read -r limit < "$directory/$memory_control" || [[ "$limit" != max ]]; then
+          printf 'TEST CPU BUDGET UNENFORCED: moving to app.slice cannot preserve the caller %s constraint; keep the existing scope or select OH_GOON_TEST_CPUS=0 explicitly\n' "$memory_control" >&2
+          return 1
+        fi
       fi
-    fi
+    done
     if [[ -e "$directory/pids.max" ]]; then
       IFS= read -r limit < "$directory/pids.max" || return 1
       if [[ "$limit" != max ]]; then

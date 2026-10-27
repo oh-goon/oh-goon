@@ -235,6 +235,211 @@ def test_unproved_forwarded_make_values_cannot_gain_ambient_execution_authority(
     assert authority.package_executables == ()
 
 
+@pytest.mark.parametrize("invocation", ["$(MAKE) child", "$(RUN)", "$(NESTED)"])
+def test_recursive_make_aliases_retain_child_tools_and_source_identity(
+    tmp_path: Path, invocation: str
+) -> None:
+    makefile = tmp_path / "Makefile"
+    source = (
+        f"RUN = $(MAKE) child\nNESTED = $(RUN)\ntarget:\n\t@{invocation}\nchild:\n\tgit --version\n"
+    )
+    makefile.write_text(source, encoding="utf-8")
+
+    baseline = derive_make_target_authority(tmp_path, "target")
+
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+    assert any("target -> child" in item for _tool, item in baseline.provenance)
+
+    makefile.write_text(source.replace("git --version", "curl --version"), encoding="utf-8")
+    changed = derive_make_target_authority(tmp_path, "target")
+
+    assert changed.unresolved == ()
+    assert changed.tools == ("curl",)
+    assert (
+        dict(changed.source_identities)["Makefile"] != dict(baseline.source_identities)["Makefile"]
+    )
+
+
+@pytest.mark.parametrize("invocation", ["$(MAKE) child", "$(RUN)", "$(NESTED)"])
+def test_recursive_make_aliases_reject_missing_children(tmp_path: Path, invocation: str) -> None:
+    makefile = tmp_path / "Makefile"
+    source = (
+        f"RUN = $(MAKE) child\nNESTED = $(RUN)\ntarget:\n\t@{invocation}\nchild:\n\tgit --version\n"
+    )
+    makefile.write_text(source, encoding="utf-8")
+    baseline = derive_make_target_authority(tmp_path, "target")
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    makefile.write_text(source.replace("\nchild:\n", "\nother:\n"), encoding="utf-8")
+    authority = derive_make_target_authority(tmp_path, "target")
+
+    assert any(
+        "missing recursive make target: target -> child" in item for item in authority.unresolved
+    )
+    assert "git" not in authority.tools
+
+
+@pytest.mark.parametrize("invocation", ["$(MAKE) child", "$(RUN)", "$(NESTED)"])
+def test_recursive_make_aliases_reject_child_cycles(tmp_path: Path, invocation: str) -> None:
+    makefile = tmp_path / "Makefile"
+    source = (
+        "RUN = $(MAKE) child\nNESTED = $(RUN)\nLOOP = $(MAKE) target\n"
+        f"target:\n\t@{invocation}\nchild:\n\tgit --version\n"
+    )
+    makefile.write_text(source, encoding="utf-8")
+    baseline = derive_make_target_authority(tmp_path, "target")
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    makefile.write_text(source.replace("git --version", "$(LOOP)"), encoding="utf-8")
+    authority = derive_make_target_authority(tmp_path, "target")
+
+    assert any(
+        "make target cycle: target -> child -> target" in item for item in authority.unresolved
+    )
+
+
+@pytest.mark.parametrize(
+    "invocation",
+    [
+        "$(MAKE)",
+        "$(MAKE) $(UNBOUND)",
+        "$(MAKE) --directory=elsewhere child",
+        "$(MAKE) child --directory=elsewhere",
+        "$(MAKE) child -C elsewhere",
+        "$(MAKE) child -fOtherfile",
+        "$(MAKE) child $(UNBOUND)",
+        '$(MAKE) child "TAIL=$(UNBOUND)"',
+        "$(MAKE) child SHELL=curl",
+        "$(MAKE) child MAKEFLAGS=-fOtherfile",
+        "$(MAKE) child MAKE=other-make",
+        "$(MAKE) child MFLAGS=-Celsewhere",
+        "$(MAKE) child MAKEFILES=Otherfile",
+        "${MAKE} child",
+    ],
+)
+def test_unsupported_recursive_make_aliases_remain_unproven(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invocation: str
+) -> None:
+    makefile = tmp_path / "Makefile"
+    source = (
+        "RUN = $(MAKE) child\nNESTED = $(RUN)\ntarget:\n\t@$(NESTED)\nchild:\n\tgit --version\n"
+        "-C:\n\tcurl --version\n-fOtherfile:\n\tcurl --version\n"
+    )
+    makefile.write_text(source, encoding="utf-8")
+    baseline = derive_make_target_authority(tmp_path, "target")
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    monkeypatch.setenv("UNBOUND", "child")
+    monkeypatch.setenv("MAKE", "make")
+    makefile.write_text(
+        source.replace("RUN = $(MAKE) child", f"RUN = {invocation}"), encoding="utf-8"
+    )
+    authority = derive_make_target_authority(tmp_path, "target")
+
+    assert authority.unresolved
+    assert "git" not in authority.tools
+
+
+@pytest.mark.parametrize("invocation", ["$(MAKE) child", "$(RUN)", "$(NESTED)"])
+def test_recursive_make_aliases_retain_every_literal_goal(tmp_path: Path, invocation: str) -> None:
+    makefile = tmp_path / "Makefile"
+    source = (
+        "RUN = $(MAKE) child\nNESTED = $(RUN)\n"
+        f"target:\n\t@{invocation}\nchild:\n\tgit --version\nother:\n\tcurl --version\n"
+    )
+    makefile.write_text(source, encoding="utf-8")
+    baseline = derive_make_target_authority(tmp_path, "target")
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    makefile.write_text(source.replace("$(MAKE) child", "$(MAKE) child other"), encoding="utf-8")
+    authority = derive_make_target_authority(tmp_path, "target")
+
+    assert authority.unresolved == ()
+    assert authority.tools == ("curl", "git")
+    assert any("target -> other" in item for _tool, item in authority.provenance)
+
+    makefile.write_text(source.replace("$(MAKE) child", "$(MAKE) child missing"), encoding="utf-8")
+    missing = derive_make_target_authority(tmp_path, "target")
+    assert any(
+        "missing recursive make target: target -> missing" in item for item in missing.unresolved
+    )
+
+
+def test_recursive_make_literal_assignments_bind_each_child_without_leaking(
+    tmp_path: Path,
+) -> None:
+    makefile = tmp_path / "Makefile"
+    source = (
+        "COMMAND = git\nRUN = $(MAKE) child\nNESTED = $(RUN)\n"
+        "target:\n\t@$(NESTED)\nchild:\n\t$(MAKE) grandchild\n"
+        "grandchild:\n\t$(COMMAND) --version\n"
+    )
+    makefile.write_text(source, encoding="utf-8")
+    baseline = derive_make_target_authority(tmp_path, "target")
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    makefile.write_text(
+        source.replace(
+            "\t@$(NESTED)\n",
+            "\t@$(NESTED) COMMAND=curl\n\t@$(NESTED) COMMAND=rm\n\t@$(NESTED)\n",
+        ),
+        encoding="utf-8",
+    )
+    authority = derive_make_target_authority(tmp_path, "target")
+
+    assert authority.unresolved == ()
+    assert authority.tools == ("curl", "git", "rm")
+    assert all("target -> child -> grandchild" in item for _tool, item in authority.provenance)
+
+
+def test_recursive_make_retains_literal_marker_assignment_data(tmp_path: Path) -> None:
+    makefile = tmp_path / "Makefile"
+    source = (
+        "MARKER = not certification\nRUN = $(MAKE) child\nNESTED = $(RUN)\n"
+        'target:\n\t@$(NESTED)\nchild:\n\tgit log --grep "$(MARKER)"\n'
+    )
+    makefile.write_text(source, encoding="utf-8")
+    baseline = derive_make_target_authority(tmp_path, "target")
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    makefile.write_text(
+        source.replace("\t@$(NESTED)\n", '\t@$(NESTED) MARKER="not certification and not slow"\n'),
+        encoding="utf-8",
+    )
+    authority = derive_make_target_authority(tmp_path, "target")
+
+    assert authority.unresolved == ()
+    assert authority.tools == baseline.tools
+
+
+def test_recursive_make_literal_assignment_keeps_cycle_detection(tmp_path: Path) -> None:
+    makefile = tmp_path / "Makefile"
+    source = (
+        "COMMAND = git\nRUN = $(MAKE) child\nNESTED = $(RUN)\n"
+        "target:\n\t@$(NESTED) COMMAND=curl\nchild:\n\t$(COMMAND) --version\n"
+    )
+    makefile.write_text(source, encoding="utf-8")
+    baseline = derive_make_target_authority(tmp_path, "target")
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("curl",)
+
+    makefile.write_text(
+        source.replace("$(COMMAND) --version", "$(MAKE) target COMMAND=git"), encoding="utf-8"
+    )
+    authority = derive_make_target_authority(tmp_path, "target")
+
+    assert any(
+        "make target cycle: target -> child -> target" in item for item in authority.unresolved
+    )
+
+
 def test_canonical_frontend_authority_closes_locked_package_executables() -> None:
     root = Path(__file__).resolve().parents[4]
     requirements = load_workload_execution_requirements(root)
@@ -245,3 +450,49 @@ def test_canonical_frontend_authority_closes_locked_package_executables() -> Non
     assert [(item.bin_name, item.package_path) for item in browser] == [
         ("playwright", "node_modules/@playwright/test")
     ]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "printf '%s' ${UNSET:-`curl --version`} && tsc -b",
+        "printf '%s' \"${UNSET:-`curl --version`}\" && tsc -b",
+        "printf '%s' \"${UNSET:-'`curl --version`'}\" && tsc -b",
+        "printf '%s' \"$((`getconf LONG_BIT`))\" && tsc -b",
+        "printf '%s' \"$(( '`getconf LONG_BIT`' ))\" && tsc -b",
+        "printf '%s' \"${UNSET:-$(( '$(getconf LONG_BIT)' ))}\" && tsc -b",
+        "printf '%s' ${UNSET:-<(curl --version)} && tsc -b",
+        "printf '%s' $(printf '%s' ${UNSET:-`curl --version`}) && tsc -b",
+    ],
+)
+def test_npm_nested_expansions_cannot_hide_unowned_native_execution(
+    tmp_path: Path, body: str
+) -> None:
+    package = _write_package(
+        tmp_path,
+        scripts={
+            "test": "printf '%s' '${UNSET:-`curl --version`}' "
+            r'"\${UNSET:-\`curl --version\`}" '
+            "${UNSET:-'`curl --version`'} "
+            r"${UNSET:-\<\(curl\)} "
+            '"${UNSET:-$(getconf LONG_BIT)}" && tsc -b',
+        },
+        dependencies={"typescript": "1"},
+        bins={"typescript": ("1.0.0", "tsc", "bin/tsc")},
+    )
+    baseline = derive_npm_run_authority(tmp_path, "test", chain=("target",))
+    assert baseline.unresolved == ()
+    assert baseline.host_tools == ("getconf", "sh")
+    assert [item.bin_name for item in baseline.package_executables] == ["tsc"]
+
+    path = package / "package.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["scripts"]["test"] = body
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    authority = derive_npm_run_authority(tmp_path, "test", chain=("target",))
+
+    if "getconf" in body:
+        assert authority.unresolved or "getconf" in authority.host_tools
+    else:
+        assert authority.unresolved or "curl" in authority.host_tools

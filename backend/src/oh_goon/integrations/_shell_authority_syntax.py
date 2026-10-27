@@ -221,43 +221,87 @@ def _balanced_char_end(text: str, start: int, opening: str, closing: str) -> int
     return cursor if depth == 0 else None
 
 
+def _unsupported_native_execution(text: str, index: int, quote: str | None) -> bool:
+    # Command substitutions are extracted by their existing owner before these
+    # groups are masked. Other active native execution forms remain unproven.
+    return (quote is None and text.startswith(("<(", ">("), index)) or (
+        quote != "'" and text[index] == "`"
+    )
+
+
+def _contains_unsupported_native_execution(fragment: str, *, quote: str | None) -> bool:
+    """Refuse unowned execution before parameter/arithmetic data becomes opaque."""
+
+    index = 0
+    initial_quote = quote
+    while index < len(fragment):
+        if _unsupported_native_execution(fragment, index, quote):
+            return True
+        if quote != "'" and fragment.startswith("$((", index):
+            end = _arithmetic_end(fragment, index + 3)
+            if end is None:
+                return True
+            index = end
+            continue
+        index, quote = _quoted_step(fragment, index, quote)
+    # A bounded brace match inside unsupported quoting is not sufficient proof
+    # that the discarded payload contains only data.
+    return quote != initial_quote
+
+
 def _arithmetic_end(text: str, start: int) -> int | None:
     depth = 1
     cursor = start
+    quote: str | None = None
     while cursor + 1 < len(text):
+        if text[cursor] == "\\":
+            cursor = min(cursor + 2, len(text))
+            continue
+        # Native arithmetic performs substitutions even within its apparent
+        # single quotes. Unextracted $() is therefore unproven too; the ordinary
+        # shell-quote extractor cannot establish its authority here.
+        if _unsupported_native_execution(text, cursor, None) or (
+            text.startswith("$(", cursor) and not text.startswith("$((", cursor)
+        ):
+            return None
         token = text[cursor : cursor + 2]
-        if token == "((":
+        if quote is None and token == "((":
             depth += 1
             cursor += 2
             continue
-        if token == "))":
+        if quote is None and token == "))":
             depth -= 1
             cursor += 2
             if depth == 0:
                 return cursor
             continue
-        cursor += 1
+        cursor, quote = _quoted_step(text, cursor, quote)
     return None
 
 
-def mask_noncommand_expansions(fragment: str) -> str:
+def mask_noncommand_expansions(fragment: str) -> str | None:
     result: list[str] = []
     index = 0
+    quote: str | None = None
     while index < len(fragment):
-        if fragment.startswith("${", index):
+        if quote != "'" and fragment.startswith("${", index):
             end = _balanced_char_end(fragment, index + 2, "{", "}")
             if end is not None:
+                if _contains_unsupported_native_execution(fragment[index:end], quote=quote):
+                    return None
                 result.append("__OH_GOON_PARAM__")
                 index = end
                 continue
-        if fragment.startswith("$((", index):
+        if quote != "'" and fragment.startswith("$((", index):
             end = _arithmetic_end(fragment, index + 3)
-            if end is not None:
-                result.append("__OH_GOON_ARITH__")
-                index = end
-                continue
-        result.append(fragment[index])
-        index += 1
+            if end is None:
+                return None
+            result.append("__OH_GOON_ARITH__")
+            index = end
+            continue
+        next_index, quote = _quoted_step(fragment, index, quote)
+        result.append(fragment[index:next_index])
+        index = next_index
     return "".join(result)
 
 
@@ -265,6 +309,8 @@ def _conditional_end(text: str, start: int) -> int | None:
     index = start
     quote: str | None = None
     while index < len(text):
+        if _unsupported_native_execution(text, index, quote):
+            return None
         if (
             quote is None
             and text.startswith("]]", index)
@@ -282,9 +328,7 @@ def _array_assignment_end(text: str, start: int) -> int | None:
     while index < len(text):
         # These native execution forms are not owned by the command-substitution
         # extractor. They cannot be discarded as array data without proof.
-        if (quote is None and text.startswith(("<(", ">("), index)) or (
-            quote != "'" and text[index] == "`"
-        ):
+        if _unsupported_native_execution(text, index, quote):
             return None
         index, quote, depth = _substitution_step(text, index, quote, depth)
         if depth == 0:

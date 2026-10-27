@@ -11,7 +11,9 @@ from oh_goon.integrations.shell_execution_authority import derive_shell_fragment
 
 _TARGET = re.compile(r"^(?P<target>[A-Za-z0-9_.-]+):(?P<rest>.*)$")
 _ASSIGNMENT = re.compile(r"^(?P<name>[A-Za-z0-9_]+)\s*(?::=|\?=|=)\s*(?P<value>.*)$")
-_MAKE_CALL = re.compile(r"\$\(MAKE\)\s+(?P<target>[A-Za-z0-9_.-]+)(?=\s|$)")
+_MAKE_REFERENCE = re.compile(r"\$\(MAKE\)|\$\{MAKE\}")
+_RECURSIVE_MAKE_TARGET = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9_.-]*")
+_RECURSIVE_MAKE_ASSIGNMENT = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.*)")
 _VAR = re.compile(r"\$\((?P<name>[A-Za-z0-9_]+)\)")
 _SIMPLE_TOOL = re.compile(r"^[A-Za-z0-9_.+-]+$")
 
@@ -346,20 +348,60 @@ class _AuthorityBuilder:
             self.visit(prerequisite, chain)
 
     def _visit_recursive_make(self, recipe: str, chain: tuple[str, ...]) -> None:
-        for match in _MAKE_CALL.finditer(recipe):
-            child = match.group("target")
-            if child in self.targets:
-                self.visit(child, chain)
+        # Only the existing literal target grammar is admitted. Native Make
+        # retains option, alternate-Makefile and ambient configuration semantics.
+        try:
+            words = _shell_tokens(recipe)
+        except ValueError:
+            words = ()
+        positions = [index for index, word in enumerate(words) if word == "$(MAKE)"]
+        if len(positions) != 1 or len(_MAKE_REFERENCE.findall(recipe)) != 1:
+            self.unresolved.add("unproven recursive make invocation: " + " -> ".join(chain))
+            return
+        children: list[str] = []
+        bindings: dict[str, str] = {}
+        for word in words[positions[0] + 1 :]:
+            assignment = _RECURSIVE_MAKE_ASSIGNMENT.fullmatch(word)
+            if assignment is not None:
+                name, value = assignment.group("name", "value")
+                if (
+                    name.startswith("MAKE")
+                    or name in {"MFLAGS", "GNUMAKEFLAGS", "SHELL"}
+                    or any(marker in value for marker in ("$", "`"))
+                ):
+                    self.unresolved.add("unproven recursive make invocation: " + " -> ".join(chain))
+                    return
+                bindings[name] = value
+            elif not word.startswith("-") and _RECURSIVE_MAKE_TARGET.fullmatch(word) is not None:
+                children.append(word)
             else:
-                self.unresolved.add(
-                    "missing recursive make target: " + " -> ".join((*chain, child))
-                )
+                self.unresolved.add("unproven recursive make invocation: " + " -> ".join(chain))
+                return
+        if not children:
+            self.unresolved.add("unproven recursive make invocation: " + " -> ".join(chain))
+            return
+        # Literal call-site assignments must affect the same child analysis;
+        # otherwise a command override could hide a different executable. Reuse
+        # the existing owner with its parsed targets and current cycle context.
+        previous_variables, previous_visited = self.variables, self.visited
+        if bindings:
+            self.variables = {**self.variables, **bindings}
+            self.visited = set()
+        try:
+            for child in children:
+                if child in self.targets:
+                    self.visit(child, chain)
+                else:
+                    self.unresolved.add(
+                        "missing recursive make target: " + " -> ".join((*chain, child))
+                    )
+        finally:
+            self.variables, self.visited = previous_variables, previous_visited
 
     def _scan_recipe(self, recipe: str, chain: tuple[str, ...]) -> None:
         expanded_recipe = _expand_segment_command(recipe, self.variables)
         if _recipe_requires_shell(expanded_recipe, self.variables):
             self.require("sh", (*chain, "<recipe-shell>"))
-        self._visit_recursive_make(recipe, chain)
         for segment in _segments(expanded_recipe):
             tool, issue = _command_tool(segment, self.variables)
             if tool is not None:
@@ -367,6 +409,7 @@ class _AuthorityBuilder:
             if issue is not None:
                 self.unresolved.add(" -> ".join(chain) + ": " + issue)
             if "$(MAKE)" in segment or "${MAKE}" in segment:
+                self._visit_recursive_make(segment, chain)
                 continue
             shell = derive_shell_fragment_authority(self.root, segment, chain=chain)
             self.tools.update(shell.tools)
