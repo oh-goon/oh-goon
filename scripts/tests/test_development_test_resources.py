@@ -393,19 +393,59 @@ def test_receiving_child_verifies_the_transported_native_task_ceiling(
         assert result.stdout == "started"
 
 
+@pytest.mark.parametrize(
+    "control,value",
+    [
+        ("memory.max", "268435456"),
+        ("memory.high", "268435456"),
+        ("memory.swap.max", "0"),
+        ("memory.swap.high", "0"),
+        ("memory.zswap.max", "0"),
+    ],
+)
+@pytest.mark.parametrize("private_parent", [False, True])
 def test_private_memory_ceiling_refuses_scope_movement_before_work(
-    tmp_path: Path, cgroup: tuple[Path, Path]
+    tmp_path: Path,
+    cgroup: tuple[Path, Path],
+    control: str,
+    value: str,
+    private_parent: bool,
 ) -> None:
-    _, directory = cgroup
-    (directory / "memory.max").write_text("268435456\n")
+    root, directory = cgroup
+    if private_parent:
+        nested = directory / "nested.scope"
+        nested.mkdir()
+        (nested / "cpu.max").write_text("max 100000\n")
+        cgroup = root, nested
+    (directory / control).write_text("max\n")
     binary, calls = _native_runner(tmp_path)
+
+    baseline = _run(tmp_path, cgroup, "/bin/true", path=binary)
+    assert baseline.returncode == 0, baseline.stderr
+    assert calls.exists()
+    calls.unlink()
+    (directory / control).write_text(value + "\n")
 
     result = _run(tmp_path, cgroup, "/bin/sh", "-c", "printf started", path=binary)
 
     assert result.returncode == 3
-    assert "memory.max constraint" in result.stderr
+    assert f"{control} constraint" in result.stderr
     assert result.stdout == ""
     assert not calls.exists()
+
+
+def test_shared_memory_pressure_limits_do_not_prevent_native_cpu_scope(
+    tmp_path: Path, cgroup: tuple[Path, Path]
+) -> None:
+    _, directory = cgroup
+    (directory.parent / "memory.high").write_text("268435456\n")
+    (directory.parent / "memory.swap.max").write_text("0\n")
+    binary, calls = _native_runner(tmp_path)
+
+    result = _run(tmp_path, cgroup, "/bin/true", path=binary)
+
+    assert result.returncode == 0, result.stderr
+    assert calls.exists()
 
 
 def test_inherited_cpu_quota_keeps_private_memory_and_task_constraints_in_place(
@@ -414,6 +454,10 @@ def test_inherited_cpu_quota_keeps_private_memory_and_task_constraints_in_place(
     _, directory = cgroup
     (directory / "cpu.max").write_text("200000 100000\n")
     (directory / "memory.max").write_text("268435456\n")
+    (directory / "memory.high").write_text("134217728\n")
+    (directory / "memory.swap.max").write_text("0\n")
+    (directory / "memory.swap.high").write_text("0\n")
+    (directory / "memory.zswap.max").write_text("0\n")
     (directory / "pids.max").write_text("128\n")
     binary, calls = _native_runner(tmp_path)
 

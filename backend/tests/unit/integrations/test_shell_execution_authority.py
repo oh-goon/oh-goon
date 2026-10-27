@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -138,6 +140,162 @@ def test_bash_control_groups_keep_substitutions_and_following_executables(
 
     assert authority.unresolved == ()
     assert set(authority.tools) == {"bash", "env", "getconf", "git", "id", "rm", "systemd-run"}
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "[[ -n <(curl --version) ]]; git --version",
+        "[[ -n >(curl --version) ]]; git --version",
+        "[[ `curl --version` == value ]]; git --version",
+        '[[ "`curl --version`" == value ]]; git --version',
+    ],
+)
+def test_conditional_groups_cannot_hide_unowned_native_execution(
+    tmp_path: Path, fragment: str
+) -> None:
+    root = _repo(tmp_path)
+    baseline = derive_shell_fragment_authority(
+        root,
+        "[[ '<(curl --version)' == \"<(curl --version)\" || "
+        "'`curl --version`' == \"\\`curl --version\\`\" || "
+        r"\<\(curl\) == \>\(curl\) ]]; git --version",
+        chain=("target",),
+    )
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
+
+    assert any("unparseable shell fragment" in item for item in authority.unresolved)
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "(( value = <(curl --version) )); git --version",
+        "(( value = >(curl --version) )); git --version",
+        "(( value = `getconf LONG_BIT` )); git --version",
+        '(( value = "`getconf LONG_BIT`" )); git --version',
+    ],
+)
+def test_arithmetic_groups_cannot_hide_unowned_native_execution(
+    tmp_path: Path, fragment: str
+) -> None:
+    root = _repo(tmp_path)
+    baseline = derive_shell_fragment_authority(
+        root,
+        "printf '%s' '`getconf LONG_BIT`' '<(curl --version)'; "
+        '(( value = "(1 + 2)" * 3 )); git --version',
+        chain=("target",),
+    )
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git",)
+
+    authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
+
+    assert any("unparseable shell fragment" in item for item in authority.unresolved)
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        "[[ -n ${UNSET:-`curl --version`} ]]; git --version",
+        '[[ -n "${UNSET:-`curl --version`}" ]]; git --version',
+        "[[ -n \"${UNSET:-'`curl --version`'}\" ]]; git --version",
+        "[[ -n ${UNSET:-<(curl --version)} ]]; git --version",
+        "[[ -n ${UNSET:->(curl --version)} ]]; git --version",
+        "(( value = ${UNSET:-`getconf LONG_BIT`} )); git --version",
+        "(( value = ${UNSET:-$((`getconf LONG_BIT`))} )); git --version",
+        "(( value = $((`getconf LONG_BIT`)) )); git --version",
+        '[[ -n "$((`getconf LONG_BIT`))" ]]; git --version',
+        "[[ -n $(printf '%s' ${UNSET:-`curl --version`}) ]]; git --version",
+    ],
+)
+def test_nested_expansions_cannot_hide_unowned_execution_before_control_masking(
+    tmp_path: Path, fragment: str
+) -> None:
+    root = _repo(tmp_path)
+    baseline = derive_shell_fragment_authority(
+        root,
+        "[[ -n '${UNSET:-`curl --version`}' || "
+        r'-n "\${UNSET:-\`curl --version\`}" ]]; '
+        "[[ -n ${UNSET:-'`curl --version`'} || "
+        r"-n ${UNSET:-\<\(curl\)} ]]; "
+        '[[ -n "${UNSET:-$(id -u)}" ]]; '
+        "(( value = ${UNSET:-$(getconf LONG_BIT)} )); git --version",
+        chain=("target",),
+    )
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("getconf", "git", "id")
+
+    authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
+
+    assert any("unparseable shell fragment" in item for item in authority.unresolved)
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "'`bash scripts/arithmetic-canary.sh`'",
+        "'$(bash scripts/arithmetic-canary.sh)'",
+    ],
+)
+@pytest.mark.parametrize(
+    "surrounding",
+    [
+        "(( value = EXPRESSION ))",
+        "printf '%s' $(( EXPRESSION ))",
+        "printf '%s' \"$(( EXPRESSION ))\"",
+        '[[ -n "$(( EXPRESSION ))" ]]',
+        "[[ -n ${OH_GOON_ARITHMETIC_UNSET:-$(( EXPRESSION ))} ]]",
+    ],
+)
+def test_native_arithmetic_substitutions_cannot_lose_their_execution_authority(
+    tmp_path: Path, expression: str, surrounding: str
+) -> None:
+    root = _repo(tmp_path)
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("Native Bash is required for arithmetic authority proof")
+    (root / "scripts/arithmetic-canary.sh").write_text(
+        "#!/bin/bash\nprintf '1\\n'\nprintf ARITHMETIC_EXECUTION_CANARY >&2\n",
+        encoding="utf-8",
+    )
+    baseline = surrounding.replace("EXPRESSION", "1")
+    native_baseline = subprocess.run(
+        [bash, "--noprofile", "--norc", "-c", f"unset OH_GOON_ARITHMETIC_UNSET; {baseline}"],
+        capture_output=True,
+        cwd=root,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert native_baseline.returncode == 0, native_baseline.stderr
+    baseline_authority = derive_shell_fragment_authority(root, baseline, chain=("target",))
+    assert baseline_authority.unresolved == ()
+    assert baseline_authority.tools == ()
+
+    fragment = surrounding.replace("EXPRESSION", expression)
+    native_effect = subprocess.run(
+        [bash, "--noprofile", "--norc", "-c", f"unset OH_GOON_ARITHMETIC_UNSET; {fragment}"],
+        capture_output=True,
+        cwd=root,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    # Bash evaluates the substitution before rejecting the resulting quoted
+    # arithmetic value. That later syntax failure cannot establish no effects.
+    assert native_effect.returncode != 0
+    assert native_effect.stderr.startswith("ARITHMETIC_EXECUTION_CANARY")
+
+    authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
+
+    assert authority.unresolved or (
+        "bash" in authority.tools and "scripts/arithmetic-canary.sh" in authority.scripts
+    )
 
 
 def test_control_prefix_assignments_and_reads_preserve_substitution_authority(

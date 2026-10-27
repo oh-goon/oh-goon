@@ -526,8 +526,8 @@ def _scan_fragment(
         _scan_fragment(
             builder, substitution, (*chain, "<command-substitution>"), functions, environment
         )
-    cleaned = mask_noncommand_expansions(cleaned)
-    parsed = segments(cleaned)
+    masked = mask_noncommand_expansions(cleaned)
+    parsed = segments(masked) if masked is not None else None
     if parsed is None:
         builder.reject(f"unparseable shell fragment: {fragment}", chain)
         return
