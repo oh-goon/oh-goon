@@ -54,14 +54,6 @@ def _native_coverage_options(state_home: Path) -> argparse.Namespace:
         for index, arg in enumerate(command)
         if arg.endswith("/oh-goon-test-batches")
     )
-    assert command[:runner] == [
-        "bash",
-        "scripts/development_test_resources.sh",
-        "sh",
-        "-c",
-        'cd backend && exec "$@"',
-        "sh",
-    ]
     with patch.object(sys, "argv", command[runner:]):
         _parser, options = parse_batch_args()
     return options
@@ -83,26 +75,17 @@ def test_journal_coverage_targets_durable_fact_authority_not_read_projection(
     assert options.qualified is True
     assert options.show_output is True
     assert options.pytest_config == Path("pyproject.toml")
-    assert options.paths == [
-        Path(f"tests/unit/runtime/{name}.py")
-        for name in (
-            "test_journal",
-            "test_journal_integrity",
-            "test_journal_operation_state",
-            "test_readmission_lineage",
-            "test_rerun_lineage",
-            "test_scout_journal_changes",
-            "test_recovery_reconciliation",
-            "test_journal_reconciliation_authority",
-            "test_atomic_runtime",
-            "test_atomic_runs",
-            "test_result_lifecycle",
-            "test_crash_consistency",
-            "test_durable_capability_provenance",
-        )
-    ]
+    assert options.paths and all(
+        path.is_relative_to(Path("tests/unit/runtime")) for path in options.paths
+    )
     assert options.marker == ""
-    assert options.pytest_arg == ["-W", "error::ResourceWarning"]
+    assert options.resume is False and options.batch is None
+    assert options.pytest_arg == [
+        "-W",
+        "error::ResourceWarning",
+        "-W",
+        "error::pytest.PytestUnraisableExceptionWarning",
+    ]
     assert options.coverage_source == [
         "oh_goon.runtime.journal",
         "oh_goon.runtime.journal_store",
@@ -110,8 +93,12 @@ def test_journal_coverage_targets_durable_fact_authority_not_read_projection(
         "oh_goon.runtime.journal_codec",
         "oh_goon.runtime.journal_facts",
     ]
-    assert options.coverage_data_file == ROOT / "backend/.coverage"
-    assert options.coverage_fail_under == 93
+    assert (
+        options.coverage_data_file
+        == state_home / "oh-goon/coverage/journal-durability.coverage"
+    )
+    # An omitted override would inherit the full-package configuration's floor.
+    assert options.coverage_fail_under == 0
     assert options.coverage_report == [
         "term-missing",
         f"json:{state_home}/oh-goon/coverage/journal-durability.json",

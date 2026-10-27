@@ -165,6 +165,18 @@ class JournalFactCodec:
         )
         if fact_hash != expected_hash:
             raise JournalCorruption(f"Journal fact hash mismatch at revision {revision}")
+        if (
+            fact_kind
+            in {
+                JournalFactKind.OPERATION,
+                JournalFactKind.RUN_EVENT,
+                JournalFactKind.FLEET_OPERATION,
+            }
+            and effect_json is not None
+        ):
+            raise JournalCorruption(
+                f"Journal fact shape does not match kind at revision {revision}"
+            )
         try:
             if fact_kind is JournalFactKind.CAMPAIGN:
                 if report_json is not None or event_json is not None or effect_json is None:

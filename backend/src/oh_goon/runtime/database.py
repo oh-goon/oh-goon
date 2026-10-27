@@ -7,7 +7,7 @@ import sqlite3
 import stat
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock, local
@@ -392,7 +392,9 @@ class LocalDatabase:
                 raise sqlite3.DatabaseError(
                     f"DB4 offline backup integrity failure: {inspection.detail}"
                 )
-            with sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True) as reader:
+            with closing(
+                sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)
+            ) as reader:
                 cookie = int(reader.execute("PRAGMA application_id").fetchone()[0])
                 revision = read_durable_revision(reader)
             if (cookie, revision) != (receipt.database_identity_cookie, receipt.durable_revision):

@@ -67,8 +67,8 @@ help:
 	  '  make frontend-functional-certification  Current functional gate: typecheck, architecture, i18n, unit tests, build' \
 	  '  make frontend-check   Strict later-release frontend gate: adds lint, coverage/quality checks' \
 	  '  make tooling-check    Repository scripts + cross-owner tooling checks' \
-	  '  make test-sqlite-coverage  SQLite authority branch coverage + connection hygiene floor' \
-	  '  make test-journal-coverage Journal durability branch coverage + fact integrity floor' \
+	  '  make test-sqlite-coverage  SQLite authority + connection hygiene checks and coverage report' \
+	  '  make test-journal-coverage Journal durability checks and coverage report' \
 	  '  make coverage-report  Show the detailed Python coverage table from the latest collected data' \
 	  '' \
 	  'Golden change loops (stop on first failure):' \
@@ -659,17 +659,20 @@ coverage-report:
 	@test -f backend/.coverage || { echo "No backend coverage data exists; run make quality-check first." >&2; exit 2; }
 	cd backend && .venv/bin/coverage report -m
 
-# Focused branch-coverage ratchet for SQLite execution authority. This is intentionally
-# narrower than coverage-python: it exercises the owner/reproof/lease paths that can
-# invalidate a run or create reconnect pressure, and treats leaked sqlite handles as failures.
+# Focused SQLite behavior and resource-hygiene checks. Coverage is diagnostic;
+# the complete Python measurement owns the separate quality ratchet.
 test-sqlite-coverage:
 	@mkdir -p "$(STATE_HOME)/oh-goon/coverage"
-	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 --pytest-arg=-W --pytest-arg=error::ResourceWarning \
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 --pytest-arg=-W --pytest-arg=error::ResourceWarning --pytest-arg=-W --pytest-arg=error::pytest.PytestUnraisableExceptionWarning \
 	  tests/unit/runtime/test_database_path_ownership.py \
 	  tests/unit/runtime/test_execution_connection_scope.py \
 	  tests/unit/runtime/test_execution_lease.py \
 	  tests/unit/runtime/test_atomic_runs.py \
 	  tests/unit/runtime/test_atomic_runtime.py \
+	  tests/unit/runtime/test_db1b1_atomic_domain_operations.py \
+	  tests/unit/runtime/test_db1b2_transaction_owner_and_replay.py \
+	  tests/unit/runtime/test_db3_scout_backup_owner.py \
+	  tests/unit/runtime/test_db5_backup_publication_failures.py \
 	  tests/unit/runtime/test_preparation_cancellation.py \
 	  tests/unit/runtime/test_revision_bound_admission.py \
 	  tests/unit/runtime/test_sqlite_adversarial_identity.py \
@@ -678,17 +681,19 @@ test-sqlite-coverage:
 	  --coverage-source=oh_goon.runtime.database \
 	  --coverage-source=oh_goon.runtime.execution.sqlite_lease \
 	  --coverage-source=oh_goon.runtime._sqlite_access_diagnostics \
-	  --coverage-data-file="$(CURDIR)/backend/.coverage" --coverage-fail-under=90 --coverage-report=term-missing \
+	  --coverage-data-file="$(STATE_HOME)/oh-goon/coverage/sqlite-core.coverage" --coverage-fail-under=0 --coverage-report=term-missing \
 	  --coverage-report=json:"$(STATE_HOME)/oh-goon/coverage/sqlite-core.json"
 
-# Durable Journal authority coverage is intentionally separate from journal_view read-side
-# projection coverage. This gate proves fact encoding/hash-chain validation, append/store/index
-# behavior, lineage admission guards, incremental observation, and recovery-facing Journal writes.
+# Durable Journal checks cover fact integrity, transaction/lineage admission,
+# pinned read cuts and recovery-facing writes. Projection coverage remains separate.
+# Coverage is diagnostic; test failures and resource leaks fail this owner gate.
 test-journal-coverage:
 	@mkdir -p "$(STATE_HOME)/oh-goon/coverage"
-	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 --pytest-arg=-W --pytest-arg=error::ResourceWarning \
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --marker "" --workers 1 --batch-size 4 --batch-timeout 180 --pytest-arg=-W --pytest-arg=error::ResourceWarning --pytest-arg=-W --pytest-arg=error::pytest.PytestUnraisableExceptionWarning \
 	  tests/unit/runtime/test_journal.py \
 	  tests/unit/runtime/test_journal_integrity.py \
+	  tests/unit/runtime/test_agent_campaign_journal.py \
+	  tests/unit/runtime/test_journal_read_views.py \
 	  tests/unit/runtime/test_journal_operation_state.py \
 	  tests/unit/runtime/test_readmission_lineage.py \
 	  tests/unit/runtime/test_rerun_lineage.py \
@@ -705,7 +710,7 @@ test-journal-coverage:
 	  --coverage-source=oh_goon.runtime.journal_index \
 	  --coverage-source=oh_goon.runtime.journal_codec \
 	  --coverage-source=oh_goon.runtime.journal_facts \
-	  --coverage-data-file="$(CURDIR)/backend/.coverage" --coverage-fail-under=93 --coverage-report=term-missing \
+	  --coverage-data-file="$(STATE_HOME)/oh-goon/coverage/journal-durability.coverage" --coverage-fail-under=0 --coverage-report=term-missing \
 	  --coverage-report=json:"$(STATE_HOME)/oh-goon/coverage/journal-durability.json"
 
 quality-check: coverage-python

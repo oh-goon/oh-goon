@@ -46,3 +46,17 @@ repository correctness or APP certification. `make quality-check` explicitly
 compares a complete coverage measurement to the existing committed floors.
 `quality-raise` reuses that same measurement before authoring floors. The floors
 are retained and cannot be lowered by the authoring command.
+
+`make test-sqlite-coverage` and `make test-journal-coverage` are focused behavior
+and resource-hygiene checks with branch-coverage diagnostics. They reuse existing
+backup, transaction/replay, campaign and pinned-read regressions alongside the
+original owner tests. Test failures, resource warnings and unraisable cleanup
+exceptions fail these gates; a percentage alone does not. Explicit zero coverage
+thresholds prevent inheritance of the generic coverage floor. The complete
+`quality-check` ratchet remains unchanged.
+
+Each focused gate retains its native data and JSON report under
+`$XDG_STATE_HOME/oh-goon/coverage` (or `~/.local/state/oh-goon/coverage`). SQLite
+uses `sqlite-core.coverage` and `sqlite-core.json`; Journal uses
+`journal-durability.coverage` and `journal-durability.json`. They do not replace
+the full-package `backend/.coverage` read by `make coverage-report`.

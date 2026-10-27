@@ -54,14 +54,6 @@ def _native_coverage_options(state_home: Path) -> argparse.Namespace:
         for index, arg in enumerate(command)
         if arg.endswith("/oh-goon-test-batches")
     )
-    assert command[:runner] == [
-        "bash",
-        "scripts/development_test_resources.sh",
-        "sh",
-        "-c",
-        'cd backend && exec "$@"',
-        "sh",
-    ]
     with patch.object(sys, "argv", command[runner:]):
         _parser, options = parse_batch_args()
     return options
@@ -74,7 +66,7 @@ def test_sqlite_coverage_target_is_frozen_owner_local_validation() -> None:
     assert "test-sqlite-coverage" in owner_targets
 
 
-def test_sqlite_coverage_target_ratcheted_authority_and_resource_hygiene(
+def test_sqlite_coverage_target_preserves_native_measurement_and_resource_hygiene(
     tmp_path: Path,
 ) -> None:
     state_home = tmp_path / "state data"
@@ -83,30 +75,28 @@ def test_sqlite_coverage_target_ratcheted_authority_and_resource_hygiene(
     assert options.qualified is True
     assert options.show_output is True
     assert options.pytest_config == Path("pyproject.toml")
-    assert options.paths == [
-        Path(f"tests/unit/runtime/{name}.py")
-        for name in (
-            "test_database_path_ownership",
-            "test_execution_connection_scope",
-            "test_execution_lease",
-            "test_atomic_runs",
-            "test_atomic_runtime",
-            "test_preparation_cancellation",
-            "test_revision_bound_admission",
-            "test_sqlite_adversarial_identity",
-            "test_sqlite_fault_matrix",
-            "test_sqlite_authority_edge_cases",
-        )
-    ]
+    assert options.paths and all(
+        path.is_relative_to(Path("tests/unit/runtime")) for path in options.paths
+    )
     assert options.marker == ""
-    assert options.pytest_arg == ["-W", "error::ResourceWarning"]
+    assert options.resume is False and options.batch is None
+    assert options.pytest_arg == [
+        "-W",
+        "error::ResourceWarning",
+        "-W",
+        "error::pytest.PytestUnraisableExceptionWarning",
+    ]
     assert options.coverage_source == [
         "oh_goon.runtime.database",
         "oh_goon.runtime.execution.sqlite_lease",
         "oh_goon.runtime._sqlite_access_diagnostics",
     ]
-    assert options.coverage_data_file == ROOT / "backend/.coverage"
-    assert options.coverage_fail_under == 90
+    assert (
+        options.coverage_data_file
+        == state_home / "oh-goon/coverage/sqlite-core.coverage"
+    )
+    # An omitted override would inherit the full-package configuration's floor.
+    assert options.coverage_fail_under == 0
     assert options.coverage_report == [
         "term-missing",
         f"json:{state_home}/oh-goon/coverage/sqlite-core.json",

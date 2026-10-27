@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
+from contextlib import closing
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -54,7 +57,7 @@ def test_original_owner_backup_is_verified_and_no_clobber(tmp_path: Path) -> Non
     assert receipt.sha256 == hashlib.sha256(dest.read_bytes()).hexdigest()
     assert receipt.durable_revision == expected
     assert receipt.database_identity_cookie == cookie
-    with sqlite3.connect(f"file:{dest}?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(f"file:{dest}?mode=ro", uri=True)) as conn:
         assert read_durable_revision(conn) == expected
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA application_id").fetchone()[0] == cookie
@@ -69,6 +72,38 @@ def test_original_owner_backup_is_verified_and_no_clobber(tmp_path: Path) -> Non
     assert dest.read_bytes() == original_bytes
     with operational.transaction() as conn:
         assert read_durable_revision(conn) == expected
+
+
+@pytest.mark.parametrize("matching_receipt", [True, False])
+def test_backup_verification_closes_native_readers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, matching_receipt: bool
+) -> None:
+    owner = LocalDatabase(tmp_path / "state.sqlite3")
+    receipt = owner.export_verified_backup(tmp_path / "snapshots" / "offline.sqlite3")
+    if not matching_receipt:
+        receipt = replace(receipt, database_identity_cookie=receipt.database_identity_cookie + 1)
+    connections: list[sqlite3.Connection] = []
+    native_connect = sqlite3.connect
+
+    def track_connection(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection: sqlite3.Connection = native_connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", track_connection)
+    try:
+        if matching_receipt:
+            LocalDatabase.verify_offline_backup(receipt)
+        else:
+            with pytest.raises(sqlite3.DatabaseError, match="cookie/revision mismatch"):
+                LocalDatabase.verify_offline_backup(receipt)
+        assert connections
+        for connection in connections:
+            with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                connection.execute("SELECT 1")
+    finally:
+        for connection in connections:
+            connection.close()
 
 
 def test_backup_never_overwrites_symlink_destination(tmp_path: Path) -> None:
