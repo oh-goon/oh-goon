@@ -165,6 +165,78 @@ def test_journal_codec_rejects_hash_valid_fact_with_wrong_shape() -> None:
         )
 
 
+@pytest.mark.parametrize("fact_kind", ("OPERATION", "RUN_EVENT", "FLEET_OPERATION"))
+@pytest.mark.parametrize("effect_json", ('{"unexpected":"effect"}', "null"))
+def test_journal_codec_rejects_unexpected_effect_column_after_valid_round_trip(
+    tmp_path: Path, fact_kind: str, effect_json: str
+) -> None:
+    from dataclasses import replace
+
+    from oh_goon.core.models.run_events import RepositoryCompletedEvent, RunStartedEvent
+    from oh_goon.core.vocabulary import FleetRunEventType
+    from oh_goon.runtime.journal_codec import GENESIS_HASH, EncodedJournalFact, JournalFactCodec
+    from oh_goon.runtime.journal_facts import (
+        FleetOperationCommitted,
+        JournalEntry,
+        OperationCommitted,
+        RunEventCommitted,
+    )
+
+    session_id = "session-codec-shape"
+    report = make_operation_report(
+        tmp_path / "repo",
+        OperationAction.INIT,
+        operation_id="operation-codec-shape",
+        fleet_run_id=None if fact_kind == "OPERATION" else "run-codec-shape",
+    )
+    encoded: EncodedJournalFact
+    expected: JournalEntry
+    if fact_kind == "OPERATION":
+        encoded = JournalFactCodec.encode_operation(report)
+        expected = OperationCommitted(1, session_id, report)
+    elif fact_kind == "RUN_EVENT":
+        started = RunStartedEvent(
+            event_type=FleetRunEventType.RUN_STARTED,
+            sequence=1,
+            fleet_run_id="run-codec-shape",
+        )
+        encoded = JournalFactCodec.encode_run_event(started)
+        expected = RunEventCommitted(1, session_id, started)
+    else:
+        completed = RepositoryCompletedEvent(
+            event_type=FleetRunEventType.REPOSITORY_COMPLETED,
+            sequence=1,
+            fleet_run_id="run-codec-shape",
+            operation_id=report.provenance.operation_id,
+        )
+        encoded = JournalFactCodec.encode_fleet_operation(report, completed)
+        expected = FleetOperationCommitted(1, session_id, report, completed)
+    committed_at = "2026-01-01T00:00:00+00:00"
+
+    def decode(fact: EncodedJournalFact) -> JournalEntry:
+        return JournalFactCodec.decode(
+            revision=1,
+            session_id=session_id,
+            kind=fact.kind.value,
+            report_json=fact.report_json,
+            event_json=fact.event_json,
+            effect_json=fact.effect_json,
+            committed_at=committed_at,
+            previous_hash=GENESIS_HASH,
+            fact_hash=JournalFactCodec.hash_fact(
+                previous_hash=GENESIS_HASH,
+                session_id=session_id,
+                encoded=fact,
+                committed_at=committed_at,
+            ),
+            expected_previous_hash=GENESIS_HASH,
+        )
+
+    assert decode(encoded) == expected
+    with pytest.raises(JournalCorruption, match="fact shape does not match kind"):
+        decode(replace(encoded, effect_json=effect_json))
+
+
 def test_journal_codec_rejects_hash_valid_invalid_acknowledgement_payload() -> None:
     from oh_goon.runtime.journal_codec import (
         GENESIS_HASH,
