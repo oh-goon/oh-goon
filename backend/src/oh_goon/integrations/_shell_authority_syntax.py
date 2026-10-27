@@ -13,6 +13,7 @@ from oh_goon.core.source_tree_policy import (
 FORWARD = re.compile(r"^# OH_GOON_FORWARD_ARGV_FROM: (?P<position>[1-9][0-9]*)$")
 FUNCTION = re.compile(r"^\s*(?:function\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{")
 ASSIGNMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_ARRAY_ASSIGNMENT_PREFIX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\+?=$")
 SIMPLE_TOOL = re.compile(r"^[A-Za-z0-9_.+-]+$")
 LOCAL_PREFIXES = ("./", "../", "backend/", "frontend/", "scripts/", "generated/", "templates/")
 CONTROL_WORDS = frozenset(
@@ -260,6 +261,113 @@ def mask_noncommand_expansions(fragment: str) -> str:
     return "".join(result)
 
 
+def _conditional_end(text: str, start: int) -> int | None:
+    index = start
+    quote: str | None = None
+    while index < len(text):
+        if (
+            quote is None
+            and text.startswith("]]", index)
+            and (index == start or text[index - 1].isspace())
+        ):
+            return index + 2
+        index, quote = _quoted_step(text, index, quote)
+    return None
+
+
+def _array_assignment_end(text: str, start: int) -> int | None:
+    depth = 1
+    index = start
+    quote: str | None = None
+    while index < len(text):
+        # These native execution forms are not owned by the command-substitution
+        # extractor. They cannot be discarded as array data without proof.
+        if (quote is None and text.startswith(("<(", ">("), index)) or (
+            quote != "'" and text[index] == "`"
+        ):
+            return None
+        index, quote, depth = _substitution_step(text, index, quote, depth)
+        if depth == 0:
+            return index
+    return None
+
+
+def _mask_shell_control_groups(fragment: str) -> str | None:
+    """Keep Bash tests/arithmetic and array data out of executable positions.
+
+    Command substitutions are extracted separately by the shell authority owner,
+    before these non-command groups are masked. Quoted text remains literal.
+    """
+
+    result: list[str] = []
+    index = 0
+    quote: str | None = None
+    word: list[str] = []
+    command_position = True
+
+    def finish_word() -> None:
+        nonlocal command_position
+        if word:
+            value = "".join(word)
+            if not (
+                command_position
+                and (
+                    value in {"if", "elif", "then", "while", "until", "do", "!", "for"}
+                    or ASSIGNMENT_NAME.match(value)
+                )
+            ):
+                command_position = False
+            word.clear()
+
+    while index < len(fragment):
+        if (
+            quote is None
+            and command_position
+            and fragment[index] == "("
+            and _ARRAY_ASSIGNMENT_PREFIX.fullmatch("".join(word))
+        ):
+            end = _array_assignment_end(fragment, index + 1)
+            if end is None:
+                return None
+            # This assignment contributes no executable word. Its command
+            # substitutions are scanned separately; do not invent a literal
+            # environment value from the masked array contents.
+            del result[-len(word) :]
+            result.append(" ")
+            word.clear()
+            index = end
+            continue
+        if (
+            quote is None
+            and not word
+            and command_position
+            and fragment.startswith(("[[", "(("), index)
+        ):
+            end = (
+                _conditional_end(fragment, index + 2)
+                if fragment.startswith("[[", index)
+                else _arithmetic_end(fragment, index + 2)
+            )
+            if end is None:
+                return None
+            result.append(":")
+            command_position = False
+            index = end
+            continue
+        if quote is None and fragment[index].isspace():
+            finish_word()
+        elif quote is None and fragment[index] in ";&|(){}":
+            finish_word()
+            command_position = True
+        next_index, quote = _quoted_step(fragment, index, quote)
+        token = fragment[index:next_index]
+        if quote is not None or not (token.isspace() or token in ";&|(){}"):
+            word.append(token)
+        result.append(token)
+        index = next_index
+    return "".join(result)
+
+
 def _protect_escaped_find_terminators(command: str) -> str:
     """Keep ``find -exec ... \\;`` terminators distinct from shell separators."""
 
@@ -291,9 +399,12 @@ def _protect_escaped_find_terminators(command: str) -> str:
 
 
 def shell_tokens(command: str) -> tuple[str, ...] | None:
+    masked_command = _mask_shell_control_groups(command)
+    if masked_command is None:
+        return None
     try:
         lexer = shlex.shlex(
-            _protect_escaped_find_terminators(command), posix=True, punctuation_chars=";&|"
+            _protect_escaped_find_terminators(masked_command), posix=True, punctuation_chars=";&|"
         )
         lexer.whitespace_split = True
         lexer.commenters = "#"
@@ -322,17 +433,10 @@ def segments(command: str) -> tuple[tuple[str, ...], ...] | None:
 
 def command_index(words: tuple[str, ...]) -> int:
     index = 0
-    while index < len(words) and ASSIGNMENT_NAME.match(words[index]):
-        index += 1
-    while index < len(words) and words[index] in {
-        "if",
-        "elif",
-        "then",
-        "while",
-        "until",
-        "do",
-        "!",
-    }:
+    while index < len(words) and (
+        ASSIGNMENT_NAME.match(words[index])
+        or words[index] in {"if", "elif", "then", "while", "until", "do", "!"}
+    ):
         index += 1
     return index
 
@@ -375,7 +479,7 @@ def is_materialized_executable_path(token: str) -> bool:
     return materialized_executable_identity(token) is not None
 
 
-def project_path(root: Path, token: str) -> Path | None:
+def project_path(root: Path, token: str, *, working_directory: str = ".") -> Path | None:
     value = token.strip("\"'")
     if not value or "$" in value:
         return None
@@ -384,7 +488,11 @@ def project_path(root: Path, token: str) -> Path | None:
         return _contained_absolute(root, candidate)
     if not value.startswith(LOCAL_PREFIXES):
         return None
-    return _contained_absolute(root, root / candidate)
+    try:
+        relative = canonical_repository_relative_path(value, working_directory=working_directory)
+    except ValueError:
+        return None
+    return _contained_absolute(root, root / relative)
 
 
 def _contained_absolute(root: Path, candidate: Path) -> Path | None:
@@ -396,9 +504,12 @@ def _contained_absolute(root: Path, candidate: Path) -> Path | None:
     return resolved
 
 
-def external_tool(root: Path, token: str) -> str | None:
+def external_tool(root: Path, token: str, *, working_directory: str = ".") -> str | None:
     value = token.strip("\"'").lstrip("({").rstrip(")}")
-    if _ignored_external_token(value) or project_path(root, value) is not None:
+    if (
+        _ignored_external_token(value)
+        or project_path(root, value, working_directory=working_directory) is not None
+    ):
         return None
     if value.startswith("/"):
         workspace = str(SANDBOX_PATHS.workspace)
@@ -492,9 +603,12 @@ def xargs_child_index(words: tuple[str, ...], index: int) -> int | None:
 
 
 def _grouped_shell_tokens(command: str) -> tuple[str, ...] | None:
+    masked_command = _mask_shell_control_groups(command)
+    if masked_command is None:
+        return None
     try:
         lexer = shlex.shlex(
-            _protect_escaped_find_terminators(command),
+            _protect_escaped_find_terminators(masked_command),
             posix=True,
             punctuation_chars=";&|()",
         )
@@ -684,6 +798,34 @@ def _literal_cd_working_directory(
         return None
 
 
+def literal_cwd_forwarded_argv(
+    fragment: str, positional: tuple[str, ...], *, working_directory: str
+) -> tuple[str, tuple[str, ...]] | None:
+    """Bind one literal contained ``cd DIR && exec \"$@\"`` shell invocation.
+
+    The first operand after a shell's command string supplies $0, so only its
+    remaining operands are forwarded. Other shell programs remain unproven.
+    """
+
+    words = shell_tokens(fragment)
+    if words is None or words.count("&&") != 1 or len(positional) < 2:
+        return None
+    separator = words.index("&&")
+    cd_words = words[:separator]
+    if not cd_words or cd_words[0] != "cd" or words[separator + 1 :] != ("exec", "$@"):
+        return None
+    if re.search(r'\bexec\s+"\$@"\s*$', fragment) is None:
+        return None
+    # A literal cd has one directory operand, with optional native flags only.
+    cursor = 1
+    while cursor < len(cd_words) and cd_words[cursor] in {"-L", "-P", "--"}:
+        cursor += 1
+    if len(cd_words) != cursor + 1:
+        return None
+    changed = _literal_cd_working_directory(cd_words, 0, working_directory)
+    return (changed, positional[1:]) if changed is not None else None
+
+
 def _materialized_from_shell_words(
     words: tuple[str, ...],
     working_directory: str,
@@ -715,6 +857,13 @@ def _materialized_from_shell_words(
             option = words[cursor]
             cursor += 1
             if option == "-c" and cursor < len(words):
+                forwarded = literal_cwd_forwarded_argv(
+                    words[cursor], tuple(words[cursor + 1 :]), working_directory=working_directory
+                )
+                if forwarded is not None:
+                    child_cwd, child = forwarded
+                    matches, _child_cwd = _materialized_from_shell_words(child, child_cwd)
+                    return matches, working_directory
                 return set(
                     materialized_executables_in_shell(
                         words[cursor],

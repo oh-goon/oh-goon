@@ -1,75 +1,110 @@
 {
   "schema": 5,
   "workload_tool_permissions": {
-    "make:architecture": [],
+    "make:architecture": [
+      "bash",
+      "systemd-run"
+    ],
     "make:template-startability-certification": [
+      "bash",
       "ldd",
       "sh",
+      "systemd-run",
       "true",
       "uv"
     ],
     "make:verify-p0": [
+      "bash",
       "git",
       "ldd",
       "sh",
+      "systemd-run",
       "uv"
     ],
     "make:verify-p1": [
       "bash",
       "git",
-      "sh"
+      "sh",
+      "systemd-run"
     ],
     "make:test-python-complete": [
+      "bash",
       "git",
       "ldd",
       "node",
       "npm",
       "sh",
+      "systemd-run",
       "true",
       "uv"
     ],
     "make:browser-preflight": [
+      "bash",
+      "env",
       "node",
       "npm",
-      "sh"
+      "sh",
+      "systemd-run"
     ],
     "make:browser-harness-preflight": [
+      "bash",
       "node",
       "npm",
-      "sh"
+      "sh",
+      "systemd-run"
     ],
     "make:browser-localhost-transport-preflight": [
+      "bash",
       "node",
       "npm",
-      "sh"
+      "sh",
+      "systemd-run"
     ],
     "make:browser-required-certification": [
+      "bash",
+      "env",
       "node",
       "npm",
-      "sh"
+      "sh",
+      "systemd-run"
     ],
     "make:browser-runtime-preflight": [
+      "bash",
+      "env",
       "node",
       "npm",
-      "sh"
+      "sh",
+      "systemd-run"
     ],
     "make:browser-targeted-certification": [
+      "bash",
+      "env",
       "node",
       "npm",
-      "sh"
+      "sh",
+      "systemd-run"
     ],
     "make:frontend-functional-certification": [
+      "bash",
       "node",
       "npm",
-      "sh"
+      "sh",
+      "systemd-run"
     ],
-    "make:check-generated": [],
+    "make:check-generated": [
+      "bash",
+      "systemd-run"
+    ],
     "make:test-integration": [
-      "sh"
+      "bash",
+      "sh",
+      "systemd-run"
     ],
     "make:local-runtime-verification": [
+      "bash",
       "node",
-      "npm"
+      "npm",
+      "systemd-run"
     ],
     "make:release-locks-check": [
       "npm",
@@ -82,6 +117,7 @@
       "git",
       "node",
       "sh",
+      "systemd-run",
       "uv"
     ]
   }

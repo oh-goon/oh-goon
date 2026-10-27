@@ -292,20 +292,41 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
     import subprocess
 
     root = Path(__file__).resolve().parents[2]
-    test_file = tmp_path / "test_resume.py"
-    test_file.write_text("def test_ok(): assert True\n", encoding="utf-8")
+    test_files = [tmp_path / f"test_resume_{index}.py" for index in range(4)]
+    for test_file in test_files:
+        test_file.write_text("def test_ok(): assert True\n", encoding="utf-8")
+    expected_members = [str(path) for path in test_files]
+    native_proc = tmp_path / "native-proc"
+    native_proc.mkdir()
+    (native_proc / "meminfo").write_text("MemAvailable: 4194304 kB\n", encoding="utf-8")
+    # Exercise actual one/two/four-worker launches independently of the host's
+    # quota. Only native capacity observation is controlled; children, receipts,
+    # timeouts and collection remain real. Native-limit precedence has unit proof.
+    launcher = (
+        "import os\nfrom functools import partial\nfrom pathlib import Path\n"
+        "from oh_goon.repository_tooling import pytest_batch_orchestration as owner\n"
+        "os.sched_getaffinity = lambda _pid: set(range(4))\n"
+        "owner.resolve_pytest_resource_budget = partial(\n"
+        "    owner.resolve_pytest_resource_budget,\n"
+        f"    proc_root=Path({str(native_proc)!r}),\n"
+        f"    cgroup_root=Path({str(tmp_path / 'native-cgroup')!r}),\n"
+        ")\n"
+        "from oh_goon.repository_tooling.test_batches import main\n"
+        "raise SystemExit(main())\n"
+    )
     state = tmp_path / "state"
     report = tmp_path / "report.json"
     command = [
         sys.executable,
-        "backend/src/oh_goon/repository_tooling/test_batches.py",
-        str(test_file),
+        "-c",
+        launcher,
+        *expected_members,
         "--granularity",
         "files",
         "--batch-size",
         "1",
         "--workers",
-        "1",
+        "4",
         "--batch-timeout",
         "10",
         "--marker",
@@ -318,20 +339,36 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
         "--report-path",
         str(report),
     ]
-    first = subprocess.run(
-        command,
-        cwd=root,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-        timeout=30,
-    )
-    assert first.returncode == 0, first.stdout
-    assert "reused-members=0" in first.stdout
-    first_payload = json.loads(report.read_text(encoding="utf-8"))
-    assert first_payload["timing_comparable"] is True
+    for budget in (1, 2, 4):
+        command[command.index("--resume-state-root") + 1] = str(state / str(budget))
+        first = subprocess.run(
+            command,
+            cwd=root,
+            env={**os.environ, "OH_GOON_TEST_CPUS": str(budget)},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=30,
+        )
+        assert first.returncode == 0, first.stdout
+        assert "reused-members=0" in first.stdout
+        first_payload = json.loads(report.read_text(encoding="utf-8"))
+        assert first_payload["timing_comparable"] is True
+        assert (
+            first_payload["diagnostics"]["resource_budget"]["effective_workers"]
+            == budget
+        )
+        first_membership = first_payload["membership_receipt"]
+        assert first_membership["selected"] == expected_members
+        assert first_membership["completed"] == expected_members
+        assert first_membership["passed"] == expected_members
+        assert first_membership["missing"] == []
+        assert first_membership["duplicates"] == []
+        assert first_membership["extras"] == []
+        assert first_membership["terminal_success"] is True
 
+    first_payload = json.loads(report.read_text(encoding="utf-8"))
     regrouped_command = list(command)
     regrouped_command[
         regrouped_command.index("1", regrouped_command.index("--batch-size"))
@@ -342,6 +379,7 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
     second = subprocess.run(
         regrouped_command,
         cwd=root,
+        env={**os.environ, "OH_GOON_TEST_CPUS": "1"},
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -349,20 +387,20 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
         timeout=30,
     )
     assert second.returncode == 0, second.stdout
-    assert "reusable-members=1/1" in second.stdout
+    assert "reusable-members=4/4" in second.stdout
     assert "PYTEST RESUME TIMING" in second.stdout
-    assert "reused-members=1" in second.stdout
+    assert "reused-members=4" in second.stdout
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["timing_comparable"] is False
-    assert payload["reused_member_count"] == 1
+    assert payload["reused_member_count"] == 4
     assert payload["executed_member_count"] == 0
     assert payload["resume_suite_identity"] == first_payload["resume_suite_identity"]
     assert (
         payload["execution_plan_identity"] != first_payload["execution_plan_identity"]
     )
     membership = payload["membership_receipt"]
-    assert membership["attempted"] == [] and membership["resumed"] == [str(test_file)]
-    assert membership["completed"] == [str(test_file)]
+    assert membership["attempted"] == [] and membership["resumed"] == expected_members
+    assert membership["completed"] == expected_members
     assert membership["terminal_success"] is True
 
 

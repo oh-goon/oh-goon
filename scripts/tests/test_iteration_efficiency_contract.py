@@ -52,7 +52,7 @@ def _native_batch_commands(target: str) -> list[list[str]]:
         timeout=10,
     )
     commands = []
-    for line in result.stdout.splitlines():
+    for line in result.stdout.replace("\\\n", " ").splitlines():
         words = shlex.split(line)
         for index, word in enumerate(words):
             if word.endswith("/oh-goon-test-batches"):
@@ -591,7 +591,101 @@ def test_preexec_usage_is_confined_to_single_threaded_opensandbox_chroot_boundar
     assert "os.setsid()" in runner
 
 
-def test_python_profile_uses_project_qualification_entrypoint() -> None:
-    profile = _target_body("test-python-profile")
-    assert ".venv/bin/oh-goon-qualification-exec pytest" in profile
-    assert ".venv/bin/python -m pytest" not in profile
+def test_python_profile_uses_qualified_native_batches_and_retains_duration_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
+
+    (command,) = _native_batch_commands("test-python-profile")
+    monkeypatch.setattr(sys, "argv", command)
+    _parser, options = parse_batch_args()
+
+    assert options.qualified is True
+    assert options.pytest_config == Path("pyproject.toml")
+    assert options.paths == [Path("tests/unit"), Path("tests/dependency_complete")]
+    assert options.marker == ""
+    assert options.pytest_arg == ["--durations=40", "--durations-min=0.05"]
+    assert options.show_output is True
+    assert options.granularity == "tests"
+    assert options.batch_size == 64
+    assert options.workers == 1 and options.batch_timeout == 180
+    assert not options.coverage_source
+    assert options.exclude == [] and options.batch is None and not options.resume
+
+
+def test_integration_gates_keep_original_serial_selection_in_both_owners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
+
+    profiles = []
+    for command in _native_batch_commands("test-integration"):
+        monkeypatch.setattr(sys, "argv", command)
+        _parser, options = parse_batch_args()
+        profiles.append(options)
+
+    assert len(profiles) == 2
+    assert all(profile.qualified for profile in profiles)
+    assert all(profile.show_output for profile in profiles)
+    assert [profile.paths for profile in profiles] == [[Path("tests/integration")]] * 2
+    assert [profile.pytest_config for profile in profiles] == [
+        Path("pyproject.toml"),
+        Path("backend/pyproject.toml"),
+    ]
+    assert [profile.marker for profile in profiles] == [
+        "not certification and not slow"
+    ] * 2
+    assert [profile.workers for profile in profiles] == [1, 1]
+    assert [profile.batch_size for profile in profiles] == [8, 8]
+    assert all(
+        profile.granularity == "tests" and profile.batch_timeout == 180
+        for profile in profiles
+    )
+    assert all(
+        profile.pytest_arg == [] and profile.exclude == [] for profile in profiles
+    )
+    assert all(profile.batch is None and not profile.resume for profile in profiles)
+
+
+def test_execution_fast_retains_exact_scope_in_bounded_native_case_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
+
+    (command,) = _native_batch_commands("test-execution-fast")
+    monkeypatch.setattr(sys, "argv", command)
+    _parser, options = parse_batch_args()
+
+    assert options.paths == [
+        Path("tests/unit") / path
+        for path in (
+            "services/test_execution_boundary_contract.py",
+            "services/test_execution_lock.py",
+            "services/test_fleet_plan_preparation_no_magic.py",
+            "services/test_fleet_plan_runtime.py",
+            "services/test_shared_plan_schedules.py",
+            "services/test_fleet_target_scheduler.py",
+            "runtime/test_schedule_lifecycle.py",
+            "runtime/test_schedule_persistence.py",
+            "runtime/test_run_admission_lock.py",
+            "runtime/test_run_admission_singleflight.py",
+            "runtime/test_readmission_lineage.py",
+            "runtime/test_executor_readmission.py",
+            "runtime/test_fleet_worker_settlement.py",
+            "runtime/test_effect_boundary.py",
+            "runtime/test_database_path_ownership.py",
+            "runtime/test_preparation_cancellation.py",
+            "runtime/test_sqlite_prelaunch_stress.py",
+            "runtime/test_sqlite_prelaunch_writeability.py",
+            "runtime/test_certification_wait_sqlite_pressure.py",
+            "runtime/test_sqlite_adversarial_identity.py",
+            "runtime/test_sqlite_fault_matrix.py",
+        )
+    ]
+    assert options.qualified and options.show_output
+    assert options.pytest_config == Path("pyproject.toml")
+    assert options.marker == "not slow and not process and not scale"
+    assert options.granularity == "tests" and options.batch_size == 64
+    assert options.workers == 1 and options.batch_timeout == 180
+    assert options.pytest_arg == [] and options.exclude == []
+    assert options.batch is None and not options.resume

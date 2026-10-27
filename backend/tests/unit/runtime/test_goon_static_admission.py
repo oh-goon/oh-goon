@@ -172,13 +172,13 @@ def test_backend_test_tool_authority_is_stable_after_uv_entrypoint_materializati
     observed = canonical_step_required_tools(root, goon="oh-goon/backend-tests", step_id="make")
 
     assert observed == expected
-    assert observed == ("git", "ldd", "node", "npm", "sh", "true", "uv")
+    assert observed == ("bash", "git", "ldd", "node", "npm", "sh", "systemd-run", "true", "uv")
 
 
 def test_make_workload_owner_is_shared_by_every_canonical_consumer() -> None:
     from oh_goon.repository_tooling.goon_static_admission import canonical_step_required_tools
 
-    expected = ("sh",)
+    expected = ("bash", "sh", "systemd-run")
     assert (
         canonical_step_required_tools(_root(), goon="oh-goon/integration-contract", step_id="make")
         == expected
@@ -198,21 +198,30 @@ def test_certification_make_workloads_admit_transitive_shell_and_workspace_tools
         "git",
         "node",
         "sh",
+        "systemd-run",
         "uv",
     )
     assert canonical_step_required_tools(_root(), goon="oh-goon/backend-p0", step_id="make") == (
+        "bash",
         "git",
         "ldd",
         "sh",
+        "systemd-run",
         "uv",
     )
-    assert canonical_step_required_tools(_root(), goon="oh-goon/architecture", step_id="make") == ()
+    assert canonical_step_required_tools(_root(), goon="oh-goon/architecture", step_id="make") == (
+        "bash",
+        "systemd-run",
+    )
 
 
 def test_architecture_does_not_require_package_manager_tool_authority() -> None:
     from oh_goon.repository_tooling.goon_static_admission import canonical_step_required_tools
 
-    assert canonical_step_required_tools(_root(), goon="oh-goon/architecture", step_id="make") == ()
+    assert canonical_step_required_tools(_root(), goon="oh-goon/architecture", step_id="make") == (
+        "bash",
+        "systemd-run",
+    )
 
 
 def test_shell_runtime_support_contract_is_execution_authority_identity(
@@ -249,6 +258,7 @@ def test_tooling_complete_opaque_runtime_authority_is_explicit_and_proven(tmp_pa
         "git",
         "node",
         "sh",
+        "systemd-run",
         "uv",
     )
     for tool in ("bash", "dd", "git", "node"):
@@ -266,7 +276,7 @@ def test_tooling_complete_opaque_runtime_authority_is_explicit_and_proven(tmp_pa
         encoding="utf-8",
     )
     reduced = load_workload_execution_requirements(root)
-    assert required_tools_for_owner(reduced, owner) == ("sh",)
+    assert required_tools_for_owner(reduced, owner) == ("bash", "sh", "systemd-run")
     assert reduced.identity != requirements.identity
 
 
@@ -355,6 +365,7 @@ def test_make_recipe_shell_is_derived_without_handwritten_tool_allow() -> None:
         "git",
         "node",
         "sh",
+        "systemd-run",
         "uv",
     )
 
@@ -363,13 +374,17 @@ def test_make_workload_requirement_change_invalidates_every_consumer_permission(
     tmp_path: Path,
 ) -> None:
     root = _copy_static_inputs(tmp_path)
+    baseline = compile_canonical_goons(root)
+    assert baseline["status"] == "PASS"
+    assert baseline["issues"] == []
     makefile = root / "Makefile"
     text = makefile.read_text(encoding="utf-8")
-    text = text.replace(
+    changed = text.replace(
         "test-integration:",
-        "# OH_GOON_OPAQUE_TOOLS: bash\ntest-integration:",
+        "# OH_GOON_OPAQUE_TOOLS: awk\ntest-integration:",
     )
-    makefile.write_text(text, encoding="utf-8")
+    assert changed != text
+    makefile.write_text(changed, encoding="utf-8")
 
     payload = compile_canonical_goons(root)
 
@@ -378,8 +393,8 @@ def test_make_workload_requirement_change_invalidates_every_consumer_permission(
         for item in payload["issues"]
         if item["code"] == "TOOL_PERMISSION_MISSING"
     }
-    assert ("oh-goon/integration-contract", ("bash",)) in affected
-    assert ("oh-goon/integration-tests", ("bash",)) in affected
+    assert ("oh-goon/integration-contract", ("awk",)) in affected
+    assert ("oh-goon/integration-tests", ("awk",)) in affected
 
 
 def test_make_workload_owner_is_derived_from_compiled_step_without_registry_mirror(
@@ -402,7 +417,7 @@ def test_make_workload_owner_is_derived_from_compiled_step_without_registry_mirr
             encoding="utf-8"
         )
     )
-    assert generated["goons"]["oh-goon/integration-contract"]["make"] == []
+    assert generated["goons"]["oh-goon/integration-contract"]["make"] == ["bash", "systemd-run"]
 
 
 def test_permission_ceiling_may_be_broader_without_broadening_runtime_step(tmp_path: Path) -> None:
@@ -424,7 +439,17 @@ def test_permission_ceiling_may_be_broader_without_broadening_runtime_step(tmp_p
 
     compiled = GoonTemplateStore(root / "templates/goons").source("oh-goon/backend-tests").compiled
     assert "curl" not in compiled.steps[0].capabilities.tools
-    assert compiled.steps[0].capabilities.tools == ("git", "ldd", "node", "npm", "sh", "true", "uv")
+    assert compiled.steps[0].capabilities.tools == (
+        "bash",
+        "git",
+        "ldd",
+        "node",
+        "npm",
+        "sh",
+        "systemd-run",
+        "true",
+        "uv",
+    )
 
 
 def test_new_direct_canonical_goon_needs_no_mirrored_execution_policy(tmp_path: Path) -> None:

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
+import shlex
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -119,12 +122,33 @@ def test_focused_schedule_regression_has_exact_owner_local_validation_classifica
     assert target in classes["owner-local-validation"]
     assert sum(target in members for members in classes.values()) == 1
     assert target not in data["canonical_human_workflow"]["make_targets"]
-    assert (
-        "frontend-schedule-plan-input-regression:\n"
-        "\tcd frontend && npm run test -- "
-        "src/features/schedules/components/ScheduleCreatePanel.test.tsx "
-        "src/features/schedules/components/schedulePlanInputDraft.test.ts"
-    ) in MAKEFILE
+    environment = os.environ.copy()
+    for name in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
+        environment.pop(name, None)
+    result = subprocess.run(
+        ["make", "--no-print-directory", "--dry-run", target],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    (command,) = [
+        shlex.split(line)
+        for line in result.stdout.replace("\\\n", " ").splitlines()
+        if line.strip()
+    ]
+    assert command[:4] == ["bash", "scripts/development_test_resources.sh", "sh", "-c"]
+    assert shlex.split(command[4]) == ["cd", "frontend", "&&", "exec", "$@"]
+    assert command[6:] == [
+        "npm",
+        "run",
+        "test",
+        "--",
+        "src/features/schedules/components/ScheduleCreatePanel.test.tsx",
+        "src/features/schedules/components/schedulePlanInputDraft.test.ts",
+    ]
 
 
 def test_candidate_convergence_preflight_uses_source_authorities_without_archive_history() -> (

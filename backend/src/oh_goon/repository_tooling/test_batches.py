@@ -15,6 +15,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oh_goon.repository_tooling.pytest_batch_coverage import BatchCoverageSession
 
 from oh_goon.engine.command import run_command
 from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
@@ -31,7 +35,10 @@ from oh_goon.repository_tooling.pytest_execution_membership import (
     PytestExecutionMembershipContext,
     PytestExecutionMembershipSession,
 )
-from oh_goon.repository_tooling.pytest_process_environment import isolated_pytest_environment
+from oh_goon.repository_tooling.pytest_process_environment import (
+    PytestInvocation,
+    resolve_pytest_invocation,
+)
 from oh_goon.repository_tooling.test_batch_receipts import (
     batch_identity as receipt_batch_identity,
 )
@@ -39,14 +46,18 @@ from oh_goon.runtime.recovery_evidence import ExecutionRecoveryEvent, recovery_w
 
 
 def _run_command(
-    command: list[str], *, timeout: int, env: dict[str, str] | None = None
+    command: list[str],
+    *,
+    timeout: int,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> tuple[int, str, float]:
     started = time.monotonic()
     try:
         result = run_command(
             *command,
             timeout=float(timeout),
-            cwd=Path.cwd(),
+            cwd=cwd if cwd is not None else Path.cwd(),
             env=env,
             merge_stderr=True,
             require_process_group_quiescence=True,
@@ -148,9 +159,17 @@ def _run_members(
     receipt_execution_plan_identity: str | None = None,
     receipt_run_identity: str | None = None,
     receipt_attempt_identity: str | None = None,
+    invocation: PytestInvocation | None = None,
+    coverage_session: BatchCoverageSession | None = None,
 ) -> tuple[int, str, float]:
-    command = [sys.executable, "-m", "pytest", "-q", "--tb=short", "-c", "backend/pyproject.toml"]
-    env = isolated_pytest_environment()
+    explicit_invocation = invocation is not None
+    invocation = invocation or resolve_pytest_invocation()
+    command = [*invocation.command_prefix, "-q", "--tb=short", "-c", str(invocation.config_file)]
+    env = dict(invocation.environment)
+    if coverage_session is not None:
+        env = coverage_session.environment_for_attempt(
+            env, receipt_attempt_identity or receipt_batch_identity(members)
+        )
     if receipt_directory is not None and receipt_suite_identity:
         physical_batch_identity = receipt_batch_identity(members)
         command += ["-p", "oh_goon.repository_tooling.pytest_batch_receipts"]
@@ -167,12 +186,15 @@ def _run_members(
                 "OH_GOON_PYTEST_RECEIPT_RUN_IDENTITY": receipt_run_identity or "",
                 "OH_GOON_PYTEST_RECEIPT_ATTEMPT_IDENTITY": receipt_attempt_identity or "",
                 "OH_GOON_PYTEST_RECEIPT_MEMBERS": json.dumps(list(members), separators=(",", ":")),
-                "OH_GOON_PYTEST_RECEIPT_ROOT": str(Path.cwd().resolve()),
+                "OH_GOON_PYTEST_RECEIPT_ROOT": str(invocation.cwd),
             }
         )
+    command += invocation.pytest_args
     if marker:
         command += ["-m", marker]
     command += list(members)
+    if explicit_invocation:
+        return _run_command(command, timeout=timeout, env=env, cwd=invocation.cwd)
     return _run_command(command, timeout=timeout, env=env)
 
 
@@ -189,6 +211,8 @@ def _run(
     receipt_execution_plan_identity: str | None = None,
     receipt_run_identity: str | None = None,
     root_attempt: int = 1,
+    invocation: PytestInvocation | None = None,
+    coverage_session: BatchCoverageSession | None = None,
 ) -> tuple[int, str, float, tuple[ExecutionRecoveryEvent, ...]]:
     started = time.monotonic()
     recovery_events: list[ExecutionRecoveryEvent] = []
@@ -241,7 +265,10 @@ def _run(
             return next((code for code in child_codes if code not in (0, 5)), 1), "".join(outputs)
 
         prepared = membership_session.prepare(
-            members, allow_current_run_reuse=is_refinement or root_attempt > 1
+            members,
+            allow_current_run_reuse=(
+                coverage_session is None and (is_refinement or root_attempt > 1)
+            ),
         )
         if not prepared.members:
             return 0, prepared.reused_prefix
@@ -255,10 +282,25 @@ def _run(
         )
         if budget_stop is not None:
             return 124, prepared.reused_prefix + budget_stop
-        rc, output, _elapsed = _run_members(
-            members, timeout=effective_timeout, marker=marker, **prepared.receipt_kwargs
-        )
+        if invocation is None and coverage_session is None:
+            rc, output, _elapsed = _run_members(
+                members, timeout=effective_timeout, marker=marker, **prepared.receipt_kwargs
+            )
+        else:
+            rc, output, _elapsed = _run_members(
+                members,
+                timeout=effective_timeout,
+                marker=marker,
+                invocation=invocation,
+                coverage_session=coverage_session,
+                **prepared.receipt_kwargs,
+            )
         output = prepared.reused_prefix + output
+        if rc == 124 and coverage_session is not None:
+            return rc, output + (
+                "\nBATCH COVERAGE RECOVERY INCOMPLETE: a timed-out measured attempt "
+                "has no admitted saved coverage; timeout refinement is disabled\n"
+            )
         if rc != 124 or not timeout_bisection or len(members) <= 1:
             return rc, output
 

@@ -28,6 +28,26 @@ The backend check includes mypy's strict `oh_goon` package selection from
 `pyproject.toml` before behavior tests. Edited test files receive separately
 selected typing checks.
 
+Supported Make validation gates, including `backend-check`, `test-integration`,
+profiling, coverage and certification, share the default two-CPU native Linux
+budget. Use `OH_GOON_TEST_CPUS=4 make -C .. backend-check` to change that ceiling
+or `OH_GOON_TEST_CPUS=0` to disable the configured ceiling explicitly. A positive
+budget requires cgroup v2 and native systemd user CPU control; unavailable
+enforcement stops before test execution. Direct focused `uv run ... pytest`
+commands remain native and do not acquire the Make-owned CPU scope.
+
+Backend and integration Make gates use the existing bounded pytest batches,
+retain their original pytest configuration and markers, and keep their original
+serial execution with one worker. Exact native collected test cases retain class
+and parameter suffixes, allowing the existing timeout refinement to split large
+files within the new 180-second per-batch timeout. An omitted
+`BACKEND_CHECK_TEST_ROOTS` still
+delegates selection to native pytest `testpaths`. Coverage retains file batches
+and the complete selected scope, combining native child data before applying the
+existing floor once.
+See [test resource budgets](../docs/DEVELOPMENT.md#local-test-resource-budget)
+for supported scope, diagnostics and parallel-invocation limits.
+
 If you add, change, or remove a FastAPI route or public request/response model, return to the repository root and run `make generate`. Never edit generated frontend contract files by hand.
 
 Use this checkout's CLI through its prepared environment:

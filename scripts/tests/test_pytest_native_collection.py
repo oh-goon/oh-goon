@@ -2,13 +2,308 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import json
 from pathlib import Path
 
 import pytest
 
 from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
+from oh_goon.repository_tooling.pytest_process_environment import (
+    resolve_pytest_invocation,
+)
 
 pytestmark = pytest.mark.process
+
+
+def test_qualified_empty_paths_match_native_defaults_flags_plugins_and_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", raising=False)
+    config = tmp_path / "pyproject.toml"
+    config.write_text(
+        '[tool.pytest.ini_options]\ntestpaths = ["chosen"]\nmarkers = ["wanted"]\n',
+        encoding="utf-8",
+    )
+    chosen = tmp_path / "chosen"
+    chosen.mkdir()
+    (chosen / "test_choice.py").write_text(
+        "from pathlib import Path\n"
+        "def test_selected(): Path('executed').write_text('yes')\n"
+        "def test_other(): pass\n",
+        encoding="utf-8",
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "test_unselected.py").write_text(
+        "raise AssertionError('expanded scope')\n"
+    )
+    (tmp_path / "conftest.py").write_text(
+        "import pytest\n"
+        "def pytest_configure(config):\n"
+        "    assert config.pluginmanager.hasplugin('pytest_cov'), 'native autoload missing'\n"
+        "def pytest_collection_modifyitems(items):\n"
+        "    for item in items:\n"
+        "        if item.name == 'test_selected': item.add_marker(pytest.mark.wanted)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    invocation = resolve_pytest_invocation(
+        qualified=True,
+        pytest_config=Path("pyproject.toml"),
+        pytest_args=("-k", "selected"),
+    )
+    native_packet = tmp_path / "native.json"
+    environment = dict(invocation.environment)
+    environment["OH_GOON_PYTEST_COLLECTION_OUTPUT"] = str(native_packet)
+    native = subprocess.run(
+        [
+            *invocation.command_prefix,
+            "--collect-only",
+            "-qq",
+            "-c",
+            str(invocation.config_file),
+            "-p",
+            "oh_goon.repository_tooling.pytest_member_selection",
+            *invocation.pytest_args,
+            "-m",
+            "wanted",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert native.returncode == 0, native.stdout + native.stderr
+    assert collect_native_pytest(
+        (), marker="wanted", invocation=invocation
+    ).payload() == json.loads(native_packet.read_text(encoding="utf-8"))
+    report = tmp_path / "report.json"
+    execution = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "oh_goon.repository_tooling.test_batches",
+            "--qualified",
+            "--pytest-config",
+            "pyproject.toml",
+            "--pytest-arg=-k",
+            "--pytest-arg=selected",
+            "--marker",
+            "wanted",
+            "--workers",
+            "1",
+            "--report-path",
+            str(report),
+            "--resume-state-root",
+            str(tmp_path / "receipts"),
+        ],
+        cwd=tmp_path,
+        env=dict(invocation.environment),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert execution.returncode == 0, execution.stdout + execution.stderr
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["membership_receipt"]["selected"] == ["chosen/test_choice.py"]
+    assert payload["membership_receipt"]["terminal_success"] is True
+    assert (tmp_path / "executed").read_text() == "yes"
+    assert payload["diagnostics"]["qualified"] is True
+
+
+def test_mixed_explicit_selectors_keep_exact_scope_and_show_native_per_batch_durations(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    first = tmp_path / "test_first.py"
+    first.write_text(
+        "def test_selected(): pass\n"
+        "def test_unselected(): raise AssertionError('expanded file selector')\n",
+        encoding="utf-8",
+    )
+    second = tmp_path / "test_second.py"
+    second.write_text("def test_one(): pass\ndef test_two(): pass\n", encoding="utf-8")
+    report = tmp_path / "report.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "oh_goon.repository_tooling.test_batches",
+            f"{first}::test_selected",
+            str(second),
+            "--granularity",
+            "files",
+            "--pytest-arg=--durations=40",
+            "--pytest-arg=--durations-min=0.0",
+            "--show-output",
+            "--marker",
+            "",
+            "--workers",
+            "1",
+            "--report-path",
+            str(report),
+            "--resume-state-root",
+            str(tmp_path / "receipts"),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["granularity"] == "tests"
+    assert payload["membership_receipt"]["selected"] == [
+        f"{first}::test_selected",
+        f"{second}::test_one",
+        f"{second}::test_two",
+    ]
+    assert payload["membership_receipt"]["terminal_success"] is True
+    assert "NATIVE OUTPUT (per batch)" in result.stdout
+    assert "slowest 40 durations" in result.stdout
+
+
+@pytest.mark.parametrize("inside_ignored_root", [False, True])
+def test_native_options_and_config_bytes_bind_correctness_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, inside_ignored_root: bool
+) -> None:
+    from oh_goon.repository_tooling import pytest_process_environment
+
+    config = tmp_path / "pyproject.toml"
+    if inside_ignored_root:
+        monkeypatch.setattr(pytest_process_environment, "ROOT", tmp_path)
+        config = tmp_path / ".venv/pyproject.toml"
+        config.parent.mkdir()
+    config.write_text('[tool.pytest.ini_options]\naddopts = "-q"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    first = resolve_pytest_invocation(pytest_config=config, pytest_args=("-k", "one"))
+    second = resolve_pytest_invocation(pytest_config=config, pytest_args=("-k", "two"))
+    identity = first.correctness_context()
+    assert identity != second.correctness_context()
+    config.write_text('[tool.pytest.ini_options]\naddopts = "-v"\n', encoding="utf-8")
+    assert identity == first.correctness_context()
+    changed = resolve_pytest_invocation(pytest_config=config, pytest_args=("-k", "one"))
+    assert identity != changed.correctness_context()
+
+
+@pytest.mark.parametrize("selected_branch", [None, "test_true"])
+def test_native_coverage_union_preserves_membership_when_floor_passes_or_fails(
+    tmp_path: Path, selected_branch: str | None
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\npythonpath = ["."]\n'
+        '[tool.coverage.run]\nbranch = true\nsource = ["subject"]\n'
+        "[tool.coverage.report]\nfail_under = 100\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "subject.py").write_text(
+        "def value(flag):\n    if flag:\n        return 1\n    return 2\n",
+        encoding="utf-8",
+    )
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_true.py").write_text(
+        "from subject import value\ndef test_true(): assert value(True) == 1\n",
+        encoding="utf-8",
+    )
+    (tests / "test_false.py").write_text(
+        "from subject import value\ndef test_false(): assert value(False) == 2\n",
+        encoding="utf-8",
+    )
+    report = tmp_path / "batch.json"
+    coverage_json = tmp_path / "coverage.json"
+    arguments = [
+        sys.executable,
+        "-m",
+        "oh_goon.repository_tooling.test_batches",
+        "--qualified",
+        "--pytest-config",
+        "pyproject.toml",
+        "--marker",
+        "",
+        "--batch-size",
+        "1",
+        "--workers",
+        "2",
+        "--batch-timeout",
+        "30",
+        "--coverage-source",
+        "subject",
+        "--coverage-data-file",
+        str(tmp_path / ".coverage"),
+        f"--coverage-report=json:{coverage_json}",
+        "--coverage-fail-under",
+        "100",
+        "--report-path",
+        str(report),
+        "--resume-state-root",
+        str(tmp_path / "receipts"),
+    ]
+    if selected_branch is not None:
+        arguments += ["--pytest-arg=-k", f"--pytest-arg={selected_branch}"]
+    result = subprocess.run(
+        arguments, cwd=tmp_path, capture_output=True, text=True, timeout=60, check=False
+    )
+    assert result.returncode == (0 if selected_branch is None else 1), (
+        result.stdout + result.stderr
+    )
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["status"] == ("PASS" if selected_branch is None else "FAIL")
+    membership = payload["membership_receipt"]
+    assert len(membership["selected"]) == (2 if selected_branch is None else 1)
+    assert membership["passed"] == membership["selected"]
+    assert membership["terminal_success"] is True
+    assert membership["missing"] == []
+    assert membership["duplicates"] == []
+    assert membership["extras"] == []
+    assert coverage_json.is_file()
+    assert (tmp_path / ".coverage").is_file()
+
+
+@pytest.mark.parametrize(
+    ("filtered", "coverage"), [(False, False), (True, False), (True, True)]
+)
+def test_qualified_empty_native_selection_exits_five_without_pass_or_coverage(
+    tmp_path: Path, filtered: bool, coverage: bool
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8"
+    )
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    if filtered:
+        (tests / "test_one.py").write_text("def test_one(): pass\n", encoding="utf-8")
+    report = tmp_path / "report.json"
+    data = tmp_path / ".coverage"
+    arguments = [
+        sys.executable,
+        "-m",
+        "oh_goon.repository_tooling.test_batches",
+        "--qualified",
+        "--pytest-config",
+        "pyproject.toml",
+        "--marker",
+        "",
+        "--report-path",
+        str(report),
+        "--resume-state-root",
+        str(tmp_path / "receipts"),
+    ]
+    if filtered:
+        arguments += ["--pytest-arg=-k", "--pytest-arg=not_present"]
+    if coverage:
+        arguments += ["--coverage-source=subject", "--coverage-data-file", str(data)]
+    result = subprocess.run(
+        arguments, cwd=tmp_path, capture_output=True, text=True, timeout=30, check=False
+    )
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert "PYTEST BATCH RESULT: PASS" not in result.stdout
+    assert not report.exists()
+    assert not data.exists()
 
 
 def test_native_collection_preserves_classes_parameters_and_overwritten_markers(

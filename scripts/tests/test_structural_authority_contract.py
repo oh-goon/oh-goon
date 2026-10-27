@@ -4,6 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from oh_goon.repository_tooling.architecture._structural_authority_workflow import (
+    check_make_single_path,
+)
 from oh_goon.repository_tooling.architecture.structural_authority_contract import (
     check_structural_authority_contract,
 )
@@ -35,10 +38,11 @@ def _minimal_repo(tmp_path: Path) -> Path:
     )
     (root / "Makefile").write_text(
         "DEVELOPMENT_TEST_RUNNER = bash scripts/development_test.sh\n"
+        "DEVELOPMENT_RESOURCE_RUNNER = bash scripts/development_test_resources.sh\n"
         'CERTIFICATION_RUNNER = env UV_CACHE_DIR="$(CERTIFICATION_UV_CACHE)" uv run --isolated --frozen --offline --no-dev --project backend oh-goon-workflow\n'
         "RUN_LOG_DIR ?= /tmp/oh-goon-test-logs\n"
-        'DEVELOPMENT_TEST_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh test $(DEVELOPMENT_TEST_RUNNER)\n'
-        'CERTIFICATION_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh certify $(CERTIFICATION_RUNNER)\n'
+        'DEVELOPMENT_TEST_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh test $(DEVELOPMENT_RESOURCE_RUNNER) $(DEVELOPMENT_TEST_RUNNER)\n'
+        'CERTIFICATION_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh certify $(DEVELOPMENT_RESOURCE_RUNNER) $(CERTIFICATION_RUNNER)\n'
         "DEPENDENCY_POLICY = uv run --no-project python backend/src/oh_goon/repository_tooling/fixture_dependency_policy.py\n"
         "INIT_DOCTOR = sh scripts/init_doctor.sh\n\n"
         "init:\n\t@uv sync --project backend --locked --group dev --group quality --group build\n\t@cd frontend && npm ci --prefer-offline --ignore-scripts --no-audit --no-fund\n\n"
@@ -146,6 +150,7 @@ def test_make_workflow_assignment_whitespace_is_representation_invariant(
 ) -> None:
     root = _minimal_repo(tmp_path)
     makefile = root / "Makefile"
+    baseline = _messages(root)
     makefile.write_text(
         makefile.read_text(encoding="utf-8")
         .replace(
@@ -153,8 +158,12 @@ def test_make_workflow_assignment_whitespace_is_representation_invariant(
             "DEVELOPMENT_TEST_RUNNER=bash scripts/development_test.sh",
         )
         .replace(
-            'DEVELOPMENT_TEST_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh test $(DEVELOPMENT_TEST_RUNNER)',
-            'DEVELOPMENT_TEST_FRONTDOOR=OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh test $(DEVELOPMENT_TEST_RUNNER)',
+            "DEVELOPMENT_RESOURCE_RUNNER = bash scripts/development_test_resources.sh",
+            "DEVELOPMENT_RESOURCE_RUNNER=bash scripts/development_test_resources.sh",
+        )
+        .replace(
+            'DEVELOPMENT_TEST_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh test $(DEVELOPMENT_RESOURCE_RUNNER) $(DEVELOPMENT_TEST_RUNNER)',
+            'DEVELOPMENT_TEST_FRONTDOOR=OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh test $(DEVELOPMENT_RESOURCE_RUNNER) $(DEVELOPMENT_TEST_RUNNER)',
         ),
         encoding="utf-8",
     )
@@ -164,10 +173,53 @@ def test_make_workflow_assignment_whitespace_is_representation_invariant(
         "DEVELOPMENT_TEST_RUNNER must have exactly one canonical" in message
         for message in messages
     )
-    assert not any(
-        "DEVELOPMENT_TEST_FRONTDOOR must be the single logging wrapper" in message
-        for message in messages
+    assert not any("one-line delegation" in message for message in messages)
+    assert messages == baseline
+
+
+@pytest.mark.parametrize(
+    "resource_runners",
+    ("", "$(DEVELOPMENT_RESOURCE_RUNNER) $(DEVELOPMENT_RESOURCE_RUNNER) "),
+    ids=("bypass", "duplicate"),
+)
+@pytest.mark.parametrize(
+    ("runner_variable", "diagnostic"),
+    (
+        (
+            "DEVELOPMENT_TEST_RUNNER",
+            "make test must remain a one-line delegation to the logged development test frontdoor",
+        ),
+        (
+            "CERTIFICATION_RUNNER",
+            "make certify must delegate exactly once to the logged certification frontdoor; APP ordering belongs to the Plan",
+        ),
+    ),
+)
+def test_logged_frontdoors_require_exactly_one_resource_wrapper(
+    tmp_path: Path, resource_runners: str, runner_variable: str, diagnostic: str
+) -> None:
+    root = tmp_path / "repo"
+    (root / "backend").mkdir(parents=True)
+    makefile = root / "Makefile"
+    baseline = (ROOT / "Makefile").read_text(encoding="utf-8")
+    makefile.write_text(baseline, encoding="utf-8")
+    (root / "backend/pyproject.toml").write_text(
+        (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8"),
+        encoding="utf-8",
     )
+    assert check_make_single_path(root) == []
+
+    mutated = baseline.replace(
+        f"$(DEVELOPMENT_RESOURCE_RUNNER) $({runner_variable})",
+        resource_runners + f"$({runner_variable})",
+        1,
+    )
+    assert mutated != baseline
+    makefile.write_text(mutated, encoding="utf-8")
+
+    assert [violation.message for violation in check_make_single_path(root)] == [
+        diagnostic
+    ]
 
 
 def test_make_workflow_assignment_operator_remains_semantic(

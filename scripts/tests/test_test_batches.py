@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 import time
 from types import ModuleType
 from pathlib import Path
@@ -51,6 +52,22 @@ def test_failure_output_is_bounded_but_keeps_head_and_tail() -> None:
     assert "line-299" in bounded
     assert "diagnostic lines omitted" in bounded
     assert len(bounded.splitlines()) == 31
+
+
+@pytest.mark.parametrize("partial_option", [("--resume",), ("--batch", "1")])
+def test_coverage_rejects_reuse_or_partial_batches_before_execution(
+    partial_option: tuple[str, ...], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["oh-goon-test-batches", "--coverage-source=oh_goon", *partial_option],
+    )
+    with pytest.raises(SystemExit) as failure:
+        parse_batch_args()
+    assert failure.value.code == 2
 
 
 def test_resource_pressure_classifier_is_narrow() -> None:

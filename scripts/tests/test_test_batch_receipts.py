@@ -4,6 +4,7 @@ import ast
 import json
 from pathlib import Path
 from typing import TypedDict
+from unittest.mock import call, patch
 
 import pytest
 
@@ -25,6 +26,144 @@ def _fix_source_identity(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
         "canonical_source_identity",
         lambda _root: "sha256:" + value * 64,
     )
+
+
+def test_plan_identity_reads_each_unique_file_once(tmp_path: Path) -> None:
+    from oh_goon.repository_tooling.test_batch_receipts import test_plan_identity
+
+    first = tmp_path / "test_first.py"
+    second = tmp_path / "test_second.py"
+    first.write_text("def test_first(): pass\n", encoding="utf-8")
+    second.write_text("def test_second(): pass\n", encoding="utf-8")
+    members = (
+        "test_first.py::test_first[one]",
+        f"{first}::TestGroup::test_other",
+        "test_second.py::test_second",
+        "test_first.py::test_first[one]",
+    )
+
+    with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
+        test_plan_identity(members, root=tmp_path)
+
+    assert opened.call_args_list == [call(first, "rb"), call(second, "rb")]
+
+
+def test_plan_identity_preserves_order_duplicates_and_current_file_bytes(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.test_batch_receipts import test_plan_identity
+
+    first = tmp_path / "test_first.py"
+    second = tmp_path / "test_second.py"
+    first.write_text("def test_first(): pass\n", encoding="utf-8")
+    second.write_text("def test_second(): pass\n", encoding="utf-8")
+    members = (
+        "test_first.py::test_first",
+        "test_second.py::test_second",
+        "test_first.py::test_first",
+    )
+    identity = test_plan_identity(members, root=tmp_path)
+
+    assert test_plan_identity(iter(members), root=tmp_path) == identity
+    assert (
+        test_plan_identity((members[1], members[0], members[2]), root=tmp_path)
+        != identity
+    )
+    assert test_plan_identity(members[:-1], root=tmp_path) != identity
+
+    first.write_text("def test_first(): True\n", encoding="utf-8")
+    assert test_plan_identity(members, root=tmp_path) != identity
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("parameter_ids", [("a", "a][b"), ("a][b", "a")])
+def test_native_parameter_ids_cannot_prefix_collide_in_completed_receipts(
+    tmp_path: Path, parameter_ids: tuple[str, str]
+) -> None:
+    import os
+    import subprocess
+    import sys
+
+    from oh_goon.repository_tooling.pytest_execution_membership import (
+        ExecutionMembershipStore,
+    )
+    from oh_goon.repository_tooling.pytest_process_environment import (
+        isolated_pytest_environment,
+    )
+    from oh_goon.repository_tooling.test_batch_receipts import (
+        MemberReceiptStore,
+        batch_identity,
+    )
+
+    root = Path(__file__).resolve().parents[2]
+    test_file = tmp_path / "test_parameter_ids.py"
+    test_file.write_text(
+        "import pytest\nclass TestGroup:\n"
+        f"    @pytest.mark.parametrize('value', [1, 2], ids={parameter_ids!r})\n"
+        "    def test_value(self, value): assert value in (1, 2)\n",
+        encoding="utf-8",
+    )
+    members = tuple(
+        f"{test_file}::TestGroup::test_value[{parameter_id}]"
+        for parameter_id in parameter_ids
+    )
+    suite_identity = "sha256:" + "a" * 64
+    plan_identity = "sha256:" + "b" * 64
+    run_identity = "sha256:" + "c" * 64
+    receipt_directory = tmp_path / "receipts"
+    environment = isolated_pytest_environment(
+        {
+            name: value
+            for name, value in os.environ.items()
+            if not name.startswith("OH_GOON_PYTEST_RECEIPT_")
+            and name not in {"PYTEST_ADDOPTS", "PYTEST_PLUGINS"}
+        }
+    )
+    environment.update(
+        {
+            "OH_GOON_PYTEST_RECEIPT_DIRECTORY": str(receipt_directory),
+            "OH_GOON_PYTEST_RECEIPT_SUITE_IDENTITY": suite_identity,
+            "OH_GOON_PYTEST_RECEIPT_BATCH_IDENTITY": batch_identity(members),
+            "OH_GOON_PYTEST_RECEIPT_EXECUTION_PLAN_IDENTITY": plan_identity,
+            "OH_GOON_PYTEST_RECEIPT_RUN_IDENTITY": run_identity,
+            "OH_GOON_PYTEST_RECEIPT_ATTEMPT_IDENTITY": "sha256:" + "d" * 64,
+            "OH_GOON_PYTEST_RECEIPT_MEMBERS": json.dumps(members),
+            "OH_GOON_PYTEST_RECEIPT_ROOT": str(tmp_path),
+        }
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-c",
+            str(root / "backend/pyproject.toml"),
+            "-p",
+            "oh_goon.repository_tooling.pytest_batch_receipts",
+            str(test_file),
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    correctness = MemberReceiptStore(receipt_directory, suite_identity=suite_identity)
+    assert all(correctness.reusable(member) for member in members)
+    membership, _ = ExecutionMembershipStore(
+        receipt_directory,
+        suite_identity=suite_identity,
+        execution_plan_identity=plan_identity,
+        run_identity=run_identity,
+    ).finalize(selected=members, resumed=(), suite_passed=True, recovery_lineage=())
+    assert membership.completed == tuple(sorted(members))
+    assert membership.missing == ()
+    assert membership.duplicates == ()
+    assert membership.extras == ()
+    assert membership.terminal_success
 
 
 def test_resume_context_changes_with_correctness_inputs_but_not_batch_grouping(

@@ -147,14 +147,20 @@ def test_backend_gate_checks_configured_package_types_before_running_tests(
     tools = tmp_path / "tools"
     tools.mkdir()
     backend = tmp_path / "backend"
-    executor = backend / ".venv/bin/oh-goon-qualification-exec"
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    shutil.copyfile(
+        ROOT / "scripts/development_test_resources.sh",
+        scripts / "development_test_resources.sh",
+    )
+    executor = backend / ".venv/bin/oh-goon-test-batches"
     executor.parent.mkdir(parents=True)
     recorder = (
         f"#!{sys.executable}\n"
         "import json, os, sys\n"
         "from pathlib import Path\n"
         "with Path(os.environ['OH_GOON_TEST_BACKEND_CALLS']).open('a') as stream:\n"
-        "    stream.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')\n"
+        "    stream.write(json.dumps({'tool': Path(sys.argv[0]).name, 'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')\n"
         "sys.exit(int(os.environ['OH_GOON_TEST_MYPY_EXIT']) if 'mypy' in sys.argv[1:] else 0)\n"
     )
     for executable in (tools / "uv", executor):
@@ -174,6 +180,7 @@ def test_backend_gate_checks_configured_package_types_before_running_tests(
         PATH=f"{tools}{os.pathsep}{environment.get('PATH', os.defpath)}",
         OH_GOON_TEST_BACKEND_CALLS=str(calls),
         OH_GOON_TEST_MYPY_EXIT=str(mypy_exit),
+        OH_GOON_TEST_CPUS="0",
     )
     result = subprocess.run(
         ["make", "--no-print-directory", "-f", str(ROOT / "Makefile"), "backend-check"],
@@ -186,7 +193,7 @@ def test_backend_gate_checks_configured_package_types_before_running_tests(
     )
     observed = [json.loads(line) for line in calls.read_text().splitlines()]
     typed = [event for event in observed if "mypy" in event["argv"]]
-    tests = [event for event in observed if event["argv"][0] == "pytest"]
+    tests = [event for event in observed if event["tool"] == "oh-goon-test-batches"]
     assert len(typed) == 1
     assert typed[0]["cwd"] == str(backend)
     assert typed[0]["argv"][-1] == "mypy"  # Use native configured package selection.
@@ -196,7 +203,7 @@ def test_backend_gate_checks_configured_package_types_before_running_tests(
         assert "17" in result.stderr
     else:
         assert len(tests) == 1
-        assert observed.index(typed[0]) < observed.index(tests[0])
+        assert all(observed.index(typed[0]) < observed.index(test) for test in tests)
 
 
 @pytest.mark.parametrize("failure", ("", "backend", "cross-owner"))
@@ -213,9 +220,9 @@ def test_integration_gate_runs_both_owners_and_preserves_failures(
     shutil.copyfile(ROOT / "Makefile", tmp_path / "Makefile")
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    for name in ("run_step.sh", "command_banner.sh"):
+    for name in ("run_step.sh", "command_banner.sh", "development_test_resources.sh"):
         shutil.copyfile(ROOT / "scripts" / name, scripts / name)
-    executable = tmp_path / "backend/.venv/bin/oh-goon-qualification-exec"
+    executable = tmp_path / "backend/.venv/bin/oh-goon-test-batches"
     executable.parent.mkdir(parents=True)
     executable.write_text(
         f"#!{sys.executable}\n"
@@ -234,6 +241,7 @@ def test_integration_gate_runs_both_owners_and_preserves_failures(
         environment.pop(name, None)
     environment["OH_GOON_INTEGRATION_CALLS"] = str(calls)
     environment["OH_GOON_INTEGRATION_FAILURE"] = failure
+    environment["OH_GOON_TEST_CPUS"] = "0"
     command = ["make", "test-integration"]
     if marker_override is not None:
         command.append(f"CHECK_PYTEST_MARKER={marker_override}")
@@ -246,27 +254,29 @@ def test_integration_gate_runs_both_owners_and_preserves_failures(
         text=True,
     )
     observed = [json.loads(line) for line in calls.read_text().splitlines()]
-    expected = [
-        {
-            "owner": "backend",
-            "argv": ["pytest", "-m", expected_marker, "tests/integration"],
-        }
-    ]
+    expected_owners = ["backend"]
+    expected_markers = [expected_marker]
+    expected_configs = ["pyproject.toml"]
     if failure != "backend":
-        expected.append(
-            {
-                "owner": "cross-owner",
-                "argv": [
-                    "pytest",
-                    "-c",
-                    "backend/pyproject.toml",
-                    "-m",
-                    expected_marker,
-                    "tests/integration",
-                ],
-            }
-        )
-    assert observed == expected
+        expected_owners.append("cross-owner")
+        expected_markers.append(expected_marker)
+        expected_configs.append("backend/pyproject.toml")
+    assert [event["owner"] for event in observed] == expected_owners
+    for event, marker, config in zip(
+        observed, expected_markers, expected_configs, strict=True
+    ):
+        arguments = event["argv"]
+        assert "--qualified" in arguments
+        assert arguments[arguments.index("--marker") + 1] == marker
+        if config == "pyproject.toml":
+            assert arguments[arguments.index("--pytest-config") + 1] == config
+        else:
+            assert "--pytest-config" not in arguments
+        assert arguments.count("tests/integration") == 1
+        assert arguments[arguments.index("--workers") + 1] == "1"
+        assert arguments[arguments.index("--batch-size") + 1] == "8"
+        assert arguments[arguments.index("--granularity") + 1] == "tests"
+        assert arguments[arguments.index("--batch-timeout") + 1] == "180"
     assert result.returncode == (2 if failure else 0), result.stdout + result.stderr
     if failure:
         assert "exit 7" in result.stderr

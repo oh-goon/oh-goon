@@ -976,8 +976,9 @@ def test_teardown_is_bounded_redacted_and_does_not_replace_the_primary_failure(
     endpoint_transport(monkeypatch, endpoint)
 
     async def check() -> None:
-        client = CodexServiceClient(tmp_path / "explicit.sock", timeout_seconds=0.03)
-        started = monotonic()
+        client = CodexServiceClient(tmp_path / "explicit.sock")
+        started: float | None = None
+        fault_entered = False
         caught: BaseException | None = None
         try:
             async with client:
@@ -985,19 +986,24 @@ def test_teardown_is_bounded_redacted_and_does_not_replace_the_primary_failure(
                 original_close = client._stack.aclose
 
                 async def failed_close() -> None:
+                    nonlocal fault_entered
                     await original_close()
+                    fault_entered = True
                     if failure == "error":
                         raise OSError("PRIVATE_CLOSE_CANARY")
                     with anyio.CancelScope(shield=True):
                         await asyncio.Event().wait()
 
                 monkeypatch.setattr(client._stack, "aclose", failed_close)
+                monkeypatch.setattr(client, "_timeout", 0.03)
+                started = monotonic()
                 if primary == "safe":
                     raise AgentProviderError("safe primary failure")
                 if primary == "cancel":
                     raise asyncio.CancelledError()
         except BaseException as error:
             caught = error
+        assert started is not None and fault_entered
         assert caught is not None
         assert monotonic() - started < 0.5
         assert "PRIVATE_CLOSE_CANARY" not in str(caught)

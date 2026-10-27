@@ -15,11 +15,13 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from contextlib import ExitStack
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol, TypedDict
 
 from oh_goon.repository_tooling import pytest_execution_report as execution_report_contract
+from oh_goon.repository_tooling.pytest_batch_coverage import BatchCoverageSession, CoverageOptions
 from oh_goon.repository_tooling.pytest_execution_membership import (
     ExecutionMembershipReceipt,
     ExecutionMembershipStore,
@@ -29,6 +31,19 @@ from oh_goon.repository_tooling.pytest_member_selection import (
     NativePytestCollection,
     collect_native_pytest,
     write_native_collection,
+)
+from oh_goon.repository_tooling.pytest_process_environment import (
+    PytestInvocation,
+    resolve_pytest_invocation,
+)
+from oh_goon.repository_tooling.pytest_resource_budget import (
+    PytestResourceBudget,
+    PytestUsageSnapshot,
+    pytest_cgroup_diagnostics,
+    pytest_usage_diagnostics,
+    read_pytest_cgroup_usage,
+    read_pytest_usage,
+    resolve_pytest_resource_budget,
 )
 from oh_goon.repository_tooling.test_batch_receipts import (
     MemberReceiptStore,
@@ -105,20 +120,6 @@ def _chunks(members: tuple[str, ...], size: int) -> tuple[Batch, ...]:
     return tuple(Batch(i + 1, len(chunks), tuple(chunk)) for i, chunk in enumerate(chunks))
 
 
-def _wsl_windows_mounted_workspace(path: Path | None = None) -> bool:
-    if sys.platform != "linux":
-        return False
-    candidate = (path or Path.cwd()).resolve()
-    parts = candidate.parts
-    if len(parts) < 3 or parts[1] != "mnt" or len(parts[2]) != 1:
-        return False
-    try:
-        release = Path("/proc/sys/kernel/osrelease").read_text(encoding="utf-8").lower()
-    except OSError:
-        return False
-    return "microsoft" in release
-
-
 @dataclass(frozen=True)
 class _BatchPlan:
     discovered_members: tuple[str, ...]
@@ -135,6 +136,11 @@ class _BatchPlan:
     run_identity: str
     execution_membership_store: ExecutionMembershipStore
     started: float
+    resource_budget: PytestResourceBudget
+    usage_started: PytestUsageSnapshot | None
+    native_collection_duration: float
+    invocation: PytestInvocation
+    coverage_session: BatchCoverageSession | None = None
 
 
 _BatchFuture = concurrent.futures.Future[tuple[int, str, float, tuple[ExecutionRecoveryEvent, ...]]]
@@ -157,7 +163,10 @@ class _BatchRunState:
 
 
 def _discover_runnable_members(
-    parser: argparse.ArgumentParser, args: argparse.Namespace
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    invocation: PytestInvocation,
+    coverage_session: BatchCoverageSession | None,
 ) -> NativePytestCollection:
     try:
         collection = collect_native_pytest(
@@ -165,10 +174,19 @@ def _discover_runnable_members(
             excludes=tuple(args.exclude),
             marker=args.marker,
             timeout=min(args.batch_timeout, args.suite_timeout or args.batch_timeout),
+            invocation=invocation,
+            environment=coverage_session.environment_for_attempt(
+                invocation.environment, "collection"
+            )
+            if coverage_session
+            else None,
         )
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     if not collection.selected:
+        if invocation.qualified:
+            print("Native pytest selected no tests (exit 5).", file=sys.stderr)
+            raise SystemExit(5)
         parser.error("native pytest collection selected no tests")
     return collection
 
@@ -211,6 +229,7 @@ def _execution_authority(
     scheduled: tuple[Batch, ...],
     reusable: frozenset[str],
     workers: int,
+    resource_budget: PytestResourceBudget,
 ) -> tuple[str, str, ExecutionMembershipStore]:
     plan_identity = receipt_execution_plan_identity(
         suite_identity=resume_context.suite_identity,
@@ -223,6 +242,7 @@ def _execution_authority(
         selected_batch=args.batch,
         scheduled_members=tuple(member for batch in scheduled for member in batch.members),
         reused_members=tuple(sorted(reusable)),
+        resource_budget=resource_budget.execution_policy(),
     )
     run_identity = execution_run_identity(
         suite_identity=resume_context.suite_identity,
@@ -237,9 +257,19 @@ def _execution_authority(
     return plan_identity, run_identity, store
 
 
-def _build_batch_plan(parser: argparse.ArgumentParser, args: argparse.Namespace) -> _BatchPlan:
-    started = time.monotonic()
-    collection = _discover_runnable_members(parser, args)
+def _build_batch_plan(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    *,
+    resource_budget: PytestResourceBudget,
+    usage_started: PytestUsageSnapshot | None,
+    started: float,
+    invocation: PytestInvocation,
+    coverage_session: BatchCoverageSession | None = None,
+) -> _BatchPlan:
+    collection_started = time.monotonic()
+    collection = _discover_runnable_members(parser, args, invocation, coverage_session)
+    collection_duration = time.monotonic() - collection_started
     members = tuple(collection.groups(args.granularity))
     discovered = tuple(item["selector"] for item in (*collection.selected, *collection.deselected))
     pruned = tuple(item["selector"] for item in collection.deselected)
@@ -248,13 +278,18 @@ def _build_batch_plan(parser: argparse.ArgumentParser, args: argparse.Namespace)
     ).hexdigest()
     batches = _select_batches(parser, args, members)
     resume_context = build_resume_context(
-        root=Path.cwd(),
+        root=invocation.source_root,
+        member_root=invocation.cwd,
         members=members,
         resume_key=args.resume_key,
         state_root=args.resume_state_root,
         granularity=args.granularity,
         marker=args.marker,
-        extra_context=(*args.resume_context, "native-pytest-collection:" + collection_identity),
+        extra_context=(
+            *args.resume_context,
+            "native-pytest-collection:" + collection_identity,
+            invocation.correctness_context(),
+        ),
     )
     resume_context.ensure_manifest()
     write_native_collection(
@@ -264,10 +299,9 @@ def _build_batch_plan(parser: argparse.ArgumentParser, args: argparse.Namespace)
         resume_context.receipt_directory, suite_identity=resume_context.suite_identity
     )
     reusable, scheduled, fully_reused = _resume_schedule(args, batches, receipt_store)
-    requested_workers = min(args.workers, max(1, len(scheduled)))
-    workers = min(requested_workers, 2) if _wsl_windows_mounted_workspace() else requested_workers
+    workers = min(resource_budget.worker_ceiling, max(1, len(scheduled)))
     plan_identity, run_identity, membership_store = _execution_authority(
-        args, resume_context, scheduled, reusable, workers
+        args, resume_context, scheduled, reusable, workers, resource_budget
     )
     selected_members = tuple(member for batch in batches for member in batch.members)
     return _BatchPlan(
@@ -285,6 +319,11 @@ def _build_batch_plan(parser: argparse.ArgumentParser, args: argparse.Namespace)
         run_identity,
         membership_store,
         started,
+        resource_budget,
+        usage_started,
+        collection_duration,
+        invocation,
+        coverage_session,
     )
 
 
@@ -299,6 +338,17 @@ def _print_batch_plan(args: argparse.Namespace, plan: _BatchPlan) -> None:
         f"environment-retries={args.environment_retries} | "
         f"timeout-bisection={'off' if args.no_timeout_bisection else 'on'} | "
         f"resume={'on' if args.resume else 'off'}",
+        flush=True,
+    )
+    print(
+        "=== PYTEST RESOURCE BUDGET === "
+        f"requested-workers={plan.resource_budget.requested_workers} | "
+        f"configured-cpus={plan.resource_budget.configured_cpus} | "
+        f"effective-workers={plan.workers} | "
+        f"affinity-cpus={plan.resource_budget.affinity_cpu_count} | "
+        f"native-quota-cpus={plan.resource_budget.cgroup_cpu_capacity} | "
+        f"memory-estimated-workers={plan.resource_budget.memory_worker_capacity} | "
+        "initial worker ceiling; native OS owns process-tree CPU quotas",
         flush=True,
     )
     if args.resume:
@@ -370,6 +420,8 @@ def _submit_next(
             receipt_execution_plan_identity=plan.execution_plan_identity,
             receipt_run_identity=plan.run_identity,
             root_attempt=state.attempts[batch.index],
+            invocation=plan.invocation,
+            coverage_session=plan.coverage_session,
         )
     ] = batch
     return True
@@ -412,7 +464,13 @@ def _record_batch_report(
 
 
 def _print_batch_failure(
-    batch: Batch, rc: int, output: str, elapsed: float, callbacks: BatchCallbacks
+    batch: Batch,
+    rc: int,
+    output: str,
+    elapsed: float,
+    callbacks: BatchCallbacks,
+    *,
+    show_output: bool = False,
 ) -> None:
     callbacks.progress_clear()
     print(
@@ -420,7 +478,9 @@ def _print_batch_failure(
         flush=True,
     )
     if output:
-        print(callbacks.bounded_failure_output(output), end="", flush=True)
+        print(
+            output if show_output else callbacks.bounded_failure_output(output), end="", flush=True
+        )
     print(f"=== PYTEST BATCH {batch.index}/{batch.total} MEMBERS ===", flush=True)
     for member in batch.members:
         print(f"  {member}", flush=True)
@@ -463,13 +523,20 @@ def _consume_future(
     future: _BatchFuture,
     batch: Batch,
     callbacks: BatchCallbacks,
+    *,
+    coverage: bool = False,
 ) -> bool:
     rc, output, elapsed, events = future.result()
     state.recovery_events.extend(events)
     if callbacks.suite_budget_stop(rc, output):
         state.suite_timed_out = True
     attempt = state.attempts.get(batch.index, 1)
-    if _retry_resource_pressure(args, state, batch, attempt, rc, output, callbacks):
+    if coverage and callbacks.resource_pressure_failure(rc, output):
+        output += (
+            "\nBATCH COVERAGE RECOVERY INCOMPLETE: correctness receipts do not "
+            "establish saved coverage; environment retry is disabled\n"
+        )
+    elif _retry_resource_pressure(args, state, batch, attempt, rc, output, callbacks):
         return True
     marker_deselected = rc == 5 and bool(args.marker)
     if marker_deselected:
@@ -484,7 +551,13 @@ def _consume_future(
     state.selected_batches += 1
     _record_batch_report(state, batch, attempt, rc, output, elapsed, events)
     if rc != 0:
-        _print_batch_failure(batch, rc, output, elapsed, callbacks)
+        _print_batch_failure(batch, rc, output, elapsed, callbacks, show_output=args.show_output)
+    elif args.show_output and output:
+        print(
+            f"=== PYTEST BATCH {batch.index}/{batch.total} NATIVE OUTPUT (per batch) ===",
+            flush=True,
+        )
+        print(output, end="" if output.endswith("\n") else "\n", flush=True)
     state.failures += int(rc != 0)
     return False
 
@@ -500,7 +573,14 @@ def _consume_done_futures(
     completed = 0
     for future in sorted(done, key=lambda item: state.pending[item].index):
         batch = state.pending.pop(future)
-        retried = _consume_future(args, state, future, batch, callbacks)
+        retried = _consume_future(
+            args,
+            state,
+            future,
+            batch,
+            callbacks,
+            coverage=plan.coverage_session is not None,
+        )
         completed += int(not retried)
         if not state.suite_timed_out:
             _submit_next(pool, args, plan, state, callbacks)
@@ -618,8 +698,10 @@ def _execution_report(
     receipt: MembershipReceiptProjection,
     receipt_path: Path,
     duration: float,
+    *,
+    diagnostics: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "schema": execution_report_contract.execution_report_schema(),
         "status": "PASS" if state.failures == 0 else "FAIL",
         "granularity": args.granularity,
@@ -644,17 +726,77 @@ def _execution_report(
         "membership_receipt": receipt.as_dict(),
         "batches": sorted(state.batch_reports, key=lambda item: int(item["batch_index"])),
     }
+    if diagnostics is not None:
+        payload["diagnostics"] = diagnostics
+    return payload
 
 
 def _finish_batch_run(args: argparse.Namespace, plan: _BatchPlan, state: _BatchRunState) -> int:
     _apply_terminal_failures(args, plan, state)
-    duration = time.monotonic() - state.suite_started
     receipt, receipt_path = _finalize_membership(plan, state)
+    coverage_result: dict[str, object] | None = None
+    if plan.coverage_session is not None:
+        status, output, elapsed = plan.coverage_session.finish(deadline=state.deadline)
+        deadline_exhausted = state.deadline is not None and time.monotonic() >= state.deadline
+        if deadline_exhausted:
+            state.suite_timed_out = True
+        coverage_result = {
+            "returncode": status,
+            "duration_ms": int(elapsed * 1000),
+            "suite_deadline_exhausted": deadline_exhausted,
+        }
+        print("=== PYTEST NATIVE BRANCH COVERAGE (current-run data) ===", flush=True)
+        if output:
+            print(output, end="" if output.endswith("\n") else "\n", flush=True)
+        state.failures += int(status != 0 or deadline_exhausted)
+    duration = time.monotonic() - state.suite_started
+    cgroup_started = plan.resource_budget.cgroup_usage_started
+    cgroup_finished = (
+        read_pytest_cgroup_usage(Path(cgroup_started.path)) if cgroup_started else None
+    )
+    observed_cgroup = pytest_cgroup_diagnostics(cgroup_started, cgroup_finished)
+    usage = pytest_usage_diagnostics(plan.usage_started, read_pytest_usage())
+    diagnostics: dict[str, object] = {
+        "resource_budget": plan.resource_budget.report(effective_workers=plan.workers),
+        "native_collection_duration_ms": int(plan.native_collection_duration * 1000),
+        "native_collection_scope": "initial admission; execution children collect natively again",
+        "usage_scope": "whole invocation including collection and waited children",
+        "usage": usage,
+        "observed_cgroup": observed_cgroup,
+        "qualified": plan.invocation.qualified,
+        "pytest_config": str(plan.invocation.config_file),
+        "native_pytest_args": list(plan.invocation.pytest_args),
+        "coverage": coverage_result,
+    }
+    cpu_text = f"{usage['cpu_seconds']['total_seconds']:.3f}s" if usage else "unavailable"
+    rss_text = (
+        f"{usage['peak_waited_child_rss_bytes'] / 1024**2:.1f}MiB" if usage else "unavailable"
+    )
+    print(
+        "=== PYTEST RESOURCE USAGE === "
+        f"cpu-self-and-waited-children={cpu_text} | "
+        f"initial-native-collection={plan.native_collection_duration:.3f}s | "
+        f"peak-waited-child-rss={rss_text} (process-lifetime high water; not aggregate)",
+        flush=True,
+    )
+    cgroup_counters = observed_cgroup["cpu_stat_deltas"]
+    throttled = cgroup_counters.get("throttled_usec") if isinstance(cgroup_counters, dict) else None
+    print(
+        "=== PYTEST OBSERVED CGROUP === "
+        f"throttled-usec={throttled} | "
+        f"memory-peak-bytes={observed_cgroup['memory_peak_bytes']} | "
+        f"peak-concurrent-tasks={observed_cgroup['peak_tasks']} | "
+        f"{observed_cgroup['availability']} "
+        "(entire cgroup, possibly shared; lifetime peaks; not child creations)",
+        flush=True,
+    )
     _print_final_result(plan, state, receipt, receipt_path, duration)
     if args.report_path is not None:
         execution_report_contract.write_execution_report(
             args.report_path,
-            _execution_report(args, plan, state, receipt, receipt_path, duration),
+            _execution_report(
+                args, plan, state, receipt, receipt_path, duration, diagnostics=diagnostics
+            ),
         )
     return 0 if state.failures == 0 else 1
 
@@ -662,7 +804,81 @@ def _finish_batch_run(args: argparse.Namespace, plan: _BatchPlan, state: _BatchR
 def run_batch_cli(
     parser: argparse.ArgumentParser, args: argparse.Namespace, callbacks: BatchCallbacks
 ) -> int:
-    plan = _build_batch_plan(parser, args)
-    _print_batch_plan(args, plan)
-    state = _run_batch_executor(args, plan, callbacks)
-    return _finish_batch_run(args, plan, state)
+    started = time.monotonic()
+    usage_started = read_pytest_usage()
+    try:
+        resource_budget = resolve_pytest_resource_budget(args.workers)
+        invocation = resolve_pytest_invocation(
+            qualified=args.qualified,
+            pytest_config=args.pytest_config,
+            pytest_args=tuple(args.pytest_arg),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        parser.error(str(exc))
+    with ExitStack() as owned:
+        coverage_session = None
+        coverage_requested = bool(
+            args.coverage_source
+            or args.coverage_data_file is not None
+            or args.coverage_report
+            or args.coverage_fail_under is not None
+        )
+        if coverage_requested:
+            args.no_timeout_bisection = True
+            args.environment_retries = 0
+            print(
+                "=== PYTEST COVERAGE RECOVERY POLICY === timeout refinement and "
+                "environment retries disabled: correctness receipts do not establish "
+                "saved native coverage",
+                flush=True,
+            )
+            try:
+                options = CoverageOptions(
+                    data_file=args.coverage_data_file or Path(".coverage"),
+                    sources=tuple(args.coverage_source),
+                    reports=tuple(args.coverage_report or ("term",)),
+                    fail_under=args.coverage_fail_under,
+                    branch=True,
+                )
+                coverage_session = owned.enter_context(
+                    BatchCoverageSession(
+                        options,
+                        cwd=invocation.cwd,
+                        config_file=invocation.config_file,
+                        environment=invocation.environment,
+                        python_prefix=invocation.command_prefix[:-2],
+                        timeout=float(args.batch_timeout),
+                    )
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                parser.error(str(exc))
+            intent = json.dumps(
+                {
+                    "sources": options.sources,
+                    "data_file": str(options.data_file),
+                    "reports": options.reports,
+                    "fail_under": options.fail_under,
+                    "branch": options.branch,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            args.resume_context = [
+                *args.resume_context,
+                "native-coverage-intent:" + hashlib.sha256(intent.encode()).hexdigest(),
+            ]
+            invocation = replace(
+                invocation, pytest_args=(*invocation.pytest_args, *coverage_session.native_args)
+            )
+        plan = _build_batch_plan(
+            parser,
+            args,
+            resource_budget=resource_budget,
+            usage_started=usage_started,
+            started=started,
+            invocation=invocation,
+            coverage_session=coverage_session,
+        )
+        _print_batch_plan(args, plan)
+        state = _run_batch_executor(args, plan, callbacks)
+        return _finish_batch_run(args, plan, state)

@@ -34,7 +34,7 @@ from oh_goon.integrations.fleet_plan_environment import step_host_environment_na
 from oh_goon.integrations.python_goon_projects import materialize_plan_projects
 from oh_goon.integrations.uv_python_runtime import find_uv_system_python
 from oh_goon.runtime.plan_templates import PlanTemplateStore
-from tests.factories.shipped_templates import AGENT_PLAN_TEMPLATES
+from tests.factories.shipped_templates import agent_plan_template_keys
 from tests.integration.services.test_shipped_template_startability import (
     _admission_stack,
     _install_source_identity_observer,
@@ -468,8 +468,9 @@ def _prove_fixture_contract(
 def test_catalog_certification_scenarios_cover_exact_shipped_plan_catalog() -> None:
     plans = PlanTemplateStore(TEMPLATES / "plans")
     discovered = {item.template_key for item in plans.catalog().templates}
-    assert not set(SCENARIOS).intersection(AGENT_PLAN_TEMPLATES)
-    assert set(SCENARIOS).union(AGENT_PLAN_TEMPLATES) == discovered
+    agent_plans = agent_plan_template_keys()
+    assert not set(SCENARIOS).intersection(agent_plans)
+    assert set(SCENARIOS).union(agent_plans) == discovered
     for template_key, scenario in SCENARIOS.items():
         assert isinstance(scenario, dict), template_key
         fixture_key = scenario["fixture"]
