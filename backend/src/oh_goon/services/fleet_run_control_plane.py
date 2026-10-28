@@ -83,6 +83,7 @@ from oh_goon.core.vocabulary import (
     FleetRunSource,
     FleetRunStatus,
     FleetRunTerminalIntent,
+    GameTapeStatus,
     OperationAction,
 )
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
@@ -146,6 +147,13 @@ def _recorded_export_artifact(
     if not isinstance(target, FleetPlanTarget):
         raise FleetPlanInvalid("The recorded Run has no declared Plan artifacts")
     tape = detail.game_tape
+    if not detail.run.status.terminal:
+        raise FleetPlanInvalid("Artifact export requires a terminal recorded Run")
+    if detail.run.status is FleetRunStatus.CANCELLED or tape.status in {
+        GameTapeStatus.CANCELLED,
+        GameTapeStatus.INTERRUPTED,
+    }:
+        raise FleetPlanInvalid("Artifact export refuses a cancelled or interrupted Run")
     matches = [
         (repository.repository.repository_id, step)
         for repository in tape.repositories
@@ -161,6 +169,14 @@ def _recorded_export_artifact(
             "from 'oh-goon plan steps RUN_ID --json'"
         )
     owner, step = matches[0]
+    if (
+        step.status not in {GameTapeStatus.PASSED, GameTapeStatus.FAILED}
+        or step.settlement.outcome not in {"SUCCESS", "FAILED"}
+        or step.settlement.cleanup != "VERIFIED"
+    ):
+        raise FleetPlanInvalid(
+            "Artifact export requires a settled Step with verified process cleanup"
+        )
     declarations = [
         declaration
         for resolved in target.plan.steps

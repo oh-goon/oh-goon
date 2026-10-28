@@ -10,26 +10,45 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
+from pydantic import TypeAdapter
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import (
     MissingPlanArtifact,
+    PlanArtifactEvidence,
     PlanRetainedContentEvidence,
+    PlanStepSettlementEvidence,
     PresentPlanArtifact,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_step_primitives import PlanArtifactDeclaration
+from oh_goon.core.models.game_tape import GameTapeStepExecution, GameTapeWhy
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.models.run import (
+    CompletedFleetRun,
+    FleetRunDetail,
+    FleetRunFailure,
+    FleetRunProgress,
+    FleetRunState,
+)
+from oh_goon.core.models.run_admission import fleet_repository_scope
 from oh_goon.core.path_authority import RepositoryScopedPath
 from oh_goon.core.path_layouts import ContentStorePathLayout
+from oh_goon.core.time import utc_now
+from oh_goon.core.vocabulary import (
+    FleetRunFailureStage,
+    FleetRunStatus,
+    GameTapeStatus,
+    OperationAction,
+)
 from oh_goon.integrations.exact_file_write import (
     ExactPublicationDurabilityError,
     publish_prepared_file,
 )
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.services.fleet_run_control_plane import FleetArtifactExport, FleetRunControlPlane
+from tests.factories.capabilities import capability_snapshot
 from tests.factories.fleet_plan_targets import structural_fleet_plan_target
 
 
@@ -75,13 +94,41 @@ def export_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
             ),
         ),
     )
-    step = SimpleNamespace(step_id="train", artifacts=(artifact,))
+    step = GameTapeStepExecution(
+        step_execution_id="recorded-train",
+        step_id="train",
+        kind="command",
+        order=1,
+        status=GameTapeStatus.PASSED,
+        exit_code=0,
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
+        artifacts=(artifact,),
+        why=GameTapeWhy(declaration="train", reached=True, explanation="Declared training Step"),
+    )
     recorded_repository = SimpleNamespace(repository=repository, steps=(step,))
+    target = structural_fleet_plan_target(plan)
+    now = utc_now()
+    run = CompletedFleetRun(
+        fleet_run_id="recorded-run",
+        target=target,
+        capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+        repository_scope=fleet_repository_scope({repository.repository_id}),
+        targets=(repository,),
+        status=FleetRunStatus.COMPLETED,
+        accepted_at=now,
+        started_at=now,
+        finished_at=now,
+        progress=FleetRunProgress(total=1, succeeded=1, failed=0),
+    )
     detail = cast(
         FleetRunDetail,
         SimpleNamespace(
-            run=SimpleNamespace(target=structural_fleet_plan_target(plan)),
-            game_tape=SimpleNamespace(repositories=(recorded_repository,)),
+            run=run,
+            game_tape=SimpleNamespace(
+                status=GameTapeStatus.PASSED, repositories=(recorded_repository,)
+            ),
         ),
     )
     unused = cast(Any, None)
@@ -117,6 +164,11 @@ def _export(case: SimpleNamespace, **options: Any) -> FleetArtifactExport:
     )
 
 
+def _set_artifacts(case: SimpleNamespace, artifacts: tuple[PlanArtifactEvidence, ...]) -> None:
+    case.step = case.step.model_copy(update={"artifacts": artifacts})
+    case.recorded_repository.steps = (case.step,)
+
+
 def test_export_uses_one_recorded_cut_after_original_source_disappears(export_case):
     export_case.source.unlink()
     result = _export(export_case)
@@ -128,6 +180,131 @@ def test_export_uses_one_recorded_cut_after_original_source_disappears(export_ca
     assert result.destination == export_case.destination
     export_case.read.assert_called_once_with("recorded-run")
     assert not list(export_case.destination.parent.glob(".oh-goon-export-*"))
+
+
+@pytest.mark.parametrize("status", list(FleetRunStatus))
+def test_export_requires_terminal_uncancelled_original_run(
+    export_case: SimpleNamespace, status: FleetRunStatus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = export_case
+    fields = case.detail.run.model_dump(
+        exclude={"status", "started_at", "finished_at", "cancel_requested_at", "failure"},
+        exclude_computed_fields=True,
+    )
+    fields["status"] = status
+    required, _ = status.receipt_timestamp_contract
+    fields.update({name: utc_now() for name in required})
+    if status is FleetRunStatus.FAILED:
+        fields["failure"] = FleetRunFailure.from_exception(
+            FleetPlanInvalid("Later Run work failed"), stage=FleetRunFailureStage.EXECUTION
+        )
+        case.detail.game_tape.status = GameTapeStatus.FAILED
+    case.detail.run = TypeAdapter(FleetRunState).validate_python(fields)
+    if status in {FleetRunStatus.COMPLETED, FleetRunStatus.FAILED}:
+        assert _export(case).destination.read_bytes() == case.payload
+        return
+    materialize = Mock(side_effect=AssertionError("Unsettled Run reached retained content"))
+    monkeypatch.setattr(case.store, "materialize_file", materialize)
+    with pytest.raises(FleetPlanInvalid, match="Run"):
+        _export(case)
+    materialize.assert_not_called()
+    assert not case.destination.exists()
+    assert not list(case.destination.parent.glob(".oh-goon-export-*"))
+
+
+@pytest.mark.parametrize("status", [GameTapeStatus.CANCELLED, GameTapeStatus.INTERRUPTED])
+def test_export_refuses_cancelled_or_interrupted_run_projection(
+    export_case: SimpleNamespace, status: GameTapeStatus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = export_case
+    fields = case.detail.run.model_dump(exclude_computed_fields=True)
+    if status is GameTapeStatus.INTERRUPTED:
+        fields["status"] = FleetRunStatus.FAILED
+        fields["failure"] = FleetRunFailure.recovery("Interrupted before Run completion")
+    else:
+        fields["status"] = FleetRunStatus.CANCELLED
+        fields["cancel_requested_at"] = utc_now()
+    case.detail.run = TypeAdapter(FleetRunState).validate_python(fields)
+    case.detail.game_tape.status = status
+    materialize = Mock(side_effect=AssertionError("Interrupted Run reached retained content"))
+    monkeypatch.setattr(case.store, "materialize_file", materialize)
+    with pytest.raises(FleetPlanInvalid, match="Run"):
+        _export(case)
+    materialize.assert_not_called()
+    assert not case.destination.exists()
+    assert not list(case.destination.parent.glob(".oh-goon-export-*"))
+
+
+@pytest.mark.parametrize(
+    "status,settlement",
+    [
+        (
+            GameTapeStatus.CANCELLED,
+            PlanStepSettlementEvidence(
+                outcome="CANCELLED", cleanup="VERIFIED", reason="CALLER_CANCELLED"
+            ),
+        ),
+        (GameTapeStatus.INTERRUPTED, PlanStepSettlementEvidence()),
+        (GameTapeStatus.FAILED, PlanStepSettlementEvidence()),
+        (
+            GameTapeStatus.FAILED,
+            PlanStepSettlementEvidence(
+                outcome="INCOMPLETE", cleanup="UNVERIFIED", reason="CLEANUP_UNVERIFIED"
+            ),
+        ),
+        (
+            GameTapeStatus.FAILED,
+            PlanStepSettlementEvidence(
+                outcome="TIMED_OUT", cleanup="VERIFIED", reason="DEADLINE_EXPIRED"
+            ),
+        ),
+    ],
+    ids=["cancelled", "interrupted", "cleanup-unavailable", "cleanup-unverified", "timed-out"],
+)
+def test_export_requires_selected_step_settlement_before_reading_retained_bytes(
+    export_case: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    status: GameTapeStatus,
+    settlement: PlanStepSettlementEvidence,
+) -> None:
+    case = export_case
+    case.recorded_repository.steps = (
+        case.step.model_copy(update={"status": status, "settlement": settlement}),
+    )
+    materialize = Mock(side_effect=AssertionError("Unsettled Step reached retained content"))
+    monkeypatch.setattr(case.store, "materialize_file", materialize)
+    with pytest.raises(FleetPlanInvalid, match="Step"):
+        _export(case)
+    materialize.assert_not_called()
+    assert not case.destination.exists()
+    assert not list(case.destination.parent.glob(".oh-goon-export-*"))
+
+
+@pytest.mark.parametrize("selected_failed", [False, True])
+def test_export_preserves_settled_artifacts_when_run_has_failed_work(
+    export_case: SimpleNamespace, selected_failed: bool
+) -> None:
+    case = export_case
+    case.detail.run = case.detail.run.model_copy(
+        update={"progress": FleetRunProgress(total=1, succeeded=0, failed=1, needs_attention=1)}
+    )
+    case.detail.game_tape.status = GameTapeStatus.ATTENTION_REQUIRED
+    if selected_failed:
+        case.recorded_repository.steps = (
+            case.step.model_copy(
+                update={
+                    "status": GameTapeStatus.FAILED,
+                    "exit_code": 1,
+                    "settlement": PlanStepSettlementEvidence(
+                        outcome="FAILED",
+                        cleanup="VERIFIED",
+                        reason="FAILED_EXIT",
+                        observed_returncode=1,
+                    ),
+                }
+            ),
+        )
+    assert _export(case).destination.read_bytes() == case.payload
 
 
 @pytest.mark.parametrize(
@@ -168,15 +345,15 @@ def test_export_rejects_unproven_or_ambiguous_recorded_artifacts_without_publica
             ),
         )
     elif defect == "missing":
-        case.step.artifacts = (MissingPlanArtifact(path=case.artifact.path),)
+        _set_artifacts(case, (MissingPlanArtifact(path=case.artifact.path),))
     elif defect == "not-retained":
-        case.step.artifacts = (case.artifact.model_copy(update={"retained_object": None}),)
+        _set_artifacts(case, (case.artifact.model_copy(update={"retained_object": None}),))
     elif defect == "undeclared-retention":
         original = case.detail.run.target.plan
         step = original.steps[0].model_copy(
             update={"artifacts": (PlanArtifactDeclaration(path=case.artifact.path),)}
         )
-        case.detail.run.target = structural_fleet_plan_target(
+        target = structural_fleet_plan_target(
             ResolvedFleetPlan.create(
                 name=original.name,
                 description=original.description,
@@ -184,6 +361,7 @@ def test_export_rejects_unproven_or_ambiguous_recorded_artifacts_without_publica
                 steps=(step,),
             )
         )
+        case.detail.run = case.detail.run.model_copy(update={"target": target})
     else:
         update = {
             "owner": {"owner_repository_id": "repo-" + "f" * 20},
@@ -193,7 +371,7 @@ def test_export_rejects_unproven_or_ambiguous_recorded_artifacts_without_publica
             "entries": {"entry_count": 2},
         }[defect]
         reference = case.retained.model_copy(update=update)
-        case.step.artifacts = (case.artifact.model_copy(update={"retained_object": reference}),)
+        _set_artifacts(case, (case.artifact.model_copy(update={"retained_object": reference}),))
     with pytest.raises(FleetPlanInvalid):
         _export(case, **options)
     assert not case.destination.exists()
@@ -237,14 +415,17 @@ def test_export_refuses_unavailable_or_changed_retained_bytes_and_cleans_staging
             )
         )
         reference = case.retained.model_copy(update={"reference_id": peer.reference_id})
-        case.step.artifacts = (case.artifact.model_copy(update={"retained_object": reference}),)
+        _set_artifacts(case, (case.artifact.model_copy(update={"retained_object": reference}),))
     elif defect == "raw-sha":
-        case.step.artifacts = (case.artifact.model_copy(update={"sha256": "f" * 64}),)
+        _set_artifacts(case, (case.artifact.model_copy(update={"sha256": "f" * 64}),))
     else:
         reference = case.retained.model_copy(update={"byte_count": case.artifact.byte_count + 1})
-        case.step.artifacts = (
-            case.artifact.model_copy(
-                update={"byte_count": reference.byte_count, "retained_object": reference}
+        _set_artifacts(
+            case,
+            (
+                case.artifact.model_copy(
+                    update={"byte_count": reference.byte_count, "retained_object": reference}
+                ),
             ),
         )
     with pytest.raises(FleetPlanInvalid):
