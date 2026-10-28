@@ -16,7 +16,7 @@ Start with the current operator and developer guides. The linked owners define b
 1. [Development](DEVELOPMENT.md), [AGENTS.md](../AGENTS.md), [Architecture](ARCHITECTURE.md), and [SSOT](development/SSOT.md) — contribution workflow and ownership. Use the [backend](../backend/README.md), [frontend](../frontend/README.md), and [repository tooling](../scripts/README.md) maps to find an implementation.
 2. [Execution first](architecture/ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md) and [replaceable implementations](architecture/ADR_CANONICAL_OWNER_REPLACEABLE_IMPLEMENTATIONS.md) — product direction and canonical responsibility boundaries.
 3. [Fail-before-work](development/FAIL_BEFORE_WORK.md) and [Native tool authority](development/NATIVE_TOOL_AUTHORITY.md) — resolve and validate once, then consume the original native tool contract.
-4. [Test quality](development/TEST_QUALITY.md) and [Generated files](development/GENERATED_FILES.md) — focused regression proof and the backend-to-frontend contract generation path.
+4. [QA baseline](development/REAL_LIFECYCLE_QA.md#before-implementing-a-backlog-item), [Test quality](development/TEST_QUALITY.md) and [Generated files](development/GENERATED_FILES.md) — distinguish implemented behavior from remaining qualification, choose focused regression proof, and follow the backend-to-frontend contract generation path.
 5. [Run configuration and inspection](development/TEMPLATE_INPUT_INSPECTION.md), [Template developer journey](../templates/README.md), and [Template input resolution](development/TEMPLATE_INPUT_RESOLUTION_TRANSPORT.md) — select one `run.yml`, inspect it, then validate, lock and run the existing Plan/Goon graph.
 
 ## Execution contracts

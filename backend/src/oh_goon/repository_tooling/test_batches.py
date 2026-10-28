@@ -359,7 +359,15 @@ def main() -> int:
         resource_pressure_failure=_resource_pressure_failure,
         suite_budget_stop=_suite_budget_stop,
     )
-    return run_batch_cli(parser, args, callbacks)
+    if not args.focused:
+        return run_batch_cli(parser, args, callbacks)
+    print("=== FOCUSED PYTEST FEEDBACK: NOT_FULLY_VERIFIED ===", flush=True)
+    print(f"Selected paths: {json.dumps([str(path) for path in args.paths])}", flush=True)
+    try:
+        return run_batch_cli(parser, args, callbacks)
+    finally:
+        print("Full verification: NOT_FULLY_VERIFIED", flush=True)
+        print(f"Next check: UNVERIFIED | {json.dumps(args.next_check)}", flush=True)
 
 
 if __name__ == "__main__":

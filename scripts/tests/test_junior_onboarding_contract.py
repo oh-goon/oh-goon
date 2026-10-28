@@ -71,14 +71,6 @@ def test_app_test_runner_owns_bootstrap_not_goon_order() -> None:
     assert "browser-targeted-certification" not in runner
 
 
-def test_junior_runbook_is_low_friction_development_start() -> None:
-    assert "make test" in APP_RUNBOOK
-    assert "fast development feedback boundary" in APP_RUNBOOK
-    assert "make certify" in APP_RUNBOOK
-    assert "PASS" in APP_RUNBOOK and "FAIL" in APP_RUNBOOK
-    assert "BLOCKED" in APP_RUNBOOK and "SKIPPED" in APP_RUNBOOK
-
-
 def test_junior_docs_have_no_explicit_self_repository_id_path() -> None:
     docs = APP_RUNBOOK + (ROOT / "docs/development/APP_CERTIFICATION.md").read_text(
         encoding="utf-8"

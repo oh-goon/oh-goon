@@ -728,6 +728,12 @@ def _execution_report(
     }
     if diagnostics is not None:
         payload["diagnostics"] = diagnostics
+    if getattr(args, "focused", False):
+        payload["feedback"] = {
+            "scope": "FOCUSED",
+            "full_verification_status": "NOT_FULLY_VERIFIED",
+            "next_check": {"command": args.next_check, "status": "UNVERIFIED"},
+        }
     return payload
 
 

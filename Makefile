@@ -128,7 +128,7 @@ help:
 	  '  make strict-local-runtime-acceptance Production-shaped strict Fleet runtime/cancel/restart acceptance' \
 	  '  make browser-targeted-certification Run the seven Gate D Chromium specs sequentially, one worker/process each' \
 	  '  make browser-required-certification Run the complete required browser suite after preflights' \
-	  '  make check            Fast inner development feedback with PASS/FAIL/BLOCKED summary' \
+	  '  make check            Broad development feedback with PASS/FAIL/BLOCKED summary' \
 	  '    normal make test runs native uv/.venv backend and npm frontend tests; host-only sampling requires explicit opt-in' \
 	  '  make local-state-check Inspect this checkout local-state schema without mutation' \
 	  '  make local-state-prelaunch-check Prove SQLite write/lock/storage semantics before app launch' \
@@ -144,7 +144,7 @@ help:
 	  '  make test-log         Show the latest saved make test output' \
 	  '  make certify-log      Show the latest saved make certify output' \
 	  '  make diagnostics-log  Show passive application diagnostic evidence' \
-	  '  make check            Fast inner development feedback' \
+	  '  make check            Broad development feedback; use docs/DEVELOPMENT.md for focused edits' \
 	  '  make build-release    Build validated locked release artifacts' \
 	  '  make assemble-release Assemble locked artifacts after caller-owned checks' \
 	  '  make release-check    Run the complete portable regression suite' \
@@ -646,10 +646,10 @@ test-real-world-parallel:
 # executes one exact-identity unit; rerun until COMPLETE. Existing authoritative checks
 # remain the owners of pass/fail truth.
 tool-session-qualification:
-	$(DEVELOPMENT_RESOURCE_RUNNER) backend/.venv/bin/oh-goon-tool-session-batches --max-units 1
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-tool-session-batches --max-units 1
 
 tool-session-qualification-status:
-	backend/.venv/bin/oh-goon-tool-session-batches --status
+	uv run --offline --frozen --no-sync --project backend oh-goon-tool-session-batches --status
 
 
 coverage-python:
