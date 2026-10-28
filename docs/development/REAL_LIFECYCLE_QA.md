@@ -28,7 +28,7 @@ capability or result registry:
 | --- | --- | --- |
 | Native Make CPU budget: [resource wrapper](../../scripts/development_test_resources.sh), with [worker admission/reporting](../../backend/src/oh_goon/repository_tooling/pytest_resource_budget.py). | [Resource regressions](../../scripts/tests/test_development_test_resources.py) protect quota/refusal and delegated constraints. Two CPUs are a CPU-time ceiling; the memory estimate is not a hard RAM/I/O limit. | [HUG-12](https://linear.app/hugloss/issue/HUG-12) needs actual Linux/WSL host proof; [HUG-90](https://linear.app/hugloss/issue/HUG-90) owns RAM/OOM/I/O qualification. Follow the [native budget commands](../DEVELOPMENT.md#local-test-resource-budget), preserving unsupported-host refusal. |
 | Native pytest batches and exact member resume: [batch owner](../../backend/src/oh_goon/repository_tooling/test_batches.py) and [receipt owner](../../backend/src/oh_goon/repository_tooling/test_batch_receipts.py). | [Batch](../../scripts/tests/test_test_batches.py) and [receipt regressions](../../scripts/tests/test_test_batch_receipts.py) protect selected membership and reusable PASS evidence. Their existence is not proof of every environment or worker ordering. | [HUG-115](https://linear.app/hugloss/issue/HUG-115) owns semantic-input invalidation, [HUG-116](https://linear.app/hugloss/issue/HUG-116) worker isolation, and [HUG-91](https://linear.app/hugloss/issue/HUG-91) disposal. Run the relevant existing file through the bounded command below. |
-| Process capture and local developer logging: [command capture](../../backend/src/oh_goon/engine/command_capture.py), [logging wrapper](../../scripts/run_logged.sh). | The supervisor supports bounded capture; [logging regressions](../../scripts/tests/test_run_logging.py) protect existing presentation/retention behavior. A caller's later display truncation does not bound earlier capture, and path sanitization does not promise arbitrary credential redaction. | [HUG-121](https://linear.app/hugloss/issue/HUG-121) owns pytest-callsite capture limits; [HUG-127](https://linear.app/hugloss/issue/HUG-127) owns log privacy/unsafe-path proofs. Reproduce at those callsites before extending their existing owners. |
+| Process capture and local developer logging: [command capture](../../backend/src/oh_goon/engine/command_capture.py), [batch owner](../../backend/src/oh_goon/repository_tooling/test_batches.py), [logging wrapper](../../scripts/run_logged.sh). | Pytest execution and native collection select bounded diagnostic tails through the existing supervisor; batch reports retain raw-stream evidence and explicit omission/completeness. [Logging regressions](../../scripts/tests/test_run_logging.py) protect presentation/retention behavior. Path replacement does not promise arbitrary credential redaction. | [HUG-121](https://linear.app/hugloss/issue/HUG-121) owns noisy-output and aggregate-memory qualification; [HUG-127](https://linear.app/hugloss/issue/HUG-127) owns log privacy/unsafe-path proofs. Use the process command below and retain unrun host cells. |
 | Native-agent execution and harness conformance: [runtime owners](AGENT_RUNTIME_OWNERS.md), [compatibility/evidence matrix](AGENT_HARNESS_COMPATIBILITY.md). | Qualification is specific to the installed harness, integration mode, model protocol and environment. Ephemeral Pi lifecycle/compaction evidence does not establish persistent cross-Run reopen. Service readiness is not task submission or continuation support. | [HUG-21](https://linear.app/hugloss/issue/HUG-21) owns native baseline reconciliation; [HUG-39](https://linear.app/hugloss/issue/HUG-39) owns Pi persistent-session qualification before execution coding. Select the exact installed-process proof in the [backend test guide](../../backend/tests/README.md), not a synthetic replacement for host behavior. |
 
 After `make init`, a bounded investigation of one listed tooling file can use:
@@ -53,6 +53,77 @@ the same PR. Keep actual execution results with their existing evidence owner;
 do not turn this guide into a perpetual PASS list. Older ADR/checkpoint results
 describe their original source. Follow [documentation anti-drift](DOCUMENTATION_ANTI_DRIFT.md)
 when current and historical explanations disagree.
+
+## Output and developer-log qualification
+
+Pytest execution retains at most 1 MiB of merged stdout/stderr diagnostics per
+native attempt through the command supervisor's bounded-tail mode. Existing
+batch reports expose `output_captures`: the original raw-stream SHA-256 and
+byte/line counts, retained size, limit, omission flag and completeness. A
+timed-out attempt reports `complete: false`; its hash describes only observed
+bytes. Native collection diagnostics are also bounded; selected membership
+still comes from the native collector's separate structured output.
+An explicit `--report-path` requires an owned output directory that other users
+cannot write. Symlink parents/destinations are refused; reports publish
+atomically with private permissions. An existing owned regular report may be
+replaced.
+
+Noisy output alone does not fail a complete native execution. Intentional
+diagnostic omission can accompany success when omission is explicit and exact
+member accounting remains intact. Timeout, cancellation and output-limit
+failure are not successful attempt evidence. Only complete required membership
+can support aggregate success after the existing recovery policy. Failure
+formatting and refinement diagnostics remain bounded as well; truncating only
+after full capture would not protect capture memory.
+
+Start the shared [HUG-121](https://linear.app/hugloss/issue/HUG-121) /
+[HUG-127](https://linear.app/hugloss/issue/HUG-127) investigation with the existing
+capture, process and logging regressions:
+
+```bash
+bash scripts/development_test_resources.sh \
+  uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
+  --qualified --focused --next-check "make tooling-check" --show-output \
+  --granularity tests --workers 1 --batch-size 16 --batch-timeout 180 \
+  scripts/tests/test_test_batches.py \
+  scripts/tests/test_test_batches_process.py \
+  scripts/tests/test_run_logging.py
+```
+
+Use controlled real pytest success, failure and timeout cases with large
+stdout/stderr, a very long newline-free line, malformed bytes and a decisive
+traceback. Include cancellation and a descendant holding the output pipe.
+Keep the measurement harness and its stored output bounded outside source.
+Record source, host, workload, configured limits, native outcomes, exact
+membership and peak aggregate memory; a single child's peak RSS is not an
+aggregate measurement. Record requested and admitted workers separately. A
+four-worker request under two-CPU admission does not qualify four workers;
+select sufficient native capacity explicitly or record that cell NOT_RUN.
+
+Developer logs are local diagnostics, separate from Run/Journal records and
+agent secret stores. The logging wrapper enters the prepared uv environment
+once, reuses its interpreter for bounded stream processors, omits command
+arguments from generated headers, and acquires private logs through native
+no-follow handles. When that environment or private location is unavailable,
+it warns and preserves command execution with bounded console presentation.
+See [private local check logs](../DEVELOPMENT.md#private-local-check-logs) for
+configuration and the existing latest-log read interface.
+
+Probe framework-generated metadata with fake-token canaries, private
+permissions, unsafe-path refusal and long-line output. Path replacement does
+not promise credential redaction for arbitrary text intentionally printed by
+a user's tests. Preserve progress, original exit status, Ctrl-C, active-log
+retention exclusions and completed-log ownership. Child text resembling a PASS
+result cannot override the native exit or member receipt. Qualify real
+filesystem permission behavior on each claimed host; portable fixtures do not
+establish WSL or mounted-path behavior.
+
+Run affected report, membership and receipt regressions when those boundaries
+change. Process cases must run explicitly because the fast tooling target
+excludes them. On stable source, run `make test-tooling`, `make architecture`
+and `make tooling-check`; shared engine/runtime changes also require
+`make backend-check`. Keep actual outcomes in the existing issue/receipt owners.
+These commands describe qualification work, not recorded passes or a new gate.
 
 Oh-Goon treats real-lifecycle proof as the highest-value regression layer for critical behavior.
 Unit tests remain necessary, but they do not prove that independently correct owners compose correctly over time.

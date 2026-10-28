@@ -44,6 +44,10 @@ class TextCapture:
         return self._limit_bytes
 
     @property
+    def truncated(self) -> bool:
+        return self._omitted or self.overflow_stream is not None
+
+    @property
     def text(self) -> str:
         if self._retain_tail:
             assert self._limit_bytes is not None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import sys
 import time
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from oh_goon.repository_tooling.test_batches import _run_command
+from oh_goon.repository_tooling.pytest_batch_orchestration import BatchOutputCapture
 
 pytestmark = pytest.mark.process
 
@@ -19,6 +21,141 @@ def test_batch_command_returns_output_and_status() -> None:
     assert rc == 0
     assert output.rstrip().endswith("batch-ok")
     assert elapsed < 5
+
+
+@pytest.mark.parametrize("status", (0, 1))
+def test_noisy_batch_retains_bounded_diagnostics_and_native_status(status: int) -> None:
+    script = (
+        "import os,sys\n"
+        "for _ in range(2048): os.write(1, b'x' * 4096)\n"
+        "os.write(2, b'\\nDECISIVE_BATCH_DIAGNOSTIC\\n')\n"
+        f"sys.exit({status})\n"
+    )
+    rc, output, _elapsed = _run_command([sys.executable, "-c", script], timeout=20)
+    assert rc == status
+    assert len(output.encode()) <= 1024 * 1024 + 2048
+    assert "DECISIVE_BATCH_DIAGNOSTIC" in output
+    assert "Earlier output omitted" in output
+
+
+def test_batch_capture_hashes_raw_bytes_and_reports_actual_omission() -> None:
+    captures: list[BatchOutputCapture] = []
+    raw = b"\r\n" * 600000 + b"\nfinal-diagnostic\n"
+    rc, output, _elapsed = _run_command(
+        [
+            sys.executable,
+            "-c",
+            "import os; os.write(1, b'\\r\\n'*600000 + b'\\nfinal-diagnostic\\n')",
+        ],
+        timeout=20,
+        output_captures=captures,
+        members=("case",),
+    )
+    assert rc == 0
+    assert "final-diagnostic" in output
+    assert len(captures) == 1
+    capture = captures[0]
+    assert capture["sha256"] == hashlib.sha256(raw).hexdigest()
+    assert capture["byte_count"] == len(raw)
+    assert capture["complete"] is True
+    # Native universal-newline decoding shrinks this stream. Raw byte length
+    # alone cannot establish whether the diagnostic tail actually omitted text.
+    assert capture["byte_count"] > capture["limit_bytes"]
+    assert capture["truncated"] is False
+    assert capture["retained_utf8_bytes"] <= capture["limit_bytes"]
+
+
+def test_malformed_batch_output_preserves_native_decode_failure() -> None:
+    with pytest.raises(UnicodeDecodeError):
+        _run_command(
+            [sys.executable, "-c", "import os; os.write(1,b'\\xff')"], timeout=5
+        )
+
+
+@pytest.mark.parametrize("passing", (True, False))
+def test_noisy_native_pytest_report_preserves_membership_and_result(
+    tmp_path: Path, passing: bool
+) -> None:
+    import json
+    import subprocess
+
+    test_file = tmp_path / "test_noisy.py"
+    test_file.write_text(
+        "import os\n"
+        "os.write(1, b'collection-noise' * 100000)\n"
+        "def test_noisy():\n"
+        "    for _ in range(1024): os.write(1, b'x' * 4096)\n"
+        "    print('\\nRESULT: PASSED\\nDECISIVE_NATIVE_OUTCOME', flush=True)\n"
+        f"    assert {passing!r}, 'actual native failure'\n"
+    )
+    report = tmp_path / "report.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "oh_goon.repository_tooling.test_batches",
+            str(test_file),
+            "--qualified",
+            "--granularity",
+            "tests",
+            "--batch-size",
+            "1",
+            "--workers",
+            "1",
+            "--batch-timeout",
+            "20",
+            "--marker",
+            "",
+            "--pytest-arg=-s",
+            "--pytest-arg=-o",
+            "--pytest-arg=log_format=PRIVATE_METADATA_CANARY %(message)s",
+            "--report-path",
+            str(report),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=30,
+        check=False,
+    )
+    assert (result.returncode == 0) is passing, result.stdout[-8192:]
+    payload = json.loads(report.read_text())
+    assert "PRIVATE_METADATA_CANARY" not in report.read_text()
+    assert payload["diagnostics"]["native_pytest_arg_count"] == 3
+    assert payload["status"] == ("PASS" if passing else "FAIL")
+    membership = payload["membership_receipt"]
+    assert membership["terminal_success"] is passing
+    assert not membership["missing"] and not membership["duplicates"]
+    assert not membership["extras"]
+    assert len(membership["passed" if passing else "failed"]) == 1
+    capture = payload["batches"][0]["output_captures"][0]
+    assert capture["byte_count"] > 4 * 1024 * 1024
+    assert capture["retained_utf8_bytes"] <= 1024 * 1024
+    assert capture["truncated"] and capture["complete"]
+    assert len(capture["sha256"]) == 64
+    if not passing:
+        assert "DECISIVE_NATIVE_OUTCOME" in result.stdout
+        assert "actual native failure" in result.stdout
+
+
+def test_noisy_batch_timeout_keeps_partial_capture_evidence_and_failure() -> None:
+    captures: list[BatchOutputCapture] = []
+    rc, output, _elapsed = _run_command(
+        [
+            sys.executable,
+            "-c",
+            "import os,time; os.write(1,b'x'*2097152); print('waiting',flush=True); time.sleep(30)",
+        ],
+        timeout=1,
+        output_captures=captures,
+    )
+    assert rc == 124
+    assert "BATCH TIMEOUT after 1s" in output
+    assert "waiting" in output
+    assert len(output.encode()) < 1024 * 1024 + 2048
+    assert captures[0]["truncated"] is True
+    assert captures[0]["complete"] is False
 
 
 def test_batch_runner_accepts_pytest_skip_as_terminal_non_failure(

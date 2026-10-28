@@ -38,54 +38,104 @@ case "$base" in
 esac
 log_dir="$base/$label"
 
+# Select the prepared project interpreter once. Selection never runs the command,
+# so an unavailable uv/environment can safely continue with bounded console output.
+# Log acquisition then uses native no-follow directory handles before re-entering
+# this same command/cancellation owner with pinned descriptors.
+if [[ -z "${OH_GOON_RUN_LOG_BOOTSTRAPPED:-}" ]]; then
+  logging_python=""
+  if [[ -x "$ROOT/backend/.venv/bin/python" ]] && command -v uv >/dev/null 2>&1; then
+    logging_python="$(uv run --offline --frozen --no-sync --project "$ROOT/backend" oh-goon-run-log --interpreter 2>/dev/null)" || logging_python=""
+  fi
+  if [[ -n "$logging_python" && "$logging_python" != *$'\n'* && -x "$logging_python" ]]; then
+    exec "$logging_python" -m oh_goon.repository_tooling.run_logging "$ROOT" "$base" "$label" "$@"
+  fi
+  OH_GOON_RUN_LOG_UNAVAILABLE=1
+fi
+logging_python="${OH_GOON_RUN_LOG_PYTHON:-}"
+run_log_dir_fd="${OH_GOON_RUN_LOG_DIRECTORY_FD:-}"
+run_log_fd="${OH_GOON_RUN_LOG_FILE_FD:-}"
+active_name="${OH_GOON_RUN_LOG_ACTIVE_NAME:-}"
+timestamp="${OH_GOON_RUN_LOG_TIMESTAMP:-}"
+unset OH_GOON_RUN_LOG_BOOTSTRAPPED OH_GOON_RUN_LOG_PYTHON OH_GOON_RUN_LOG_DIRECTORY_FD
+unset OH_GOON_RUN_LOG_FILE_FD OH_GOON_RUN_LOG_ACTIVE_NAME OH_GOON_RUN_LOG_TIMESTAMP
+
 sanitize_stream() {
-  local line tmp_match state_label="<state>/run-logs"
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line//"$ROOT"/<repo>}"
-    line="${line//"$base"/"$state_label"}"
-    line="${line//"$HOME"/<home>}"
-    while [[ "$line" =~ /tmp/tmp\.[A-Za-z0-9._-]+ ]]; do
+  if [[ -n "$logging_python" ]]; then
+    "$logging_python" -m oh_goon.repository_tooling.run_logging --stream "$ROOT" "$base" "$HOME" -1
+    return $?
+  fi
+  # The pre-environment path must also bound newline-free output. Carry only a
+  # fixed-path overlap; discard an already-replaced temporary-token suffix.
+  local chunk pending="" buffer tmp_match suffix rc boundary discard_tmp=0 overlap=9
+  local state_label="<state>/run-logs" LC_ALL=C
+  (( ${#ROOT} > overlap )) && overlap=${#ROOT}
+  (( ${#base} > overlap )) && overlap=${#base}
+  (( ${#HOME} > overlap )) && overlap=${#HOME}
+  while :; do
+    chunk=""
+    IFS= read -r -n 8192 chunk
+    rc=$?
+    if (( rc == 0 && ${#chunk} < 8192 )); then chunk+=$'\n'; fi
+    if (( discard_tmp )); then
+      if [[ "$chunk" =~ ^[A-Za-z0-9._-]+ ]]; then
+        suffix="${BASH_REMATCH[0]}"
+        chunk="${chunk#"$suffix"}"
+      fi
+      [[ -n "$chunk" ]] && discard_tmp=0
+    fi
+    buffer="$pending$chunk"
+    buffer="${buffer//"$ROOT"/<repo>}"
+    buffer="${buffer//"$base"/"$state_label"}"
+    buffer="${buffer//"$HOME"/<home>}"
+    while [[ "$buffer" =~ /tmp/tmp\.[A-Za-z0-9._-]+ ]]; do
       tmp_match="${BASH_REMATCH[0]}"
-      line="${line//"$tmp_match"/<tmp>}"
+      [[ "$buffer" == *"$tmp_match" ]] && discard_tmp=1
+      buffer="${buffer//"$tmp_match"/<tmp>}"
     done
-    printf '%s\n' "$line"
+    boundary=$((${#buffer} - overlap))
+    (( boundary < 0 )) && boundary=0
+    suffix="${buffer##*$'\n'}"
+    (( ${#buffer} - ${#suffix} > boundary )) && boundary=$((${#buffer} - ${#suffix}))
+    if (( rc != 0 )); then boundary=${#buffer}; fi
+    printf '%s' "${buffer:0:boundary}"
+    pending="${buffer:boundary}"
+    (( rc != 0 )) && break
   done
 }
 
-sh "$ROOT/scripts/command_banner.sh" "OH-GOON ${label^^}" "Command: $* | Owner: run_logged.sh" | sanitize_stream
+sh "$ROOT/scripts/command_banner.sh" "OH-GOON ${label^^}" "Owner: run_logged.sh | Command arguments omitted from diagnostics" | sanitize_stream
 
-if ! mkdir -p "$log_dir" 2>/dev/null; then
-  printf 'WARNING: could not create Oh-Goon run-log directory: %s\n' "$log_dir" | sanitize_stream >&2
+if [[ -n "${OH_GOON_RUN_LOG_UNAVAILABLE:-}" ]]; then
+  printf 'WARNING: private persistent run logging is unavailable; prepare the uv environment and select an owned private directory without symlinks.\n' >&2
   echo "Continuing without persistent command logging." >&2
-  exec "$@"
 fi
+unset OH_GOON_RUN_LOG_UNAVAILABLE
 
 # Bash owns wall-clock metadata without an external `date` process. Certification
 # sandboxes may deny unrelated executables; logging metadata must never become an
 # execution dependency.
-TZ=UTC printf -v timestamp '%(%Y%m%dT%H%M%SZ)T' -1
+[[ -n "$timestamp" ]] || TZ=UTC printf -v timestamp '%(%Y%m%dT%H%M%SZ)T' -1
 printf -v started_epoch '%(%s)T' -1
 run_log="$log_dir/${timestamp}-$$.log"
-active_run_log="${run_log}.inprogress"
+active_run_log="/proc/self/fd/$run_log_dir_fd/$active_name"
 latest_log="$log_dir/latest.log"
-latest_candidate="$log_dir/.latest.${timestamp}.$$.tmp"
+latest_candidate="/proc/self/fd/$run_log_dir_fd/.latest.${timestamp}.$$.tmp"
 
 # The invocation owns exactly one byte stream: its active run log. Publish
 # latest.log as a hard-link projection of that owner-scoped inode, then replace
 # the previous projection with one same-directory atomic rename. A later
 # invocation can therefore supersede this projection without giving an older
 # writer any pathname through which it can mutate the newer run.
-latest_projection_ok=1
-if ! : >"$active_run_log" 2>/dev/null; then
-  latest_projection_ok=0
-else
-  rm -f "$latest_candidate" 2>/dev/null || true
+latest_projection_ok=0
+if [[ -n "$run_log_fd" ]]; then
   if ! ln "$active_run_log" "$latest_candidate" 2>/dev/null || \
-     ! mv -fT "$latest_candidate" "$latest_log" 2>/dev/null; then
-    latest_projection_ok=0
+     ! mv -fT "$latest_candidate" "/proc/self/fd/$run_log_dir_fd/latest.log" 2>/dev/null; then
     rm -f "$latest_candidate" 2>/dev/null || true
     printf '\nWARNING: latest run-log projection could not be published.\n' >&2
     printf 'Owner-scoped run evidence will continue independently.\n' >&2
+  else
+    latest_projection_ok=1
   fi
 fi
 
@@ -96,23 +146,11 @@ set +e
 # reliably cancelling the owned workflow. Only presentation/log persistence is
 # asynchronous now; it receives EOF as soon as the foreground command exits.
 sanitize_and_persist() {
-  local line tmp_match state_label="<state>/run-logs" persistence_ok=1
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line//"$ROOT"/<repo>}"
-    line="${line//"$base"/"$state_label"}"
-    line="${line//"$HOME"/<home>}"
-    while [[ "$line" =~ /tmp/tmp\.[A-Za-z0-9._-]+ ]]; do
-      tmp_match="${BASH_REMATCH[0]}"
-      line="${line//"$tmp_match"/<tmp>}"
-    done
-    printf '%s\n' "$line"
-    if (( persistence_ok )); then
-      if ! printf '%s\n' "$line" >>"$active_run_log" 2>/dev/null; then
-        persistence_ok=0
-      fi
-    fi
-  done
-  (( persistence_ok == 1 ))
+  if [[ -n "$run_log_fd" ]]; then
+    "$logging_python" -m oh_goon.repository_tooling.run_logging --stream "$ROOT" "$base" "$HOME" "$run_log_fd"
+  else
+    sanitize_stream
+  fi
 }
 
 {
@@ -120,9 +158,7 @@ sanitize_and_persist() {
   printf 'Kind: %s\n' "$label"
   printf 'Started UTC: %s\n' "$timestamp"
   printf 'Working directory: <repo>\n'
-  printf 'Command:'
-  printf ' %q' "$@"
-  printf '\n\n'
+  printf 'Command arguments: omitted from diagnostics\n\n'
 } | sanitize_and_persist
 header_logging_ok=$?
 
@@ -177,7 +213,11 @@ trap forward_termination TERM
 # ambient `setsid`. The wrapper can therefore forward operator cancellation to the
 # whole immediate command tree while remaining alive long enough to reap it.
 set -m
-"$@" >&"$command_log_fd" 2>&1 &
+(
+  [[ -z "$run_log_fd" ]] || exec {run_log_fd}>&-
+  [[ -z "$run_log_dir_fd" ]] || exec {run_log_dir_fd}>&-
+  exec "$@"
+) >&"$command_log_fd" 2>&1 &
 child_pid=$!
 wait "$child_pid"
 rc=$?
@@ -204,6 +244,7 @@ footer_logging_ok=$?
 set -e
 
 persistence_ok=1
+[[ -n "$run_log_fd" ]] || persistence_ok=0
 (( header_logging_ok == 0 )) || persistence_ok=0
 (( command_logging_ok == 0 )) || persistence_ok=0
 (( footer_logging_ok == 0 )) || persistence_ok=0
@@ -212,16 +253,20 @@ if (( persistence_ok == 1 )); then
   # Only a fully persisted run may acquire the completed .log identity. Keep the
   # active writer outside retention ownership until the logger is drained and the
   # footer is durable, then publish with one atomic rename in the same directory.
-  if mv "$active_run_log" "$run_log" 2>/dev/null; then
+  if [[ ! -L "$active_run_log" && -f "$active_run_log" && "$active_run_log" -ef "/proc/self/fd/$run_log_fd" ]] && \
+     mv -T "$active_run_log" "/proc/self/fd/$run_log_dir_fd/${active_name%.inprogress}" 2>/dev/null; then
     # Run logs are disposable diagnostics with one bounded retention owner. This is
     # best-effort maintenance only and can never change the wrapped command result.
-    retention_python="$ROOT/backend/.venv/bin/python"
-    if [[ -x "$retention_python" ]] && ! "$retention_python" -m oh_goon.runtime.run_log_retention "$log_dir" >/dev/null 2>&1; then
+    if ! (cd "/proc/self/fd/$run_log_dir_fd" && "$logging_python" -m oh_goon.runtime.run_log_retention .) >/dev/null 2>&1; then
       printf '\nWARNING: Oh-Goon run-log retention maintenance failed.\n' >&2
     fi
-    printf '\nSaved run log: %s\n' "$run_log" | sanitize_stream
-    if (( latest_projection_ok == 1 )); then
-      printf 'Latest run log: %s\n' "$latest_log" | sanitize_stream
+    if "$logging_python" -m oh_goon.repository_tooling.run_logging --verify-location "$base" "$label" "$run_log_dir_fd"; then
+      printf '\nSaved run log: %s\n' "$run_log" | sanitize_stream
+      if (( latest_projection_ok == 1 )); then
+        printf 'Latest run log: %s\n' "$latest_log" | sanitize_stream
+      fi
+    else
+      printf '\nWARNING: run-log directory was replaced; no current saved pathname can be reported.\n' >&2
     fi
   else
     persistence_ok=0
@@ -231,4 +276,6 @@ if (( persistence_ok == 0 )); then
   printf '\nWARNING: persistent run logging became unavailable during execution.\n' >&2
   printf 'Console output remained live; the logging failure did not change the command result.\n' >&2
 fi
+[[ -z "$run_log_fd" ]] || exec {run_log_fd}>&-
+[[ -z "$run_log_dir_fd" ]] || exec {run_log_dir_fd}>&-
 exit "$rc"

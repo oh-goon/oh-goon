@@ -54,6 +54,14 @@ def test_failure_output_is_bounded_but_keeps_head_and_tail() -> None:
     assert len(bounded.splitlines()) == 31
 
 
+def test_failure_output_bounds_a_single_line_and_keeps_decisive_tail() -> None:
+    bounded = _bounded_failure_output("start:" + "x" * (2 * 1024 * 1024) + ":failure\n")
+    assert len(bounded) < 8192
+    assert bounded.startswith("start:")
+    assert bounded.endswith(":failure\n")
+    assert "diagnostic line truncated" in bounded
+
+
 @pytest.mark.parametrize("partial_option", [("--resume",), ("--batch", "1")])
 def test_coverage_rejects_reuse_or_partial_batches_before_execution(
     partial_option: tuple[str, ...], monkeypatch: pytest.MonkeyPatch

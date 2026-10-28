@@ -100,6 +100,7 @@ class CommandResult:
     standard_isolation: PlanStandardIsolationEvidence | None = None
     # Tail capture retains diagnostic text; this evidence covers the whole raw stream.
     stdout_evidence: PlanOutputEvidence | None = None
+    stdout_truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +140,7 @@ class CommandTimeoutExpired(subprocess.TimeoutExpired):
         self.physical_execution_id = physical_execution_id
         self.standard_isolation = standard_isolation
         self.stdout_evidence: PlanOutputEvidence | None = None
+        self.stdout_truncated = False
 
 
 class CommandSupervisionTerminated(RuntimeError):
@@ -182,6 +184,7 @@ class CommandCancelledError(RuntimeError):
         self.stderr = stderr
         self.standard_isolation = standard_isolation
         self.stdout_evidence: PlanOutputEvidence | None = None
+        self.stdout_truncated = False
 
 
 class CommandAuthorityTerminatedError(RuntimeError):
@@ -795,6 +798,7 @@ def run_command(
             else stdout_capture.text.rstrip(),
             stderr=stderr_capture.text.rstrip(),
             stdout_evidence=stdout_capture.evidence,
+            stdout_truncated=stdout_capture.truncated,
             duration_ms=int((time.monotonic() - started) * 1000),
             supervisor=CommandSupervisorReceipt(
                 leader_exited_before_group_quiescence=leader_exited_before_group_quiescence,
@@ -837,6 +841,7 @@ def run_command(
             failure, (CommandTimeoutExpired, CommandCancelledError)
         ):
             failure.stdout_evidence = stdout_capture.evidence
+            failure.stdout_truncated = stdout_capture.truncated
             if isinstance(failure, CommandTimeoutExpired):
                 failure.output = stdout_capture.text
             else:

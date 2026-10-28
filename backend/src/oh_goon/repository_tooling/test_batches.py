@@ -8,19 +8,24 @@ and discover an agent/tool timeout after wasting the full execution window.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
+from threading import Event
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from oh_goon.repository_tooling.pytest_batch_coverage import BatchCoverageSession
 
-from oh_goon.engine.command import run_command
+from oh_goon.core.models.fleet_plan_evidence import PlanOutputEvidence
+from oh_goon.engine.command import CommandTimeoutExpired, run_command
+from oh_goon.engine.command_capture import TextCapture
 from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
 from oh_goon.repository_tooling.pytest_batch_execution_policy import (
     admitted_execution_timeout,
@@ -28,6 +33,7 @@ from oh_goon.repository_tooling.pytest_batch_execution_policy import (
 from oh_goon.repository_tooling.pytest_batch_orchestration import (
     Batch,
     BatchCallbacks,
+    BatchOutputCapture,
     RefinementHistory,
     run_batch_cli,
 )
@@ -44,6 +50,43 @@ from oh_goon.repository_tooling.test_batch_receipts import (
 )
 from oh_goon.runtime.recovery_evidence import ExecutionRecoveryEvent, recovery_work_identity
 
+_CAPTURE_LIMIT_BYTES = 1024 * 1024
+
+
+def _bounded_diagnostic_join(parts: list[str]) -> str:
+    capture = TextCapture(_CAPTURE_LIMIT_BYTES, Event(), retain_tail=True)
+    for part in parts:
+        capture.append(part, stream="stdout")
+    return capture.text
+
+
+def _captured_output(
+    output: str,
+    evidence: PlanOutputEvidence | None,
+    *,
+    truncated: bool,
+    complete: bool,
+    members: tuple[str, ...],
+    captures: list[BatchOutputCapture] | None,
+) -> str:
+    if evidence is None:
+        return output
+    capture: BatchOutputCapture = {
+        "members": list(members),
+        "sha256": evidence.sha256,
+        "byte_count": evidence.byte_count,
+        "line_count": evidence.line_count,
+        "retained_utf8_bytes": len(output.encode("utf-8")),
+        "limit_bytes": _CAPTURE_LIMIT_BYTES,
+        "truncated": truncated,
+        "complete": complete,
+    }
+    if captures is not None:
+        captures.append(capture)
+    if truncated or not complete:
+        return f"PYTEST OUTPUT CAPTURE: {json.dumps(capture, sort_keys=True)}\n" + output
+    return output
+
 
 def _run_command(
     command: list[str],
@@ -51,6 +94,8 @@ def _run_command(
     timeout: int,
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
+    output_captures: list[BatchOutputCapture] | None = None,
+    members: tuple[str, ...] = (),
 ) -> tuple[int, str, float]:
     started = time.monotonic()
     try:
@@ -62,11 +107,31 @@ def _run_command(
             merge_stderr=True,
             require_process_group_quiescence=True,
             parent_death_signal=True,
+            max_capture_bytes_per_stream=_CAPTURE_LIMIT_BYTES,
+            retain_output_tail=True,
         )
-        return result.returncode, result.stdout, time.monotonic() - started
+        output = _captured_output(
+            result.stdout,
+            result.stdout_evidence,
+            truncated=result.stdout_truncated,
+            complete=True,
+            members=members,
+            captures=output_captures,
+        )
+        return result.returncode, output, time.monotonic() - started
     except subprocess.TimeoutExpired as exc:
         output = exc.output or ""
-        return 124, str(output) + f"\nBATCH TIMEOUT after {timeout}s\n", time.monotonic() - started
+        text = output.decode("utf-8", errors="replace") if isinstance(output, bytes) else output
+        if isinstance(exc, CommandTimeoutExpired):
+            text = _captured_output(
+                text,
+                exc.stdout_evidence,
+                truncated=exc.stdout_truncated,
+                complete=False,
+                members=members,
+                captures=output_captures,
+            )
+        return 124, text + f"\nBATCH TIMEOUT after {timeout}s\n", time.monotonic() - started
 
 
 def _progress_fd() -> int | None:
@@ -109,18 +174,28 @@ _PYTEST_PROGRESS_ONLY = re.compile(r"^[.sFxXEPr\s\[\]0-9%]+$")
 
 
 def _bounded_failure_output(output: str, *, max_lines: int = 120) -> str:
-    lines = [
-        line
-        for line in output.rstrip().splitlines()
-        if not (line.strip() and _PYTEST_PROGRESS_ONLY.fullmatch(line.strip()))
-    ]
-    if len(lines) <= max_lines:
-        return "\n".join(lines) + ("\n" if lines else "")
     head = max_lines // 3
     tail = max_lines - head
-    omitted = len(lines) - head - tail
-    visible = [*lines[:head], f"... {omitted} diagnostic lines omitted ...", *lines[-tail:]]
-    return "\n".join(visible) + "\n"
+    first: list[str] = []
+    last: deque[str] = deque(maxlen=tail)
+    count = 0
+    for raw_line in io.StringIO(output):
+        line = raw_line.rstrip("\r\n")
+        stripped = line.strip()
+        if stripped and _PYTEST_PROGRESS_ONLY.fullmatch(stripped):
+            continue
+        if len(line) > 4096:
+            line = line[:2048] + " ... diagnostic line truncated ... " + line[-2048:]
+        count += 1
+        if len(first) < head:
+            first.append(line)
+        else:
+            last.append(line)
+    if count <= max_lines:
+        visible = [*first, *last]
+    else:
+        visible = [*first, f"... {count - max_lines} diagnostic lines omitted ...", *last]
+    return "\n".join(visible) + ("\n" if visible else "")
 
 
 _RESOURCE_PRESSURE_PATTERNS = (
@@ -161,6 +236,7 @@ def _run_members(
     receipt_attempt_identity: str | None = None,
     invocation: PytestInvocation | None = None,
     coverage_session: BatchCoverageSession | None = None,
+    output_captures: list[BatchOutputCapture] | None = None,
 ) -> tuple[int, str, float]:
     explicit_invocation = invocation is not None
     invocation = invocation or resolve_pytest_invocation()
@@ -193,6 +269,15 @@ def _run_members(
     if marker:
         command += ["-m", marker]
     command += list(members)
+    if output_captures is not None:
+        return _run_command(
+            command,
+            timeout=timeout,
+            env=env,
+            cwd=invocation.cwd,
+            output_captures=output_captures,
+            members=members,
+        )
     if explicit_invocation:
         return _run_command(command, timeout=timeout, env=env, cwd=invocation.cwd)
     return _run_command(command, timeout=timeout, env=env)
@@ -213,6 +298,7 @@ def _run(
     root_attempt: int = 1,
     invocation: PytestInvocation | None = None,
     coverage_session: BatchCoverageSession | None = None,
+    output_captures: list[BatchOutputCapture] | None = None,
 ) -> tuple[int, str, float, tuple[ExecutionRecoveryEvent, ...]]:
     started = time.monotonic()
     recovery_events: list[ExecutionRecoveryEvent] = []
@@ -257,12 +343,14 @@ def _run(
                         "BATCH RECOVERY STOPPED: decisive refined child failure; "
                         "remaining sibling work deferred to the next run\n"
                     )
-                    return child_rc, "".join(outputs)
+                    return child_rc, _bounded_diagnostic_join(outputs)
             if all(code == 0 for code in child_codes):
-                return 0, "".join(outputs)
+                return 0, _bounded_diagnostic_join(outputs)
             if all(code == 5 for code in child_codes):
-                return 5, "".join(outputs)
-            return next((code for code in child_codes if code not in (0, 5)), 1), "".join(outputs)
+                return 5, _bounded_diagnostic_join(outputs)
+            return next(
+                (code for code in child_codes if code not in (0, 5)), 1
+            ), _bounded_diagnostic_join(outputs)
 
         prepared = membership_session.prepare(
             members,
@@ -282,7 +370,17 @@ def _run(
         )
         if budget_stop is not None:
             return 124, prepared.reused_prefix + budget_stop
-        if invocation is None and coverage_session is None:
+        if output_captures is not None:
+            rc, output, _elapsed = _run_members(
+                members,
+                timeout=effective_timeout,
+                marker=marker,
+                invocation=invocation,
+                coverage_session=coverage_session,
+                output_captures=output_captures,
+                **prepared.receipt_kwargs,
+            )
+        elif invocation is None and coverage_session is None:
             rc, output, _elapsed = _run_members(
                 members, timeout=effective_timeout, marker=marker, **prepared.receipt_kwargs
             )
@@ -336,14 +434,14 @@ def _run(
                     "BATCH RECOVERY STOPPED: decisive refined child failure; "
                     "remaining sibling work deferred to the next run\n"
                 )
-                return child_rc, "".join(recovered_output)
+                return child_rc, _bounded_diagnostic_join(recovered_output)
         if all(code == 0 for code in child_codes):
-            return 0, "".join(recovered_output)
+            return 0, _bounded_diagnostic_join(recovered_output)
         if all(code == 5 for code in child_codes):
-            return 5, "".join(recovered_output)
-        return next((code for code in child_codes if code not in (0, 5)), 1), "".join(
-            recovered_output
-        )
+            return 5, _bounded_diagnostic_join(recovered_output)
+        return next(
+            (code for code in child_codes if code not in (0, 5)), 1
+        ), _bounded_diagnostic_join(recovered_output)
 
     rc, output = run_group(batch.members, is_refinement=False)
     return rc, output, time.monotonic() - started, tuple(recovery_events)

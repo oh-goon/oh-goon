@@ -18,7 +18,7 @@ from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Protocol, TypedDict
+from typing import NotRequired, Protocol, TypedDict
 
 from oh_goon.repository_tooling import pytest_execution_report as execution_report_contract
 from oh_goon.repository_tooling.pytest_batch_coverage import BatchCoverageSession, CoverageOptions
@@ -63,6 +63,17 @@ class MembershipReceiptProjection(Protocol):
     def as_dict(self) -> dict[str, object]: ...
 
 
+class BatchOutputCapture(TypedDict):
+    members: list[str]
+    sha256: str
+    byte_count: int
+    line_count: int
+    retained_utf8_bytes: int
+    limit_bytes: int
+    truncated: bool
+    complete: bool
+
+
 class BatchExecutionReport(TypedDict):
     batch_index: int
     members: list[str]
@@ -72,6 +83,7 @@ class BatchExecutionReport(TypedDict):
     environment_retry_count: int
     timeout_refinements: list[str]
     recovery_events: list[dict[str, object]]
+    output_captures: NotRequired[list[BatchOutputCapture]]
 
 
 @dataclass(frozen=True)
@@ -160,6 +172,7 @@ class _BatchRunState:
     batch_reports: list[BatchExecutionReport] = field(default_factory=list)
     recovery_events: list[ExecutionRecoveryEvent] = field(default_factory=list)
     refinement_history: RefinementHistory = field(default_factory=RefinementHistory)
+    output_captures: dict[int, list[BatchOutputCapture]] = field(default_factory=dict)
 
 
 def _discover_runnable_members(
@@ -422,6 +435,7 @@ def _submit_next(
             root_attempt=state.attempts[batch.index],
             invocation=plan.invocation,
             coverage_session=plan.coverage_session,
+            output_captures=state.output_captures.setdefault(batch.index, []),
         )
     ] = batch
     return True
@@ -459,6 +473,7 @@ def _record_batch_report(
             "environment_retry_count": max(0, attempt - 1),
             "timeout_refinements": list(refinements),
             "recovery_events": [event.as_dict() for event in events],
+            "output_captures": state.output_captures.pop(batch.index, []),
         }
     )
 
@@ -771,7 +786,8 @@ def _finish_batch_run(args: argparse.Namespace, plan: _BatchPlan, state: _BatchR
         "observed_cgroup": observed_cgroup,
         "qualified": plan.invocation.qualified,
         "pytest_config": str(plan.invocation.config_file),
-        "native_pytest_args": list(plan.invocation.pytest_args),
+        "native_pytest_arg_count": len(plan.invocation.pytest_args),
+        "native_pytest_arg_values": "omitted from diagnostics",
         "coverage": coverage_result,
     }
     cpu_text = f"{usage['cpu_seconds']['total_seconds']:.3f}s" if usage else "unavailable"
