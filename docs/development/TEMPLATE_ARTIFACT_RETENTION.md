@@ -69,7 +69,14 @@ oh-goon plan export-artifact RUN_ID --step STEP_ID \
 ```
 
 The command selects the exact declared retained artifact from the recorded
-Run, verifies repository ownership and file kind, and materializes it under an
+Run. Cancelling, cancelled or interrupted Runs and unknown selected-Step cleanup
+refuse before reading retained bytes. The selected producer must be physically
+settled with verified cleanup; its Run may still be active while another
+repository executes. A failed
+Step with verified cleanup, including a timeout or output-limit failure, may
+still supply its retained diagnostic artifacts; another failed Step does not
+invalidate a completed producer's artifacts.
+Export verifies repository ownership and file kind, then materializes under an
 existing content-store read lease. The copied canonical object identity must
 match the retained reference, and its raw byte hash and size must match the
 artifact evidence. Private file-backed
@@ -82,6 +89,12 @@ for each retained artifact shown in its bounded preview.
 Export remains available after execution scratch and caller source disappear,
 while the retained reference remains live. Missing, evidence-only, released or
 inconsistent content refuses; export never falls back to a current workspace.
+`plan outputs`, Game Tape and the Run API describe collection-time evidence:
+`PRESENT` means the file was collected, and a recorded retained reference does
+not prove that its bytes are still available. Export checks the live reference
+and bytes under the read lease. A printed export command is a selection hint,
+not a fresh availability observation. Releasing retained bytes preserves that
+historical evidence and the original Run result.
 Exported bytes are an explicitly promoted user file; exporting does not release
 the retained reference or change the historical Run result.
 If private staging cleanup fails after publication, the export still reports
