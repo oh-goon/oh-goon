@@ -28,10 +28,11 @@ make test
 
 `make init` is the idempotent first-checkout and reconciliation boundary. `backend/pyproject.toml` owns dependency intent and committed `backend/uv.lock` is the sole exact Python resolution authority. Native `uv sync --locked` and native `npm ci` materialize the environment and own their own network, cache, retry, installation, and environment semantics. Oh-Goon does not require a separate certification dependency universe or maintain a parallel dependency cache. `make sync` is the explicit authoring boundary allowed to update native lock bytes after intentional dependency-intent changes. `make certify` consumes that already-materialized native authority and then proves only release-critical Oh-Goon semantics; it does not invoke `make init` again.
 
-`make test` is intentionally optimized for fast feedback. Backend and frontend
-preparation are independent, ordinary test failures are collected instead of
-stopping unrelated checks, and format/lint/browser/systemd/cgroup/release gates do
-not sit in front of Python, Node or frontend code tests.
+Use the [focused edit loop](docs/DEVELOPMENT.md#focused-edit-loop) for a selected
+test while editing. `make test` aggregates the ordinary backend, integration and
+frontend checks for a stable batch. Independent checks continue after an
+ordinary test failure. Supported Make checks verify their native CPU budget
+before work; browser, quality and release checks retain their separate owners.
 
 On WSL, dependency and test startup is usually much faster when the checkout lives on the native Linux filesystem (for example `~/oh-goon`) instead of a Windows-mounted `/mnt/c/...` path. `make test` prints a non-blocking note when it detects the slower mounted layout; the mounted layout remains supported.
 
@@ -291,7 +292,7 @@ make test-integration
 
 `make architecture` is a small repository-only lane for cross-owner dependency direction, local-only frontend networking, exact template package grammar, production-template safety, Scout's read-only dependency boundary, release identity, and the dependency-intent/resolution ownership boundary. Runtime safety remains proved by behavioral backend and integration tests.
 
-`make check` is the fast development feedback boundary after `make init`. It
+`make check` is a broad development feedback boundary after `make init`. It
 runs backend fast tests, repository-tooling tests, architecture,
 generated-contract freshness, frontend typecheck, and frontend unit tests.
 `make quality-check` and the owner checks above cover the separate lint,

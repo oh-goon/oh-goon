@@ -265,6 +265,7 @@ def test_batch_execution_report_is_atomic_and_records_timeout_refinement(
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["schema"] == "oh-goon.pytest-batch-execution/v1"
     assert payload["status"] == "PASS"
+    assert "feedback" not in payload
     assert payload["batches"][0]["members"] == [str(test_file)]
     assert payload["batches"][0]["environment_retry_count"] == 0
     assert payload["batches"][0]["recovery_events"] == []
@@ -283,6 +284,90 @@ def test_batch_execution_report_is_atomic_and_records_timeout_refinement(
     )
     assert Path(payload["membership_receipt_path"]).exists()
     assert not list(report.parent.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("selected_outcome", ("pass", "fail", "missing", "deselected"))
+def test_focused_native_selection_never_claims_unselected_integration_verification(
+    selected_outcome: str, tmp_path: Path
+) -> None:
+    import json
+    import subprocess
+
+    selected = tmp_path / "test_selected.py"
+    selected.write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('value', (1, 2))\n"
+        f"def test_selected(value): assert value != {2 if selected_outcome == 'fail' else 3}\n",
+        encoding="utf-8",
+    )
+    integration = tmp_path / "integration"
+    integration.mkdir()
+    unselected_effect = tmp_path / "unselected-integration-ran"
+    (integration / "test_unselected.py").write_text(
+        "from pathlib import Path\n"
+        "def test_unselected_integration_failure():\n"
+        f"    Path({str(unselected_effect)!r}).touch()\n"
+        "    assert False, 'unselected integration deliberately fails'\n",
+        encoding="utf-8",
+    )
+    if selected_outcome == "missing":
+        selected.unlink()
+    report = tmp_path / "focused.json"
+    escalation_effect = tmp_path / "escalation-ran"
+    next_check = f"touch {escalation_effect}"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "oh_goon.repository_tooling.test_batches",
+            str(selected),
+            "--focused",
+            "--next-check",
+            next_check,
+            "--granularity",
+            "tests",
+            "--batch-size",
+            "8",
+            "--workers",
+            "1",
+            "--batch-timeout",
+            "10",
+            "--marker",
+            "never_selected" if selected_outcome == "deselected" else "",
+            "--report-path",
+            str(report),
+            "--resume-state-root",
+            str(tmp_path / "state"),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=30,
+    )
+    assert (result.returncode == 0) is (selected_outcome == "pass"), result.stdout
+    assert "FOCUSED PYTEST FEEDBACK: NOT_FULLY_VERIFIED" in result.stdout
+    assert "Full verification: NOT_FULLY_VERIFIED" in result.stdout
+    assert f"Next check: UNVERIFIED | {json.dumps(next_check)}" in result.stdout
+    assert "RESULT: PASSED" not in result.stdout
+    assert not unselected_effect.exists()
+    assert not escalation_effect.exists(), "the next check is guidance, never an effect"
+    if selected_outcome in ("missing", "deselected"):
+        assert "PYTEST BATCH RESULT: PASS" not in result.stdout
+        assert not report.exists()
+        return
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert payload["status"] == ("PASS" if selected_outcome == "pass" else "FAIL")
+    assert payload["membership_receipt"]["selected"] == [
+        f"{selected}::test_selected[1]",
+        f"{selected}::test_selected[2]",
+    ]
+    assert payload["feedback"] == {
+        "scope": "FOCUSED",
+        "full_verification_status": "NOT_FULLY_VERIFIED",
+        "next_check": {"command": next_check, "status": "UNVERIFIED"},
+    }
 
 
 def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparable(
@@ -370,6 +455,7 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
 
     first_payload = json.loads(report.read_text(encoding="utf-8"))
     regrouped_command = list(command)
+    regrouped_command += ["--focused", "--next-check", "make tooling-check"]
     regrouped_command[
         regrouped_command.index("1", regrouped_command.index("--batch-size"))
     ] = "8"
@@ -394,6 +480,7 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
     assert payload["timing_comparable"] is False
     assert payload["reused_member_count"] == 4
     assert payload["executed_member_count"] == 0
+    assert payload["feedback"]["full_verification_status"] == "NOT_FULLY_VERIFIED"
     assert payload["resume_suite_identity"] == first_payload["resume_suite_identity"]
     assert (
         payload["execution_plan_identity"] != first_payload["execution_plan_identity"]

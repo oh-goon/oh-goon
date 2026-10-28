@@ -4,6 +4,56 @@ This guide and `REAL_LIFECYCLE_QA.yml` describe current coverage owners and
 reproduction commands. Listed test references are not recorded passes; report
 actual results against the exact source and environment that executed them.
 
+## Before implementing a backlog item
+
+An open qualification issue does not mean its feature is missing. First identify
+the supported behavior in its current owner, then find the existing proof and
+the specific evidence still needed. Change code only for a reproduced defect or
+an explicitly missing capability. A test reference shows where to investigate;
+it does not establish that the test passed on this source or host.
+
+Keep two questions separate in review and issue updates:
+
+1. **Implementation:** is the requested behavior implemented, partial, absent,
+   or intentionally unsupported? Link its current code/contract owner.
+2. **Qualification:** what did an actual check establish, for which source,
+   host, harness and mode? Record its command and evidence in the existing issue
+   or receipt owner. Unrun, blocked, incomplete and historical results cannot
+   establish a current PASS.
+
+These worked examples point to existing owners rather than define another
+capability or result registry:
+
+| Capability already present | Existing proof and its limits | Remaining question / next action |
+| --- | --- | --- |
+| Native Make CPU budget: [resource wrapper](../../scripts/development_test_resources.sh), with [worker admission/reporting](../../backend/src/oh_goon/repository_tooling/pytest_resource_budget.py). | [Resource regressions](../../scripts/tests/test_development_test_resources.py) protect quota/refusal and delegated constraints. Two CPUs are a CPU-time ceiling; the memory estimate is not a hard RAM/I/O limit. | [HUG-12](https://linear.app/hugloss/issue/HUG-12) needs actual Linux/WSL host proof; [HUG-90](https://linear.app/hugloss/issue/HUG-90) owns RAM/OOM/I/O qualification. Follow the [native budget commands](../DEVELOPMENT.md#local-test-resource-budget), preserving unsupported-host refusal. |
+| Native pytest batches and exact member resume: [batch owner](../../backend/src/oh_goon/repository_tooling/test_batches.py) and [receipt owner](../../backend/src/oh_goon/repository_tooling/test_batch_receipts.py). | [Batch](../../scripts/tests/test_test_batches.py) and [receipt regressions](../../scripts/tests/test_test_batch_receipts.py) protect selected membership and reusable PASS evidence. Their existence is not proof of every environment or worker ordering. | [HUG-115](https://linear.app/hugloss/issue/HUG-115) owns semantic-input invalidation, [HUG-116](https://linear.app/hugloss/issue/HUG-116) worker isolation, and [HUG-91](https://linear.app/hugloss/issue/HUG-91) disposal. Run the relevant existing file through the bounded command below. |
+| Process capture and local developer logging: [command capture](../../backend/src/oh_goon/engine/command_capture.py), [logging wrapper](../../scripts/run_logged.sh). | The supervisor supports bounded capture; [logging regressions](../../scripts/tests/test_run_logging.py) protect existing presentation/retention behavior. A caller's later display truncation does not bound earlier capture, and path sanitization does not promise arbitrary credential redaction. | [HUG-121](https://linear.app/hugloss/issue/HUG-121) owns pytest-callsite capture limits; [HUG-127](https://linear.app/hugloss/issue/HUG-127) owns log privacy/unsafe-path proofs. Reproduce at those callsites before extending their existing owners. |
+| Native-agent execution and harness conformance: [runtime owners](AGENT_RUNTIME_OWNERS.md), [compatibility/evidence matrix](AGENT_HARNESS_COMPATIBILITY.md). | Qualification is specific to the installed harness, integration mode, model protocol and environment. Ephemeral Pi lifecycle/compaction evidence does not establish persistent cross-Run reopen. Service readiness is not task submission or continuation support. | [HUG-21](https://linear.app/hugloss/issue/HUG-21) owns native baseline reconciliation; [HUG-39](https://linear.app/hugloss/issue/HUG-39) owns Pi persistent-session qualification before execution coding. Select the exact installed-process proof in the [backend test guide](../../backend/tests/README.md), not a synthetic replacement for host behavior. |
+
+After `make init`, a bounded investigation of one listed tooling file can use:
+
+```bash
+uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
+  --qualified --focused --next-check "make tooling-check" --show-output \
+  --granularity tests --workers 1 \
+  --batch-size 16 --batch-timeout 180 scripts/tests/test_test_batch_receipts.py
+```
+
+This is focused evidence only. Direct uv commands do not acquire the Make-owned
+CPU scope. Use the [development loop and escalation rules](../DEVELOPMENT.md)
+and [tool-session qualification](TOOL_SESSION_QUALIFICATION.md) for the remaining
+owner checks. [Test isolation QA](TEST_SETUP_ISOLATION_QA.md) retains fixture
+ownership. [HUG-133](https://linear.app/hugloss/issue/HUG-133) owns the local-test
+closure matrix and [HUG-69](https://linear.app/hugloss/issue/HUG-69) CLI signoff;
+this guide does not duplicate their result accounting.
+
+When behavior changes, update its current explanation and proof references in
+the same PR. Keep actual execution results with their existing evidence owner;
+do not turn this guide into a perpetual PASS list. Older ADR/checkpoint results
+describe their original source. Follow [documentation anti-drift](DOCUMENTATION_ANTI_DRIFT.md)
+when current and historical explanations disagree.
+
 Oh-Goon treats real-lifecycle proof as the highest-value regression layer for critical behavior.
 Unit tests remain necessary, but they do not prove that independently correct owners compose correctly over time.
 
