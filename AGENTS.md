@@ -243,6 +243,7 @@ of applicable escalation rows after the focused checks; do not regenerate
 unrelated output or broaden testing to hide a failure.
 
 Constrained agent/tool sessions follow [Tool-session qualification](docs/development/TOOL_SESSION_QUALIFICATION.md): start known-large pytest surfaces in the existing resume-safe batch runner; already bounded owner files may run directly.
+For short-lived ChatGPT/coding-agent sessions, follow the [fast iteration and continuation playbook](docs/development/CHATGPT_ITERATION.md); it adds no execution or qualification authority.
 
 | Changed boundary | Required escalation |
 | --- | --- |
