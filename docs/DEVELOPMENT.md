@@ -189,6 +189,42 @@ Coverage gates retain file batches and their original coverage sources. Native c
 
 Batch JSON reports include the resolved budget and observed enforcement facts, native collection duration, whole-run CPU time, and the peak RSS of waited-for children where the host provides those observations. Child peak RSS is not the sum of concurrently resident processes. PID-bound cgroup observations also report CPU-quota throttling counter changes and lifetime memory/task peaks when available; a shared cgroup may include other work, and concurrent task peaks do not count total child creation. Resource diagnostics do not change selected membership, result verdicts, process deadlines or receipt authority. Reduced concurrency can increase elapsed time; a timeout remains unverified and is never converted to PASS or hidden by an automatic timeout extension.
 
+### Private local check logs
+
+The check/test/verify/certify logging wrapper selects the prepared backend
+interpreter through uv once. Its child stream processors reuse that exact
+interpreter. Before the environment is prepared, or when a private log location
+cannot be acquired, the command still runs with bounded console sanitization and
+an explicit persistent-log-unavailable warning. Logging does not install or repair
+the environment and cannot change a failing command into success.
+
+Persistent local diagnostics use owned private directories (0700) and files
+(0600), acquired through native no-follow directory handles. Existing shared or
+symlinked locations are refused rather than silently changing permissions. To
+choose a separate location explicitly, create a private directory under a trusted
+parent and pass it as `RUN_LOG_DIR` to Make; for example:
+
+```bash
+install -d -m 700 "$HOME/.oh-goon-run-logs"
+RUN_LOG_DIR="$HOME/.oh-goon-run-logs" make test
+RUN_LOG_DIR="$HOME/.oh-goon-run-logs" make test-log
+```
+
+`test-log` and `certify-log` read the private latest log without following
+symlinked paths. The writer retains one pinned file descriptor while the command
+runs, so replacing the directory cannot redirect its later writes. Completed-log
+retention remains owned by the existing retention policy; active logs stay outside
+that pruning set.
+
+Both console and persistent streams process bounded chunks, including output
+without newlines. Repository/home/temporary path replacement is privacy-aware
+presentation, not arbitrary credential redaction. Framework headers omit command
+arguments, and batch JSON diagnostics report the native option count without
+copying option values. Correctness identities still bind the exact native
+arguments. Raw output deliberately printed by tests remains visible and may be
+persisted. Use fake credentials in failure probes and treat these local logs as
+private diagnostics, never as Run/Journal or certification result authority.
+
 ## Dependency cache authority
 
 Oh-Goon does not own package-manager or browser caches. Native uv, npm, and Playwright remain the sole cache/materialization authorities. Oh-Goon therefore exposes no cache status/prune/clean compatibility command and does not recognize historical Oh-Goon dependency-cache locations. Current Oh-Goon-owned persistent state is reported and pruned only through the storage lifecycle (`make storage-status` / `make storage-prune`) when that lifecycle has positive ownership/disposal proof. Unknown old cache directories are simply unclassified host bytes and receive no product cleanup authority.

@@ -4,6 +4,9 @@ import argparse
 
 import ast
 import json
+import os
+import stat
+import errno
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -139,6 +142,141 @@ def test_execution_report_persistence_rejects_stale_schema(
 
     pytest_execution_report.write_execution_report(report, _report_payload(_schema()))
     assert json.loads(report.read_text(encoding="utf-8"))["schema"] == f"{FAMILY}/v7"
+
+
+def test_execution_report_replaces_owned_file_privately(tmp_path: Path) -> None:
+    report = tmp_path / "reports" / "batch.json"
+    payload = _report_payload(_schema())
+    previous_umask = os.umask(0)
+    try:
+        pytest_execution_report.write_execution_report(report, payload)
+        assert json.loads(report.read_text(encoding="utf-8")) == payload
+        assert stat.S_IMODE(report.stat().st_mode) == 0o600
+        assert stat.S_IMODE(report.parent.stat().st_mode) == 0o700
+        replacement = {**payload, "status": "FAIL"}
+        pytest_execution_report.write_execution_report(report, replacement)
+        assert json.loads(report.read_text(encoding="utf-8")) == replacement
+    finally:
+        os.umask(previous_umask)
+    assert sorted(item.name for item in report.parent.iterdir()) == ["batch.json"]
+
+
+@pytest.mark.parametrize("link_parent", [False, True])
+def test_execution_report_refuses_symlink_without_touching_foreign_bytes(
+    tmp_path: Path, link_parent: bool
+) -> None:
+    owner = tmp_path / "owner"
+    owner.mkdir(mode=0o700)
+    report = owner / "batch.json"
+    payload = _report_payload(_schema())
+    pytest_execution_report.write_execution_report(report, payload)
+    assert json.loads(report.read_text(encoding="utf-8")) == payload
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    sentinel = foreign / "sentinel.json"
+    sentinel.write_text("foreign-owned-sentinel", encoding="utf-8")
+    if link_parent:
+        report = tmp_path / "alias" / "sentinel.json"
+        report.parent.symlink_to(foreign, target_is_directory=True)
+    else:
+        report.unlink()
+        report.symlink_to(sentinel)
+    with pytest.raises((OSError, RuntimeError)):
+        pytest_execution_report.write_execution_report(report, payload)
+    assert sentinel.read_text(encoding="utf-8") == "foreign-owned-sentinel"
+    assert not list(foreign.glob(".*.tmp"))
+
+
+def test_execution_report_rejects_shared_writable_directory(tmp_path: Path) -> None:
+    report = tmp_path / "shared" / "batch.json"
+    report.parent.mkdir(mode=0o700)
+    payload = _report_payload(_schema())
+    pytest_execution_report.write_execution_report(report, payload)
+    report.parent.chmod(0o777)
+    try:
+        with pytest.raises(RuntimeError, match="directory must be owned"):
+            pytest_execution_report.write_execution_report(
+                report, {**payload, "status": "FAIL"}
+            )
+        assert json.loads(report.read_text(encoding="utf-8")) == payload
+    finally:
+        report.parent.chmod(0o700)
+
+
+def test_execution_report_publication_failure_preserves_previous_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    report = tmp_path / "report.json"
+    payload = _report_payload(_schema())
+    pytest_execution_report.write_execution_report(report, payload)
+
+    def refuse_publication(*args: object, **kwargs: object) -> None:
+        raise OSError(errno.ENOSPC, "controlled report publication failure")
+
+    monkeypatch.setattr(os, "replace", refuse_publication)
+    with pytest.raises(OSError, match="controlled report publication failure"):
+        pytest_execution_report.write_execution_report(
+            report, {**payload, "status": "FAIL"}
+        )
+    assert json.loads(report.read_text(encoding="utf-8")) == payload
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["report.json"]
+
+
+def test_execution_report_directory_replacement_cannot_write_foreign_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    owner = tmp_path / "owner"
+    owner.mkdir(mode=0o700)
+    report = owner / "report.json"
+    payload = _report_payload(_schema())
+    pytest_execution_report.write_execution_report(report, payload)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir(mode=0o700)
+    foreign_report = foreign / "report.json"
+    foreign_report.write_text("foreign-owned-sentinel", encoding="utf-8")
+    original_replace = os.replace
+
+    def substitute_directory(
+        source: str, destination: str, *, src_dir_fd: int, dst_dir_fd: int
+    ) -> None:
+        owner.rename(tmp_path / "retained-owner")
+        owner.symlink_to(foreign, target_is_directory=True)
+        original_replace(
+            source, destination, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd
+        )
+
+    monkeypatch.setattr(os, "replace", substitute_directory)
+    with pytest.raises(RuntimeError, match="directory changed during publication"):
+        pytest_execution_report.write_execution_report(
+            report, {**payload, "status": "FAIL"}
+        )
+    assert foreign_report.read_text(encoding="utf-8") == "foreign-owned-sentinel"
+
+
+def test_execution_report_refuses_ancestor_symlink_after_publication(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    selected = tmp_path / "selected"
+    report = selected / "reports" / "report.json"
+    payload = _report_payload(_schema())
+    pytest_execution_report.write_execution_report(report, payload)
+    original_replace = os.replace
+
+    def substitute_ancestor(
+        source: str, destination: str, *, src_dir_fd: int, dst_dir_fd: int
+    ) -> None:
+        original_replace(
+            source, destination, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd
+        )
+        relocated = tmp_path / "relocated"
+        selected.rename(relocated)
+        selected.symlink_to(relocated, target_is_directory=True)
+
+    monkeypatch.setattr(os, "replace", substitute_ancestor)
+    with pytest.raises(RuntimeError, match="directory changed during publication"):
+        pytest_execution_report.write_execution_report(
+            report, {**payload, "status": "FAIL"}
+        )
 
 
 def test_hosted_receipt_validation_follows_schema_owner_and_rejects_stale(

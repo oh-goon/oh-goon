@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import selectors
 import signal
+import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -44,6 +46,7 @@ def test_logged_runner_streams_persists_latest_and_preserves_exit(
     )
     assert result.returncode == 7
     assert "alpha" in result.stdout and "beta" in result.stdout
+    assert result.stdout.index("OH-GOON TEST") < result.stdout.index("alpha")
     latest = tmp_path / "logs" / "test" / "latest.log"
     assert latest.is_file()
     text = latest.read_text(encoding="utf-8")
@@ -248,14 +251,328 @@ def test_logged_runner_uses_one_live_spinner_line_on_a_real_terminal(
         os.close(master_fd)
 
 
-def test_logged_runner_retention_consumes_repository_python_without_ambient_python_authority() -> (
-    None
-):
-    source = RUNNER.read_text(encoding="utf-8")
-    assert 'retention_python="$ROOT/backend/.venv/bin/python"' in source
-    assert '[[ -x "$retention_python" ]]' in source
-    assert "PYTHONPATH=" not in source
-    assert "python3 -m oh_goon.runtime.run_log_retention" not in source
+def test_unavailable_uv_keeps_console_and_child_result_without_persistent_logs(
+    tmp_path: Path,
+) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    shell = shutil.which("sh")
+    bash = shutil.which("bash")
+    assert shell is not None
+    assert bash is not None
+    (tools / "sh").symlink_to(shell)
+    (tools / "bash").symlink_to(bash)
+    env = dict(os.environ, PATH=str(tools), OH_GOON_RUN_LOG_DIR=str(tmp_path / "logs"))
+    result = subprocess.run(
+        (
+            "bash",
+            str(RUNNER),
+            "test",
+            sys.executable,
+            "-c",
+            "print('still-ran'); raise SystemExit(7)",
+        ),
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 7
+    assert "still-ran" in result.stdout
+    assert "Continuing without persistent command logging" in result.stderr
+    assert not (tmp_path / "logs").exists()
+
+
+def test_log_metadata_omits_arguments_and_uses_private_permissions(
+    tmp_path: Path,
+) -> None:
+    env = logging_host_env(tmp_path)
+    env["OH_GOON_RUN_LOG_DIR"] = str(tmp_path / "logs")
+    token = "FAKE_ARGV_TOKEN_127"
+    raw_output = "FAKE_INTENTIONAL_TEST_OUTPUT_127"
+    result = subprocess.run(
+        (
+            "bash",
+            str(RUNNER),
+            "test",
+            sys.executable,
+            "-c",
+            f"print({raw_output!r}); raise SystemExit(7)",
+            token,
+        ),
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        umask=0,
+    )
+    assert result.returncode == 7
+    latest = tmp_path / "logs/test/latest.log"
+    logged = latest.read_text()
+    assert token not in result.stdout + result.stderr + logged
+    assert raw_output in result.stdout and raw_output in logged
+    assert stat.S_IMODE(latest.stat().st_mode) == 0o600
+    assert stat.S_IMODE(latest.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(latest.parent.parent.stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize(
+    "unsafe", ("symlink-base", "symlink-parent", "symlink-label", "public-base")
+)
+def test_unsafe_log_directory_never_writes_foreign_files_or_changes_child_result(
+    tmp_path: Path,
+    unsafe: str,
+) -> None:
+    env = logging_host_env(tmp_path)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir(mode=0o700)
+    sentinel = foreign / "sentinel"
+    sentinel.write_bytes(b"unrelated bytes")
+    base = tmp_path / "logs"
+    if unsafe == "symlink-base":
+        base.symlink_to(foreign, target_is_directory=True)
+    elif unsafe == "symlink-parent":
+        (tmp_path / "link").symlink_to(foreign, target_is_directory=True)
+        base = tmp_path / "link/logs"
+    elif unsafe == "symlink-label":
+        base.mkdir(mode=0o700)
+        (base / "test").symlink_to(foreign, target_is_directory=True)
+    else:
+        base.mkdir(mode=0o755)
+    env["OH_GOON_RUN_LOG_DIR"] = str(base)
+    result = subprocess.run(
+        (
+            "bash",
+            str(RUNNER),
+            "test",
+            sys.executable,
+            "-c",
+            "print('still-ran'); raise SystemExit(7)",
+        ),
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 7
+    assert "still-ran" in result.stdout
+    assert "Continuing without persistent command logging" in result.stderr
+    assert sentinel.read_bytes() == b"unrelated bytes"
+    assert tuple(foreign.iterdir()) == (sentinel,)
+
+
+@pytest.mark.parametrize("prepared", (True, False))
+def test_newline_free_output_preserves_boundaries_and_path_redaction(
+    tmp_path: Path,
+    prepared: bool,
+) -> None:
+    env = logging_host_env(tmp_path)
+    env["OH_GOON_RUN_LOG_DIR"] = str(tmp_path / "logs")
+    if not prepared:
+        shell = shutil.which("sh")
+        bash = shutil.which("bash")
+        assert shell is not None
+        assert bash is not None
+        tools = tmp_path / "only-shell"
+        tools.mkdir()
+        (tools / "sh").symlink_to(shell)
+        (tools / "bash").symlink_to(bash)
+        env["PATH"] = str(tools)
+    payload = (
+        b"x" * 8190
+        + os.fsencode(ROOT)
+        + b"/file /tmp/tmp."
+        + b"A" * 65536
+        + b"/next\nlast-output\n"
+    )
+    child = (
+        "import os; data=" + repr(payload) + "; os.write(1,data); raise SystemExit(7)"
+    )
+    result = subprocess.run(
+        ("bash", str(RUNNER), "test", sys.executable, "-c", child),
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == 7
+    assert os.fsencode(ROOT) not in result.stdout
+    assert b"A" * 64 not in result.stdout
+    assert b"<repo>/file <tmp>/next\nlast-output\n" in result.stdout
+    assert b"OH-GOON RUN RESULT: FAIL (exit 7)" in result.stdout
+    if prepared:
+        assert (
+            b"<repo>/file <tmp>/next\nlast-output\n"
+            in (tmp_path / "logs/test/latest.log").read_bytes()
+        )
+
+
+def test_replaced_log_directory_cannot_redirect_active_writes(tmp_path: Path) -> None:
+    env = logging_host_env(tmp_path)
+    env["OH_GOON_RUN_LOG_DIR"] = str(tmp_path / "logs")
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    moved = tmp_path / "original"
+    child = (
+        "from pathlib import Path; import os; "
+        "d=Path(os.environ['OH_GOON_RUN_LOG_DIR'])/'test'; "
+        f"d.rename({str(moved)!r}); d.symlink_to({str(foreign)!r},target_is_directory=True); "
+        "print('owned-after-replacement'); raise SystemExit(7)"
+    )
+    result = subprocess.run(
+        ("bash", str(RUNNER), "test", sys.executable, "-c", child),
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 7
+    assert tuple(foreign.iterdir()) == ()
+    assert "owned-after-replacement" in (moved / "latest.log").read_text()
+    assert "Saved run log:" not in result.stdout
+    assert "run-log directory was replaced" in result.stderr
+
+
+def test_replaced_log_ancestor_cannot_advertise_an_unreadable_saved_path(
+    tmp_path: Path,
+) -> None:
+    env = logging_host_env(tmp_path)
+    base = tmp_path / "logs"
+    env["OH_GOON_RUN_LOG_DIR"] = str(base)
+    baseline = subprocess.run(
+        (
+            "bash",
+            str(RUNNER),
+            "test",
+            sys.executable,
+            "-c",
+            "print('stable-directory')",
+        ),
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert baseline.returncode == 0
+    assert "Saved run log:" in baseline.stdout
+    moved = tmp_path / "original"
+    child = (
+        "from pathlib import Path; import os; "
+        "d=Path(os.environ['OH_GOON_RUN_LOG_DIR']); "
+        f"d.rename({str(moved)!r}); d.symlink_to({str(moved)!r},target_is_directory=True); "
+        "print('owned-after-ancestor-replacement')"
+    )
+    result = subprocess.run(
+        ("bash", str(RUNNER), "test", sys.executable, "-c", child),
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0
+    assert "owned-after-ancestor-replacement" in (moved / "test/latest.log").read_text()
+    assert "Saved run log:" not in result.stdout
+    assert "Latest run log:" not in result.stdout
+    assert "run-log directory was replaced" in result.stderr
+
+
+@pytest.mark.parametrize("label", ("test", "certify"))
+def test_make_log_readback_refuses_symlinks_without_creating_state(
+    tmp_path: Path,
+    label: str,
+) -> None:
+    base = tmp_path / "logs"
+    target = f"{label}-log"
+    read_command = ("make", "--no-print-directory", target, f"RUN_LOG_DIR={base}")
+    missing = subprocess.run(
+        read_command, cwd=ROOT, capture_output=True, text=True, timeout=10
+    )
+    assert missing.returncode != 0
+    assert not base.exists()
+    env = logging_host_env(tmp_path)
+    env["OH_GOON_RUN_LOG_DIR"] = str(base)
+    produced = subprocess.run(
+        (
+            "bash",
+            str(RUNNER),
+            label,
+            sys.executable,
+            "-c",
+            "print('RESULT: PASSED'); raise SystemExit(7)",
+        ),
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert produced.returncode == 7
+    assert "OH-GOON RUN RESULT: FAIL (exit 7)" in produced.stdout
+    readback = subprocess.run(
+        read_command, cwd=ROOT, capture_output=True, text=True, timeout=10
+    )
+    assert readback.returncode == 0
+    assert "OH-GOON RUN RESULT: FAIL (exit 7)" in readback.stdout
+    latest = base / label / "latest.log"
+    latest.unlink()
+    foreign = tmp_path / "secret"
+    foreign.write_text("FAKE_PRIVATE_TOKEN_127")
+    latest.symlink_to(foreign)
+    refused = subprocess.run(
+        read_command, cwd=ROOT, capture_output=True, text=True, timeout=10
+    )
+    assert refused.returncode != 0
+    assert "FAKE_PRIVATE_TOKEN_127" not in refused.stdout + refused.stderr
+    assert foreign.read_text() == "FAKE_PRIVATE_TOKEN_127"
+
+
+def test_bootstrap_exec_failure_closes_its_owned_log_descriptors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.repository_tooling.run_logging import main
+
+    inherited: list[int] = []
+
+    def refuse_exec(
+        _command: str, _args: list[str], environment: dict[str, str]
+    ) -> None:
+        inherited.extend(
+            int(environment[key])
+            for key in (
+                "OH_GOON_RUN_LOG_DIRECTORY_FD",
+                "OH_GOON_RUN_LOG_FILE_FD",
+            )
+        )
+        raise OSError("simulated exec failure")
+
+    monkeypatch.setattr(os, "execvpe", refuse_exec)
+    assert (
+        main([str(ROOT), str(tmp_path / "logs"), "test", "unavailable-command"]) == 127
+    )
+    assert len(inherited) == 2
+    for descriptor in inherited:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+
+
+def test_log_write_without_progress_stops_persistence_but_drains_console(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from oh_goon.repository_tooling.run_logging import main
+
+    chunks = iter((b"first\n", b"last\n", b""))
+    monkeypatch.setattr(os, "read", lambda _fd, _size: next(chunks))
+    monkeypatch.setattr(os, "write", lambda _fd, _data: 0)
+    assert main(["--stream", str(ROOT), "/state", "/home/user", "99"]) == 1
+    assert capsys.readouterr().out == "first\nlast\n"
 
 
 def test_logged_runner_cannot_turn_log_directory_failure_into_a_test_blocker(
@@ -460,7 +777,8 @@ def test_logged_runner_bounds_completed_run_logs(tmp_path: Path) -> None:
     env = logging_host_env(tmp_path)
     env["OH_GOON_RUN_LOG_DIR"] = str(tmp_path / "logs")
     log_dir = tmp_path / "logs" / "test"
-    log_dir.mkdir(parents=True)
+    log_dir.parent.mkdir(mode=0o700)
+    log_dir.mkdir(mode=0o700)
     for index in range(30):
         path = log_dir / f"20260101T0000{index % 60:02d}Z-{1000 + index}.log"
         path.write_text(f"old-{index}", encoding="utf-8")

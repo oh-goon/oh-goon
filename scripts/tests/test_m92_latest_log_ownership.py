@@ -127,6 +127,8 @@ def test_latest_publication_failure_does_not_corrupt_run_evidence_or_result(
     env["OH_GOON_RUN_LOG_DIR"] = str(tmp_path / "logs")
     latest = tmp_path / "logs" / "test" / "latest.log"
     latest.mkdir(parents=True)
+    latest.parent.chmod(0o700)
+    latest.parent.parent.chmod(0o700)
 
     result = subprocess.run(
         ("bash", str(RUNNER), "test", "bash", "-c", "printf 'owner-only\\n'; exit 7"),

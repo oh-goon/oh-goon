@@ -145,12 +145,6 @@ def test_full_certification_delegates_database_preflight_to_the_leased_frontdoor
     assert "preflight_certification_database_under_lease(" in frontdoor
 
 
-def test_logged_frontdoors_emit_banner_before_running_child() -> None:
-    banner = RUN_LOGGED.index("command_banner.sh")
-    child = RUN_LOGGED.index('"$@" >&"$command_log_fd" 2>&1 &')
-    assert banner < child
-
-
 def test_command_supervision_avoids_multithreaded_preexec_and_ru_cold_parallelism() -> (
     None
 ):

@@ -740,12 +740,10 @@ certify:
 	@$(CERTIFICATION_FRONTDOOR)
 
 test-log:
-	@test -f "$(RUN_LOG_DIR)/test/latest.log" || { echo "No make test log exists yet." >&2; exit 2; }
-	@cat "$(RUN_LOG_DIR)/test/latest.log"
+	@uv run --offline --frozen --no-sync --project backend oh-goon-run-log --read "$(RUN_LOG_DIR)" test
 
 certify-log:
-	@test -f "$(RUN_LOG_DIR)/certify/latest.log" || { echo "No make certify log exists yet." >&2; exit 2; }
-	@cat "$(RUN_LOG_DIR)/certify/latest.log"
+	@uv run --offline --frozen --no-sync --project backend oh-goon-run-log --read "$(RUN_LOG_DIR)" certify
 
 diagnostics-log:
 	@path="$$(backend/.venv/bin/oh-goon-local-state diagnostics-path)"; \

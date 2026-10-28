@@ -125,12 +125,20 @@ def collect_native_pytest(
                 merge_stderr=True,
                 require_process_group_quiescence=True,
                 parent_death_signal=True,
+                retain_output_tail=True,
             )
         except subprocess.TimeoutExpired as exc:
             raise ValueError("Native pytest collection timed out") from exc
         if result.returncode not in (0, 5) or not output.is_file():
+            evidence = result.stdout_evidence
+            observed = (
+                f" raw-bytes={evidence.byte_count} sha256={evidence.sha256}"
+                if evidence is not None
+                else ""
+            )
             raise ValueError(
-                f"Native pytest collection failed ({result.returncode}): {result.stdout}"
+                f"Native pytest collection failed ({result.returncode}); "
+                f"output-truncated={result.stdout_truncated}{observed}: {result.stdout}"
             )
         packet = read_native_collection(output)
     collection = NativePytestCollection(tuple(packet["selected"]), tuple(packet["deselected"]))
