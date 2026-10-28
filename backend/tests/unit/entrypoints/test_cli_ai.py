@@ -477,15 +477,16 @@ def test_ai_invalid_verification_fails_before_application_state(
     native_cli.build.assert_not_called()
 
 
+@pytest.mark.parametrize("missing", ["systemd-run", "systemctl"])
 def test_isolated_resource_caps_require_native_resource_boundary_before_application_state(
-    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
     payload = json.loads(native_cli.config.read_text())
     payload["native_profiles"]["isolated"]["resources"] = {"memory_mib": 128}
     native_cli.config.write_text(json.dumps(payload))
     monkeypatch.setattr(cli_ai, "_isolation", native_cli.isolation_factory)
     monkeypatch.setattr(
-        "oh_goon.cli_ai.shutil.which", lambda name: "/native/bwrap" if name == "bwrap" else None
+        "oh_goon.cli_ai.shutil.which", lambda name: None if name == missing else f"/native/{name}"
     )
     assert main([*native_cli.argv, "--profile", "isolated"]) == 2
     native_cli.build.assert_not_called()

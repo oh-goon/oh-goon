@@ -14,6 +14,13 @@ installed cases remain **NOT_RUN** in this review. Native executable facts remai
 in the frozen selection and original execution evidence, never in a second
 version database here.
 
+Resource-admission disposition: **retain** the protocol, settlement and
+reserved-directory adaptations below. Capped standard execution now verifies
+that native scope placement retains the caller's aggregate limits; see the
+[resource boundary](AGENT_RUNTIME_OWNERS.md). Installed-harness qualification in
+a changed resource context remains **unqualified** until separately exercised.
+The earlier installed results retain their recorded mode and environment scope.
+
 | Installed check on this Linux host | Result and precise limit |
 | --- | --- |
 | OpenCode 2.1.2, [service readiness and stdin lease][opencode-installed-service] | **PASS**, two tests: bounded authenticated readiness/PID, client closure preserving the server, original-owner cancellation, plus actual `--stdio` endpoint discovery and parent stdin closure producing native exit 0 and process quiescence. No service-session execution qualification. |

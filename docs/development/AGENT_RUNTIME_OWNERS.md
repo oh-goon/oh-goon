@@ -411,6 +411,31 @@ The existing owners enforce these contracts:
 Ordinary Bubblewrap evidence describes a shared host kernel, explicit mounts,
 the actual selected network mode and native systemd resource caps. It does not establish
 immutable runtime bytes, deep custody, installed-model quality or APP PASS.
+Capped standard execution binds native `systemd-run` and `systemctl` and uses
+the same captured user-manager environment for admission and launch. The original
+resource owner verifies the caller's process and thread cgroup membership and
+the manager's actual target slice. A new scope is refused before application
+work if it would leave a finite private caller CPU quota, PID maximum or
+supported memory maximum/high threshold. This covers `cpu.max`, `pids.max` and
+the memory max/high/swap/zswap controls observed by the resource owner.
+CPU placement, scheduler weights and I/O policies remain outside this check.
+Shared ancestor limits remain enforced by the kernel. Unknown hierarchy,
+threaded layouts or unreadable controls cannot establish safe scope migration.
+The caller check runs before a cached availability result is accepted and again
+before launch; an empty resource policy keeps its existing execution path.
+
+The aggregate limits of a private caller group cover its other members too.
+Copying a numeric limit into a sibling scope does not preserve that accounting.
+An incompatible caller context therefore remains unavailable for capped standard
+execution. This changes resource admission, while the native harness protocols
+and their settlement adaptations retain their existing owners.
+
+Ordinary verification has no public whole-Run CPU/RAM budget. Run and repository
+workers currently share control-plane threads, and source acquisition and
+preparation precede worker submission. A budget covering that setup and all
+parallel repository work needs an original Run execution boundary and explicit
+native placement transport. The current scope for each native workload does
+not provide that aggregate guarantee.
 Workspace, configuration and explicit input binds reject host sockets, FIFOs
 and special objects before launch. System runtime links to host IPC outside all
 bound system roots remain usable as links; their host endpoints are absent from

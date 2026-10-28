@@ -21,6 +21,15 @@ from oh_goon.integrations._fleet_plan_resource_evidence import write_attempt_res
 from oh_goon.integrations.exact_file_write import publish_text_file, remove_file_durably
 
 _RESOURCE_PROTOCOL = 1
+STANDARD_RESOURCE_SLICE = "app.slice"
+_STANDARD_MOUNTINFO_LIMIT = 1024 * 1024
+_STANDARD_MEMORY_CONTROLS = (
+    "memory.max",
+    "memory.high",
+    "memory.swap.max",
+    "memory.swap.high",
+    "memory.zswap.max",
+)
 NESTED_CGROUP_DELEGATED_ENV = "OH_GOON_NESTED_CGROUP_DELEGATED"
 NESTED_CGROUP_SUBGROUP_ENV = "OH_GOON_NESTED_CGROUP_SUBGROUP"
 NESTED_CGROUP_PROCESS_SUBGROUP = "oh-goon-nested-process"
@@ -38,6 +47,9 @@ _CGROUP_EXEC = """raise RuntimeError('original LACE independent kernel custody N
 def standard_resource_scope_command(
     policy: CicdResourcePolicy,
     executable: str | None,
+    *,
+    query_executable: str | None = None,
+    manager_environment: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
     """Delegate ordinary whole-workload caps and cleanup to the native user manager.
 
@@ -55,7 +67,15 @@ def standard_resource_scope_command(
         raise FleetPlanInvalid(
             "Standard workload resource caps require an explicitly selected native systemd-run"
         )
-    command = [executable, "--user", "--scope", "--quiet", "--collect"]
+    _require_standard_scope_inheritance(query_executable, manager_environment)
+    command = [
+        executable,
+        "--user",
+        "--scope",
+        "--quiet",
+        "--collect",
+        f"--slice={STANDARD_RESOURCE_SLICE}",
+    ]
     if policy.memory_bytes is not None:
         command.extend(
             (f"--property=MemoryMax={policy.memory_bytes}", "--property=MemorySwapMax=0")
@@ -67,6 +87,173 @@ def standard_resource_scope_command(
         quota = str(whole) if decimal == 0 else f"{whole}.{decimal}"
         command.append(f"--property=CPUQuota={quota}%")
     return (*command, "--")
+
+
+def _standard_mountinfo_snapshot() -> tuple[str, ...]:
+    try:
+        with Path("/proc/thread-self/mountinfo").open(encoding="utf-8") as source:
+            payload = source.read(_STANDARD_MOUNTINFO_LIMIT + 1)
+    except (OSError, UnicodeError) as exc:
+        raise FleetPlanInvalid("Native resource scope mount view is unavailable") from exc
+    if not payload or len(payload) > _STANDARD_MOUNTINFO_LIMIT:
+        raise FleetPlanInvalid("Native resource scope mount view is empty or exceeds its bound")
+    return tuple(payload.splitlines())
+
+
+def _standard_cgroup_directory(root: Path, *, mountinfo: tuple[str, ...] | None = None) -> Path:
+    payloads: list[str] = []
+    try:
+        for name in ("self", "thread-self"):
+            with Path(f"/proc/{name}/cgroup").open(encoding="ascii") as source:
+                payloads.append(source.read(16385))
+    except (OSError, UnicodeError) as exc:
+        raise FleetPlanInvalid("Native resource scope caller mapping is unavailable") from exc
+    rows = payloads[0].splitlines()
+    if (
+        any(len(payload) > 16384 for payload in payloads)
+        or payloads[0] != payloads[1]
+        or len(rows) != 1
+        or not rows[0].startswith("0::")
+    ):
+        raise FleetPlanInvalid("Native resource scope requires an unambiguous unified cgroup")
+    return _standard_cgroup_path(root, rows[0][3:], mountinfo=mountinfo)
+
+
+def _standard_cgroup_path(
+    root: Path, relative: str, *, mountinfo: tuple[str, ...] | None = None
+) -> Path:
+    from pathlib import PurePosixPath
+
+    path = PurePosixPath(relative)
+    if (
+        not relative.startswith("/")
+        or path.as_posix() != relative
+        or ".." in path.parts
+        or "\x00" in relative
+    ):
+        raise FleetPlanInvalid("Native resource scope cgroup path is ambiguous")
+    selected = root / relative.lstrip("/")
+    if not _is_cgroup2_path(selected, require_unified_root=True, mountinfo=mountinfo):
+        raise FleetPlanInvalid("Native resource scope cgroup mount mapping is unavailable")
+    return selected
+
+
+def _require_standard_scope_inheritance(
+    query_executable: str | None,
+    manager_environment: Mapping[str, str] | None,
+) -> None:
+    """Refuse a native scope that abandons caller aggregate resource controls.
+
+    Numeric child caps cannot replace a shared ancestor envelope. Only ancestors
+    that also contain the selected native target slice remain inherited.
+    """
+    from oh_goon.engine.command import (
+        CommandOutputLimitExceeded,
+        CommandTimeoutExpired,
+        run_command,
+    )
+
+    if (
+        query_executable is None
+        or not Path(query_executable).is_absolute()
+        or not os.access(query_executable, os.X_OK)
+        or manager_environment is None
+    ):
+        raise FleetPlanInvalid(
+            "Native resource scope requires selected systemctl and captured user-manager authority"
+        )
+    root = Path("/sys/fs/cgroup")
+    mountinfo = _standard_mountinfo_snapshot()
+    caller = _standard_cgroup_directory(root, mountinfo=mountinfo)
+    caller_identity = _exact_cgroup_identity(caller)
+    with _bound_cgroup_directory(caller, caller_identity) as caller_handle:
+        _require_standard_domain(caller_handle)
+        _require_standard_caller_membership(caller_handle)
+        try:
+            result = run_command(
+                query_executable,
+                "--user",
+                "--no-pager",
+                "show",
+                STANDARD_RESOURCE_SLICE,
+                "--property=ControlGroup",
+                "--value",
+                env=dict(manager_environment),
+                timeout=5,
+                max_capture_bytes_per_stream=4096,
+                require_process_group_quiescence=True,
+                parent_death_signal=True,
+            )
+        except (OSError, CommandTimeoutExpired, CommandOutputLimitExceeded) as exc:
+            raise FleetPlanInvalid("Native resource scope target slice is unavailable") from exc
+        if result.returncode != 0:
+            raise FleetPlanInvalid("Native resource scope target slice is unavailable")
+        target = _standard_cgroup_path(root, result.stdout.strip(), mountinfo=mountinfo)
+        if target.name != STANDARD_RESOURCE_SLICE:
+            raise FleetPlanInvalid("Native resource scope target slice mapping is ambiguous")
+        target_identity = _exact_cgroup_identity(target)
+        with _bound_cgroup_directory(target, target_identity) as target_handle:
+            _require_standard_domain(target_handle)
+            current = caller
+            while current != target and not target.is_relative_to(current):
+                with _bound_cgroup_directory(current, _exact_cgroup_identity(current)) as handle:
+                    _require_standard_domain(handle)
+                    _require_unlimited_private_controls(handle)
+                if current == root:
+                    raise FleetPlanInvalid("Native resource scope has no shared cgroup ancestry")
+                current = current.parent
+            if _standard_cgroup_directory(root, mountinfo=mountinfo) != caller:
+                raise FleetPlanInvalid("Native resource scope caller cgroup changed")
+            if _standard_mountinfo_snapshot() != mountinfo:
+                raise FleetPlanInvalid("Native resource scope caller mount view changed")
+            _require_original_cgroup(target, target_identity)
+            _require_original_cgroup(caller, caller_identity)
+            _require_standard_caller_membership(caller_handle)
+
+
+def _require_standard_caller_membership(handle: int) -> None:
+    members = _read_bound_cgroup_control(handle, "cgroup.procs", 65536).splitlines()
+    if str(os.getpid()) not in members:
+        raise FleetPlanInvalid("Native resource scope cgroup does not contain the caller PID")
+
+
+def _require_standard_domain(handle: int) -> None:
+    if _read_bound_cgroup_control(handle, "cgroup.type", 128).strip() != "domain":
+        raise FleetPlanInvalid(
+            "Native resource scope requires an unambiguous process-domain cgroup"
+        )
+
+
+def _require_unlimited_private_controls(handle: int) -> None:
+    controls = ("cpu.max", *_STANDARD_MEMORY_CONTROLS, "pids.max")
+    for name in controls:
+        try:
+            os.stat(name, dir_fd=handle, follow_symlinks=False)
+        except FileNotFoundError:
+            if name in ("memory.swap.high", "memory.zswap.max"):
+                continue
+            raise FleetPlanInvalid(
+                "Native resource scope caller controls are unavailable"
+            ) from None
+        except OSError as exc:
+            raise FleetPlanInvalid("Native resource scope caller controls are unavailable") from exc
+        value = _read_bound_cgroup_control(handle, name, 128).strip()
+        if name == "cpu.max":
+            fields = value.split()
+            if (
+                len(fields) != 2
+                or not fields[1].isascii()
+                or not fields[1].isdigit()
+                or int(fields[1]) <= 0
+            ):
+                raise FleetPlanInvalid("Native resource scope caller CPU control is invalid")
+            value = fields[0]
+        if value != "max":
+            if not value.isascii() or not value.isdigit():
+                raise FleetPlanInvalid("Native resource scope caller control is invalid")
+            raise FleetPlanInvalid(
+                f"Native resource scope would abandon the caller's finite {name} constraint"
+            )
 
 
 def require_independent_native_parent_custody(
@@ -662,14 +849,28 @@ def _required_resource_controllers(policy: CicdResourcePolicy) -> set[str]:
     return required_controllers
 
 
-def _is_cgroup2_path(path: Path) -> bool:
+def _is_cgroup2_path(
+    path: Path,
+    *,
+    require_unified_root: bool = False,
+    mountinfo: tuple[str, ...] | None = None,
+) -> bool:
     """Prove that ``path`` is covered by a cgroup2 mount in this mount namespace."""
 
-    try:
-        lines = Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return False
+    if mountinfo is not None:
+        lines = mountinfo
+    elif require_unified_root:
+        try:
+            lines = _standard_mountinfo_snapshot()
+        except FleetPlanInvalid:
+            return False
+    else:
+        try:
+            lines = tuple(Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines())
+        except OSError:
+            return False
     best_match: tuple[int, str] | None = None
+    host_mapping = False
     for line in lines:
         before, separator, after = line.partition(" - ")
         if not separator:
@@ -685,10 +886,20 @@ def _is_cgroup2_path(path: Path) -> bool:
             covered = False
         if not covered:
             continue
+        if require_unified_root and mount_point.is_relative_to(Path("/sys/fs/cgroup")):
+            if mount_point != Path("/sys/fs/cgroup") or fields[3] != "/":
+                return False
+            if host_mapping:
+                return False
+            host_mapping = True
         rank = len(mount_point.parts)
         if best_match is None or rank > best_match[0]:
             best_match = (rank, filesystem_fields[0])
-    return best_match is not None and best_match[1] == "cgroup2"
+    return (
+        best_match is not None
+        and best_match[1] == "cgroup2"
+        and (not require_unified_root or host_mapping)
+    )
 
 
 def _decode_mountinfo_path(value: str) -> str:
@@ -1018,7 +1229,14 @@ def _bound_cgroup_directory(cgroup: Path, expected_identity: tuple[int, int]) ->
 
 def _read_bound_cgroup_control(descriptor: int, name: str, limit: int) -> str:
     """Bounded kernel-control read via the original directory (no path relookup)."""
-    if name not in ("cgroup.events", "cgroup.procs"):
+    if name not in (
+        "cgroup.events",
+        "cgroup.procs",
+        "cgroup.type",
+        "cpu.max",
+        "pids.max",
+        *_STANDARD_MEMORY_CONTROLS,
+    ):
         raise FleetPlanInvalid("Fleet unrecognized cgroup observation control")
     try:
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=descriptor)
