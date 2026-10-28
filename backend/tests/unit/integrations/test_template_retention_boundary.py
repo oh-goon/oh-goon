@@ -1,4 +1,4 @@
-"""M136: prove artifact evidence and strict content retention share one owner."""
+"""Artifact evidence, qualified retention and publication rollback."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.file_digest import sha256_file_with_size
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
     ResolvedCommandStep,
@@ -318,7 +319,7 @@ def test_post_retention_file_read_failure_rolls_back_all_new_references(
         (workspace / name).write_text(name)
     put_file = retention.content_store.put_file
     retained_files: list[FleetContentObject] = []
-    hash_file = publication.sha256_file_with_size
+    hash_file = sha256_file_with_size
 
     def record_retention(
         source: RepositoryScopedPath, *, cancel_requested: Callable[[], bool] | None = None
@@ -379,7 +380,9 @@ def test_trusted_local_retention_requires_store_and_valid_owner_before_work(
     with pytest.raises(FleetPlanInvalid):
         if entrypoint == "prepare":
             executor.prepare_direct_run(
-                RepositoryIdentity(path=repository), plan, cancel_requested=None
+                RepositoryIdentity.model_validate({"path": repository}),
+                plan,
+                cancel_requested=None,
             )
         else:
             executor.execute_direct_run(
@@ -422,7 +425,9 @@ def test_direct_publication_failure_records_step_failure_and_preserves_native_fa
     step = _captured_step(repository)
     launched: list[str] = []
 
-    def execute(source: Path, selected: ResolvedCommandStep, *args, **kwargs) -> StepOutcome:
+    def execute(
+        source: Path, selected: ResolvedCommandStep, *args: object, **kwargs: object
+    ) -> StepOutcome:
         launched.append(selected.step_id)
         (source / "model.json").write_bytes(b"actual training result")
         return from_command(
@@ -456,7 +461,8 @@ def test_direct_publication_failure_records_step_failure_and_preserves_native_fa
     assert failed.status == "FAILED"
     assert failed.returncode == (native_returncode or PLAN_CONTRACT_RETURN_CODE)
     assert failed.attempts[0].returncode == native_returncode
-    assert failed.artifacts == failed.outputs == ()
+    assert failed.artifacts == ()
+    assert failed.outputs == ()
     assert skipped.status == "SKIPPED"
     assert launched == [step.step_id]
     assert "native training result" in sequence.stdout
@@ -474,7 +480,7 @@ def test_unsettled_direct_step_never_retains_requested_artifacts(
     step = _captured_step(repository)
     (workspace / "model.json").write_bytes(b"unsettled result")
 
-    def unsettled(*args, **kwargs) -> StepOutcome:
+    def unsettled(*args: object, **kwargs: object) -> StepOutcome:
         return StepOutcome(
             argv=step.argv,
             returncode=0,
