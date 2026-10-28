@@ -1,0 +1,15 @@
+runtime: python
+application:
+  path: templates/goons/general/orders-taskflow
+uv:
+  lock_mode: locked
+  group: ci
+steps:
+- run: ruff check . --output-format json --output-file ruff.json
+  artifacts:
+  - path: ruff.json
+    retention: content_store
+- run: pytest --junitxml=junit.xml
+  artifacts:
+  - path: junit.xml
+    retention: content_store

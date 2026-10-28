@@ -151,7 +151,7 @@ def _select(selection: Path, fixture: str) -> None:
 
 
 def _run_and_read(
-    cli: Callable[..., str], selection: Path, total: str | None
+    cli: Callable[..., str], selection: Path, total: str | None, *, repository_id: str
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     receipt = json.loads(cli("run", str(selection), "--json", expected=0 if total else 1))
     assert receipt["status"] == "COMPLETED"
@@ -175,8 +175,17 @@ def _run_and_read(
         assert [step["status"] for step in steps] == ["PASSED"] * 3
         result = (json.dumps({"total_order_value": total}) + "\n").encode()
         artifact = outputs["repositories"][0]["steps"][2]["artifacts"][0]
+        assert artifact["status"] == "PRESENT"
         assert artifact["sha256"] == hashlib.sha256(result).hexdigest()
-        assert artifact["byte_count"] == len(result) and artifact.get("retained_object") is None
+        assert artifact["byte_count"] == len(result)
+        retained = artifact["retained_object"]
+        assert retained is not None and retained["kind"] == "file"
+        assert retained["byte_count"] == len(result)
+        assert (
+            retained["owner_repository_id"]
+            == outputs["repositories"][0]["repository"]["repository_id"]
+            == repository_id
+        )
         produced_total = outputs["repositories"][0]["steps"][1]["outputs"][0]
         assert produced_total["sha256"] == hashlib.sha256(total.encode()).hexdigest()
     return run_id, tape, outputs
@@ -226,7 +235,7 @@ def test_local_application_uses_unchanged_native_code_and_keeps_three_run_histor
     for fixture, total in (("official", "1236.70"), ("invalid", None), ("changed", "60.00")):
         _select(selected, fixture)
         cli("lock", str(selected))
-        run_id, tape, outputs = _run_and_read(cli, selected, total)
+        run_id, tape, outputs = _run_and_read(cli, selected, total, repository_id=target)
         steps = tape["repositories"][0]["steps"]
         source = steps[0]["project_source"]
         assert source["application"] == {"path": str(application)}
@@ -300,7 +309,7 @@ def test_git_application_keeps_its_own_pin_across_ref_changes_and_cache_loss(
         )
 
     assert pin()["commit"] == original_commit
-    _, original_tape, _ = _run_and_read(cli, selected, "1236.70")
+    _, original_tape, _ = _run_and_read(cli, selected, "1236.70", repository_id=target)
     captured = original_tape["repositories"][0]["steps"][0]["project_source"]
     assert {
         field: captured["application"][field] for field in (*coordinates, "kind", "commit")
@@ -316,11 +325,11 @@ def test_git_application_keeps_its_own_pin_across_ref_changes_and_cache_loss(
     cli("lock", str(selected), "--update-goons")
     assert pin()["commit"] == original_commit
     shutil.rmtree(git_source_cache(environment))
-    _, retained_tape, _ = _run_and_read(cli, selected, "1236.70")
+    _, retained_tape, _ = _run_and_read(cli, selected, "1236.70", repository_id=target)
     assert retained_tape["repositories"][0]["steps"][0]["project_source"] == captured
     cli("lock", str(selected), "--update-applications")
     assert pin()["commit"] == changed_commit
-    _, refreshed_tape, _ = _run_and_read(cli, selected, "5.00")
+    _, refreshed_tape, _ = _run_and_read(cli, selected, "5.00", repository_id=target)
     refreshed = refreshed_tape["repositories"][0]["steps"][0]["project_source"]
     assert refreshed["application"]["commit"] == changed_commit
     assert refreshed["content_sha256"] != captured["content_sha256"]
@@ -510,7 +519,7 @@ def test_application_uv_lock_mode_matches_native_uv_without_rewriting_source(
     selected = _workflow(tmp_path / "workflow", target, {"path": str(application)}, lock_mode=mode)
     cli("lock", str(selected))
     if mode == "frozen":
-        _, tape, _ = _run_and_read(cli, selected, "1236.70")
+        _, tape, _ = _run_and_read(cli, selected, "1236.70", repository_id=target)
         preparation = tape["repositories"][0]["steps"][0]["attempts"][0]["uv_preparation"]
         assert preparation["freshness"] == "not_checked"
     else:

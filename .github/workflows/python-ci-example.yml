@@ -1,0 +1,57 @@
+name: Python CI example
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-ci-example:
+    name: python-ci-example
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.5"
+          enable-cache: false
+      - name: Prepare exact candidate CLI outside the workload
+        run: |
+          git clone --no-hardlinks "$GITHUB_WORKSPACE" "$RUNNER_TEMP/oh-goon-tool"
+          git -C "$RUNNER_TEMP/oh-goon-tool" checkout --detach "$GITHUB_SHA"
+          make -C "$RUNNER_TEMP/oh-goon-tool" backend-install
+      - name: Execute the committed Python CI example
+        run: |
+          exec bash examples/python-ci/run.sh run \
+            "$RUNNER_TEMP/oh-goon-tool" "$GITHUB_WORKSPACE" \
+            examples/python-ci/plan.yml "$RUNNER_TEMP/oh-goon-ci-state"
+      - name: Reopen Run evidence and export retained files
+        if: ${{ always() }}
+        run: |
+          bash examples/python-ci/run.sh collect \
+            "$RUNNER_TEMP/oh-goon-tool" "$RUNNER_TEMP/oh-goon-ci-state" \
+            "$RUNNER_TEMP/oh-goon-ci-results"
+      - name: Upload recorded results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/oh-goon-ci-results/
+          if-no-files-found: error
+          retention-days: 7

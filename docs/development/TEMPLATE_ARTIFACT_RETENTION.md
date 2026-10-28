@@ -93,9 +93,9 @@ cannot replace a primary export error or rewrite the historical Run outcome.
 ### Concrete shipped choices
 
 - [`general/orders-taskflow`](../../templates/goons/general/orders-taskflow/goon.yml):
-  the extracted, transformed and final JSON files are evidence. Scalar outputs
-  carry this Run's values into later Steps; these declarations do not retain
-  downloadable bytes after attempt scratch is disposed.
+  DATA and TOTAL keep their existing output evidence; the final JSON result
+  is content-store-retained for export after attempt disposal. Scalar outputs
+  carry this Run's values into later Steps independently of file retention.
 - [`python/test`](../../templates/goons/python/test/goon.yml): the JUnit report
   provides test *evidence*; coverage policy and optional reports belong to native
   project configuration. No durable bytes are requested.

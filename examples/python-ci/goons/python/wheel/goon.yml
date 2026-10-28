@@ -1,0 +1,7 @@
+application:
+  path: templates/goons/general/orders-taskflow
+steps:
+- run: uv build --wheel --out-dir dist
+  artifacts:
+  - path: dist/airflow_oh_goon_orders-0.1.0-py3-none-any.whl
+    retention: content_store

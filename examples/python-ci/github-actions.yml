@@ -1,0 +1,50 @@
+# Copy to .github/workflows/python-ci.yml after adding this example's Plan/Goons.
+name: Python pipeline through Oh-Goon
+
+"on": [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    env:
+      UV_PYTHON: "3.12"
+      # Select a reviewed immutable commit for repeatable tool installation.
+      OH_GOON_REF: main
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.5"
+          enable-cache: false
+      - name: Prepare CLI outside the workload
+        run: |
+          git clone https://github.com/oh-goon/oh-goon.git "$RUNNER_TEMP/oh-goon-tool"
+          git -C "$RUNNER_TEMP/oh-goon-tool" checkout --detach "$OH_GOON_REF"
+          make -C "$RUNNER_TEMP/oh-goon-tool" backend-install
+      - name: Execute declared checks and build
+        run: |
+          exec bash examples/python-ci/run.sh run \
+            "$RUNNER_TEMP/oh-goon-tool" "$GITHUB_WORKSPACE" \
+            examples/python-ci/plan.yml "$RUNNER_TEMP/oh-goon-ci-state"
+      - name: Reopen Run evidence and export retained files
+        if: ${{ always() }}
+        run: |
+          bash examples/python-ci/run.sh collect \
+            "$RUNNER_TEMP/oh-goon-tool" "$RUNNER_TEMP/oh-goon-ci-state" \
+            "$RUNNER_TEMP/oh-goon-ci-results"
+      - name: Upload recorded results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/oh-goon-ci-results/
+          if-no-files-found: error
+          retention-days: 7

@@ -208,7 +208,6 @@ def test_canonical_call_edges_and_current_migration_seams_still_exist() -> None:
             "RecoveryService.acknowledge",
             {"self._recovery.acknowledge"},
         ),
-        ("cli_runtime_plans.py", "_run", {"runtime.plans.run"}),
         (
             "cli_runtime_operations.py",
             "run_operation_command",

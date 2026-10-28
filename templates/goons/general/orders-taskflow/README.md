@@ -27,34 +27,76 @@ Native frozen synchronization consumes the committed resolution without rewritin
 
 ## OH-Goon
 
-Use an installed OH-Goon CLI after its normal setup. For a source checkout, follow [development setup](https://github.com/oh-goon/oh-goon/blob/main/docs/DEVELOPMENT.md) and use its prepared CLI. In the copied project, initialize a standalone target repository and register it headlessly:
+Use your actual Orders application Git checkout, with this complete project at
+its repository root. The [Git-source walkthrough](../../../../examples/airflow-taskflow-showcase/README.md)
+uses the same real application as its registered subject. Source-checkout CLI
+setup is described in the [Quickstart](../../../../docs/QUICKSTART.md).
+
+Initialize by the project path; no manual repository ID transfer is needed:
 
 ```bash
-git init
 oh-goon league add-folder "$PWD"
-oh-goon league scan --json
+oh-goon templates init general/orders-taskflow --kind goon --output ../orders-workflow --repository "$PWD"
 ```
 
-The included `run.yml` illustrates selection of this copied repository's root Goon. Set its `target.repository_id` to the registered identity from the scan. For a generated catalog workflow, the [initializer](../../../../templates/README.md) accepts `--repository PATH` and fills that identity directly. Registration does not require the browser. Change caller values only in `run.yml` (`fixture: official`, `changed`, or `invalid`), then:
+To execute this checkout's own root Goon, keep the generated target identity and
+replace the generated `source` in `../orders-workflow/run.yml` with:
+
+```yaml
+source: {kind: repository-goon}
+inputs:
+  fixture: official
+```
+
+The included `run.yml` illustrates this selection, while the initializer fills
+the registered target. Run the normal lock/waited-execution path:
 
 ```bash
-oh-goon lock ./run.yml
-oh-goon run ./run.yml
+oh-goon lock ../orders-workflow/run.yml
+oh-goon run ../orders-workflow/run.yml
 ```
 
-The Run waits for completion and prints its ID. Use that exact ID in `oh-goon plan tape RUN_ID`, `oh-goon plan steps RUN_ID`, `oh-goon plan logs RUN_ID`, and `oh-goon plan outputs RUN_ID`, or open its Game Tape in the browser. `config inspect ./run.yml` and `config validate ./run.yml` are optional authoring diagnostics. Lock/run perform the canonical validation. After changing a selection or Goon declaration, explicitly lock again; running does not refresh a stale lock.
+The expected result is three successful Steps and `total_order_value` of
+`1236.70`. `config inspect` and `config validate` are optional diagnostics.
+Editing an input or source requires explicitly locking again; running never
+refreshes a stale lock. The [Git-selected example](../../../../examples/airflow-taskflow-showcase/README.md)
+selects the Plan and package from one pinned upstream revision instead, while
+retaining the same real application repository as subject.
 
-The expected result is three successful Steps and `total_order_value` of `1236.70` or `60.00`. With `fixture: invalid`, extraction succeeds, transformation fails with a nonzero exit, loading is skipped, and the Run requires attention. Use a fresh copy or remove previous `.showcase/` results when inspecting failure locally: an old file is not evidence of a new successful Step.
+Run prints its ID and an export command with the exact recorded Step ID.
+`plan tape`, `plan steps`, `plan logs` and `plan outputs` inspect that Run;
+raw process logs have their own transient availability. The final
+`.showcase/result.json` uses `retention: content_store`, so its actual bytes can
+be exported after attempt cleanup or process restart:
 
-The final `.showcase/result.json` uses `retention: evidence`: Game Tape records its presence, hash and size. This declaration does not retain durable file bytes. See [artifact retention](https://github.com/oh-goon/oh-goon/blob/main/docs/development/TEMPLATE_ARTIFACT_RETENTION.md).
+```bash
+mkdir -p ../orders-results
+oh-goon plan outputs RUN_ID --json
+oh-goon plan export-artifact RUN_ID --step STEP_ID --path .showcase/result.json --output ../orders-results/official.json
+```
+
+Use the Step ID printed by completion or `plan outputs`. Export checks the
+recorded retained reference, raw file hash and size before creating a new local
+file. Existing destinations are refused. Retention is owned by the
+[existing content store](../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md);
+it does not grant strict executor or certification guarantees.
+
+Set `inputs.fixture` to `changed`, relock and run. Export its `60.00` result to a
+new filename, then reopen and export the earlier Run's original `1236.70` result.
+With `fixture: invalid`, extraction passes, transformation fails, loading is
+skipped and `run` exits 1. That Run has no load artifact; an export attempt is
+refused even if a later successful Run or direct developer command has a result
+file. The three managed Steps transport actual DATA and TOTAL values through
+the existing explicit output bindings.
 
 This root Goon selects `runtime: python`. It captures this complete project and
 installs its base application dependencies with no default dependency groups.
 Native uv owns installation; there is no dependency-install Step. Execution
-uses separate package source, environment and writable output roots. It does
-not reuse or prune the developer's `.venv`, and the target repository supplies
-no implementation. Authored code, resources, project metadata and native lock
-bind freshness; caches and declared `.showcase/` outputs do not.
+uses separate package source, environment and writable output roots. The
+developer's `.venv` and direct `.showcase/` outputs remain unchanged. Authored
+code, resources, project metadata and native lock bind freshness; caches and
+declared `.showcase/` outputs do not. The ordinary verification Plan makes no
+claim of enforced CPU or memory limits.
 
 ## Airflow
 
@@ -84,6 +126,11 @@ explicit pinned Git coordinates; see the [template guide](https://github.com/oh-
 This root-Goon comparison does not establish scheduler/worker deployment,
 strict/native qualification, APP certification or the broader initialization/result roadmap.
 
-The required integration CI check and ordinary `make release-check` run this package's application tests and the Iris package tests in disposable environments through `make test-python-projects`, without selecting Airflow. The canonical strict integration ring keeps its prepared-environment contract. The [Git-selected example](../../../../examples/airflow-taskflow-showcase/README.md) runs this same named package against an empty target.
+The required integration CI check and ordinary `make release-check` run this package's application tests and the Iris package tests in disposable environments through `make test-python-projects`, without selecting Airflow. The canonical strict integration ring keeps its prepared-environment contract. The [Git-selected example](../../../../examples/airflow-taskflow-showcase/README.md) runs this same named package against the real developer application repository.
 
-The existing native CLI regression in `backend/tests/integration/services/test_airflow_taskflow_showcase.py` executes `official` success → `invalid` failure → `changed` success through both local and Git Plan selections. Each invocation obtains a distinct real Run ID. After the execution owner disposes attempt scratch, new CLI processes reopen all three IDs and compare their retained source/selection identity, exact Step outcomes and output evidence. The failed Run retains no load artifact after the later success. These checks qualify this showcase's durable evidence; they do not prove a separate crash-recovery system or retained downloadable bytes.
+The [Python CI walkthrough](../../../../examples/python-ci/README.md) reuses this
+application for linting, tests, packaging and retained result collection. Its
+GitHub Actions and GitLab examples leave triggering with the hosted platform;
+the same original Plan/Goon/Step lifecycle executes the declared work.
+
+The existing native CLI regression in `backend/tests/integration/services/test_airflow_taskflow_showcase.py` executes `official` success → `invalid` failure → `changed` success through both local and Git Plan selections. Each case first develops, tests and runs the real project through native uv. Managed invocations obtain distinct Run IDs and preserve that developer environment and direct output. After attempt scratch disposal, fresh CLI processes reopen all three IDs, compare retained source/selection and Step evidence, and export the successful Runs' exact JSON bytes. The failed Run has no load artifact and cannot export one after the later success. These checks establish this showcase's recorded results and retained bytes; they do not prove a separate crash-recovery system or strict execution.

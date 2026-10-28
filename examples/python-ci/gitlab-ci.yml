@@ -1,0 +1,50 @@
+# Copy to .gitlab-ci.yml. Use a disposable Linux shell runner tagged linux-shell,
+# prepared with Bash, Git, GNU Make, uv 0.12.5 and Python 3.12.
+stages: [test]
+
+variables:
+  UV_PYTHON: "3.12"
+  # Select a reviewed immutable commit for repeatable tool installation.
+  OH_GOON_REF: main
+  OH_GOON_JOB_ROOT: "/tmp/oh-goon-$CI_PROJECT_ID-$CI_JOB_ID"
+
+python:
+  stage: test
+  tags: [linux-shell]
+  interruptible: true
+  allow_failure: false
+  before_script:
+    - mkdir -m 700 -- "$OH_GOON_JOB_ROOT"
+    - git clone https://github.com/oh-goon/oh-goon.git "$OH_GOON_JOB_ROOT/tool"
+    - git -C "$OH_GOON_JOB_ROOT/tool" checkout --detach "$OH_GOON_REF"
+    - make -C "$OH_GOON_JOB_ROOT/tool" backend-install
+  script:
+    - |
+      # The shell executor delivers native signals to the job process group.
+      # No signal-forwarding trap or alternate execution owner is introduced.
+      run_status=0
+      bash examples/python-ci/run.sh run \
+        "$OH_GOON_JOB_ROOT/tool" "$CI_PROJECT_DIR" \
+        examples/python-ci/plan.yml "$OH_GOON_JOB_ROOT/state" || run_status=$?
+      collect_status=0
+      bash examples/python-ci/run.sh collect \
+        "$OH_GOON_JOB_ROOT/tool" "$OH_GOON_JOB_ROOT/state" \
+        "$CI_PROJECT_DIR/ci-artifacts" || collect_status=$?
+      if [ "$run_status" -ne 0 ]; then
+        exit "$run_status"
+      fi
+      exit "$collect_status"
+  after_script:
+    - |
+      # Cancellation may bypass script's collection. This is a native best-effort
+      # after_script; ordinary success already requires collection above.
+      if [ ! -e "$CI_PROJECT_DIR/ci-artifacts" ] &&
+         [ -s "$OH_GOON_JOB_ROOT/state/run.json" ]; then
+        bash examples/python-ci/run.sh collect \
+          "$OH_GOON_JOB_ROOT/tool" "$OH_GOON_JOB_ROOT/state" \
+          "$CI_PROJECT_DIR/ci-artifacts"
+      fi
+  artifacts:
+    when: always
+    paths: [ci-artifacts/]
+    expire_in: 1 week
