@@ -32,6 +32,7 @@ from oh_goon.integrations._fleet_plan_step_outcome import (
     output_contract_failure,
     process_boundary_settled,
     skipped_after_failure,
+    step_succeeded,
 )
 from oh_goon.integrations._fleet_plan_step_retry import (
     RetryExecutionResult,
@@ -42,6 +43,7 @@ from oh_goon.integrations.fleet_plan_run import PreparedPlanRun
 from oh_goon.integrations.fleet_plan_secret_redaction import redact_host_secrets
 from oh_goon.integrations.fleet_plan_step_execution import StepRuntime
 from oh_goon.integrations.fleet_plan_step_publication import (
+    DirectArtifactRetention,
     collect_direct_artifacts,
     collect_strict_artifacts,
 )
@@ -73,10 +75,13 @@ class FleetPlanStepSequence:
         repository: Path,
         runtime: StepRuntime,
         output_observer: StepOutputObserver | None = None,
+        *,
+        direct_artifact_retention: Mapping[str, DirectArtifactRetention] | None = None,
     ) -> None:
         self._repository = repository
         self._runtime = runtime
         self._output_observer = output_observer
+        self._direct_artifact_retention = direct_artifact_retention or {}
         self._results: list[PlanStepExecution] = []
         self._stdout: list[str] = []
         self._stderr: list[str] = []
@@ -114,10 +119,24 @@ class FleetPlanStepSequence:
                     step_order=step_order,
                 ),
             )
+            try:
+                artifacts = self._direct_artifacts(step, record)
+            except (FleetPlanInvalid, OSError) as error:
+                detail = "\n".join((str(error), *getattr(error, "__notes__", ())))
+                failure = FleetPlanInvalid(detail)
+                outcome = (
+                    output_contract_failure(step, failure, record.outcome.argv, base=record.outcome)
+                    if step_succeeded(step, record.outcome)
+                    else replace(
+                        record.outcome,
+                        stderr=(record.outcome.stderr.rstrip() + "\n" + detail).lstrip("\n"),
+                    )
+                )
+                record = replace(record, outcome=outcome, outputs={}, output_evidence=())
+                artifacts = ()
         except OperationCancelledError as error:
             self._record_cancelled_lifecycle(step, error)
             raise
-        artifacts = self._direct_artifacts(step, record)
         self._record(step, record, host_environment=None, artifacts=artifacts)
         self._record_terminal_lifecycle(step)
 
@@ -315,7 +334,11 @@ class FleetPlanStepSequence:
             or process_boundary_settled(record.outcome) is not True
         ):
             return ()
-        return collect_direct_artifacts(record.evidence_repository, step.artifacts)
+        return collect_direct_artifacts(
+            record.evidence_repository,
+            step.artifacts,
+            retention=self._direct_artifact_retention.get(step.step_id),
+        )
 
     def _strict_artifacts(
         self,

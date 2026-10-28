@@ -101,12 +101,21 @@ def _validate_step_structure(
                 "which does not publish its workspace"
             )
     cache_source = step.cache.source
-    if plan.execution.purpose is not ExecutionPurpose.CICD and any(
-        artifact.retention == "content_store" for artifact in step.artifacts
+    captured_verification = (
+        plan.execution.purpose is ExecutionPurpose.VERIFICATION
+        and step.kind == "command"
+        and getattr(step, "project_source", None) is not None
+    )
+    if (
+        plan.execution.purpose is not ExecutionPurpose.CICD
+        and not captured_verification
+        and any(artifact.retention == "content_store" for artifact in step.artifacts)
     ):
         raise ValueError(
             f"Resolved Fleet step {step.step_id} content_store artifact retention requires "
-            "execution.purpose=cicd; direct execution does not own retained publication"
+            "execution.purpose=cicd or a captured project command with "
+            "execution.purpose=verification; direct target-workspace execution does not own "
+            "retained publication"
         )
     if isinstance(cache_source, RetainedPlanCacheSource):
         if plan.execution.purpose is not ExecutionPurpose.CICD:

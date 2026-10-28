@@ -160,6 +160,15 @@ This rule applies to every execution purpose, not only strict CI/CD. Effect-free
 This is one source of truth, not two purpose-selected validators. `FleetAdmissionPlanner` owns the base repository+Plan admissibility decision for every Fleet Plan. Strict CI/CD extends that decision with additional strict proofs; verification, inspection, maintenance, and migration do not get an admit-first path.
 The base decision emits one compact repository/Plan admission receipt per selected repository, including the exact filesystem subject instance in its semantic identity and binds it into `RUN_ADMITTED`. Runtime preparation compares current repository-resolvable semantics to that exact receipt; disagreement is staleness, not permission for a second validator to choose a different answer. Retained cross-run cache references are intentionally strict-CI/CD-only because their immutable bytes are frozen/verified by strict prepared-run authority; non-CI/CD Plans reject retained cache sources during resolved-Plan validation.
 
+Trusted-local verification can retain explicitly declared artifact files from a
+captured package/application's owned attempt workspace. The existing Run,
+collector and content-store owners preserve repository scope, settled-process
+collection and byte identity; this capability issues no strict executor or
+isolation receipts. Ordinary direct target-workspace artifact publication,
+retained cache inputs and automatic retries keep their stronger requirements.
+The default Iris Plan uses this verification route; selecting `purpose: cicd`
+still requires strict admission. See [artifact retention and export](development/TEMPLATE_ARTIFACT_RETENTION.md).
+
 A failed admission creates no partially running Fleet and no durable Run/attempt that later discovers it was never valid to start. This boundary does not pre-execute the workload: test failures, verification findings, command failures, and other outcomes produced by a validly admitted operation remain execution evidence rather than being promoted into shadow admission rules.
 
 ## Principle: no magic

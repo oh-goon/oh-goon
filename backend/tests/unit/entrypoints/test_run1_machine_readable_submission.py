@@ -272,7 +272,10 @@ def test_completion_preview_reports_omissions_retention_and_shell_safe_readback(
         game_tape=SimpleNamespace(
             why_not=None,
             repositories=(
-                SimpleNamespace(repository=SimpleNamespace(name="project"), steps=steps),
+                SimpleNamespace(
+                    repository=SimpleNamespace(name="project", repository_id="repo-1"),
+                    steps=steps,
+                ),
             ),
         ),
     )
@@ -291,6 +294,25 @@ def test_completion_preview_reports_omissions_retention_and_shell_safe_readback(
         if line.startswith("Inspect Run: ")
     )
     assert shlex.split(readback) == ["oh-goon", "plan", "handoff", run_id]
+    export = next(
+        line.removeprefix("  Export artifact: ")
+        for line in output.splitlines()
+        if line.startswith("  Export artifact: ")
+    )
+    assert shlex.split(export) == [
+        "oh-goon",
+        "plan",
+        "export-artifact",
+        run_id,
+        "--repository-id",
+        "repo-1",
+        "--step",
+        "check-0",
+        "--path",
+        "report-0.json",
+        "--output",
+        "./report-0.json",
+    ]
 
 
 @pytest.mark.parametrize("status", [FleetRunStatus.RUNNING, FleetRunStatus.CANCELLED])

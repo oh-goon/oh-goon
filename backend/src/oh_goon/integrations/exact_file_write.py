@@ -7,7 +7,7 @@ import stat
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import BinaryIO
 
@@ -110,6 +110,45 @@ def replace_prepared_file(temporary: Path, target: Path) -> None:
     """Commit prepared bytes and durably publish the directory entry where supported."""
     os.replace(temporary, target)
     _sync_published_parent(target)
+
+
+def publish_prepared_file(temporary: Path, target: Path) -> None:
+    """Exclusively publish a staged file through pinned, no-follow native directories.
+
+    The caller owns a private staging directory immediately beneath the target's
+    parent. Existing targets, including symlinks, are never replaced.
+    """
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        raise OSError("Safe file export requires native directory-relative file operations")
+    if not target.is_absolute() or ".." in target.parts or temporary.parent.parent != target.parent:
+        raise ValueError("Prepared file publication requires contained sibling staging")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    with ExitStack() as owned:
+        parent = os.open(target.anchor, flags)
+        owned.callback(os.close, parent)
+        for component in target.parent.parts[1:]:
+            parent = os.open(component, flags, dir_fd=parent)
+            owned.callback(os.close, parent)
+        staging = os.open(temporary.parent.name, flags, dir_fd=parent)
+        owned.callback(os.close, staging)
+        source = os.open(temporary.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=staging)
+        owned.callback(os.close, source)
+        if not stat.S_ISREG(os.fstat(source).st_mode):
+            raise OSError("Prepared export is not a regular file")
+        os.fsync(source)
+        os.link(
+            temporary.name,
+            target.name,
+            src_dir_fd=staging,
+            dst_dir_fd=parent,
+            follow_symlinks=False,
+        )
+        try:
+            _fsync_directory_descriptor(parent)
+        except OSError as exc:
+            raise ExactPublicationDurabilityError(
+                f"Published {target} but could not durably sync its parent directory: {exc}"
+            ) from exc
 
 
 def publish_prepared_directory(staging: Path, target: Path) -> None:

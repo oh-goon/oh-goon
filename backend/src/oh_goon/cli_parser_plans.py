@@ -121,6 +121,19 @@ def _add_run_readback_commands(
     logs.add_argument("fleet_run_id")
     logs.add_argument("--after", type=_nonnegative_cursor, default=0)
     logs.add_argument("--json", action="store_true", dest="as_json")
+    export = plan_subparsers.add_parser(
+        "export-artifact", help="Export one declared retained file from a recorded Run"
+    )
+    export.add_argument("fleet_run_id")
+    export.add_argument("--step", dest="step_id", required=True, help="Exact recorded Step ID")
+    export.add_argument(
+        "--path", dest="artifact_path", required=True, help="Exact declared artifact path"
+    )
+    export.add_argument("--output", type=Path, required=True, help="New local file to create")
+    export.add_argument(
+        "--repository-id", help="Select one recorded repository when the Step ID is ambiguous"
+    )
+    export.add_argument("--json", action="store_true", dest="as_json")
     for command, help_text in (
         ("tape", "Read the original archived Game Tape projection for one Fleet Run"),
         ("steps", "Navigate original Game Tape repository and Step identities"),

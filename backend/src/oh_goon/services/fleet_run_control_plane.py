@@ -7,8 +7,11 @@ if TYPE_CHECKING:
 
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, Literal
 
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
 from oh_goon.core.capability_registry import (
@@ -23,6 +26,7 @@ from oh_goon.core.errors import (
     JournalConflict,
     StateConflict,
 )
+from oh_goon.core.file_digest import sha256_file_with_size
 from oh_goon.core.game_tape_comparison import compare_game_tapes
 from oh_goon.core.game_tape_failure_history import project_game_tape_failure_history
 from oh_goon.core.game_tape_performance import project_game_tape_performance
@@ -41,6 +45,7 @@ from oh_goon.core.models.fleet_failures import (
     FleetFailureInventory,
     FleetFailureRepositoryPage,
 )
+from oh_goon.core.models.fleet_plan_evidence import PresentPlanArtifact
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.game_tape import GameTape, GameTapeRunDiff
 from oh_goon.core.models.game_tape_failure_history import GameTapeFailureHistory
@@ -62,6 +67,7 @@ from oh_goon.core.models.run_admission import (
 from oh_goon.core.models.run_events import FleetRunEventBatch
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget, OperationTarget
+from oh_goon.core.path_authority import RepositoryScopedPath
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.product_identity import new_fleet_run_id, repository_subject_instance_id
 from oh_goon.core.projections.agent_campaign import project_agent_campaign
@@ -79,6 +85,12 @@ from oh_goon.core.vocabulary import (
     FleetRunTerminalIntent,
     OperationAction,
 )
+from oh_goon.integrations.content_snapshot import SnapshotIdentity
+from oh_goon.integrations.exact_file_write import (
+    ExactPublicationDurabilityError,
+    publish_prepared_file,
+)
+from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.runtime.execution import ExecutionTicket, RunExecutionSupervisor
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
@@ -99,6 +111,82 @@ class _RecoveredRunSourceConflict(Exception):
         self.state = state
 
 
+@dataclass(frozen=True, slots=True)
+class FleetArtifactExport:
+    """An explicitly promoted artifact verified against one recorded Run's evidence."""
+
+    fleet_run_id: str
+    repository_id: str
+    step_id: str
+    artifact_path: str
+    destination: Path
+    sha256: str
+    byte_count: int
+    reference_id: str
+    cleanup_status: Literal["verified", "failed"] = "verified"
+    cleanup_failure: str | None = None
+
+
+def _cleanup_artifact_export(temporary: TemporaryDirectory[str]) -> str | None:
+    try:
+        temporary.cleanup()
+    except BaseException as error:
+        return f"{type(error).__name__}: {error}; private staging: {temporary.name}"
+    return None
+
+
+def _recorded_export_artifact(
+    detail: FleetRunDetail,
+    *,
+    step_id: str,
+    artifact_path: str,
+    repository_id: str | None,
+) -> tuple[str, PresentPlanArtifact]:
+    target = detail.run.target
+    if not isinstance(target, FleetPlanTarget):
+        raise FleetPlanInvalid("The recorded Run has no declared Plan artifacts")
+    tape = detail.game_tape
+    matches = [
+        (repository.repository.repository_id, step)
+        for repository in tape.repositories
+        if repository_id is None or repository.repository.repository_id == repository_id
+        for step in repository.steps
+        if step.step_id == step_id
+    ]
+    if not matches:
+        raise FleetPlanInvalid("No recorded Step matches the selected Run and repository")
+    if len(matches) != 1:
+        raise FleetPlanInvalid(
+            "The recorded Step is ambiguous across repositories; select --repository-id "
+            "from 'oh-goon plan steps RUN_ID --json'"
+        )
+    owner, step = matches[0]
+    declarations = [
+        declaration
+        for resolved in target.plan.steps
+        if resolved.step_id == step_id
+        for declaration in resolved.artifacts
+        if declaration.path == artifact_path
+    ]
+    if len(declarations) != 1 or declarations[0].retention != "content_store":
+        raise FleetPlanInvalid("The selected artifact was not declared for content-store retention")
+    evidence = [artifact for artifact in step.artifacts if artifact.path == artifact_path]
+    if len(evidence) != 1 or not isinstance(evidence[0], PresentPlanArtifact):
+        raise FleetPlanInvalid("The selected artifact has no recorded present file")
+    artifact = evidence[0]
+    retained = artifact.retained_object
+    if retained is None:
+        raise FleetPlanInvalid("The selected artifact has no recorded retained content reference")
+    if (
+        retained.owner_repository_id != owner
+        or retained.kind != "file"
+        or retained.byte_count != artifact.byte_count
+        or retained.entry_count != 1
+    ):
+        raise FleetPlanInvalid("The retained artifact reference does not match its Run evidence")
+    return owner, artifact
+
+
 class FleetRunControlPlane:
     """Fleet-run lifecycle/read control plane; execution and durable truth stay delegated."""
 
@@ -112,6 +200,7 @@ class FleetRunControlPlane:
         live_output: GameTapeLiveOutputStore,
         diagnostics: DiagnosticEmitter | None = None,
         schedule_executions: ScheduleExecutionStore | None = None,
+        content_store: FleetContentStore | None = None,
     ) -> None:
         self._admission = admission
         self._journal = journal
@@ -121,6 +210,7 @@ class FleetRunControlPlane:
         self._live_output = live_output
         self._diagnostics = diagnostics
         self._schedule_executions = schedule_executions
+        self._content_store = content_store
 
     def require_cli_plan_preparation(self, fleet_run_id: str | None) -> None:
         """Delegate CLI pre-resolution admission to the original Fleet lifecycle."""
@@ -506,6 +596,85 @@ class FleetRunControlPlane:
         if provenance is None:
             return detail
         return detail.model_copy(update={"producer_implementation_provenance": provenance})
+
+    def export_artifact(
+        self,
+        fleet_run_id: str,
+        *,
+        step_id: str,
+        artifact_path: str,
+        destination: Path,
+        repository_id: str | None = None,
+    ) -> FleetArtifactExport:
+        """Export only retained bytes bound to an exact recorded Step and declaration."""
+        detail = self.get(fleet_run_id)
+        owner, artifact = _recorded_export_artifact(
+            detail, step_id=step_id, artifact_path=artifact_path, repository_id=repository_id
+        )
+        retained = artifact.retained_object
+        assert retained is not None
+        if self._content_store is None:
+            raise FleetPlanInvalid("The retained artifact content store is unavailable")
+        target = destination.expanduser().absolute()
+        if ".." in target.parts or any(part.is_symlink() for part in (target, *target.parents)):
+            raise FleetPlanInvalid(
+                "Artifact export destination cannot use traversal or symlink aliases"
+            )
+        if target.exists():
+            raise FleetPlanInvalid("Artifact export destination already exists; choose a new file")
+        if not target.parent.is_dir():
+            raise FleetPlanInvalid(
+                "Artifact export destination requires an existing parent directory"
+            )
+        temporary = TemporaryDirectory(prefix=".oh-goon-export-", dir=target.parent)
+        try:
+            staged = Path(temporary.name) / "artifact"
+            observed = self._content_store.materialize_file(
+                retained.reference_id,
+                RepositoryScopedPath.create(
+                    owner_repository_id=owner,
+                    root=Path(temporary.name),
+                    path=staged,
+                    label="recorded artifact export",
+                ),
+                expected_identity=SnapshotIdentity(
+                    retained.sha256, retained.byte_count, retained.entry_count
+                ),
+            )
+            if (
+                observed.sha256 != retained.sha256
+                or observed.byte_count != retained.byte_count
+                or observed.entry_count != retained.entry_count
+            ):
+                raise FleetPlanInvalid(
+                    "Retained artifact bytes differ from the recorded Run evidence"
+                )
+            raw_sha256, byte_count = sha256_file_with_size(staged)
+            if raw_sha256 != artifact.sha256 or byte_count != artifact.byte_count:
+                raise FleetPlanInvalid("Exported artifact bytes differ from their recorded SHA-256")
+            publish_prepared_file(staged, target)
+        except BaseException as error:
+            if isinstance(error, ExactPublicationDurabilityError):
+                error.add_note(
+                    f"Artifact destination was published at {target}; its durability is unverified."
+                )
+            cleanup_failure = _cleanup_artifact_export(temporary)
+            if cleanup_failure is not None:
+                error.add_note("Artifact export staging cleanup failed: " + cleanup_failure)
+            raise
+        cleanup_failure = _cleanup_artifact_export(temporary)
+        return FleetArtifactExport(
+            fleet_run_id=fleet_run_id,
+            repository_id=owner,
+            step_id=step_id,
+            artifact_path=artifact.path,
+            destination=target,
+            sha256=artifact.sha256,
+            byte_count=artifact.byte_count,
+            reference_id=retained.reference_id,
+            cleanup_status="verified" if cleanup_failure is None else "failed",
+            cleanup_failure=cleanup_failure,
+        )
 
     def begin_agent_campaign(self, intent: AgentCampaignIntent) -> AgentCampaignReadback:
         return self._journal.begin_agent_campaign(intent)
