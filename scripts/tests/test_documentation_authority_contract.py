@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_source_navigation_links_resolve_to_current_owners() -> None:
     documents = (
+        ROOT / "AGENTS.md",
         ROOT / "backend/README.md",
         ROOT / "backend/src/oh_goon/README.md",
         ROOT / "backend/tests/README.md",
@@ -20,6 +21,7 @@ def test_source_navigation_links_resolve_to_current_owners() -> None:
         ROOT / "docs/development/SSOT.md",
         ROOT / "docs/README.md",
         ROOT / "docs/DEVELOPMENT.md",
+        ROOT / "docs/development/CHATGPT_ITERATION.md",
         ROOT / "docs/development/REAL_LIFECYCLE_QA.md",
         ROOT / "docs/AGENT_SKILLS.md",
         ROOT / "docs/AGENT_PROVIDERS.md",

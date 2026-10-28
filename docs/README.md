@@ -39,5 +39,6 @@ Retained ADRs explain architectural choices and their original evidence limits. 
 - [Self-hosting boundaries](development/TEMPLATE_SELF_HOSTING_BOUNDARIES.md) and [catalog determinism](development/TEMPLATE_CATALOG_DETERMINISM.md) — repository verification templates and exact template source identity.
 - [Canonical workflow](development/CANONICAL_WORKFLOW.md), [APP test run](development/APP_TEST_RUN.md), and [Package run](development/PACKAGE_RUN.md) — supported commands for explicit certification and release work.
 - [Durable continuation](development/DURABLE_CONTINUATION.md) — recovery and portable working-state handoff when that workflow is needed.
+- [Chat session continuation](development/CHATGPT_ITERATION.md) — resume an ordinary contribution from current source, saved work and exact-source check evidence.
 
 Hashmarks-derived navigation helps locate repository evidence; it does not define Oh-Goon operating commands, admission, execution, or release policy. See the [Hashmarks integration boundary](architecture/hashmarks-oh-goon-authority-boundary.md). Do not mirror `make help`; link the current command owners.
