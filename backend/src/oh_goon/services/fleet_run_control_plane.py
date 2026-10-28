@@ -147,13 +147,14 @@ def _recorded_export_artifact(
     if not isinstance(target, FleetPlanTarget):
         raise FleetPlanInvalid("The recorded Run has no declared Plan artifacts")
     tape = detail.game_tape
-    if not detail.run.status.terminal:
-        raise FleetPlanInvalid("Artifact export requires a terminal recorded Run")
-    if detail.run.status is FleetRunStatus.CANCELLED or tape.status in {
+    if detail.run.status in {
+        FleetRunStatus.CANCELLING,
+        FleetRunStatus.CANCELLED,
+    } or tape.status in {
         GameTapeStatus.CANCELLED,
         GameTapeStatus.INTERRUPTED,
     }:
-        raise FleetPlanInvalid("Artifact export refuses a cancelled or interrupted Run")
+        raise FleetPlanInvalid("Artifact export refuses a cancelling, cancelled or interrupted Run")
     matches = [
         (repository.repository.repository_id, step)
         for repository in tape.repositories

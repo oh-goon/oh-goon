@@ -69,9 +69,10 @@ oh-goon plan export-artifact RUN_ID --step STEP_ID \
 ```
 
 The command selects the exact declared retained artifact from the recorded
-Run. Export requires a terminal, uncancelled Run and a physically settled selected
-Step whose cleanup is verified. Cancelled or interrupted
-execution and unknown cleanup refuse before reading retained bytes. A failed
+Run. Cancelling, cancelled or interrupted Runs and unknown selected-Step cleanup
+refuse before reading retained bytes. The selected producer must be physically
+settled with verified cleanup; its Run may still be active while another
+repository executes. A failed
 Step with verified cleanup, including a timeout or output-limit failure, may
 still supply its retained diagnostic artifacts; another failed Step does not
 invalidate a completed producer's artifacts.

@@ -13,6 +13,7 @@ import pytest
 from pydantic import TypeAdapter
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.game_tape_lifecycle import run_status
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import (
     MissingPlanArtifact,
@@ -189,8 +190,10 @@ def test_export_uses_one_recorded_cut_after_original_source_disappears(export_ca
     assert not list(export_case.destination.parent.glob(".oh-goon-export-*"))
 
 
-@pytest.mark.parametrize("status", list(FleetRunStatus))
-def test_export_requires_terminal_uncancelled_original_run(
+@pytest.mark.parametrize(
+    "status", [status for status in FleetRunStatus if status is not FleetRunStatus.QUEUED]
+)
+def test_export_preserves_completed_producers_unless_run_cancelled(
     export_case: SimpleNamespace, status: FleetRunStatus, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     case = export_case
@@ -205,9 +208,9 @@ def test_export_requires_terminal_uncancelled_original_run(
         fields["failure"] = FleetRunFailure.from_exception(
             FleetPlanInvalid("Later Run work failed"), stage=FleetRunFailureStage.EXECUTION
         )
-        case.detail.game_tape.status = GameTapeStatus.FAILED
     case.detail.run = TypeAdapter(FleetRunState).validate_python(fields)
-    if status in {FleetRunStatus.COMPLETED, FleetRunStatus.FAILED}:
+    case.detail.game_tape.status = run_status(case.detail.run)
+    if status in {FleetRunStatus.RUNNING, FleetRunStatus.COMPLETED, FleetRunStatus.FAILED}:
         assert _export(case).destination.read_bytes() == case.payload
         return
     materialize = Mock(side_effect=AssertionError("Unsettled Run reached retained content"))
