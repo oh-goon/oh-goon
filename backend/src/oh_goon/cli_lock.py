@@ -76,7 +76,7 @@ def run_stateless_lock(args: argparse.Namespace) -> int:
                 if hasattr(args, "_run_configuration")
                 else None,
                 source_graph=getattr(args, "_source_graph", None),
-                repository=args._run_configuration.repository.path
+                repository=args._run_configuration.resolution_repository
                 if hasattr(args, "_run_configuration")
                 else None,
             )

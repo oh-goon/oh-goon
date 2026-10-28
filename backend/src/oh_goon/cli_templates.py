@@ -30,7 +30,7 @@ def run_template_command(args: argparse.Namespace) -> int:
                 args.output,
                 kind=args.kind,
                 reviewers=reviewers,
-                repository=args.repository,
+                repositories=args.repository or (),
             )
             print(f"Created: {destination}")
             print(

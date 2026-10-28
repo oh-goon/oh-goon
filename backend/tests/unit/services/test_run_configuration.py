@@ -7,7 +7,10 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
-from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.repository import ExcludedRepositoryCatalogEntry, RepositoryIdentity
+from oh_goon.core.models.run_configuration import RunConfiguration
+from oh_goon.core.time import utc_now
+from oh_goon.core.vocabulary import FleetScope
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -91,6 +94,129 @@ def test_only_registered_target_is_selected_without_path_guessing(tmp_path):
     assert normalized.plan_path == tmp_path / "plan.yml"
     with pytest.raises(FleetPlanInvalid, match="exactly one"):
         normalize_run_configuration(captured, [repository, repository])
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        {"repository_ids": []},
+        {"repository_ids": ["repo-one"]},
+        {"repository_ids": ["repo-one", "repo-one"]},
+        {"repository_ids": ["repo-one", ""]},
+        {"repository_ids": "repo-one,repo-two"},
+        {"repository_id": "repo-one", "repository_ids": ["repo-one", "repo-two"]},
+    ],
+)
+def test_plural_target_set_requires_unique_complete_unambiguous_ids(
+    tmp_path: Path, target: dict[str, object]
+) -> None:
+    import yaml
+
+    path = tmp_path / "run.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {"version": 1, "source": {"kind": "file-plan", "path": "plan.yml"}, "target": target}
+        )
+    )
+    with pytest.raises(FleetPlanInvalid):
+        load_run_configuration(path)
+
+
+@pytest.mark.parametrize("source", ("file", "catalog"))
+def test_plural_normalization_keeps_all_targets_without_a_primary_repository(
+    tmp_path: Path, source: str
+) -> None:
+    import yaml
+
+    repositories = []
+    for name in ("application-one", "application-two"):
+        root = tmp_path / name
+        root.mkdir()
+        repositories.append(RepositoryIdentity.model_validate({"path": root}))
+    package = tmp_path / "plans/general/check"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# general/check\n")
+    plan = package / "plan.yml" if source == "catalog" else tmp_path / "plan.yml"
+    plan.write_text("version: 1\ngoons: []\n")
+    path = tmp_path / "run.yml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "catalog-plan", "name": "general/check"}
+                if source == "catalog"
+                else {"kind": "file-plan", "path": "plan.yml"},
+                "target": {"repository_ids": [item.repository_id for item in repositories]},
+            }
+        )
+    )
+    snapshot = load_run_configuration(path)
+    normalized = normalize_run_configuration(
+        snapshot, repositories, plan_templates=PlanTemplateStore(tmp_path / "plans")
+    )
+    assert normalized.repositories == tuple(repositories)
+    assert normalized.plan_path == plan
+    assert normalized.resolution_repository is None
+    assert snapshot.selection.target.model_dump() == {
+        "repository_ids": tuple(item.repository_id for item in repositories)
+    }
+    with pytest.raises(FleetPlanInvalid, match="single repository context"):
+        _ = normalized.repository
+    for incomplete in (repositories[:1], [*repositories, repositories[1]]):
+        with pytest.raises(FleetPlanInvalid, match="every selected ID"):
+            normalize_run_configuration(snapshot, incomplete)
+    excluded = ExcludedRepositoryCatalogEntry(
+        scope=FleetScope.EXCLUDED,
+        repository=repositories[1],
+        exclusion_reason="explicit exclusion",
+        excluded_at=utc_now(),
+    )
+    with pytest.raises(FleetPlanInvalid, match="every selected ID"):
+        normalize_run_configuration(snapshot, [repositories[0], excluded])
+
+
+@pytest.mark.parametrize("single_workspace", ("repository-goon", "agent", "repair"))
+def test_plural_selection_refuses_single_workspace_contracts_before_source_reads(
+    tmp_path: Path, single_workspace: str
+) -> None:
+    import yaml
+
+    payload: dict[str, object] = {
+        "version": 1,
+        "source": {"kind": "file-plan", "path": "unavailable.yml"},
+        "target": {"repository_ids": ["repo-one", "repo-two"]},
+    }
+    if single_workspace == "repository-goon":
+        payload["source"] = {"kind": "repository-goon"}
+    else:
+        payload["agent"] = {
+            "model_profile": "fixture",
+            "acceptance": "review",
+            "repository_root": "/unavailable",
+            "skill_root": ".",
+        }
+        if single_workspace == "repair":
+            payload["repair"] = {
+                "review_passes": 1,
+                "write_roots": ["src"],
+                "timeout_seconds": 10,
+                "step_timeout_seconds": 5,
+            }
+    path = tmp_path / "run.yml"
+    path.write_text(yaml.safe_dump(payload))
+    with pytest.raises(FleetPlanInvalid, match="selection fields"):
+        load_run_configuration(path)
+
+
+def test_singular_target_serialization_keeps_existing_contract() -> None:
+    selected = RunConfiguration.model_validate(
+        {
+            "version": 1,
+            "source": {"kind": "file-plan", "path": "plan.yml"},
+            "target": {"repository_id": "repo-one"},
+        }
+    )
+    assert selected.target.model_dump() == {"repository_id": "repo-one"}
 
 
 @pytest.mark.parametrize("selected", ["../outside.yml", "/tmp/elsewhere.yml", "alias.yml"])

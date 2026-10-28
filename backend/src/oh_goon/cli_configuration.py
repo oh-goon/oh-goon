@@ -27,13 +27,16 @@ def prepare_configuration(args: argparse.Namespace) -> None:
     snapshot = load_run_configuration(args.configuration)
     locations = LeagueFolderStore().list()
     discovery = RepositoryDiscoveryService()
-    repositories = discovery.explicit_configured_roots(
-        locations, repository_ids=(snapshot.selection.target.repository_id,)
-    )
-    if not repositories:
-        repositories = tuple(
+    requested = snapshot.selection.target.selected_ids()
+    repositories = discovery.explicit_configured_roots(locations, repository_ids=requested)
+    missing = set(requested) - {repository.repository_id for repository in repositories}
+    if missing:
+        discovered = (
             RepositoryIdentity.model_validate({"path": path})
             for path in discovery.git_roots(locations, require_pyproject=False)
+        )
+        repositories += tuple(
+            repository for repository in discovered if repository.repository_id in missing
         )
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     selected, graph = capture_run_configuration_source(
@@ -49,6 +52,8 @@ def prepare_configuration(args: argparse.Namespace) -> None:
     agent = snapshot.selection.agent
     repair = snapshot.selection.repair
     agent_source = graph.has_agent_source_contract()
+    if len(selected.repositories) > 1 and agent_source:
+        raise FleetPlanInvalid("Agent execution requires a single repository")
     if (agent is not None) != agent_source:
         raise FleetPlanInvalid("agent selection must match the selected source's Agent contract")
     if agent_source:
@@ -74,7 +79,7 @@ def prepare_configuration(args: argparse.Namespace) -> None:
         "plan_inputs": None,
         "inputs_file": None,
         "extensions": None,
-        "repository_ids": [selected.repository.repository_id],
+        "repository_ids": [repository.repository_id for repository in selected.repositories],
         "all_repositories": False,
         "fleet_run_id": getattr(args, "fleet_run_id", None),
         "priority": SchedulingPriority.NORMAL,
@@ -129,7 +134,9 @@ def run_config_command(args: argparse.Namespace) -> int:
         for source in report["source"]["git_sources"]:
             print(f"  Git: {source['git']} | ref={source['ref']} | commit={source['commit']}")
             print(f"    path: {source['path']}")
-        print(f"Target: {report['target']['name']} ({report['target']['repository_id']})")
+        targets = report["target"].get("repositories", (report["target"],))
+        for target in targets:
+            print(f"Target: {target['name']} ({target['repository_id']})")
         print(f"Status: {report['status']}")
         print("Inputs:")
         for item in report["inputs"]:

@@ -196,6 +196,14 @@ validation is not execution, and a lock is not write permission. Locking freezes
 the selected source and inputs; run performs fresh admission and waits for
 completion. Source or selection changes require a new matching lock.
 
+For one Plan over several registered application roots, repeat `--repository
+PATH` during initialization. The initializer fills an exact
+`target.repository_ids` set; ordinary execution and readback then use one Fleet
+Run for those repositories. Each target needs the same Plan/input contract.
+Repository Goons, Agent and repair workflows keep their single-workspace
+selection. See [the parallel CLI walkthrough](../templates/README.md#one-plan-over-several-applications)
+for registration and commands.
+
 Use the [configuration guide](development/TEMPLATE_INPUT_INSPECTION.md) for
 project Plans, repository Goons and optional agent/repair groups. Shared Plan
 UI/service operations retain explicit multi-repository selection and their own

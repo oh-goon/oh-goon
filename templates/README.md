@@ -59,6 +59,33 @@ oh-goon plan handoff RUN_ID
 
 These commands reopen durable Run and Game Tape evidence after the execution process exits. `plan outputs` shows output hashes, sizes and retained references when present; it does not download files. `oh-goon plan logs RUN_ID` reads logs only while their transient retention remains available. An `evidence` artifact declaration records a file's identity without retaining its bytes; see the [retention contract](../docs/development/TEMPLATE_ARTIFACT_RETENTION.md).
 
+## One Plan over several applications
+
+Register each actual application root, then repeat `--repository` to initialize
+one explicit target set:
+
+```sh
+oh-goon league add-folder /absolute/path/to/application-one
+oh-goon league add-folder /absolute/path/to/application-two
+oh-goon templates init python/quality --kind plan --output ./workflow --repository /absolute/path/to/application-one --repository /absolute/path/to/application-two
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
+```
+
+The initializer writes `target.repository_ids` for the exact selected set. A
+single path retains `target.repository_id`. Each application must satisfy the
+same Plan and selected input values; project-relative native configuration is
+resolved for each target. The original Fleet scheduler owns parallelism,
+failure and cancellation, and completion/readback reports one Run containing
+all selected repositories.
+
+Catalog, file and Git Plans support this explicit set. Repository Goons, Agent
+and repair workflows retain their single-workspace contract. Duplicate,
+unavailable or unregistered members refuse; the CLI does not silently reduce
+the requested set. Git-free applications require exact registration of each
+root. The selected execution policy continues to own resource guarantees;
+ordinary verification currently has no aggregate Run CPU/RAM budget.
+
 ## Change values without editing the Goon
 
 Edit only `run.yml` for caller choices. Atomic Goons own input types, defaults, choices and constraints. A required plain string can be written as `label:`; a default string as `label: example`. Use a mapping when a type, description or constraint adds information. Plans expose unambiguous unbound direct inputs, while fixed `with:` bindings remain fixed. Shared names need explicit recipients in the Plan/Composite; `config inspect` shows the selected contract.

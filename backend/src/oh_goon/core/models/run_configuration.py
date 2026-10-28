@@ -15,6 +15,7 @@ from oh_goon.core.models.git_sources import GitSourceSelection
 from oh_goon.core.template_identity import canonical_template_key
 
 _INPUT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,63}\Z")
+_RepositorySelectionId = Annotated[str, Field(min_length=1, max_length=160, pattern=r"^\S+$")]
 
 
 class _SelectionModel(ImmutableModel):
@@ -63,7 +64,33 @@ RunSourceSelection = Annotated[
 
 
 class RunTargetSelection(_SelectionModel):
-    repository_id: str = Field(min_length=1, max_length=160, pattern=r"^\S+$")
+    repository_id: _RepositorySelectionId | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    repository_ids: tuple[_RepositorySelectionId, ...] | None = Field(
+        default=None, min_length=2, exclude_if=lambda value: value is None
+    )
+
+    @field_validator("repository_ids", mode="before")
+    @classmethod
+    def yaml_sequence(cls, value: object) -> object:
+        return tuple(value) if type(value) is list else value
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> RunTargetSelection:
+        if (self.repository_id is None) == (self.repository_ids is None):
+            raise ValueError("target requires exactly one of repository_id or repository_ids")
+        if self.repository_ids is not None and len(set(self.repository_ids)) != len(
+            self.repository_ids
+        ):
+            raise ValueError("target.repository_ids must contain unique repository IDs")
+        return self
+
+    def selected_ids(self) -> tuple[str, ...]:
+        if self.repository_id is not None:
+            return (self.repository_id,)
+        assert self.repository_ids is not None
+        return self.repository_ids
 
 
 class RunAgentSelection(_SelectionModel):
@@ -147,6 +174,12 @@ class RunConfiguration(_SelectionModel):
         self.caller_inputs()
         if self.repair is not None and self.agent is None:
             raise ValueError("repair requires an explicit agent selection")
+        if len(self.target.selected_ids()) > 1 and (
+            isinstance(self.source, RepositoryGoonSelection)
+            or self.agent is not None
+            or self.repair is not None
+        ):
+            raise ValueError("repository-goon and Agent execution require a single repository")
         return self
 
     def caller_inputs(self) -> dict[str, PlanInputValue]:

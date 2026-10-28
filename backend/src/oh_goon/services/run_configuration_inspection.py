@@ -89,7 +89,7 @@ def inspect_run_configuration(
             resolved = resolver.resolve_source_graph(
                 graph,
                 inputs=normalized.inputs,
-                repository=normalized.repository.path,
+                repository=normalized.resolution_repository,
                 observe_environment=False,
                 resolved_inputs=effective_inputs,
             )
@@ -313,7 +313,13 @@ def inspect_run_configuration(
             "sha256": graph.root.source_sha256,
             "git_sources": [pin.model_dump(mode="json") for pin in graph.execution_sources],
         },
-        "target": normalized.repository.model_dump(mode="json"),
+        "target": normalized.repository.model_dump(mode="json")
+        if len(normalized.repositories) == 1
+        else {
+            "repositories": [
+                repository.model_dump(mode="json") for repository in normalized.repositories
+            ]
+        },
         "inputs": inputs,
         "unrouted_inputs": list(interface.unrouted_inputs),
         "occurrences": occurrences,
