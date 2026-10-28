@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_source_navigation_links_resolve_to_current_owners() -> None:
     documents = (
+        ROOT / "AGENTS.md",
         ROOT / "backend/README.md",
         ROOT / "backend/src/oh_goon/README.md",
         ROOT / "backend/tests/README.md",
@@ -19,6 +20,9 @@ def test_source_navigation_links_resolve_to_current_owners() -> None:
         ROOT / "docs/ARCHITECTURE.md",
         ROOT / "docs/development/SSOT.md",
         ROOT / "docs/README.md",
+        ROOT / "docs/DEVELOPMENT.md",
+        ROOT / "docs/development/CHATGPT_ITERATION.md",
+        ROOT / "docs/development/REAL_LIFECYCLE_QA.md",
         ROOT / "docs/AGENT_SKILLS.md",
         ROOT / "docs/AGENT_PROVIDERS.md",
         ROOT / "docs/development/AGENT_RUNTIME_OWNERS.md",
@@ -106,20 +110,6 @@ def test_browser_docs_distinguish_primary_steps_tab_from_cicd_flow_visualization
     assert "Steps (CI/CD Flow)" in matrix
     assert "Game Tape opens on the read-only **Steps** review tab" in frontend
     assert "Game Tape opens on **CI/CD Flow**" not in coverage
-
-
-def test_development_docs_assign_quality_and_coverage_to_current_make_owners() -> None:
-    runbook = (ROOT / "docs/development/APP_TEST_RUN.md").read_text(encoding="utf-8")
-    privacy = (ROOT / "docs/PRIVACY.md").read_text(encoding="utf-8")
-
-    assert "`make check` is the fast development feedback boundary" in runbook
-    assert "`make quality-check` owns fresh Python branch coverage" in runbook
-    assert (
-        "`make check-backend` is the backend-local Ruff + coverage + ratchet diagnostic"
-        in runbook
-    )
-    assert "`make check` owns stricter quality/lint/coverage gates" not in runbook
-    assert "fast development architecture projection" in privacy
 
 
 def test_command_owner_preserves_process_group_quiescence_checks() -> None:

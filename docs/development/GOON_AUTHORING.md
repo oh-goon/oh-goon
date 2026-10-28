@@ -532,8 +532,9 @@ steps:
 
 `steps[].artifacts[]` declares actual produced files, not command logs or
 execution metadata. Use [template artifact retention](TEMPLATE_ARTIFACT_RETENTION.md)
-for the backend-owned `evidence` versus `content_store` distinction, strict
-publication requirements, retained-reference lifetime and catalog examples.
+for the backend-owned `evidence` versus `content_store` distinction, strict and
+captured-project verification publication boundaries, artifact export,
+retained-reference lifetime and catalog examples.
 
 ## Shipped network authority
 

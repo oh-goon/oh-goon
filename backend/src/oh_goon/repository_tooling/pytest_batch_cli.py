@@ -10,6 +10,16 @@ def parse_batch_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser = argparse.ArgumentParser()
     parser.add_argument("paths", nargs="*", type=Path)
     parser.add_argument(
+        "--focused",
+        action="store_true",
+        help="label explicit selected-test feedback as not fully verified",
+    )
+    parser.add_argument(
+        "--next-check",
+        metavar="COMMAND",
+        help="caller-selected unverified escalation command for --focused; never executed",
+    )
+    parser.add_argument(
         "--qualified",
         action="store_true",
         help="use the bound isolated project interpreter and native plugins",
@@ -93,6 +103,13 @@ def parse_batch_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
 
 
 def _validate_batch_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if args.focused:
+        if not args.paths:
+            parser.error("--focused requires explicit test paths or native pytest node IDs")
+        if args.next_check is None or not args.next_check.strip():
+            parser.error("--focused requires a nonblank --next-check command")
+    elif args.next_check is not None:
+        parser.error("--next-check requires --focused")
     coverage_requested = bool(
         args.coverage_source
         or args.coverage_data_file is not None

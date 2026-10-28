@@ -1,141 +1,76 @@
 # ChatGPT / constrained-agent development loop
 
-This document preserves the practical iteration contract for ChatGPT and other
-short-lived agent/tool sessions. It is **contributor guidance**, not a new
-runtime path, test gate, state database, or certification authority. Root
-[`AGENTS.md`](../../AGENTS.md) owns repository-wide policy;
-[`TOOL_SESSION_QUALIFICATION.md`](TOOL_SESSION_QUALIFICATION.md) owns bounded
-qualification; [`CI_CD_CONTRACT.md`](../CI_CD_CONTRACT.md) owns hosted checks.
+Use this guide to resume one cohesive Oh-Goon contribution after a chat reset.
+The repository and its existing check owners supply authority; chat memory and
+handoff notes help locate it. Contributor policy remains in
+[AGENTS.md](../../AGENTS.md). This guide adds no runner, gate or certificate.
 
-## Begin each session from repository authority
+## Establish the current task
 
-1. Read root `AGENTS.md` and the affected owner-local guidance. Fetch the
-   current `main` and existing PR branch/head before treating prior chat context
-   as current. ChatGPT memory, an old handoff, or a Linear issue is **a lead**,
-   not source, implementation, test, or merge truth.
-2. Check for an existing active PR covering the same owner and intent. Continue
-   that PR when practical; rebase or reconcile against current `main`. Prefer
-   one cohesive, reviewable batch over one PR per tiny fix. Do not mix unrelated
-   changes only to reduce PR count.
-3. Capture the intended contract, affected owner, explicit out-of-scope
-   boundaries, and focused negative/positive checks before editing. For an
-   observed bug, establish a failing regression when practical; removing a
-   failing test is not a repair unless the requirement is obsolete, incorrect,
-   or demonstrably covered elsewhere.
-4. Respect the product boundary: Hashmarks supplies repository evidence;
-   the selected coding agent reasons/edits; Oh-Goon owns admission, execution,
-   recovery, and verification. Do not invent another runner, scheduler,
-   repository graph, harness session store, or generated-contract authority.
+1. Read root and affected owner guidance. Inspect the working tree, branch and
+   exact commit before editing; preserve existing uncommitted work. Fetch the
+   current base and PR head when available, and reconcile differences before
+   relying on an older handoff. If remote state is unavailable, report that gap.
+2. Find the existing PR for the user-approved goal. Continue its coherent slice
+   where practical; do not combine unrelated work just to reduce PR count.
+3. Follow the [QA baseline](REAL_LIFECYCLE_QA.md#before-implementing-a-backlog-item)
+   to distinguish implemented behavior from missing qualification. An open issue
+   is not evidence that a mechanism needs rebuilding. Locate the current owner,
+   existing regression and specific missing proof before choosing an edit.
 
-## Fast feedback without reducing required proof
+## Iterate through existing owners
 
-- Develop in the smallest affected owner. Run its focused test first and
-  diagnose the **first real failure**. Fix the owner, extend a regression, and
-  rerun that focused test before escalating according to the root
-  `AGENTS.md` matrix. For backend edits, use the existing
-  `uv run --offline --frozen --no-sync pytest ...` command after `make init`.
-- Keep the local Python/Node environments and native package caches when
-  source/dependency authority permits. Do not rerun `make init`, regenerate
-  contracts, rebuild wheels, or re-resolve locks on every edit. Execute
-  `make sync` only for an intentional dependency-intent change.
-- Test execution must remain resource-bounded on a developer/WSL host:
-  avoid overlapping heavyweight pytest/process suites or unconstrained
-  concurrent tool sessions. Use the existing test owners/batch runner, and
-  verify actual child-process/cgroup limits rather than assuming a parent
-  setting constrains descendants. A machine becoming CPU-saturated is a
-  performance defect to measure, not a reason to skip coverage.
-- When the outer ChatGPT/tool call may expire, **start** known-large suites
-  with `make tool-session-qualification` or existing
-  `oh-goon-test-batches --resume`. Do not first launch a known-monolithic
-  command and split only after it times out. Run
-  `make tool-session-qualification-status` for progress. Reuse only exact
-  source/plan/toolchain-bound PASS receipts, not stale or partial output.
-  A completed small owner test may run directly to avoid pytest startup churn.
-- Keep `make check`/owner gates, `make verify` diagnostics,
-  `make certify` and release proof separate under their documented authority.
-  A diagnostic, older commit's green CI, truncated output, timed-out test,
-  or unfinished batch is **not** final-source PASS.
+Use the [focused edit loop](../DEVELOPMENT.md#focused-edit-loop) for the concrete
+selection and next required check. Diagnose its first failure before broadening.
+Keep a reproducing regression when it adds defect-detection power, following
+[Test quality](TEST_QUALITY.md); general development/review methods remain in
+[agentsCookbook](../AGENT_SKILLS.md).
 
-## Publishing and reviewing one coherent batch
+Initialize dependencies when needed through the existing `make init` frontdoor;
+reuse valid environments during edits. Lock authoring and generated-contract
+changes follow their existing owners, not a per-session refresh ritual.
 
-1. Group related source fix, regressions, and current-owner docs into the
-   existing PR where possible. Keep draft PR feedback cheap; publish fewer,
-   meaningful head updates rather than repeatedly triggering broad CI.
-2. Locally run the focused checks and the union of required escalation rows.
-   Do not classify a regression as `slow` merely because it is expensive;
-   retain process, isolation, cancellation, and negative-boundary proof.
-3. Mark the PR ready for review only when its intended slice is reviewable.
-   All seven hosted routine check names belong to ready PR/current head.
-   Rerun only failed jobs for an unchanged commit; changed head requires fresh
-   evidence. Green CI is not proof that GitHub branch protection is active.
-4. Review tests that were removed or relaxed: identify the requirement they
-   enforced and equivalent observable proof after the change. Review source
-   behavior as well as test changes. General review methodology belongs in
-   agentsCookbook; keep only Oh-Goon-specific decisions here.
-5. Report the six completion fields required by root `AGENTS.md`.
-   Name every gate that was NOT_RUN, BLOCKED, or interrupted rather than
-   projecting success from partial evidence.
+The [local test resource budget](../DEVELOPMENT.md#local-test-resource-budget)
+already covers supported Make gates. Direct uv/npm tests do not acquire that
+scope automatically. Run major gates sequentially when measuring workstation
+load; record the actual command, budget, host and outcome. Investigate a measured
+resource defect in its existing owner rather than introducing another runner.
 
-## Portable continuation across chat resets
+Start known-large surfaces with [tool-session qualification](TOOL_SESSION_QUALIFICATION.md)
+or the existing resume-safe batch owner. Reuse only receipts accepted by that
+owner for the exact source, selection and toolchain; an interrupted or timed-out
+unit remains unverified. Follow the root escalation matrix for the final slice.
+Focused PASS does not establish owner-gate, APP or release completion.
 
-Before losing a chat session, publish the durable state to the **existing**
-GitHub PR/issue or its linked review discussion (and to the tracked Linear
-task when that is the selected planning owner). Do not commit transcript
-history, chat memory dumps, private paths, credentials, archive checkpoints,
-or phase/status files to the source tree. A useful handoff includes:
+Publish coherent updates using the existing
+[hosted-check contract](../CI_CD_CONTRACT.md#repository-checks-on-github).
+Draft feedback is the cheap iteration lane; ready PRs still require all routine
+checks on the current head, including documentation changes. Diagnose a failing
+hosted check from its native failure evidence before changing code or retrying.
 
-- Repository, branch, current exact commit SHA and PR URL; base `main` SHA
-  when available.
-- User-approved goal, constraints and explicit non-goals; implementation
-  owners touched; related issues/requirements.
-- Changes already committed versus remaining work, with the first concrete
-  next action. State whether PR is draft or ready.
-- Focused test command/results, escalation check names and exact commit
-  bound to each result, known failures and unverified gaps.
-- Relevant retained bounded evidence/receipts with their identity and
-  freshness; whether native qualification remains outstanding.
+## Leave a usable handoff
 
-On restart, read that persisted handoff **and independently verify** branch,
-source, PR head, CI and required contract state. ChatGPT memory can help find
-a prior decision but must never silently override current code. Reuse the
-same run/batch receipts only when the qualification identity still matches.
-For explicitly archive-managed campaigns, use
-[`DURABLE_CONTINUATION.md`](DURABLE_CONTINUATION.md), not this ordinary
-GitHub-based handoff, for checkpoint authority.
-
-## Practical session handoff (PR comment, not source status file)
-
-Use the existing PR description or review comment as the durable checkpoint.
-Keep it compact enough that a new coding session can act without reading an
-entire transcript:
+Preserve work with normal Git commits and synchronization within the user's
+authorized scope. When publication to an existing PR/issue or selected planning
+task is authorized, place a compact handoff there; otherwise return it to the
+user. This guide grants no permission to send messages or publish private data.
+Do not put transcripts, status files, logs or recovery transport in source.
 
 ```text
-Repository / base: oh-goon/oh-goon / main@<verified SHA>
-Working PR / branch / head: #<number> / <branch> / <verified SHA>
-Goal and non-goals: <approved scope; boundary to preserve>
-Owner and contract: <source owner, relevant docs, contract change>
-Completed: <committed changes only>
-Next: <one concrete first action; remaining tasks>
-Focused proof: <command, PASS/FAIL, exact source identity>
-Escalation: <required checks and status for this exact head>
-Unverified/blockers: <explicit NOT_RUN/BLOCKED/timeouts>
-PR readiness: draft for iteration / ready for full gate
+Repository / base / PR: <repository, verified base SHA, existing PR URL>
+Branch / head / working tree: <exact SHA; committed and uncommitted changes>
+Goal / constraints: <approved scope and boundaries to preserve>
+Owner / contract: <affected owners and current contract links>
+Completed: <durably saved changes and where they can be recovered>
+Next: <first concrete action, then remaining work>
+Evidence: <commands, outcomes, source identity including any dirty changes>
+Escalation / gaps: <required gates; FAIL, NOT_RUN, BLOCKED or interrupted>
+Readiness: <draft or ready; hosted checks for the current head>
 ```
 
-Do not paste tokens, credentials, private paths, unredacted outputs, or large
-transcripts. On the next session, compare this checkpoint to the live PR and
-`main`; discard stale assertions. Documentation-only edits are **not** an
-excuse to skip the seven required ready-PR checks. Keep a PR in draft while
-iterating, then switch to ready only once the intended final head is published.
-If a ready PR needs more changes, returning to draft avoids repeatedly launching
-full check suites; completion still requires final-head evidence.
-
-## What not to optimize away
-
-Never turn a shorter chat, faster draft job, cached receipt, fixture-only test,
-or passing test count into an execution or certification claim. Maintain
-correctness, source identity, permissions, native ownership, durable recovery,
-negative tests, and exact verification membership. Improvement proposals such
-as global CPU budgets or reduced repeated pytest collection require measured
-baseline, an existing-owner implementation, and regression evidence; this
-guide does not assert they have been implemented.
+Report the six completion fields from root `AGENTS.md`; keep bounded evidence
+with its existing owner and omit credentials, private paths and raw transcripts.
+On restart, independently verify the handoff against source, working-tree changes,
+PR head and check results. Old green CI and a list of tests are not current PASS.
+Use [durable continuation](DURABLE_CONTINUATION.md) only for an explicitly
+archive-managed campaign or requested portable checkpoint.

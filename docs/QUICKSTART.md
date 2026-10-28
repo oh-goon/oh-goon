@@ -2,19 +2,32 @@
 
 You do not need to understand SQLite, the Journal, capabilities, or operation schemas to use oh-goon.
 
-## 1. Standard start — recommended
+## 1. Prepare a source checkout
 
-For a source checkout, use the browser-first path:
+For CLI workflows, start in the repository root with Git, Bash, GNU Make and
+uv `>=0.10.0` in a Linux/WSL shell:
+
+```bash
+make backend-install
+uv run --offline --frozen --no-sync --project backend oh-goon --help
+```
+
+Native uv consumes the committed backend lock and selects Python
+`>=3.12,<3.15`. No Node, npm or frontend build is needed for the source CLI.
+Use the full `uv run ... oh-goon` prefix in place of `oh-goon` in the examples
+below, then continue to [Select one workflow configuration](#select-one-workflow-configuration).
+
+For the browser, initialize both owners and start the source UI:
 
 ```bash
 make init   # native uv sync + native npm ci + tiny Oh-Goon smoke
 make dev
 ```
 
-Open the exact `http://127.0.0.1:5173/#access=...` URL printed by `make dev`. The Vite frontend proxies `/api` to the backend on `127.0.0.1:8787`; the one-time fragment establishes the process-local session and is removed from browser history. Python `>=3.12,<3.15` is resolved by uv; source checkouts require a Linux/WSL shell with Git, Bash, GNU Make, uv `>=0.10.0`, Node 22.16.0+, and npm 10.9.2+. `make diagnostic-system-check` is available when you need read-only environment and lock diagnostics, but it is not a startup prerequisite.
+Open the exact `http://127.0.0.1:5173/#access=...` URL printed by `make dev`. The Vite frontend proxies `/api` to the backend on `127.0.0.1:8787`; the one-time fragment establishes the process-local session and is removed from browser history. This browser path also requires Node 22.16.0+ and npm 10.9.2+. `make diagnostic-system-check` is available when you need read-only environment and lock diagnostics, but it is not a startup prerequisite.
 
-Hashmarks is required and installed by `make init` from the normal backend
-dependency lock. No separate Hashmarks installation or agentsCookbook checkout
+Hashmarks is required and installed by `make backend-install` or `make init`
+from the normal backend dependency lock. No separate Hashmarks installation or agentsCookbook checkout
 is needed. A native dependency failure must be resolved before running the
 affected workload; diagnostics do not replace the real Hashmarks integration.
 
@@ -65,7 +78,7 @@ The canonical repository CI/CD entrypoint is exactly `<git-root>/goon.yml`. A re
 
 For a repository marked ready, press **Run CI/CD** in Repositories. oh-goon resolves that repository's current root `goon.yml`, runs the normal Enforcer admission, then executes exactly that repository through the canonical local FleetRun lifecycle.
 
-The browser run waits for the same canonical lifecycle and shows failure/cancellation in Runs and Game Tape. A Git repository does not need `pyproject.toml` merely to be a CI/CD target; language-specific files are requirements declared by its own `goon.yml`. CLI equivalents are collected in the **Advanced: CLI access** section at the end.
+The browser run waits for the same canonical lifecycle and shows failure/cancellation in Runs and Game Tape. A Git repository does not need `pyproject.toml` merely to be a CI/CD target; language-specific files are requirements declared by its own `goon.yml`. CLI equivalents are collected in the **CLI workflows** section at the end.
 
 ### First local launch
 
@@ -87,7 +100,7 @@ If a run fails, start in Game Tape. It remains read-only and shows the canonical
 
 The Shared Plan `plan.yml` lives in oh-goon's local configuration and is not copied into repositories. For this run each repository's own `goon.yml` is completely omitted: it is not read, validated, merged, inherited, or executed. Exact Shared Plan source/revision history and preview details remain available without changing the normal run path.
 
-The same operations are available to power users through the optional CLI; see **Advanced: CLI access** below.
+The same operations are available through the CLI; see **CLI workflows** below.
 
 Preview is read-only and uses the same declared Enforcer/admission requirements as the run. Run remains a separate explicit action. The selected repositories only need to be current managed Git repositories; their repository `goon.yml` may be configured, missing, or invalid because it is not a source for the Shared Run.
 
@@ -112,19 +125,18 @@ Before Run is enabled, the browser automatically requests the read-only backend 
 
 Settings and Help are utility controls. Recovery is reached from canonical failure guidance, and Recovery/Tools become top-level navigation in **Advanced** experience. Manual Verify, security, migration and command recipes remain Advanced work rather than the normal first-run path.
 
-## Advanced: CLI access
+## CLI workflows
 
-The CLI is optional and uses the same Python implementation as the GUI. It is not required for the standard browser path.
-
-After `make init`, run the source CLI from the repository root:
+The CLI uses the same Python implementation as the GUI. After
+`make backend-install` or `make init`, run it from the repository root:
 
 ```bash
 uv run --offline --frozen --no-sync --project backend oh-goon --help
 ```
 
 Use that prefix for the `oh-goon` examples below. The optional `make cli-install`
-target builds a standard wheel and requires the release owner's built UI, so
-it is not part of fresh-checkout startup. For contributor browser acceptance,
+target builds a standard wheel and requires the release owner's built UI. Source
+CLI setup uses `make backend-install`. For contributor browser acceptance,
 prepare browser engines separately after normal setup:
 
 ```bash
@@ -146,26 +158,36 @@ make architecture
 
 ### Select one workflow configuration
 
-Follow the [template first-run guide](../templates/README.md) for headless
-registration with `league add-folder` and `league scan --json`. Copy the selected
-repository's canonical `repository_id` into the generated selection's
-`target.repository_id`; the current initializer requires this explicit ID transfer:
+Register the target folder once, then select its repository by path during
+initialization. The initializer writes the registered target ID into `run.yml`:
 
 ```bash
-oh-goon templates list --kind plan
-oh-goon templates init python/quality --kind plan --output ./workflow
-# Edit workflow/run.yml: target.repository_id and relevant inputs.
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
+oh-goon league add-folder /absolute/path/to/repository
+oh-goon templates init python/quality --kind plan --output ./workflow --repository /absolute/path/to/repository
+# Edit workflow/run.yml inputs for your project.
 oh-goon lock ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 
+For `python/quality`, the selected project needs a committed `pyproject.toml`
+and native `uv.lock`; its selected dependency group supplies Ruff, pytest and
+the chosen type checker. The defaults select project `.`, group `dev` and Pyright.
+Set `inputs.project` for a contained project and `inputs.typechecker` when its
+checker differs from the default. Prepare and test that project with native uv
+as usual. Ordinary verification uses trusted local execution; strict executor
+setup applies only when the selected workflow requires it.
+
+`templates list --kind plan`, `config inspect ./workflow/run.yml` and
+`config validate ./workflow/run.yml` are optional discovery and diagnostics.
+Use inspect to see typed inputs before editing. Initialization refuses an
+existing destination, so choose a fresh workflow directory.
+
 The config chooses a shipped Plan directly, so an unchanged Plan needs no local
 copy. `inputs` supplies scalar values to the Goon-owned typed contract. Native
 uv/Ruff/Pytest configuration stays in your project. Inspection is read-only;
-validation is not execution, and a lock is not write permission. Source or
-selection changes require a new matching lock and fresh admission.
+validation is not execution, and a lock is not write permission. Locking freezes
+the selected source and inputs; run performs fresh admission and waits for
+completion. Source or selection changes require a new matching lock.
 
 Use the [configuration guide](development/TEMPLATE_INPUT_INSPECTION.md) for
 project Plans, repository Goons and optional agent/repair groups. Shared Plan

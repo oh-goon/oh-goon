@@ -32,7 +32,12 @@ from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.models.termination import TerminationSignal
-from oh_goon.core.path_authority import RepositoryPathSpace, StrictHostPathAuthority, canonical_path
+from oh_goon.core.path_authority import (
+    RepositoryPathSpace,
+    RepositoryScopedPath,
+    StrictHostPathAuthority,
+    canonical_path,
+)
 from oh_goon.core.path_layouts import AttemptPathLayout, RunPathLayout
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
@@ -54,6 +59,7 @@ from oh_goon.integrations._fleet_plan_step_local_execution import (
 from oh_goon.integrations._fleet_plan_step_sequence import FleetPlanStepSequence
 from oh_goon.integrations.content_snapshot import SnapshotIdentity, copy_frozen_directory
 from oh_goon.integrations.fleet_content_store import FleetContentStore
+from oh_goon.integrations.fleet_content_store_lifecycle import validate_repository_id
 from oh_goon.integrations.fleet_plan_environment import require_environment
 from oh_goon.integrations.fleet_plan_import_applicability import applicable_plan_for_repository
 from oh_goon.integrations.fleet_plan_managed_runtime import (
@@ -70,6 +76,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
 )
 from oh_goon.integrations.fleet_plan_run import PreparedPlanRun
 from oh_goon.integrations.fleet_plan_step_execution import StepLifecycleObserver, StepRuntime
+from oh_goon.integrations.fleet_plan_step_publication import DirectArtifactRetention
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +137,7 @@ class FleetPlanRunExecutor:
 
         if plan.execution.purpose is ExecutionPurpose.CICD:
             raise FleetPlanInvalid("Strict CI/CD plans require prepare_strict_run")
+        self._require_direct_retention(plan, repository.repository_id)
         self._preflight_direct_steps(repository.path, plan, cancel_requested=cancel_requested)
 
     def prepare_strict_run(
@@ -227,6 +235,7 @@ class FleetPlanRunExecutor:
                 raise FleetPlanInvalid("Admitted execution target differs from the selected Plan")
         if plan.execution.purpose is ExecutionPurpose.CICD:
             raise FleetPlanInvalid("Strict CI/CD plans require execute_strict_run")
+        retention_store = self._require_direct_retention(plan, repository_id)
         runtime = self._step_runtime(
             cancel_requested,
             fleet_run_id,
@@ -270,6 +279,7 @@ class FleetPlanRunExecutor:
             layout = RunPathLayout.from_root(Path(directory))
             sources = materialize_plan_projects(plan, layout)
             workspaces: dict[str, Path] = {}
+            retention: dict[str, DirectArtifactRetention] = {}
             for step in plan.steps:
                 if isinstance(step, ResolvedCommandStep) and step.project_source is not None:
                     workspace = AttemptPathLayout.from_root(
@@ -300,13 +310,27 @@ class FleetPlanRunExecutor:
                         require_exists=step.project_source.application is not None,
                     ).mkdir(parents=True, exist_ok=True)
                     workspaces[step.step_id] = workspace
+                    if any(item.retention == "content_store" for item in step.artifacts):
+                        assert retention_store is not None and repository_id is not None
+                        retention[step.step_id] = DirectArtifactRetention(
+                            workspace=RepositoryScopedPath.create(
+                                owner_repository_id=repository_id,
+                                root=layout.root,
+                                path=workspace,
+                                label=f"Trusted-local Step {step.step_id} artifact workspace",
+                            ),
+                            content_store=retention_store,
+                            cancel_requested=cancel_requested,
+                        )
             runtime = replace(
                 runtime,
                 project_sources=sources,
                 project_workspaces=workspaces,
                 on_unsettled_run_process=retain_unsettled_package_scratch,
             )
-            sequence = FleetPlanStepSequence(repository, runtime, output_observer)
+            sequence = FleetPlanStepSequence(
+                repository, runtime, output_observer, direct_artifact_retention=retention
+            )
             for step in plan.steps:
                 sequence.run_direct(step)
             outcome = self._outcome(sequence)
@@ -347,6 +371,30 @@ class FleetPlanRunExecutor:
         finally:
             if not retain_package_scratch:
                 temporary.cleanup()
+
+    def _require_direct_retention(
+        self, plan: ResolvedFleetPlan, repository_id: str | None
+    ) -> FleetContentStore | None:
+        retained_steps = tuple(
+            step
+            for step in plan.steps
+            if any(item.retention == "content_store" for item in step.artifacts)
+        )
+        if not retained_steps:
+            return None
+        if plan.execution.purpose is not ExecutionPurpose.VERIFICATION or any(
+            not isinstance(step, ResolvedCommandStep) or step.project_source is None
+            for step in retained_steps
+        ):
+            raise FleetPlanInvalid(
+                "Trusted-local retained artifacts require verification-purpose captured project Steps"
+            )
+        if self._content_store is None:
+            raise FleetPlanInvalid("Trusted-local retained artifacts require a FleetContentStore")
+        if repository_id is None:
+            raise FleetPlanInvalid("Trusted-local retained artifacts require a repository owner")
+        validate_repository_id(repository_id)
+        return self._content_store
 
     def _with_project_delivery(
         self, plan: ResolvedFleetPlan, target: FleetPlanTarget | None, repository_id: str | None

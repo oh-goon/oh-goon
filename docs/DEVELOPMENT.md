@@ -4,6 +4,10 @@ For the short operator/developer navigation path, start at [`docs/README.md`](RE
 
 Critical regression strategy: [`development/REAL_LIFECYCLE_QA.md`](development/REAL_LIFECYCLE_QA.md). Critical behavior is not considered proven by component tests alone; production-shaped lifecycle and adversarial proofs are the release-confidence layer.
 
+Before implementing an open issue, read the [QA baseline](development/REAL_LIFECYCLE_QA.md#before-implementing-a-backlog-item)
+to locate existing behavior, its proof scope and the qualification still needed.
+An open qualification task is not evidence that its mechanism needs rebuilding.
+
 Test design/cleanup policy: [`development/TEST_QUALITY.md`](development/TEST_QUALITY.md). Use it to choose the proof layer, avoid false-confidence tests, and review mocks/fixtures/timing/skips without creating a test-quality meta-suite.
 
 ```bash
@@ -103,6 +107,63 @@ The project has one native Python engine. There is no standalone compatibility e
 ## Repository understanding certification
 
 Agent-oriented repository comprehension is testable without granting write authority. The version-bound pilot lives under [`docs/certification/`](certification/README.md): candidate-visible questions are separate from grader-only gold answers, and `uv run --offline --frozen --no-sync --project backend oh-goon-repository-understanding-exam prepare <destination>` creates an answer-free checkout for the blind pass. The caller must restrict the candidate to that prepared checkout; prompt instructions alone are not an answer-access boundary.
+
+## Focused edit loop
+
+Choose the test file or native pytest node for the behavior you are editing.
+After `make init`, run the existing batch owner with explicit focused scope:
+
+```bash
+bash scripts/development_test_resources.sh \
+  uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
+  --qualified --focused --next-check "make backend-check" backend/tests/unit/core/test_error_kinds.py
+```
+
+Replace the path and next check with the relevant owner. Native pytest still
+owns collection, node IDs, markers and failures. `--focused` requires an explicit
+selection and a nonblank `--next-check`; that command is printed guidance and is
+never executed. The terminal and optional `--report-path` JSON retain the native
+selected result and label full verification `NOT_FULLY_VERIFIED`. A missing file,
+empty selection, failure, interruption or timeout cannot establish broader PASS.
+
+Already bounded files can also use the native pytest command in the
+[backend guide](../backend/README.md#golden-execution-loops). That remains focused
+evidence. Use the batch owner for large selections, bounded process deadlines or
+exact-member resume/reporting; its collection and admission have their own cost.
+
+| Edited boundary | Focused selection | Next escalation still unverified |
+| --- | --- | --- |
+| Backend behavior | Relevant `backend/tests/unit/<owner>/` file or node | `make backend-check` |
+| Repository tooling | Relevant `scripts/tests/` file or node | `make test-tooling`, then `make architecture` and `make tooling-check` |
+| Public API or generator | Owning API/compiler regression | Existing backend/tooling checks, then `make generate`, `make check-generated`, `make test-integration`, `make frontend-check` |
+| Shipped templates | Relevant template/compiler regression | `make architecture` and `make backend-check` |
+
+For a frontend edit, select the colocated file through native Vitest:
+
+```bash
+bash scripts/development_test_resources.sh \
+  npm --prefix frontend run test -- src/domain/identity/canonicalValue.test.ts
+```
+
+That result covers the requested frontend selection; `make frontend-check`
+remains unverified until run. Browser/theme changes add their owning checks in
+[AGENTS.md](../AGENTS.md). Shared fixtures, generated contracts, deleted tests and
+unknown impact do not make a focused selection cover unselected owners. Choose
+the union of their required checks before review.
+
+`make check` aggregates backend, tooling, architecture, generated contracts and
+frontend checks. `make test` also includes integration and frontend functional
+checks. Run these broad commands on a stable batch; use the explicit selection
+above while editing. Their original selection and exit semantics remain intact.
+`make verify` remains whole-app diagnosis and `make certify` owns APP completion.
+
+For measurements, record the source, host/toolchain, exact command, CPU budget,
+selected members, collection time and actual outcome. Distinguish fresh receipts
+from resumed work: reused PASS evidence makes elapsed timing non-comparable.
+Fresh processes do not imply cold filesystem/package caches. Use the existing
+batch resource report and native import-time profiling to locate a cost before
+changing its owner; keep results in the issue/PR evidence rather than a new
+benchmark registry.
 
 ### Fast certification repair loop
 

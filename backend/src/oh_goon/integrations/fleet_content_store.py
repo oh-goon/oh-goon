@@ -16,6 +16,7 @@ from oh_goon.core.path_authority import (
     ensure_private_directory,
 )
 from oh_goon.core.path_layouts import ContentStorePathLayout
+from oh_goon.integrations._copy_transport import copy_regular_file
 from oh_goon.integrations.exact_file_write import (
     ExactPublicationDurabilityError,
     publish_prepared_directory,
@@ -372,6 +373,51 @@ class FleetContentStore:
                 raise FleetPlanInvalid(
                     f"Fleet content object changed while materializing reference: {reference_id}"
                 )
+            with store_lock(self._lock_path):
+                touch_object_used_locked(self.root, lease.object_id, byte_count=observed.byte_count)
+            return observed
+
+    def materialize_file(
+        self,
+        reference_id: str,
+        destination: RepositoryScopedPath,
+        *,
+        expected_identity: SnapshotIdentity | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> SnapshotIdentity:
+        """Copy one leased retained file to a new scoped staging path and verify its bytes."""
+        _require_repository_scoped_path(destination, label="Fleet retained file destination")
+        destination.prove_scope()
+        with self.acquire_lease(
+            reference_id,
+            owner_repository_id=destination.owner_repository_id,
+            expected_kind="file",
+        ) as lease:
+            _kind, expected_sha256 = _parse_object_id(lease.object_id)
+            source = self._object_path(lease.object_id)
+            if expected_identity is not None and (
+                expected_identity.sha256 != expected_sha256
+                or expected_identity.entry_count != 1
+                or source.stat(follow_symlinks=False).st_size != expected_identity.byte_count
+            ):
+                raise FleetPlanInvalid("Retained file metadata differs from its recorded identity")
+
+            def check_cancel() -> None:
+                if cancel_requested is not None and cancel_requested():
+                    from oh_goon.engine.errors import OperationCancelledError
+
+                    raise OperationCancelledError("Cancelled while materializing retained file")
+
+            copy_regular_file(
+                source,
+                destination.path,
+                check_cancel=check_cancel,
+                label="Fleet retained file materialization",
+            )
+            destination.prove_owned()
+            observed = snapshot_identity(destination.path, cancel_requested=cancel_requested)
+            if observed.sha256 != expected_sha256:
+                raise FleetPlanInvalid("Fleet content object changed while materializing file")
             with store_lock(self._lock_path):
                 touch_object_used_locked(self.root, lease.object_id, byte_count=observed.byte_count)
             return observed

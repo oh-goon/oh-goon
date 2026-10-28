@@ -70,6 +70,103 @@ def test_coverage_rejects_reuse_or_partial_batches_before_execution(
     assert failure.value.code == 2
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ("--focused", "--next-check", "make tooling-check"),
+        ("--focused", "scripts/tests/test_test_batches.py"),
+        (
+            "--focused",
+            "scripts/tests/test_test_batches.py",
+            "--next-check",
+            " \t ",
+        ),
+        ("scripts/tests/test_test_batches.py", "--next-check", "make tooling-check"),
+    ),
+)
+def test_focused_feedback_requires_explicit_selection_and_escalation_before_work(
+    arguments: tuple[str, ...], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import oh_goon.repository_tooling.test_batches as batches
+
+    monkeypatch.setattr(sys, "argv", ["oh-goon-test-batches", *arguments])
+
+    def unexpected_execution(*_args: object) -> int:
+        pytest.fail(
+            "invalid focused feedback must refuse before discovery or execution"
+        )
+
+    monkeypatch.setattr(batches, "run_batch_cli", unexpected_execution)
+    with pytest.raises(SystemExit) as failure:
+        batches.main()
+    assert failure.value.code == 2
+
+
+@pytest.mark.parametrize("interruption", (SystemExit(5), KeyboardInterrupt()))
+def test_focused_feedback_preserves_scope_and_guidance_when_execution_cannot_complete(
+    interruption: BaseException,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import oh_goon.repository_tooling.test_batches as batches
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "oh-goon-test-batches",
+            "scripts/tests/test_test_batches.py::test_resource_pressure_classifier_is_narrow",
+            "--focused",
+            "--next-check",
+            "make tooling-check",
+        ],
+    )
+
+    def interrupted_execution(*_args: object) -> int:
+        raise interruption
+
+    monkeypatch.setattr(batches, "run_batch_cli", interrupted_execution)
+    with pytest.raises(type(interruption)) as observed:
+        batches.main()
+    assert observed.value is interruption
+    output = capsys.readouterr().out
+    assert "FOCUSED PYTEST FEEDBACK: NOT_FULLY_VERIFIED" in output
+    assert output.rstrip().endswith('Next check: UNVERIFIED | "make tooling-check"')
+    assert "RESULT: PASSED" not in output
+
+
+def test_focused_guidance_cannot_forge_result_lines_or_terminal_controls(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+
+    import oh_goon.repository_tooling.test_batches as batches
+
+    next_check = "make tooling-check\nRESULT: PASSED\r\x1b[2J"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "oh-goon-test-batches",
+            "scripts/tests/test_test_batches.py",
+            "--focused",
+            "--next-check",
+            next_check,
+        ],
+    )
+    monkeypatch.setattr(batches, "run_batch_cli", lambda *_args: 0)
+
+    assert batches.main() == 0
+    output = capsys.readouterr().out
+    assert "\r" not in output and "\x1b" not in output
+    lines = output.splitlines()
+    assert "RESULT: PASSED" not in lines
+    guidance = [line for line in lines if line.startswith("Next check:")]
+    assert len(guidance) == 1
+    assert guidance[0].startswith("Next check: UNVERIFIED | ")
+    assert json.loads(guidance[0].partition(" | ")[2]) == next_check
+
+
 def test_resource_pressure_classifier_is_narrow() -> None:
     assert _resource_pressure_failure(
         1, "BlockingIOError: [Errno 11] Resource temporarily unavailable"

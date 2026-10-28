@@ -111,6 +111,16 @@ Python-version compatibility. Oh-Goon may observe application-specific runtime f
 such as installed distribution identity, importability, required APIs, or ABI behavior,
 but must not parse requirement minima and issue a second compatibility verdict.
 
+Use uv to select, prepare, or enter the project environment. Once its interpreter
+has been resolved, child processes for that environment reuse that exact
+interpreter, for example through `sys.executable`. Carry the resolved authority
+through delegation; invoking a child does not require another environment
+selection. A new project or environment remains a separate native uv boundary.
+
+Host-only Python diagnostics are separate evidence. They do not replace
+authoritative checks in the selected project environment or establish that its
+dependencies are missing.
+
 For a strict repository-backed `uv:` Step, the admitted source is a new isolated
 execution subject. The live checkout's `backend/.venv` is never authority and is never
 transported. Admission proves Oh-Goon-owned source, project, group, execution and isolation

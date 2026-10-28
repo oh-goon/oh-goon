@@ -40,32 +40,26 @@ class QualificationUnit:
     environment: tuple[tuple[str, str], ...] = (("TERM", "dumb"),)
 
 
-def _python() -> str:
-    return sys.executable
-
-
 def maintenance_release_units() -> tuple[QualificationUnit, ...]:
-    python = _python()
+    python = sys.executable
+    pytest_command = (python, "-m", "pytest", "-c", str(ROOT / "backend/pyproject.toml"), "-q")
     return (
         QualificationUnit(
             "structural-authority",
-            (python, "-m", "pytest", "-q", "scripts/tests/test_structural_authority_contract.py"),
+            (*pytest_command, "scripts/tests/test_structural_authority_contract.py"),
             180,
             10.0,
         ),
         QualificationUnit(
             "shard-contract",
-            (python, "-m", "pytest", "-q", "scripts/tests/test_shard_execution_contract.py"),
+            (*pytest_command, "scripts/tests/test_shard_execution_contract.py"),
             120,
             8.0,
         ),
         QualificationUnit(
             "hashmarks-boundary",
             (
-                python,
-                "-m",
-                "pytest",
-                "-q",
+                *pytest_command,
                 "scripts/tests/test_hashmarks_harness_boundary_contract.py",
             ),
             180,
@@ -74,10 +68,7 @@ def maintenance_release_units() -> tuple[QualificationUnit, ...]:
         QualificationUnit(
             "repository-understanding",
             (
-                python,
-                "-m",
-                "pytest",
-                "-q",
+                *pytest_command,
                 "scripts/tests/test_repository_understanding_certification.py",
             ),
             1200,

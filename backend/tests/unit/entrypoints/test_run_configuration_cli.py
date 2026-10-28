@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 import pytest
@@ -205,7 +206,7 @@ def test_initializer_never_uses_same_name_as_repository_lookup(tmp_path, monkeyp
     )
 
 
-def test_initializer_refuses_unregistered_repository_before_publication(workflow):
+def test_initializer_refuses_unregistered_repository_before_publication(workflow, capsys):
     outside = workflow.parent.parent / "unregistered"
     (outside / ".git").mkdir(parents=True)
     output = workflow.parent.parent / "refused"
@@ -226,6 +227,7 @@ def test_initializer_refuses_unregistered_repository_before_publication(workflow
         == 2
     )
     assert not output.exists()
+    assert "oh-goon league add-folder PATH" in capsys.readouterr().err
 
 
 def test_inspection_and_validation_use_the_same_owner_report_without_runtime(
@@ -302,6 +304,34 @@ def test_generator_refuses_symlink_destination(tmp_path, capsys):
         main(["templates", "init", "--kind", "plan", "python/quality", "--output", str(alias)]) == 2
     )
     assert not list(target.iterdir())
+
+
+def test_initializer_prints_executable_lock_and_run_commands(workflow, capsys):
+    output = workflow.parent.parent / "workflow's literal $selection"
+    repository = workflow.parent.parent / "repository"
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "templates",
+                "init",
+                "python/quality",
+                "--kind",
+                "plan",
+                "--output",
+                str(output),
+                "--repository",
+                str(repository),
+            ]
+        )
+        == 0
+    )
+    lines = capsys.readouterr().out.splitlines()
+    for label, command in (("Next: ", "lock"), ("Then: ", "run")):
+        rendered = next(line.removeprefix(label) for line in lines if line.startswith(label))
+        assert shlex.split(rendered) == ["oh-goon", command, str(output / "run.yml")]
+    assert any(line.startswith("Optional inspection: ") for line in lines)
+    assert "target.repository_id" not in "\n".join(lines)
 
 
 def test_internal_templates_use_their_owner_command(tmp_path):

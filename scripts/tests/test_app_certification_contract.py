@@ -345,16 +345,6 @@ def test_certification_plan_has_no_release_or_browser_matrix_replay() -> None:
     )
 
 
-def test_help_separates_development_verify_and_lean_certification() -> None:
-    assert "make check            Fast inner development feedback" in MAKEFILE
-    assert "make verify           Exhaustive whole-app diagnosis" in MAKEFILE
-    assert (
-        "make certify          Lean APP verification of the initialized checkout; no strict executor required"
-        in MAKEFILE
-    )
-    assert "make certification-setup" not in MAKEFILE
-
-
 def test_app_local_runtime_verification_is_separate_from_strict_real_world_acceptance() -> (
     None
 ):

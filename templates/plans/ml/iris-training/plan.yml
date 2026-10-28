@@ -1,4 +1,4 @@
 execution:
-  purpose: cicd
+  purpose: verification
 goons:
 - ml/iris-train

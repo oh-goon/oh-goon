@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`make test` is the fast development feedback boundary. It answers one question:
+`make test` is the broad development test boundary. It answers one question:
 
 > Did this source change break code that can be tested on the current machine?
 
@@ -89,8 +89,8 @@ make certify
 ```
 
 - `make browser-test` proves browser behavior and requires its browser environment.
-- `make check` is the fast development feedback boundary: dependency readiness, bounded backend/tooling checks, architecture/generated contracts, frontend typecheck, and frontend unit tests. It intentionally does **not** own the promotion coverage ratchet.
-- `make quality-check` owns fresh Python branch coverage plus the Python quality ratchet; `make check-backend` is the backend-local Ruff + coverage + ratchet diagnostic.
+- Use the [focused edit loop](../DEVELOPMENT.md#focused-edit-loop) for a selected test during editing. `make check` aggregates bounded backend/tooling checks, architecture/generated contracts, frontend typecheck and frontend unit tests on a stable batch.
+- `make quality-check` owns fresh Python branch coverage plus the Python quality ratchet; `make check-backend` owns backend Ruff, formatting, typing and behavior checks.
 - `make init` is the single normal dependency-materialization boundary: native uv/npm establish the project environments and own any registry/network use. Browser engines remain an explicit browser/release concern rather than an APP-init supply.
 - `make certify` performs the evidence-bearing Oh-Goon APP verification Plan through the real
   certification frontdoor against the already-initialized checkout. It must not rebuild dependency

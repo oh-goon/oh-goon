@@ -437,12 +437,24 @@ def _prove_iris_project_executable(
     return executable
 
 
+@pytest.mark.parametrize("strict", [False, True], ids=["trusted-local", "strict"])
 def test_iris_package_resolves_entrypoint_and_reaches_admission_without_work(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, strict: bool
 ) -> None:
     repository = tmp_path / "repositories" / "iris"
     _copy_iris_project(repository)
-    target = _reviewed_shipped_target("ml/iris-training")
+    if strict:
+        plan_path = tmp_path / "strict-plan.yml"
+        plan_path.write_text("execution: {purpose: cicd}\ngoons:\n- ml/iris-train\n")
+        resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
+        reviewed = resolver.resolve(plan_path)
+        target = prepare_reviewed_execution_target(
+            resolver,
+            plan_path,
+            expected_execution_digest=build_execution_lock(reviewed).digest,
+        )
+    else:
+        target = _reviewed_shipped_target("ml/iris-training")
     database, state, attempts, planner, lifecycle, backend = _admission_stack(tmp_path, repository)
     repository_identity = RepositoryIdentity.model_validate({"path": repository})
     repository_scope = fleet_repository_scope({repository_identity.repository_id})
@@ -472,7 +484,14 @@ def test_iris_package_resolves_entrypoint_and_reaches_admission_without_work(
     events = state.journal.run_events("template-iris-startability-positive").events
     assert run.status is FleetRunStatus.QUEUED
     assert [event.event_type for event in events] == [FleetRunEventType.RUN_ADMITTED]
-    assert backend.availability_checks > 0
+    if strict:
+        assert backend.availability_checks > 0
+    else:
+        assert backend.availability_checks == 0
+        detail = state.journal.read_view().required_run_detail(
+            "template-iris-startability-positive"
+        )
+        assert isinstance(detail.execution, DirectFleetExecutionAdmission)
     assert backend.execute_calls == 0
     assert attempts.all() == []
     assert _repository_bytes(repository) == source_before

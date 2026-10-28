@@ -399,3 +399,54 @@ def test_run_unit_supplies_noninteractive_term(monkeypatch: pytest.MonkeyPatch) 
     unit = subject.QualificationUnit("architecture", ("tool", "architecture"), 30)
     assert subject._run_unit(unit) == 0
     assert captured["env"] == {"TERM": "dumb"}
+
+
+@pytest.mark.process
+def test_pytest_units_use_project_configuration_for_imports_and_selection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    backend = tmp_path / "backend"
+    support = backend / "tests"
+    support.mkdir(parents=True)
+    (support / "__init__.py").write_text("", encoding="utf-8")
+    (support / "fakes.py").write_text(
+        "VALUE = 'project-test-support'\n", encoding="utf-8"
+    )
+    (backend / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\n"
+        'pythonpath = ["."]\n'
+        "addopts = \"--strict-markers -m 'not external_host'\"\n"
+        'markers = ["external_host: separately selected host qualification"]\n',
+        encoding="utf-8",
+    )
+    tooling = tmp_path / "scripts/tests"
+    tooling.mkdir(parents=True)
+    (tooling / "conftest.py").write_text(
+        "import pytest\n"
+        "from tests.fakes import VALUE\n"
+        "@pytest.fixture\n"
+        "def configured_support(): return VALUE\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(subject, "ROOT", tmp_path)
+    units = tuple(
+        unit
+        for unit in subject.maintenance_release_units()
+        if unit.command[1:3] == ("-m", "pytest")
+    )
+    assert units
+    for unit in units:
+        selected_test = tmp_path / unit.command[-1]
+        selected_test.write_text(
+            "import pytest\n"
+            "def test_configured_support(configured_support):\n"
+            "    assert configured_support == 'project-test-support'\n"
+            "@pytest.mark.external_host\n"
+            "def test_separate_host_qualification():\n"
+            "    raise AssertionError('project marker selection was not applied')\n",
+            encoding="utf-8",
+        )
+        assert subject._run_unit(unit) == 0
+        assert "1 passed, 1 deselected" in capsys.readouterr().out

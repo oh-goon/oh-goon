@@ -28,8 +28,8 @@ done
 printf '\n'
 if (( failed )); then
   echo "RESULT: FAILED"
-  echo "Fast development feedback only; run make verify when you need whole-app diagnosis."
+  echo "Development feedback only; run make verify when you need whole-app diagnosis."
   exit 1
 fi
 echo "RESULT: PASSED"
-echo "Fast development feedback passed. Run make verify for exhaustive diagnosis; make certify remains final authority."
+echo "Development checks passed. Run make verify for exhaustive diagnosis; make certify remains final authority."

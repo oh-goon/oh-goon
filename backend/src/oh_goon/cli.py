@@ -18,7 +18,6 @@ from oh_goon.cli_parser import build_parser
 from oh_goon.cli_start import run_start_command
 from oh_goon.cli_status import run_status_command
 from oh_goon.cli_stop import run_stop_command
-from oh_goon.cli_storage import run_storage_command
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from oh_goon.core.errors import DatabaseSchemaMismatch, FleetDomainError
 from oh_goon.runtime.database import DatabasePathIdentityLost
@@ -93,11 +92,14 @@ def _first_command_result(
 
 
 def _run_pre_runtime_command(args: argparse.Namespace) -> int | None:
+    if args.command == "storage":
+        from oh_goon.cli_storage import run_storage_command
+
+        return run_storage_command(args)
     result = _first_command_result(
         args,
         (
             run_local_state_command,
-            run_storage_command,
             run_status_command,
             run_open_command,
             run_logs_command,

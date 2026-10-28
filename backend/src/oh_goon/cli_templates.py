@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 
 from oh_goon.core.errors import FleetDomainError
@@ -33,9 +34,16 @@ def run_template_command(args: argparse.Namespace) -> int:
             )
             print(f"Created: {destination}")
             print(
-                "Set the required values in run.yml, then inspect and validate it."
+                "Edit the required inputs in the created run.yml, if any."
                 if args.repository is not None
-                else "Select the registered repository ID and required values, then inspect and validate run.yml."
+                else "Set target.repository_id and required inputs in the created run.yml. "
+                "Use --repository PATH when initializing to select a registered repository by path."
+            )
+            print("Next: " + shlex.join(("oh-goon", "lock", str(destination))))
+            print("Then: " + shlex.join(("oh-goon", "run", str(destination))))
+            print(
+                "Optional inspection: "
+                + shlex.join(("oh-goon", "config", "inspect", str(destination)))
             )
             return 0
         if args.template_command == "show":

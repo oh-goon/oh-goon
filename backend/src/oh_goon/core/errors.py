@@ -324,6 +324,21 @@ class FleetPlanSourceAcquisitionRequired(FleetPlanInvalid):
     """The selected Git source has no acquired/pinned source authority yet."""
 
 
+class ExecutionLockRejected(FleetPlanInvalid):
+    """A lock owner rejected authority; presentation uses only typed, safe facts."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str,
+        goon_positions: tuple[int, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.goon_positions = goon_positions
+
+
 class RunConfigurationInvalid(FleetPlanInvalid):
     """A safe typed selection refusal, with field locations and no caller values."""
 
