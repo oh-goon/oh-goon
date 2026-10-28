@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import ExecutionLockRejected, FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock, verify_execution_lock
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
 from oh_goon.core.product_identity import operation_intent_key
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.execution_lock_persistence import (
@@ -282,12 +283,20 @@ def test_step_command_and_requirement_changes_invalidate_goon(tmp_path: Path) ->
     plan_path.write_text("execution: {purpose: cicd}\n" + plan_path.read_text(), encoding="utf-8")
     before_plan, before_graph = _resolve(plan_path, goons)
     before = build_execution_lock(before_plan)
+    verify_execution_lock(before, before)
 
     source.write_text(_atomic("a", command="false"), encoding="utf-8")
     after_plan, after_graph = _resolve(plan_path, goons)
     after = build_execution_lock(after_plan)
     assert before.execution[0].digest != after.execution[0].digest
     assert before.digest != after.digest
+    with pytest.raises(ExecutionLockRejected) as changed:
+        verify_execution_lock(after, before)
+    assert changed.value.reason == "goons_changed"
+    assert changed.value.goon_positions == (1,)
+    diagnostic = safe_plan_diagnostic(changed.value)
+    assert "bound input values" in diagnostic["safe_next_action"]
+    assert "Plan order: 1." in diagnostic["safe_next_action"]
 
     source.write_text(_atomic("a", command="true", requirement="marker.txt"), encoding="utf-8")
     required_plan, required_graph = _resolve(plan_path, goons)
@@ -309,11 +318,36 @@ def test_plan_order_and_input_changes_invalidate_lock(tmp_path: Path) -> None:
     reordered = build_execution_lock(reordered_plan)
     assert [item.goon for item in before.execution] != [item.goon for item in reordered.execution]
     assert before.plan != reordered.plan
+    with pytest.raises(ExecutionLockRejected) as reordered_error:
+        verify_execution_lock(reordered, before)
+    assert reordered_error.value.reason == "plan_changed"
 
     _plan(plan_path, ("general/a",), with_value="3.13")
     input_plan, input_graph = _resolve(plan_path, goons)
     changed = build_execution_lock(input_plan)
     assert changed.execution[0].digest != before.execution[0].digest
+
+
+def test_changed_input_identifies_ordered_duplicate_occurrence_without_echoing_values(tmp_path):
+    goons = tmp_path / "goons"
+    _package(goons, "general/a", _input_atomic())
+    path = tmp_path / "plan.yml"
+    _plan(path, ("general/a", "general/a"), with_value="3.12")
+    plan, _ = _resolve(path, goons)
+    before = build_execution_lock(plan)
+    verify_execution_lock(before, before)
+    content = path.read_text()
+    prefix, _, suffix = content.rpartition("python: '3.12'")
+    path.write_text(prefix + "python: 'PRIVATE_INPUT_SENTINEL'" + suffix)
+    plan, _ = _resolve(path, goons)
+    with pytest.raises(ExecutionLockRejected) as changed:
+        verify_execution_lock(build_execution_lock(plan), before)
+    assert changed.value.reason == "goons_changed"
+    assert changed.value.goon_positions == (2,)
+    diagnostic = safe_plan_diagnostic(changed.value)
+    assert "Plan order: 2." in diagnostic["safe_next_action"]
+    assert "PRIVATE_INPUT_SENTINEL" not in str(diagnostic)
+    assert "general/a" not in str(diagnostic)
 
 
 def test_composition_change_invalidates_without_serializing_steps(tmp_path: Path) -> None:

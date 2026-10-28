@@ -90,7 +90,8 @@ def test_plan_diagnostic_cli_human_paths(capsys):
 def test_plan_run_completed_attention_required_is_nonzero(monkeypatch, capsys):
     detail = SimpleNamespace(
         outcome=FleetRunOutcome.ATTENTION_REQUIRED,
-        run=SimpleNamespace(status=FleetRunStatus.COMPLETED),
+        run=SimpleNamespace(status=FleetRunStatus.COMPLETED, fleet_run_id="run-attention"),
+        game_tape=SimpleNamespace(why_not=None, repositories=()),
     )
     admitted = SimpleNamespace(fleet_run_id="run-attention", target=None)
     runtime = SimpleNamespace(

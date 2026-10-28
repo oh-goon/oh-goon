@@ -1,18 +1,16 @@
 # Templates and first runs
 
-Choose an existing Plan, edit one `run.yml`, inspect it, validate it, lock it and run it. The Plan/Goon graph owns the work; this file selects the target and caller choices.
+Choose an existing Plan for your repository path, edit one `run.yml`, lock it and run it. The Plan/Goon graph owns the work; this file selects the target and caller choices.
 
-Use an initialized installation. Source-checkout users run `make init` once and use the prepared CLI described in the [backend guide](../backend/README.md). Register the directory containing your workload repositories and read the exact target identity:
+Use the [CLI-only setup](../README.md#cli-first--no-frontend-setup). Source-checkout users run `make backend-install` and use the prepared command described there; no frontend build is required. When working outside that checkout, give its command prefix an absolute `--project /path/to/oh-goon/backend`. Built releases use the installed `oh-goon` command. Register the workload directory once:
 
 ```sh
-oh-goon league add-folder /absolute/path/to/repositories
-oh-goon league scan --json
-oh-goon templates list --kind plan
+oh-goon league add-folder /absolute/path/to/project
 ```
 
-Catalog usage labels distinguish runnable workflows with prerequisites, teaching examples and internal owner commands. Listing a template does not execute it or check prerequisite availability; human and JSON output report those unverified states explicitly.
+Use `oh-goon templates list --kind plan` to browse workflows. Catalog usage labels distinguish runnable workflows with prerequisites, teaching examples and internal owner commands. Listing a template does not execute it or check prerequisite availability; human and JSON output report those unverified states explicitly.
 
-Copy the workload’s `teams[].repository.repository_id` from the scan. Registration is an explicit action; `run.yml` does not discover or guess a repository.
+Initialization selects the registered repository with `--repository PATH` and fills its canonical identity. No scan or manual ID copying is needed. Registration remains explicit; `run.yml` does not register a directory.
 
 ## First local Python run
 
@@ -20,39 +18,39 @@ Your trusted workload needs a committed `pyproject.toml` and native `uv.lock`. I
 
 ```sh
 uv sync --frozen --group dev
-oh-goon templates init python/quality --kind plan --output ./workflow
+oh-goon templates init python/quality --kind plan --output ./workflow --repository /absolute/path/to/project
 ```
 
-The initializer refuses an existing destination. It publishes `run.yml` only after every generated companion is complete. An interrupted output without `run.yml` is incomplete; initialization never overwrites it or removes user files. Choose a fresh output directory after a failed generation. Edit `workflow/run.yml`:
+Run native uv from the workload project. The initializer refuses an existing destination. It publishes `run.yml` only after every generated companion is complete. An interrupted output without `run.yml` is incomplete; initialization never overwrites it or removes user files. Choose a fresh output directory after a failed generation. Keep the generated target and edit only the input values you need in `workflow/run.yml`, for example:
 
 ```yaml
-version: 1
-source: {kind: catalog-plan, name: python/quality}
-target: {repository_id: REPOSITORY_ID}
 inputs:
   typechecker: ty
 ```
 
-Replace the target ID. This example changes the checker to ty; the default project and group remain `.` and `dev`. A project under `backend` uses `inputs.project: backend`. Keep credentials outside this file.
+This example changes the checker to ty; the default project and group remain `.` and `dev`. A project under `backend` uses `inputs.project: backend`. Keep credentials outside this file.
 
 ```sh
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
 oh-goon lock ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 
-Inspection is local and read-only. Validation uses the canonical compiler/input binder; it does not prove installed tools or successful execution. Lock freezes the selected source/inputs and captured Goon/Plan and Skill identities. Run uses fresh original admission and waits for completion. Changing an identity-bearing selection requires a fresh lock.
+Run waits for completion and returns a nonzero exit code when the declared work fails. Locking and running invoke the existing validation owners. Optional `oh-goon config inspect ./workflow/run.yml` shows input names, defaults and constraints; `oh-goon config validate ./workflow/run.yml` checks caller values without starting a Run. Neither proves installed tools or successful execution.
+
+Lock freezes the selected source/inputs and captured Goon/Plan and Skill identities. After changing `run.yml`, execution policy, Goon behavior, or captured application code and its metadata/native lock, review the change and run `oh-goon lock ./workflow/run.yml` again. Ordinary relocking retains existing Git Plan/Goon, application and Skill commits. Refresh them only when intended with `--update-goons`, `--update-applications` or `--update-skills`. See [lock diagnostics and evidence limits](../docs/development/TEMPLATE_INPUT_INSPECTION.md#locking-and-actionable-refusals).
 
 Ordinary verification uses the trusted local path. Explicit CI/CD templates retain their declared strict executor and content-store requirements; see the [execution contract](../docs/CI_CD_CONTRACT.md). A generated config never grants write authority, network access or certification.
 
-Successful quality execution records the native checks and `junit.xml` in the selected project. A failed command remains a failed Step with its exit code and logs. Read the returned Run ID:
+Successful quality execution records the native checks and `junit.xml` in the selected project. Completion prints the outcome, failed Steps when present, artifact paths and evidence, and commands for inspecting that Run. Use its returned Run ID to reopen recorded results:
 
 ```sh
 oh-goon plan status RUN_ID
 oh-goon plan steps RUN_ID
 oh-goon plan outputs RUN_ID
+oh-goon plan handoff RUN_ID
 ```
+
+These commands reopen durable Run and Game Tape evidence after the execution process exits. `plan outputs` shows output hashes, sizes and retained references when present; it does not download files. `oh-goon plan logs RUN_ID` reads logs only while their transient retention remains available. An `evidence` artifact declaration records a file's identity without retaining its bytes; see the [retention contract](../docs/development/TEMPLATE_ARTIFACT_RETENTION.md).
 
 ## Change values without editing the Goon
 
@@ -83,7 +81,7 @@ inputs:
   typechecker: ty
 ```
 
-The contained Plan path is relative to the workflow root. `pass:` deliberately routes the shared names to both Goons. `with:` binds fixed values, renamed caller values or prior producer outputs; it does not repeat the child schema. Inspect, validate, refresh the lock and run the same selected file.
+Retain the target block filled by initialization. The contained Plan path is relative to the workflow root. `pass:` deliberately routes the shared names to both Goons. `with:` binds fixed values, renamed caller values or prior producer outputs; it does not repeat the child schema. Refresh the lock and run the same selected file; inspect or validate it separately when useful.
 
 ## Give repeated imports independent values
 
@@ -218,7 +216,8 @@ target: {repository_id: REPOSITORY_ID}
 The Plan's contained local imports come from that same revision. `lock` acquires
 source and pins the commit; ordinary lock regeneration and runs retain it,
 including after cache loss. Use `oh-goon lock run.yml --update-goons` to refresh
-Goon/Plan pins explicitly. Skill refresh remains `--update-skills`. Inspection
+Goon/Plan pins explicitly. Application refresh uses `--update-applications`;
+Skill refresh remains `--update-skills`. Inspection
 uses only cached source and reports acquisition is required when unavailable.
 Acquisition does not execute project code or install dependencies.
 

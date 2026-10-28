@@ -103,7 +103,10 @@ def initialize_run_configuration(
             LeagueFolderStore().list(), repository
         )
         if root is None:
-            raise FleetPlanInvalid("--repository must select a registered League repository path")
+            raise FleetPlanInvalid(
+                "--repository must select a registered League repository path. "
+                "Register its directory with 'oh-goon league add-folder PATH', then retry."
+            )
         target = RepositoryIdentity.model_validate({"path": root})
     goon_store = GoonTemplateStore()
     goons = _FrozenGoonSources(goon_store)
@@ -202,7 +205,11 @@ def initialize_run_configuration(
                 "timeout_seconds": 1800,
                 "step_timeout_seconds": 300,
             }
-        rendered = "# Select the registered target and replace REQUIRED values before validation.\n"
+        rendered = (
+            "# Replace any REQUIRED input values before locking.\n"
+            if target is not None
+            else "# Select the registered target and replace REQUIRED values before locking.\n"
+        )
         rendered += (
             f"# Selected {label} source SHA-256: {source.sha256} (provenance, not a lock).\n"
         )
