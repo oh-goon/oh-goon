@@ -47,7 +47,9 @@ def _commit(repository: Path) -> str:
     return _git(repository, "rev-parse", "HEAD")
 
 
-def _orders_application(repository: Path, subdirectory: str = ".") -> Path:
+def _orders_application(
+    repository: Path, subdirectory: str = ".", *, initialize_git: bool = True
+) -> Path:
     application = repository / subdirectory
     shutil.copytree(
         ORDERS,
@@ -60,8 +62,9 @@ def _orders_application(repository: Path, subdirectory: str = ".") -> Path:
     (repository / ".gitignore").write_text(
         "**/.venv/\n**/__pycache__/\n**/.pytest_cache/\n**/.showcase/\n", encoding="utf-8"
     )
-    _git(repository, "init", "-q", "-b", "main")
-    _commit(repository)
+    if initialize_git:
+        _git(repository, "init", "-q", "-b", "main")
+        _commit(repository)
     return application
 
 
@@ -326,6 +329,98 @@ def test_git_application_keeps_its_own_pin_across_ref_changes_and_cache_loss(
     assert refreshed["content_sha256"] != captured["content_sha256"]
     assert not (application / ".venv").exists()
     assert not (application / ".showcase").exists()
+
+
+def test_registered_filesystem_application_runs_and_exports_without_git(tmp_path: Path) -> None:
+    repository = tmp_path / "plain application"
+    application = _orders_application(repository, initialize_git=False)
+    original_lock = (application / "uv.lock").read_bytes()
+    original_source = (application / "src/orders_pipeline/operations.py").read_bytes()
+    environment = _cli_environment(tmp_path)
+    cli = _cli(tmp_path, environment)
+    cli("league", "add-folder", str(repository))
+    assert json.loads(cli("league", "scan", "--json"))["teams"] == []
+    workflow = tmp_path / "workflow"
+    cli(
+        "templates",
+        "init",
+        "general/orders-taskflow",
+        "--kind",
+        "goon",
+        "--repository",
+        str(repository),
+        "--output",
+        str(workflow),
+    )
+    selection = workflow / "run.yml"
+    target = yaml.safe_load(selection.read_text())["target"]["repository_id"]
+    package = workflow / "goons/general/independent-orders"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# general/independent-orders\n")
+    (package / "goon.yml").write_text(
+        yaml.safe_dump(
+            {
+                "runtime": "python",
+                "application": {"path": str(application)},
+                "uv": {"lock_mode": "frozen"},
+                "steps": [
+                    {
+                        "run": "orders-pipeline run --fixture official",
+                        "artifacts": [
+                            {"path": ".showcase/result.json", "retention": "content_store"}
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    (workflow / "plan.yml").write_text(
+        "goons:\n- import: general/independent-orders\n  from: ./goons\n"
+    )
+    cli("lock", str(selection))
+    receipt = json.loads(cli("run", str(selection), "--json"))
+    assert receipt["outcome"] == "SUCCESS"
+    run_id = receipt["fleet_run_id"]
+    tape = json.loads(cli("plan", "tape", run_id, "--json"))
+    recorded_repository = tape["repositories"][0]
+    assert recorded_repository["repository"]["repository_id"] == target
+    assert Path(recorded_repository["repository"]["path"]) == repository
+    (step,) = recorded_repository["steps"]
+    assert step["status"] == "PASSED" and step["settlement"]["cleanup"] == "VERIFIED"
+    assert step["project_source"]["application"] == {"path": str(application)}
+    (artifact,) = step["artifacts"]
+    assert artifact["retained_object"]["owner_repository_id"] == target
+    assert (application / "uv.lock").read_bytes() == original_lock
+    assert (application / "src/orders_pipeline/operations.py").read_bytes() == original_source
+    assert not (repository / ".git").exists()
+    assert not (application / ".venv").exists() and not (application / ".showcase").exists()
+    scratch = ApplicationStatePathLayout.from_database(
+        Path(environment["OH_GOON_DB"])
+    ).run_workspaces
+    assert list(scratch.iterdir()) == []
+    shutil.rmtree(repository)
+    shutil.rmtree(workflow)
+    reopened = json.loads(cli("plan", "tape", run_id, "--json"))
+    assert reopened["repositories"] == tape["repositories"]
+    destination = tmp_path / "retained-orders.json"
+    exported = json.loads(
+        cli(
+            "plan",
+            "export-artifact",
+            run_id,
+            "--step",
+            step["step_id"],
+            "--path",
+            artifact["path"],
+            "--output",
+            str(destination),
+            "--json",
+        )
+    )
+    expected = (json.dumps({"total_order_value": "1236.70"}) + "\n").encode()
+    assert destination.read_bytes() == expected
+    assert exported["sha256"] == artifact["sha256"] == hashlib.sha256(expected).hexdigest()
+    assert exported["repository_id"] == target
 
 
 def test_plain_application_source_does_not_require_python_or_goon_metadata(

@@ -6,7 +6,7 @@ from types import MappingProxyType
 
 from oh_goon.core.capability_model import CapabilityDefinition, CapabilityTargetSelector
 from oh_goon.core.errors import TargetSelectionError
-from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
+from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry
 from oh_goon.core.models.run_admission import (
     ExplicitRepositoryScope,
     FleetRepositoryScope,
@@ -18,6 +18,7 @@ from oh_goon.runtime.state import LocalStateReadView
 from oh_goon.services.league import LeagueService
 from oh_goon.services.migration import MigrationService
 from oh_goon.services.repositories import RepositoryService
+from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.target_selection_projection import ProjectionTargetSelection
 
 Selector = Callable[
@@ -88,12 +89,10 @@ class FleetTargetSelector:
         participate directly even when Git is not an authority for that source tree.
         """
 
-        requested = set(repository_scope.repository_ids)
         by_id = {entry.repository.repository_id: entry for entry in selected}
-        for location in state.locations:
-            repository = RepositoryIdentity.model_validate({"path": location})
-            if repository.repository_id not in requested:
-                continue
+        for repository in RepositoryDiscoveryService.explicit_configured_roots(
+            state.locations, repository_ids=repository_scope.repository_ids
+        ):
             if str(navigation_path(repository.path)) in state.exclusions:
                 continue
             by_id.setdefault(
