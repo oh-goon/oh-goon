@@ -722,9 +722,11 @@ def test_timeout_bisection_reuses_completed_member_without_duplicate_coverage(
     second_attempt = tmp_path / "second-attempt.txt"
     test_file.write_text(
         "import time\n"
+        "import pytest\n"
         "from pathlib import Path\n"
         f"FIRST_COUNT = Path({str(first_count)!r})\n"
         f"SECOND_ATTEMPT = Path({str(second_attempt)!r})\n"
+        "@pytest.mark.no_resume\n"
         "def test_first():\n"
         "    count = int(FIRST_COUNT.read_text() or '0') if FIRST_COUNT.exists() else 0\n"
         "    FIRST_COUNT.write_text(str(count + 1))\n"

@@ -514,7 +514,7 @@ def test_pytest_receipt_plugin_persists_completed_file_member_before_later_failu
         "OH_GOON_PYTEST_RECEIPT_EXECUTION_PLAN_IDENTITY", "sha256:" + "c" * 64
     )
     monkeypatch.setenv("OH_GOON_PYTEST_RECEIPT_MEMBERS", '["a.py","b.py"]')
-    plugin.pytest_configure(None)
+    plugin.pytest_configure(SimpleNamespace(addinivalue_line=lambda *_args: None))
     plugin.pytest_collection_finish(
         SimpleNamespace(
             items=[
@@ -571,7 +571,7 @@ def test_pytest_receipt_plugin_does_not_persist_skipped_or_xfailed_member(
         "OH_GOON_PYTEST_RECEIPT_EXECUTION_PLAN_IDENTITY", "sha256:" + "e" * 64
     )
     monkeypatch.setenv("OH_GOON_PYTEST_RECEIPT_MEMBERS", '["a.py::test_optional"]')
-    plugin.pytest_configure(None)
+    plugin.pytest_configure(SimpleNamespace(addinivalue_line=lambda *_args: None))
     plugin.pytest_collection_finish(
         SimpleNamespace(
             items=[SimpleNamespace(nodeid=member, path=Path.cwd() / "a.py")]

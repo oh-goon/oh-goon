@@ -165,6 +165,46 @@ batch resource report and native import-time profiling to locate a cost before
 changing its owner; keep results in the issue/PR evidence rather than a new
 benchmark registry.
 
+### Resume input authority
+
+Member PASS reuse binds the canonical source, exact native members and their
+test bytes, Python/package toolchain, pytest configuration/options and the
+resolved invocation environment. That environment context includes native
+HOME/XDG configuration, data, state, cache and runtime selectors, PATH, temporary-directory
+selectors, and pytest's option/plugin/autoload/temporary-root controls. Values
+are captured once for collection and execution and contribute only a digest to
+the receipt context. Worker count, grouping, timeout and CPU budgets remain
+execution facts; changing those alone preserves a valid deterministic receipt.
+
+The unqualified interpreter also binds native Python import selectors:
+`PYTHONPATH`, `PYTHONHOME`, `PYTHONUSERBASE`, `PYTHONNOUSERSITE` and
+`PYTHONSAFEPATH`. Qualified execution retains its existing cleaned environment
+and native `-I` behavior, so ignored interpreter controls do not invalidate reuse.
+A retained variable used as test data can still be declared with `--resume-env`;
+the declaration binds the environment actually delivered to the child.
+
+Declare additional environment inputs explicitly with repeatable
+`--resume-env NAME`. The selected value, including unset versus empty, binds
+reuse without being copied into report metadata. Mutable fixture data or native
+tool configuration at an unchanged path needs an identity from its existing
+owner through `--resume-context`; hashing the path or reading a version string
+does not establish unchanged content. Context manifests store derived identities
+rather than the caller's raw context tokens.
+
+Tests whose external state has no repeatability authority declare native
+`@pytest.mark.no_resume`. They execute again on a later `--resume` invocation;
+with file granularity, any such item prevents reuse of its entire file member.
+Already-completed members in the current invocation remain available to the
+existing timeout refinement so they are not executed twice. The marker changes
+reuse eligibility, not native collection, test selection or result accounting.
+
+These controls do not discover arbitrary environment reads, live network or
+database changes, clock dependencies, or replaced native executables. Undeclared
+external dependencies remain unqualified for cached PASS. Supply their owner's
+context, use `no_resume`, or run without `--resume` (for Make fast lanes,
+`PYTEST_RESUME=`). A receipt establishes only its admitted context and cannot
+replace fresh evidence for an unrepresented input.
+
 ### Fast certification repair loop
 
 After a backend APP failure, prefer bounded `make test-python` or `make verify-p0`; run full `make certify` only after the focused repair is green. The inner backend gate has 120s batch / 1200s suite hard timeouts and excludes explicit slow/process/scale/certification tests. Final APP backend qualification uses `make test-python-complete` with 180s batch / 1200s suite hard timeouts. `make init` is native dependency materialization, not a per-edit command.

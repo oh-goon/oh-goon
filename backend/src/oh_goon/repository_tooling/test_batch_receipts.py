@@ -28,7 +28,7 @@ from typing import Iterable
 RECEIPT_SCHEMA = "oh-goon.pytest-member-receipt/v2"
 RESUME_SCHEMA = "oh-goon.pytest-resume-context/v2"
 EXECUTION_PLAN_SCHEMA = "oh-goon.pytest-execution-plan/v1"
-CONTEXT_MANIFEST_SCHEMA = "oh-goon.pytest-resume-context-manifest/v1"
+CONTEXT_MANIFEST_SCHEMA = "oh-goon.pytest-resume-context-manifest/v2"
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -125,7 +125,9 @@ class ResumeContext:
             "resume_key": self.resume_key,
             "granularity": self.granularity,
             "marker": self.marker,
-            "extra_context": list(self.extra_context),
+            "extra_context": [
+                _canonical_identity({"context": value}) for value in self.extra_context
+            ],
         }
 
     def ensure_manifest(self) -> Path:

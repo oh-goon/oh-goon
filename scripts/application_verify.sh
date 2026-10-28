@@ -1,10 +1,50 @@
 #!/usr/bin/env bash
 set -u
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 MAKE_BIN="${MAKE:-make}"
 BANNER="$ROOT/scripts/command_banner.sh"
+
+WORKSPACE_SOURCE_IDENTITY=""
+WORKSPACE_INTEGRITY_FAILED=0
+SOURCE_LAYOUT="$ROOT/backend/.venv/bin/oh-goon-source-layout"
+
+capture_workspace_integrity() {
+  if [[ ! -x "$SOURCE_LAYOUT" ]]; then
+    printf '%s\n' 'WORKSPACE INTEGRITY FAILED: canonical source-layout owner is unavailable' >&2
+    return 1
+  fi
+  WORKSPACE_SOURCE_IDENTITY="$("$SOURCE_LAYOUT" identity --root "$ROOT")" || return 1
+  if [[ ! "$WORKSPACE_SOURCE_IDENTITY" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    printf '%s\n' 'WORKSPACE INTEGRITY FAILED: canonical source-layout owner returned invalid identity' >&2
+    return 1
+  fi
+  printf 'WORKSPACE SOURCE IDENTITY: %s\n' "$WORKSPACE_SOURCE_IDENTITY"
+}
+
+verify_workspace_integrity() {
+  (( WORKSPACE_INTEGRITY_FAILED == 0 )) || return 1
+  if [[ -z "$WORKSPACE_SOURCE_IDENTITY" ]]; then
+    return 0
+  fi
+  if [[ ! "$ROOT" -ef . ]]; then
+    WORKSPACE_INTEGRITY_FAILED=1
+    printf '%s\n' 'WORKSPACE INTEGRITY FAILED: declared checkout directory changed during make verify' >&2
+    return 1
+  fi
+  local current
+  if ! current="$("$SOURCE_LAYOUT" identity --root "$ROOT")"; then
+    WORKSPACE_INTEGRITY_FAILED=1
+    return 1
+  fi
+  if [[ "$current" != "$WORKSPACE_SOURCE_IDENTITY" ]]; then
+    WORKSPACE_INTEGRITY_FAILED=1
+    printf '%s\n' 'WORKSPACE INTEGRITY FAILED: canonical authored source changed during make verify' >&2
+    printf 'Expected: %s\nObserved: %s\n' "$WORKSPACE_SOURCE_IDENTITY" "$current" >&2
+    return 1
+  fi
+}
 
 # Exhaustive diagnostic breadth. This intentionally exceeds the lean APP certification
 # Plan and never creates APP PASS.
@@ -44,9 +84,17 @@ if [[ "$init_rc" -ne 0 ]]; then
 fi
 
 if [[ "$backend_ready" -eq 1 ]]; then
+  if ! capture_workspace_integrity; then
+    printf '%s\n' 'RESULT: FAILED' 'Canonical source identity unavailable; no verification checks started.' >&2
+    exit 1
+  fi
   sh "$BANNER" "APPLICATION VERIFY CONVERGENCE PREFLIGHT" "Fail-fast candidate coherence before expensive qualification"
   if ! "$MAKE_BIN" --no-print-directory candidate-convergence-preflight; then
     echo "Candidate convergence preflight failed; expensive verification was not started." >&2
+    exit 1
+  fi
+  if ! verify_workspace_integrity; then
+    printf '%s\n' 'RESULT: FAILED' 'Source authority changed during convergence; no verification checks started.' >&2
     exit 1
   fi
 fi
@@ -58,9 +106,21 @@ record() {
 
 run_row() {
   local goon="$1" name="$2" target="$3"
-  sh "$BANNER" "APPLICATION VERIFY" "Diagnostic breadth: $goon | make $target"
   local rc=0
+  if (( WORKSPACE_INTEGRITY_FAILED )); then
+    record "$name" BLOCKED "source authority changed; check not started | $goon | make $target"
+    return 1
+  fi
+  sh "$BANNER" "APPLICATION VERIFY" "Diagnostic breadth: $goon | make $target"
   "$MAKE_BIN" --no-print-directory "$target" || rc=$?
+  if ! verify_workspace_integrity; then
+    if (( rc )); then
+      record "$name" FAIL "exit $rc; source authority changed | $goon | make $target"
+      return "$rc"
+    fi
+    record "$name" BLOCKED "source authority changed during check | $goon | make $target"
+    return 1
+  fi
   if [[ "$rc" -eq 0 ]]; then
     record "$name" PASS
     return 0
@@ -81,6 +141,10 @@ for row in "${VERIFY_ROWS[@]}"; do
 
   run_row "$goon" "$name" "$target" || true
 done
+
+if ! verify_workspace_integrity; then
+  record "Workspace integrity" BLOCKED "source-owned workspace changed or disappeared; rerun make verify"
+fi
 
 printf '
 OH-GOON APPLICATION VERIFICATION

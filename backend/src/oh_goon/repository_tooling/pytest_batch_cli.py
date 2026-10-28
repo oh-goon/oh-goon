@@ -90,6 +90,13 @@ def parse_batch_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         help="additional exact environment identity token; repeat for extra lane authorities",
     )
     parser.add_argument(
+        "--resume-env",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="declare a semantic environment input for exact reuse; values are digested, not reported",
+    )
+    parser.add_argument(
         "--environment-retries",
         type=int,
         default=0,

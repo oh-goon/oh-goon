@@ -177,11 +177,18 @@ def main(argv: list[str] | None = None) -> int:
         default="check",
     )
     parser.add_argument(
+        "--root",
+        type=Path,
+        help="explicit source checkout for identity inspection only",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="show exact paths for high-volume source transport artifact diagnostics",
     )
     args = parser.parse_args(argv)
+    if args.root is not None and args.command != "identity":
+        parser.error("--root is supported only for identity inspection")
     try:
         if args.command == "check":
             return _check_command(debug=args.debug)
@@ -191,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
             # membership/identity and already imports source-layout policy helpers.
             from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 
-            print(canonical_source_identity(ROOT))
+            print(canonical_source_identity(args.root if args.root is not None else ROOT))
             return 0
         if args.command == "transport-clean":
             return _transport_clean_command(debug=args.debug)

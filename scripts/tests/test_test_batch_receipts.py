@@ -28,6 +28,109 @@ def _fix_source_identity(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "name",
+    (
+        "HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_STATE_HOME",
+        "XDG_RUNTIME_DIR",
+        "PATH",
+        "TMPDIR",
+        "PYTEST_DEBUG_TEMPROOT",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONUSERBASE",
+        "PYTHONNOUSERSITE",
+        "PYTHONSAFEPATH",
+    ),
+)
+def test_invocation_binds_owned_selectors_once_without_recording_values(
+    name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.pytest_process_environment import (
+        resolve_pytest_invocation,
+    )
+
+    config = tmp_path / "pyproject.toml"
+    config.write_text("[tool.pytest.ini_options]\n")
+    first_value = str(tmp_path / "private-selector-first")
+    monkeypatch.setenv(name, first_value)
+    first = resolve_pytest_invocation(pytest_config=config)
+    identity = first.correctness_context()
+    monkeypatch.setenv(name, str(tmp_path / "private-selector-second"))
+    assert first.correctness_context() == identity
+    assert (
+        resolve_pytest_invocation(pytest_config=config).correctness_context()
+        != identity
+    )
+    assert first_value not in identity
+
+
+@pytest.mark.process
+def test_qualified_native_python_ignores_import_controls_and_preserves_environment_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    from oh_goon.repository_tooling.pytest_process_environment import (
+        resolve_pytest_invocation,
+    )
+
+    config = tmp_path / "pyproject.toml"
+    config.write_text("[tool.pytest.ini_options]\n")
+    case = tmp_path / "test_native_isolation.py"
+    case.write_text(
+        "import sys\n"
+        "def test_isolation():\n"
+        "    assert sys.flags.isolated == 1\n"
+        "    assert sys.flags.ignore_environment == 1\n"
+        "    assert sys.flags.no_user_site == 1\n"
+        "    assert sys.flags.safe_path is True\n"
+    )
+    settings = {
+        "PYTHONPATH": str(tmp_path / "first-path"),
+        "PYTHONHOME": str(tmp_path / "first-home"),
+        "PYTHONUSERBASE": str(tmp_path / "first-user"),
+        "PYTHONNOUSERSITE": "",
+        "PYTHONSAFEPATH": "",
+    }
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value)
+    first = resolve_pytest_invocation(qualified=True, pytest_config=config)
+    assert (
+        "PYTHONPATH" not in first.environment and "PYTHONHOME" not in first.environment
+    )
+    assert first.environment["PYTHONUSERBASE"] == settings["PYTHONUSERBASE"]
+    for name in settings:
+        monkeypatch.setenv(
+            name,
+            "1"
+            if name in ("PYTHONNOUSERSITE", "PYTHONSAFEPATH")
+            else str(tmp_path / (name + "-second")),
+        )
+    second = resolve_pytest_invocation(qualified=True, pytest_config=config)
+    assert first.correctness_context() == second.correctness_context()
+    for invocation in (first, second):
+        result = subprocess.run(
+            [*invocation.command_prefix, "-q", "-c", str(config), str(case)],
+            cwd=invocation.cwd,
+            env=dict(invocation.environment),
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    declared = resolve_pytest_invocation(
+        qualified=True, pytest_config=config, resume_environment=("PYTHONUSERBASE",)
+    )
+    monkeypatch.setenv("PYTHONUSERBASE", str(tmp_path / "explicit-data-change"))
+    changed = resolve_pytest_invocation(
+        qualified=True, pytest_config=config, resume_environment=("PYTHONUSERBASE",)
+    )
+    assert declared.correctness_context() != changed.correctness_context()
+
+
 def test_plan_identity_reads_each_unique_file_once(tmp_path: Path) -> None:
     from oh_goon.repository_tooling.test_batch_receipts import test_plan_identity
 
@@ -217,6 +320,14 @@ def test_resume_context_changes_with_correctness_inputs_but_not_batch_grouping(
     assert first_execution != regrouped_execution
     assert first.receipt_directory == regrouped.receipt_directory
 
+    external_input = build_resume_context(
+        **base, extra_context=("fixture-owner:changed",)
+    )
+    assert external_input.source_identity == first.source_identity
+    assert external_input.test_plan_identity == first.test_plan_identity
+    assert external_input.toolchain_identity == first.toolchain_identity
+    assert external_input.suite_identity != first.suite_identity
+
     test_file.write_text("def test_value(): assert 1 == 1\n", encoding="utf-8")
     changed = build_resume_context(**base)
     assert first.source_identity == changed.source_identity
@@ -241,7 +352,7 @@ def test_resume_context_manifest_is_atomic_and_auditable(
         state_root=tmp_path / "state",
         granularity="files",
         marker="not slow",
-        extra_context=("node=v24.20.0",),
+        extra_context=("native-owner=private-context-canary",),
     )
     path = context.ensure_manifest()
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -249,7 +360,9 @@ def test_resume_context_manifest_is_atomic_and_auditable(
     assert payload["source_identity"] == context.source_identity
     assert payload["test_plan_identity"] == context.test_plan_identity
     assert payload["toolchain_identity"] == context.toolchain_identity
-    assert payload["extra_context"] == ["node=v24.20.0"]
+    assert len(payload["extra_context"]) == 1
+    assert payload["extra_context"][0].startswith("sha256:")
+    assert "private-context-canary" not in path.read_text(encoding="utf-8")
     assert not list(path.parent.glob("*.tmp"))
 
 

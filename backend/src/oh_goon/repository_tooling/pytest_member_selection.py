@@ -1,4 +1,4 @@
-"""Capture native pytest collection; this owner never interprets Python or markers."""
+"""Transport native pytest addressing and explicitly declared reuse eligibility."""
 
 from __future__ import annotations
 
@@ -21,12 +21,25 @@ _COLLECTION_ENV = "OH_GOON_PYTEST_COLLECTION_OUTPUT"
 _DESELECTED: list[dict[str, str]] = []
 
 
+def register_resume_marker(config: Any) -> None:
+    config.addinivalue_line(
+        "markers", "no_resume: external state has no cross-invocation reusable PASS authority"
+    )
+
+
+def pytest_configure(config: Any) -> None:
+    register_resume_marker(config)
+
+
 def collected_item(item: Any, root: Path) -> dict[str, str]:
     """Transport native addressing, including class and parametrized item suffixes."""
     path = Path(item.path).resolve()
     file = path.relative_to(root).as_posix() if path.is_relative_to(root) else path.as_posix()
     suffix = item.nodeid.partition("::")[2]
-    return {"file": file, "selector": file + ("::" + suffix if suffix else "")}
+    row = {"file": file, "selector": file + ("::" + suffix if suffix else "")}
+    if item.get_closest_marker("no_resume") is not None:
+        row["no_resume"] = "true"
+    return row
 
 
 def pytest_deselected(items: list[Any]) -> None:

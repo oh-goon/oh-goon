@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 from typing import TYPE_CHECKING
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from oh_goon.repository_tooling.pytest_batch_coverage import BatchCoverageSession
 
 from oh_goon.core.models.fleet_plan_evidence import PlanOutputEvidence
-from oh_goon.engine.command import CommandTimeoutExpired, run_command
+from oh_goon.engine.command import CommandCancelledError, CommandTimeoutExpired, run_command
 from oh_goon.engine.command_capture import TextCapture
 from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
 from oh_goon.repository_tooling.pytest_batch_execution_policy import (
@@ -96,8 +97,11 @@ def _run_command(
     cwd: Path | None = None,
     output_captures: list[BatchOutputCapture] | None = None,
     members: tuple[str, ...] = (),
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> tuple[int, str, float]:
     started = time.monotonic()
+    if cancel_requested is not None and cancel_requested():
+        return 130, "BATCH CANCELLED before native launch\n", 0.0
     try:
         result = run_command(
             *command,
@@ -109,6 +113,7 @@ def _run_command(
             parent_death_signal=True,
             max_capture_bytes_per_stream=_CAPTURE_LIMIT_BYTES,
             retain_output_tail=True,
+            cancel_requested=cancel_requested,
         )
         output = _captured_output(
             result.stdout,
@@ -132,6 +137,16 @@ def _run_command(
                 captures=output_captures,
             )
         return 124, text + f"\nBATCH TIMEOUT after {timeout}s\n", time.monotonic() - started
+    except CommandCancelledError as exc:
+        text = _captured_output(
+            exc.stdout,
+            exc.stdout_evidence,
+            truncated=exc.stdout_truncated,
+            complete=False,
+            members=members,
+            captures=output_captures,
+        )
+        return 130, text + "\nBATCH CANCELLED\n", time.monotonic() - started
 
 
 def _progress_fd() -> int | None:
@@ -237,6 +252,7 @@ def _run_members(
     invocation: PytestInvocation | None = None,
     coverage_session: BatchCoverageSession | None = None,
     output_captures: list[BatchOutputCapture] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> tuple[int, str, float]:
     explicit_invocation = invocation is not None
     invocation = invocation or resolve_pytest_invocation()
@@ -269,7 +285,7 @@ def _run_members(
     if marker:
         command += ["-m", marker]
     command += list(members)
-    if output_captures is not None:
+    if output_captures is not None or cancel_requested is not None:
         return _run_command(
             command,
             timeout=timeout,
@@ -277,6 +293,7 @@ def _run_members(
             cwd=invocation.cwd,
             output_captures=output_captures,
             members=members,
+            cancel_requested=cancel_requested,
         )
     if explicit_invocation:
         return _run_command(command, timeout=timeout, env=env, cwd=invocation.cwd)
@@ -299,6 +316,7 @@ def _run(
     invocation: PytestInvocation | None = None,
     coverage_session: BatchCoverageSession | None = None,
     output_captures: list[BatchOutputCapture] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> tuple[int, str, float, tuple[ExecutionRecoveryEvent, ...]]:
     started = time.monotonic()
     recovery_events: list[ExecutionRecoveryEvent] = []
@@ -314,6 +332,8 @@ def _run(
     )
 
     def run_group(members: tuple[str, ...], *, is_refinement: bool) -> tuple[int, str]:
+        if cancel_requested is not None and cancel_requested():
+            return 130, "BATCH CANCELLED before refinement admission\n"
         remembered = refinement_history.get(members) if refinement_history is not None else None
         if timeout_bisection and remembered is not None and len(members) > 1:
             parent_identity = recovery_work_identity(members)
@@ -370,7 +390,7 @@ def _run(
         )
         if budget_stop is not None:
             return 124, prepared.reused_prefix + budget_stop
-        if output_captures is not None:
+        if output_captures is not None or cancel_requested is not None:
             rc, output, _elapsed = _run_members(
                 members,
                 timeout=effective_timeout,
@@ -378,6 +398,7 @@ def _run(
                 invocation=invocation,
                 coverage_session=coverage_session,
                 output_captures=output_captures,
+                cancel_requested=cancel_requested,
                 **prepared.receipt_kwargs,
             )
         elif invocation is None and coverage_session is None:

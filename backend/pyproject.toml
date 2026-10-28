@@ -182,6 +182,7 @@ addopts = "-q --strict-markers --strict-config"
 markers = [
   "slow: exhaustive full-corpus checks with bounded regression counterparts; run by complete/release verification",
   "process: real child-process lifecycle tests excluded from the inner development gate",
+  "no_resume: external state has no cross-invocation reusable PASS authority",
   "scale: intentionally large-count concurrency/scale regression tests",
   "certification: opt-in native model, privileged custody, or certification probes owned by explicit acceptance targets",
   "host_dns: test requires working external DNS/network and is excluded from constrained-host diagnostics",

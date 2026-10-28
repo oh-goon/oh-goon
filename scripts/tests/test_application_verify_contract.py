@@ -1,11 +1,27 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/application_verify.sh"
+
+
+def _isolated_runner(
+    directory: Path, script_text: str, *, prepared: bool = True
+) -> Path:
+    scripts = directory / "checkout/scripts"
+    scripts.mkdir(parents=True)
+    script = scripts / SCRIPT.name
+    script.write_text(script_text, encoding="utf-8")
+    shutil.copy2(ROOT / "scripts/command_banner.sh", scripts / "command_banner.sh")
+    if prepared:
+        owner = scripts.parent / "backend/.venv/bin/oh-goon-source-layout"
+        owner.parent.mkdir(parents=True)
+        owner.symlink_to(ROOT / "backend/.venv/bin/oh-goon-source-layout")
+    return script
 
 
 def _verify_rows() -> list[tuple[str, str, str]]:
@@ -53,13 +69,8 @@ def test_verify_goon_identity_is_provenance_not_scheduling_authority(
     ).replace("oh-goon/browser-", "oh-goon/browser-renamed-")
 
     def run(script_text: str, directory: Path) -> tuple[int, list[str], str]:
-        checkout = directory / "checkout"
-        (checkout / "scripts").mkdir(parents=True)
-        script = checkout / "scripts/application_verify.sh"
-        script.write_text(script_text, encoding="utf-8")
-        (checkout / "scripts/command_banner.sh").write_bytes(
-            (ROOT / "scripts/command_banner.sh").read_bytes()
-        )
+        script = _isolated_runner(directory, script_text)
+        checkout = script.parent.parent
         calls = directory / "calls.txt"
         fake_make = directory / "make"
         fake_make.write_text(
@@ -97,6 +108,7 @@ def test_verify_goon_identity_is_provenance_not_scheduling_authority(
 def test_verify_uses_native_init_as_its_only_materialization_prerequisite(
     tmp_path: Path,
 ) -> None:
+    script = _isolated_runner(tmp_path, SCRIPT.read_text(encoding="utf-8"))
     calls = tmp_path / "calls.txt"
     fake_make = tmp_path / "make"
     fake_make.write_text(
@@ -109,8 +121,8 @@ def test_verify_uses_native_init_as_its_only_materialization_prerequisite(
     )
     fake_make.chmod(0o755)
     completed = subprocess.run(
-        ["bash", str(SCRIPT)],
-        cwd=ROOT,
+        ["bash", str(script)],
+        cwd=script.parent.parent,
         env={**os.environ, "MAKE": str(fake_make)},
         text=True,
         capture_output=True,
@@ -133,14 +145,12 @@ def test_verify_blocks_broad_diagnostics_when_native_init_fails(tmp_path: Path) 
         encoding="utf-8",
     )
     fake_make.chmod(0o755)
-    isolated = tmp_path / "checkout"
-    (isolated / "scripts").mkdir(parents=True)
-    (isolated / "scripts/application_verify.sh").write_bytes(SCRIPT.read_bytes())
-    (isolated / "scripts/command_banner.sh").write_bytes(
-        (ROOT / "scripts/command_banner.sh").read_bytes()
+    script = _isolated_runner(
+        tmp_path, SCRIPT.read_text(encoding="utf-8"), prepared=False
     )
+    isolated = script.parent.parent
     completed = subprocess.run(
-        ["bash", str(isolated / "scripts/application_verify.sh")],
+        ["bash", str(script)],
         cwd=isolated,
         env={**os.environ, "MAKE": str(fake_make)},
         text=True,
