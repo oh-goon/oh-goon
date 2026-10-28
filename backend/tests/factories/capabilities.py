@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.models.capability import CapabilitySnapshot
@@ -13,6 +17,13 @@ from oh_goon.core.models.target import OperationTarget
 from oh_goon.core.vocabulary import OperationAction
 from oh_goon.runtime.journal import Journal
 from tests.factories.journal import admit_run
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
+    from oh_goon.core.models.operation import OperationExecution
+    from oh_goon.core.models.run import FleetRunState
+    from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest, CapabilityRunner
+    from oh_goon.core.vocabulary import EffectBoundaryKind
 
 
 def resolved_intent(
@@ -35,7 +46,7 @@ def admit_test_run(
     action: OperationAction,
     targets: list[RepositoryIdentity],
     target: OperationTarget | None = None,
-):
+) -> FleetRunState:
     """Admit a test run using the same bound capability contract as production."""
     intent = resolved_intent(action, target)
     admitted = FleetRunAdmissionIntent(
@@ -48,16 +59,16 @@ def admit_test_run(
 
 
 def capability_request(
-    repository,
+    repository: Path,
     action: OperationAction,
     target: OperationTarget | None = None,
     *,
     operation_id: str = "op-test",
     fleet_run_id: str | None = None,
-    effect_boundary=None,
-    cancel_requested=None,
-    isolation_backend=None,
-):
+    effect_boundary: EffectBoundaryKind | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
+    isolation_backend: PlanIsolationBackendEvidence | None = None,
+) -> CapabilityExecutionRequest:
     """Build one production-shaped admitted capability request for direct runner tests."""
     from oh_goon.core.effect_attempt_transitions import begin_effect_attempt
     from oh_goon.core.models.effect_origin import DirectEffectOrigin, FleetEffectOrigin
@@ -90,7 +101,9 @@ def capability_request(
     )
 
 
-def execute_capability_runner(runner, request):
+def execute_capability_runner(
+    runner: CapabilityRunner, request: CapabilityExecutionRequest
+) -> OperationExecution:
     """Exercise a concrete runner through its production prepare/execute lifetime."""
     prepared = runner.prepare(request)
     try:

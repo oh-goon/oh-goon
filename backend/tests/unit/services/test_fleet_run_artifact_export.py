@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable, Iterator
+from os import PathLike
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, Literal, cast
+from typing import Any, Literal, Never, cast
 from unittest.mock import Mock
 
 import pytest
@@ -49,6 +51,7 @@ from oh_goon.engine.command import (
     CommandTimeoutExpired,
 )
 from oh_goon.integrations._fleet_plan_step_outcome import settle_step_execution
+from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.exact_file_write import (
     ExactPublicationDurabilityError,
     publish_prepared_file,
@@ -177,7 +180,9 @@ def _set_artifacts(case: SimpleNamespace, artifacts: tuple[PlanArtifactEvidence,
     case.recorded_repository.steps = (case.step,)
 
 
-def test_export_uses_one_recorded_cut_after_original_source_disappears(export_case):
+def test_export_uses_one_recorded_cut_after_original_source_disappears(
+    export_case: SimpleNamespace,
+) -> None:
     export_case.source.unlink()
     result = _export(export_case)
     assert export_case.destination.read_bytes() == export_case.payload
@@ -388,8 +393,8 @@ def test_export_preserves_settled_artifacts_when_run_has_failed_work(
     ],
 )
 def test_export_rejects_unproven_or_ambiguous_recorded_artifacts_without_publication(
-    export_case, defect
-):
+    export_case: SimpleNamespace, defect: str
+) -> None:
     case = export_case
     options = {}
     if defect == "unknown-step":
@@ -442,7 +447,9 @@ def test_export_rejects_unproven_or_ambiguous_recorded_artifacts_without_publica
     case.read.assert_called_once_with("recorded-run")
 
 
-def test_repository_selection_resolves_shared_run_step_ambiguity(export_case):
+def test_repository_selection_resolves_shared_run_step_ambiguity(
+    export_case: SimpleNamespace,
+) -> None:
     case = export_case
     case.detail.game_tape.repositories += (
         SimpleNamespace(
@@ -459,8 +466,8 @@ def test_repository_selection_resolves_shared_run_step_ambiguity(export_case):
 
 @pytest.mark.parametrize("defect", ["tampered", "released", "wrong-reference", "size", "raw-sha"])
 def test_export_refuses_unavailable_or_changed_retained_bytes_and_cleans_staging(
-    export_case, defect
-):
+    export_case: SimpleNamespace, defect: str
+) -> None:
     case = export_case
     if defect == "tampered":
         case.stored.path.write_bytes(b"corrupt-model")
@@ -500,8 +507,8 @@ def test_export_refuses_unavailable_or_changed_retained_bytes_and_cleans_staging
 
 @pytest.mark.parametrize("existing", ["file", "symlink", "parent-symlink"])
 def test_export_never_overwrites_existing_files_or_follows_destination_aliases(
-    export_case, existing
-):
+    export_case: SimpleNamespace, existing: str
+) -> None:
     case = export_case
     protected = case.destination.parent / "protected"
     protected.write_bytes(b"keep-me")
@@ -522,13 +529,25 @@ def test_export_never_overwrites_existing_files_or_follows_destination_aliases(
 
 
 def test_export_publication_race_preserves_the_other_writer_and_cleans_staging(
-    export_case, monkeypatch
-):
+    export_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     case = export_case
-    materialize = case.store.materialize_file
+    store: FleetContentStore = case.store
+    materialize = store.materialize_file
 
-    def materialize_before_racing_writer(*args, **kwargs):
-        result = materialize(*args, **kwargs)
+    def materialize_before_racing_writer(
+        reference_id: str,
+        destination: RepositoryScopedPath,
+        *,
+        expected_identity: SnapshotIdentity | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> SnapshotIdentity:
+        result = materialize(
+            reference_id,
+            destination,
+            expected_identity=expected_identity,
+            cancel_requested=cancel_requested,
+        )
         case.destination.write_bytes(b"concurrent-writer")
         return result
 
@@ -540,14 +559,29 @@ def test_export_publication_race_preserves_the_other_writer_and_cleans_staging(
 
 
 @pytest.fixture
-def failed_export_cleanup(monkeypatch):
+def failed_export_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[list[TemporaryDirectory[str]]]:
     import oh_goon.services.fleet_run_control_plane as module
 
     create_temporary = TemporaryDirectory
-    owned = []
+    owned: list[TemporaryDirectory[str]] = []
 
-    def prepare_with_failing_cleanup(*args, **kwargs):
-        temporary = create_temporary(*args, **kwargs)
+    def prepare_with_failing_cleanup(
+        suffix: str | None = None,
+        prefix: str | None = None,
+        dir: str | PathLike[str] | None = None,
+        ignore_cleanup_errors: bool = False,
+        *,
+        delete: bool = True,
+    ) -> SimpleNamespace:
+        temporary = create_temporary(
+            suffix=suffix,
+            prefix=prefix,
+            dir=dir,
+            ignore_cleanup_errors=ignore_cleanup_errors,
+            delete=delete,
+        )
         owned.append(temporary)
         return SimpleNamespace(
             name=temporary.name,
@@ -563,8 +597,8 @@ def failed_export_cleanup(monkeypatch):
 
 
 def test_cleanup_failure_after_publication_preserves_exported_result(
-    export_case, failed_export_cleanup
-):
+    export_case: SimpleNamespace, failed_export_cleanup: list[TemporaryDirectory[str]]
+) -> None:
     exported = _export(export_case)
     assert exported.cleanup_status == "failed"
     assert exported.cleanup_failure == (
@@ -577,8 +611,10 @@ def test_cleanup_failure_after_publication_preserves_exported_result(
 
 
 def test_cleanup_failure_before_publication_preserves_primary_error_and_reports_cleanup(
-    export_case, failed_export_cleanup, monkeypatch
-):
+    export_case: SimpleNamespace,
+    failed_export_cleanup: list[TemporaryDirectory[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     primary = FleetPlanInvalid("Original retained-object identity failure")
     monkeypatch.setattr(export_case.store, "materialize_file", Mock(side_effect=primary))
     with pytest.raises(FleetPlanInvalid) as rejected:
@@ -593,14 +629,14 @@ def test_cleanup_failure_before_publication_preserves_primary_error_and_reports_
 
 
 def test_postpublication_durability_failure_identifies_visible_destination(
-    export_case, monkeypatch
-):
+    export_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import oh_goon.services.fleet_run_control_plane as module
 
     publish = publish_prepared_file
 
-    def publish_then_fail_durability(*args):
-        publish(*args)
+    def publish_then_fail_durability(temporary: Path, target: Path) -> Never:
+        publish(temporary, target)
         raise ExactPublicationDurabilityError("Synthetic parent fsync failure")
 
     monkeypatch.setattr(module, "publish_prepared_file", publish_then_fail_durability)
