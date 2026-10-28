@@ -853,6 +853,7 @@ def test_native_send_backpressure_has_the_same_nonretryable_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     methods: list[str] = []
+    blocked_commands: list[dict[str, Any]] = []
 
     async def endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
@@ -869,7 +870,9 @@ def test_native_send_backpressure_has_the_same_nonretryable_deadline(
     original_send = AsyncWebSocketSession.send_text
 
     async def bounded_send(session: AsyncWebSocketSession, data: str) -> None:
-        if json.loads(data)["method"] == "command/exec":
+        message = json.loads(data)
+        if message["method"] == "command/exec":
+            blocked_commands.append(message)
             await asyncio.Event().wait()
         else:
             await original_send(session, data)
@@ -878,9 +881,9 @@ def test_native_send_backpressure_has_the_same_nonretryable_deadline(
 
     async def check() -> None:
         async with CodexServiceClient(
-            tmp_path / "explicit.sock", experimental_api=True, timeout_seconds=0.03
+            tmp_path / "explicit.sock", experimental_api=True, timeout_seconds=1
         ) as client:
-            async with asyncio.timeout(1):
+            async with asyncio.timeout(3):
                 with pytest.raises(NativeCodexRequestUncertain) as error:
                     await client.command_exec(
                         ("/native/qualification",),
@@ -892,6 +895,8 @@ def test_native_send_backpressure_has_the_same_nonretryable_deadline(
 
     asyncio.run(check())
     assert methods == ["initialize", "initialized"]
+    assert len(blocked_commands) == 1
+    assert blocked_commands[0]["params"]["timeoutMs"] == 20
 
 
 def test_cancelled_initialize_preserves_cancellation_and_closes_owned_transport(
