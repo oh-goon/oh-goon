@@ -19,6 +19,9 @@ TOOLING_TEST_RESUME_CONTEXT = --resume-context "node=$$(node --version 2>/dev/nu
 PYTEST_RESUME ?= --resume
 # Empty preserves pytest's native testpaths; hosted CI partitions these with test-integration.
 BACKEND_CHECK_TEST_ROOTS ?=
+# Local checks stay serial; hosted jobs can use the existing bounded worker owner.
+BACKEND_CHECK_TEST_WORKERS ?= 1
+INTEGRATION_TEST_WORKERS ?= 1
 # Native pytest marker expressions: routine checks retain meaningful process/scale
 # regressions; only exhaustive variants with bounded counterparts are deferred.
 CHECK_PYTEST_MARKER ?= not certification and not slow
@@ -577,8 +580,8 @@ frontend-build:
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run build
 
 test-integration:
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualified native pytest batches | original serial selection' -- sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml tests/integration --granularity tests --workers 1 --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualified native pytest batches' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output tests/integration --granularity tests --workers 1 --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualified native pytest batches | complete ordinary selection' -- sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualified native pytest batches' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
 
 test-python-projects:
 	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'STANDALONE PYTHON PROJECT TESTS' 'Owner: native uv | Iris and orders application tests' -- uv run --offline --frozen --no-sync --project backend oh-goon-python-project-checks
@@ -758,7 +761,7 @@ check-backend:
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality ruff format --check src tests
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality mypy
 	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet guard
-	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --granularity tests --workers 1 --batch-size 64 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(BACKEND_CHECK_TEST_ROOTS)
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --granularity tests --workers $(BACKEND_CHECK_TEST_WORKERS) --batch-size 64 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(BACKEND_CHECK_TEST_ROOTS)
 
 backend-check: check-backend
 

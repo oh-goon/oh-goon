@@ -50,6 +50,26 @@ jobs:
         run: make init
       - name: Run draft feedback
         run: make lint format-check architecture release-locks-check
+      - name: Run focused behavior smoke tests
+        run: |
+          bash scripts/development_test_resources.sh \
+            uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
+            --qualified --focused --next-check 'make backend-check' --show-output \
+            --granularity tests --workers 1 --batch-size 64 \
+            --batch-timeout 120 --suite-timeout 300 --marker 'not certification and not slow' \
+            backend/tests/unit/core/test_error_kinds.py \
+            backend/tests/unit/integrations/test_fleet_plan_compilation_adversarial.py \
+            backend/tests/unit/services/test_execution_lock.py
+      - name: Explain draft verification scope
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### Draft feedback: FOCUSED / NOT_FULLY_VERIFIED
+          The behavior smoke selection checks domain errors, authoring validation and execution locks.
+          It does not establish coverage of this PR's changed behavior or replace the seven required checks.
+          Run **Focused behavior feedback** on this branch to select another pytest file, owner or node.
+          Mark the PR ready for review to run all required checks for its current commit.
+          EOF
   checks:
     # Job conditions run before matrix expansion. A draft's skipped stub must
     # never publish one of the seven required check names as a skipped success.
@@ -70,9 +90,14 @@ jobs:
         include:
           - target: backend-check
             backend_test_roots: tests/unit tests/dependency_complete
+            backend_test_workers: 2
+          - target: test-integration
+            integration_test_workers: 2
     env:
       UV_PYTHON: "3.12"
       BACKEND_CHECK_TEST_ROOTS: ${{ matrix.backend_test_roots || '' }}
+      BACKEND_CHECK_TEST_WORKERS: ${{ matrix.backend_test_workers || 1 }}
+      INTEGRATION_TEST_WORKERS: ${{ matrix.integration_test_workers || 1 }}
       PYTEST_ADDOPTS: >-
         ${{ matrix.target == 'test-integration'
             && '-vv --maxfail=1 --durations=40 --durations-min=0.05 -o faulthandler_timeout=120 -o faulthandler_exit_on_timeout=false'

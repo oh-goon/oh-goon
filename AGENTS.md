@@ -222,6 +222,13 @@ for target-free execution. See `docs/development/GOON_AUTHORING.md`.
 
 ## Tests and change-impact checks
 
+Optimize verified issue-to-merge throughput, not test count. Use focused feedback
+while editing, then the complete required merge checks once the change is coherent.
+Preserve meaningful behavioral coverage while reducing repeated setup and safely
+parallelizing existing owners. The development backbone is defined in
+[`docs/CI_CD_CONTRACT.md`](docs/CI_CD_CONTRACT.md#fast-feedback-and-complete-release-verification)
+and the integration-fixture rules in [`TEST_QUALITY.md`](docs/development/TEST_QUALITY.md#fast-integration-and-infrastructure-lifecycle).
+
 Backend unit tests follow `backend/tests/unit/<owner>/`; CLI tests use
 `entrypoints/`. Backend-only integration uses
 `backend/tests/integration/{api,engine,services}/`. Frontend tests are colocated;

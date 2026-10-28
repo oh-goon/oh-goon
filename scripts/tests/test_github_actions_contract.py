@@ -31,7 +31,11 @@ def _workflow() -> dict[str, Any]:
 
 
 def _cpu_preparation(job: dict[str, Any]) -> str:
-    runs = [step["run"] for step in job["steps"] if "run" in step]
+    runs = [
+        step["run"]
+        for step in job["steps"]
+        if "run" in step and step.get("if") != "always()"
+    ]
     preparations = [
         (index, command)
         for index, command in enumerate(runs)
@@ -97,7 +101,8 @@ def test_required_checks_run_for_ready_pull_requests_main_and_merge_groups() -> 
 
 @pytest.mark.process
 @pytest.mark.parametrize(
-    "job_name", ["draft-feedback", "checks", "release", "complete-release"]
+    "job_name",
+    ["draft-feedback", "checks", "release", "complete-release", "focused-behavior"],
 )
 @pytest.mark.parametrize("manager_status", [0, 17])
 def test_native_cpu_preparation_proves_user_bus_before_make_without_opting_out(
@@ -106,7 +111,9 @@ def test_native_cpu_preparation_proves_user_bus_before_make_without_opting_out(
     bash = shutil.which("bash", path=os.defpath)
     if bash is None:
         pytest.skip("native Bash is unavailable")
-    if job_name == "complete-release":
+    if job_name == "focused-behavior":
+        job = _focused_workflow()["jobs"][job_name]
+    elif job_name == "complete-release":
         workflow = yaml.safe_load(
             (ROOT / ".github/workflows/release-validation.yml").read_text()
         )
@@ -465,8 +472,13 @@ def test_release_assembles_only_after_all_six_checks_for_the_same_source() -> No
     )
 
 
-def test_pull_request_checks_have_read_only_uncredentialed_execution() -> None:
-    workflow = _workflow()
+@pytest.mark.parametrize("workflow_name", ["ci.yml", "focused-feedback.yml"])
+def test_pull_request_checks_have_read_only_uncredentialed_execution(
+    workflow_name: str,
+) -> None:
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows" / workflow_name).read_text(encoding="utf-8")
+    )
     assert workflow["permissions"] == {"contents": "read"}
     for job in workflow["jobs"].values():
         assert "permissions" not in job
@@ -484,10 +496,14 @@ def test_pull_request_checks_have_read_only_uncredentialed_execution() -> None:
         assert checkout["with"]["fetch-depth"] == 0
 
 
-def _make_commands(targets: list[str], roots: str | None = None) -> list[list[str]]:
+def _make_commands(
+    targets: list[str], roots: str | None = None, *, workers: int | None = None
+) -> list[list[str]]:
     environment = os.environ.copy()
     for name in (
         "BACKEND_CHECK_TEST_ROOTS",
+        "BACKEND_CHECK_TEST_WORKERS",
+        "INTEGRATION_TEST_WORKERS",
         "CHECK_PYTEST_MARKER",
         "TOOLING_TEST_MARKER",
         "TOOLING_COMPLETE_TEST_MARKER",
@@ -498,6 +514,9 @@ def _make_commands(targets: list[str], roots: str | None = None) -> list[list[st
         environment.pop(name, None)
     if roots is not None:
         environment["BACKEND_CHECK_TEST_ROOTS"] = roots
+    if workers is not None:
+        environment["BACKEND_CHECK_TEST_WORKERS"] = str(workers)
+        environment["INTEGRATION_TEST_WORKERS"] = str(workers)
     result = subprocess.run(
         ["make", "--no-print-directory", "--dry-run", *targets],
         cwd=ROOT,
@@ -547,7 +566,9 @@ def _batch_invocations(
     return invocations
 
 
-def test_draft_feedback_uses_separate_names_and_only_cheap_native_checks() -> None:
+def test_draft_feedback_keeps_separate_names_and_adds_bounded_focused_behavior() -> (
+    None
+):
     jobs = _workflow()["jobs"]
     draft = jobs["draft-feedback"]
     required_names = [*jobs["checks"]["strategy"]["matrix"]["target"], "build-release"]
@@ -557,10 +578,14 @@ def test_draft_feedback_uses_separate_names_and_only_cheap_native_checks() -> No
         "github.event_name == 'pull_request' && github.event.pull_request.draft == true"
     )
     assert "strategy" not in draft and "continue-on-error" not in draft
-    assert all("if" not in step for step in draft["steps"])
+    assert all("continue-on-error" not in step for step in draft["steps"])
+    summary = draft["steps"][-1]
+    assert summary["if"] == "always()"
+    assert "NOT_FULLY_VERIFIED" in summary["run"]
+    assert all("if" not in step for step in draft["steps"][:-1])
     commands = [step["run"] for step in draft["steps"] if "run" in step]
     preparation = _cpu_preparation(draft)
-    assert [command for command in commands if command != preparation] == [
+    assert [command for command in commands if command != preparation][:2] == [
         "make init",
         "make lint format-check architecture release-locks-check",
     ]
@@ -572,15 +597,138 @@ def test_draft_feedback_uses_separate_names_and_only_cheap_native_checks() -> No
         or any(word.endswith("/oh-goon-test-batches") for word in command)
         for command in native_commands
     )
+    smoke = draft["steps"][-2]["run"]
+    command = shlex.split(smoke.replace("\\\n", " "))
+    assert command[:3] == ["bash", "scripts/development_test_resources.sh", "uv"]
+    runner = command.index("oh-goon-test-batches")
+    with patch.object(sys, "argv", command[runner:]):
+        _parser, options = parse_batch_args()
+    assert options.focused and options.qualified and options.show_output
+    assert options.next_check == "make backend-check"
+    assert options.workers == 1 and options.batch_size == 64
+    assert options.batch_timeout == 120 and options.suite_timeout == 300
+    assert options.marker == "not certification and not slow"
+    assert not options.resume and options.batch is None
+    assert len(options.paths) == 3
+    assert all((ROOT / path).is_file() for path in options.paths)
+
+
+def _focused_workflow() -> dict[str, Any]:
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/focused-feedback.yml").read_text(encoding="utf-8")
+    )
+    assert isinstance(workflow, dict)
+    return workflow
+
+
+def test_manual_focused_run_never_publishes_required_checks_or_cancels_full_ci() -> (
+    None
+):
+    workflow = _focused_workflow()
+    assert set(workflow["on"]) == {"workflow_dispatch"}
+    inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    assert set(inputs) == {"test_selection", "next_check"}
+    assert all(
+        value["required"] and value["type"] == "string" for value in inputs.values()
+    )
+    assert workflow["concurrency"]["group"].startswith("${{ github.workflow }}-")
+    assert set(workflow["jobs"]) == {"focused-behavior"}
+    job = workflow["jobs"]["focused-behavior"]
+    required = _workflow()["jobs"]["checks"]["strategy"]["matrix"]["target"]
+    assert job["name"] not in [*required, "build-release"]
+    assert "continue-on-error" not in job and job["timeout-minutes"] == 15
+    assert job["steps"][-1]["if"] == "always()"
+    assert "NOT_FULLY_VERIFIED" in job["steps"][-1]["run"]
+    for step in job["steps"][:-1]:
+        assert "if" not in step and "continue-on-error" not in step
+    _cpu_preparation(job)
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("exit_code", [0, 17, 124, 130])
+def test_manual_focused_selection_and_guidance_are_inert_argv_and_preserve_failure(
+    tmp_path: Path, exit_code: int
+) -> None:
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    forwarded = tmp_path / "argv"
+    shim = commands / "bash"
+    shim.write_text(
+        '#!/bin/sh\nprintf "%s\\0" "$@" > "$FORWARDED"\nexit "$TEST_STATUS"\n'
+    )
+    shim.chmod(0o755)
+    selection = "backend/tests/unit/core/test_x.py::test_case[$(touch injected); `touch injected`]"
+    guidance = "make backend-check\n$(touch injected); `touch injected`"
+    step = _focused_workflow()["jobs"]["focused-behavior"]["steps"][-2]
+    assert step["env"] == {
+        "TEST_SELECTION": "${{ inputs.test_selection }}",
+        "NEXT_CHECK": "${{ inputs.next_check }}",
+    }
+    assert "${{" not in step["run"]
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            "PATH": str(commands) + os.pathsep + os.defpath,
+            "TEST_SELECTION": selection,
+            "NEXT_CHECK": guidance,
+            "FORWARDED": str(forwarded),
+            "TEST_STATUS": str(exit_code),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == exit_code, result.stderr
+    arguments = forwarded.read_bytes().decode().split("\0")[:-1]
+    assert arguments[-2:] == ["--", selection]
+    assert arguments[arguments.index("--next-check") + 1] == guidance
+    assert not (tmp_path / "injected").exists()
+    runner = arguments.index("oh-goon-test-batches")
+    with patch.object(sys, "argv", arguments[runner:]):
+        _parser, options = parse_batch_args()
+    assert options.paths == [Path(selection)]
+    assert options.focused and options.qualified and options.workers == 1
+    assert options.suite_timeout == 600 and options.batch_timeout == 180
+    assert options.marker == "not certification and not slow"
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("missing_input", ["TEST_SELECTION", "NEXT_CHECK"])
+def test_manual_focused_run_refuses_empty_input_before_launch(
+    tmp_path: Path, missing_input: str
+) -> None:
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    # No child executable is available: success here would silently admit a broad run.
+    environment = {
+        "PATH": str(tmp_path),
+        "TEST_SELECTION": "backend/tests/unit/core/test_error_kinds.py",
+        "NEXT_CHECK": "make backend-check",
+    }
+    environment[missing_input] = ""
+    step = _focused_workflow()["jobs"]["focused-behavior"]["steps"][-2]
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert result.stderr == ""
 
 
 def test_hosted_backend_roots_partition_the_complete_suite_without_nested_selection() -> (
     None
 ):
     checks = _workflow()["jobs"]["checks"]
-    selection = checks["strategy"]["matrix"]["include"]
-    assert len(selection) == 1 and selection[0]["target"] == "backend-check"
-    roots = selection[0]["backend_test_roots"]
+    selection = {row["target"]: row for row in checks["strategy"]["matrix"]["include"]}
+    assert set(selection) == {"backend-check", "test-integration"}
+    roots = selection["backend-check"]["backend_test_roots"]
     assert checks["env"]["BACKEND_CHECK_TEST_ROOTS"] == (
         "${{ matrix.backend_test_roots || '' }}"
     )
@@ -626,6 +774,30 @@ def test_hosted_backend_roots_partition_the_complete_suite_without_nested_select
     admitted_roots = [str(path) for path in (*backend.paths, *integration[0][1].paths)]
     assert sorted(admitted_roots) == sorted(testpaths)
     assert len(admitted_roots) == len(set(admitted_roots))
+
+    # Hosted parallelism uses the original runner and selection, within the same
+    # native two-CPU budget; local defaults and release selection remain serial.
+    assert selection["backend-check"]["backend_test_workers"] == 2
+    assert selection["test-integration"]["integration_test_workers"] == 2
+    assert checks["env"]["BACKEND_CHECK_TEST_WORKERS"] == (
+        "${{ matrix.backend_test_workers || 1 }}"
+    )
+    assert checks["env"]["INTEGRATION_TEST_WORKERS"] == (
+        "${{ matrix.integration_test_workers || 1 }}"
+    )
+    hosted = _batch_invocations(
+        _make_commands(["backend-check", "test-integration"], roots, workers=2)
+    )
+    assert [cwd for cwd, _arguments in hosted] == [
+        Path("backend"),
+        Path("backend"),
+        Path("."),
+    ]
+    for (_cwd, parallel), serial in zip(
+        hosted, [backend, *[a for _c, a in integration]], strict=True
+    ):
+        assert parallel.workers == 2
+        assert vars(parallel) | {"workers": 1} == vars(serial)
 
 
 def test_routine_tooling_keeps_process_and_scale_coverage_while_deferring_exhaustive_cases() -> (
