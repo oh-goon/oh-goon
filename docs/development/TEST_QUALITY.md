@@ -31,6 +31,38 @@ Reusable test-review methods live in agentsCookbook: [coverage design review](ht
 
 Use [Real lifecycle QA](REAL_LIFECYCLE_QA.md) for Oh-Goon's critical process, persistence, release-artifact and restart journeys. Use [Development](../DEVELOPMENT.md) for the current source commands and [Generated files](GENERATED_FILES.md) when a backend contract changes.
 
+## Fast integration and infrastructure lifecycle
+
+Most verification should be fast, isolated and deterministic, including integration
+tests. Review a slow owner for repeated native collection, application boot,
+environment/container startup and database preparation before adding retries or
+changing test selection. Reuse native uv/npm download caches or session/module
+infrastructure when the tested contract permits it; do not reuse mutable application
+state or treat a prepared fixture as evidence of a fresh-start guarantee.
+
+An infrastructure fixture owns acquisition, readiness, per-test isolation and
+deterministic teardown, including failure and cancellation. Each test needs its own
+database/schema or proven reset boundary, workspace, credentials/configuration and
+process/output identity. Bind servers to dynamically allocated ports. Do not share
+open database handles or application singletons across workers. A session-scoped
+container may serve isolated test databases; a process-startup or restart regression
+must still start or reopen the actual process whose behavior it proves.
+
+Use the existing bounded batch runner for process parallelism. Qualify complete
+selected membership, failures, worker isolation and cleanup before changing a
+required lane's worker count or fixture scope. Exercise supported local, hosted
+and container environments explicitly; unavailable environments remain unverified.
+Do not add mandatory network services for tests that can use deterministic local
+fixtures. Retain real native dependencies where they are the behavior under test.
+
+Measure the change with the same source, test membership, toolchain, CPU budget
+and cache conditions. Preserve unique behavioral and negative-boundary coverage;
+delete redundant setup rather than valuable assertions. Keep performance and
+isolation evidence in the owning Linear issue/PR and use
+[the CI throughput contract](../CI_CD_CONTRACT.md#fast-feedback-and-complete-release-verification)
+to distinguish per-edit feedback, complete merge checks and explicit release-only
+exhaustive qualification.
+
 ## Python coverage ownership
 
 `make coverage-python` reports coverage for the Python package using both

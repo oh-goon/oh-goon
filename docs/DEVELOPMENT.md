@@ -110,6 +110,17 @@ Agent-oriented repository comprehension is testable without granting write autho
 
 ## Focused edit loop
 
+For an issue-to-PR loop, keep the PR in draft while editing: each update runs
+static checks and a small automatic behavior smoke selection. Use Actions →
+**Focused behavior feedback** → **Run workflow** on that branch to run the
+specific pytest file, owner directory or node for the issue, with its next owner
+check shown as unverified guidance. This workflow becomes available after it lands
+on the default branch. Its bounded job does not replace required checks or claim
+coverage of unselected behavior. Run the relevant owner checks for the coherent
+change, then mark the PR ready to launch all seven required checks. Merge and
+close the issue after the required results for that commit pass; do not wait for
+full CI after each edit. See the [hosted feedback contract](CI_CD_CONTRACT.md).
+
 Choose the test file or native pytest node for the behavior you are editing.
 After `make init`, run the existing batch owner with explicit focused scope:
 
@@ -223,7 +234,7 @@ The wrapper supports the conventional unified `/sys/fs/cgroup` layout only after
 
 The pytest batch runner resolves its worker budget before collection. It intersects requested workers with the configured CPU budget, native affinity and cgroup CPU capacity, and an initial memory-headroom estimate. The memory estimate bounds concurrency; it is not a memory limit or a guarantee against exhaustion. Zero disables only the configured CPU ceiling: native capacity and the memory guard still apply. Fixed worker selection lasts for that invocation; there is no live pressure controller or thermal governor.
 
-Previously monolithic Python Make gates use the existing batch runner with their original native pytest configuration, selected roots, warning policy and marker scope, adding a 180-second per-batch timeout. Converted qualified gates batch exact native collected test cases, including class and parameter suffixes, so the existing timeout refinement can split a large file at case boundaries within that budget. Qualified gates retain the original qualification adapter for each pytest invocation. Ordinary backend and integration checks retain one serial worker and their original marker expression; omitted backend-check roots still use native pytest `testpaths`. Existing fast and complete batch owners retain their declared execution lanes. Native pytest output remains visible. `test-python-profile` retains duration diagnostics for the full unit and dependency-complete selection, reported per batch rather than as one suite-wide ranking.
+Previously monolithic Python Make gates use the existing batch runner with their original native pytest configuration, selected roots, warning policy and marker scope, adding a 180-second per-batch timeout. Converted qualified gates batch exact native collected test cases, including class and parameter suffixes, so the existing timeout refinement can split a large file at case boundaries within that budget. Qualified gates retain the original qualification adapter for each pytest invocation. Ordinary backend and integration checks retain their original marker expression and default locally to one worker. Hosted CI requests two workers under the same two-CPU quota; `BACKEND_CHECK_TEST_WORKERS` and `INTEGRATION_TEST_WORKERS` expose that explicit setting for local qualification. Omitted backend-check roots still use native pytest `testpaths`. Existing fast and complete batch owners retain their declared execution lanes. Native pytest output remains visible. `test-python-profile` retains duration diagnostics for the full unit and dependency-complete selection, reported per batch rather than as one suite-wide ranking.
 
 Coverage gates retain file batches and their original coverage sources. Native coverage combines child data before writing the requested reports and evaluating the selected policy once. The SQLite and Journal gates reuse existing owner regressions, treat resource and unraisable cleanup warnings as failures, and report coverage without a percentage gate. Their separate state-directory data files preserve the complete Python measurement, whose JSON remains the input to the existing quality ratchet. See [Python coverage ownership](development/TEST_QUALITY.md#python-coverage-ownership). Successful member receipts do not replace coverage observations. Coverage runs disable timeout refinement and environment retries: a timed-out or resource-failed measured attempt remains non-PASS because correctness receipts cannot establish that its native coverage was saved.
 

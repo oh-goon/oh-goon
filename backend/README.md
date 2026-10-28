@@ -37,8 +37,10 @@ enforcement stops before test execution. Direct focused `uv run ... pytest`
 commands remain native and do not acquire the Make-owned CPU scope.
 
 Backend and integration Make gates use the existing bounded pytest batches,
-retain their original pytest configuration and markers, and keep their original
-serial execution with one worker. Exact native collected test cases retain class
+retain their original pytest configuration and markers, and default locally to
+one worker. Hosted CI requests two workers under the same two-CPU quota through
+`BACKEND_CHECK_TEST_WORKERS=2` and `INTEGRATION_TEST_WORKERS=2`; these explicit Make
+settings also support local isolation/performance qualification. Exact native collected test cases retain class
 and parameter suffixes, allowing the existing timeout refinement to split large
 files within the new 180-second per-batch timeout. An omitted
 `BACKEND_CHECK_TEST_ROOTS` still

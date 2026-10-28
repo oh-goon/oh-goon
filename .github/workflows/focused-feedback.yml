@@ -1,0 +1,83 @@
+name: Focused behavior feedback
+
+"on":
+  workflow_dispatch:
+    inputs:
+      test_selection:
+        description: One explicit pytest file, directory or node ID, relative to the checkout
+        required: true
+        type: string
+        default: backend/tests/unit/integrations/test_fleet_plan_compilation_adversarial.py
+      next_check:
+        description: Next owner check to display as UNVERIFIED guidance (never executed)
+        required: true
+        type: string
+        default: make backend-check
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused-behavior:
+    name: focused-behavior
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.19.0"
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.5"
+          enable-cache: false
+      - name: Install native test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Prepare native test CPU control
+        run: |
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          runner_uid=$(id -u)
+          sudo loginctl enable-linger "$runner_uid"
+          sudo systemctl start "user@$runner_uid.service"
+          test -S "/run/user/$runner_uid/bus"
+          printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
+          printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
+      - name: Materialize committed locks
+        run: make init
+      - name: Run explicit focused selection
+        env:
+          TEST_SELECTION: ${{ inputs.test_selection }}
+          NEXT_CHECK: ${{ inputs.next_check }}
+        run: |
+          test -n "$TEST_SELECTION"
+          test -n "$NEXT_CHECK"
+          bash scripts/development_test_resources.sh \
+            uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
+            --qualified --focused --next-check "$NEXT_CHECK" --show-output \
+            --granularity tests --workers 1 --batch-size 64 \
+            --batch-timeout 180 --suite-timeout 600 --marker 'not certification and not slow' \
+            -- "$TEST_SELECTION"
+      - name: Explain focused verification scope
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### Focused feedback: FOCUSED / NOT_FULLY_VERIFIED
+          The job result covers only the explicit selected tests at the checked-out commit.
+          Failure, empty selection, interruption and timeout do not establish PASS.
+          The next owner check is printed as UNVERIFIED guidance and is never executed.
+          Mark the PR ready for review to run all seven required checks.
+          EOF

@@ -53,11 +53,35 @@ settings; verify the active rules and check names independently of a green
 workflow run.
 
 Draft pull requests run only the nonrequired `draft-feedback` job: locked setup,
-lint, format, architecture and lock checks, without pytest suites. Mark a draft
+lint, format, architecture and lock checks, followed by a bounded behavior smoke
+selection through the existing qualified pytest batch runner. The explicit selection
+in `ci.yml` checks domain errors, authoring validation and execution-lock behavior;
+it is not an impact selection or proof of coverage of the PR's changes. It uses one
+worker, a 120-second batch timeout and a 300-second suite budget. Failure and timeout
+fail the job. Its output and job summary label the scope `FOCUSED / NOT_FULLY_VERIFIED`.
+Mark a draft
 ready for review to launch all seven routine checks for its current commit; later
 ready-PR pushes also run all seven. Returning to draft starts cheap feedback and
 cancels superseded runs through the existing concurrency policy. Focused tests
 remain the local iteration loop; draft feedback is not test or merge completion.
+
+For behavior specific to the issue, open Actions → **Focused behavior feedback** →
+**Run workflow**, select the draft branch, and enter one checkout-relative pytest
+file, directory or native node ID plus its next owner-check command. For example,
+`backend/tests/unit/services/test_execution_lock.py` with `make backend-check`, or
+`scripts/tests/test_github_actions_contract.py` with `make tooling-check`.
+The workflow must first exist on the default branch for GitHub's manual trigger
+to be available. Each run checks out the selected ref's exact event SHA. Inputs
+are quoted argv data, never shell source; the next check is inert `UNVERIFIED`
+guidance. Empty or missing selections fail rather than falling back to all tests.
+The selected run uses the same native lock setup and CPU-budget wrapper, one worker,
+a 180-second batch timeout and a 600-second suite budget. Large owner selections
+can exceed that budget; use a smaller explicit selection or the full owner gate.
+It has its own concurrency group, does not cancel required CI and publishes only
+`focused-behavior`, never one of the seven required check names. Ready-PR, main,
+merge-group and complete release selections remain unchanged. Complete portable
+coverage, including exhaustive `slow` variants, remains available through the
+existing explicit `make release-check` workflow.
 
 The full job's draft condition is evaluated before matrix expansion, as specified
 by [GitHub's job-condition contract](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif).
@@ -129,6 +153,44 @@ requires a Linux shell runner. See the walkthrough for exact local and hosted
 proof and the remaining unqualified boundaries.
 
 ## Fast feedback and complete release verification
+
+The development objective is shorter **verified issue-to-merge time**: select an
+open issue, implement it, get useful feedback, create or update its PR, pass the
+required checks, merge, close the satisfied issue, and proceed to the next
+authorized issue. CI and local testing are part of that workflow. Test count and
+coverage percentages are diagnostics; success means retaining meaningful defect
+detection while reducing avoidable waiting and repeated work.
+
+Use the existing focused loop during edits and run the applicable owner escalation
+on a coherent change. Draft CI adds automatic smoke feedback; its separately
+selectable behavior workflow tests the issue-specific selection. Required ready-PR
+checks verify the complete ordinary merge selection, with independent jobs running
+concurrently. Backend and integration hosted jobs request two workers from the
+existing bounded batch runner under the same native two-CPU quota. Local defaults
+remain one worker; `BACKEND_CHECK_TEST_WORKERS` and `INTEGRATION_TEST_WORKERS` expose
+that same explicit runner setting for isolation/performance qualification. Native
+capacity and memory admission may reduce concurrency. No new scheduler, test
+selector, cache or result authority is introduced. Every successful run must still
+account for its exact complete selected membership. Worker changes require real
+isolation proof; increased concurrency cannot excuse a flaky or missing result.
+
+Do not turn a slow test into a release-only test solely because of its duration.
+Fast, isolated and deterministic integration tests are a design requirement.
+Share infrastructure only when the tested contract permits it, keep mutable test
+state independent, and retain fresh-process, crash/reopen and native-tool proofs
+where the boundary itself is under test. Follow the owning
+[fixture lifecycle rules](development/TEST_QUALITY.md#fast-integration-and-infrastructure-lifecycle)
+across local, hosted and supported container environments. Preserve explicit
+cleanup and report missing host capabilities instead of substituting mocks for
+native qualification.
+
+Measure time to first actionable result, PR critical-path duration, repeated
+collection/setup, flake/rerun frequency, defects caught before merge and idle time
+between completed issues. Attribute costs with native durations and existing batch
+resource reports; compare exact source, environment, CPU budget and test membership,
+and distinguish warm caches and resumed work. Store measurements in the owning
+issue or PR, not a telemetry database or repository status file. These indicators
+guide optimization; they do not justify weaker assertions or omitted verification.
 
 Use focused owner tests while editing. Draft feedback stays inexpensive. Routine
 ready-PR/main checks include meaningful `process` and `scale` regressions, including
