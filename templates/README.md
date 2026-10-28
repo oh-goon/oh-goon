@@ -235,7 +235,7 @@ A selected source is exactly one of `catalog-plan` with `name`, `file-plan` with
 | [OCI deployment](plans/oci/release-deploy/README.md) | Publish exact digest, mutate and verify exact generation. |
 | [Kubernetes mutation](plans/kubernetes/set-image/README.md) | Digest-qualified update; no standalone readiness claim. |
 | [Vulnerability scan](plans/security/cve-combined/README.md) | Native scanners, declared egress and report retention. |
-| [Iris training](plans/ml/iris-training/README.md) | Complete package-owned training project; retained model requires the Plan's strict executor. |
+| [Iris training](plans/ml/iris-training/README.md) | Trusted-local package training with retained metrics/model export; strict execution remains explicit. |
 | [Isolated dataflow](plans/advanced/isolated-dataflow/README.md) | Teaching workflow requiring explicit project scripts/token. |
 | [Native review](plans/agents/native-review/README.md) | Installed native agent, compatible profile and captured Skill. |
 | [Review–repair](../examples/agentic-review-repair-loop/README.md) | Ordered reviews and explicitly bounded admitted repairs. |

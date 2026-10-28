@@ -52,6 +52,8 @@ def main() -> int:
         "accuracy": accuracy,
         "minimum_accuracy": args.minimum_accuracy_percent / 100,
         "random_seed": args.random_seed,
+        "test_size_percent": args.test_size_percent,
+        "max_iterations": args.max_iterations,
         "training_examples": len(train_data),
         "test_examples": len(test_data),
         "scikit_learn_version": sklearn.__version__,

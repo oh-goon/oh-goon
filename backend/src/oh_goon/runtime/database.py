@@ -283,6 +283,7 @@ class LocalDatabase:
                 staged = target_dir / f".{target.name}.{uuid4().hex}.snapshot-tmp"
                 published_identity: tuple[int, int] | None = None
                 receipt: LocalStateBackupReceipt | None = None
+                descriptor: int | None = None
                 try:
                     connection.execute("VACUUM INTO ?", (str(staged),))
                     # The existing read-only inspector is the canonical SQLite
@@ -296,16 +297,16 @@ class LocalDatabase:
                         )
                     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
                     descriptor = os.open(staged, flags)
-                    try:
-                        metadata = os.fstat(descriptor)
-                        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-                            raise RuntimeError("backup must be a single-link regular file")
-                        digest = hashlib.sha256()
-                        while chunk := os.read(descriptor, 1024 * 1024):
-                            digest.update(chunk)
-                        os.fsync(descriptor)
-                    finally:
-                        os.close(descriptor)
+                    # Keep the native inode alive through publication and rollback;
+                    # a removed target must not let its identity be recycled for
+                    # another owner's replacement before our cleanup decision.
+                    metadata = os.fstat(descriptor)
+                    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                        raise RuntimeError("backup must be a single-link regular file")
+                    digest = hashlib.sha256()
+                    while chunk := os.read(descriptor, 1024 * 1024):
+                        digest.update(chunk)
+                    os.fsync(descriptor)
                     # DB4: before publication prove the SNAPSHOT itself kept the
                     # exact source cookie and durable revision. SQLite integrity
                     # alone cannot detect a valid but wrong/stale database.
@@ -351,7 +352,11 @@ class LocalDatabase:
                             ) from cleanup_error
                     raise
                 finally:
-                    staged.unlink(missing_ok=True)
+                    try:
+                        staged.unlink(missing_ok=True)
+                    finally:
+                        if descriptor is not None:
+                            os.close(descriptor)
             finally:
                 connection.close()
         assert receipt is not None

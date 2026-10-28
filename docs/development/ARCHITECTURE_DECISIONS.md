@@ -194,6 +194,19 @@ Reusable content is identified by immutable digest/content identity. Mutable nam
 ### Repository owner and retained filesystem authority are one capability
 The executor that owns a repository effect also owns the retained filesystem authority required to finish or publish that effect. Ownership is not split into unrelated process and filesystem tokens.
 
+Trusted-local verification may publish declared retained files only from a
+captured package/application's allocated attempt workspace, after process
+settlement and before scratch disposal. The original Run owner binds that scope
+to the registered repository. Ordinary target-workspace commands and other
+non-strict purposes remain unqualified for retained publication. Strict
+execution and its prepared-run receipts keep their original authority.
+
+Artifact export selects recorded Run/Step evidence, checks repository ownership,
+and materializes under the original content-store read lease. It verifies the
+retained canonical content identity separately from the artifact's raw byte
+hash before exclusive destination publication. There is no workspace fallback
+or independent artifact store. See [artifact retention](TEMPLATE_ARTIFACT_RETENTION.md).
+
 ### Strict attempt trees are re-proven before host-side post-process reads
 Before host-side code consumes strict-attempt output, the retained tree and ownership boundary are proven again rather than trusted from an earlier observation.
 

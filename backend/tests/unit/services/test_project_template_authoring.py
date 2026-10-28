@@ -356,8 +356,13 @@ def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
         guide = source.path.with_name("README.md").read_text()
         example = re.search(r"```yaml\n(version: 1\nsource:.*?\n)```", guide, re.S)
         if example is None:
-            assert not resolver.inspect_inputs(source.path), key
-            resolver.resolve(source.path)
+            input_example = re.search(r"```yaml\n(inputs:.*?\n)```", guide, re.S)
+            if input_example is None:
+                assert not resolver.inspect_inputs(source.path), key
+                resolver.resolve(source.path)
+            else:
+                inputs = yaml.safe_load(input_example.group(1))["inputs"]
+                resolver.resolve(source.path, inputs=inputs)
             continue
         selection = tmp_path / "run.yml"
         selection.write_text(example.group(1))

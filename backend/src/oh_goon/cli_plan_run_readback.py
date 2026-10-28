@@ -9,6 +9,7 @@ import argparse
 import json
 import shlex
 from itertools import islice
+from pathlib import PurePosixPath
 from typing import Any
 
 from oh_goon.application import ApplicationRuntime
@@ -42,7 +43,7 @@ def print_run_completion(detail: FleetRunDetail) -> None:
             print(f"  Recorded reason: {step.reason}")
     if next(failed_steps, None) is not None:
         print("More failed Steps are recorded; inspect the Run below.")
-    _print_completion_outputs(tape)
+    _print_completion_outputs(tape, fleet_run_id=detail.run.fleet_run_id)
     for label, command in (
         ("Inspect Run", "handoff"),
         ("Inspect outputs", "outputs"),
@@ -51,7 +52,7 @@ def print_run_completion(detail: FleetRunDetail) -> None:
         print(f"{label}: " + shlex.join(("oh-goon", "plan", command, detail.run.fleet_run_id)))
 
 
-def _print_completion_outputs(tape: GameTape) -> None:
+def _print_completion_outputs(tape: GameTape, *, fleet_run_id: str) -> None:
     outputs = (
         (repository.repository.name, step.step_id, output)
         for repository in tape.repositories
@@ -66,17 +67,36 @@ def _print_completion_outputs(tape: GameTape) -> None:
     if next(outputs, None) is not None:
         print("More output evidence is recorded; inspect outputs below.")
     artifacts = (
-        (repository.repository.name, step.step_id, artifact)
+        (repository.repository, step.step_id, artifact)
         for repository in tape.repositories
         for step in repository.steps
         for artifact in step.artifacts
     )
-    for repository_name, step_id, artifact in islice(artifacts, 8):
-        print(f"Artifact: {repository_name}/{step_id}: {artifact.path} [{artifact.status}]")
+    for repository, step_id, artifact in islice(artifacts, 8):
+        print(f"Artifact: {repository.name}/{step_id}: {artifact.path} [{artifact.status}]")
         if artifact.status == "PRESENT":
             print(f"  Evidence: {artifact.byte_count} bytes; sha256:{artifact.sha256}")
             if artifact.retained_object is not None:
                 print(f"  Retained reference: {artifact.retained_object.reference_id}")
+                print(
+                    "  Export artifact: "
+                    + shlex.join(
+                        (
+                            "oh-goon",
+                            "plan",
+                            "export-artifact",
+                            fleet_run_id,
+                            "--repository-id",
+                            repository.repository_id,
+                            "--step",
+                            step_id,
+                            "--path",
+                            artifact.path,
+                            "--output",
+                            "./" + PurePosixPath(artifact.path).name,
+                        )
+                    )
+                )
     if next(artifacts, None) is not None:
         print("More artifacts are recorded; inspect outputs below.")
 

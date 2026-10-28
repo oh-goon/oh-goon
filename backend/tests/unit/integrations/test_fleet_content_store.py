@@ -249,6 +249,76 @@ def test_content_store_live_read_lease_blocks_gc_after_reference_release(tmp_pat
     assert not retained.path.exists()
 
 
+def test_retained_file_materialization_verifies_exact_copy_with_a_live_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import oh_goon.integrations.fleet_content_store as module
+
+    source = tmp_path / "model.json"
+    source.write_bytes(b'{"weights": [1, 2, 3]}\n')
+    store = FleetContentStore(tmp_path / "store")
+    retained = store.put_file(_owned(source, OWNER))
+    output = tmp_path / "export"
+    output.mkdir()
+    destination = output / "model.json"
+    from oh_goon.integrations._copy_transport import copy_regular_file
+
+    copy = copy_regular_file
+    identify = snapshot_identity
+    identified = []
+
+    def copy_while_released(*args, **kwargs):
+        store.release_reference(retained.reference_id, owner_repository_id=OWNER)
+        assert store.garbage_collect() == ()
+        return copy(*args, **kwargs)
+
+    def identify_copy(path, **kwargs):
+        identified.append(path)
+        return identify(path, **kwargs)
+
+    monkeypatch.setattr(module, "copy_regular_file", copy_while_released)
+    monkeypatch.setattr(module, "snapshot_identity", identify_copy)
+    result = store.materialize_file(retained.reference_id, _destination(destination, OWNER))
+    assert result == retained.identity
+    assert destination.read_bytes() == source.read_bytes()
+    assert identified == [destination]
+    assert store.garbage_collect() == (retained.object_id,)
+
+
+@pytest.mark.parametrize("defect", ["owner", "kind", "tampered", "existing", "symlink"])
+def test_retained_file_materialization_refuses_invalid_authority_or_destination(
+    tmp_path: Path, defect: str
+) -> None:
+    source = tmp_path / "source"
+    source.write_bytes(b"original-model")
+    store = FleetContentStore(tmp_path / "store")
+    if defect == "kind":
+        tree = tmp_path / "tree"
+        tree.mkdir()
+        (tree / "entry").write_bytes(b"tree-content")
+        retained = store.put_tree(_owned(tree, OWNER))
+    else:
+        retained = store.put_file(_owned(source, OWNER))
+    output = tmp_path / "export"
+    output.mkdir()
+    destination = output / "model"
+    if defect == "tampered":
+        retained.path.write_bytes(b"changed-model")
+    elif defect == "existing":
+        destination.write_bytes(b"keep-existing")
+    elif defect == "symlink":
+        destination.symlink_to(source)
+    with pytest.raises(FleetPlanInvalid):
+        store.materialize_file(
+            retained.reference_id,
+            _destination(destination, OTHER if defect == "owner" else OWNER),
+        )
+    if defect == "existing":
+        assert destination.read_bytes() == b"keep-existing"
+    assert source.read_bytes() == b"original-model"
+    assert not list(ContentStorePathLayout.from_root(store.root).leases.glob("*/lease-*.json"))
+
+
 def test_content_store_gc_fails_closed_on_corrupt_reference_metadata(tmp_path: Path) -> None:
     store = FleetContentStore(tmp_path / "store")
     source = tmp_path / "artifact-corrupt"

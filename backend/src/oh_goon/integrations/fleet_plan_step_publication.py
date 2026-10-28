@@ -18,6 +18,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PublishedPlanOutputEvidence,
 )
 from oh_goon.core.models.fleet_plan_step_primitives import PlanArtifactDeclaration
+from oh_goon.core.path_authority import RepositoryScopedPath, canonical_path
 from oh_goon.core.product_identity import stable_id
 from oh_goon.integrations._fleet_plan_step_dataflow import (
     collect_published_outputs,
@@ -28,7 +29,7 @@ from oh_goon.integrations._fleet_plan_step_outcome import (
     output_contract_failure,
 )
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
-from oh_goon.integrations.fleet_content_store import FleetContentObject
+from oh_goon.integrations.fleet_content_store import FleetContentObject, FleetContentStore
 from oh_goon.integrations.fleet_plan_run import (
     FleetPlanStepAttempt,
     PreparedPlanRun,
@@ -45,6 +46,39 @@ class AttemptPublication:
     outcome: StepOutcome
     cache_identity: SnapshotIdentity | None
     retained_cache: PlanRetainedContentEvidence | None
+
+
+@dataclass(frozen=True, slots=True)
+class DirectArtifactRetention:
+    """Run-allocated artifact scope; it conveys no strict execution guarantees."""
+
+    workspace: RepositoryScopedPath
+    content_store: FleetContentStore
+    cancel_requested: Callable[[], bool] | None = None
+
+    def prove_workspace(self, repository: Path) -> None:
+        self.workspace.prove_scope()
+        if canonical_path(repository) != self.workspace.path:
+            raise FleetPlanInvalid(
+                "Trusted-local artifact collection differs from its allocated Step workspace"
+            )
+
+    def retain_file(self, path: Path, value: str) -> FleetContentObject:
+        self.prove_workspace(self.workspace.path)
+        return self.content_store.put_file(
+            RepositoryScopedPath.create(
+                owner_repository_id=self.workspace.owner_repository_id,
+                root=self.workspace.path,
+                path=path,
+                label=f"Trusted-local artifact {value}",
+            ),
+            cancel_requested=self.cancel_requested,
+        )
+
+    def release(self, reference_id: str) -> None:
+        self.content_store.release_reference(
+            reference_id, owner_repository_id=self.workspace.owner_repository_id
+        )
 
 
 def publish_direct_attempt_outputs(
@@ -213,14 +247,28 @@ def _published_outputs(
 def collect_direct_artifacts(
     repository: Path,
     declarations: tuple[PlanArtifactDeclaration, ...],
+    *,
+    retention: DirectArtifactRetention | None = None,
 ) -> tuple[PlanArtifactEvidence, ...]:
-    """Collect direct-run artifacts; retained content is strict-only by contract."""
+    """Retain direct artifacts only through the original allocated workspace scope."""
 
-    if any(declaration.retention == "content_store" for declaration in declarations):
+    requests_retention = any(
+        declaration.retention == "content_store" for declaration in declarations
+    )
+    if requests_retention and retention is None:
         raise FleetPlanInvalid(
-            "Direct Fleet execution cannot publish artifacts to the strict content store"
+            "Direct Fleet execution cannot publish retained artifacts without an allocated Step workspace"
         )
-    return _collect_artifacts(repository, declarations, retain_file=None)
+    if not requests_retention:
+        return _collect_artifacts(repository, declarations, retain_file=None)
+    assert retention is not None
+    retention.prove_workspace(repository)
+    return _collect_artifacts(
+        repository,
+        declarations,
+        retain_file=retention.retain_file,
+        release_file=lambda retained: retention.release(retained.reference_id),
+    )
 
 
 def collect_strict_artifacts(
@@ -230,52 +278,78 @@ def collect_strict_artifacts(
 ) -> tuple[PlanArtifactEvidence, ...]:
     """Collect strict-run artifacts and retain explicitly declared file objects."""
 
-    def retain_file(path: Path, value: str) -> PlanRetainedContentEvidence:
+    def retain_file(path: Path, value: str) -> FleetContentObject:
         if prepared_run.content_store is None:
             raise FleetPlanInvalid(
                 f"Fleet artifact {value} requested content-store retention without a strict run store"
             )
-        object_ = prepared_run.content_store.put_file(
+        return prepared_run.content_store.put_file(
             prepared_run.retained_content_path(
                 path,
                 owned_root=repository,
                 label=f"Fleet artifact {value}",
             )
         )
-        return _retained_content_evidence(object_)
 
-    return _collect_artifacts(repository, declarations, retain_file=retain_file)
+    def release_file(retained: FleetContentObject) -> None:
+        if prepared_run.content_store is None:
+            raise FleetPlanInvalid("Strict artifact reference rollback requires its content store")
+        prepared_run.content_store.release_reference(
+            retained.reference_id, owner_repository_id=retained.owner_repository_id
+        )
+
+    return _collect_artifacts(
+        repository, declarations, retain_file=retain_file, release_file=release_file
+    )
 
 
 def _collect_artifacts(
     repository: Path,
     declarations: tuple[PlanArtifactDeclaration, ...],
     *,
-    retain_file: Callable[[Path, str], PlanRetainedContentEvidence] | None,
+    retain_file: Callable[[Path, str], FleetContentObject] | None,
+    release_file: Callable[[FleetContentObject], None] | None = None,
 ) -> tuple[PlanArtifactEvidence, ...]:
     evidence: list[PlanArtifactEvidence] = []
-    for declaration in declarations:
-        value = declaration.path
-        path = repository_relative_path(repository, value, kind="artifact")
-        if not path.is_file():
-            evidence.append(MissingPlanArtifact(path=value))
-            continue
-        sha256, byte_count = sha256_file_with_size(path)
-        retained = None
-        if declaration.retention == "content_store":
-            if retain_file is None:
-                raise FleetPlanInvalid(
-                    f"Fleet artifact {value} requested content-store retention without strict execution"
+    retained_files: list[FleetContentObject] = []
+    try:
+        for declaration in declarations:
+            value = declaration.path
+            path = repository_relative_path(repository, value, kind="artifact")
+            if not path.is_file():
+                evidence.append(MissingPlanArtifact(path=value))
+                continue
+            retained = None
+            if declaration.retention == "content_store":
+                if retain_file is None:
+                    raise FleetPlanInvalid(
+                        f"Fleet artifact {value} requested content-store retention without strict execution"
+                    )
+                object_ = retain_file(path, value)
+                retained_files.append(object_)
+                retained = _retained_content_evidence(object_)
+                sha256, byte_count = sha256_file_with_size(object_.path)
+            else:
+                sha256, byte_count = sha256_file_with_size(path)
+            evidence.append(
+                PresentPlanArtifact(
+                    path=value,
+                    sha256=sha256,
+                    byte_count=byte_count,
+                    retained_object=retained,
                 )
-            retained = retain_file(path, value)
-        evidence.append(
-            PresentPlanArtifact(
-                path=value,
-                sha256=sha256,
-                byte_count=byte_count,
-                retained_object=retained,
             )
-        )
+    except BaseException as error:
+        if release_file is not None:
+            for retained_file in reversed(retained_files):
+                try:
+                    release_file(retained_file)
+                except Exception as cleanup_error:
+                    error.add_note(
+                        "Artifact reference rollback failed for "
+                        f"{retained_file.reference_id}: {cleanup_error}"
+                    )
+        raise
     return tuple(evidence)
 
 

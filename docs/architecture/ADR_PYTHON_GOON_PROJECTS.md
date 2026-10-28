@@ -16,7 +16,7 @@ The Plan remains small:
 
 ```yaml
 execution:
-  purpose: cicd
+  purpose: verification
 
 goons:
 - ml/iris-train
@@ -149,7 +149,7 @@ steps:
     --max-iterations ${{ inputs.max_iterations }}
   artifacts:
   - path: ml-output/iris-training-metrics.json
-    retention: evidence
+    retention: content_store
   - path: ml-output/iris-model-parameters.json
     retention: content_store
 ```
@@ -299,9 +299,20 @@ resources, metadata or native lock invalidate stale execution even when
 `goon.yml` is unchanged. Local uncommitted source is identified by the captured
 working files rather than represented as clean Git HEAD.
 
-The Iris Plan keeps `purpose: cicd`, existing artifact retention and strict
-execution requirements. Ordinary package execution gains no global strict-host
-qualification requirement. See [execution first](ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md).
+The Iris Plan selects trusted-local `purpose: verification` and retains its
+declared metrics and model files through the existing collector/content store.
+The original Run owner binds retained publication to the captured project's
+allocated attempt workspace and real registered repository, after verified
+process settlement and before scratch disposal. Artifact records describe
+stored bytes; they do not add strict execution receipts. The public
+`plan export-artifact` command selects the recorded Run/Step artifact and
+verifies its retained identity under a read lease before exporting bytes.
+
+Explicit `purpose: cicd` keeps strict preparation, isolation and publication
+requirements. Ordinary target-workspace commands do not acquire retained
+publication, and retained cache inputs and retries remain strict-only.
+See [artifact retention](../development/TEMPLATE_ARTIFACT_RETENTION.md) and
+[execution first](ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md).
 
 An explicit strict `trust_repository_code: false` applies the selected isolation
 boundary to native dependency installation and package builds as well as the
@@ -417,10 +428,10 @@ its three installed-command Steps.
 The namespace proof uses a shared host kernel; it does not qualify the stronger
 application-kernel or VM boundary required for untrusted strict admission.
 These tested boundaries do not establish APP PASS, privileged strict/native
-qualification, or an Airflow scheduler/worker deployment. Completing the Iris
-`purpose: cicd` Plan requires actual selected strict execution and retained
-content-store artifacts; standalone training or an ordinary verification
-wrapper cannot substitute for that evidence.
+qualification, or an Airflow scheduler/worker deployment. Explicit Iris
+`purpose: cicd` execution still requires actual selected strict admission and
+retained-content publication. Trusted-local verification establishes its own
+recorded execution and retained bytes, and cannot substitute for strict evidence.
 
 ## Existing owners
 

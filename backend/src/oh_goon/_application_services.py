@@ -109,6 +109,7 @@ def _build_fleet_services(
         foundation.live_output,
         foundation.diagnostics,
         schedule_executions=foundation.schedule_executions,
+        content_store=foundation.content_store,
     )
 
 
