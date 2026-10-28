@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import Mock
 
 import pytest
@@ -42,11 +42,18 @@ from oh_goon.core.vocabulary import (
     GameTapeStatus,
     OperationAction,
 )
+from oh_goon.engine.command import (
+    CommandOutputLimitExceeded,
+    CommandSupervisorReceipt,
+    CommandTimeoutExpired,
+)
+from oh_goon.integrations._fleet_plan_step_outcome import settle_step_execution
 from oh_goon.integrations.exact_file_write import (
     ExactPublicationDurabilityError,
     publish_prepared_file,
 )
 from oh_goon.integrations.fleet_content_store import FleetContentStore
+from oh_goon.integrations.fleet_plan_output_limit import bounded_execution_failure_outcome
 from oh_goon.services.fleet_run_control_plane import FleetArtifactExport, FleetRunControlPlane
 from tests.factories.capabilities import capability_snapshot
 from tests.factories.fleet_plan_targets import structural_fleet_plan_target
@@ -252,14 +259,8 @@ def test_export_refuses_cancelled_or_interrupted_run_projection(
                 outcome="INCOMPLETE", cleanup="UNVERIFIED", reason="CLEANUP_UNVERIFIED"
             ),
         ),
-        (
-            GameTapeStatus.FAILED,
-            PlanStepSettlementEvidence(
-                outcome="TIMED_OUT", cleanup="VERIFIED", reason="DEADLINE_EXPIRED"
-            ),
-        ),
     ],
-    ids=["cancelled", "interrupted", "cleanup-unavailable", "cleanup-unverified", "timed-out"],
+    ids=["cancelled", "interrupted", "cleanup-unavailable", "cleanup-unverified"],
 )
 def test_export_requires_selected_step_settlement_before_reading_retained_bytes(
     export_case: SimpleNamespace,
@@ -271,6 +272,65 @@ def test_export_requires_selected_step_settlement_before_reading_retained_bytes(
     case.recorded_repository.steps = (
         case.step.model_copy(update={"status": status, "settlement": settlement}),
     )
+    materialize = Mock(side_effect=AssertionError("Unsettled Step reached retained content"))
+    monkeypatch.setattr(case.store, "materialize_file", materialize)
+    with pytest.raises(FleetPlanInvalid, match="Step"):
+        _export(case)
+    materialize.assert_not_called()
+    assert not case.destination.exists()
+    assert not list(case.destination.parent.glob(".oh-goon-export-*"))
+
+
+@pytest.mark.parametrize("failure", ["timeout", "output_limit"])
+@pytest.mark.parametrize("quiescent", [False, True])
+def test_export_bounded_failure_artifacts_requires_verified_original_cleanup(
+    export_case: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Literal["timeout", "output_limit"],
+    quiescent: bool,
+) -> None:
+    case = export_case
+    step = case.detail.run.target.plan.steps[0]
+    supervisor = CommandSupervisorReceipt(
+        process_group_cleanup_requested=True,
+        cleanup_reason=failure,
+        forced_termination=True,
+        final_process_group_quiescent=quiescent,
+    )
+    error = (
+        CommandTimeoutExpired(step.argv, 1, supervisor=supervisor)
+        if failure == "timeout"
+        else CommandOutputLimitExceeded(
+            argv=step.argv,
+            stream="stdout",
+            limit_bytes=1,
+            stdout="x",
+            stderr="",
+            supervisor=supervisor,
+        )
+    )
+    outcome = bounded_execution_failure_outcome(step, error)
+    settlement = settle_step_execution(step, outcome)
+    assert settlement.outcome == ("TIMED_OUT" if failure == "timeout" else "OUTPUT_LIMITED")
+    assert settlement.cleanup == ("VERIFIED" if quiescent else "UNVERIFIED")
+    case.recorded_repository.steps = (
+        case.step.model_copy(
+            update={
+                "status": GameTapeStatus.FAILED,
+                "exit_code": outcome.returncode,
+                "settlement": settlement,
+            }
+        ),
+    )
+    case.detail.run = case.detail.run.model_copy(
+        update={"progress": FleetRunProgress(total=1, succeeded=0, failed=1, needs_attention=1)}
+    )
+    case.detail.game_tape.status = GameTapeStatus.ATTENTION_REQUIRED
+    if quiescent:
+        exported = _export(case)
+        assert exported.sha256 == case.artifact.sha256
+        assert exported.destination.read_bytes() == case.payload
+        return
     materialize = Mock(side_effect=AssertionError("Unsettled Step reached retained content"))
     monkeypatch.setattr(case.store, "materialize_file", materialize)
     with pytest.raises(FleetPlanInvalid, match="Step"):

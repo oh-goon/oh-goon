@@ -171,7 +171,7 @@ def _recorded_export_artifact(
     owner, step = matches[0]
     if (
         step.status not in {GameTapeStatus.PASSED, GameTapeStatus.FAILED}
-        or step.settlement.outcome not in {"SUCCESS", "FAILED"}
+        or step.settlement.outcome not in {"SUCCESS", "FAILED", "TIMED_OUT", "OUTPUT_LIMITED"}
         or step.settlement.cleanup != "VERIFIED"
     ):
         raise FleetPlanInvalid(
