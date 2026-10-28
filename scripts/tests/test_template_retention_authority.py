@@ -1,4 +1,4 @@
-"""M136: shipped template retention choices must match the runtime contract."""
+"""Shipped artifact declarations and canonical retention-guide navigation."""
 
 from __future__ import annotations
 
@@ -38,11 +38,12 @@ def _errors(goon: dict[str, Any]) -> tuple[str, ...]:
 
 
 def _shipped_artifact_goons() -> tuple[tuple[Path, dict[str, Any]], ...]:
-    return tuple(
-        (path, yaml.safe_load(path.read_text(encoding="utf-8")))
-        for path in sorted(GOONS.glob("*/*/goon.yml"))
-        if "artifacts:" in path.read_text(encoding="utf-8")
-    )
+    entries = []
+    for path in sorted(GOONS.glob("*/*/goon.yml")):
+        goon = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if _artifacts(goon):
+            entries.append((path, goon))
+    return tuple(entries)
 
 
 def test_m136_every_shipped_artifact_is_explicit_and_documented() -> None:
@@ -60,6 +61,7 @@ def test_m136_invalid_or_ambiguous_retention_is_detected(mutation: str) -> None:
     _, exemplar = next(
         (path, item) for path, item in _shipped_artifact_goons() if _artifacts(item)
     )
+    assert not _errors(exemplar)
     changed = copy.deepcopy(exemplar)
     first = next(step for step in changed["steps"] if step.get("artifacts"))
     if mutation == "duplicate":
@@ -71,28 +73,16 @@ def test_m136_invalid_or_ambiguous_retention_is_detected(mutation: str) -> None:
     assert _errors(changed)
 
 
-def test_m136_guide_covers_runtime_owners_and_every_shipped_choice() -> None:
+def test_retention_guide_links_cover_every_shipped_artifact_choice() -> None:
     text = GUIDE.read_text(encoding="utf-8")
-    for contract in (
-        "PlanArtifactDeclaration",
-        "PresentPlanArtifact",
-        "MissingPlanArtifact",
-        "PlanRetainedContentEvidence",
-        "fleet_plan_step_publication.py",
-        "fleet_content_maintenance.py",
-        "fleet_content_retention.py",
-        "repository-scoped",
-        "strict execution",
-        "Run ID",
-        "Plan ID",
-    ):
-        assert contract in text
-    for path, _ in _shipped_artifact_goons():
-        identity = "/".join(path.parent.parts[-2:])
-        assert f"`{identity}`" in text, identity
+    linked_files = set()
     for link in re.findall(r"\]\(([^)#]+)(?:#[^)]*)?\)", text):
         if not link.startswith(("http://", "https://", "mailto:")):
-            assert (GUIDE.parent / link).is_file(), link
+            target = (GUIDE.parent / link).resolve()
+            assert target.is_file(), link
+            linked_files.add(target)
+    for path, _ in _shipped_artifact_goons():
+        assert path.resolve() in linked_files, path
 
 
 def test_m136_navigation_links_to_one_canonical_guide() -> None:

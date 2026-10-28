@@ -14,7 +14,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_agent_providers import agent_connection_from_args
 from oh_goon.cli_plan_definition_commands import _check, _diff
 from oh_goon.cli_plan_inputs import plan_inputs
-from oh_goon.cli_plan_run_readback import run_plan_readback
+from oh_goon.cli_plan_run_readback import print_run_completion, run_plan_readback
 from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
 from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import AgentRepairBudget, AgentRepairResult
@@ -65,6 +65,7 @@ def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> i
         "outputs": run_plan_readback,
         "handoff": run_plan_readback,
         "campaign": run_plan_readback,
+        "export-artifact": _export_artifact,
         "schedule": _schedule,
         "reschedule": _reschedule,
     }
@@ -74,6 +75,54 @@ def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> i
 
 _RUN_RESULT_SCHEMA = "oh-goon.plan-run-result/v1"
 _RUN_JSON_PROGRESS: ContextVar[bool] = ContextVar("oh_goon_run_json_progress", default=False)
+
+
+def _export_artifact(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
+    schema = "oh-goon.plan-artifact-export/v1"
+    try:
+        exported = runtime.runs.export_artifact(
+            args.fleet_run_id,
+            step_id=args.step_id,
+            artifact_path=args.artifact_path,
+            destination=args.output,
+            repository_id=args.repository_id,
+        )
+    except (FleetDomainError, OSError, ValueError) as exc:
+        notes = list(getattr(exc, "__notes__", ()))
+        if args.as_json:
+            print(
+                json.dumps(
+                    {"schema": schema, "status": "error", "message": str(exc), "notes": notes}
+                )
+            )
+        else:
+            print(str(exc))
+            for note in notes:
+                print(note)
+        return 2
+    result = {
+        "schema": schema,
+        "status": "exported",
+        "fleet_run_id": exported.fleet_run_id,
+        "repository_id": exported.repository_id,
+        "step_id": exported.step_id,
+        "artifact_path": exported.artifact_path,
+        "destination": str(exported.destination),
+        "sha256": exported.sha256,
+        "byte_count": exported.byte_count,
+        "reference_id": exported.reference_id,
+        "cleanup_status": exported.cleanup_status,
+        "cleanup_failure": exported.cleanup_failure,
+    }
+    if args.as_json:
+        print(json.dumps(result, sort_keys=True))
+    else:
+        print(f"Exported: {exported.destination}")
+        print(f"Recorded artifact: {exported.step_id}: {exported.artifact_path}")
+        print(f"Verified: {exported.byte_count} bytes; sha256:{exported.sha256}")
+        if exported.cleanup_failure is not None:
+            print("Export completed; private staging cleanup failed: " + exported.cleanup_failure)
+    return 0
 
 
 def _run_result(
@@ -300,6 +349,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     else:
         print(f"Execution status: {detail.run.status.value}")
         print(f"Outcome: {detail.outcome.value}")
+        print_run_completion(detail)
     if detail.outcome is FleetRunOutcome.SUCCESS:
         return 0
     if args.repair_handoff:

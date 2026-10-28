@@ -30,6 +30,6 @@ steps:
     ${{ inputs.minimum_accuracy_percent }} --max-iterations ${{ inputs.max_iterations }}
   artifacts:
   - path: ml-output/iris-training-metrics.json
-    retention: evidence
+    retention: content_store
   - path: ml-output/iris-model-parameters.json
     retention: content_store

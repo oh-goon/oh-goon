@@ -15,5 +15,7 @@ def print_safe_plan_diagnostic(exc: Exception, *, as_json: bool) -> None:
     print(f"Plan rejected: {report['code']}")
     if report["inputs"]:
         print(f"Inputs: {', '.join(report['inputs'])}")
+    if report.get("fields"):
+        print(f"Fields: {', '.join(report['fields'])}")
     print(f"Next action: {report['safe_next_action']}")
     print("No execution was initiated by this diagnostic presentation.")

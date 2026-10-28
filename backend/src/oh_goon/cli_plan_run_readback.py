@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
+from itertools import islice
+from pathlib import PurePosixPath
 from typing import Any
 
 from oh_goon.application import ApplicationRuntime
@@ -14,10 +17,88 @@ from oh_goon.cli_plan_summary import configuration_summary
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.game_tape import GameTape, GameTapeStepExecution
 from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.vocabulary import GameTapeStatus
 
 
 def _print_json(value: object) -> None:
     print(json.dumps(value, sort_keys=True, ensure_ascii=False))
+
+
+def print_run_completion(detail: FleetRunDetail) -> None:
+    """Show bounded original completion evidence from the supplied terminal read cut."""
+    tape = detail.game_tape
+    if tape.why_not is not None:
+        print(f"Failure: {tape.why_not.code}: {tape.why_not.message}")
+        print(f"Next action: {tape.why_not.safe_next_action}")
+    failed_steps = (
+        (repository.repository.name, step)
+        for repository in tape.repositories
+        for step in repository.steps
+        if step.status is GameTapeStatus.FAILED
+    )
+    for repository_name, step in islice(failed_steps, 8):
+        exit_code = f" (exit {step.exit_code})" if step.exit_code is not None else ""
+        print(f"Failed Step: {repository_name}/{step.step_id}{exit_code}")
+        if step.reason is not None:
+            print(f"  Recorded reason: {step.reason}")
+    if next(failed_steps, None) is not None:
+        print("More failed Steps are recorded; inspect the Run below.")
+    _print_completion_outputs(tape, fleet_run_id=detail.run.fleet_run_id)
+    for label, command in (
+        ("Inspect Run", "handoff"),
+        ("Inspect outputs", "outputs"),
+        ("Read logs (while available)", "logs"),
+    ):
+        print(f"{label}: " + shlex.join(("oh-goon", "plan", command, detail.run.fleet_run_id)))
+
+
+def _print_completion_outputs(tape: GameTape, *, fleet_run_id: str) -> None:
+    outputs = (
+        (repository.repository.name, step.step_id, output)
+        for repository in tape.repositories
+        for step in repository.steps
+        for output in step.outputs
+    )
+    for repository_name, step_id, output in islice(outputs, 8):
+        print(
+            f"Output evidence: {repository_name}/{step_id}/{output.name} "
+            f"({output.byte_count} bytes; sha256:{output.sha256})"
+        )
+    if next(outputs, None) is not None:
+        print("More output evidence is recorded; inspect outputs below.")
+    artifacts = (
+        (repository.repository, step.step_id, artifact)
+        for repository in tape.repositories
+        for step in repository.steps
+        for artifact in step.artifacts
+    )
+    for repository, step_id, artifact in islice(artifacts, 8):
+        print(f"Artifact: {repository.name}/{step_id}: {artifact.path} [{artifact.status}]")
+        if artifact.status == "PRESENT":
+            print(f"  Evidence: {artifact.byte_count} bytes; sha256:{artifact.sha256}")
+            if artifact.retained_object is not None:
+                print(f"  Retained reference: {artifact.retained_object.reference_id}")
+                print(
+                    "  Export artifact: "
+                    + shlex.join(
+                        (
+                            "oh-goon",
+                            "plan",
+                            "export-artifact",
+                            fleet_run_id,
+                            "--repository-id",
+                            repository.repository_id,
+                            "--step",
+                            step_id,
+                            "--path",
+                            artifact.path,
+                            "--output",
+                            "./" + PurePosixPath(artifact.path).name,
+                        )
+                    )
+                )
+    if next(artifacts, None) is not None:
+        print("More artifacts are recorded; inspect outputs below.")
 
 
 def _status(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:

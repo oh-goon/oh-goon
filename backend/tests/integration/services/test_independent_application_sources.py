@@ -374,6 +374,72 @@ def test_plain_application_source_does_not_require_python_or_goon_metadata(
     assert _git(repository, "status", "--porcelain") == ""
 
 
+def test_application_retained_result_exports_after_attempt_disposal(tmp_path: Path) -> None:
+    repository = tmp_path / "applications/orders"
+    application = _orders_application(repository)
+    original_lock = (application / "uv.lock").read_bytes()
+    environment = _cli_environment(tmp_path)
+    cli = _cli(tmp_path, environment)
+    target = _registered_target(cli, repository)
+    selected = _workflow(tmp_path / "workflow", target, {"path": str(application)})
+    goon = selected.parent / "goons/general/independent-orders/goon.yml"
+    declaration = yaml.safe_load(goon.read_text())
+    declaration["steps"] = [
+        {
+            "run": "orders-pipeline run --fixture ${{ inputs.fixture }}",
+            "artifacts": [{"path": ".showcase/result.json", "retention": "content_store"}],
+        }
+    ]
+    goon.write_text(yaml.safe_dump(declaration, sort_keys=False))
+    cli("lock", str(selected))
+    receipt = json.loads(cli("run", str(selected), "--json"))
+    assert receipt["outcome"] == "SUCCESS"
+    tape = json.loads(cli("plan", "tape", receipt["fleet_run_id"], "--json"))
+    (step,) = tape["repositories"][0]["steps"]
+    assert step["status"] == "PASSED" and step["settlement"]["cleanup"] == "VERIFIED"
+    assert step["project_source"]["application"] == {"path": str(application)}
+    assert step["attempts"][0]["supervisor"]["final_process_group_quiescent"] is True
+    (artifact,) = step["artifacts"]
+    expected = (json.dumps({"total_order_value": "1236.70"}) + "\n").encode()
+    assert artifact["path"] == ".showcase/result.json" and artifact["status"] == "PRESENT"
+    assert artifact["sha256"] == hashlib.sha256(expected).hexdigest()
+    assert artifact["byte_count"] == len(expected)
+    assert artifact["retained_object"]["owner_repository_id"] == target
+    assert (application / "uv.lock").read_bytes() == original_lock
+    assert not (application / ".showcase").exists()
+    assert not (application / ".venv").exists()
+    assert _git(repository, "status", "--porcelain") == ""
+    scratch = ApplicationStatePathLayout.from_database(
+        Path(environment["OH_GOON_DB"])
+    ).run_workspaces
+    assert scratch.is_dir() and list(scratch.iterdir()) == []
+
+    # Export reopens retained Run evidence after the original attempt and
+    # authoring workspace have gone, without rerunning the application.
+    shutil.rmtree(selected.parent)
+    destination = tmp_path / "retained result.json"
+    exported = json.loads(
+        cli(
+            "plan",
+            "export-artifact",
+            receipt["fleet_run_id"],
+            "--step",
+            step["step_id"],
+            "--path",
+            artifact["path"],
+            "--output",
+            str(destination),
+            "--json",
+        )
+    )
+    assert exported["status"] == "exported"
+    assert destination.read_bytes() == expected
+    assert exported["sha256"] == artifact["sha256"]
+    assert exported["byte_count"] == len(expected)
+    assert exported["reference_id"] == artifact["retained_object"]["reference_id"]
+    assert _git(repository, "status", "--porcelain") == ""
+
+
 def test_repeated_application_occurrences_preserve_independent_output_lineage(
     tmp_path: Path,
 ) -> None:

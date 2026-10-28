@@ -6,8 +6,9 @@ Oh Goon is a general-purpose workflow and Agent execution engine for repository 
 
 **Development repository.** This source is available for development and review;
 it is not a released or fully qualified product. Start a source checkout with
-`make init` followed by `make dev`. Ordinary Linux/WSL development does not
-require historical checkpoint archives or release certification.
+`make backend-install` for CLI use, or `make init` followed by `make dev` for the
+browser. Ordinary Linux/WSL development does not require historical checkpoint
+archives or release certification.
 
 **Execution first. Security proportional to the workload.** Standard local work
 uses the existing execution lifecycle on Linux/WSL, with process supervision,
@@ -49,9 +50,25 @@ development checkout.
 
 ## Start
 
-### Standard start — recommended for a source checkout
+### CLI first — no frontend setup
 
-For the repository checkout, this is the recommended UI-first path for all users:
+From the repository root in a Linux/WSL shell with Git, Bash, GNU Make and
+uv `>=0.10.0`:
+
+```bash
+make backend-install
+uv run --offline --frozen --no-sync --project backend oh-goon --help
+```
+
+`backend-install` consumes the committed native uv lock and prepares the source
+CLI, including Hashmarks. Native uv selects Python `>=3.12,<3.15`. This path does
+not need Node, npm or a frontend build. Replace `--help` with a CLI command below;
+the [Quickstart](docs/QUICKSTART.md#select-one-workflow-configuration) shows the
+short path from repository selection to a completed local workflow.
+
+### Browser start
+
+To develop or use the source UI:
 
 ```bash
 make init
@@ -66,16 +83,16 @@ Use a Linux or WSL shell with Git, Bash, GNU Make, uv `>=0.10.0`, Node 22.16.0+ 
 
 **Hashmarks is required.** It is a normal backend dependency in
 [`backend/pyproject.toml`](backend/pyproject.toml), with its exact released wheel
-and digest recorded in [`backend/uv.lock`](backend/uv.lock). `make init` installs
-it through native uv along with the other dependencies. Repository identity and
-repository evidence use the [single Hashmarks integration](docs/architecture/hashmarks-oh-goon-authority-boundary.md).
+and digest recorded in [`backend/uv.lock`](backend/uv.lock). `make backend-install`
+and `make init` install it through native uv along with the other dependencies.
+Repository identity and repository evidence use the [single Hashmarks integration](docs/architecture/hashmarks-oh-goon-authority-boundary.md).
 A missing wheel or failed download must be resolved through the native
 dependency installation; it must not be replaced with an Oh-Goon identity
 implementation or a diagnostic test substitute.
 
 Re-running `make init` is the repeatable reconciliation path. It consumes committed `backend/uv.lock` and `frontend/package-lock.json` without authoring dependency history. `backend/.venv` and `frontend/node_modules` remain generated local state, while `backend/uv.lock` is committed, packaged, and identity-bearing. The backend dependency contract is exactly `backend/pyproject.toml` (intent) plus `backend/uv.lock` (resolved authority). There is no separate developer acquisition/setup command.
 
-When Python dependency intent was intentionally changed, `make sync` is the authoring loop: native uv resolves the new graph and updates committed `backend/uv.lock` for review; npm separately owns its committed frontend lock. `make certify` does not author dependency history or rerun dependency materialization. Canonical `make init` is the single normal local materialization boundary; certification consumes the resulting uv/npm-owned environments. Private registry identity remains operator/native-tool configuration, never repository or certification identity.
+When Python dependency intent was intentionally changed, `make sync` is the authoring loop: native uv resolves the new graph and updates committed `backend/uv.lock` for review; npm separately owns its committed frontend lock. `make certify` does not author dependency history or rerun dependency materialization. `make init` materializes both developer environments; `make backend-install` selects the same native uv operation for CLI-only use. Certification consumes the resulting uv/npm-owned environments. Private registry identity remains operator/native-tool configuration, never repository or certification identity.
 
 Frontend development materialization is npm-owned. `make init` and `make frontend-install` invoke native `npm ci --prefer-offline --ignore-scripts --no-audit --no-fund`; Oh-Goon does not maintain a second `node_modules` cache, cache identity, symlink publisher, graph validator, or GC policy. Browser binaries are intentionally separate from developer initialization: use `make browser-setup` when browser diagnostics or release acceptance require them. The lean APP certification Plan does not replay the full browser matrix; `make verify` owns that broader diagnostic surface. `make browser-preflight` launches the configured engines and reports missing host libraries. Only `make browser-system-deps` asks Playwright to install operating-system dependencies and may require sudo/root. A release host without browser engines can run the same full gate in the exact lock-derived Playwright image with `make acceptance-browser-container`.
 
@@ -89,17 +106,10 @@ oh-goon start
 
 Open the exact `http://127.0.0.1:8787/#access=...` URL printed by `oh-goon start`. If you are working from a source checkout, use `make dev` instead.
 
-### Optional CLI access
-
-After `make init`, use the CLI from the repository root:
-
-```bash
-uv run --offline --frozen --no-sync --project backend oh-goon --help
-```
-
-Replace `--help` with the desired command below. Global installation is optional;
-the source `make cli-install` target builds a standard wheel and therefore needs
-the release owner's built UI first. It is not a fresh-checkout setup step.
+Global installation is optional. The source `make cli-install` target builds a
+standard wheel and therefore needs
+the release owner's built UI first. Use `make backend-install` for source CLI
+setup.
 
 Start from the short [documentation entry path](docs/README.md); it links to [Quickstart](docs/QUICKSTART.md), [Troubleshooting](docs/TROUBLESHOOTING.md), and the owner-specific references without mirroring their policy.
 
@@ -118,18 +128,20 @@ For normal CLI work, register the target folder and select its repository path
 when creating one `run.yml`:
 
 ```bash
-oh-goon templates list --kind plan
 oh-goon league add-folder /absolute/path/to/repository
 oh-goon templates init python/quality --kind plan --output ./workflow --repository /absolute/path/to/repository
 # Edit relevant workflow/run.yml inputs for the selected project.
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
 oh-goon lock ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 
+The path must identify a registered repository; initialization fills its target
+ID in `run.yml`. Ordinary verification uses trusted local execution. The
+selected project supplies its own native lock and declared tools.
+`templates list --kind plan`, `config inspect` and `config validate` are optional
+discovery and diagnostics before locking.
 Inspection is local and read-only. Validation proves the selected source and
-typed inputs; neither command grants permission or proves native prerequisites.
+typed inputs; neither diagnostic grants permission or proves native prerequisites.
 Locking freezes execution identity, and Run admission checks freshness before
 effects. The [configuration guide](docs/development/TEMPLATE_INPUT_INSPECTION.md)
 explains catalog, file, repository Goon and pinned Git selections and their owners.

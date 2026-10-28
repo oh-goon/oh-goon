@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from oh_goon.core.errors import FleetPlanInvalid, RunConfigurationInvalid
+from oh_goon.core.errors import ExecutionLockRejected, FleetPlanInvalid, RunConfigurationInvalid
 from oh_goon.core.execution_lock_identity import LOCK_VERSION
 from oh_goon.core.models.execution_lock_models import ExecutionLock
 from oh_goon.core.path_authority import navigation_path
@@ -52,23 +52,29 @@ def render_execution_lock(lock: ExecutionLock) -> str:
 
 def parse_execution_lock(text: str) -> ExecutionLock:
     if len(text) > MAX_EXECUTION_LOCK_BYTES or len(text.encode("utf-8")) > MAX_EXECUTION_LOCK_BYTES:
-        raise FleetPlanInvalid("goon.lock exceeds its source-size bound")
+        raise ExecutionLockRejected("goon.lock exceeds its source-size bound", reason="malformed")
     try:
         payload = parse_fleet_yaml_document(text, source=LOCK_FILE_NAME).payload
     except (FleetPlanInvalid, RecursionError) as exc:
-        raise FleetPlanInvalid("Malformed goon.lock: invalid YAML mapping") from exc
+        raise ExecutionLockRejected(
+            "Malformed goon.lock: invalid YAML mapping", reason="malformed"
+        ) from exc
     version = payload.get("lock_version")
     if type(version) is not int or version != LOCK_VERSION:
-        raise FleetPlanInvalid(f"Unsupported goon.lock version: {version!r}; expected 2")
+        raise ExecutionLockRejected(
+            f"Unsupported goon.lock version: {version!r}; expected 2", reason="unsupported_version"
+        )
     external = payload.get("external", {})
     if not isinstance(external, dict):
-        raise FleetPlanInvalid("Malformed goon.lock: external must be a path-to-digest mapping")
+        raise ExecutionLockRejected(
+            "Malformed goon.lock: external must be a path-to-digest mapping", reason="malformed"
+        )
     normalized = dict(payload)
     normalized["external"] = [{"path": path, "digest": digest} for path, digest in external.items()]
     try:
         return ExecutionLock.model_validate(normalized)
     except ValidationError as exc:
-        raise FleetPlanInvalid(f"Malformed goon.lock: {exc}") from exc
+        raise ExecutionLockRejected(f"Malformed goon.lock: {exc}", reason="malformed") from exc
 
 
 def write_execution_lock(path: Path, lock: ExecutionLock) -> None:
@@ -102,8 +108,9 @@ def write_execution_lock(path: Path, lock: ExecutionLock) -> None:
 def load_execution_lock(path: Path) -> ExecutionLock:
     lock_path = navigation_path(path)
     if not lock_path.is_file():
-        raise FleetPlanInvalid(
-            f"Locked execution requires {LOCK_FILE_NAME}; run 'oh-goon lock' to generate it"
+        raise ExecutionLockRejected(
+            f"Locked execution requires {LOCK_FILE_NAME}; run 'oh-goon lock' to generate it",
+            reason="missing",
         )
     try:
         captured = read_caller_file_bytes(
@@ -111,4 +118,4 @@ def load_execution_lock(path: Path) -> ExecutionLock:
         )
         return parse_execution_lock(captured.decode("utf-8"))
     except (OSError, UnicodeError, RunConfigurationInvalid) as exc:
-        raise FleetPlanInvalid(f"Cannot read goon.lock: {exc}") from exc
+        raise ExecutionLockRejected(f"Cannot read goon.lock: {exc}", reason="unreadable") from exc

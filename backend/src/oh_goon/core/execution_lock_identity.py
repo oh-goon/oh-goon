@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import ExecutionLockRejected, FleetPlanInvalid
 from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.execution_lock_models import (
     ExecutionLock,
@@ -105,23 +105,45 @@ def canonical_external_identities(
 def verify_execution_lock(expected: ExecutionLock, actual: ExecutionLock) -> None:
     """Reject any lock whose structure or final digest differs from resolved semantics."""
     if actual.digest != _recompute_overall(actual):
-        raise FleetPlanInvalid(
-            "goon.lock final digest is invalid or was tampered with; regenerate goon.lock"
+        raise ExecutionLockRejected(
+            "goon.lock final digest is invalid or was tampered with; regenerate goon.lock",
+            reason="invalid_digest",
         )
     if actual.plan != expected.plan:
-        raise FleetPlanInvalid("goon.lock Plan/root digest is stale; regenerate goon.lock")
+        raise ExecutionLockRejected(
+            "goon.lock Plan/root digest is stale; regenerate goon.lock", reason="plan_changed"
+        )
     if actual.execution != expected.execution:
-        raise FleetPlanInvalid("goon.lock ordered Goon identity is stale; regenerate goon.lock")
+        positions = tuple(
+            index + 1
+            for index in range(max(len(actual.execution), len(expected.execution)))
+            if index >= len(actual.execution)
+            or index >= len(expected.execution)
+            or actual.execution[index] != expected.execution[index]
+        )
+        raise ExecutionLockRejected(
+            "goon.lock ordered Goon identity is stale; regenerate goon.lock",
+            reason="goons_changed",
+            goon_positions=positions,
+        )
     if actual.external != expected.external:
-        raise FleetPlanInvalid(
-            "goon.lock external artifact identity is stale; regenerate goon.lock"
+        raise ExecutionLockRejected(
+            "goon.lock external artifact identity is stale; regenerate goon.lock",
+            reason="external_changed",
         )
     if actual.skill_sources != expected.skill_sources:
-        raise FleetPlanInvalid("goon.lock Skill sources are stale; regenerate goon.lock")
+        raise ExecutionLockRejected(
+            "goon.lock Skill sources are stale; regenerate goon.lock", reason="skills_changed"
+        )
     if actual.execution_sources != expected.execution_sources:
-        raise FleetPlanInvalid("goon.lock execution sources are stale; explicitly lock again")
+        raise ExecutionLockRejected(
+            "goon.lock execution sources are stale; explicitly lock again",
+            reason="sources_changed",
+        )
     if actual.digest != expected.digest:
-        raise FleetPlanInvalid("goon.lock execution digest is stale; regenerate goon.lock")
+        raise ExecutionLockRejected(
+            "goon.lock execution digest is stale; regenerate goon.lock", reason="execution_changed"
+        )
 
 
 def _plan_digest(
