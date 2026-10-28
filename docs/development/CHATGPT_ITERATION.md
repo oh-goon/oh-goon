@@ -103,6 +103,33 @@ For explicitly archive-managed campaigns, use
 [`DURABLE_CONTINUATION.md`](DURABLE_CONTINUATION.md), not this ordinary
 GitHub-based handoff, for checkpoint authority.
 
+## Practical session handoff (PR comment, not source status file)
+
+Use the existing PR description or review comment as the durable checkpoint.
+Keep it compact enough that a new coding session can act without reading an
+entire transcript:
+
+```text
+Repository / base: oh-goon/oh-goon / main@<verified SHA>
+Working PR / branch / head: #<number> / <branch> / <verified SHA>
+Goal and non-goals: <approved scope; boundary to preserve>
+Owner and contract: <source owner, relevant docs, contract change>
+Completed: <committed changes only>
+Next: <one concrete first action; remaining tasks>
+Focused proof: <command, PASS/FAIL, exact source identity>
+Escalation: <required checks and status for this exact head>
+Unverified/blockers: <explicit NOT_RUN/BLOCKED/timeouts>
+PR readiness: draft for iteration / ready for full gate
+```
+
+Do not paste tokens, credentials, private paths, unredacted outputs, or large
+transcripts. On the next session, compare this checkpoint to the live PR and
+`main`; discard stale assertions. Documentation-only edits are **not** an
+excuse to skip the seven required ready-PR checks. Keep a PR in draft while
+iterating, then switch to ready only once the intended final head is published.
+If a ready PR needs more changes, returning to draft avoids repeatedly launching
+full check suites; completion still requires final-head evidence.
+
 ## What not to optimize away
 
 Never turn a shorter chat, faster draft job, cached receipt, fixture-only test,
