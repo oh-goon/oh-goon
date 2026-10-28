@@ -13,6 +13,10 @@ then invokes each Python module with the same `sys.executable`. Project and
 interpreter selection happen once; unit commands show the selected interpreter
 and consume the explicit backend pytest configuration.
 
+This follows the [Python launch boundary](NATIVE_TOOL_AUTHORITY.md): uv selects,
+prepares, or enters the project environment; child processes reuse its resolved
+interpreter. Host-only diagnostics remain separate from authoritative checks.
+
 PASS receipts are reusable only when the canonical packageable source identity, the exact
 ordered qualification plan, and the Python toolchain identity are unchanged. A failed,
 interrupted, or timed-out unit receives no PASS receipt and is retried on the next call.
