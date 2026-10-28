@@ -169,7 +169,14 @@ oh-goon lock ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 
-For `python/quality`, the selected project needs a committed `pyproject.toml`
+For an application without Git metadata, register its exact root directory and
+use that same path with `--repository`. An unregistered directory, or an
+arbitrary non-Git descendant of a registered parent, is refused. Normal Git
+discovery and nested-path selection remain available; the broad League scan
+continues to list Git roots. The application itself remains the registered Run
+subject, with the existing exclusion and instance checks.
+
+For `python/quality`, the selected project needs `pyproject.toml`
 and native `uv.lock`; its selected dependency group supplies Ruff, pytest and
 the chosen type checker. The defaults select project `.`, group `dev` and Pyright.
 Set `inputs.project` for a contained project and `inputs.typechecker` when its

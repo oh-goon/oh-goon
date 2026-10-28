@@ -1,6 +1,9 @@
 from pathlib import Path
 
+import pytest
+
 from oh_goon.core.capability_plan_definitions import PLAN_CAPABILITIES
+from oh_goon.core.errors import TargetSelectionError
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import (
     AllRepositoryScope,
@@ -73,7 +76,7 @@ def test_fleet_plan_explicit_scope_can_target_configured_non_git_source_root(
     migration = MigrationService(state, discovery)
     league = LeagueService(state, discovery)
     selector = FleetTargetSelector(repositories, migration, league)
-    repository_id = RepositoryIdentity(path=source).repository_id
+    repository_id = RepositoryIdentity.model_validate({"path": source}).repository_id
 
     selected = selector.select(
         PLAN_CAPABILITIES[0],
@@ -83,3 +86,35 @@ def test_fleet_plan_explicit_scope_can_target_configured_non_git_source_root(
     )
 
     assert [entry.repository.path for entry in selected] == [source.resolve()]
+    with pytest.raises(TargetSelectionError):
+        selector.select(PLAN_CAPABILITIES[0], state.read_view(), None, AllRepositoryScope())
+
+
+@pytest.mark.parametrize("boundary", ["excluded", "missing", "parent-only"])
+def test_explicit_filesystem_scope_retains_registration_and_exclusion_boundaries(
+    tmp_path: Path, boundary: str
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    repository_id = RepositoryIdentity.model_validate({"path": source}).repository_id
+    state = local_state(LocalDatabase(tmp_path / "state.db"))
+    state.add_location(source.parent if boundary == "parent-only" else source)
+    if boundary == "excluded":
+        state.exclude(
+            source, "excluded source", expected_durable_revision=state.read_view().durable_revision
+        )
+    elif boundary == "missing":
+        source.rmdir()
+    discovery = RepositoryDiscoveryService()
+    selector = FleetTargetSelector(
+        RepositoryService(state, discovery),
+        MigrationService(state, discovery),
+        LeagueService(state, discovery),
+    )
+    with pytest.raises(TargetSelectionError):
+        selector.select(
+            PLAN_CAPABILITIES[0],
+            state.read_view(),
+            None,
+            ExplicitRepositoryScope(repository_ids=(repository_id,)),
+        )

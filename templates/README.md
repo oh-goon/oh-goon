@@ -12,9 +12,16 @@ Use `oh-goon templates list --kind plan` to browse workflows. Catalog usage labe
 
 Initialization selects the registered repository with `--repository PATH` and fills its canonical identity. No scan or manual ID copying is needed. Registration remains explicit; `run.yml` does not register a directory.
 
+The actual application directory may be a registered filesystem subject without
+Git metadata. Register that exact directory and pass the same path to
+`--repository`; registering only its parent does not select arbitrary non-Git
+descendants. Git repositories retain their normal discovery and nested-path
+selection. Broad League scans continue to list Git roots. Execution still uses
+the actual registered subject and its instance identity.
+
 ## First local Python run
 
-Your trusted workload needs a committed `pyproject.toml` and native `uv.lock`. Its selected group must provide Ruff, pytest and your chosen Pyright or ty checker. Prepare that group with native uv in the selected project, then initialize a new workflow directory:
+Your trusted workload needs `pyproject.toml` and a native `uv.lock`. Its selected group must provide Ruff, pytest and your chosen Pyright or ty checker. Prepare that group with native uv in the selected project, then initialize a new workflow directory:
 
 ```sh
 uv sync --frozen --group dev

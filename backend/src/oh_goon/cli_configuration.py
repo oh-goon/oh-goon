@@ -25,12 +25,16 @@ from oh_goon.services.run_configuration_inspection import inspect_run_configurat
 def prepare_configuration(args: argparse.Namespace) -> None:
     """Capture the selected file once, then transport its existing invocation facts."""
     snapshot = load_run_configuration(args.configuration)
-    repositories = tuple(
-        RepositoryIdentity.model_validate({"path": path})
-        for path in RepositoryDiscoveryService().git_roots(
-            LeagueFolderStore().list(), require_pyproject=False
-        )
+    locations = LeagueFolderStore().list()
+    discovery = RepositoryDiscoveryService()
+    repositories = discovery.explicit_configured_roots(
+        locations, repository_ids=(snapshot.selection.target.repository_id,)
     )
+    if not repositories:
+        repositories = tuple(
+            RepositoryIdentity.model_validate({"path": path})
+            for path in discovery.git_roots(locations, require_pyproject=False)
+        )
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     selected, graph = capture_run_configuration_source(
         snapshot,

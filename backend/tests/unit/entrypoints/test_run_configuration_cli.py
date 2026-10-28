@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import shlex
+from operator import setitem
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -228,6 +230,141 @@ def test_initializer_refuses_unregistered_repository_before_publication(workflow
     )
     assert not output.exists()
     assert "oh-goon league add-folder PATH" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("path_form", ["absolute", "home-relative"])
+def test_initialization_selects_registered_filesystem_root_without_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_form: str
+) -> None:
+    import oh_goon.cli as cli
+
+    repository = tmp_path / "plain application"
+    repository.mkdir()
+    requested = repository
+    if path_form == "home-relative":
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        requested = Path("~/plain application")
+    preferences = tmp_path / "league.yml"
+    preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
+    )
+    output = tmp_path / "workflow"
+    assert (
+        main(
+            [
+                "templates",
+                "init",
+                "python/quality",
+                "--kind",
+                "plan",
+                "--repository",
+                str(requested),
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    selection = yaml.safe_load((output / "run.yml").read_text())
+    assert (
+        selection["target"]["repository_id"]
+        == RepositoryIdentity.model_validate({"path": repository}).repository_id
+    )
+    assert not (repository / ".git").exists()
+
+
+@pytest.mark.parametrize("command", [("config", "inspect"), ("config", "validate"), ("lock",)])
+def test_configuration_selects_registered_filesystem_root_without_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: tuple[str, ...]
+) -> None:
+    import oh_goon.cli as cli
+
+    repository = tmp_path / "plain application"
+    repository.mkdir()
+    preferences = tmp_path / "league.yml"
+    preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
+    )
+    selection = tmp_path / "run.yml"
+    selection.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "catalog-plan", "name": "python/quality"},
+                "target": {
+                    "repository_id": RepositoryIdentity.model_validate(
+                        {"path": repository}
+                    ).repository_id
+                },
+            }
+        )
+    )
+    assert main([*command, str(selection)]) == 0
+    assert not (repository / ".git").exists()
+
+
+@pytest.mark.parametrize("registration", ["parent-only", "unregistered", "missing-root"])
+def test_filesystem_target_requires_its_exact_available_registration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    registration: str,
+) -> None:
+    import oh_goon.cli as cli
+
+    repository = tmp_path / "projects/application"
+    repository.mkdir(parents=True)
+    folders = [str(repository.parent if registration == "parent-only" else repository)]
+    if registration == "unregistered":
+        folders = []
+    if registration == "missing-root":
+        repository.rmdir()
+    preferences = tmp_path / "league.yml"
+    preferences.write_text(yaml.safe_dump({"version": 1, "folders": folders}))
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
+    )
+    output = tmp_path / "workflow"
+    assert (
+        main(
+            [
+                "templates",
+                "init",
+                "python/quality",
+                "--kind",
+                "plan",
+                "--repository",
+                str(repository),
+                "--output",
+                str(output),
+            ]
+        )
+        == 2
+    )
+    assert not output.exists()
+    selection = tmp_path / "run.yml"
+    selection.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "catalog-plan", "name": "python/quality"},
+                "target": {
+                    "repository_id": RepositoryIdentity.model_validate(
+                        {"path": repository}
+                    ).repository_id
+                },
+            }
+        )
+    )
+    capsys.readouterr()
+    assert main(["config", "validate", str(selection), "--json"]) == 2
+    assert json.loads(capsys.readouterr().out)["code"] == "CONFIG_TARGET_UNAVAILABLE"
 
 
 def test_inspection_and_validation_use_the_same_owner_report_without_runtime(
@@ -501,9 +638,11 @@ def test_source_execution_policy_selects_the_original_runtime_profile(
     data["source"]["name"] = plan
     workflow.write_text(yaml.safe_dump(data))
     observed = []
-    monkeypatch.setattr(
-        cli, "_build_application_runtime", lambda **kwargs: observed.append(kwargs) or object()
-    )
+
+    def observe_runtime(**kwargs: Any) -> None:
+        observed.append(kwargs)
+
+    monkeypatch.setattr(cli, "_build_application_runtime", observe_runtime)
     monkeypatch.setattr(cli, "_execute_stateful_command", lambda runtime, args: 2)
     assert main(["run", str(workflow)]) == 2
     assert observed[0]["standard_local"] is (not strict)
@@ -558,7 +697,7 @@ def test_captured_input_choices_are_immutable(workflow):
     exposed["typechecker"] = "pyright"
     assert captured.inputs == {"typechecker": "ty"}
     with pytest.raises(TypeError):
-        captured.selection.inputs[0] = ("typechecker", "pyright")
+        setitem(cast(Any, captured.selection.inputs), 0, ("typechecker", "pyright"))
 
 
 def test_inspection_projects_authored_skill_references_and_unverified_pin_records(

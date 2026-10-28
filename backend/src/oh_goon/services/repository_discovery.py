@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 from oh_goon.core.models.repository import (
@@ -64,6 +64,27 @@ class RepositoryDiscoveryService:
         if not discovered:
             return None
         return max(discovered, key=lambda candidate: len(candidate.parts))
+
+    @staticmethod
+    def explicit_configured_roots(
+        locations: list[Path] | tuple[Path, ...],
+        *,
+        repository_ids: Collection[str],
+    ) -> tuple[RepositoryIdentity, ...]:
+        """Match explicit identities to available exact registered filesystem roots.
+
+        This does not discover descendants or expand broad Git-team selection.
+        Runtime scope admission still owns exclusions and subject-instance fencing.
+        """
+        requested = set(repository_ids)
+        roots: list[RepositoryIdentity] = []
+        for location in locations:
+            if not location.is_dir():
+                continue
+            repository = RepositoryIdentity.model_validate({"path": location})
+            if repository.repository_id in requested:
+                roots.append(repository)
+        return tuple(roots)
 
     @staticmethod
     def _describe(

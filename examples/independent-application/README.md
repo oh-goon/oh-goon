@@ -2,13 +2,13 @@
 
 Classification: runnable-with-prerequisites
 
-Keep the application in its own repository and maintain this ordinary Goon
+Keep the application in its own directory and maintain this ordinary Goon
 separately. The application owns its implementation, native lock and installed
 commands; it needs no `goon.yml` or Oh-Goon SDK. This example contains workflow
 declarations only, with explicit placeholders to replace for your application.
 
 First run the application's own native tests and installed command directly.
-For a Python application, use its committed `uv.lock` and native uv commands.
+For a Python application, use its native `uv.lock` and native uv commands.
 Then set `application.path` and the actual installed argv in the
 [Atomic Goon](goons/general/run/goon.yml). The [Plan](plan.yml) imports that
 separately maintained Goon through the existing local catalog contract.
@@ -19,17 +19,27 @@ Keep live dotenv state and other secrets outside the selected source; use
 explicit environment imports. Capture refuses `.env`/`.env.*` runtime files,
 while `.env.example`, `.env.sample` and `.env.template` remain authored templates.
 
-Select the actual registered repository whose effects this workflow operates on:
+Register the actual application directory and initialize a fresh workflow with
+its target identity. From the Oh-Goon source checkout:
 
 ```sh
-oh-goon league add-folder /absolute/parent/of/your/repository
-oh-goon league scan --json
+oh-goon league add-folder /absolute/path/to/your/application
+oh-goon templates init python/quality --kind plan --output ../application-workflow --repository /absolute/path/to/your/application
+cp examples/independent-application/plan.yml ../application-workflow/plan.yml
+cp -R examples/independent-application/goons ../application-workflow/goons
 ```
 
-Set that exact ID in [run.yml](run.yml). When the application itself is the
-effect subject, select its real repository; an unrelated empty repository is not
-a target-free execution mode. No repository-free subject is currently supported.
-From this separate workflow directory, use the ordinary public commands:
+Keep the generated `target` in `../application-workflow/run.yml`; replace its
+`source` with `source: {kind: file-plan, path: ./plan.yml}` and remove any inputs
+that do not belong to the custom Plan. Set the copied Goon's application path
+and installed command as described above. This directory's [run.yml](run.yml)
+illustrates the selection shape; copying its placeholder over the generated
+target is unnecessary.
+
+Git metadata is optional for an exact registered application root. The Run
+still requires its real registered subject; unregistered or target-free
+execution is unsupported. From `../application-workflow`, use the ordinary
+public commands:
 
 ```sh
 oh-goon config inspect ./run.yml

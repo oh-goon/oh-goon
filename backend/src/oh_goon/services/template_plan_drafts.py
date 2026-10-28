@@ -99,15 +99,22 @@ def initialize_run_configuration(
         from oh_goon.runtime.league_folders import LeagueFolderStore
         from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 
-        root = RepositoryDiscoveryService().containing_git_root(
-            LeagueFolderStore().list(), repository
-        )
-        if root is None:
+        locations = LeagueFolderStore().list()
+        discovery = RepositoryDiscoveryService()
+        root = discovery.containing_git_root(locations, repository)
+        if root is not None:
+            target = RepositoryIdentity.model_validate({"path": root})
+        else:
+            requested = RepositoryIdentity.model_validate({"path": repository.expanduser()})
+            roots = discovery.explicit_configured_roots(
+                locations, repository_ids=(requested.repository_id,)
+            )
+            target = roots[0] if len(roots) == 1 else None
+        if target is None:
             raise FleetPlanInvalid(
                 "--repository must select a registered League repository path. "
                 "Register its directory with 'oh-goon league add-folder PATH', then retry."
             )
-        target = RepositoryIdentity.model_validate({"path": root})
     goon_store = GoonTemplateStore()
     goons = _FrozenGoonSources(goon_store)
     source = PlanTemplateStore().source(key) if kind == "plan" else goons.source(key)
