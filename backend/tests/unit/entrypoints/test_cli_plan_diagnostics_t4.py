@@ -10,7 +10,7 @@ import yaml
 
 from oh_goon.cli import main
 from oh_goon.cli_plan_diagnostics import safe_plan_diagnostic
-from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid
+from oh_goon.core.errors import ExecutionLockRejected, FleetPlanInputRejected, FleetPlanInvalid
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.factories.run_configuration import write_run_configuration
@@ -162,6 +162,77 @@ def test_unsafe_input_name_and_exception_are_not_serialized():
     assert result["inputs"] == ["valid"]
     assert "EXPOSE_ME" not in json.dumps(result)
     assert safe_plan_diagnostic(ValueError("private path /tmp/private"))["inputs"] == []
+
+
+@pytest.mark.parametrize(
+    "change,explanation",
+    [
+        ("malformed", "malformed"),
+        ("version", "unsupported format"),
+        ("tampered", "integrity check"),
+        ("symlink", "readable lock without symlink"),
+        ("configuration", "run.yml changed since locking"),
+    ],
+)
+def test_run_lock_refusals_explain_repair_before_runtime_without_private_values(
+    tmp_path, monkeypatch, capsys, change, explanation
+):
+    import oh_goon.cli as cli
+
+    config = write_run_configuration(tmp_path, monkeypatch)
+    assert main(["lock", str(config)]) == 0
+    lock = config.with_name("goon.lock")
+    original = lock.read_bytes()
+    if change == "malformed":
+        lock.write_text("PRIVATE_LOCK_SENTINEL: [invalid")
+    elif change == "version":
+        lock.write_text("lock_version: PRIVATE_LOCK_SENTINEL\n")
+    elif change == "tampered":
+        contents = yaml.safe_load(original)
+        contents["digest"] = "sha256:" + "0" * 64
+        lock.write_text(yaml.safe_dump(contents))
+    elif change == "symlink":
+        private = tmp_path / "PRIVATE_LOCK_SENTINEL"
+        private.write_text("PRIVATE_LOCK_CONTENTS")
+        lock.unlink()
+        lock.symlink_to(private)
+    else:
+        with config.open("a") as stream:
+            stream.write("# PRIVATE_LOCK_SENTINEL\n")
+    before_attempt = None if change == "symlink" else lock.read_bytes()
+    capsys.readouterr()
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime before lock refusal")
+    )
+    assert main(["run", str(config), "--json"]) == 2
+    raw = capsys.readouterr().out
+    diagnostic = json.loads(raw)
+    assert explanation in diagnostic["safe_next_action"]
+    assert "PRIVATE_LOCK" not in raw
+    assert str(tmp_path) not in raw
+    if change != "symlink":
+        assert lock.read_bytes() == before_attempt
+    else:
+        assert lock.is_symlink()
+
+
+def test_missing_lock_action_uses_original_lock_owner_without_creating_a_file(tmp_path):
+    from oh_goon.services.execution_lock_persistence import load_execution_lock
+
+    lock = tmp_path / "goon.lock"
+    with pytest.raises(ExecutionLockRejected) as rejected:
+        load_execution_lock(lock)
+    action = safe_plan_diagnostic(rejected.value)["safe_next_action"]
+    assert "goon.lock is missing" in action
+    assert "oh-goon lock run.yml" in action
+    assert not lock.exists()
+
+
+def test_unknown_lock_reason_does_not_echo_exception_or_lock_names():
+    diagnostic = safe_plan_diagnostic(
+        ExecutionLockRejected("PRIVATE_MESSAGE", reason="PRIVATE_REASON")
+    )
+    assert "PRIVATE_" not in json.dumps(diagnostic)
 
 
 def test_projected_ambiguity_retains_compiler_owner(tmp_path):

@@ -9,6 +9,7 @@ import re
 from typing import NotRequired, TypedDict
 
 from oh_goon.core.errors import (
+    ExecutionLockRejected,
     FleetPlanInputRejected,
     FleetPlanSourceAcquisitionRequired,
     RunConfigurationInvalid,
@@ -19,7 +20,7 @@ _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,63}\Z")
 _CONFIG_ACTIONS = {
     "CONFIG_SCHEMA_INVALID": "Correct the named run.yml fields using the version 1 selection contract.",
     "CONFIG_PATH_INVALID": "Select an existing regular source contained in the workflow root; remove traversal and symlink aliases.",
-    "CONFIG_TARGET_UNAVAILABLE": "Set target.repository_id to exactly one included registered repository.",
+    "CONFIG_TARGET_UNAVAILABLE": "Register the target directory with 'oh-goon league add-folder PATH' and select it during initialization with '--repository PATH'; confirm the repository remains included.",
     "CONFIG_CHANGED": "The captured configuration changed; inspect the current run.yml and explicitly regenerate goon.lock.",
 }
 _CONFIG_FIELDS = frozenset(
@@ -58,6 +59,20 @@ _NEXT_ACTIONS = {
     "UNOWNED_PROJECTED_INPUT": "Expose the input through one selected Goon or author an explicit binding.",
     "AMBIGUOUS_PROJECTED_INPUT": "Select recipient imports explicitly with pass: or with: for each shared input.",
 }
+_LOCK_ACTIONS = {
+    "missing": "goon.lock is missing. Generate it with 'oh-goon lock run.yml', then retry the run.",
+    "unreadable": "goon.lock could not be captured as a bounded regular file. Restore a readable lock without symlink aliases and retry; preserve existing Git and Skill pins.",
+    "malformed": "goon.lock is malformed or exceeds its size bound. Restore the generated lock from version control before relocking; do not hand edit its pins or digests.",
+    "unsupported_version": "goon.lock uses an unsupported format. Use the matching Oh-Goon version or explicitly regenerate the lock after reviewing the selected sources and pins.",
+    "invalid_digest": "goon.lock failed its integrity check. Restore the generated lock from version control before relocking; its recorded pins cannot be trusted.",
+    "plan_changed": "The Plan's execution policy, root Steps, requirements, Goon order or native Agent selection changed. Review the intended change, then run 'oh-goon lock run.yml'.",
+    "goons_changed": "A Goon's execution, requirements or bound input values changed. Inspect the selected contract, review the intended change, then run 'oh-goon lock run.yml'.",
+    "configuration_changed": "run.yml changed since locking. Review its source, target, inputs and Agent/repair selections, then run 'oh-goon lock run.yml' before execution or source acquisition.",
+    "external_changed": "A file recorded in goon.lock changed. Review the selected configuration and external files, then run 'oh-goon lock run.yml'.",
+    "skills_changed": "The selected Skill source pins changed. Review the intended selection, then run 'oh-goon lock run.yml'; use --update-skills only to explicitly refresh those pins.",
+    "sources_changed": "The selected Git Plan, Goon or application pins changed. Review the selection, then run 'oh-goon lock run.yml'; use --update-goons or --update-applications only for an intentional refresh.",
+    "execution_changed": "The resolved execution differs from goon.lock. Review the intended change, then run 'oh-goon lock run.yml'.",
+}
 
 
 class SafePlanValidationDiagnostic(TypedDict):
@@ -87,6 +102,25 @@ def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
                 if field and all(part in _CONFIG_FIELDS for part in field.split("."))
             }
         )
+    elif isinstance(exc, ExecutionLockRejected) and exc.reason in _LOCK_ACTIONS:
+        # Keep the existing transport schema; only the rejecting lock owner
+        # supplies the failure reason. Never echo lock paths, names or values.
+        code = "PLAN_RESOLUTION_REJECTED"
+        inputs = []
+        stage = "plan_resolution"
+        action = _LOCK_ACTIONS[exc.reason]
+        if exc.reason == "goons_changed":
+            positions = sorted(
+                {
+                    position
+                    for position in exc.goon_positions
+                    if type(position) is int and position > 0
+                }
+            )
+            if positions:
+                shown = ", ".join(str(position) for position in positions[:16])
+                remainder = f" (+{len(positions) - 16} more)" if len(positions) > 16 else ""
+                action += f" Changed top-level Goon occurrences in Plan order: {shown}{remainder}."
     elif isinstance(exc, FleetPlanSourceAcquisitionRequired):
         code = "SOURCE_ACQUISITION_REQUIRED"
         inputs = []

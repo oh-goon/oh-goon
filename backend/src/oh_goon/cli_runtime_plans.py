@@ -14,7 +14,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_agent_providers import agent_connection_from_args
 from oh_goon.cli_plan_definition_commands import _check, _diff
 from oh_goon.cli_plan_inputs import plan_inputs
-from oh_goon.cli_plan_run_readback import run_plan_readback
+from oh_goon.cli_plan_run_readback import print_run_completion, run_plan_readback
 from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
 from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import AgentRepairBudget, AgentRepairResult
@@ -300,6 +300,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     else:
         print(f"Execution status: {detail.run.status.value}")
         print(f"Outcome: {detail.outcome.value}")
+        print_run_completion(detail)
     if detail.outcome is FleetRunOutcome.SUCCESS:
         return 0
     if args.repair_handoff:

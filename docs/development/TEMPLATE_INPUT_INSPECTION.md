@@ -21,52 +21,56 @@ expire or be cancelled before intent is recorded; that invocation result has
 no Journal revision and grants no durable completion claim. A readback never
 resumes execution.
 
-After [development setup](../DEVELOPMENT.md), invoke the source CLI with
+Use [CLI-only setup](../../README.md#cli-first--no-frontend-setup):
+`make backend-install` prepares the source CLI without building the frontend.
+Invoke it from the Oh-Goon checkout with
 `uv run --offline --frozen --no-sync --project backend oh-goon` in place of
-`oh-goon` below. Built releases use the installed command directly.
+`oh-goon` below. When working from your workload directory, replace `--project backend`
+with the absolute `--project /path/to/oh-goon/backend`. Built releases use the
+installed command directly.
 
 ```sh
-oh-goon templates list --kind plan
 oh-goon league add-folder /absolute/path/to/repository
 oh-goon templates init python/quality --kind plan --output ./workflow --repository /absolute/path/to/repository
 ```
 
 `--kind` is required because a Plan and a Goon may share the same catalog key.
-For a single Goon, use `oh-goon templates init python/test --kind goon --output ./workflow`.
+For a single Goon, use `oh-goon templates init python/test --kind goon --output ./workflow --repository /absolute/path/to/repository`.
 A Plan selection uses the catalog directly; a Goon selection creates a minimal
 `plan.yml` importing that exact Goon and selects the file from `run.yml`. Neither
 mode copies the selected Goon implementation or invents another source owner.
 
 The initializer resolves `--repository` through the existing League registry
-and writes its canonical identity. Edit the generated inputs you need. For example:
+and writes its canonical identity. No scan or manual repository-ID copying is
+needed. Keep that generated target and edit only the inputs you need. For example,
+these values select the `backend` project and ty:
 
 ```yaml
-version: 1
-source:
-  kind: catalog-plan
-  name: python/quality
-target:
-  repository_id: REPOSITORY_ID
 inputs:
   project: backend
   dependency_group: dev
   typechecker: ty
 ```
 
-The illustrative `REPOSITORY_ID` above is filled by `--repository`; omitting that
-option deliberately leaves a target placeholder for later selection. An
-unregistered explicit path refuses before publishing the workflow. See the
+Omitting `--repository` deliberately leaves a target placeholder for later
+selection. An unregistered explicit path refuses before publishing the workflow. See the
 [template first-run guide](../../templates/README.md) for headless registration.
 The Python values above illustrate this repository's layout. Native uv, Ruff,
 Pytest and the selected type checker retain their project configuration and
-results. Inspect your actual selected contract before changing values.
+results. The shortest execution path after editing is:
+
+```sh
+oh-goon lock ./workflow/run.yml
+oh-goon run ./workflow/run.yml
+```
+
+Inspection and validation are optional diagnostics; lock and run still use the
+canonical validation owners. To see the selected inputs or check values separately:
 
 ```sh
 oh-goon config inspect ./workflow/run.yml
 oh-goon config inspect ./workflow/run.yml --json
 oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
-oh-goon run ./workflow/run.yml
 ```
 
 Generation refuses an existing destination. It does not overwrite a project or
@@ -124,8 +128,8 @@ Neither selection searches for a nearby Plan or shadows shipped imports.
 `lock` explicitly acquires source and records its exact commit in `goon.lock`.
 Ordinary lock regeneration and runs keep the pin; a missing cache may recover
 that same commit. `lock run.yml --update-goons` explicitly refreshes Goon/Plan
-selectors independently of `--update-skills`. Inspection and validation use
-cached source only; unavailable source reports acquisition is required without
+selectors independently of `--update-applications` and `--update-skills`.
+Inspection and validation use cached source only; unavailable source reports acquisition is required without
 network effects. Acquisition does not run project code or install dependencies.
 Explicit `config inspect --acquire` also permits acquisition for contract
 discovery before a successful lock; installation and execution remain unproven.
@@ -169,6 +173,35 @@ an effect may start. Changing source, target, input values, Skill selection,
 model/profile, roots or budgets requires a matching fresh lock. Missing,
 unsupported or stale authority refuses; there is no unlocked fallback.
 
+## Locking and actionable refusals
+
+Run `oh-goon lock ./workflow/run.yml` after reviewing a change to `run.yml`,
+Plan execution policy, ordered imports, Goon behavior or requirements, or captured
+application code, metadata, native lock or resources. Target-project dependencies
+remain native uv authority; `goon.lock` does not replace `uv.lock` or prove that
+dependencies are installed. Ordinary relocking preserves recorded Git Plan/Goon,
+application and Skill commits. Select `--update-goons`, `--update-applications`
+or `--update-skills` only when you intend to refresh that source class.
+
+Lock refusals explain the boundary the existing owner could establish:
+
+- A missing lock requires the explicit lock command before running.
+- An unreadable, malformed or integrity-invalid lock needs a readable generated
+  record with trustworthy pins. Restore it from version control where available
+  before relocking. Unsupported formats require a compatible Oh-Goon version or
+  an explicitly reviewed regeneration.
+- A stale lock identifies changed Plan authority, Goon execution or bound inputs,
+  caller files, Skill sources, or Git Plan/Goon/application pins and directs you
+  to review that change before relocking.
+
+These diagnostics use existing digest comparisons. They cannot recover an old
+input value or identify an individual changed source file from a digest. A
+numbered Goon occurrence refers to its position in the ordered execution list;
+repeated imports remain distinct. The diagnostic reports bounded occurrence
+numbers when available and does not expose caller values, private paths or raw
+source names. Read the selected contract with `config inspect` when you need
+input definitions. A refusal never refreshes pins or repairs a lock implicitly.
+
 ## One human and JSON report
 
 `config inspect` renders the same local captured selection as `--json`.
@@ -200,6 +233,26 @@ source, inspection leaves it unobserved instead of treating it as absent or
 choosing a fallback. The report remains `contract-inspected` and validation
 returns an unverified result. Explicit lock/run use the original environment
 authority and can still reject the actual selected value.
+
+## Read recorded results
+
+`run` waits for completion and reports a nonzero exit code when the declared
+work fails. Its human completion report includes failed Steps and their recorded
+exit codes, declared artifact paths and evidence, and commands for that Run:
+
+```sh
+oh-goon plan status RUN_ID
+oh-goon plan steps RUN_ID
+oh-goon plan outputs RUN_ID
+oh-goon plan handoff RUN_ID
+```
+
+These views reopen the original durable Run and Game Tape after the execution
+process exits. `plan outputs` reports hashes, byte counts and retained references
+when present; it does not download artifact bytes. An `evidence` artifact does
+not promise retained file bytes. Read `oh-goon plan logs RUN_ID` while transient
+logs are still available. Historical evidence stays separate from current
+workspace files and current source. See the [artifact retention contract](TEMPLATE_ARTIFACT_RETENTION.md).
 
 ## Clean break and evidence limits
 

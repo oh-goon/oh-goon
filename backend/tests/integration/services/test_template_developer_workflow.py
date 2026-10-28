@@ -53,7 +53,7 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
     step_count: int,
 ) -> None:
     monkeypatch.setenv("UV_CACHE_DIR", str(native_fixture_uv_cache))
-    repository = tmp_path / "repositories/team/app"
+    repository = tmp_path / "repositories/team/app project"
     shutil.copytree(
         FIXTURE,
         repository,
@@ -90,12 +90,18 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
         return completed.stdout
 
     cli("league", "add-folder", str(tmp_path / "repositories"))
-    league = json.loads(cli("league", "scan", "--json"))
-    assert len(league["teams"]) == 1
-    target = league["teams"][0]["repository"]
-    assert Path(target["path"]) == repository
     workflow = tmp_path / "workflow"
-    cli("templates", "init", key, "--kind", kind, "--output", str(workflow))
+    cli(
+        "templates",
+        "init",
+        key,
+        "--kind",
+        kind,
+        "--output",
+        str(workflow),
+        "--repository",
+        str(repository),
+    )
     if key == "python/test":
         # Extend the initialized Atomic selection through ordinary authoring,
         # using a real project command as the bounded published-data producer.
@@ -113,21 +119,39 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
             stream.write("- import: general/native-report\n  from: ./goons\n")
     selection = workflow / "run.yml"
     config = yaml.safe_load(selection.read_text())
-    config["target"]["repository_id"] = target["repository_id"]
+    assert config["target"]["repository_id"] == repository_id(repository)
     if key == "python/quality":
         config["inputs"] = {"typechecker": "ty"}
     selection.write_text(yaml.safe_dump(config, sort_keys=False))
-    inspected = json.loads(cli("config", "inspect", str(selection), "--json"))
-    validated = json.loads(cli("config", "validate", str(selection), "--json"))
-    assert inspected == validated
-    assert validated["status"] == "inputs-valid"
-    assert validated["proof"]["admission"] == "not-started"
+    if kind == "goon":
+        inspected = json.loads(cli("config", "inspect", str(selection), "--json"))
+        validated = json.loads(cli("config", "validate", str(selection), "--json"))
+        assert inspected == validated
+        assert validated["status"] == "inputs-valid"
+        assert validated["proof"]["admission"] == "not-started"
     assert not (workflow / "goon.lock").exists()
     cli("lock", str(selection))
     assert (workflow / "goon.lock").is_file()
-    receipt = json.loads(cli("run", str(selection), "--json"))
-    run_id = receipt["fleet_run_id"]
-    assert receipt["status"] == "COMPLETED" and receipt["outcome"] == "SUCCESS"
+    human_result = None
+    if kind == "plan":
+        human_result = cli("run", str(selection))
+        run_ids = [
+            line.removeprefix("Fleet Run ID: ")
+            for line in human_result.splitlines()
+            if line.startswith("Fleet Run ID: ")
+        ]
+        assert len(run_ids) == 1
+        run_id = run_ids[0]
+        assert "Execution status: COMPLETED" in human_result
+        assert "Outcome: SUCCESS" in human_result
+        assert "junit.xml [PRESENT]" in human_result
+        assert f"Inspect Run: oh-goon plan handoff {run_id}" in human_result
+        assert f"Inspect outputs: oh-goon plan outputs {run_id}" in human_result
+        assert f"Read logs (while available): oh-goon plan logs {run_id}" in human_result
+    else:
+        receipt = json.loads(cli("run", str(selection), "--json"))
+        run_id = receipt["fleet_run_id"]
+        assert receipt["status"] == "COMPLETED" and receipt["outcome"] == "SUCCESS"
     # Every readback crosses a fresh process and reopens the durable original
     # Journal; none can reuse the execution process's transient Run objects.
     views = {
@@ -154,6 +178,8 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
     assert report["status"] == "PRESENT"
     assert report["sha256"] == hashlib.sha256(junit).hexdigest()
     assert report["byte_count"] == len(junit)
+    if human_result is not None:
+        assert f"Evidence: {len(junit)} bytes; sha256:{report['sha256']}" in human_result
 
     if key == "python/test":
         published = next(

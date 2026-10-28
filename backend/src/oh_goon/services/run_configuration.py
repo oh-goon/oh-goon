@@ -304,8 +304,10 @@ def _configuration_repository(
         if repository.repository_id == snapshot.selection.target.repository_id:
             matches.append(repository)
     if len(matches) != 1:
-        raise FleetPlanInvalid(
-            "run.yml target must name exactly one included registered repository"
+        raise RunConfigurationInvalid(
+            "run.yml target must name exactly one included registered repository",
+            diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+            fields=("target.repository_id",),
         )
     repository = matches[0]
     snapshot.require_fresh()
@@ -351,6 +353,7 @@ def capture_run_configuration_source(
     update_applications: bool = False,
 ) -> tuple[NormalizedRunConfiguration, FleetPlanSourceGraph]:
     """Acquire only explicitly, then capture one original source graph before closing Git."""
+    from oh_goon.core.errors import ExecutionLockRejected
     from oh_goon.core.execution_lock_identity import verify_execution_lock
     from oh_goon.integrations.git_source_preparation import prepare_git_source
     from oh_goon.services.execution_lock_persistence import (
@@ -369,11 +372,14 @@ def capture_run_configuration_source(
             lock = parse_execution_lock(lock_bytes.decode("utf-8"))
             verify_execution_lock(lock, lock)
             locked = lock.execution_sources
-        except (FleetPlanInvalid, OSError, UnicodeError, ValueError):
+        except (FleetPlanInvalid, OSError, UnicodeError, ValueError) as exc:
             if acquire or allow_network:
-                raise FleetPlanInvalid(
-                    "Existing goon.lock is unavailable or invalid; restore its source pins before locking"
-                ) from None
+                if isinstance(exc, ExecutionLockRejected):
+                    raise
+                raise ExecutionLockRejected(
+                    "Existing goon.lock is unavailable or invalid; restore its source pins before locking",
+                    reason="unreadable",
+                ) from exc
             locked = None
         else:
             if not acquire and allow_network:
@@ -382,8 +388,9 @@ def capture_run_configuration_source(
                     None,
                 )
                 if expected != "sha256:" + snapshot.sha256:
-                    raise FleetPlanInvalid(
-                        "run.yml changed from goon.lock; explicitly lock the current selection before acquisition"
+                    raise ExecutionLockRejected(
+                        "run.yml changed from goon.lock; explicitly lock the current selection before acquisition",
+                        reason="configuration_changed",
                     )
     selection = snapshot.selection.source
     if isinstance(selection, GitPlanSelection):
