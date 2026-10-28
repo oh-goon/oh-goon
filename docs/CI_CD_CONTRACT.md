@@ -15,8 +15,8 @@ locks through `make init`, then invoke `backend-check`, `frontend-check`,
 The integration target executes both backend and cross-owner integration tests.
 That required job also runs `make test-python-projects`: each shipped Python
 application's own tests use its committed native uv lock and an owned external
-environment. Iris selects its development group; orders explicitly selects its
-Airflow test group, where a missing Airflow installation is a failure. The
+environment. Iris and Orders select their development groups; Orders' external
+Airflow adapter has its own explicitly selected optional qualification. The
 standalone setup stays outside the strict qualification rings. Ordinary
 `make release-check` includes the same project check.
 The seventh stable check name remains `build-release`; its job uses GitHub's
@@ -106,6 +106,27 @@ receive repository secrets. Installed-agent,
 live-account, browser, and privileged certification remain explicit qualification;
 portable checks exclude the existing `certification` marker. Workflow files are
 authored source and participate in canonical source/archive identity.
+
+## Use Oh-Goon in another repository's CI
+
+The [Python CI walkthrough](../examples/python-ci/README.md) supplies a small
+Plan, two project-local Goons, GitHub Actions and GitLab CI configurations. It
+uses the existing Orders application for native lint, tests and wheel building.
+The hosted platform owns triggers and job scheduling; Oh-Goon's public CLI owns
+locking, admission, waited execution and Run reporting. Source selection pins
+the real application's Git commit, while native uv owns dependency freshness
+and build behavior. No empty target repository or alternate runner is needed.
+
+The original content-store collector retains the declared wheel and native
+Ruff/JUnit reports needed for later diagnostics. Public artifact export verifies
+their bytes before the platform uploads the promoted files and portable JSON
+readbacks. Failed work retains its failed outcome and
+skips later Steps. A rejected invocation with no submitted Run has no execution
+receipt to collect. The CLI handles SIGINT/SIGTERM through its existing Run
+cancellation service; platform force-kill and artifact-upload availability
+remain separate qualification boundaries. The reference GitLab configuration
+requires a Linux shell runner. See the walkthrough for exact local and hosted
+proof and the remaining unqualified boundaries.
 
 ## Fast feedback and complete release verification
 

@@ -18,4 +18,4 @@ steps:
     run: orders-pipeline load --total ${{ steps.transform.outputs.TOTAL }}
     artifacts:
       - path: .showcase/result.json
-        retention: evidence
+        retention: content_store

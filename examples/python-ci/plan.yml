@@ -1,0 +1,7 @@
+execution:
+  purpose: verification
+goons:
+- import: python/checks
+  from: ./goons
+- import: python/wheel
+  from: ./goons

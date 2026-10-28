@@ -3,11 +3,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
+from types import FrameType
 from typing import TypedDict
 
 from oh_goon.application import ApplicationRuntime
@@ -138,7 +142,39 @@ def _run_result(
     }
 
 
+class _CliRunTermination(KeyboardInterrupt):
+    """A caller's default SIGTERM requests the original waited Run cancellation."""
+
+
+def _request_cli_run_termination(_signum: int, _frame: FrameType | None) -> None:
+    raise _CliRunTermination
+
+
+@contextmanager
+def _waited_run_sigterm(wait: bool) -> Iterator[None]:
+    # Embedding threads and explicit caller signal handlers retain their native
+    # authority. Only the ordinary executable's default SIGTERM is adapted.
+    if (
+        not wait
+        or threading.current_thread() is not threading.main_thread()
+        or signal.getsignal(signal.SIGTERM) != signal.SIG_DFL
+    ):
+        yield
+        return
+    previous = signal.signal(signal.SIGTERM, _request_cli_run_termination)
+    try:
+        yield
+    finally:
+        if signal.getsignal(signal.SIGTERM) is _request_cli_run_termination:
+            signal.signal(signal.SIGTERM, previous)
+
+
 def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
+    with _waited_run_sigterm(args.wait):
+        return _run_selected(runtime, args)
+
+
+def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     if getattr(args, "as_json", False) and args.repair_handoff:
         print(
             json.dumps(
@@ -267,7 +303,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             detail = _wait_for_terminal_with_progress(
                 runtime, admitted.fleet_run_id, admitted_run=admitted
             )
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as interruption:
         cancellation_requested = False
         execution_status = None
         execution_terminal = None
@@ -298,7 +334,11 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 )
             )
         else:
-            print("Plan invocation interrupted.")
+            print(
+                "Plan invocation interrupted by SIGTERM."
+                if isinstance(interruption, _CliRunTermination)
+                else "Plan invocation interrupted."
+            )
             if admitted is not None:
                 print(
                     "Cancellation request: "
@@ -307,7 +347,7 @@ def _run(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 print("Execution status: " + (execution_status or "unobserved"))
                 print("Cleanup evidence: inspect durable Run handoff.")
                 print("Durable Run handoff argv: " + json.dumps(readback))
-        return 130
+        return 143 if isinstance(interruption, _CliRunTermination) else 130
     except (FleetDomainError, ValueError) as exc:
         if hasattr(args, "_run_configuration"):
             from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic

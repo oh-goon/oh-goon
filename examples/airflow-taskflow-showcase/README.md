@@ -2,19 +2,37 @@
 
 Classification: runnable-with-prerequisites
 
-Select one revision of this repository and run its complete [general/orders-taskflow Python Goon](../../templates/goons/general/orders-taskflow/README.md) against an empty registered target. This ordinary trusted verification Plan needs an installed OH-Goon CLI, Python 3.12+ and native uv. The application has no runtime dependencies; the separate Airflow adapter is optional.
+Select one revision of this repository and run its complete
+[general/orders-taskflow Python project](../../templates/goons/general/orders-taskflow/README.md)
+against your actual Orders application Git checkout. This trusted-local
+verification Plan needs an initialized Oh-Goon CLI, Python 3.12+ and native uv.
+The application has no runtime dependencies; the separate Airflow adapter is
+optional.
 
-Create and register a target without copying application code into it:
+## Develop and select the application
+
+In your Orders application checkout, first develop and run the same business
+code directly:
 
 ```bash
-mkdir -p ./repositories/orders-target
-git init ./repositories/orders-target
-oh-goon league add-folder "$PWD/repositories/orders-target"
-oh-goon league scan
-oh-goon templates init general/orders-taskflow --kind goon --output ./workflow --repository "$PWD/repositories/orders-target"
+uv sync --frozen --no-default-groups --group dev
+uv run --no-sync pytest tests/test_operations.py tests/test_cli.py
+uv run --no-sync orders-pipeline run --fixture official
 ```
 
-Initialization binds the registered target and writes its canonical ID. Keep the generated `target` and `inputs` in `workflow/run.yml`; replace only its `source` mapping with this explicit Git selection:
+The result in `.showcase/result.json` contains `{"total_order_value": "1236.70"}`.
+The installed command's `run` form calls the same extraction, transformation and
+loading functions that the three Oh-Goon Steps invoke individually.
+
+Register this real application repository and initialize by its path:
+
+```bash
+oh-goon league add-folder "$PWD"
+oh-goon templates init general/orders-taskflow --kind goon --output ../orders-workflow --repository "$PWD"
+```
+
+Keep the generated `target` and `inputs` in `../orders-workflow/run.yml`;
+replace only its `source` mapping with this explicit Git selection:
 
 ```yaml
 source:
@@ -25,25 +43,70 @@ source:
   plan: examples/airflow-taskflow-showcase/plan.yml
 ```
 
-The selector names the repository, requested ref, authoring root and contained Plan. That Plan imports this revision's package explicitly; the installed catalog cannot shadow it. The initializer's local `workflow/plan.yml` is now unselected and can be removed after this edit. This directory's `run.yml` is a reference selection with a placeholder target; initialization supplies the actual target authority.
+The selector names the repository, requested ref, authoring root and contained
+Plan. That Plan imports the package from the same revision. Its captured Git
+source supplies the executed implementation; your application checkout remains
+the registered execution subject. The initializer's local `plan.yml` is now
+unselected. This directory's `run.yml` is a reference selection; initialization
+has already supplied your actual target identity.
 
 ```bash
-oh-goon config inspect ./workflow/run.yml --acquire
-oh-goon lock ./workflow/run.yml
-oh-goon run ./workflow/run.yml --json
+oh-goon lock ../orders-workflow/run.yml
+oh-goon run ../orders-workflow/run.yml
 ```
 
-Explicit inspection acquires source and explains the input contract and selected commit. It does not install or execute application code. Locking records the commit in `workflow/goon.lock`; later Runs retain that exact pin. Change a caller input and lock again. Only `oh-goon lock ./workflow/run.yml --update-goons` refreshes Git source selection. Cached inspection without `--acquire` does not fetch missing source.
+`config inspect ../orders-workflow/run.yml --acquire` is optional: it explicitly
+acquires source and shows its input contract and selected commit without
+installing or executing application code. Locking records the exact commit in
+`../orders-workflow/goon.lock`; later Runs consume that pin. Editing `fixture`
+and locking again preserves the pin. Only `lock --update-goons` explicitly
+refreshes Git source selection. `uv.lock` owns native Python dependency
+resolution; `goon.lock` additionally binds selected workflow source and caller
+inputs. Cached inspection without `--acquire` does not fetch missing source.
 
-The ordinary Run waits for completion. Use its returned `fleet_run_id` in a fresh CLI process:
+## Inspect and export the result
+
+The Run waits for completion and prints its Run ID and export command. Use that
+ID in a new CLI process, and export into a directory outside the application
+source checkout:
 
 ```bash
+mkdir -p ../orders-results
 oh-goon plan tape RUN_ID --json
 oh-goon plan outputs RUN_ID --json
+oh-goon plan export-artifact RUN_ID --step general-orders-taskflow.load --path .showcase/result.json --output ../orders-results/official.json
 ```
 
-With `fixture: official`, all three Steps pass and the final artifact hash describes `{"total_order_value": "1236.70"}` followed by a newline. `fixture: changed` produces `60.00`. `fixture: invalid` passes extraction, fails transformation and skips loading; the Run requires attention. Each execution uses owned source, environment and output roots, leaving the empty target and developer environment unchanged.
+The final JSON uses `retention: content_store`. Export verifies the recorded
+artifact's raw byte hash and size and the retained object's separate canonical
+identity. It reads the recorded retained reference after attempt scratch is
+disposed; the developer's `.venv` and direct-command output stay unchanged.
+Choose a new destination filename for each export. Existing files are refused.
+See the [retention lifecycle](../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md)
+for retained-reference availability.
 
-The artifact uses `retention: evidence`: Game Tape preserves its hash, size and presence across process restart. It does not retain downloadable bytes. The Iris CI/CD [Git example](../python-goon-project/README.md) demonstrates a separate workflow requiring retained-content publication and the selected CI/CD executor.
+Set `inputs.fixture: changed`, lock and run again, then export that Run to
+`../orders-results/changed.json`; its total is `60.00`. Both Run IDs remain
+independently inspectable. Export the first ID to a fresh filename after the
+later Run to recover its original `1236.70` bytes.
 
-OH-Goon executes the package's three ordered Steps and explicit output bindings. It does not execute or translate Airflow DAGs. The [canonical package guide](../../templates/goons/general/orders-taskflow/README.md) identifies the official Airflow 3.3.2 tutorial and this application's adaptations, and documents direct frozen Python development, the full business command and individual operations. Required CI runs the ordinary application tests under the native lock without Airflow. The optional external Airflow adapter and any scheduler/worker deployment remain separate qualification.
+With `fixture: invalid`, extraction passes, transformation fails with a native
+nonzero exit, and loading is skipped. `run` exits 1 and the Run requires
+attention. `plan steps FAILED_RUN_ID --json` exposes those three outcomes.
+Exporting `.showcase/result.json` for that failed Run is refused and creates no
+destination file, even if the developer checkout or a later Run has a successful
+result. DATA and TOTAL remain explicit Step output bindings; final retained
+content does not replace dataflow or turn a failed Step into success.
+
+Oh-Goon executes three ordered Steps. It does not execute or translate Airflow
+DAGs. The [canonical project guide](../../templates/goons/general/orders-taskflow/README.md)
+identifies the upstream tutorial and this application's adaptations. Ordinary
+application tests run under the native lock without Airflow. The optional
+external Airflow adapter and scheduler/worker deployment remain separate
+qualification, as do strict isolation and APP certification. This local Plan
+does not claim enforced CPU or memory caps.
+
+The [Python CI walkthrough](../python-ci/README.md) uses this same Orders
+application for linting, tests, packaging and artifact collection through
+GitHub Actions or GitLab CI. The hosted platform owns triggering; the existing
+Oh-Goon Run and native tools own execution.
