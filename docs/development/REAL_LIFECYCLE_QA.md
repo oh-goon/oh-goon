@@ -54,6 +54,76 @@ do not turn this guide into a perpetual PASS list. Older ADR/checkpoint results
 describe their original source. Follow [documentation anti-drift](DOCUMENTATION_ANTI_DRIFT.md)
 when current and historical explanations disagree.
 
+## Source, resume and worker authority qualification
+
+The existing source-layout owner supplies canonical authored-source identity;
+native pytest supplies selection and outcomes, and the existing member receipt
+store owns reuse. An earlier successful owner or receipt cannot prove a changed
+source or an unqualified semantic input. Qualification must exercise the real
+boundary rather than substitute a fake source identity or infer test dependencies.
+
+For [HUG-114](https://linear.app/hugloss/issue/HUG-114), synchronize native
+launcher children in disposable checkouts and mutate authored Python, tests,
+frontend, generated contracts or scripts between owners and immediately before
+aggregate success. Compare canonical identities at semantic-owner boundaries
+as well as beginning/end, retaining an observed source change even if a later
+edit restores the initial bytes. Stop admitting further owners after a change.
+The source-layout identity command accepts an explicit `--root` for inspection;
+repair commands retain their original root. Stable source,
+ephemeral outputs, original failures, adjacent worktrees and symlink substitution
+provide the controls. Tool-session units revalidate source before publishing a
+new PASS receipt. Within-owner transient edits require that owner's proof or
+explicit immutable-source qualification; these boundary checks are not a file
+watcher. Certification retains its original source authority.
+
+For [HUG-115](https://linear.app/hugloss/issue/HUG-115), first establish genuine
+two-run reuse with unchanged source/member/toolchain, then change a controlled
+semantic environment, configuration, plugin, native tool or external fixture
+input. Record the supported input owner and require rerun or refusal when its
+authority changes. Native HOME/XDG, PATH, Python import, temporary-directory and
+pytest selectors bind the resolved invocation digest; `--resume-env NAME` declares additional
+semantic environment inputs. Use the existing `--resume-context` with an owner's
+actual input digest for mutable tool/fixture content, or native `no_resume` when
+there is no cross-invocation repeatability authority. Its mark inhibits future
+cached reuse, not current-run completed-member accounting. Unknown dependencies
+remain unqualified: arbitrary ambient-state discovery, blanket environment
+hashing and stored credentials are not valid substitutes. Context manifests
+retain digests rather than raw context tokens. Worker, batching, timeout and
+CPU-only changes must retain otherwise valid reuse.
+
+For [HUG-116](https://linear.app/hugloss/issue/HUG-116), compare identical native
+members across fresh/resumed, file/case and ordering variants. Exercise owned
+SQLite files, HOME/XDG roots, sockets/ports and child lifetimes with both valid
+isolation and a deliberate collision. Caller HOME/XDG selection remains intact;
+test fixtures own temporary resources and environment restoration. Cancellation
+must reach active native commands before the executor joins them, with no new
+refinement admitted after cancellation. Preserve declared serial process work and
+exact terminal accounting. Record requested and admitted workers; actual four-
+worker qualification needs explicit native capacity, not a four-worker request
+under a two-CPU ceiling. Missing physical-host cells remain NOT_RUN.
+
+After native environment preparation, begin with the bounded existing owner files:
+
+```bash
+bash scripts/development_test_resources.sh \
+  uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
+  --qualified --focused --next-check "make tooling-check" \
+  --granularity files --batch-size 1 --workers 1 --batch-timeout 180 \
+  scripts/tests/test_development_check_contract.py \
+  scripts/tests/test_development_test_runner.py \
+  scripts/tests/test_application_verify_contract.py \
+  scripts/tests/test_test_batch_receipts.py \
+  scripts/tests/test_pytest_native_collection.py
+```
+
+Add the decisive native canaries to their existing owners after reproducing a
+gap. Run process cases explicitly, then the applicable root escalation union on
+stable source. Keep results with HUG-133 and the original receipts; these commands
+are investigation entry points, not recorded passes or a new test authority.
+The native [source-boundary proofs](../../scripts/tests/test_development_source_authority.py)
+and [worker/resource proofs](../../scripts/tests/test_pytest_worker_isolation.py)
+exercise the public launchers and existing batch runner alongside those owner files.
+
 ## Output and developer-log qualification
 
 Pytest execution retains at most 1 MiB of merged stdout/stderr diagnostics per

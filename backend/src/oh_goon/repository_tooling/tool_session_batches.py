@@ -434,6 +434,23 @@ def main(argv: list[str] | None = None) -> int:
                 f"TOOL SESSION QUALIFICATION FAILED unit={unit.name} exit={code}", file=sys.stderr
             )
             return code
+        try:
+            current_source_identity = canonical_source_identity(ROOT)
+        except (OSError, ValueError):
+            print(
+                f"TOOL SESSION QUALIFICATION INCOMPLETE unit={unit.name} "
+                "canonical source identity unavailable; no PASS receipt written",
+                file=sys.stderr,
+            )
+            return 1
+        if current_source_identity != source_identity:
+            print(
+                f"TOOL SESSION QUALIFICATION SOURCE_CHANGED unit={unit.name} "
+                f"expected={source_identity} observed={current_source_identity}; "
+                "no PASS receipt written",
+                file=sys.stderr,
+            )
+            return 1
         _write_receipt(
             _receipt_path(directory, unit),
             source_identity=source_identity,

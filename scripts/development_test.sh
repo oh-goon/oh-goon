@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 
 MAKE_BIN="${MAKE:-make}"
@@ -46,27 +46,44 @@ notes=()
 failed=0
 
 WORKSPACE_SOURCE_IDENTITY=""
+WORKSPACE_INTEGRITY_REQUIRED=0
+WORKSPACE_INTEGRITY_FAILED=0
 SOURCE_LAYOUT="$ROOT/backend/.venv/bin/oh-goon-source-layout"
 
 capture_workspace_integrity() {
+  WORKSPACE_INTEGRITY_REQUIRED=1
   if [[ ! -x "$SOURCE_LAYOUT" ]]; then
     printf '%s\n' 'WORKSPACE INTEGRITY FAILED: canonical source-layout owner is unavailable' >&2
     return 1
   fi
-  WORKSPACE_SOURCE_IDENTITY="$($SOURCE_LAYOUT identity)" || return 1
-  if [[ "$WORKSPACE_SOURCE_IDENTITY" != sha256:* ]]; then
+  local current
+  current="$("$SOURCE_LAYOUT" identity --root "$ROOT")" || return 1
+  if [[ ! "$current" =~ ^sha256:[0-9a-f]{64}$ ]]; then
     printf '%s\n' 'WORKSPACE INTEGRITY FAILED: canonical source-layout owner returned invalid identity' >&2
     return 1
   fi
+  WORKSPACE_SOURCE_IDENTITY="$current"
+  printf 'WORKSPACE SOURCE IDENTITY: %s\n' "$WORKSPACE_SOURCE_IDENTITY"
 }
 
 verify_workspace_integrity() {
+  (( WORKSPACE_INTEGRITY_FAILED == 0 )) || return 1
   if [[ -z "$WORKSPACE_SOURCE_IDENTITY" ]]; then
-    return 0
+    (( WORKSPACE_INTEGRITY_REQUIRED == 0 ))
+    return $?
+  fi
+  if [[ ! "$ROOT" -ef . ]]; then
+    WORKSPACE_INTEGRITY_FAILED=1
+    printf '%s\n' 'WORKSPACE INTEGRITY FAILED: declared checkout directory changed during make test' >&2
+    return 1
   fi
   local current
-  current="$($SOURCE_LAYOUT identity)" || return 1
+  if ! current="$("$SOURCE_LAYOUT" identity --root "$ROOT")"; then
+    WORKSPACE_INTEGRITY_FAILED=1
+    return 1
+  fi
   if [[ "$current" != "$WORKSPACE_SOURCE_IDENTITY" ]]; then
+    WORKSPACE_INTEGRITY_FAILED=1
     printf '%s\n' 'WORKSPACE INTEGRITY FAILED: canonical authored source changed during make test' >&2
     printf 'Expected: %s\nObserved: %s\n' "$WORKSPACE_SOURCE_IDENTITY" "$current" >&2
     return 1
@@ -94,15 +111,27 @@ record() {
 run_check() {
   local name="$1"
   local target="$2"
+  local code=0
+  if (( WORKSPACE_INTEGRITY_FAILED )); then
+    record "$name" BLOCKED "source authority changed; check not started"
+    return 1
+  fi
   sh "$BANNER" "DEVELOPMENT TEST" "Owner/check: $name | make $target"
-  if "$MAKE_BIN" --no-print-directory "$target"; then
-    record "$name" PASS
-    return 0
-  else
-    local code=$?
+  "$MAKE_BIN" --no-print-directory "$target" || code=$?
+  if ! verify_workspace_integrity; then
+    if (( code )); then
+      record "$name" FAIL "exit $code; source authority changed"
+      return "$code"
+    fi
+    record "$name" BLOCKED "source authority changed during check"
+    return 1
+  fi
+  if (( code )); then
     record "$name" FAIL "exit $code"
     return "$code"
   fi
+  record "$name" PASS
+  return 0
 }
 
 skip_check() {
@@ -218,6 +247,10 @@ if verify_workspace_integrity; then
   run_check "Frontend build" frontend-build || frontend_failure_guard || true
 else
   record "Frontend prerequisite integrity" BLOCKED "source-owned workspace changed or disappeared during backend/tooling tests"
+fi
+
+if [[ -n "$WORKSPACE_SOURCE_IDENTITY" ]] && ! verify_workspace_integrity; then
+  record "Workspace integrity" BLOCKED "source-owned workspace changed or disappeared; rerun make test"
 fi
 
 printf '\nOH-GOON DEVELOPMENT TESTS\n\n'

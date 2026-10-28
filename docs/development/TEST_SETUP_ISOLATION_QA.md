@@ -14,3 +14,11 @@ Keep isolation fixtures function-scoped unless a proposed wider scope proves all
 4. re-measurement shows a meaningful benefit rather than a micro-optimisation.
 
 A tiny reduction in fixture calls is not sufficient reason to trade away independent test state. The current process-identity, certification-frontdoor, and package-slim fixtures intentionally remain function-scoped.
+
+Native [worker qualification](../../scripts/tests/test_pytest_worker_isolation.py)
+reuses resource basenames across independent pytest processes to prove fixture
+ownership, coverage union and cleanup. Caller HOME/XDG selection is preserved;
+fixtures own their temporary state and restore environment changes. The existing
+command supervisor handles cancellation and releases owned process resources.
+Record actual admitted workers and exact membership for fresh/resumed runs;
+unsupported host cells remain unqualified.

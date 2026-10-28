@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -100,22 +101,21 @@ def _run(
         if diagnostic_option is not None
         else ("1" if run_hosted_diagnostic else "0")
     )
-    source_layout = ROOT / "backend/.venv/bin/oh-goon-source-layout"
-    created_source_layout = not source_layout.exists()
-    if created_source_layout:
-        source_layout.parent.mkdir(parents=True, exist_ok=True)
-        source_layout.write_text(
-            "#!/usr/bin/env bash\nprintf '%s\n' sha256:test-development-runner\n",
-            encoding="utf-8",
-        )
-        source_layout.chmod(0o755)
-    try:
-        result = subprocess.run(
-            ("bash", str(RUNNER)), cwd=ROOT, env=env, capture_output=True, text=True
-        )
-    finally:
-        if created_source_layout:
-            source_layout.unlink(missing_ok=True)
+    checkout = tmp_path / "checkout"
+    scripts = checkout / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (RUNNER.name, "command_banner.sh", "host_python.sh"):
+        shutil.copy2(ROOT / "scripts" / name, scripts / name)
+    source_layout = checkout / "backend/.venv/bin/oh-goon-source-layout"
+    source_layout.parent.mkdir(parents=True)
+    source_layout.symlink_to(ROOT / "backend/.venv/bin/oh-goon-source-layout")
+    result = subprocess.run(
+        ("bash", str(scripts / RUNNER.name)),
+        cwd=checkout,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
     invoked = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
     return result, invoked
 
@@ -181,15 +181,6 @@ def test_frontend_failure_is_native_and_does_not_create_dependency_classifier(
     assert "frontend-architecture" in invoked
     assert "Frontend typecheck       FAIL" in result.stdout
     assert "Frontend dependencies" not in result.stdout
-
-
-def test_frontend_failure_guard_checks_source_integrity_only() -> None:
-    text = RUNNER.read_text(encoding="utf-8")
-    guard = text.split("frontend_failure_guard() {", 1)[1].split("\n}\n", 1)[0]
-    assert "verify_workspace_integrity" in guard
-    assert "frontend-dependencies-check" not in guard
-    assert "node_modules" not in guard
-    assert "npm ls" not in guard
 
 
 def test_development_runner_never_acquires_dependencies() -> None:

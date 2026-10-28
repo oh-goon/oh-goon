@@ -3,7 +3,9 @@ from __future__ import annotations
 import subprocess
 import sys
 import json
+import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -13,6 +15,243 @@ from oh_goon.repository_tooling.pytest_process_environment import (
 )
 
 pytestmark = pytest.mark.process
+
+
+def test_resume_tracks_unqualified_native_python_import_path(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    first_path = tmp_path / "first-imports"
+    second_path = tmp_path / "second-imports"
+    for path, allowed in ((first_path, True), (second_path, False)):
+        path.mkdir()
+        (path / "selected_state.py").write_text(f"ALLOWED = {allowed!r}\n")
+    trace = tmp_path / "trace"
+    case = tmp_path / "test_import_state.py"
+    case.write_text(
+        "from selected_state import ALLOWED\nfrom pathlib import Path\n"
+        "def test_imported_state():\n"
+        f"    with Path({str(trace)!r}).open('a') as stream: stream.write('run\\n')\n"
+        "    assert ALLOWED\n"
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "oh_goon.repository_tooling.test_batches",
+        str(case),
+        "--granularity",
+        "tests",
+        "--marker",
+        "",
+        "--workers",
+        "1",
+        "--batch-size",
+        "1",
+        "--batch-timeout",
+        "20",
+        "--resume-state-root",
+        str(tmp_path / "receipts"),
+    ]
+
+    def run(
+        path: Path, number: int, *, resume: bool = True
+    ) -> tuple[int, dict[str, Any]]:
+        report = tmp_path / f"report-{number}.json"
+        result = subprocess.run(
+            [*command, *(["--resume"] if resume else []), "--report-path", str(report)],
+            cwd=root,
+            env={**os.environ, "PYTHONPATH": str(path)},
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        assert report.is_file(), result.stdout + result.stderr
+        assert (
+            str(first_path) not in report.read_text()
+            and str(second_path) not in report.read_text()
+        )
+        return result.returncode, json.loads(report.read_text())
+
+    baseline_code, baseline = run(first_path, 1)
+    same_code, same = run(first_path, 2)
+    assert baseline_code == same_code == 0
+    assert baseline["resume_suite_identity"] == same["resume_suite_identity"]
+    assert same["membership_receipt"]["resumed"] == [f"{case}::test_imported_state"]
+    assert trace.read_text().splitlines() == ["run"]
+    changed_code, changed = run(second_path, 3)
+    fresh_code, fresh = run(second_path, 4, resume=False)
+    assert (
+        baseline["source_identity"]
+        == changed["source_identity"]
+        == fresh["source_identity"]
+    )
+    assert baseline["test_plan_identity"] == changed["test_plan_identity"]
+    assert baseline["toolchain_identity"] == changed["toolchain_identity"]
+    assert changed_code == fresh_code == 1
+    assert changed["resume_suite_identity"] != baseline["resume_suite_identity"]
+    assert changed["membership_receipt"]["resumed"] == []
+    assert changed["membership_receipt"]["failed"] == [f"{case}::test_imported_state"]
+    assert trace.read_text().splitlines() == ["run", "run", "run"]
+
+
+@pytest.mark.parametrize("selector", ("XDG_STATE_HOME", "CUSTOM_TEST_INPUT"))
+def test_resume_binds_native_and_declared_environment_without_budget_or_value_leaks(
+    tmp_path: Path, selector: str
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    allowed = str(tmp_path / "allowed")
+    denied = str(tmp_path / "denied")
+    trace = tmp_path / "trace"
+    case = tmp_path / "test_semantic_environment.py"
+    case.write_text(
+        "import os\nfrom pathlib import Path\n"
+        "def test_value():\n"
+        "    with Path(os.environ['RESUME_PROBE_TRACE']).open('a') as stream: stream.write('run\\n')\n"
+        f"    assert os.environ[{selector!r}] == {allowed!r}\n"
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "oh_goon.repository_tooling.test_batches",
+        str(case),
+        "--qualified",
+        "--granularity",
+        "tests",
+        "--marker",
+        "",
+        "--resume",
+        "--resume-state-root",
+        str(tmp_path / "receipts"),
+        "--resume-context",
+        "native-owner=private-context-canary",
+    ]
+    if selector == "CUSTOM_TEST_INPUT":
+        command += ["--resume-env", selector]
+
+    def run(
+        value: str, number: int, regroup: bool = False
+    ) -> tuple[int, dict[str, Any]]:
+        environment = dict(os.environ)
+        environment.update({selector: value, "RESUME_PROBE_TRACE": str(trace)})
+        environment["OH_GOON_TEST_CPUS"] = "4" if regroup else "2"
+        report = tmp_path / f"report-{number}.json"
+        result = subprocess.run(
+            [
+                *command,
+                "--workers",
+                "2" if regroup else "1",
+                "--batch-size",
+                "4" if regroup else "1",
+                "--batch-timeout",
+                "30" if regroup else "20",
+                "--report-path",
+                str(report),
+            ],
+            cwd=root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        assert report.is_file(), result.stdout + result.stderr
+        payload = json.loads(report.read_text())
+        assert allowed not in report.read_text() and denied not in report.read_text()
+        return result.returncode, payload
+
+    first_code, first = run(allowed, 1)
+    unchanged_code, unchanged = run(allowed, 2, regroup=True)
+    assert first_code == unchanged_code == 0
+    assert first["source_identity"] == unchanged["source_identity"]
+    assert first["resume_suite_identity"] == unchanged["resume_suite_identity"]
+    assert unchanged["membership_receipt"]["resumed"] == [f"{case}::test_value"]
+    assert trace.read_text().splitlines() == ["run"]
+
+    changed_code, changed = run(denied, 3)
+    assert changed["source_identity"] == first["source_identity"]
+    assert changed["test_plan_identity"] == first["test_plan_identity"]
+    assert changed["toolchain_identity"] == first["toolchain_identity"]
+    assert changed["resume_suite_identity"] != first["resume_suite_identity"]
+    assert changed_code != 0
+    assert changed["membership_receipt"]["resumed"] == []
+    assert changed["membership_receipt"]["failed"] == [f"{case}::test_value"]
+    again_code, again = run(denied, 4)
+    assert again_code != 0 and again["membership_receipt"]["resumed"] == []
+    assert trace.read_text().splitlines() == ["run", "run", "run"]
+    manifests = list((tmp_path / "receipts").rglob("context.json"))
+    assert manifests
+    assert all("private-context-canary" not in path.read_text() for path in manifests)
+
+
+@pytest.mark.parametrize("granularity", ("files", "tests"))
+def test_native_no_resume_declaration_reruns_external_state_without_disabling_other_reuse(
+    tmp_path: Path, granularity: str
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    config = tmp_path / "pyproject.toml"
+    config.write_text('[tool.pytest.ini_options]\naddopts = "--strict-markers"\n')
+    external = tmp_path / "external-state"
+    external.write_text("allowed")
+    trace = tmp_path / "trace"
+    case = tmp_path / "test_external_state.py"
+    case.write_text(
+        "import pytest\nfrom pathlib import Path\n"
+        f"TRACE = Path({str(trace)!r})\n"
+        "def record(name):\n"
+        "    with TRACE.open('a') as stream: stream.write(name+'\\n')\n"
+        "@pytest.mark.no_resume\n"
+        "def test_external():\n"
+        "    record('external')\n"
+        f"    assert Path({str(external)!r}).read_text() == 'allowed'\n"
+        "def test_stable(): record('stable')\n"
+    )
+    command = [
+        sys.executable,
+        "-m",
+        "oh_goon.repository_tooling.test_batches",
+        str(case),
+        "--qualified",
+        "--pytest-config",
+        str(config),
+        "--granularity",
+        granularity,
+        "--marker",
+        "",
+        "--workers",
+        "1",
+        "--batch-size",
+        "1",
+        "--batch-timeout",
+        "20",
+        "--resume",
+        "--resume-state-root",
+        str(tmp_path / "receipts"),
+    ]
+    observations = []
+    for number in range(3):
+        if number == 2:
+            external.write_text("changed")
+        report = tmp_path / f"report-{number}.json"
+        result = subprocess.run(
+            [*command, "--report-path", str(report)],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        assert report.is_file(), result.stdout + result.stderr
+        payload = json.loads(report.read_text())
+        observations.append(payload)
+        assert (result.returncode == 0) is (number != 2)
+        expected_reuse = (
+            [f"{case}::test_stable"] if number and granularity == "tests" else []
+        )
+        assert payload["membership_receipt"]["resumed"] == expected_reuse
+        assert not payload["membership_receipt"]["missing"]
+        assert not payload["membership_receipt"]["duplicates"]
+        assert not payload["membership_receipt"]["extras"]
+    assert len({item["source_identity"] for item in observations}) == 1
+    assert len({item["resume_suite_identity"] for item in observations}) == 1
+    lines = trace.read_text().splitlines()
+    assert lines.count("external") == 3
+    assert lines.count("stable") == (3 if granularity == "files" else 1)
 
 
 def test_qualified_empty_paths_match_native_defaults_flags_plugins_and_cwd(

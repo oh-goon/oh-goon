@@ -2,12 +2,75 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
 import pytest
 
 from oh_goon.repository_tooling import tool_session_batches as subject
+from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("mutation", ("authored", "symlink"))
+def test_native_unit_cannot_publish_pass_for_changed_or_unreadable_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation: str
+) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    source = checkout / "README.md"
+    source.write_text("before\n", encoding="utf-8")
+    counter = tmp_path / "executed"
+    external = tmp_path / "external.md"
+    external.write_text("unowned bytes\n", encoding="utf-8")
+    command = (
+        "from pathlib import Path; import sys; p=Path(sys.argv[1]); "
+        "p.write_text(p.read_text()+'.' if p.exists() else '.')"
+    )
+    stable = subject.QualificationUnit(
+        "native", (sys.executable, "-c", command, str(counter), str(external)), 5
+    )
+    selected = [stable]
+    state = tmp_path / "state"
+    monkeypatch.setattr(subject, "ROOT", checkout)
+    monkeypatch.setattr(subject, "_state_root", lambda: state)
+    monkeypatch.setattr(subject, "maintenance_release_units", lambda: tuple(selected))
+    before = canonical_source_identity(checkout)
+    assert subject.main([]) == 0
+    assert counter.read_text() == "."
+    receipts = list(state.rglob("*.json"))
+    assert len(receipts) == 1
+    original_receipt = receipts[0].read_bytes()
+
+    change = (
+        "; Path('README.md').write_text('after\\n')"
+        if mutation == "authored"
+        else "; Path('README.md').unlink(); Path('README.md').symlink_to(sys.argv[2])"
+    )
+    selected[:] = [
+        subject.QualificationUnit(
+            "native",
+            (sys.executable, "-c", command + change, str(counter), str(external)),
+            5,
+        )
+    ]
+    assert subject.main([]) == 1
+    assert counter.read_text() == ".."
+    assert len(list(state.rglob("*.json"))) == 1
+    assert receipts[0].read_bytes() == original_receipt
+
+    if source.is_symlink():
+        source.unlink()
+    source.write_text("repaired\n", encoding="utf-8")
+    selected[:] = [stable]
+    assert subject.main([]) == 0
+    assert counter.read_text() == "..."
+    admitted_sources = {
+        json.loads(path.read_text())["source_identity"]
+        for path in state.rglob("*.json")
+    }
+    assert admitted_sources == {before, canonical_source_identity(checkout)}
 
 
 def _complete(calls: list[str], unit: subject.QualificationUnit) -> int:

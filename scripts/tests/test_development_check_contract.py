@@ -13,6 +13,17 @@ SCRIPT = ROOT / "scripts/development_check.sh"
 MAKEFILE = (ROOT / "Makefile").read_text(encoding="utf-8")
 
 
+def _isolated_runner(tmp_path: Path) -> Path:
+    scripts = tmp_path / "checkout/scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy2(SCRIPT, scripts / SCRIPT.name)
+    shutil.copy2(ROOT / "scripts/command_banner.sh", scripts / "command_banner.sh")
+    owner = scripts.parent / "backend/.venv/bin/oh-goon-source-layout"
+    owner.parent.mkdir(parents=True)
+    owner.symlink_to(ROOT / "backend/.venv/bin/oh-goon-source-layout")
+    return scripts / SCRIPT.name
+
+
 def _native_frontdoor_commands(target: str, log_directory: Path) -> list[list[str]]:
     environment = os.environ.copy()
     for name in (
@@ -174,11 +185,8 @@ def test_fast_check_runs_normal_owners_without_local_checkpoint_history(
     tmp_path: Path,
 ) -> None:
     """An ordinary checkout must not fail because archive-only inputs are absent."""
-    checkout = tmp_path / "checkout"
-    scripts = checkout / "scripts"
-    scripts.mkdir(parents=True)
-    shutil.copy2(SCRIPT, scripts / SCRIPT.name)
-    shutil.copy2(ROOT / "scripts/command_banner.sh", scripts / "command_banner.sh")
+    script = _isolated_runner(tmp_path)
+    checkout = script.parent.parent
     calls = tmp_path / "calls"
     fake = tmp_path / "make"
     fake.write_text(
@@ -192,7 +200,7 @@ def test_fast_check_runs_normal_owners_without_local_checkpoint_history(
     fake.chmod(0o755)
 
     completed = subprocess.run(
-        ["bash", str(scripts / SCRIPT.name)],
+        ["bash", str(script)],
         cwd=checkout,
         env={**os.environ, "MAKE": str(fake), "OH_GOON_TEST_CALLS": str(calls)},
         text=True,
@@ -212,6 +220,7 @@ def test_fast_check_runs_normal_owners_without_local_checkpoint_history(
 
 
 def test_fast_check_reports_multiple_independent_failures(tmp_path: Path) -> None:
+    script = _isolated_runner(tmp_path)
     fake = tmp_path / "make"
     fake.write_text(
         "#!/bin/sh\n"
@@ -222,8 +231,8 @@ def test_fast_check_reports_multiple_independent_failures(tmp_path: Path) -> Non
     )
     fake.chmod(0o755)
     completed = subprocess.run(
-        ["bash", str(SCRIPT)],
-        cwd=ROOT,
+        ["bash", str(script)],
+        cwd=script.parent.parent,
         env={**os.environ, "MAKE": str(fake)},
         text=True,
         capture_output=True,
@@ -238,6 +247,7 @@ def test_fast_check_reports_multiple_independent_failures(tmp_path: Path) -> Non
 def test_fast_check_lets_backend_and_frontend_operations_report_their_own_failures(
     tmp_path: Path,
 ) -> None:
+    script = _isolated_runner(tmp_path)
     fake = tmp_path / "make"
     fake.write_text(
         "#!/bin/sh\n"
@@ -248,8 +258,8 @@ def test_fast_check_lets_backend_and_frontend_operations_report_their_own_failur
     )
     fake.chmod(0o755)
     completed = subprocess.run(
-        ["bash", str(SCRIPT)],
-        cwd=ROOT,
+        ["bash", str(script)],
+        cwd=script.parent.parent,
         env={**os.environ, "MAKE": str(fake)},
         text=True,
         capture_output=True,

@@ -18,6 +18,7 @@ from oh_goon.repository_tooling.pytest_execution_membership import ExecutionMemb
 from oh_goon.repository_tooling.pytest_member_selection import (
     collected_item,
     read_native_collection,
+    register_resume_marker,
 )
 from oh_goon.repository_tooling.test_batch_receipts import MemberReceiptStore
 
@@ -37,6 +38,7 @@ _NODE_TO_MEMBER: dict[str, str] = {}
 def pytest_configure(config: Any) -> None:
     global _STORE, _EXECUTION_STORE, _ATTEMPT_IDENTITY
     global _BATCH_IDENTITY, _EXECUTION_PLAN_IDENTITY, _EXPECTED_MEMBERS, _ADMISSION_ROOT
+    register_resume_marker(config)
     directory = os.environ.get("OH_GOON_PYTEST_RECEIPT_DIRECTORY")
     suite_identity = os.environ.get("OH_GOON_PYTEST_RECEIPT_SUITE_IDENTITY")
     batch = os.environ.get("OH_GOON_PYTEST_RECEIPT_BATCH_IDENTITY")

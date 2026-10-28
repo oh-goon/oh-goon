@@ -173,6 +173,7 @@ class _BatchRunState:
     recovery_events: list[ExecutionRecoveryEvent] = field(default_factory=list)
     refinement_history: RefinementHistory = field(default_factory=RefinementHistory)
     output_captures: dict[int, list[BatchOutputCapture]] = field(default_factory=dict)
+    cancellation_requested: threading.Event = field(default_factory=threading.Event)
 
 
 def _discover_runnable_members(
@@ -217,7 +218,11 @@ def _select_batches(
 
 
 def _resume_schedule(
-    args: argparse.Namespace, batches: tuple[Batch, ...], receipt_store: MemberReceiptStore
+    args: argparse.Namespace,
+    batches: tuple[Batch, ...],
+    receipt_store: MemberReceiptStore,
+    *,
+    non_reusable_members: frozenset[str] = frozenset(),
 ) -> tuple[frozenset[str], tuple[Batch, ...], int]:
     reusable: set[str] = set()
     scheduled: list[Batch] = []
@@ -225,7 +230,11 @@ def _resume_schedule(
     for batch in batches:
         remaining = []
         for member in batch.members:
-            if args.resume and receipt_store.reusable(member):
+            if (
+                args.resume
+                and member not in non_reusable_members
+                and receipt_store.reusable(member)
+            ):
                 reusable.add(member)
             else:
                 remaining.append(member)
@@ -311,7 +320,14 @@ def _build_batch_plan(
     receipt_store = MemberReceiptStore(
         resume_context.receipt_directory, suite_identity=resume_context.suite_identity
     )
-    reusable, scheduled, fully_reused = _resume_schedule(args, batches, receipt_store)
+    non_reusable_members = frozenset(
+        row["file"] if args.granularity == "files" else row["selector"]
+        for row in collection.selected
+        if row.get("no_resume") == "true"
+    )
+    reusable, scheduled, fully_reused = _resume_schedule(
+        args, batches, receipt_store, non_reusable_members=non_reusable_members
+    )
     workers = min(resource_budget.worker_ceiling, max(1, len(scheduled)))
     plan_identity, run_identity, membership_store = _execution_authority(
         args, resume_context, scheduled, reusable, workers, resource_budget
@@ -412,6 +428,8 @@ def _submit_next(
     state: _BatchRunState,
     callbacks: BatchCallbacks,
 ) -> bool:
+    if state.cancellation_requested.is_set():
+        return False
     if not state.unscheduled:
         return False
     if state.deadline is not None and state.deadline - time.monotonic() <= 0:
@@ -436,6 +454,7 @@ def _submit_next(
             invocation=plan.invocation,
             coverage_session=plan.coverage_session,
             output_captures=state.output_captures.setdefault(batch.index, []),
+            cancel_requested=state.cancellation_requested.is_set,
         )
     ] = batch
     return True
@@ -607,28 +626,34 @@ def _run_batch_executor(
 ) -> _BatchRunState:
     state = _new_run_state(args, plan)
     with concurrent.futures.ThreadPoolExecutor(max_workers=plan.workers) as pool:
-        completed = plan.fully_reused_batches
-        for _ in range(plan.workers):
-            if not _submit_next(pool, args, plan, state, callbacks):
-                break
-        while state.pending:
-            callbacks.progress_refresh(
-                f"Pytest batches · {completed}/{len(plan.batches)} complete · "
-                f"{len(state.pending)} active · {len(state.unscheduled)} queued"
-            )
-            done, _ = concurrent.futures.wait(
-                state.pending,
-                timeout=_wait_timeout(state),
-                return_when=concurrent.futures.FIRST_COMPLETED,
-            )
-            completed += _consume_done_futures(args, plan, state, pool, done, callbacks)
-            if (
-                state.deadline is not None
-                and time.monotonic() >= state.deadline
-                and state.unscheduled
-            ):
-                state.suite_timed_out = True
-        callbacks.progress_clear()
+        try:
+            completed = plan.fully_reused_batches
+            for _ in range(plan.workers):
+                if not _submit_next(pool, args, plan, state, callbacks):
+                    break
+            while state.pending:
+                callbacks.progress_refresh(
+                    f"Pytest batches · {completed}/{len(plan.batches)} complete · "
+                    f"{len(state.pending)} active · {len(state.unscheduled)} queued"
+                )
+                done, _ = concurrent.futures.wait(
+                    state.pending,
+                    timeout=_wait_timeout(state),
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                completed += _consume_done_futures(args, plan, state, pool, done, callbacks)
+                if (
+                    state.deadline is not None
+                    and time.monotonic() >= state.deadline
+                    and state.unscheduled
+                ):
+                    state.suite_timed_out = True
+            callbacks.progress_clear()
+        except BaseException:
+            # The native command owner drains and terminates active groups before
+            # the executor joins them. No queued refinement may start afterward.
+            state.cancellation_requested.set()
+            raise
     return state
 
 
@@ -834,6 +859,7 @@ def run_batch_cli(
             qualified=args.qualified,
             pytest_config=args.pytest_config,
             pytest_args=tuple(args.pytest_arg),
+            resume_environment=tuple(args.resume_env),
         )
     except (OSError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))
