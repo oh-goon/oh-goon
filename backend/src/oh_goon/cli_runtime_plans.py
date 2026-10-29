@@ -206,7 +206,11 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
         if hasattr(args, "_run_configuration"):
-            source_identity["repository"] = args._run_configuration.repository.path
+            source_identity["repository"] = args._run_configuration.resolution_repository
+            if args._run_configuration.repository_instance_ids is not None:
+                source_identity["expected_repository_instance_ids"] = (
+                    args._run_configuration.repository_instance_ids
+                )
             source_identity["source_graph"] = args._source_graph
             source_identity["repository_goon"] = (
                 args._run_configuration.snapshot.selection.source.kind == "repository-goon"
@@ -955,7 +959,7 @@ def _schedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
         if hasattr(args, "_run_configuration"):
-            source_identity["repository"] = args._run_configuration.repository.path
+            source_identity["repository"] = args._run_configuration.resolution_repository
             source_identity["source_graph"] = args._source_graph
             source_identity["repository_goon"] = (
                 args._run_configuration.snapshot.selection.source.kind == "repository-goon"
@@ -993,7 +997,7 @@ def _reschedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
         if hasattr(args, "_run_configuration"):
-            source_identity["repository"] = args._run_configuration.repository.path
+            source_identity["repository"] = args._run_configuration.resolution_repository
             source_identity["source_graph"] = args._source_graph
             source_identity["repository_goon"] = (
                 args._run_configuration.snapshot.selection.source.kind == "repository-goon"

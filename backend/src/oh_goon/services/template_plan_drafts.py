@@ -61,6 +61,7 @@ def initialize_run_configuration(
     kind: Literal["plan", "goon"],
     reviewers: Sequence[tuple[str, str]] = (),
     repository: Path | None = None,
+    repositories: Sequence[Path] = (),
 ) -> Path:
     """Author one selection and necessary Plan intent; never admit effects."""
     import tempfile
@@ -94,27 +95,36 @@ def initialize_run_configuration(
         raise FleetPlanInvalid("Internal templates use their owning Make/certification command")
     if reviewers and key != "agents/agentic-review-repair-loop":
         raise FleetPlanInvalid("Reviewer authoring requires agents/agentic-review-repair-loop")
-    target = None
-    if repository is not None:
+    if repository is not None and repositories:
+        raise FleetPlanInvalid("Select repository paths through one explicit target selection")
+    requested = (repository,) if repository is not None else tuple(repositories)
+    targets: list[RepositoryIdentity] = []
+    target: RepositoryIdentity | None = None
+    if requested:
         from oh_goon.runtime.league_folders import LeagueFolderStore
         from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 
         locations = LeagueFolderStore().list()
         discovery = RepositoryDiscoveryService()
-        root = discovery.containing_git_root(locations, repository)
-        if root is not None:
-            target = RepositoryIdentity.model_validate({"path": root})
-        else:
-            requested = RepositoryIdentity.model_validate({"path": repository.expanduser()})
-            roots = discovery.explicit_configured_roots(
-                locations, repository_ids=(requested.repository_id,)
-            )
-            target = roots[0] if len(roots) == 1 else None
-        if target is None:
-            raise FleetPlanInvalid(
-                "--repository must select a registered League repository path. "
-                "Register its directory with 'oh-goon league add-folder PATH', then retry."
-            )
+        for path in requested:
+            root = discovery.containing_git_root(locations, path)
+            if root is not None:
+                target = RepositoryIdentity.model_validate({"path": root})
+            else:
+                selected_path = RepositoryIdentity.model_validate({"path": path.expanduser()})
+                roots = discovery.explicit_configured_roots(
+                    locations, repository_ids=(selected_path.repository_id,)
+                )
+                target = roots[0] if len(roots) == 1 else None
+            if target is None:
+                raise FleetPlanInvalid(
+                    "--repository must select a registered League repository path. "
+                    "Register its directory with 'oh-goon league add-folder PATH', then retry."
+                )
+            if any(item.repository_id == target.repository_id for item in targets):
+                raise FleetPlanInvalid("--repository must select each repository exactly once")
+            targets.append(target)
+    target = targets[0] if len(targets) == 1 else None
     goon_store = GoonTemplateStore()
     goons = _FrozenGoonSources(goon_store)
     source = PlanTemplateStore().source(key) if kind == "plan" else goons.source(key)
@@ -141,12 +151,16 @@ def initialize_run_configuration(
             )
         )
         interface = inspect_projected_inputs(graph)
+        if len(targets) > 1 and graph.has_agent_source_contract():
+            raise FleetPlanInvalid("Agent execution requires a single repository")
         payload: dict[str, Any] = {
             "version": 1,
             "source": {"kind": "file-plan", "path": "plan.yml"}
             if "plan.yml" in files
             else {"kind": "catalog-plan", "name": key},
-            "target": {"repository_id": target.repository_id if target else "REPOSITORY_ID"},
+            "target": {"repository_ids": [item.repository_id for item in targets]}
+            if len(targets) > 1
+            else {"repository_id": target.repository_id if target else "REPOSITORY_ID"},
         }
         required: dict[str, PlanInputValue] = {
             item.definition.name: f"REQUIRED_{item.definition.name}"
@@ -214,7 +228,7 @@ def initialize_run_configuration(
             }
         rendered = (
             "# Replace any REQUIRED input values before locking.\n"
-            if target is not None
+            if targets
             else "# Select the registered target and replace REQUIRED values before locking.\n"
         )
         rendered += (

@@ -1,7 +1,7 @@
 # Run configuration and inspection
 
 Normal CLI execution selects one explicit `run.yml`. It chooses an existing
-Plan or repository Goon, a registered target, scalar caller values, and relevant
+Plan or repository Goon, registered targets, scalar caller values, and relevant
 agent or bounded-repair selections. It does not define Steps, permissions,
 provider connections, native model settings, or a second workflow language.
 
@@ -55,6 +55,17 @@ inputs:
 Omitting `--repository` deliberately leaves a target placeholder for later
 selection. An unregistered explicit path refuses before publishing the workflow. See the
 [template first-run guide](../../templates/README.md) for headless registration.
+
+Repeat `--repository PATH` for a context-free catalog, file or Git Plan over
+several actual applications. The generated `target.repository_ids` contains an
+explicit unique set of at least two registered identities. It is mutually
+exclusive with the existing singular `target.repository_id`; a single path
+keeps that original form. The same Plan/inputs execute through one Fleet Run
+and its existing target scheduler. Every requested member must resolve;
+duplicates or unavailable members refuse before application work. Repository
+Goons, Agent and repair sources require one target. See
+[the parallel walkthrough](../../templates/README.md#one-plan-over-several-applications).
+
 The Python values above illustrate this repository's layout. Native uv, Ruff,
 Pytest and the selected type checker retain their project configuration and
 results. The shortest execution path after editing is:

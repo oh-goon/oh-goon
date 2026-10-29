@@ -29,6 +29,7 @@ from oh_goon.core.models.run_configuration import (
     RunConfiguration,
 )
 from oh_goon.core.path_authority import ContainedPathSpace
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary import FleetScope
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.runtime.template_discovery import template_package
@@ -219,8 +220,23 @@ class RunConfigurationSnapshot:
 @dataclass(frozen=True, slots=True)
 class NormalizedRunConfiguration:
     snapshot: RunConfigurationSnapshot
-    repository: RepositoryIdentity
+    repositories: tuple[RepositoryIdentity, ...]
     plan_path: Path
+    repository_instances: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def repository(self) -> RepositoryIdentity:
+        if len(self.repositories) != 1:
+            raise RunConfigurationInvalid("This selection requires a single repository context")
+        return self.repositories[0]
+
+    @property
+    def resolution_repository(self) -> Path | None:
+        return self.repositories[0].path if len(self.repositories) == 1 else None
+
+    @property
+    def repository_instance_ids(self) -> dict[str, str] | None:
+        return dict(self.repository_instances) if self.repository_instances else None
 
     @property
     def inputs(self) -> dict[str, PlanInputValue]:
@@ -289,11 +305,12 @@ def load_run_configuration(path: Path) -> RunConfigurationSnapshot:
     return RunConfigurationSnapshot(selection, data, identity)
 
 
-def _configuration_repository(
+def _configuration_repositories(
     snapshot: RunConfigurationSnapshot,
     repositories: Iterable[RepositoryIdentity | RepositoryCatalogEntry],
-) -> RepositoryIdentity:
-    matches = []
+) -> tuple[RepositoryIdentity, ...]:
+    requested = snapshot.selection.target.selected_ids()
+    matches: dict[str, list[RepositoryIdentity]] = {identifier: [] for identifier in requested}
     for entry in repositories:
         if isinstance(entry, RepositoryIdentity):
             repository = entry
@@ -301,15 +318,14 @@ def _configuration_repository(
             if entry.scope is not FleetScope.INCLUDED:
                 continue
             repository = entry.repository
-        if repository.repository_id == snapshot.selection.target.repository_id:
-            matches.append(repository)
-    if len(matches) != 1:
+        if repository.repository_id in matches:
+            matches[repository.repository_id].append(repository)
+    if any(len(entries) != 1 for entries in matches.values()):
         raise RunConfigurationInvalid(
-            "run.yml target must name exactly one included registered repository",
+            "run.yml target must name exactly one included registered repository for every selected ID",
             diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
-            fields=("target.repository_id",),
+            fields=("target.repository_id" if len(requested) == 1 else "target.repository_ids",),
         )
-    repository = matches[0]
     snapshot.require_fresh()
     snapshot.agent_repository_root()
     snapshot.agent_skill_root()
@@ -324,7 +340,20 @@ def _configuration_repository(
                 diagnostic_code="CONFIG_SCHEMA_INVALID",
                 fields=("repair.write_roots",),
             ) from exc
-    return repository
+    return tuple(matches[identifier][0] for identifier in requested)
+
+
+def _plural_repository_instances(
+    repositories: tuple[RepositoryIdentity, ...],
+) -> tuple[tuple[str, str], ...]:
+    return (
+        tuple(
+            (repository.repository_id, repository_subject_instance_id(repository.path))
+            for repository in repositories
+        )
+        if len(repositories) > 1
+        else ()
+    )
 
 
 def normalize_run_configuration(
@@ -335,11 +364,14 @@ def normalize_run_configuration(
     acquired_plan: Path | None = None,
 ) -> NormalizedRunConfiguration:
     """Select an explicit registered target; discovery and execution remain original owners."""
-    repository = _configuration_repository(snapshot, repositories)
+    selected = _configuration_repositories(snapshot, repositories)
+    instances = _plural_repository_instances(selected)
     source = snapshot.source_path(
-        repository.path, plan_templates=plan_templates, acquired_plan=acquired_plan
+        selected[0].path if len(selected) == 1 else None,
+        plan_templates=plan_templates,
+        acquired_plan=acquired_plan,
     )
-    return NormalizedRunConfiguration(snapshot, repository, source)
+    return NormalizedRunConfiguration(snapshot, selected, source, instances)
 
 
 def capture_run_configuration_source(
@@ -361,7 +393,8 @@ def capture_run_configuration_source(
         parse_execution_lock,
     )
 
-    repository = _configuration_repository(snapshot, repositories)
+    selected = _configuration_repositories(snapshot, repositories)
+    instances = _plural_repository_instances(selected)
     locked: tuple[LockedExecutionSource, ...] | None = ()
     if snapshot.lock_path.exists() or snapshot.lock_path.is_symlink():
         try:
@@ -459,9 +492,9 @@ def capture_run_configuration_source(
                 update_applications=update_applications,
                 allow_source_network=allow_network,
             )
-            return NormalizedRunConfiguration(snapshot, repository, plan), graph
-    plan = snapshot.source_path(repository.path)
-    return NormalizedRunConfiguration(snapshot, repository, plan), resolver.analyze_source(
+            return NormalizedRunConfiguration(snapshot, selected, plan, instances), graph
+    plan = snapshot.source_path(selected[0].path if len(selected) == 1 else None)
+    return NormalizedRunConfiguration(snapshot, selected, plan, instances), resolver.analyze_source(
         plan,
         locked_sources=locked,
         acquire_sources=acquire,

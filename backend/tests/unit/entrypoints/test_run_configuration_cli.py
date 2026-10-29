@@ -232,6 +232,208 @@ def test_initializer_refuses_unregistered_repository_before_publication(workflow
     assert "oh-goon league add-folder PATH" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("invalid_member", ("unregistered", "duplicate"))
+def test_initializer_repeated_paths_refuse_incomplete_or_duplicate_targets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid_member: str
+) -> None:
+    repository = tmp_path / "application"
+    repository.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    preferences = tmp_path / "league.yml"
+    preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    output = tmp_path / "workflow"
+    assert (
+        main(
+            [
+                "templates",
+                "init",
+                "python/quality",
+                "--kind",
+                "plan",
+                "--output",
+                str(output),
+                "--repository",
+                str(repository),
+                "--repository",
+                str(repository if invalid_member == "duplicate" else other),
+            ]
+        )
+        == 2
+    )
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("kind", ("plan", "goon"))
+def test_initializer_repeated_paths_select_an_exact_registered_target_set_without_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    import oh_goon.cli as cli
+
+    applications = [tmp_path / "application-one", tmp_path / "application-two"]
+    for application in applications:
+        application.mkdir()
+    preferences = tmp_path / "league.yml"
+    preferences.write_text(
+        yaml.safe_dump({"version": 1, "folders": [str(root) for root in applications]})
+    )
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
+    )
+    output = tmp_path / "workflow"
+    assert (
+        main(
+            [
+                "templates",
+                "init",
+                "python/quality",
+                "--kind",
+                kind,
+                "--output",
+                str(output),
+                "--repository",
+                str(applications[0]),
+                "--repository",
+                str(applications[1]),
+            ]
+        )
+        == 0
+    )
+    selected = yaml.safe_load((output / "run.yml").read_text())
+    assert selected["target"] == {
+        "repository_ids": [
+            RepositoryIdentity.model_validate({"path": root}).repository_id for root in applications
+        ]
+    }
+    assert not (output / "goon.lock").exists()
+
+
+def test_plural_inspection_merges_exact_filesystem_and_discovered_git_roots_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import oh_goon.cli as cli
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+
+    application = tmp_path / "application"
+    application.mkdir()
+    git_root = tmp_path / "git-projects" / "project"
+    (git_root / ".git").mkdir(parents=True)
+    preferences = tmp_path / "league.yml"
+    preferences.write_text(
+        yaml.safe_dump({"version": 1, "folders": [str(application), str(git_root.parent)]})
+    )
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
+    )
+    package = tmp_path / "goons/general/check"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# general/check\n")
+    (package / "goon.yml").write_text("steps:\n- id: check\n  run: /bin/true\n")
+    (tmp_path / "plan.yml").write_text("goons:\n- import: general/check\n  from: ./goons\n")
+    roots = (application, git_root)
+    path = tmp_path / "run.yml"
+    payload: dict[str, Any] = {
+        "version": 1,
+        "source": {"kind": "file-plan", "path": "plan.yml"},
+        "target": {
+            "repository_ids": [
+                RepositoryIdentity.model_validate({"path": root}).repository_id for root in roots
+            ]
+        },
+    }
+    path.write_text(yaml.safe_dump(payload))
+    analyzed: list[Path] = []
+    original = FleetPlanResolver.analyze_source
+
+    def analyze(self: FleetPlanResolver, source: Path, **kwargs: Any) -> Any:
+        analyzed.append(source)
+        return original(self, source, **kwargs)
+
+    monkeypatch.setattr(FleetPlanResolver, "analyze_source", analyze)
+    assert main(["config", "validate", str(path), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert [entry["repository_id"] for entry in report["target"]["repositories"]] == payload[
+        "target"
+    ]["repository_ids"]
+    assert analyzed == [tmp_path / "plan.yml"]
+
+    git_root.rename(git_root.with_name("moved-project"))
+    assert main(["config", "validate", str(path), "--json"]) == 2
+    refusal = json.loads(capsys.readouterr().out)
+    assert refusal["code"] == "CONFIG_TARGET_UNAVAILABLE"
+    assert analyzed == [tmp_path / "plan.yml"]
+
+
+def test_plural_run_refuses_a_replaced_member_before_any_application_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import oh_goon.cli as cli
+    from oh_goon.application import ApplicationRuntime
+
+    applications = (tmp_path / "application-one", tmp_path / "application-two")
+    for application in applications:
+        application.mkdir()
+        (application / "verify.sh").write_text("printf executed > executed.txt\n")
+    preferences = tmp_path / "league.yml"
+    preferences.write_text(
+        yaml.safe_dump({"version": 1, "folders": [str(root) for root in applications]})
+    )
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
+    package = tmp_path / "goons/general/check"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# general/check\n")
+    (package / "goon.yml").write_text("steps:\n- id: check\n  run: /bin/sh verify.sh\n")
+    (tmp_path / "plan.yml").write_text("goons:\n- import: general/check\n  from: ./goons\n")
+    selection = tmp_path / "run.yml"
+    selection.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "source": {"kind": "file-plan", "path": "plan.yml"},
+                "target": {
+                    "repository_ids": [
+                        RepositoryIdentity.model_validate({"path": root}).repository_id
+                        for root in applications
+                    ]
+                },
+            }
+        )
+    )
+    assert main(["lock", str(selection)]) == 0
+    assert main(["run", str(selection), "--json"]) == 0
+    baseline = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert baseline["outcome"] == "SUCCESS"
+    for application in applications:
+        marker = application / "executed.txt"
+        assert marker.read_text() == "executed"
+        marker.unlink()
+    build = cli._build_application_runtime
+
+    def replaced_before_build(**kwargs: Any) -> ApplicationRuntime | None:
+        applications[1].rename(tmp_path / "original-application-two")
+        applications[1].mkdir()
+        (applications[1] / "verify.sh").write_text("printf replaced > executed.txt\n")
+        return build(**kwargs)
+
+    monkeypatch.setattr(cli, "_build_application_runtime", replaced_before_build)
+    assert main(["run", str(selection), "--json"]) == 2
+    refusal = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert refusal["fleet_run_id"] is None
+    assert all(not (application / "executed.txt").exists() for application in applications)
+    monkeypatch.setattr(cli, "_build_application_runtime", build)
+    runtime = ApplicationRuntime.build(standard_local=True)
+    try:
+        assert [item.run.fleet_run_id for item in runtime.runs.history().items] == [
+            baseline["fleet_run_id"]
+        ]
+    finally:
+        runtime.shutdown()
+
+
 @pytest.mark.parametrize("path_form", ["absolute", "home-relative"])
 def test_initialization_selects_registered_filesystem_root_without_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_form: str

@@ -1,6 +1,7 @@
 """Remote selections consume valid frozen pins before native acquisition."""
 
 import subprocess
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -8,17 +9,25 @@ import yaml
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.engine.git import GitService
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.run_configuration import (
+    RunConfigurationSnapshot,
     capture_run_configuration_source,
     load_run_configuration,
 )
 
 
-def _case(tmp_path, monkeypatch, *, complete_example=False, extra_package=False):
+def _case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    complete_example: bool = False,
+    extra_package: bool = False,
+) -> tuple[RunConfigurationSnapshot, RepositoryIdentity, FleetPlanResolver]:
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     source = tmp_path / "upstream"
     package = source / "goons/general/check"
@@ -98,6 +107,36 @@ def _case(tmp_path, monkeypatch, *, complete_example=False, extra_package=False)
         build_execution_lock(resolved, external_artifacts=snapshot.external_artifacts()),
     )
     return snapshot, repository, resolver
+
+
+def test_git_plan_plural_capture_keeps_one_source_graph_and_exact_target_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot, repository, resolver = _case(tmp_path, monkeypatch, complete_example=True)
+    second = tmp_path / "second-application"
+    second.mkdir()
+    repositories = (repository, RepositoryIdentity.model_validate({"path": second}))
+    payload = yaml.safe_load(snapshot.content)
+    payload["target"] = {"repository_ids": [item.repository_id for item in repositories]}
+    snapshot.path.write_text(yaml.safe_dump(payload))
+    selected = load_run_configuration(snapshot.path)
+    analyze = Mock(wraps=resolver.analyze_source)
+    monkeypatch.setattr(resolver, "analyze_source", analyze)
+
+    normalized, graph = capture_run_configuration_source(
+        selected, repositories, resolver, acquire=True, allow_network=False
+    )
+
+    assert normalized.repositories == repositories
+    assert normalized.resolution_repository is None
+    assert set(normalized.repository_instance_ids or {}) == {
+        item.repository_id for item in repositories
+    }
+    assert analyze.call_count == 1
+    resolved = resolver.resolve_source_graph(graph)
+    assert isinstance(resolved.steps[0], ResolvedCommandStep)
+    assert resolved.steps[0].argv == ("echo", "selected")
+    assert tuple(source.kind for source in graph.execution_sources) == ("plan",)
 
 
 @pytest.mark.parametrize("complete_example", [False, True])
@@ -213,9 +252,11 @@ def test_adding_a_same_selector_package_preserves_existing_pin_in_either_order(
     )
     pinned = resolver.resolve_source_graph(graph)
     assert [pin.commit for pin in pinned.execution_sources] == [original, original]
-    assert [step.argv[-1] for step in pinned.steps] == [
-        "secondary" if name == "second" else "selected" for name in names
-    ]
+    commands = []
+    for step in pinned.steps:
+        assert isinstance(step, ResolvedCommandStep)
+        commands.append(step.argv[-1])
+    assert commands == ["secondary" if name == "second" else "selected" for name in names]
     _, refreshed = capture_run_configuration_source(
         snapshot,
         (repository,),
@@ -283,7 +324,9 @@ def test_switching_to_a_complete_example_retains_the_shared_selector_pin(tmp_pat
     )
     assert graph.execution_sources[0].kind == "plan"
     assert graph.execution_sources[0].commit == original
-    assert resolver.resolve_source_graph(graph).steps[0].argv[-1] == "selected"
+    command = resolver.resolve_source_graph(graph).steps[0]
+    assert isinstance(command, ResolvedCommandStep)
+    assert command.argv[-1] == "selected"
 
 
 def test_nested_same_selector_import_uses_the_complete_examples_captured_commit(
@@ -353,6 +396,7 @@ def test_nested_same_selector_import_uses_the_complete_examples_captured_commit(
     )
     resolved = resolver.resolve_source_graph(graph)
     assert [pin.commit for pin in resolved.execution_sources] == [selected, selected]
+    assert isinstance(resolved.steps[0], ResolvedCommandStep)
     assert resolved.steps[0].argv[-1] == "selected"
 
 

@@ -29,9 +29,10 @@ def add_goon_commands(
     init.add_argument("--output", type=Path, required=True)
     init.add_argument(
         "--repository",
+        action="append",
         type=Path,
         metavar="PATH",
-        help="Select a registered League repository path and write its exact target identity",
+        help="Select a registered League repository path; repeat for an exact target set",
     )
     init.add_argument(
         "--review",
