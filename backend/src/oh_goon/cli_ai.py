@@ -130,9 +130,16 @@ def _isolation(selected: ResolvedNativeAgent) -> ProcessIsolationBackend | None:
             "The selected isolated profile requires installed Bubblewrap (bwrap)"
         )
     resource_executable = shutil.which("systemd-run") if requested else None
+    resource_query_executable = shutil.which("systemctl") if requested else None
     if requested and resource_executable is None:
         raise AgentProviderError("Selected resource caps require installed systemd-run")
-    return BubblewrapProcessIsolation(executable, standard_resource_executable=resource_executable)
+    if requested and resource_query_executable is None:
+        raise AgentProviderError("Selected resource caps require installed systemctl")
+    return BubblewrapProcessIsolation(
+        executable,
+        standard_resource_executable=resource_executable,
+        standard_resource_query_executable=resource_query_executable,
+    )
 
 
 def resolve_native_cli_selection(

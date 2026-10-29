@@ -7,6 +7,8 @@ import json
 import os
 import shutil
 import socket
+import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -966,6 +968,12 @@ def test_requested_caps_use_native_whole_workload_scope_for_preflight_and_launch
     resource_executable.chmod(0o755)
     backend = _backend(tmp_path, monkeypatch)
     backend.standard_resource_executable = str(resource_executable)
+    backend.standard_resource_query_executable = str(resource_executable)
+    from oh_goon.integrations import _fleet_plan_cgroup_resources
+
+    monkeypatch.setattr(
+        _fleet_plan_cgroup_resources, "_require_standard_scope_inheritance", lambda *_args: None
+    )
     calls: list[tuple[str, ...]] = []
 
     def command(*argv: str, **kwargs: Any) -> CommandResult:
@@ -990,12 +998,181 @@ def test_requested_caps_use_native_whole_workload_scope_for_preflight_and_launch
         assert "--property=TasksMax=32" in argv
 
 
+@pytest.mark.parametrize("late", [False, True], ids=["cached-preflight", "pre-exec"])
+def test_native_scope_inheritance_is_rechecked_before_cached_or_physical_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, late: bool
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    calls: list[tuple[str, ...]] = []
+    scope_calls = 0
+    refused_at: int | None = None
+
+    def scope(
+        _policy: CicdResourcePolicy, _executable: str | None, **options: Any
+    ) -> tuple[str, ...]:
+        nonlocal scope_calls
+        scope_calls += 1
+        if scope_calls == refused_at:
+            raise FleetPlanInvalid("inherited caller limit changed")
+        return ()
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        _native_exec_ack(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "standard_resource_scope_command", scope)
+    monkeypatch.setattr(module, "run_command", command)
+    request = _request(backend, tmp_path, resources=CicdResourcePolicy(cpu_millis=1000))
+    backend.require_standard_available(request)
+    previous_calls = len(calls)
+    refused_at = scope_calls + (2 if late else 1)
+    with pytest.raises(FleetPlanInvalid, match="inherited caller limit changed"):
+        backend.execute(request, timeout=4, cancel_requested=None)
+    assert len(calls) == previous_calls
+
+
+def test_validated_native_resource_prefix_is_transported_without_rediscovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    resolved: list[tuple[str, ...]] = []
+    validated: list[tuple[str, ...]] = []
+    launched: list[tuple[str, ...]] = []
+    original_validation = backend._validate_standard_request
+
+    def scope(
+        _policy: CicdResourcePolicy, _executable: str | None, **options: Any
+    ) -> tuple[str, ...]:
+        prefix = (f"/resolved/native-scope-{len(resolved)}", "--")
+        resolved.append(prefix)
+        return prefix
+
+    def validate(
+        request: StandardIsolatedProcessRequest,
+    ) -> tuple[frozenset[tuple[int, int]], tuple[str, ...]]:
+        identities, prefix = original_validation(request)
+        validated.append(prefix)
+        return identities, prefix
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        assert argv[: len(validated[-1])] == validated[-1]
+        launched.append(validated[-1])
+        _native_exec_ack(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "standard_resource_scope_command", scope)
+    monkeypatch.setattr(backend, "_validate_standard_request", validate)
+    monkeypatch.setattr(module, "run_command", command)
+    backend.execute(
+        _request(backend, tmp_path, resources=CicdResourcePolicy(cpu_millis=1000)),
+        timeout=4,
+        cancel_requested=None,
+    )
+    assert len(launched) == 2
+    assert all(prefix in resolved for prefix in launched)
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "property_,control,expected,requested",
+    [
+        ("CPUQuota=25%", "cpu.max", "25000 100000", {"memory_mib": 1024}),
+        ("MemoryMax=536870912", "memory.max", "536870912", {"cpu_millis": 1000}),
+        ("TasksMax=64", "pids.max", "64", {"cpu_millis": 1000}),
+    ],
+    ids=["cpu", "memory", "pids"],
+)
+def test_native_scope_refuses_abandoned_caller_limits_before_application_work(
+    tmp_path: Path,
+    property_: str,
+    control: str,
+    expected: str,
+    requested: dict[str, int],
+) -> None:
+    tools = {name: shutil.which(name) for name in ("bwrap", "systemd-run", "systemctl")}
+    if not all(tools.values()):
+        pytest.skip("native bwrap/systemd-run/systemctl are not installed")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    marker = workspace / "application-ran"
+    probe = tmp_path / "resource-admission.py"
+    probe.write_text("""from pathlib import Path
+import json
+import sys
+from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
+from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+from oh_goon.integrations.fleet_plan_process_isolation import StandardIsolatedProcessRequest
+
+workspace, marker, tools_text, policy_text, control = sys.argv[1:]
+tools = json.loads(tools_text)
+relative = Path('/proc/self/cgroup').read_text().strip().split('::', 1)[1]
+group = Path('/sys/fs/cgroup') / relative.lstrip('/')
+observed = (group / control).read_text().strip()
+backend = BubblewrapProcessIsolation(
+    tools['bwrap'], standard_resource_executable=tools['systemd-run'],
+    standard_resource_query_executable=tools['systemctl'],
+)
+request = StandardIsolatedProcessRequest(
+    workspace=Path(workspace), cwd=Path(workspace),
+    argv=('/usr/bin/touch', marker),
+    env={'PATH': '/usr/bin:/bin'},
+    backend_configuration_id=backend.configuration_identity(),
+    require_workspace_current=lambda: None,
+    resources=CicdResourcePolicy(**json.loads(policy_text)),
+)
+try:
+    backend.execute(request, timeout=5, cancel_requested=None)
+except FleetPlanInvalid as exc:
+    print(json.dumps({'status': 'refused', 'reason': str(exc), 'observed': observed}))
+else:
+    print(json.dumps({'status': 'executed', 'observed': observed}))
+""")
+    assert tools["systemd-run"] is not None
+    with (tmp_path / "native-scope.log").open("w+b") as output:
+        completed = subprocess.run(
+            [
+                tools["systemd-run"],
+                "--user",
+                "--scope",
+                "--quiet",
+                "--collect",
+                f"--property={property_}",
+                "--",
+                sys.executable,
+                "-I",
+                str(probe),
+                str(workspace),
+                str(marker),
+                json.dumps(tools),
+                json.dumps(requested),
+                control,
+            ],
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            timeout=60,
+        )
+        output.seek(0)
+        payload = output.read(65537)
+    assert completed.returncode == 0, payload.decode(errors="replace")[-8192:]
+    assert len(payload) <= 65536
+    report = json.loads(payload)
+    assert report["observed"] == expected
+    assert report["status"] == "refused" and f"finite {control}" in report["reason"]
+    assert not marker.exists()
+
+
 @pytest.mark.process
 def test_real_native_scope_applies_limits_to_the_bubblewrap_workload(tmp_path: Path) -> None:
-    executable, resources = shutil.which("bwrap"), shutil.which("systemd-run")
-    if executable is None or resources is None:
-        pytest.skip("native bwrap and systemd-run are not installed")
-    backend = BubblewrapProcessIsolation(executable, standard_resource_executable=resources)
+    executable, resources, query = (
+        shutil.which(name) for name in ("bwrap", "systemd-run", "systemctl")
+    )
+    if executable is None or resources is None or query is None:
+        pytest.skip("native bwrap/systemd-run/systemctl are not installed")
+    backend = BubblewrapProcessIsolation(
+        executable, standard_resource_executable=resources, standard_resource_query_executable=query
+    )
     workspace = tmp_path / "repo"
     workspace.mkdir()
     observed: dict[str, str] = {}
@@ -1323,14 +1500,16 @@ def test_standard_receipt_requires_native_successful_exec_acknowledgement(
 def test_native_systemd_scope_reports_enforced_policy_after_nonzero_workload_exec(
     tmp_path: Path,
 ) -> None:
-    tools = {name: shutil.which(name) for name in ("bwrap", "systemd-run")}
+    tools = {name: shutil.which(name) for name in ("bwrap", "systemd-run", "systemctl")}
     if not all(tools.values()):
         if os.environ.get("OH_GOON_REQUIRE_NATIVE_ISOLATION") == "1":
-            pytest.fail("required native bwrap/systemd-run not installed")
-        pytest.skip("native bwrap/systemd-run not installed")
-    assert tools["bwrap"] and tools["systemd-run"]
+            pytest.fail("required native bwrap/systemd-run/systemctl not installed")
+        pytest.skip("native bwrap/systemd-run/systemctl not installed")
+    assert tools["bwrap"] and tools["systemd-run"] and tools["systemctl"]
     backend = BubblewrapProcessIsolation(
-        tools["bwrap"], standard_resource_executable=tools["systemd-run"]
+        tools["bwrap"],
+        standard_resource_executable=tools["systemd-run"],
+        standard_resource_query_executable=tools["systemctl"],
     )
     repository = tmp_path / "repo"
     repository.mkdir()

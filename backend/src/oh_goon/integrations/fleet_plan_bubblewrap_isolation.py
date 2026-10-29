@@ -126,10 +126,12 @@ class BubblewrapProcessIsolation:
         cgroup_state_dir: Path | None = None,
         require_local_resource_intent: bool = False,
         standard_resource_executable: str | None = None,
+        standard_resource_query_executable: str | None = None,
     ) -> None:
         self.executable = executable
         self.require_local_resource_intent = require_local_resource_intent
         self.standard_resource_executable = standard_resource_executable
+        self.standard_resource_query_executable = standard_resource_query_executable
         self._standard_resource_environment = {
             name: os.environ[name]
             for name in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
@@ -218,7 +220,7 @@ class BubblewrapProcessIsolation:
 
     def require_standard_available(self, request: StandardIsolatedProcessRequest) -> None:
         """Prove the requested ordinary namespace capability before workload effects."""
-        private_file_identities = self._validate_standard_request(request)
+        private_file_identities, _resource_scope = self._validate_standard_request(request)
         if not self._standard_system_checked:
             system_runtime_roots = _standard_system_roots()
             for path in system_runtime_roots:
@@ -296,7 +298,7 @@ class BubblewrapProcessIsolation:
 
     def _validate_standard_request(
         self, request: StandardIsolatedProcessRequest
-    ) -> frozenset[tuple[int, int]]:
+    ) -> tuple[frozenset[tuple[int, int]], tuple[str, ...]]:
         if os.name != "posix" or not Path(self.executable).is_file():
             raise FleetPlanInvalid("Standard isolated execution requires native Bubblewrap")
         if request.host_network:
@@ -334,7 +336,7 @@ class BubblewrapProcessIsolation:
                 "Standard namespace launcher cannot accept host loader/interpreter injection: "
                 + ", ".join(unsafe_environment)
             )
-        standard_resource_scope_command(request.resources, self.standard_resource_executable)
+        resource_scope = self._standard_resource_scope(request)
         request.require_workspace_current()
         if not request.cwd.is_dir() or not request.cwd.is_relative_to(request.workspace):
             raise FleetPlanInvalid("Standard sandbox workspace or cwd is no longer current")
@@ -459,7 +461,15 @@ class BubblewrapProcessIsolation:
                 raise FleetPlanInvalid(
                     "Standard model broker requires one socket in a private directory"
                 )
-        return private_file_identities
+        return private_file_identities, resource_scope
+
+    def _standard_resource_scope(self, request: StandardIsolatedProcessRequest) -> tuple[str, ...]:
+        return standard_resource_scope_command(
+            request.resources,
+            self.standard_resource_executable,
+            query_executable=self.standard_resource_query_executable,
+            manager_environment=self._standard_resource_environment,
+        )
 
     def _execute_standard(
         self,
@@ -649,12 +659,10 @@ class BubblewrapProcessIsolation:
                         *argv,
                     )
                 )
-                self._validate_standard_request(request)
+                _private_file_identities, resource_scope = self._validate_standard_request(request)
                 try:
                     result = run_command(
-                        *standard_resource_scope_command(
-                            request.resources, self.standard_resource_executable
-                        ),
+                        *resource_scope,
                         *args,
                         timeout=timeout,
                         env={**environment, **self._standard_resource_environment},
@@ -757,7 +765,10 @@ class BubblewrapProcessIsolation:
                     {
                         "standard_resource_executable": _executable_sha256(
                             self.standard_resource_executable
-                        )
+                        ),
+                        "standard_resource_query_executable": _executable_sha256(
+                            self.standard_resource_query_executable
+                        ),
                     }
                     if self.standard_resource_executable is not None
                     else {}

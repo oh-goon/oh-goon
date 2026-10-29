@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -58,10 +59,25 @@ def test_physical_quiescence_downgrade_fails_original_architecture(
     new: str,
 ) -> None:
     root = _fixture(tmp_path)
+    assert check_co_r01_lifecycle_edges(root) == []
     file = root / relative
     source = file.read_text(encoding="utf-8")
     assert old in source
-    if relative == _CGROUP_OWNER and old.startswith("_remove_cgroup("):
+    if relative == _CGROUP_OWNER and old.startswith('"cgroup.'):
+        wait = next(
+            node
+            for node in ast.parse(source).body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_wait_for_cgroup_empty"
+        )
+        assert wait.end_lineno is not None
+        lines = source.splitlines(keepends=True)
+        start, end = wait.lineno - 1, wait.end_lineno
+        governed = "".join(lines[start:end])
+        assert governed.count(old) == 1
+        lines[start:end] = [governed.replace(old, new, 1)]
+        source = "".join(lines)
+    elif relative == _CGROUP_OWNER and old.startswith("_remove_cgroup("):
         prefix, signature, closing = source.partition("    def close(self)")
         assert signature and old in closing
         source = prefix + signature + closing.replace(old, new, 1)
