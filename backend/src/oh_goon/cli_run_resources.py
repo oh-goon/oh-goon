@@ -37,7 +37,7 @@ from oh_goon.engine.atomic_execution_bytes import (
     verify_sealed_execution_descriptor,
 )
 from oh_goon.engine.command import CommandProcessLifecycleEvent, run_command
-from oh_goon.integrations.exact_file_write import prepared_text_file, publish_prepared_file
+from oh_goon.integrations.exact_file_write import publish_text_file
 from oh_goon.integrations.run_resource_envelope import (
     PinnedRunResourceScope,
     ResolvedRunResourceScope,
@@ -279,19 +279,8 @@ def verify_run_resource_handoff(
         if configuration.absolute() != captured.snapshot.path:
             raise FleetPlanInvalid("Run resource handoff selects another configuration")
         evidence = verify_current_run_resource_scope(captured.scope, handoff_sha256=captured.sha256)
-        parent = captured.observation_path.parent
-        metadata = parent.stat(follow_symlinks=False)
-        if (
-            not stat.S_ISDIR(metadata.st_mode)
-            or metadata.st_uid != os.geteuid()
-            or stat.S_IMODE(metadata.st_mode) != 0o700
-            or parent.is_symlink()
-        ):
-            raise FleetPlanInvalid(
-                "Run resource observation parent is not original private scratch"
-            )
-        with prepared_text_file(captured.observation_path, evidence.model_dump_json()) as prepared:
-            publish_prepared_file(prepared, captured.observation_path)
+        _require_private_control_parent(captured.observation_path)
+        publish_text_file(captured.observation_path, evidence.model_dump_json())
         available, _, _ = select.select([captured.acknowledgement_descriptor], [], [], 30)
         if not available or os.read(captured.acknowledgement_descriptor, 1) != b"1":
             raise FleetPlanInvalid(
@@ -300,6 +289,21 @@ def verify_run_resource_handoff(
         return captured, evidence
     finally:
         os.close(captured.acknowledgement_descriptor)
+
+
+def _require_private_control_parent(path: Path) -> None:
+    parent = path.parent
+    metadata = parent.stat(follow_symlinks=False)
+    if (
+        not path.is_absolute()
+        or ".." in path.parts
+        or parent.resolve(strict=True) != parent
+        or not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or parent.is_symlink()
+    ):
+        raise FleetPlanInvalid("Run resource observation parent is not original private scratch")
 
 
 class RunResourceSignalForwarder:
@@ -413,12 +417,12 @@ def publish_terminal_run_resource_context(
     evidence: RunResourceEnvelopeEvidence,
 ) -> None:
     """Publish only the original terminal cut after all child runtime writes settle."""
+    _require_private_control_parent(captured.terminal_path)
     context = runtime.runs.capture_run_resource_observation_context(evidence)
     payload = context.model_dump_json()
     if len(payload.encode("utf-8")) > MAX_RUN_CONTROL_OBSERVATION_BYTES:
         raise FleetPlanInvalid("Terminal Run resource context exceeds its bound")
-    with prepared_text_file(captured.terminal_path, payload) as prepared:
-        publish_prepared_file(prepared, captured.terminal_path)
+    publish_text_file(captured.terminal_path, payload)
 
 
 class _RunResourceParent:

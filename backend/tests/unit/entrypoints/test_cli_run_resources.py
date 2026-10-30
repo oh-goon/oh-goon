@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import oh_goon.cli_run_resources as resource_cli
 from oh_goon.cli_run_resources import (
     PreparedRunResourceHandoff,
     ResolvedCliState,
@@ -18,11 +19,20 @@ from oh_goon.cli_run_resources import (
     restore_run_resource_handoff,
 )
 from oh_goon.core.errors import ExecutionAuthorityDivergence, RunConfigurationInvalid
+from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.run import FleetRunFailure
+from oh_goon.core.models.run_admission import fleet_repository_scope
+from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_MODE_ENV
+from oh_goon.core.vocabulary import FleetRunStatus, FleetRunTerminalIntent
 from oh_goon.engine.atomic_execution_bytes import atomic_execution_bytes_supported
 from oh_goon.engine.command import CommandProcessLifecycleEvent, run_command
 from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.journal import Journal, RunResourceObservationContext
 from oh_goon.services.run_configuration import RunConfigurationSnapshot, load_run_configuration
+from tests.factories.journal import admit_run, start_run, terminalize_run
+from tests.factories.run_resources import run_resource_admission, run_resource_envelope
 
 
 def _invocation(
@@ -200,3 +210,130 @@ def test_private_transport_cleanup_does_not_mask_original_result(
             result = 7
         assert result == 7
     assert prepared.cleanup_errors == ["HANDOFF_SCRATCH_CLEANUP_FAILED"]
+
+
+@pytest.mark.skipif(not atomic_execution_bytes_supported(), reason="Linux sealed FD unavailable")
+@pytest.mark.parametrize("private_terminal", (True, False), ids=("publish", "private-parent-lost"))
+def test_real_control_publication_and_ack_with_physical_scope_boundary_mocked(
+    tmp_path: Path,
+    private_terminal: bool,
+) -> None:
+    snapshot, state, scope = _invocation(tmp_path)
+    repository = RepositoryIdentity.model_validate({"path": tmp_path / "subject"})
+    repository.path.mkdir()
+    journal = Journal(LocalDatabase(state.database, journal_mode="DELETE"))
+    child = """
+import json, os, sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+from oh_goon.cli_run_resources import verify_run_resource_handoff, publish_terminal_run_resource_context
+from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.journal import Journal
+
+header, configuration, payload, private_terminal = sys.argv[1:]
+expected = RunResourceEnvelopeEvidence.model_validate_json(payload)
+# This replaces only the physical scope qualification. Sealing, file I/O,
+# process ownership, ACK, Journal capture and text publication remain real.
+with patch('oh_goon.cli_run_resources.verify_current_run_resource_scope', return_value=expected):
+    captured, observed = verify_run_resource_handoff(header, Path(configuration))
+assert observed == expected
+for descriptor in (json.loads(header)['descriptor'], captured.acknowledgement_descriptor):
+    try:
+        os.fstat(descriptor)
+    except OSError:
+        pass
+    else:
+        raise AssertionError('child retained a consumed control descriptor')
+runtime = SimpleNamespace(runs=Journal(LocalDatabase(captured.state.database, journal_mode='DELETE')))
+if private_terminal == 'false':
+    captured.terminal_path.parent.chmod(0o755)
+    try:
+        publish_terminal_run_resource_context(runtime, captured, expected)
+    except FleetPlanInvalid:
+        assert not captured.terminal_path.exists()
+        print('private-parent-rejected')
+    else:
+        raise AssertionError('terminal evidence published to a nonprivate parent')
+else:
+    publish_terminal_run_resource_context(runtime, captured, expected)
+    print('control-publication-complete')
+"""
+    with prepare_run_resource_handoff(snapshot, state, scope) as prepared:
+        expected = run_resource_envelope(scope.fleet_run_id).model_copy(
+            update={
+                "resources": scope.resources,
+                "unit_name": scope.unit_name,
+                "handoff_sha256": prepared.sha256,
+                "memory_max_bytes": scope.resources.memory_bytes,
+                "pids_max": scope.resources.max_processes,
+            }
+        )
+        admit_run(
+            journal,
+            expected.fleet_run_id,
+            run_resource_admission(repository, expected),
+            fleet_repository_scope({repository.repository_id}),
+            [repository],
+        )
+        start_run(journal, expected.fleet_run_id)
+        terminalize_run(
+            journal,
+            expected.fleet_run_id,
+            FleetRunTerminalIntent.FAIL,
+            FleetRunFailure.recovery("Original fixture failure"),
+        )
+        acknowledged = False
+
+        def acknowledge_started() -> None:
+            nonlocal acknowledged
+            if acknowledged or not prepared.observation_path.exists():
+                return
+            started = RunResourceEnvelopeEvidence.model_validate_json(
+                resource_cli._read_control_json(prepared.observation_path)
+            )
+            assert started == expected
+            assert prepared.observation_path.stat().st_mode & 0o777 == 0o600
+            assert os.write(prepared.acknowledgement_write, b"1") == 1
+            acknowledged = True
+
+        completed = run_command(
+            sys.executable,
+            "-I",
+            "-c",
+            child,
+            prepared.header,
+            str(snapshot.path),
+            expected.model_dump_json(),
+            str(private_terminal).lower(),
+            termination_requested=acknowledge_started,
+            pass_fds=(prepared.descriptor, prepared.acknowledgement_read),
+            timeout=10,
+            require_process_group_quiescence=True,
+            parent_death_signal=True,
+            max_capture_bytes_per_stream=8192,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert acknowledged
+        assert completed.supervisor.final_process_group_quiescent
+        assert completed.stdout.strip() == (
+            "control-publication-complete" if private_terminal else "private-parent-rejected"
+        )
+        if private_terminal:
+            context = RunResourceObservationContext.model_validate_json(
+                resource_cli._read_control_json(prepared.terminal_path)
+            )
+            assert context.expected == expected
+            assert context.terminal_status is FleetRunStatus.FAILED
+            assert context.database.path == state.database
+            assert prepared.terminal_path.stat().st_mode & 0o777 == 0o600
+        else:
+            assert not prepared.terminal_path.exists()
+        # Child consumption must not close the parent's separate FD table.
+        for descriptor in (prepared.descriptor, prepared.acknowledgement_read):
+            os.fstat(descriptor)
+        assert not list(prepared.observation_path.parent.glob("*.tmp"))
+    assert prepared.cleanup_errors == []
+    assert not prepared.observation_path.parent.exists()
