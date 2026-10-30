@@ -631,6 +631,18 @@ explicit public non-secret configuration-directory contract. That Pi directory u
 a private copy-on-write overlay; disposable native state cannot modify the host
 input. User auth/configuration stores are never deployment inputs or runtime roots.
 
+Pi `arguments` contain native options and their own values. Oh-Goon owns the
+invocation's task, session and transport: caller arguments cannot select native
+history, change mode, request print/export/inspection, insert a `--` terminator,
+or add positional tasks and `@file` inputs. A missing native option value is
+refused before it can consume an adapter-owned flag. Use the outer CLI's
+`--prompt` or `--prompt-file` for task input. Nonconflicting model, thinking,
+tool, display and extension options retain their original order and values;
+native Pi still interprets those values. Explicit native model arguments retain
+the existing public broker-configuration requirement. Unknown extension flags
+do not attest the behavior of arbitrary extension code. Persistent session modes
+remain unqualified; see the [Pi argument QA boundary](development/AGENT_HARNESS_COMPATIBILITY.md#pi-argument-ownership-qa--hug-71).
+
 Model context limits, output budgets and thinking controls belong to the native
 agent/provider configuration. Include reasoning tokens in the output budget.
 A provider may reject or ignore an unsupported thinking setting; for local

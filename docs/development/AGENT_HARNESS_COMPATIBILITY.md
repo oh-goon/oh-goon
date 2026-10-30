@@ -266,6 +266,20 @@ arbitrary extension code still requires the separate effective-session checks in
 [HUG-136](https://linear.app/hugloss/issue/HUG-136). Typed creation/continuation,
 mount custody and same-process RPC qualification remain with HUG-40/41/70/139.
 
+**Disposition: retain** the adapter's task/session/transport reservation and
+qualify its option-boundary framing against installed Pi 1.3.0. The existing
+[argument owner][native] distinguishes value-taking native options, switches and
+unknown long extension flags without interpreting values or rewriting argv.
+`--use-theme` and `--tui-mode` have native flag-leading-value refusal, unlike
+ordinary value-taking options. Their native fatal diagnostics are not evidence
+of reachable model work. [Installed parser probes][pi-session-tests] establish
+these distinctions in a read-only, denied-network Bubblewrap process; they do
+not start Pi or load an extension. [Native unit tests][native-tests],
+[resolver tests][resolver-tests] and the
+[CLI/Plan tests](../../backend/tests/unit/entrypoints/test_cli_ai.py) protect
+early refusals and valid caller options. Requalify framing on a native upgrade;
+these results do not certify arbitrary extensions or new persistent modes.
+
 ## Upgrade and subtraction review
 
 For a native integration change, review the applicable IDs and record an explicit
