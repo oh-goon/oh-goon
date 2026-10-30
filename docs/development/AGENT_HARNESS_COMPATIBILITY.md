@@ -242,6 +242,30 @@ process receipts. The entrypoint hash does not seal Node or its imported package
 bytes; changed implementations require requalification (HUG-137). No live
 account, paid inference, transcript parser or product command change is involved.
 
+## Pi argument ownership QA — HUG-71
+
+[HUG-71](https://linear.app/hugloss/issue/HUG-71) protects the currently supported
+native invocation before persistent-session selection is enabled. Exercise the
+selected installed parser, including its `--` terminator, positional tasks,
+`@file` inputs, native session selectors and long equals forms that may reach
+extension flags. An appended `--mode json --no-session` does not protect the
+invocation when earlier arguments terminate option parsing or consume those
+owned flags as a missing option value.
+
+Before changing admission, reproduce these routes with the installed parser
+without model or personal-store access. Require refusal through the existing
+native argument owner before executable/configuration reads, Run construction,
+lock publication or model effects. Cover the public CLI and authored Plan paths,
+and retain positive controls for nonconflicting native model, thinking, tool,
+display and extension options. Argument values must never appear in refusals.
+
+This is an invocation-ownership check, not a replacement native option resolver.
+Native Pi continues to interpret option values and extension semantics. Reserved
+names cannot become caller authority through an extension's equals form;
+arbitrary extension code still requires the separate effective-session checks in
+[HUG-136](https://linear.app/hugloss/issue/HUG-136). Typed creation/continuation,
+mount custody and same-process RPC qualification remain with HUG-40/41/70/139.
+
 ## Upgrade and subtraction review
 
 For a native integration change, review the applicable IDs and record an explicit
