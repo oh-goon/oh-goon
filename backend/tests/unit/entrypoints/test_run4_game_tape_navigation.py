@@ -27,6 +27,7 @@ class _Tape:
     journal_revision = 7
     configuration = None
     why_not = None
+    artifact_observation = None
 
     def __init__(self, run_id):
         self.fleet_run_id = run_id

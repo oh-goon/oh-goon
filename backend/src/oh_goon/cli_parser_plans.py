@@ -3,6 +3,42 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from oh_goon.core.models.game_tape import (
+    MAX_ARTIFACT_OBSERVATION_BYTES,
+    MAX_ARTIFACT_OBSERVATION_COUNT,
+    MAX_ARTIFACT_OBSERVATION_SECONDS,
+)
+
+
+def _artifact_limit(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a whole number") from None
+    if not 0 <= parsed <= MAX_ARTIFACT_OBSERVATION_COUNT:
+        raise argparse.ArgumentTypeError("artifact count is outside the supported bounds")
+    return parsed
+
+
+def _artifact_bytes(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a whole number of bytes") from None
+    if not 0 <= parsed <= MAX_ARTIFACT_OBSERVATION_BYTES:
+        raise argparse.ArgumentTypeError("artifact byte budget is outside the supported bounds")
+    return parsed
+
+
+def _artifact_seconds(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a number of seconds") from None
+    if not 0 < parsed <= MAX_ARTIFACT_OBSERVATION_SECONDS:
+        raise argparse.ArgumentTypeError("artifact time budget is outside the supported bounds")
+    return parsed
+
 
 def add_workflow_commands(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
@@ -168,3 +204,12 @@ def _add_run_readback_commands(
             "fleet_run_id", metavar="CAMPAIGN_OR_RUN_ID" if command == "campaign" else None
         )
         viewer.add_argument("--json", action="store_true", dest="as_json")
+        if command in {"outputs", "tape", "handoff"}:
+            viewer.add_argument(
+                "--observe-artifacts",
+                action="store_true",
+                help="Explicitly verify retained bytes under bounded read leases; history stays unchanged",
+            )
+            viewer.add_argument("--artifact-limit", type=_artifact_limit)
+            viewer.add_argument("--artifact-byte-budget", type=_artifact_bytes)
+            viewer.add_argument("--artifact-time-budget-seconds", type=_artifact_seconds)

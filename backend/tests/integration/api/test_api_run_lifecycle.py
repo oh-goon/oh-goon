@@ -3,14 +3,20 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
 
 from oh_goon.api import dependencies
 from oh_goon.api.app import app as api_app
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.operation import OperationExecution
+from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.vocabulary import OperationAction, Verdict
 from oh_goon.engine.errors import OperationCancelledError
+from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from tests.factories.local_state import local_state
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.runtime_stack import fleet_stack
@@ -50,6 +56,136 @@ class ApiCancellableRunner:
         while not cancel_requested() and time.monotonic() < deadline:
             time.sleep(0.01)
         raise OperationCancelledError("cancelled")
+
+
+def test_run_detail_api_transports_one_bounded_artifact_observation_without_changing_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repos"
+    repository = root / "api"
+    repository.mkdir(parents=True)
+    (repository / ".git").mkdir()
+    (repository / "pyproject.toml").write_text("[project]\nname='api'\nversion='0.1.0'\n")
+    state = local_state(LocalDatabase(tmp_path / "observation-api.db"))
+    state.add_location(root)
+    fleet, manager, _, _ = fleet_stack(state, ApiReadyRunner())
+    owner: FleetRunControlPlane = manager
+    api_app.dependency_overrides[dependencies.fleet_service] = lambda: fleet
+    api_app.dependency_overrides[dependencies.fleet_run_control_plane] = lambda: owner
+    client = authenticated_api_client(api_app)
+    try:
+        started = client.post(
+            "/api/fleet/runs", json={"fleet_run_id": "artifact-observation-api", "action": "init"}
+        )
+        assert started.status_code == 202
+        run_id = started.json()["fleet_run_id"]
+        owner.wait_for_terminal(run_id, timeout=2)
+        store = FleetContentStore(tmp_path / "content-store")
+        forbidden_read = Mock(side_effect=AssertionError("No artifact bytes were selected"))
+        monkeypatch.setattr(store, "materialize_file", forbidden_read)
+        monkeypatch.setattr(owner, "_content_store", store)
+        get = owner.get
+        returned: list[FleetRunDetail] = []
+        selections: list[tuple[str, bool, int | None, int | None, float | None]] = []
+
+        def selected_get(
+            fleet_run_id: str,
+            *,
+            observe_artifacts: bool = False,
+            artifact_limit: int | None = None,
+            artifact_byte_budget: int | None = None,
+            artifact_time_budget_seconds: float | None = None,
+        ) -> FleetRunDetail:
+            selections.append(
+                (
+                    fleet_run_id,
+                    observe_artifacts,
+                    artifact_limit,
+                    artifact_byte_budget,
+                    artifact_time_budget_seconds,
+                )
+            )
+            detail = get(
+                fleet_run_id,
+                observe_artifacts=observe_artifacts,
+                artifact_limit=artifact_limit,
+                artifact_byte_budget=artifact_byte_budget,
+                artifact_time_budget_seconds=artifact_time_budget_seconds,
+            )
+            returned.append(detail)
+            return detail
+
+        monkeypatch.setattr(owner, "get", selected_get)
+        default = client.get(f"/api/fleet/runs/{run_id}")
+        assert default.status_code == 200
+        original = default.json()
+        assert original["game_tape"]["artifact_observation"] is None
+        assert "artifact_observation" not in original
+        assert returned[-1].artifact_observation is None
+        assert selections == [(run_id, False, None, None, None)]
+        for parameters, limits in (
+            ({"observe_artifacts": "true"}, (32, 16 * 1024 * 1024, 5.0)),
+            (
+                {
+                    "observe_artifacts": "true",
+                    "artifact_limit": "0",
+                    "artifact_byte_budget": "0",
+                    "artifact_time_budget_seconds": "0.5",
+                },
+                (0, 0, 0.5),
+            ),
+        ):
+            before = len(returned)
+            response = client.get(f"/api/fleet/runs/{run_id}", params=parameters)
+            assert response.status_code == 200
+            assert len(returned) == before + 1
+            batch = returned[-1].artifact_observation
+            assert batch is not None
+            payload = response.json()
+            assert payload["game_tape"]["artifact_observation"] == batch.model_dump(mode="json")
+            assert batch.journal_revision == payload["journal_revision"]
+            assert (batch.artifact_limit, batch.byte_budget, batch.time_budget_seconds) == limits
+            assert batch.total_artifacts == batch.omitted_artifacts == 0
+            assert batch.observations == ()
+            assert payload["run"] == original["run"]
+            assert payload["operations"] == original["operations"]
+        assert selections[-1] == (run_id, True, 0, 0, 0.5)
+        forbidden_read.assert_not_called()
+        invalid_selections = (
+            ({"artifact_limit": "1"}, 400, "FLEET_PLAN_INVALID"),
+            (
+                {"observe_artifacts": "false", "artifact_byte_budget": "0"},
+                400,
+                "FLEET_PLAN_INVALID",
+            ),
+            ({"observe_artifacts": "true", "artifact_limit": "65"}, 422, "VALIDATION_ERROR"),
+            (
+                {"observe_artifacts": "true", "artifact_byte_budget": str(64 * 1024 * 1024 + 1)},
+                422,
+                "VALIDATION_ERROR",
+            ),
+            (
+                {"observe_artifacts": "true", "artifact_time_budget_seconds": "0"},
+                422,
+                "VALIDATION_ERROR",
+            ),
+        )
+        with monkeypatch.context() as scoped:
+            forbidden_journal = Mock(side_effect=AssertionError("Invalid observation read history"))
+            scoped.setattr(state.journal, "read_view", forbidden_journal)
+            for parameters, status, code in invalid_selections:
+                response = client.get(f"/api/fleet/runs/{run_id}", params=parameters)
+                assert response.status_code == status
+                assert response.json()["code"] == code
+            forbidden_journal.assert_not_called()
+        forbidden_read.assert_not_called()
+        unchanged = client.get(f"/api/fleet/runs/{run_id}")
+        assert unchanged.status_code == 200
+        assert unchanged.json() == original
+    finally:
+        client.close()
+        owner.shutdown()
+        api_app.dependency_overrides.clear()
 
 
 def test_async_run_api_returns_run_detail_from_session_journal(tmp_path: Path) -> None:

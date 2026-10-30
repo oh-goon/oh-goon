@@ -1,4 +1,4 @@
-// OPENAPI_SHA256: 6a4fad82374650d631e9b52525979c5d369ffc7e0e74f44640714c13505baaeb
+// OPENAPI_SHA256: 5896ee54550190ef36594a0ff29cbc5f4f59a965cbd463c1a86081a0a8d3cf5f
 // AUTO-GENERATED static runtime validators compiled from FastAPI/OpenAPI.
 // Component validators live in deterministic internal shards; transport consumes this facade only.
 // This file executes schema-specific checks; it does not interpret JSON Schema at runtime.
@@ -21,10 +21,12 @@ import { validateFleetFailureRepositoryPage } from "@generated/validatorParts/va
 import { validateFleetRunChildRequest, validateFleetRunDetail, validateFleetRunEventBatch } from "@generated/validatorParts/validatorPart013";
 import { validateFleetRunHistoryPage, validateFleetRunOverview, validateFleetRunRequest, validateFleetRunState, validateFleetSbomBundle, validateFleetSecuritySummary, validateFleetSnapshot } from "@generated/validatorParts/validatorPart014";
 import { validateGameTapeFailureHistory } from "@generated/validatorParts/validatorPart017";
-import { validateGameTapeLiveOutputBatch, validateGameTapePerformanceReport } from "@generated/validatorParts/validatorPart018";
+import { validateGameTapeLiveOutputBatch } from "@generated/validatorParts/validatorPart018";
+import { validateGameTapePerformanceReport } from "@generated/validatorParts/validatorPart019";
 import { validateGameTapeRunDiff } from "@generated/validatorParts/validatorPart020";
 import { validateIncludeRepositoryRequest, validateIncludedRepositoryCatalogEntry } from "@generated/validatorParts/validatorPart023";
-import { validateLeagueLineupCatalog, validateLeagueLineupDocument, validateLeagueLineupInspection, validateLeagueLineupSaveRequest, validateLeagueMap, validateLocationRequest, validateLocationsResponse } from "@generated/validatorParts/validatorPart025";
+import { validateLeagueLineupCatalog, validateLeagueLineupDocument, validateLeagueLineupInspection, validateLeagueLineupSaveRequest } from "@generated/validatorParts/validatorPart025";
+import { validateLeagueMap, validateLocationRequest, validateLocationsResponse } from "@generated/validatorParts/validatorPart026";
 import { validatePlacementQueueSnapshot } from "@generated/validatorParts/validatorPart029";
 import { validatePlanTemplateCatalog, validatePrivacyResponse } from "@generated/validatorParts/validatorPart034";
 import { validateQueueCancelRequest, validateQueueReprioritizeRequest } from "@generated/validatorParts/validatorPart035";

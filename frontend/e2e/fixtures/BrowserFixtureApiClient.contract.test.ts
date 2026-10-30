@@ -7,6 +7,19 @@ import { FIXTURE_PLANS, FIXTURE_SHA } from "./plans";
 import { DEFAULT_RUN_ID } from "./runIds";
 
 describe("BrowserFixtureApiClient canonical fixture contracts", () => {
+  it("observes selected artifact bytes only on request while retaining the recorded evidence", async () => {
+    const client = new BrowserFixtureApiClient("artifact-observation");
+    const recorded = decodeResponse(operations.get_fleet_run.operationId, await client.fleetRunDetail(DEFAULT_RUN_ID));
+    expect(recorded.game_tape.artifact_observation).toBeNull();
+    const observed = decodeResponse(operations.get_fleet_run.operationId, await client.fleetRunDetail(DEFAULT_RUN_ID, undefined, true));
+    expect(observed.game_tape.artifact_observation?.observations.map((item) => item.status)).toEqual(["AVAILABLE", "UNAVAILABLE"]);
+    expect(observed.game_tape.artifact_observation?.omitted_artifacts).toBe(2);
+    expect(observed.game_tape.repositories).toEqual(recorded.game_tape.repositories);
+    expect(observed.run).toEqual(recorded.run);
+    const unobserved = await client.fleetRunDetail(DEFAULT_RUN_ID);
+    expect(unobserved.game_tape.artifact_observation).toBeNull();
+  });
+
   it("serves a campaign without fabricating a Run and validates its generated response contract", async () => {
     const client = new BrowserFixtureApiClient();
     const campaign = decodeResponse(operations.get_agent_campaign.operationId, await client.agentCampaign("campaign-browser-refused"));

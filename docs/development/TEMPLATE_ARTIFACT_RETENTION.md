@@ -89,10 +89,10 @@ for each retained artifact shown in its bounded preview.
 Export remains available after execution scratch and caller source disappear,
 while the retained reference remains live. Missing, evidence-only, released or
 inconsistent content refuses; export never falls back to a current workspace.
-`runs outputs`, Game Tape and the Run API describe collection-time evidence:
+Default `runs outputs`, Game Tape and Run API reads describe collection-time evidence:
 `PRESENT` means the file was collected, and a recorded retained reference does
 not prove that its bytes are still available. Export checks the live reference
-and bytes under the read lease. A printed export command is a selection hint,
+and bytes under the read lease. A printed completion export command is a selection hint,
 not a fresh availability observation. Releasing retained bytes preserves that
 historical evidence and the original Run result.
 Exported bytes are an explicitly promoted user file; exporting does not release
@@ -102,6 +102,59 @@ the verified destination and `status: exported`, with `cleanup_status: failed`
 and `cleanup_failure` describing the separate cleanup problem. Resolve that
 problem rather than retrying onto the already-created destination. Cleanup
 cannot replace a primary export error or rewrite the historical Run outcome.
+
+### Observe retained-byte availability explicitly
+
+Request bounded verification without exporting a user file:
+
+```sh
+oh-goon runs outputs RUN_ID --observe-artifacts --json
+oh-goon runs tape RUN_ID --observe-artifacts --json
+oh-goon runs handoff RUN_ID --observe-artifacts --json
+```
+
+The existing Run-detail API accepts `observe_artifacts=true`. The browser's
+**Check artifact availability** action makes that explicit read; navigation,
+polling, mutation invalidation and ordinary refreshes do not scan blob bytes.
+A supplied matching observation is reused without another probe.
+
+All surfaces carry the same versioned `artifact_observation` read model, under
+Game Tape in the Run API. It is separate from historical artifact evidence and
+is never written into the Journal. It binds the captured Run/journal revision,
+repository and Step execution IDs, path, recorded digest/size/reference, check
+time, budgets and omissions. It grants no retention promise, Run outcome,
+execution permission or certification receipt.
+
+| Observation | Meaning |
+| --- | --- |
+| `AVAILABLE` / `VERIFIED` | Canonical identity and raw SHA-256/size were verified under an authorized read lease using private file-backed staging. |
+| `UNAVAILABLE` | No retained bytes were collected, or the scoped reference/object is unavailable or fails identity verification. |
+| `REFUSED` | Original cancellation/interruption, unsettled producer, declaration/owner or recorded identity does not authorize a read. |
+| `UNOBSERVED` | A budget, unavailable store or read failure prevented verification; this is not a missing-object claim. |
+
+Deleted, released, unreadable and foreign references may all report
+`REFERENCE_UNAVAILABLE`: the reference owner supplies no release/expiry
+tombstone or cross-repository existence oracle. An authorized reference with
+absent bytes reports `OBJECT_MISSING`; failed identity verification reports
+`IDENTITY_MISMATCH`. No current-workspace fallback occurs.
+
+Defaults are 32 recorded artifacts, 16 MiB of scheduled payload and a five-second
+cooperative elapsed-time budget. Optional `--artifact-limit`,
+`--artifact-byte-budget` and `--artifact-time-budget-seconds` select bounds up to
+64 artifacts, 64 MiB and ten seconds; equivalent API parameters use underscores.
+Custom budgets require explicit observation. Count/byte budgets may be zero.
+Larger artifacts stay `UNOBSERVED`; count omissions remain explicit. Failed
+reads consume their scheduled payload budget too. Existing native transports and
+bounded buffers own copying/verification. Elapsed cancellation is checked between
+I/O stages/chunks and cannot interrupt a stalled kernel call.
+
+Entries are point-in-time leased observations, not an atomic snapshot of all
+references or a guarantee of future retrieval. Release/GC can change availability
+after observation; export always acquires its own lease and verifies again.
+Printed export commands remain subject to that recheck. Staging cleanup failure
+is reported separately without rewriting verified bytes or original Run/Step
+results. Observer failures expose controlled reasons rather than private store
+paths or arbitrary exception text.
 
 ### Concrete shipped choices
 

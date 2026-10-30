@@ -51,7 +51,7 @@ export interface ApiClient {
   fleetFailureGroups(query?: string, offset?: number, limit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.fleet_failure_groups.operationId>;
   fleetFailureRepositories(groupId: string, query?: string, signatureId?: string, offset?: number, limit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.fleet_failure_repositories.operationId>;
   fleetRunHistory(beforeRevision?: number, limit?: number, outcome?: FleetRunHistoryOutcome, status?: FleetRunHistoryStatus, source?: FleetRunHistorySource, repositoryId?: string, fromAt?: string, toAt?: string, planQuery?: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.fleet_run_history.operationId>;
-  fleetRunDetail(runId: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.get_fleet_run.operationId>;
+  fleetRunDetail(runId: string, options?: ReadRequestOptions, observeArtifacts?: boolean): ReadOperationResult<typeof op.get_fleet_run.operationId>;
   agentCampaign(campaignId: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.get_agent_campaign.operationId>;
   compareFleetRuns(runId: string, baselineRunId: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.compare_fleet_runs.operationId>;
   gameTapePerformance(runId: string, sampleLimit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.game_tape_performance.operationId>;

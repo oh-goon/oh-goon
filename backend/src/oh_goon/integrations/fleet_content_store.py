@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import (
+    FleetContentIntegrityError,
+    FleetContentObjectUnavailable,
+    FleetPlanInvalid,
+)
 from oh_goon.core.operation_economics import OperationEconomicsReceipt, economics_receipt
 from oh_goon.core.path_authority import (
     RepositoryScopedPath,
@@ -17,7 +21,7 @@ from oh_goon.core.path_authority import (
     ensure_private_directory,
 )
 from oh_goon.core.path_layouts import ContentStorePathLayout
-from oh_goon.integrations._copy_transport import copy_regular_file
+from oh_goon.integrations._copy_transport import FileCopyLimitExceeded, copy_regular_file
 from oh_goon.integrations.exact_file_write import (
     ExactPublicationDurabilityError,
     publish_prepared_directory,
@@ -403,7 +407,9 @@ class FleetContentStore:
                 or expected_identity.entry_count != 1
                 or source.stat(follow_symlinks=False).st_size != expected_identity.byte_count
             ):
-                raise FleetPlanInvalid("Retained file metadata differs from its recorded identity")
+                raise FleetContentIntegrityError(
+                    "Retained file metadata differs from its recorded identity"
+                )
 
             def check_cancel() -> None:
                 if cancel_requested is not None and cancel_requested():
@@ -411,16 +417,24 @@ class FleetContentStore:
 
                     raise OperationCancelledError("Cancelled while materializing retained file")
 
-            copy_regular_file(
-                source,
-                destination.path,
-                check_cancel=check_cancel,
-                label="Fleet retained file materialization",
-            )
+            try:
+                copy_regular_file(
+                    source,
+                    destination.path,
+                    check_cancel=check_cancel,
+                    label="Fleet retained file materialization",
+                    max_bytes=expected_identity.byte_count
+                    if expected_identity is not None
+                    else None,
+                )
+            except FileCopyLimitExceeded as error:
+                raise FleetContentIntegrityError(str(error)) from error
             destination.prove_owned()
             observed = snapshot_identity(destination.path, cancel_requested=cancel_requested)
             if observed.sha256 != expected_sha256:
-                raise FleetPlanInvalid("Fleet content object changed while materializing file")
+                raise FleetContentIntegrityError(
+                    "Fleet content object changed while materializing file"
+                )
             with store_lock(self._lock_path):
                 touch_object_used_locked(self.root, lease.object_id, byte_count=observed.byte_count)
             return observed
@@ -441,7 +455,7 @@ class FleetContentStore:
             )
             kind, sha256 = _parse_object_id(object_id)
             if expected_kind is not None and kind != expected_kind:
-                raise FleetPlanInvalid(
+                raise FleetContentIntegrityError(
                     f"Fleet content reference {reference_id} has kind {kind}, expected {expected_kind}"
                 )
             path = self._object_path(object_id)
@@ -478,7 +492,7 @@ class FleetContentStore:
             )
             kind, _sha256 = _parse_object_id(object_id)
             if expected_kind is not None and kind != expected_kind:
-                raise FleetPlanInvalid(
+                raise FleetContentIntegrityError(
                     f"Fleet content reference {reference_id} has kind {kind}, expected {expected_kind}"
                 )
             path = self._object_path(object_id)
@@ -503,11 +517,11 @@ class FleetContentStore:
             )
             kind, _ = _parse_object_id(object_id)
             if expected_kind is not None and kind != expected_kind:
-                raise FleetPlanInvalid(
+                raise FleetContentIntegrityError(
                     f"Fleet content reference {reference_id} has kind {kind}, expected {expected_kind}"
                 )
             if not self._object_path(object_id).exists():
-                raise FleetPlanInvalid(
+                raise FleetContentObjectUnavailable(
                     f"Fleet content object for reference is unavailable: {reference_id}"
                 )
             return new_lease_locked(

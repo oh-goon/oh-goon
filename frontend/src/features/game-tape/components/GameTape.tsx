@@ -23,6 +23,7 @@ import { GameTapeVerification } from "@/features/game-tape/components/GameTapeVe
 import { statusTone } from "@/features/game-tape/gameTapeFormat";
 import { findGameTapeStepContext, gameTapeFailureNavigation, gameTapeStepContexts } from "@/features/game-tape/gameTapeSteps";
 import { useGameTapeComparison } from "@/features/game-tape/hooks/useGameTapeComparison";
+import { useGameTapeArtifactObservation } from "@/features/game-tape/hooks/useGameTapeArtifactObservation";
 import { useGameTapeFailureHistory } from "@/features/game-tape/hooks/useGameTapeFailureHistory";
 import { useGameTapeLiveOutput } from "@/features/game-tape/hooks/useGameTapeLiveOutput";
 import { useGameTapePerformance } from "@/features/game-tape/hooks/useGameTapePerformance";
@@ -108,6 +109,9 @@ function GameTapeRun({
 }: GameTapeProps) {
   const { t } = useTranslation();
   const tape = detail.game_tape;
+  const artifactObservation = useGameTapeArtifactObservation(tape);
+  const observation = artifactObservation.resource.data;
+  const observingArtifacts = artifactObservation.resource.status === "read-loading" || artifactObservation.resource.status === "read-refreshing";
   const hasComparison = comparisonOptions.length > 0;
   const viewAvailable = (candidate: GameTapeView) => !compact || !["performance", "playByPlay", "attempts", "search"].includes(candidate);
   const view = requestedView && viewAvailable(requestedView) && (requestedView !== "diff" || hasComparison) ? requestedView : "summary";
@@ -222,6 +226,15 @@ function GameTapeRun({
         {advancedViews.map((item) => <ViewButton key={item} item={item} selected={view === item} onSelect={selectView} />)}
       </nav>
     </details> : null}
+    {artifacts.size > 0 && (view === "outputs" || view === "logs" || selectedArtifacts.length > 0) ? <section className="compact-card" aria-label={t("gameTape.evidence.availabilityTitle")}>
+      <header><strong>{t("gameTape.evidence.availabilityTitle")}</strong><button className="button button--secondary button--compact" type="button" disabled={observingArtifacts} aria-busy={observingArtifacts} onClick={() => { void artifactObservation.refresh(); }}>{t(observingArtifacts ? "gameTape.evidence.checkingAvailability" : "gameTape.evidence.checkAvailability")}</button></header>
+      <p>{t("gameTape.evidence.availabilityRule")}</p>
+      {artifactObservation.resource.failure ? <p role="alert">{artifactObservation.resource.failure.message}</p> : null}
+      {observation ? <div role="status">
+        <p>{t("gameTape.evidence.observationSummary", { count: observation.observations.length, total: observation.total_artifacts })}</p>
+        {observation.omitted_artifacts > 0 ? <p>{t("gameTape.evidence.observationOmitted", { count: observation.omitted_artifacts })}</p> : null}
+      </div> : null}
+    </section> : null}
     <div className={selected ? "game-tape-review-workspace game-tape-review-workspace--inspecting" : "game-tape-review-workspace"}>
       <div className="game-tape-review-surface">
         {view === "summary" ? <GameTapeSummary tape={tape} compact={compact} /> : null}
@@ -230,14 +243,14 @@ function GameTapeRun({
         {view === "performance" ? <GameTapePerformance report={performance.data} loading={performance.status === "read-loading" || performance.status === "read-refreshing"} scout={scoutRun.data} scoutLoading={scoutRun.status === "read-loading" || scoutRun.status === "read-refreshing"} onSelect={selectStep} /> : null}
         {view === "playByPlay" ? <GameTapePlayByPlay tape={tape} onSelect={selectStep} /> : null}
         {view === "attempts" ? <GameTapeAttempts tape={tape} selectedId={selected?.step_execution_id ?? null} onSelect={selectStep} /> : null}
-        {view === "outputs" ? <GameTapeOutputs tape={tape} /> : null}
+        {view === "outputs" ? <GameTapeOutputs tape={tape} observation={observation} /> : null}
         {view === "verification" ? <GameTapeVerification tape={tape} /> : null}
         {view === "enforcer" ? <GameTapeEnforcer tape={tape} /> : null}
-        {view === "logs" ? <GameTapeEvidence tape={tape} selectedId={selected?.step_execution_id ?? null} onSelect={selectStep} failureHistory={failureHistory.data} failureHistoryLoading={failureHistory.status === "read-loading"} liveOutput={liveOutput.data} artifacts={artifacts} logQuery={logQuery} logStream={logStream} logPageFromEnd={logPageFromEnd} onLogQueryChange={onLogQueryChange} onLogStreamChange={onLogStreamChange} onLogPageChange={onLogPageChange} rawLogsOpen={rawLogsOpen} onRawLogsOpenChange={onRawLogsOpenChange} /> : null}
+        {view === "logs" ? <GameTapeEvidence tape={tape} selectedId={selected?.step_execution_id ?? null} onSelect={selectStep} failureHistory={failureHistory.data} failureHistoryLoading={failureHistory.status === "read-loading"} liveOutput={liveOutput.data} artifacts={artifacts} observation={observation} logQuery={logQuery} logStream={logStream} logPageFromEnd={logPageFromEnd} onLogQueryChange={onLogQueryChange} onLogStreamChange={onLogStreamChange} onLogPageChange={onLogPageChange} rawLogsOpen={rawLogsOpen} onRawLogsOpenChange={onRawLogsOpenChange} /> : null}
         {view === "search" ? <GameTapeSearch tape={tape} onSelect={selectStep} liveOutput={liveOutput.data} /> : null}
         {view === "diff" ? <GameTapeDiff diff={comparison.data} options={comparisonOptions} baselineRunId={validBaseline} previousComparableRunId={previousComparableRunId} loading={comparison.status === "read-loading" || comparison.status === "read-refreshing"} onBaselineChange={selectBaseline} /> : null}
       </div>
-      {selected && ["flow", "timeline", "performance", "playByPlay", "logs", "search"].includes(view) ? <GameTapeStepInspector key={selected.step_execution_id} step={selected} artifacts={selectedArtifacts} failureHistory={failureHistory.data} failureHistoryLoading={failureHistory.status === "read-loading"} technicalOpen={technicalOpen} onTechnicalOpenChange={onTechnicalOpenChange} onClose={() => selectStep(null)} onOpenEvidence={() => selectView("logs")} onPreviousFailure={previousFailureId ? () => selectStep(previousFailureId) : undefined} onNextFailure={nextFailureId ? () => selectStep(nextFailureId) : undefined} onComparePreviousOccurrence={openPreviousExactComparison} /> : null}
+      {selected && ["flow", "timeline", "performance", "playByPlay", "logs", "search"].includes(view) ? <GameTapeStepInspector key={selected.step_execution_id} step={selected} artifacts={selectedArtifacts} observation={observation} artifactOwner={selectedContext ? { repository_execution_id: selectedContext.repository.repository_execution_id, repository_id: selectedContext.repository.repository.repository_id, step_execution_id: selected.step_execution_id, step_id: selected.step_id } : undefined} failureHistory={failureHistory.data} failureHistoryLoading={failureHistory.status === "read-loading"} technicalOpen={technicalOpen} onTechnicalOpenChange={onTechnicalOpenChange} onClose={() => selectStep(null)} onOpenEvidence={() => selectView("logs")} onPreviousFailure={previousFailureId ? () => selectStep(previousFailureId) : undefined} onNextFailure={nextFailureId ? () => selectStep(nextFailureId) : undefined} onComparePreviousOccurrence={openPreviousExactComparison} /> : null}
     </div>
   </section>;
 }

@@ -8913,6 +8913,16 @@
             ],
             "title": "Application Launch"
           },
+          "artifact_observation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GameTapeArtifactObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "campaign_journal": {
             "anyOf": [
               {
@@ -9097,6 +9107,238 @@
           "observability"
         ],
         "title": "GameTape",
+        "type": "object"
+      },
+      "GameTapeArtifactAvailability": {
+        "additionalProperties": false,
+        "description": "One point-in-time read observation, separate from collected artifact evidence.",
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "cleanup_failure": {
+            "anyOf": [
+              {
+                "const": "STAGING_CLEANUP_FAILED",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Failure"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "VERIFIED",
+              "NOT_COLLECTED",
+              "NOT_RETAINED",
+              "RUN_CANCELLED",
+              "RUN_INTERRUPTED",
+              "PRODUCER_UNSETTLED",
+              "DECLARATION_MISMATCH",
+              "OWNER_MISMATCH",
+              "IDENTITY_MISMATCH",
+              "REFERENCE_UNAVAILABLE",
+              "OBJECT_MISSING",
+              "STORE_UNAVAILABLE",
+              "READ_FAILED",
+              "BYTE_BUDGET",
+              "TIME_BUDGET"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "recorded_byte_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Byte Count"
+          },
+          "recorded_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Sha256"
+          },
+          "recorded_status": {
+            "enum": [
+              "PRESENT",
+              "MISSING"
+            ],
+            "title": "Recorded Status",
+            "type": "string"
+          },
+          "reference_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Id"
+          },
+          "repository_execution_id": {
+            "title": "Repository Execution Id",
+            "type": "string"
+          },
+          "repository_id": {
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "staging_cleanup": {
+            "default": "NOT_REQUIRED",
+            "enum": [
+              "NOT_REQUIRED",
+              "VERIFIED",
+              "FAILED"
+            ],
+            "title": "Staging Cleanup",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "AVAILABLE",
+              "UNAVAILABLE",
+              "UNOBSERVED",
+              "REFUSED"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "step_execution_id": {
+            "title": "Step Execution Id",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_execution_id",
+          "repository_id",
+          "step_execution_id",
+          "step_id",
+          "path",
+          "recorded_status",
+          "status",
+          "reason",
+          "checked_at"
+        ],
+        "title": "GameTapeArtifactAvailability",
+        "type": "object"
+      },
+      "GameTapeArtifactObservation": {
+        "additionalProperties": false,
+        "description": "Bounded ephemeral verification of one recorded Run cut; never a retention promise.",
+        "properties": {
+          "artifact_limit": {
+            "default": 32,
+            "maximum": 64.0,
+            "minimum": 0.0,
+            "title": "Artifact Limit",
+            "type": "integer"
+          },
+          "byte_budget": {
+            "default": 16777216,
+            "maximum": 67108864.0,
+            "minimum": 0.0,
+            "title": "Byte Budget",
+            "type": "integer"
+          },
+          "bytes_scheduled": {
+            "minimum": 0.0,
+            "title": "Bytes Scheduled",
+            "type": "integer"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "title": "Finished At",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "journal_revision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Journal Revision"
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/GameTapeArtifactAvailability"
+            },
+            "maxItems": 64,
+            "title": "Observations",
+            "type": "array"
+          },
+          "omitted_artifacts": {
+            "minimum": 0.0,
+            "title": "Omitted Artifacts",
+            "type": "integer"
+          },
+          "schema_name": {
+            "const": "oh-goon.artifact-availability/v1",
+            "default": "oh-goon.artifact-availability/v1",
+            "title": "Schema Name",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "time_budget_seconds": {
+            "default": 5,
+            "exclusiveMinimum": 0.0,
+            "maximum": 10.0,
+            "title": "Time Budget Seconds",
+            "type": "number"
+          },
+          "total_artifacts": {
+            "minimum": 0.0,
+            "title": "Total Artifacts",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "started_at",
+          "finished_at",
+          "total_artifacts",
+          "omitted_artifacts",
+          "bytes_scheduled",
+          "observations"
+        ],
+        "title": "GameTapeArtifactObservation",
         "type": "object"
       },
       "GameTapeAttemptTransition": {
@@ -35510,6 +35752,70 @@
             "schema": {
               "title": "Fleet Run Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "observe_artifacts",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Observe Artifacts",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "artifact_limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 64,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Artifact Limit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "artifact_byte_budget",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 67108864,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Artifact Byte Budget"
+            }
+          },
+          {
+            "in": "query",
+            "name": "artifact_time_budget_seconds",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 10,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Artifact Time Budget Seconds"
             }
           }
         ],
