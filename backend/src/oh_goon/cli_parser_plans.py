@@ -24,6 +24,7 @@ def add_plan_commands(
     run = subparsers.add_parser("run", help="Execute one locked run.yml through Fleet")
     run.add_argument("configuration", type=Path)
     run.add_argument("--json", action="store_true", dest="as_json")
+    run.add_argument("--_resource-handoff", help=argparse.SUPPRESS)
     run.add_argument(
         "--fleet-run-id",
         help="Exact fresh Run identity enrolled by the original in-process deployment owner",

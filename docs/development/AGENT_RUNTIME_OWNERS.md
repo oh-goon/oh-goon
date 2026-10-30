@@ -430,12 +430,18 @@ An incompatible caller context therefore remains unavailable for capped standard
 execution. This changes resource admission, while the native harness protocols
 and their settlement adaptations retain their existing owners.
 
-Ordinary verification has no public whole-Run CPU/RAM budget. Run and repository
-workers currently share control-plane threads, and source acquisition and
-preparation precede worker submission. A budget covering that setup and all
-parallel repository work needs an original Run execution boundary and explicit
-native placement transport. The current scope for each native workload does
-not provide that aggregate guarantee.
+Ordinary waited CLI Plans can select one aggregate budget through
+[`run.yml` resources](TEMPLATE_INPUT_INSPECTION.md#limit-a-local-run). The same
+CLI enters a fresh native scope before source acquisition and runtime setup;
+its original Fleet workers and parallel targets inherit that boundary. The
+bounded outer launcher transports captured configuration and observes native
+settlement without running another workflow or reconstructing global history.
+The private-caller preservation rule above also applies to this launch.
+Agent/repair, strict/remote and deployment execution remain incompatible with
+this selection: independently scoped workloads do not yet carry a shared
+aggregate placement contract. Their per-workload limits do not establish a
+whole-Run guarantee. Native harness adaptations retain their existing
+qualification limits.
 Workspace, configuration and explicit input binds reject host sockets, FIFOs
 and special objects before launch. System runtime links to host IPC outside all
 bound system roots remain usable as links; their host endpoints are absent from

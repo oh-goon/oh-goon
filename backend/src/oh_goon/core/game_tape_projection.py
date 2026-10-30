@@ -77,6 +77,7 @@ def project_game_tape(detail: FleetRunDetail) -> GameTape:
         fleet_run_id=detail.run.fleet_run_id,
         run_source=detail.run.source,
         execution=detail.execution,
+        resource_observation=detail.resource_observation,
         application_launch=detail.application_launch,
         scheduling=detail.scheduling,
         status=run_status(detail.run),

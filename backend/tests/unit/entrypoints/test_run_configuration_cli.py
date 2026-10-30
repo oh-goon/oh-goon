@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import argparse
 import json
 import shlex
 from operator import setitem
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import pytest
 import yaml
 
 from oh_goon.cli import main
 from oh_goon.core.execution_lock_identity import LOCK_VERSION
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.services.execution_lock_persistence import load_execution_lock
+from oh_goon.services.run_configuration import RunConfigurationSnapshot
 
 
 @pytest.fixture
@@ -848,6 +851,114 @@ def test_source_execution_policy_selects_the_original_runtime_profile(
     monkeypatch.setattr(cli, "_execute_stateful_command", lambda runtime, args: 2)
     assert main(["run", str(workflow)]) == 2
     assert observed[0]["standard_local"] is (not strict)
+
+
+def test_budgeted_run_captures_installed_argv_before_source_or_runtime_work(
+    workflow: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    import oh_goon.cli as cli
+    import oh_goon.cli_run_resources as resources
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+
+    selected = yaml.safe_load(workflow.read_text())
+    selected["resources"] = {"cpu_millis": 1000, "memory_mib": 512}
+    workflow.write_text(yaml.safe_dump(selected))
+    argv = ["run", str(workflow), "--json"]
+    monkeypatch.setattr(sys, "argv", ["oh-goon", *argv])
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime before native scope")
+    )
+    monkeypatch.setattr(
+        FleetPlanResolver,
+        "analyze_source",
+        lambda *args, **kw: pytest.fail("source capture before native scope"),
+    )
+    captured: list[tuple[RunConfigurationSnapshot, list[str]]] = []
+
+    def launch(
+        args: argparse.Namespace, snapshot: RunConfigurationSnapshot, original_argv: list[str]
+    ) -> int:
+        captured.append((snapshot, original_argv))
+        assert args.command == "run"
+        assert args.as_json
+        return 7
+
+    monkeypatch.setattr(resources, "run_with_resource_envelope", launch)
+    assert main() == 7
+    assert len(captured) == 1
+    snapshot, original_argv = captured[0]
+    assert original_argv == argv
+    assert snapshot.path == workflow
+    assert snapshot.selection.resources is not None
+    assert snapshot.selection.resources.cpu_millis == 1000
+    assert snapshot.content == workflow.read_bytes()
+
+
+def test_budget_unavailable_refuses_before_source_capture_or_runtime(
+    workflow: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import oh_goon.cli as cli
+    import oh_goon.cli_run_resources as resources
+    from oh_goon.core.errors import FleetPlanInvalid
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+
+    selected = yaml.safe_load(workflow.read_text())
+    selected["resources"] = {"cpu_millis": 1000}
+    workflow.write_text(yaml.safe_dump(selected))
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime after refused cap")
+    )
+    monkeypatch.setattr(
+        FleetPlanResolver,
+        "analyze_source",
+        lambda *args, **kw: pytest.fail("source acquired after refused cap"),
+    )
+    calls: list[tuple[str, CicdResourcePolicy]] = []
+
+    def unavailable(run_id: str, policy: CicdResourcePolicy) -> NoReturn:
+        calls.append((run_id, policy))
+        raise FleetPlanInvalid("native scope would discard caller resource limits")
+
+    monkeypatch.setattr(resources, "prepare_run_resource_scope", unavailable)
+    assert main(["run", str(workflow)]) == 2
+    assert len(calls) == 1
+    assert calls[0][1].cpu_millis == 1000
+    assert not (workflow.parent / "goon.lock").exists()
+
+
+def test_budgeted_schedule_refuses_before_source_capture_or_runtime(
+    workflow: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import oh_goon.cli as cli
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+
+    selected = yaml.safe_load(workflow.read_text())
+    selected["resources"] = {"memory_mib": 512}
+    workflow.write_text(yaml.safe_dump(selected))
+    monkeypatch.setattr(
+        cli, "_build_application_runtime", lambda **kw: pytest.fail("schedule runtime started")
+    )
+    monkeypatch.setattr(
+        FleetPlanResolver,
+        "analyze_source",
+        lambda *args, **kw: pytest.fail("unsupported scheduled budget acquired source"),
+    )
+    assert (
+        main(
+            [
+                "plan",
+                "schedule",
+                str(workflow),
+                "--schedule-id",
+                "budgeted",
+                "--interval-minutes",
+                "60",
+            ]
+        )
+        == 2
+    )
 
 
 @pytest.mark.parametrize("plan,repair", [("python/quality", False), ("agents/native-review", True)])

@@ -4785,6 +4785,16 @@
               }
             ],
             "title": "Rerun From Run Id"
+          },
+          "resource_envelope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunResourceEnvelopeEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "DirectFleetExecutionAdmission",
@@ -7921,6 +7931,16 @@
             "title": "Rerun Supported",
             "type": "boolean"
           },
+          "resource_observation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunResourceEnvelopeObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "run": {
             "$ref": "#/components/schemas/FleetRunState"
           },
@@ -7976,6 +7996,7 @@
             "RUN_CANCEL_REQUESTED": "#/components/schemas/RunCancelRequestedEvent",
             "RUN_COMPLETED": "#/components/schemas/RunCompletedEvent",
             "RUN_FAILED": "#/components/schemas/RunFailedEvent",
+            "RUN_RESOURCES_OBSERVED": "#/components/schemas/RunResourcesObservedEvent",
             "RUN_STARTED": "#/components/schemas/RunStartedEvent",
             "STEP_ATTEMPT_CREATED": "#/components/schemas/StepAttemptCreatedEvent",
             "STEP_CANCELLED": "#/components/schemas/StepCancelledEvent",
@@ -7995,6 +8016,9 @@
           },
           {
             "$ref": "#/components/schemas/RunStartedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/RunResourcesObservedEvent"
           },
           {
             "$ref": "#/components/schemas/RepositoryStartedEvent"
@@ -9031,6 +9055,16 @@
             "maxItems": 64,
             "title": "Requirements",
             "type": "array"
+          },
+          "resource_observation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunResourceEnvelopeObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "run_source": {
             "$ref": "#/components/schemas/FleetRunSource",
@@ -20865,6 +20899,35 @@
         "title": "PrivacyResponse",
         "type": "object"
       },
+      "ProcessBirthIdentity": {
+        "description": "Stable identity of one Linux process instance; PID alone is never identity.",
+        "properties": {
+          "boot_id": {
+            "title": "Boot Id",
+            "type": "string"
+          },
+          "pid": {
+            "title": "Pid",
+            "type": "integer"
+          },
+          "provider": {
+            "default": "linux-procfs-v1",
+            "title": "Provider",
+            "type": "string"
+          },
+          "start_ticks": {
+            "title": "Start Ticks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pid",
+          "boot_id",
+          "start_ticks"
+        ],
+        "title": "ProcessBirthIdentity",
+        "type": "object"
+      },
       "ProcessExitedEvent": {
         "additionalProperties": false,
         "properties": {
@@ -26062,6 +26125,318 @@
           "step_timeout_seconds"
         ],
         "title": "RunRepairSelection",
+        "type": "object"
+      },
+      "RunResourceEnvelopeEvidence": {
+        "additionalProperties": false,
+        "description": "Native launch facts; constructing this model never grants execution authority.",
+        "properties": {
+          "cgroup_device": {
+            "minimum": 1.0,
+            "title": "Cgroup Device",
+            "type": "integer"
+          },
+          "cgroup_inode": {
+            "minimum": 1.0,
+            "title": "Cgroup Inode",
+            "type": "integer"
+          },
+          "cpu_max": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cpu Max",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "handoff_sha256": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Handoff Sha256",
+            "type": "string"
+          },
+          "invocation_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Invocation Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "systemd_user_scope",
+            "default": "systemd_user_scope",
+            "title": "Kind",
+            "type": "string"
+          },
+          "memory_max_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Max Bytes"
+          },
+          "memory_oom_group": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Oom Group"
+          },
+          "memory_swap_max_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Swap Max Bytes"
+          },
+          "oom_policy": {
+            "anyOf": [
+              {
+                "const": "kill",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oom Policy"
+          },
+          "pids_max": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pids Max"
+          },
+          "process_birth": {
+            "$ref": "#/components/schemas/ProcessBirthIdentity"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/CicdResourcePolicy"
+          },
+          "unit_name": {
+            "maxLength": 255,
+            "pattern": "^oh-goon-run-[A-Za-z0-9_.-]+\\.scope$",
+            "title": "Unit Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "unit_name",
+          "invocation_id",
+          "handoff_sha256",
+          "process_birth",
+          "resources",
+          "cgroup_device",
+          "cgroup_inode",
+          "cpu_max",
+          "memory_max_bytes",
+          "memory_swap_max_bytes",
+          "pids_max"
+        ],
+        "title": "RunResourceEnvelopeEvidence",
+        "type": "object"
+      },
+      "RunResourceEnvelopeObservation": {
+        "additionalProperties": false,
+        "description": "Final native observation and cleanup convergence, separate from Run result truth.",
+        "properties": {
+          "active_state": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active State"
+          },
+          "cleanup": {
+            "enum": [
+              "VERIFIED",
+              "INCOMPLETE"
+            ],
+            "title": "Cleanup",
+            "type": "string"
+          },
+          "cpu_usage_usec": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Usage Usec"
+          },
+          "fleet_run_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "invocation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invocation Id"
+          },
+          "kind": {
+            "const": "systemd_user_scope",
+            "default": "systemd_user_scope",
+            "title": "Kind",
+            "type": "string"
+          },
+          "memory_peak_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Peak Bytes"
+          },
+          "oom_kill_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oom Kill Count"
+          },
+          "pids_peak": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pids Peak"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "pattern": "^[A-Z0-9_]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "state": {
+            "enum": [
+              "TERMINAL",
+              "INCOMPLETE"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "unit_name": {
+            "maxLength": 255,
+            "pattern": "^oh-goon-run-[A-Za-z0-9_.-]+\\.scope$",
+            "title": "Unit Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "unit_name",
+          "state",
+          "cleanup"
+        ],
+        "title": "RunResourceEnvelopeObservation",
+        "type": "object"
+      },
+      "RunResourcesObservedEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "event_type": {
+            "const": "RUN_RESOURCES_OBSERVED",
+            "title": "Event Type",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "observation": {
+            "$ref": "#/components/schemas/RunResourceEnvelopeObservation"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "fleet_run_id",
+          "event_type",
+          "observation"
+        ],
+        "title": "RunResourcesObservedEvent",
         "type": "object"
       },
       "RunStartedEvent": {

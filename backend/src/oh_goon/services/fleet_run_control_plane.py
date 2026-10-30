@@ -59,12 +59,14 @@ from oh_goon.core.models.run import (
     FleetRunState,
 )
 from oh_goon.core.models.run_admission import (
+    DirectFleetExecutionAdmission,
     ExplicitRepositoryScope,
     FleetRepositoryScope,
     InvalidRepositoryScopeRequest,
     requested_fleet_repository_scope,
 )
 from oh_goon.core.models.run_events import FleetRunEventBatch
+from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget, OperationTarget
 from oh_goon.core.path_authority import RepositoryScopedPath
@@ -94,7 +96,7 @@ from oh_goon.integrations.exact_file_write import (
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.runtime.execution import ExecutionTicket, RunExecutionSupervisor
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
-from oh_goon.runtime.journal import Journal
+from oh_goon.runtime.journal import Journal, RunResourceObservationContext
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
 from oh_goon.services.fleet_caller_file_freshness import require_target_caller_file_fresh
@@ -271,6 +273,12 @@ class FleetRunControlPlane:
     def require_plan_ingress_preparation(self, fleet_run_id: str | None) -> None:
         """Delegate CLI/HTTP identity membership to one original lifecycle owner."""
         self._lifecycle.require_plan_ingress_preparation(fleet_run_id)
+
+    def capture_run_resource_observation_context(
+        self, expected: RunResourceEnvelopeEvidence
+    ) -> RunResourceObservationContext:
+        """Transport the original terminal child cut after its runtime has quiesced."""
+        return self._journal.capture_run_resource_observation_context(expected)
 
     def start(
         self,
@@ -1023,6 +1031,12 @@ def _rerun_run(
             )
         if not detail.run.status.terminal:
             raise StateConflict("Only a terminal Fleet run may be run again")
+        if isinstance(detail.execution, DirectFleetExecutionAdmission) and (
+            detail.execution.resource_envelope is not None
+        ):
+            raise StateConflict(
+                "A budgeted Run requires a fresh native envelope; repeat the original 'oh-goon run run.yml'"
+            )
         # A Run-history rerun starts from captured durable intent, not from a new
         # Plan request.  Before resolving capability policy or deriving a fresh
         # repository scope, ask the *original* lifecycle owner whether replay

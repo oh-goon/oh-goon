@@ -22,6 +22,22 @@ This changes scheduling granularity only. It does not weaken assertions, deselec
 
 The generic command owner strips presentation/control descriptors such as `OH_GOON_PROGRESS_FD` and local access tokens from children. Repository tests cannot bypass pytest capture by inheriting Oh-Goon presentation authority.
 
+An explicitly budgeted waited CLI Run uses this same command owner to launch
+the original CLI in one native systemd scope before preparation. Its bounded,
+sealed handoff transports the captured configuration and resolved database,
+League and SQLite settings; ordinary Step environments keep their existing
+sanitization. The child verifies the handoff against its actual native unit
+before restoring execution authority. The existing Fleet and Step owners
+still execute and report the Run exactly once.
+
+The outer CLI forwards SIGINT/SIGTERM through a birth-matched pidfd to that
+original child. Native scope accounting and cleanup observations remain
+separate from the durable workload outcome. The parent never rebuilds a global
+Journal view to append final accounting: it consumes a bounded child-issued
+context and the original Journal owner performs an exact-head append. Changed
+or missing authority leaves persistence incomplete. See
+[local Run budgets](TEMPLATE_INPUT_INSPECTION.md#limit-a-local-run).
+
 ## SQLite preparation observation
 
 Long preparation uses fresh, read-only admitted SQLite handles at bounded observation cadence. If SQLite reports `SQLITE_NOTADB` or `SQLITE_CORRUPT` on one fresh observer open while path identity is unchanged, Oh-Goon performs at most three observation-only re-proof attempts with bounded delays. A successful later proof must re-establish schema, journal, database identity, durable revision, and `PRAGMA quick_check` before execution continues.
