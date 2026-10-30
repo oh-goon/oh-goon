@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import json
+import stat
 from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,60 @@ from oh_goon.integrations.hashmarks.development_verification import (
 from oh_goon.repository_tooling import development_verification as owner
 from oh_goon.engine.command import run_command
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
+
+
+def test_private_json_transport_publishes_and_reopens_real_files(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    scratch = tmp_path / "control"
+    scratch.mkdir(mode=0o700)
+    target = scratch / "plan.json"
+    payload = {"candidate": "a" * 40, "members": ["test.py::test_case"]}
+    owner._write_transport(target, payload, source)
+    assert owner._read_json(target) == payload
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    owner._write_transport(target, {"status": "MERGE_PROOF_READY"}, source)
+    assert owner._read_json(target) == {"status": "MERGE_PROOF_READY"}
+    assert list(scratch.iterdir()) == [target]
+
+
+def test_plan_cli_publishes_after_actual_source_admission(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    owner._git(source, "init", "-q")
+    readme = source / "README.md"
+    readme.write_text("Original explanation.\n", encoding="utf-8")
+    owner._git(source, "add", "README.md")
+    owner._git(
+        source,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "fixture",
+    )
+    readme.write_text("Updated explanation.\n", encoding="utf-8")
+    scratch = tmp_path / "control"
+    scratch.mkdir(mode=0o700)
+    target = scratch / "plan.json"
+    assert (
+        owner.main(["--root", str(source), "--base", "HEAD", "--plan", str(target)])
+        == 0
+    )
+    plan = owner.ChangeVerificationPlan.model_validate_json(target.read_bytes())
+    assert plan.changed_paths == ("README.md",)
+    assert plan.source_identity == canonical_source_identity(source)
+    assert plan.behavioral_status == "NOT_APPLICABLE"
+    assert (
+        json.loads(target.read_text())["candidate"]
+        == owner._git(source, "rev-parse", "HEAD").strip()
+    )
 
 
 @pytest.fixture

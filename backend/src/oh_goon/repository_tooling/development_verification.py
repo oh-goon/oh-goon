@@ -15,7 +15,7 @@ from pydantic import ConfigDict, Field
 
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.engine.command import run_command
-from oh_goon.integrations.exact_file_write import prepared_text_file, publish_prepared_file
+from oh_goon.integrations.exact_file_write import publish_text_file
 from oh_goon.integrations.hashmarks.development_verification import nominate_changed_verification
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
@@ -477,8 +477,7 @@ def _write_transport(path: Path, payload: Mapping[str, Any], root: Path) -> None
     metadata = target.parent.stat(follow_symlinks=False)
     if metadata.st_mode & 0o077:
         raise ValueError("Verification transport parent must be private")
-    with prepared_text_file(target, json.dumps(payload, sort_keys=True) + "\n") as prepared:
-        publish_prepared_file(prepared, target)
+    publish_text_file(target, json.dumps(payload, sort_keys=True) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
