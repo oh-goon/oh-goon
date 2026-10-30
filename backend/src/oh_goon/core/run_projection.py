@@ -141,7 +141,9 @@ class _RunFold:
             )
         if isinstance(event, RunResourcesObservedEvent):
             if not isinstance(state, _TERMINAL_STATES):
-                raise InvalidRunTransition("Final native resource observation requires a terminal Run")
+                raise InvalidRunTransition(
+                    "Final native resource observation requires a terminal Run"
+                )
             admitted = (
                 self.execution.resource_envelope
                 if isinstance(self.execution, DirectFleetExecutionAdmission)
@@ -154,7 +156,9 @@ class _RunFold:
                 or admitted.unit_name != observed.unit_name
                 or admitted.invocation_id != observed.invocation_id
             ):
-                raise InvalidRunTransition("Native resource observation differs from original admission")
+                raise InvalidRunTransition(
+                    "Native resource observation differs from original admission"
+                )
             if self.resource_observation is not None:
                 raise InvalidRunTransition("Run resource observation is already recorded")
             self.resource_observation = observed

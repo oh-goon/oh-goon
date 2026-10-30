@@ -40,7 +40,12 @@ class RunResourceEnvelopeEvidence(ImmutableModel):
     @model_validator(mode="after")
     def validate_observed_limits(self) -> RunResourceEnvelopeEvidence:
         fields = self.cpu_max.split()
-        if len(fields) != 2 or not fields[1].isascii() or not fields[1].isdigit() or int(fields[1]) <= 0:
+        if (
+            len(fields) != 2
+            or not fields[1].isascii()
+            or not fields[1].isdigit()
+            or int(fields[1]) <= 0
+        ):
             raise ValueError("native CPU observation requires a quota and positive period")
         quota = fields[0]
         if quota != "max" and (not quota.isascii() or not quota.isdigit() or int(quota) <= 0):
@@ -85,5 +90,7 @@ class RunResourceEnvelopeObservation(ImmutableModel):
     @classmethod
     def require_native_invocation(cls, value: str | None) -> str | None:
         if value == "0" * 32:
-            raise ValueError("native invocation identity must be observed or explicitly unavailable")
+            raise ValueError(
+                "native invocation identity must be observed or explicitly unavailable"
+            )
         return value
