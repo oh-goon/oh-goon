@@ -28,6 +28,7 @@ class _Model:
 class _Tape:
     def __init__(self, status=GameTapeStatus.FAILED, *, focus=(), why_not=None, count=0):
         self.status = status
+        self.fleet_run_id = ""
         self.plan_id = "canonical-plan"
         self.summary = _Model({"failed_steps": 1, "executed_steps": 2})
         self.receipt = _Model({"validation": "PASSED", "finished_at": "canonical-time"})
