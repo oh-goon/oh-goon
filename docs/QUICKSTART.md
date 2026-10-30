@@ -58,13 +58,13 @@ dependency intent; review the native-authored lock changes before committing.
 
 ## 2. Built release startup
 
-`oh-goon start` is for built releases only. A built release already contains the React UI, so Node/npm are not runtime dependencies:
+`oh-goon app start` is for built releases only. A built release already contains the React UI, so Node/npm are not runtime dependencies:
 
 ```bash
-oh-goon start
+oh-goon app start
 ```
 
-Open the exact `http://127.0.0.1:8787/#access=...` URL printed by `oh-goon start`. Oh Goon binds only to loopback and also requires the process-local access capability; loopback alone is not treated as authorization. No cloud account or remote control plane is required.
+Open the exact `http://127.0.0.1:8787/#access=...` URL printed by `oh-goon app start`. Oh Goon binds only to loopback and also requires the process-local access capability; loopback alone is not treated as authorization. No cloud account or remote control plane is required.
 
 If you are in a source checkout and see `The bundled oh-goon UI is not present`, use `make dev` instead.
 
@@ -158,54 +158,49 @@ make architecture
 
 ### Select one workflow configuration
 
-Register the target folder once, then select its repository by path during
-initialization. The initializer writes the registered target ID into `run.yml`:
+Initialize a trusted local project and run the generated workflow:
 
 ```bash
-oh-goon league add-folder /absolute/path/to/repository
-oh-goon templates init python/quality --kind plan --output ./workflow --repository /absolute/path/to/repository
-# Edit workflow/run.yml inputs for your project.
-oh-goon lock ./workflow/run.yml
-oh-goon run ./workflow/run.yml
+oh-goon init --template python/quality --repository /absolute/path/to/project --no-input
+oh-goon run ./workflow --no-input
 ```
 
-For an application without Git metadata, register its exact root directory and
-use that same path with `--repository`. An unregistered directory, or an
-arbitrary non-Git descendant of a registered parent, is refused. Normal Git
-discovery and nested-path selection remain available; the broad League scan
-continues to list Git roots. The application itself remains the registered Run
-subject, with the existing exclusion and instance checks.
+Initialization validates inputs, registers only the selected exact Git root if
+needed, and publishes `run.yml` and its first canonical lock together. `--output`
+defaults to `workflow`; an existing destination is refused. `--kind` defaults to
+`plan`, while `--kind goon` selects a single Goon explicitly.
 
-For `python/quality`, the selected project needs `pyproject.toml`
-and native `uv.lock`; its selected dependency group supplies Ruff, pytest and
-the chosen type checker. The defaults select project `.`, group `dev` and Pyright.
-Set `inputs.project` for a contained project and `inputs.typechecker` when its
-checker differs from the default. Prepare and test that project with native uv
-as usual. Ordinary verification uses trusted local execution; strict executor
-setup applies only when the selected workflow requires it.
+For `python/quality`, the project needs `pyproject.toml` and native `uv.lock`;
+its selected dependency group supplies Ruff, pytest and the chosen type checker.
+Defaults select project `.`, group `dev` and Pyright. Supply caller choices at
+initialization, for example `--input project=backend --input typechecker=ty`.
+Prepare that project with native uv as usual. Ordinary verification uses trusted
+local execution; strict setup applies only when the workflow selects it.
 
-`templates list --kind plan`, `config inspect ./workflow/run.yml` and
-`config validate ./workflow/run.yml` are optional discovery and diagnostics.
-Use inspect to see typed inputs before editing. Initialization refuses an
-existing destination, so choose a fresh workflow directory.
+The v2 `target.repository` path is relative to `run.yml`'s directory, or explicitly
+absolute. Repeating init's `--repository` writes an exclusive `target.repositories`
+list for one Plan over at least two distinct roots; no implicit fleet is selected.
+Repository Goons and Agent/repair workflows remain singular. Each path selects
+the exact registered root, including an existing registered
+filesystem subject without Git. It never guesses an ancestor Git root, enrolls
+siblings or treats a parent folder as the selected non-Git application.
 
-The config chooses a shipped Plan directly, so an unchanged Plan needs no local
-copy. `inputs` supplies scalar values to the Goon-owned typed contract. Native
-uv/Ruff/Pytest configuration stays in your project. Inspection is read-only;
-validation is not execution, and a lock is not write permission. Locking freezes
-the selected source and inputs; run performs fresh admission and waits for
-completion. Source or selection changes require a new matching lock.
+After reviewing later source/input changes, prepare the new lock explicitly:
 
-For one Plan over several registered application roots, repeat `--repository
-PATH` during initialization. The initializer fills an exact
-`target.repository_ids` set; ordinary execution and readback then use one Fleet
-Run for those repositories. Each target needs the same Plan/input contract.
-Repository Goons, Agent and repair workflows keep their single-workspace
-selection. See [the parallel CLI walkthrough](../templates/README.md#one-plan-over-several-applications)
-for registration and commands.
+```bash
+oh-goon workflow prepare ./workflow
+oh-goon run ./workflow
+```
 
-Use the [configuration guide](development/TEMPLATE_INPUT_INSPECTION.md) for
-project Plans, repository Goons and optional agent/repair groups. Shared Plan
-UI/service operations retain explicit multi-repository selection and their own
-reviewed identity. The removed Plan-path/values/flag assembly has no compatibility
-route.
+`templates list`, `workflow inspect ./workflow`, `workflow validate ./workflow`
+and stateless `doctor` are optional diagnostics. Inspection/validation do not
+register targets, write locks, start the app or execute checks. Source acquisition
+requires explicit `--acquire`; preparing a fresh CI target requires explicit
+`--register-target`. Run never registers, refreshes refs or repairs a lock.
+
+Use [the configuration guide](development/TEMPLATE_INPUT_INSPECTION.md) for
+file/repository/Git sources, typed inputs and explicit `init --draft` Agent/repair
+authoring. `runs show|handoff|steps|outputs RUN_ID` reopens retained execution
+facts; `runs logs RUN_ID` reports transient retention honestly. `app` owns browser
+lifecycle commands. Shared Plan, Lineup and Schedule operations retain their
+existing multi-repository and instance authority.

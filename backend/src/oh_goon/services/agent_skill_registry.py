@@ -191,13 +191,13 @@ def original_skill_aliases(
     if locked_sources is not None and not update_sources:
         if set(locked) != set(registry.sources) or len(locked) != len(locked_sources):
             raise FleetPlanInvalid(
-                "Skill sources differ from goon.lock; run 'oh-goon lock --update-skills'"
+                "Skill sources differ from goon.lock; run 'oh-goon workflow prepare run.yml --refresh skills'"
             )
         for name, source in registry.sources.items():
             pin = locked[name]
             if (pin.source, pin.ref, pin.skills) != (source.source, source.ref, source.skills):
                 raise FleetPlanInvalid(
-                    f"Skill source {name!r} changed; run 'oh-goon lock --update-skills'"
+                    f"Skill source {name!r} changed; run 'oh-goon workflow prepare run.yml --refresh skills'"
                 )
     prepared: dict[str, PreparedSkill] = {}
     pins: list[LockedSkillSource] = []

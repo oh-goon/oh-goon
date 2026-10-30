@@ -300,15 +300,11 @@ Machine-readable preview output is available with:
 uv run --locked --project backend oh-goon enforcer run /path/to/team --json
 ```
 
-Normal CLI setup selects one versioned `run.yml` and registered repository ID:
+Normal CLI setup selects one versioned `run.yml` and exact registered repository path:
 
 ```bash
-oh-goon templates init python/quality --kind plan --output ./workflow
-# Edit workflow/run.yml before continuing.
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
-oh-goon run ./workflow/run.yml
+oh-goon init --template python/quality --repository /absolute/path/to/project --no-input
+oh-goon run ./workflow --no-input
 ```
 
 The compiler and typed binder retain source/contract authority. `plan check`

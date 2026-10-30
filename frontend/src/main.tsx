@@ -21,7 +21,7 @@ void boot();
 async function boot(): Promise<void> {
   const access = await ensureLocalAccess().catch(() => ({ status: "required" as const }));
   if (access.status !== "ready") {
-    root!.innerHTML = "<main><h1>Local access required</h1><p>Open Oh Goon from the launch URL printed by <code>oh-goon start</code> or <code>make dev</code>.</p></main>";
+    root!.innerHTML = "<main><h1>Local access required</h1><p>Open Oh Goon from the launch URL printed by <code>oh-goon app start</code> or <code>make dev</code>.</p></main>";
     return;
   }
 

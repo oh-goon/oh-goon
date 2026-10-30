@@ -7,10 +7,12 @@ Run a read-only Trivy filesystem vulnerability scan and retain its actual machin
 **Prerequisites:** Installed native scanners and admitted declared online egress. Trivy report bytes require strict content-store publication.
 
 ```sh
-oh-goon templates init security/trivy-audit --kind plan --output ./workflow
+oh-goon init --template security/trivy-audit --kind plan --output ./workflow --draft
 ```
 
-The [security/trivy-audit Plan](../../../plans/security/trivy-audit/README.md) supplies the surrounding policy and ordered work. Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+The [security/trivy-audit Plan](../../../plans/security/trivy-audit/README.md) supplies the surrounding policy and ordered work. Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** Native scanner status and the declared report; nonzero findings remain a failed Step.
 

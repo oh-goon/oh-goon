@@ -55,7 +55,7 @@ def test_every_catalog_contract_is_discoverable_from_selected_config(tmp_path, m
             frozen = tmp_path / "captured-project"
             materialize_python_goon_project(project.archive, project.identity, frozen)
             shutil.copytree(frozen, config.parent / "repository", dirs_exist_ok=True)
-        assert main(["config", "inspect", str(config), "--json"]) == 0, (kind, key)
+        assert main(["workflow", "inspect", str(config), "--json"]) == 0, (kind, key)
         report = json.loads(capsys.readouterr().out)
         expected = resolver.inspect_inputs(snapshot.path)
         assert [item["name"] for item in report["inputs"]] == [
@@ -75,7 +75,7 @@ def test_missing_or_malformed_source_refuses_without_lock(tmp_path, monkeypatch,
     config = write_run_configuration(
         tmp_path, monkeypatch, source={"kind": "file-plan", "path": "missing.yml"}
     )
-    assert main(["config", kind, str(config), "--json"]) == 2
+    assert main(["workflow", kind, str(config), "--json"]) == 2
     assert json.loads(capsys.readouterr().out)["status"] == "rejected"
     assert not config.with_name("goon.lock").exists()
 
@@ -103,7 +103,7 @@ def test_ambiguous_contracts_are_visible_and_fixed_literals_redacted(
     config = write_run_configuration(
         tmp_path, monkeypatch, plan_content=f"version: 1\ngoons:\n{imports}"
     )
-    assert main(["config", "inspect", str(config), "--json"]) == 0
+    assert main(["workflow", "inspect", str(config), "--json"]) == 0
     output = capsys.readouterr().out
     report = json.loads(output)
     assert [item["name"] for item in report["inputs"]] == accepted
@@ -123,7 +123,7 @@ goons:
 - python/typecheck
 """,
     )
-    assert main(["config", "inspect", str(config), "--json"]) == 0
+    assert main(["workflow", "inspect", str(config), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["unrouted_inputs"] == []
     assert {item["name"] for item in report["inputs"]} == {

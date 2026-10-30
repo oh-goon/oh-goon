@@ -9,10 +9,10 @@ Run a typed read-only review using the existing `agents/native-review` Plan and 
 Initialize a separate workflow, then copy the included `.goonskills.yml` into it:
 
 ```sh
-oh-goon templates init agents/native-review --kind plan --output ./workflow
+oh-goon init --template agents/native-review --kind plan --output ./workflow --draft
 ```
 
-Edit `workflow/run.yml` using [the complete selection](run.yml). Set the real `target.repository_id`, `inputs.repo`, approved `agent.repository_root` and selected profile. The example follows the initializer’s Codex default; select Pi or OpenCode explicitly with a compatible profile. Keep `agent.skill_root: .` and the registry beside `run.yml`. The registry owns the Git source/ref/directories once; do not copy these facts into the run selection:
+Edit `workflow/run.yml` using [the complete selection](run.yml). Set the real `target.repository`, `inputs.repo`, approved `agent.repository_root` and selected profile. The example follows the initializer’s Codex default; select Pi or OpenCode explicitly with a compatible profile. Keep `agent.skill_root: .` and the registry beside `run.yml`. The registry owns the Git source/ref/directories once; do not copy these facts into the run selection:
 
 ```yaml
 sources:
@@ -24,9 +24,9 @@ sources:
 ```
 
 ```sh
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
+oh-goon workflow inspect ./workflow/run.yml
+oh-goon workflow validate ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 
 import pytest
@@ -130,4 +131,43 @@ def test_cli_closes_runtime_when_stateful_dispatch_loading_fails(monkeypatch) ->
     monkeypatch.setattr(builtins, "__import__", unavailable_dispatch)
     with pytest.raises(ModuleNotFoundError, match="stateful dispatch unavailable"):
         cli.main([])
+    assert runtime.shutdown_calls == 1
+
+
+@pytest.mark.parametrize(
+    "failure,code",
+    [
+        (
+            DatabasePathIdentityLost("PRIVATE_DATABASE_PATH identity changed"),
+            "STATE_IDENTITY_UNAVAILABLE",
+        ),
+        (
+            sqlite3.OperationalError("database or disk is full: PRIVATE_DATABASE_PATH"),
+            "STATE_OBSERVATION_UNAVAILABLE",
+        ),
+    ],
+)
+def test_run_readback_reports_lost_authority_as_one_safe_json_result(
+    monkeypatch, capsys, failure, code
+) -> None:
+    runtime = _Runtime()
+
+    def build(_cls, **kwargs):
+        assert kwargs == {"startup_purpose": "observation"}
+        return runtime
+
+    monkeypatch.setattr(cli.ApplicationRuntime, "build", classmethod(build))
+    monkeypatch.setattr(
+        cli_runtime,
+        "run_stateful_command",
+        lambda _runtime, _args: (_ for _ in ()).throw(failure),
+    )
+
+    assert cli.main(["runs", "show", "recorded-run", "--json"]) == 2
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert report["code"] == code
+    assert report["fleet_run_id"] == "recorded-run"
+    assert report["status"] == "error"
+    assert captured.err == "" and "PRIVATE_DATABASE_PATH" not in captured.out
     assert runtime.shutdown_calls == 1

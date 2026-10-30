@@ -7,10 +7,12 @@ Build one OCI archive through Fleet's typed isolated builder contract. The Goon 
 **Prerequisites:** An admitted strict executor with Buildah and crun, digest-pinned Containerfile bases and configured retained workspace storage. No publish destination or publication credential binding is selected. The current local backend refuses strict Runs until independent native parent custody can be established; installing these tools alone does not qualify it. See the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
 ```sh
-oh-goon templates init oci/image --kind plan --output ./workflow
+oh-goon init --template oci/image --kind plan --output ./workflow --draft
 ```
 
-The [oci/image Plan](../../../plans/oci/image/README.md) supplies the surrounding policy and ordered work. Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+The [oci/image Plan](../../../plans/oci/image/README.md) supplies the surrounding policy and ordered work. Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** `oci/image.oci.tar`, `oci/image-build.json` and a published producer workspace.
 

@@ -119,13 +119,13 @@ build-backend = "uv_build"
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": repository_id(repository)},
+                "target": {"repository": str(repository)},
             }
         )
     )
-    assert main(["lock", str(selection)]) == 0
+    assert main(["workflow", "prepare", str(selection)]) == 0
     captured = load_run_configuration(selection)
     runtime = ApplicationRuntime.build(standard_local=True)
     started = None

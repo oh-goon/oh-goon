@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from oh_goon._application_foundation import RuntimeStartupPurpose
     from oh_goon.engine.git import GitService
     from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
     from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
@@ -148,10 +150,22 @@ def _build_application_runtime(
     standard_local: bool | None = None,
     standard_process_isolation: ProcessIsolationBackend | None = None,
     git_service: GitService | None = None,
+    startup_purpose: RuntimeStartupPurpose = "application",
+    as_json: bool = False,
+    readback_id: str | None = None,
 ) -> ApplicationRuntime | None:
     try:
+        if startup_purpose == "observation":
+            return ApplicationRuntime.build(startup_purpose="observation")
         if fleet_provisioner is not None:
             return ApplicationRuntime.build(fleet_provisioner=fleet_provisioner)
+        if startup_purpose == "workflow":
+            return ApplicationRuntime.build(
+                standard_local=standard_local,
+                standard_process_isolation=standard_process_isolation,
+                git_service=git_service,
+                startup_purpose="workflow",
+            )
         if git_service is not None:
             return ApplicationRuntime.build(
                 standard_local=standard_local,
@@ -160,15 +174,58 @@ def _build_application_runtime(
             )
         return ApplicationRuntime.build(standard_local=standard_local)
     except DatabaseSchemaMismatch as exc:
+        if startup_purpose == "observation":
+            _print_readback_failure(exc, as_json=as_json, fleet_run_id=readback_id)
+            return None
         print(str(exc))
     except DatabasePathIdentityLost as exc:
+        if startup_purpose == "observation":
+            _print_readback_failure(exc, as_json=as_json, fleet_run_id=readback_id)
+            return None
         _print_runtime_database_identity_lost(str(exc))
     except Exception as exc:
+        if startup_purpose == "observation":
+            if isinstance(
+                exc, (FleetDomainError, OSError, UnicodeError, ValueError, sqlite3.Error)
+            ):
+                _print_readback_failure(exc, as_json=as_json, fleet_run_id=readback_id)
+                return None
         reason = storage_unavailable_reason(exc)
         if reason is None:
             raise
         _print_runtime_storage_unavailable(reason)
     return None
+
+
+def _print_readback_failure(exc: Exception, *, as_json: bool, fleet_run_id: str | None) -> None:
+    code = (
+        "STATE_SCHEMA_INCOMPATIBLE"
+        if isinstance(exc, DatabaseSchemaMismatch)
+        else (
+            "STATE_IDENTITY_UNAVAILABLE"
+            if isinstance(exc, DatabasePathIdentityLost)
+            else "STATE_OBSERVATION_UNAVAILABLE"
+        )
+    )
+    action = "Preserve existing state and inspect local-state compatibility with its original runtime; readback does not initialize, repair or recover state."
+    if as_json:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    "schema": "oh-goon.plan-run-read-error/v1",
+                    "status": "error",
+                    "fleet_run_id": fleet_run_id,
+                    "code": code,
+                    "safe_next_action": action,
+                },
+                sort_keys=True,
+            )
+        )
+    else:
+        print(f"Run readback refused: {code}")
+        print(action)
 
 
 def _execute_stateful_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
@@ -178,6 +235,9 @@ def _execute_stateful_command(runtime: ApplicationRuntime, args: argparse.Namesp
         result = run_stateful_command(runtime, args)
     except BaseException as exc:
         _shutdown_after_primary_failure(runtime)
+        if args.command == "runs" and isinstance(exc, (sqlite3.Error, OSError)):
+            _print_readback_failure(exc, as_json=args.as_json, fleet_run_id=args.fleet_run_id)
+            return 2
         if isinstance(exc, DatabasePathIdentityLost):
             _print_runtime_database_identity_lost(str(exc))
             return 2
@@ -198,6 +258,65 @@ def _execute_stateful_command(runtime: ApplicationRuntime, args: argparse.Namesp
     return result
 
 
+def _prepare_registered_workflow(args: argparse.Namespace) -> int:
+    """Compose explicit registration around the original preparation and lock owners."""
+    from oh_goon.cli_configuration import (
+        prepare_configuration,
+        register_prepared_configuration_target,
+    )
+    from oh_goon.cli_lock import generate_stateless_lock, run_lock_with_owner
+    from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
+    from oh_goon.services.run_configuration import (
+        load_run_configuration,
+        resolve_run_configuration_targets,
+    )
+
+    try:
+        snapshot = load_run_configuration(args.configuration)
+        targets = resolve_run_configuration_targets(snapshot)
+        prepare_configuration(args, snapshot=snapshot, targets=targets)
+        if any(not target.registered for target in targets):
+            locations = ApplicationRuntime.build_registration_service()
+            register_prepared_configuration_target(args, locations)
+        lock = generate_stateless_lock(args)
+    except BaseException as exc:
+        identity_lost = isinstance(exc, DatabasePathIdentityLost)
+        storage_reason = storage_unavailable_reason(exc)
+        if identity_lost or storage_reason is not None:
+            if args.as_json:
+                import json
+
+                print(
+                    json.dumps(
+                        {
+                            "schema": "oh-goon.workflow-prepare/v1",
+                            "status": "error",
+                            "code": "RUNTIME_DATABASE_IDENTITY_LOST"
+                            if identity_lost
+                            else "RUNTIME_STORAGE_UNAVAILABLE",
+                            "safe_next_action": "Preserve existing state and inspect local-state compatibility and host storage before retrying. This refusal does not authorize repair, reset or replay.",
+                            "target_registration": getattr(args, "_target_registration", None),
+                        },
+                        sort_keys=True,
+                    )
+                )
+            elif identity_lost:
+                _print_runtime_database_identity_lost(str(exc))
+            else:
+                assert storage_reason is not None
+                _print_runtime_storage_unavailable(storage_reason)
+            return 2
+        if not isinstance(exc, (FleetDomainError, OSError, UnicodeError, ValueError)):
+            raise
+        print_safe_plan_diagnostic(
+            exc,
+            as_json=args.as_json,
+            target_registration=getattr(args, "_target_registration", None),
+        )
+        return 2
+    return run_lock_with_owner(args, lambda *_args, **_kwargs: lock)
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -212,6 +331,9 @@ def main(
     """
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command is None:
+        parser.print_help()
+        return 0
     if fleet_provisioner is not None:
         from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
@@ -253,10 +375,19 @@ def main(
         else:
             args.command, args.plan_command = "plan", "run"
 
-    if args.command == "config":
+    if args.command == "workflow":
+        refresh = set(getattr(args, "refresh", ()))
+        args.update_goons = "goons" in refresh
+        args.update_applications = "applications" in refresh
+        args.update_skills = "skills" in refresh
+
+    if args.command == "workflow" and args.workflow_command in {"inspect", "validate"}:
         from oh_goon.cli_configuration import run_config_command
 
         return run_config_command(args)
+
+    if args.command == "workflow" and args.workflow_command == "prepare" and args.register_target:
+        return _prepare_registered_workflow(args)
 
     if hasattr(args, "configuration"):
         from oh_goon.cli_configuration import prepare_configuration
@@ -282,7 +413,7 @@ def main(
                 "local execution waits for completion and cannot use deployment enrollment"
             )
 
-    if args.command == "templates":
+    if args.command in {"init", "templates"}:
         from oh_goon.cli_templates import run_template_command
 
         return run_template_command(args)
@@ -312,22 +443,37 @@ def main(
 
             return _check_pre_runtime(args)
 
-    # `oh-goon lock` writes only its explicit goon.lock through the original
-    # FleetPlanService lock writer. It must not construct the app/Fleet database.
     if args.command == "agent":
         from oh_goon.cli_agent_patch_apply import run_selected_proposal
 
         return run_selected_proposal(args)
 
-    if args.command == "lock":
+    # Preparation retains the original stateless lock owner; the private dev
+    # ingress is distinct from the public workflow grammar.
+    if args.command == "lock" or (
+        args.command == "workflow" and args.workflow_command == "prepare"
+    ):
         from oh_goon.cli_lock import run_stateless_lock
 
         return run_stateless_lock(args)
+
+    if args.command == "doctor" and not args.runtime:
+        from oh_goon.cli_runtime_state import run_basic_doctor
+
+        return run_basic_doctor(args)
+
+    if args.command == "app":
+        args.command = args.app_command
 
     direct_result = _run_pre_runtime_command(args)
     if direct_result is not None:
         return direct_result
 
+    startup_purpose: RuntimeStartupPurpose = (
+        "workflow"
+        if hasattr(args, "_run_configuration") and fleet_provisioner is None
+        else "application"
+    )
     if args.command == "plan" and args.plan_command == "run" and args.native_agent is not None:
         if not standard_local or not args.wait:
             parser.error("native Agent execution requires ordinary waited execution")
@@ -342,11 +488,20 @@ def main(
             return 2
         args._native_agent = selected
         runtime = _build_application_runtime(
-            standard_local=standard_local, standard_process_isolation=isolation, git_service=git
+            standard_local=standard_local,
+            standard_process_isolation=isolation,
+            git_service=git,
+            startup_purpose=startup_purpose,
+        )
+    elif args.command == "runs":
+        runtime = _build_application_runtime(
+            startup_purpose="observation", as_json=args.as_json, readback_id=args.fleet_run_id
         )
     else:
         runtime = _build_application_runtime(
-            fleet_provisioner=fleet_provisioner, standard_local=standard_local
+            fleet_provisioner=fleet_provisioner,
+            standard_local=standard_local,
+            startup_purpose=startup_purpose,
         )
     if runtime is None:
         return 2

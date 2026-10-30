@@ -387,9 +387,9 @@ def test_installed_cli_executes_selected_repository_goon_in_a_real_process(tmp_p
     config.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "repository-goon"},
-                "target": {"repository_id": repository_id(repo)},
+                "target": {"repository": str(repo)},
             }
         )
     )
@@ -409,7 +409,11 @@ def test_installed_cli_executes_selected_repository_goon_in_a_real_process(tmp_p
         "oh-goon",
     ]
     locked = subprocess.run(
-        [*prefix, "lock", str(config)], capture_output=True, text=True, timeout=30, check=False
+        [*prefix, "workflow", "prepare", str(config)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert locked.returncode == 0, locked.stdout + locked.stderr
     completed = subprocess.run(

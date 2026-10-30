@@ -150,7 +150,7 @@ def test_serve_generates_api_capability_before_uvicorn(monkeypatch, capsys) -> N
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
     monkeypatch.setitem(sys.modules, "uvicorn", _fake_uvicorn(calls))
 
-    assert cli.main(["serve", "--host", "127.0.0.1", "--port", "9898"]) == 0
+    assert cli.main(["app", "serve", "--host", "127.0.0.1", "--port", "9898"]) == 0
 
     token = os.environ[LOCAL_ACCESS_ENV]
     assert token

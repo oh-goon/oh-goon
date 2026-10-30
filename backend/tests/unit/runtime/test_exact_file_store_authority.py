@@ -56,99 +56,250 @@ def test_shared_plan_fenced_read_uses_store_revision_authority(tmp_path: Path) -
         store.read("python-quality", expected_revision=original.sha256)
 
 
-def test_authored_tree_completion_follows_native_directory_durability(tmp_path, monkeypatch):
+@pytest.mark.parametrize("collision", ["empty-directory", "symlink", "file"])
+def test_atomic_directory_publication_never_replaces_existing_destinations(tmp_path, collision):
+    from oh_goon.integrations.exact_file_write import publish_prepared_directory
+
+    staging = tmp_path / ".oh-goon-init-owned"
+    staging.mkdir(mode=0o700)
+    (staging / "run.yml").write_text("complete selection")
+    (staging / "goon.lock").write_text("matching lock")
+    output = tmp_path / "workflow"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if collision == "empty-directory":
+        output.mkdir()
+    elif collision == "symlink":
+        output.symlink_to(outside, target_is_directory=True)
+    else:
+        output.write_text("user data")
+    with pytest.raises(FileExistsError):
+        publish_prepared_directory(staging, output, exclusive=True)
+    assert (staging / "goon.lock").read_text() == "matching lock"
+    if collision == "empty-directory":
+        assert list(output.iterdir()) == []
+    elif collision == "symlink":
+        assert output.is_symlink() and list(outside.iterdir()) == []
+    else:
+        assert output.read_text() == "user data"
+
+
+def test_atomic_directory_commit_exposes_complete_tree_and_preserves_modes(tmp_path):
+    import stat
+
+    from oh_goon.integrations.exact_file_write import publish_prepared_directory
+
+    staging = tmp_path / ".oh-goon-init-owned"
+    staging.mkdir(mode=0o700)
+    (staging / "run.yml").write_text("complete selection")
+    (staging / "goon.lock").write_text("matching lock")
+    output = tmp_path / "workflow"
+    publish_prepared_directory(staging, output, exclusive=True)
+    assert not staging.exists()
+    assert sorted(path.name for path in output.iterdir()) == ["goon.lock", "run.yml"]
+    assert (output / "run.yml").read_text() == "complete selection"
+    assert stat.S_IMODE(output.stat().st_mode) == 0o700
+
+
+def test_concurrent_directory_commits_have_exactly_one_winner(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from oh_goon.integrations.exact_file_write import publish_prepared_directory
+
+    output = tmp_path / "workflow"
+    stages = [tmp_path / ".oh-goon-init-first", tmp_path / ".oh-goon-init-second"]
+    for index, staging in enumerate(stages):
+        staging.mkdir(mode=0o700)
+        (staging / "run.yml").write_text(str(index))
+        (staging / "goon.lock").write_text(str(index))
+    barrier = Barrier(2, timeout=5)
+
+    def publish(staging):
+        barrier.wait()
+        try:
+            publish_prepared_directory(staging, output, exclusive=True)
+        except FileExistsError:
+            return "collision"
+        return "committed"
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(publish, stages))
+    assert sorted(results) == ["collision", "committed"]
+    assert (output / "run.yml").read_text() == (output / "goon.lock").read_text()
+    assert sum(staging.exists() for staging in stages) == 1
+
+
+@pytest.mark.parametrize("fault", ["no-space", "interrupted"])
+def test_precommit_failure_leaves_only_owned_staging(tmp_path, monkeypatch, fault):
+    import errno
+
+    from oh_goon.integrations import exact_file_write
+
+    staging = tmp_path / ".oh-goon-init-owned"
+    staging.mkdir(mode=0o700)
+    (staging / "run.yml").write_text("complete selection")
+    (staging / "goon.lock").write_text("matching lock")
+    output = tmp_path / "workflow"
+
+    def fail(*args):
+        if fault == "interrupted":
+            raise KeyboardInterrupt
+        raise OSError(errno.ENOSPC, "native publication has no space")
+
+    monkeypatch.setattr(exact_file_write, "_rename_directory_no_replace", fail)
+    with pytest.raises(KeyboardInterrupt if fault == "interrupted" else OSError):
+        exact_file_write.publish_prepared_directory(staging, output, exclusive=True)
+    assert not output.exists()
+    assert sorted(path.name for path in staging.iterdir()) == ["goon.lock", "run.yml"]
+
+
+def test_staged_companion_directory_sync_failure_prevents_any_final_publication(
+    tmp_path, monkeypatch
+):
+    import errno
     import os
     import stat
 
-    from oh_goon.integrations.exact_file_write import publish_new_text_tree
+    from oh_goon.integrations.exact_file_write import (
+        prepared_sibling_directory,
+        publish_prepared_directory,
+    )
 
     output = tmp_path / "workflow"
-    events = []
-    fsync = os.fsync
-    link = os.link
+    sync = os.fsync
+    with pytest.raises(OSError, match="directory durability failed"):
+        with prepared_sibling_directory(output) as prepared:
+            prepared.write_text("goons/general/example/goon.yml", "steps: []\n")
+            prepared.write_text("run.yml", "complete selection")
+            prepared.write_text("goon.lock", "matching lock")
 
-    def directory_identity(path):
-        status = path.stat()
-        return status.st_dev, status.st_ino
+            def fail(descriptor):
+                if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                    raise OSError(errno.EIO, "directory durability failed")
+                return sync(descriptor)
 
-    def sync(descriptor):
-        status = os.fstat(descriptor)
-        if stat.S_ISDIR(status.st_mode):
-            events.append(("sync", (status.st_dev, status.st_ino)))
-        return fsync(descriptor)
-
-    def publish(source, target, **kwargs):
-        if not any(kind == "link" for kind, _ in events):
-            # Exclusive creation of the output itself must already be durable.
-            assert ("sync", directory_identity(tmp_path)) in events
-        if target == "run.yml":
-            companion = max(index for index, (kind, _) in enumerate(events) if kind == "link")
-            pending = events[companion + 1 :]
-            directories = [
-                output / "goons/agents/review-repair",
-                output / "goons/agents",
-                output / "goons",
-                output,
-                tmp_path,
-            ]
-            positions = [
-                max(
-                    index
-                    for index, item in enumerate(pending)
-                    if item == ("sync", directory_identity(directory))
-                )
-                for directory in directories
-            ]
-            assert positions == sorted(positions)
-        events.append(("link", target))
-        return link(source, target, **kwargs)
-
-    monkeypatch.setattr(os, "fsync", sync)
-    monkeypatch.setattr(os, "link", publish)
-    publish_new_text_tree(
-        output,
-        {
-            "goons/agents/review-repair/goon.yml": "version: 1\n",
-            "plan.yml": "version: 1\n",
-            "run.yml": "version: 1\n",
-        },
-        commit_last="run.yml",
-    )
-    assert (output / "run.yml").is_file()
+            monkeypatch.setattr(os, "fsync", fail)
+            publish_prepared_directory(prepared.path, output, exclusive=True)
+    assert not output.exists()
+    assert not list(tmp_path.glob(".oh-goon-init-*"))
 
 
-def test_companion_directory_durability_failure_prevents_completion(tmp_path, monkeypatch):
+def test_postcommit_durability_failure_reports_complete_visible_tree_without_rollback(
+    tmp_path, monkeypatch
+):
     import errno
     import os
 
-    from oh_goon.integrations.exact_file_write import publish_new_text_tree
+    from oh_goon.integrations import exact_file_write
 
+    staging = tmp_path / ".oh-goon-init-owned"
+    staging.mkdir(mode=0o700)
+    (staging / "run.yml").write_text("complete selection")
+    (staging / "goon.lock").write_text("matching lock")
     output = tmp_path / "workflow"
-    linked = os.link
-    fsync = os.fsync
-    companion_published = False
+    rename = exact_file_write._rename_directory_no_replace
+    sync = os.fsync
+    committed = False
 
-    def publish(source, target, **kwargs):
-        nonlocal companion_published
-        result = linked(source, target, **kwargs)
-        companion_published = True
-        return result
+    def commit(*args):
+        nonlocal committed
+        rename(*args)
+        committed = True
 
-    def sync(descriptor):
-        if companion_published:
-            actual = os.fstat(descriptor)
-            ancestor = (output / "goons").stat()
-            if (actual.st_dev, actual.st_ino) == (ancestor.st_dev, ancestor.st_ino):
-                raise OSError(errno.EIO, "directory durability failed")
-        return fsync(descriptor)
+    def fail(descriptor):
+        if committed:
+            raise OSError(errno.EIO, "native directory durability failed")
+        return sync(descriptor)
 
-    monkeypatch.setattr(os, "link", publish)
-    monkeypatch.setattr(os, "fsync", sync)
-    with pytest.raises(OSError, match="directory durability failed"):
-        publish_new_text_tree(
-            output,
-            {"goons/agents/review/goon.yml": "version: 1\n", "run.yml": "version: 1\n"},
-            commit_last="run.yml",
-        )
-    assert (output / "goons/agents/review/goon.yml").is_file()
-    assert not (output / "run.yml").exists()
+    monkeypatch.setattr(exact_file_write, "_rename_directory_no_replace", commit)
+    monkeypatch.setattr(os, "fsync", fail)
+    with pytest.raises(exact_file_write.ExactPublicationDurabilityError):
+        exact_file_write.publish_prepared_directory(staging, output, exclusive=True)
+    assert not staging.exists()
+    assert (output / "run.yml").read_text() == "complete selection"
+    assert (output / "goon.lock").read_text() == "matching lock"
+
+
+def test_parent_retarget_after_pinning_never_redirects_atomic_commit(tmp_path, monkeypatch):
+    from oh_goon.integrations import exact_file_write
+
+    parent = tmp_path / "selected"
+    parent.mkdir()
+    staging = parent / ".oh-goon-init-owned"
+    staging.mkdir(mode=0o700)
+    (staging / "run.yml").write_text("complete selection")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sync = exact_file_write._sync_prepared_directory_descriptor
+
+    def retarget(descriptor):
+        parent.rename(tmp_path / "original")
+        parent.symlink_to(outside, target_is_directory=True)
+        return sync(descriptor)
+
+    monkeypatch.setattr(exact_file_write, "_sync_prepared_directory_descriptor", retarget)
+    with pytest.raises(OSError, match="directory changed"):
+        exact_file_write.publish_prepared_directory(staging, parent / "workflow", exclusive=True)
+    assert list(outside.iterdir()) == []
+    assert not (tmp_path / "original/workflow").exists()
+
+
+def test_staging_creation_and_cleanup_stay_with_the_pinned_parent(tmp_path, monkeypatch):
+    import os
+
+    from oh_goon.integrations.exact_file_write import prepared_sibling_directory
+
+    parent = tmp_path / "selected"
+    parent.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    mkdir = os.mkdir
+
+    def retarget(name, *args, **kwargs):
+        if str(name).startswith(".oh-goon-init-"):
+            parent.rename(tmp_path / "original")
+            parent.symlink_to(outside, target_is_directory=True)
+        return mkdir(name, *args, **kwargs)
+
+    monkeypatch.setattr(os, "mkdir", retarget)
+    with pytest.raises(OSError, match="directory changed"):
+        with prepared_sibling_directory(parent / "workflow"):
+            pytest.fail("A replaced parent must refuse before authoring")
+    assert list(outside.iterdir()) == []
+    assert list((tmp_path / "original").iterdir()) == []
+
+
+def test_staging_write_and_cleanup_never_follow_a_retargeted_parent(tmp_path):
+    from oh_goon.integrations.exact_file_write import prepared_sibling_directory
+
+    parent = tmp_path / "selected"
+    parent.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    with pytest.raises(OSError, match="directory changed"):
+        with prepared_sibling_directory(parent / "workflow") as prepared:
+            prepared.write_text("run.yml", "owned authoring")
+            parent.rename(tmp_path / "original")
+            parent.symlink_to(outside, target_is_directory=True)
+            foreign = outside / prepared.path.name
+            foreign.mkdir()
+            (foreign / "run.yml").write_text("user data")
+            prepared.write_text("other.yml", "must never reach outside")
+    assert (foreign / "run.yml").read_text() == "user data"
+    assert not (foreign / "other.yml").exists()
+    assert list((tmp_path / "original").iterdir()) == []
+
+
+def test_staging_cleanup_refuses_a_replaced_stage_inode(tmp_path):
+    from oh_goon.integrations.exact_file_write import prepared_sibling_directory
+
+    with pytest.raises(OSError, match="directory changed"):
+        with prepared_sibling_directory(tmp_path / "workflow") as prepared:
+            prepared.write_text("run.yml", "owned authoring")
+            prepared.path.rename(tmp_path / ".oh-goon-init-moved-owned")
+            prepared.path.mkdir()
+            (prepared.path / "user.txt").write_text("user data")
+            prepared.require_current()
+    assert (prepared.path / "user.txt").read_text() == "user data"
+    assert (tmp_path / ".oh-goon-init-moved-owned/run.yml").read_text() == "owned authoring"

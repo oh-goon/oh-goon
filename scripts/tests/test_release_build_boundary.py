@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -386,6 +387,8 @@ def test_installed_wheel_initializes_complete_agent_workflow_without_checkout_re
 
     league.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
     native_environment["OH_GOON_LEAGUE_FILE"] = str(league)
+    database = tmp_path / "operational.sqlite"
+    native_environment["OH_GOON_DB"] = str(database)
     native_environment.pop("PYTHONPATH", None)
     shutil.rmtree(root / "templates")
     shutil.rmtree(root / "examples")
@@ -394,15 +397,18 @@ def test_installed_wheel_initializes_complete_agent_workflow_without_checkout_re
     result = subprocess.run(
         [
             str(environment / "bin/oh-goon"),
-            "templates",
             "init",
+            "--template",
             "agents/agentic-review-repair-loop",
+            "--draft",
             "--kind",
             "plan",
             "--output",
             str(output),
             "--repository",
             str(repository),
+            "--no-input",
+            "--json",
         ],
         cwd=tmp_path,
         env=native_environment,
@@ -411,6 +417,17 @@ def test_installed_wheel_initializes_complete_agent_workflow_without_checkout_re
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
+    initialized = json.loads(result.stdout)
+    assert initialized["status"] == "not_ready"
+    assert {
+        "inputs.repo",
+        "inputs.regression_command",
+        "inputs.verification_command",
+        "agent.model_profile",
+        "repair.write_roots",
+    } <= set(initialized["required_fields"])
+    assert not (output / "goon.lock").exists()
+    assert not database.exists()
     for relative in (
         ".goonskills.yml",
         "skills/adjudicate/SKILL.md",
@@ -420,13 +437,23 @@ def test_installed_wheel_initializes_complete_agent_workflow_without_checkout_re
             ROOT / "examples" / AGENT_REVIEW_EXAMPLE / relative
         ).read_bytes()
     selected = yaml.safe_load((output / "run.yml").read_text())
-    assert selected["inputs"]["repo"] == "local:target"
+    assert (output / selected["target"]["repository"]).resolve() == repository
+    assert "repo" not in selected.get("inputs", {})
     assert selected["agent"]["repository_root"] == str(repository.parent)
-    assert selected["agent"]["model_profile"] == "REQUIRED_MODEL_PROFILE"
+    assert "model_profile" not in selected["agent"]
+    assert "write_roots" not in selected["repair"]
+    selected.setdefault("inputs", {}).update(
+        repo="local:target",
+        regression_command="scripts/regression",
+        verification_command="scripts/verify",
+    )
+    selected["agent"]["model_profile"] = "inspection-only"
+    selected["repair"]["write_roots"] = ["src"]
+    (output / "run.yml").write_text(yaml.safe_dump(selected, sort_keys=False))
     inspected = subprocess.run(
         [
             str(environment / "bin/oh-goon"),
-            "config",
+            "workflow",
             "inspect",
             str(output / "run.yml"),
             "--json",
@@ -438,6 +465,11 @@ def test_installed_wheel_initializes_complete_agent_workflow_without_checkout_re
         timeout=60,
     )
     assert inspected.returncode == 0, inspected.stderr + inspected.stdout
+    report = json.loads(inspected.stdout)
+    assert report["proof"]["provider"] == "configuration-not-inspected;not-connected"
+    assert report["proof"]["admission"] == report["proof"]["execution"] == "not-started"
+    assert not database.exists()
+    assert not (output / "goon.lock").exists()
 
 
 def test_release_staging_is_owned_by_release_script_not_make_bootstrap_target() -> None:

@@ -15,7 +15,7 @@ from oh_goon.core.models.git_sources import GitSourceSelection
 from oh_goon.core.template_identity import canonical_template_key
 
 _INPUT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,63}\Z")
-_RepositorySelectionId = Annotated[str, Field(min_length=1, max_length=160, pattern=r"^\S+$")]
+_RepositoryPath = Annotated[str, Field(min_length=1, max_length=4096)]
 
 
 class _SelectionModel(ImmutableModel):
@@ -64,33 +64,39 @@ RunSourceSelection = Annotated[
 
 
 class RunTargetSelection(_SelectionModel):
-    repository_id: _RepositorySelectionId | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
-    repository_ids: tuple[_RepositorySelectionId, ...] | None = Field(
+    repository: _RepositoryPath | None = Field(default=None, exclude_if=lambda value: value is None)
+    repositories: tuple[_RepositoryPath, ...] | None = Field(
         default=None, min_length=2, exclude_if=lambda value: value is None
     )
 
-    @field_validator("repository_ids", mode="before")
+    @field_validator("repository", "repositories", mode="before")
+    @classmethod
+    def selected_value_cannot_be_null(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("A selected repository field cannot be null")
+        return value
+
+    @field_validator("repositories", mode="before")
     @classmethod
     def yaml_sequence(cls, value: object) -> object:
         return tuple(value) if type(value) is list else value
 
     @model_validator(mode="after")
     def validate_selection(self) -> RunTargetSelection:
-        if (self.repository_id is None) == (self.repository_ids is None):
-            raise ValueError("target requires exactly one of repository_id or repository_ids")
-        if self.repository_ids is not None and len(set(self.repository_ids)) != len(
-            self.repository_ids
-        ):
-            raise ValueError("target.repository_ids must contain unique repository IDs")
+        if (self.repository is None) == (self.repositories is None):
+            raise ValueError("target requires exactly one of repository or repositories")
+        selected = self.selected_paths()
+        if len(set(selected)) != len(selected):
+            raise ValueError("target.repositories must contain unique repository paths")
+        if any(not value.strip() or "\x00" in value or "${" in value for value in selected):
+            raise ValueError("target selections must be literal directory paths")
         return self
 
-    def selected_ids(self) -> tuple[str, ...]:
-        if self.repository_id is not None:
-            return (self.repository_id,)
-        assert self.repository_ids is not None
-        return self.repository_ids
+    def selected_paths(self) -> tuple[str, ...]:
+        if self.repository is not None:
+            return (self.repository,)
+        assert self.repositories is not None
+        return self.repositories
 
 
 class RunAgentSelection(_SelectionModel):
@@ -135,7 +141,7 @@ class RunRepairSelection(_SelectionModel):
 
 
 class RunConfiguration(_SelectionModel):
-    version: Literal[1]
+    version: Literal[2]
     source: RunSourceSelection
     target: RunTargetSelection
     inputs: tuple[tuple[str, PlanInputValue], ...] = Field(default=(), max_length=64)
@@ -146,7 +152,7 @@ class RunConfiguration(_SelectionModel):
     @classmethod
     def version_is_integer(cls, value: object) -> object:
         if type(value) is not int:
-            raise ValueError("run.yml version must be integer 1")
+            raise ValueError("run.yml version must be integer 2")
         return value
 
     @field_validator("inputs", mode="before", json_schema_input_type=dict[str, PlanInputValue])
@@ -174,7 +180,7 @@ class RunConfiguration(_SelectionModel):
         self.caller_inputs()
         if self.repair is not None and self.agent is None:
             raise ValueError("repair requires an explicit agent selection")
-        if len(self.target.selected_ids()) > 1 and (
+        if len(self.target.selected_paths()) > 1 and (
             isinstance(self.source, RepositoryGoonSelection)
             or self.agent is not None
             or self.repair is not None

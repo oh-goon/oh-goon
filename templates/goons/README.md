@@ -50,6 +50,6 @@ distinct without inventing duplicate Make/npm prerequisite graphs.
 
 ## Start and customize
 
-Initialize one Goon with `oh-goon templates init python/ruff --kind goon --output ./workflow`. This creates a minimal project Plan and its selected `run.yml`; edit only the target and caller choices before inspection and execution. Use `--kind plan` to select a complete catalog workflow directly.
+Initialize one Goon with `oh-goon init --template python/ruff --kind goon --output ./workflow --draft`. This creates a minimal project Plan and its selected `run.yml`; edit only the target and caller choices before inspection and execution. Use `--kind plan` to select a complete catalog workflow directly.
 
 Some Goons need an earlier producer, an ordered phase context or explicit strict execution policy. Their package guides start from an existing Plan that owns those decisions. Use the [local Python journey](../README.md) to run, configure and extend a Plan. `oh-goon templates list --kind goon` lists the actual catalog. Atomic Goons own typed input descriptions; one selected `run.yml` supplies caller choices. Local `from:` imports use the same package shape and compiler.

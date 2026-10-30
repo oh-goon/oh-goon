@@ -99,8 +99,8 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
     cli("league", "add-folder", str(tmp_path / "repositories"))
     workflow = tmp_path / "workflow"
     cli(
-        "templates",
         "init",
+        "--template",
         key,
         "--kind",
         kind,
@@ -126,18 +126,18 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
             stream.write("- import: general/native-report\n  from: ./goons\n")
     selection = workflow / "run.yml"
     config = yaml.safe_load(selection.read_text())
-    assert config["target"]["repository_id"] == repository_id(repository)
+    assert (selection.parent / config["target"]["repository"]).resolve() == repository
     if key == "python/quality":
         config["inputs"] = {"typechecker": "ty"}
     selection.write_text(yaml.safe_dump(config, sort_keys=False))
     if kind == "goon":
-        inspected = json.loads(cli("config", "inspect", str(selection), "--json"))
-        validated = json.loads(cli("config", "validate", str(selection), "--json"))
+        inspected = json.loads(cli("workflow", "inspect", str(selection), "--json"))
+        validated = json.loads(cli("workflow", "validate", str(selection), "--json"))
         assert inspected == validated
         assert validated["status"] == "inputs-valid"
         assert validated["proof"]["admission"] == "not-started"
-    assert not (workflow / "goon.lock").exists()
-    cli("lock", str(selection))
+    assert (workflow / "goon.lock").is_file()
+    cli("workflow", "prepare", str(selection))
     assert (workflow / "goon.lock").is_file()
     human_result = None
     if kind == "plan":
@@ -152,9 +152,9 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
         assert "Execution status: COMPLETED" in human_result
         assert "Outcome: SUCCESS" in human_result
         assert "junit.xml [PRESENT]" in human_result
-        assert f"Inspect Run: oh-goon plan handoff {run_id}" in human_result
-        assert f"Inspect outputs: oh-goon plan outputs {run_id}" in human_result
-        assert f"Read logs (while available): oh-goon plan logs {run_id}" in human_result
+        assert f"Inspect Run: oh-goon runs handoff {run_id}" in human_result
+        assert f"Inspect outputs: oh-goon runs outputs {run_id}" in human_result
+        assert f"Read logs (while available): oh-goon runs logs {run_id}" in human_result
     else:
         receipt = json.loads(cli("run", str(selection), "--json"))
         run_id = receipt["fleet_run_id"]
@@ -162,7 +162,7 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
     # Every readback crosses a fresh process and reopens the durable original
     # Journal; none can reuse the execution process's transient Run objects.
     views = {
-        view: json.loads(cli("plan", view, run_id, "--json"))
+        view: json.loads(cli("runs", "show" if view == "status" else view, run_id, "--json"))
         for view in ("status", "steps", "outputs", "tape")
     }
     assert all(report["fleet_run_id"] == run_id for report in views.values())
@@ -200,17 +200,17 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
         (repository / "tests/test_workload.py").write_text(
             "def test_native_failure():\n    assert False\n"
         )
-        cli("lock", str(selection))
+        cli("workflow", "prepare", str(selection))
         failed = json.loads(cli("run", str(selection), "--json", expected_returncode=1))
-        failed_status = json.loads(cli("plan", "status", failed["fleet_run_id"], "--json"))
-        failed_tape = json.loads(cli("plan", "tape", failed["fleet_run_id"], "--json"))
+        failed_status = json.loads(cli("runs", "show", failed["fleet_run_id"], "--json"))
+        failed_tape = json.loads(cli("runs", "tape", failed["fleet_run_id"], "--json"))
         assert failed_status["outcome"] == "ATTENTION_REQUIRED"
         assert failed_tape["status"] == "ATTENTION_REQUIRED"
         failed_step = failed_tape["repositories"][0]["steps"][0]
         assert failed_step["status"] == "FAILED" and failed_step["exit_code"] == 1
         skipped = failed_tape["repositories"][0]["steps"][1]
         assert skipped["status"] == "SKIPPED" and skipped["outputs"] == []
-        assert json.loads(cli("plan", "outputs", run_id, "--json")) == views["outputs"]
+        assert json.loads(cli("runs", "outputs", run_id, "--json")) == views["outputs"]
 
 
 def test_plural_configuration_runs_actual_applications_concurrently_and_keeps_target_history(
@@ -255,8 +255,8 @@ printf '%s\n' "$total"
         cli("league", "add-folder", str(application))
     workflow = tmp_path / "workflow"
     cli(
-        "templates",
         "init",
+        "--template",
         "python/test",
         "--kind",
         "goon",
@@ -270,8 +270,10 @@ printf '%s\n' "$total"
     selection = workflow / "run.yml"
     config = yaml.safe_load(selection.read_text())
     repository_ids = {repository_id(application) for application in applications}
-    assert set(config["target"]["repository_ids"]) == repository_ids
-    assert "repository_id" not in config["target"]
+    assert {
+        (workflow / selected).resolve() for selected in config["target"]["repositories"]
+    } == set(applications)
+    assert "repository" not in config["target"]
     package = workflow / "goons/general/verify-order"
     package.mkdir(parents=True)
     (package / "README.md").write_text("# general/verify-order\n\nVerify each order.\n")
@@ -303,13 +305,16 @@ printf '%s\n' "$total"
             sort_keys=False,
         )
     )
-    cli("lock", str(selection))
+    # The replacement Plan has no public inputs; discard the initial Python choices.
+    config.pop("inputs", None)
+    selection.write_text(yaml.safe_dump(config))
+    cli("workflow", "prepare", str(selection))
     receipt = json.loads(cli("run", str(selection), "--json"))
     assert receipt["status"] == "COMPLETED" and receipt["outcome"] == "SUCCESS"
     run_id = receipt["fleet_run_id"]
-    tape = json.loads(cli("plan", "tape", run_id, "--json"))
-    outputs = json.loads(cli("plan", "outputs", run_id, "--json"))
-    events = json.loads(cli("plan", "events", run_id, "--json"))
+    tape = json.loads(cli("runs", "tape", run_id, "--json"))
+    outputs = json.loads(cli("runs", "outputs", run_id, "--json"))
+    events = json.loads(cli("runs", "events", run_id, "--json"))
     assert tape["status"] == "PASSED"
     assert {item["repository"]["repository_id"] for item in tape["repositories"]} == repository_ids
     assert len({item["operation_id"] for item in tape["repositories"]}) == 2
@@ -341,11 +346,11 @@ printf '%s\n' "$total"
         (barrier / f"{application.name}.started").unlink()
         (application / "completed.txt").unlink()
     (applications[1] / "verify.sh").write_text(verify + "exit 7\n")
-    cli("lock", str(selection))
+    cli("workflow", "prepare", str(selection))
     failed = json.loads(cli("run", str(selection), "--json", expected_returncode=1))
     assert failed["fleet_run_id"] != run_id
     assert failed["outcome"] == "ATTENTION_REQUIRED"
-    failed_tape = json.loads(cli("plan", "tape", failed["fleet_run_id"], "--json"))
+    failed_tape = json.loads(cli("runs", "tape", failed["fleet_run_id"], "--json"))
     partition = {
         item["repository"]["repository_id"]: item["steps"] for item in failed_tape["repositories"]
     }
@@ -359,10 +364,10 @@ printf '%s\n' "$total"
     assert failed_steps[0]["exit_code"] == 7
     assert (applications[0] / "completed.txt").is_file()
     assert not (applications[1] / "completed.txt").exists()
-    reopened = json.loads(cli("plan", "tape", run_id, "--json"))
+    reopened = json.loads(cli("runs", "tape", run_id, "--json"))
     assert reopened["repositories"] == tape["repositories"]
     assert reopened["status"] == "PASSED"
-    assert json.loads(cli("plan", "outputs", run_id, "--json")) == outputs
+    assert json.loads(cli("runs", "outputs", run_id, "--json")) == outputs
 
 
 @pytest.mark.parametrize("project", [".", "my backend"])
@@ -411,14 +416,14 @@ steps:
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": repository_id(repository)},
+                "target": {"repository": str(repository)},
                 "inputs": {"project": project, "typechecker": checker},
             }
         )
     )
-    assert main(["lock", str(selection)]) == 0
+    assert main(["workflow", "prepare", str(selection)]) == 0
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(tmp_path / "repositories")
@@ -437,7 +442,7 @@ steps:
         assert result.game_tape.status.value == "PASSED"
         # A real failed test must remain a failure through the same admitted path.
         (target / "tests/test_workload.py").write_text("def test_failure():\n    assert False\n")
-        assert main(["lock", str(selection)]) == 0
+        assert main(["workflow", "prepare", str(selection)]) == 0
         capsys.readouterr()
         assert main(["run", str(selection), "--json"]) == 1
         failed_receipt = json.loads(capsys.readouterr().out)
@@ -504,13 +509,13 @@ steps:
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": repository_id(repository)},
+                "target": {"repository": str(repository)},
             }
         )
     )
-    assert main(["lock", str(selection)]) == 0
+    assert main(["workflow", "prepare", str(selection)]) == 0
     captured = load_run_configuration(selection)
     runtime = ApplicationRuntime.build(standard_local=True)
     started = None

@@ -4,7 +4,9 @@ Plans answer only: **which Goon capabilities run, in what order, and which Goon 
 
 Every shipped Plan package is exactly `templates/plans/<category>/<name>/{plan.yml,README.md}`. The package path is the shipped Plan identity, so `name:` is not repeated in YAML and human description belongs in `README.md`.
 
-Start a catalog Plan with `oh-goon templates init python/quality --kind plan --output ./workflow`; its `run.yml` selects the catalog source directly.
+Start a catalog Plan with `oh-goon init --template python/quality --kind plan --output ./workflow --draft`; its `run.yml` selects the catalog source directly.
+
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../README.md).
 
 A minimal authored Plan is:
 

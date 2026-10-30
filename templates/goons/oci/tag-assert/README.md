@@ -7,10 +7,12 @@ Read one existing OCI registry tag and require that its top-level manifest diges
 **Prerequisites:** Selected registry/repository/tag and expected digest, with declared `OCI_REGISTRY_USERNAME`/`OCI_REGISTRY_PASSWORD` host bindings.
 
 ```sh
-oh-goon templates init oci/tag-gate --kind plan --output ./workflow
+oh-goon init --template oci/tag-gate --kind plan --output ./workflow --draft
 ```
 
-The [oci/tag-gate Plan](../../../plans/oci/tag-gate/README.md) supplies the surrounding policy and ordered work. Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+The [oci/tag-gate Plan](../../../plans/oci/tag-gate/README.md) supplies the surrounding policy and ordered work. Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** `OCI_TAG_DIGEST` and `OCI_TAG_RESOLVED_REFERENCE`; mismatch fails without tag mutation.
 

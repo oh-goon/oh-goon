@@ -44,7 +44,7 @@ or partially classified phases fail before work. Ordinary unclassified Plans
 retain their existing execution behavior.
 
 For a single provider review, import `agents/review` without `phase:`, bind its
-`skill` and use the normal `lock run.yml` / `run run.yml` commands with one matching config selection. Review-pass and
+`skill` and use the normal `workflow prepare run.yml` / `run run.yml` commands with one matching config selection. Review-pass and
 repair-write limits apply only to loops. Adjudication and proposal Agents consume
 the preceding phases' admitted records and require the loop context.
 
@@ -119,7 +119,7 @@ individual finding's resolution. Bounded native context diagnostics and original
 execution facts explain preflight failures without including model/tool transcripts;
 their existing claim and execution authority labels remain distinct.
 
-Use `oh-goon plan campaign CAMPAIGN_OR_RUN_ID --json` with the campaign ID or any
+Use `oh-goon runs campaign CAMPAIGN_OR_RUN_ID --json` with the campaign ID or any
 linked Run to inspect the same retained evidence after interruption. The campaign
 ID also works when initial admission was refused and no Run exists. Cancellation
 before source/intent preparation reports that no retained campaign is available.
@@ -205,7 +205,7 @@ facts in the existing export receipt, lock, invocation result and Run evidence:
 
 Campaign policy decides workflow convergence and retains its decision in the
 canonical Journal; original Runs and settled Step evidence decide execution
-outcomes. Inspect `plan campaign CAMPAIGN_OR_RUN_ID --json` after reopening the runtime;
+outcomes. Inspect `runs campaign CAMPAIGN_OR_RUN_ID --json` after reopening the runtime;
 the verified Journal read cut retains campaign intent, exact linked phases and
 committed controller decisions independently of invocation stdout. Successful
 child verification without a committed controller decision remains incomplete,
@@ -273,7 +273,7 @@ Use the source CLI to inspect the exact options:
 
 ```bash
 uv run --offline --frozen --no-sync --project backend oh-goon run --help
-uv run --offline --frozen --no-sync --project backend oh-goon lock --help
+uv run --offline --frozen --no-sync --project backend oh-goon workflow prepare --help
 ```
 
 ## Select a Skill
@@ -302,9 +302,9 @@ OH-Goon and does not rewrite upstream `SKILL.md` content or names. Choose distin
 directory names within a namespace; conflicting aliases are rejected.
 
 Native Git prepares each declared source once per capture. It accepts branch,
-tag and full commit selectors. The first `oh-goon lock` records each remote
+tag and full commit selectors. The first `oh-goon workflow prepare` records each remote
 source/ref, selected directories and exact commit in `goon.lock`. Later locks
-and runs keep those commits. Use the same lock command with `--update-skills`
+and runs keep those commits. Use the same lock command with `--refresh skills`
 to refresh them or accept changed source declarations. Cache misses fetch the
 recorded commit; they never advance a branch implicitly. Commit the registry
 and generated lock with the workflow. There is no INI registry or Gitlink mode.
@@ -361,7 +361,7 @@ Select repository/Skill roots and acceptance in the `agent` group of `run.yml`.
 Model-backed harnesses also require their native implementation/profile or managed
 model profile; recipient-free read-only `local-search` does not select a model.
 The config supplies no
-native model metadata or private credentials. Normal `config inspect` remains
+native model metadata or private credentials. Normal `workflow inspect` remains
 local and cannot fetch remote Skill sources; explicit locking uses the original
 source capture owner. No stored selection grants fresh effect consent.
 

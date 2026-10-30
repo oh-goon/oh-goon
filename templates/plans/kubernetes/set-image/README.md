@@ -7,15 +7,15 @@ Commit a digest-qualified image to one exact Kubernetes Deployment container.
 **Prerequisites:** A reachable selected Kubernetes API and authority to change the named Deployment/container. Bind `KUBERNETES_TOKEN` and `KUBERNETES_CA_CERTIFICATE` through the host environment. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
 ```sh
-oh-goon templates init kubernetes/set-image --kind plan --output ./workflow
+oh-goon init --template kubernetes/set-image --kind plan --output ./workflow --draft
 ```
 
-Edit `workflow/run.yml` with your registered target and caller choices. Omitted options keep their Goon-owned defaults:
+This explicit draft is NOT_READY. Set `target.repository` to your exact registered repository path and fill the required caller choices in `workflow/run.yml`. Omitted options keep their Goon-owned defaults:
 
 ```yaml
-version: 1
+version: 2
 source: {kind: catalog-plan, name: kubernetes/set-image}
-target: {repository_id: REPOSITORY_ID}
+target: {repository: /absolute/path/to/project}
 inputs:
   kubernetes_api_hostname: kube.example.com
   namespace: production
@@ -25,9 +25,9 @@ inputs:
 ```
 
 ```sh
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
+oh-goon workflow inspect ./workflow/run.yml
+oh-goon workflow validate ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 

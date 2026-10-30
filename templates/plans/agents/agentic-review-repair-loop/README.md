@@ -7,15 +7,15 @@ Run four ordered reviews, adjudication, bounded repair, regression and final ver
 **Prerequisites:** An authorized repository root, captured Skill resources and configured model connection. Prepare the pinned Skill registry and explicit executable project check scripts. Repair requires explicit write roots and fresh Run admission.
 
 ```sh
-oh-goon templates init agents/agentic-review-repair-loop --kind plan --output ./workflow
+oh-goon init --template agents/agentic-review-repair-loop --kind plan --output ./workflow --draft
 ```
 
-Edit `workflow/run.yml` with your registered target and caller choices. Omitted options keep their Goon-owned defaults:
+This explicit draft is NOT_READY. Set `target.repository` to your exact registered repository path and fill the required caller choices in `workflow/run.yml`. Omitted options keep their Goon-owned defaults:
 
 ```yaml
-version: 1
+version: 2
 source: {kind: catalog-plan, name: agents/agentic-review-repair-loop}
-target: {repository_id: REPOSITORY_ID}
+target: {repository: /absolute/path/to/project}
 inputs:
   repo: local:repo
   regression_command: scripts/regression
@@ -33,9 +33,9 @@ repair:
 ```
 
 ```sh
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
+oh-goon workflow inspect ./workflow/run.yml
+oh-goon workflow validate ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml --authorize-repair
 ```
 

@@ -1,14 +1,52 @@
 from __future__ import annotations
 
 import argparse
+import json
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.errors import FleetDomainError
-from oh_goon.core.vocabulary import SystemHealthStatus
+from oh_goon.core.vocabulary import SystemHealthStatus, ToolStatus
 
 
-def _doctor_command(runtime: ApplicationRuntime, _args: argparse.Namespace) -> int:
+def run_basic_doctor(args: argparse.Namespace) -> int:
+    from oh_goon.services.system_health import SystemHealthService
+
+    tools = SystemHealthService.inspect_tools()
+    ready = all(not tool.required or tool.status is ToolStatus.READY for tool in tools)
+    if args.as_json:
+        print(
+            json.dumps(
+                {
+                    "schema": "oh-goon.doctor/v1",
+                    "scope": "tools",
+                    "status": "ready" if ready else "setup_required",
+                    "tools": [tool.model_dump(mode="json") for tool in tools],
+                },
+                sort_keys=True,
+            )
+        )
+    else:
+        for tool in tools:
+            version = f" ({tool.version})" if tool.version else ""
+            print(f"{tool.name:<8} {tool.status}{version}")
+        print("Use oh-goon doctor --runtime for explicit application runtime diagnostics.")
+    return 0 if ready else 2
+
+
+def _doctor_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     health = runtime.system_health.inspect()
+    if getattr(args, "as_json", False):
+        print(
+            json.dumps(
+                {
+                    "schema": "oh-goon.doctor/v1",
+                    "scope": "runtime",
+                    **health.model_dump(mode="json"),
+                },
+                sort_keys=True,
+            )
+        )
+        return 0 if health.status is SystemHealthStatus.READY else 2
     for tool in health.tools:
         version = f" ({tool.version})" if tool.version else ""
         print(f"{tool.name:<8} {tool.status}{version}")

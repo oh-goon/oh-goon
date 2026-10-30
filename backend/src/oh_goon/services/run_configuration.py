@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import sqlite3
 import stat
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -43,6 +45,7 @@ from oh_goon.services.fleet_caller_file_freshness import (
 if TYPE_CHECKING:
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
     from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
+    from oh_goon.services.locations import LocationService
 
 
 class _RunYamlLoader(yaml.SafeLoader):
@@ -82,7 +85,7 @@ def _regular_file(path: Path, root: Path) -> tuple[Path, str]:
         ) from exc
 
 
-def _no_symlink_components(path: Path) -> None:
+def _no_symlink_components(path: Path, *, allow_missing: bool = False) -> None:
     current = Path(path.anchor)
     for part in path.parts[1:]:
         current /= part
@@ -92,10 +95,27 @@ def _no_symlink_components(path: Path) -> None:
                     "run.yml paths cannot contain symlink components",
                     diagnostic_code="CONFIG_PATH_INVALID",
                 )
+        except FileNotFoundError:
+            if not allow_missing:
+                raise RunConfigurationInvalid(
+                    "run.yml selected path is unavailable", diagnostic_code="CONFIG_PATH_INVALID"
+                ) from None
         except OSError as exc:
             raise RunConfigurationInvalid(
                 "run.yml selected path is unavailable", diagnostic_code="CONFIG_PATH_INVALID"
             ) from exc
+
+
+def require_no_symlink_target_path(path: Path, *, allow_missing: bool = False) -> None:
+    """Validate a caller's unnormalized target before authoring can erase aliases."""
+    try:
+        _no_symlink_components(path.expanduser().absolute(), allow_missing=allow_missing)
+    except RunConfigurationInvalid as exc:
+        raise RunConfigurationInvalid(
+            str(exc),
+            diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+            fields=("target.repository",),
+        ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,8 +171,8 @@ class RunConfigurationSnapshot:
         if isinstance(source, GitPlanSelection):
             if acquired_plan is None:
                 raise FleetPlanSourceAcquisitionRequired(
-                    "Git Plan source requires explicit acquisition with lock; "
-                    "inspect its contract first with 'oh-goon config inspect run.yml --acquire'"
+                    "Git Plan source acquisition requires explicit workflow preparation; "
+                    "inspect its contract first with 'oh-goon workflow inspect run.yml --acquire'"
                 )
             return acquired_plan
         if isinstance(source, CatalogPlanSelection):
@@ -216,6 +236,23 @@ class RunConfigurationSnapshot:
             )
         return root
 
+    def validate_authoring_paths(self) -> tuple[Path | None, Path | None]:
+        """Validate known caller roots before acquisition or target registration."""
+        self.require_fresh()
+        repository_root, skill_root = self.agent_repository_root(), self.agent_skill_root()
+        if self.selection.repair is not None:
+            from oh_goon.integrations.agent_patch_apply import validate_write_roots
+
+            try:
+                validate_write_roots(self.selection.repair.write_roots)
+            except FleetPlanInvalid as exc:
+                raise RunConfigurationInvalid(
+                    "repair requires explicit contained write roots",
+                    diagnostic_code="CONFIG_SCHEMA_INVALID",
+                    fields=("repair.write_roots",),
+                ) from exc
+        return repository_root, skill_root
+
 
 @dataclass(frozen=True, slots=True)
 class NormalizedRunConfiguration:
@@ -223,6 +260,7 @@ class NormalizedRunConfiguration:
     repositories: tuple[RepositoryIdentity, ...]
     plan_path: Path
     repository_instances: tuple[tuple[str, str], ...] = ()
+    registrations: tuple[bool, ...] = ()
 
     @property
     def repository(self) -> RepositoryIdentity:
@@ -239,8 +277,183 @@ class NormalizedRunConfiguration:
         return dict(self.repository_instances) if self.repository_instances else None
 
     @property
+    def repository_instance_id(self) -> str:
+        repository = self.repository
+        return dict(self.repository_instances)[repository.repository_id]
+
+    @property
+    def registered(self) -> bool:
+        return all(self.registrations)
+
+    @property
     def inputs(self) -> dict[str, PlanInputValue]:
         return self.snapshot.inputs
+
+
+@dataclass(frozen=True, slots=True)
+class RunConfigurationTarget:
+    """One selected path plus observed scope; this is not execution admission."""
+
+    repository: RepositoryIdentity
+    registered: bool
+    repository_instance_id: str
+
+
+def _target_paths(
+    snapshot: RunConfigurationSnapshot, target_root: Path | None = None
+) -> tuple[Path, ...]:
+    literals = snapshot.selection.target.selected_paths()
+    field = "target.repository" if len(literals) == 1 else "target.repositories"
+    paths: list[Path] = []
+    for value in literals:
+        literal = Path(value)
+        selected = literal if literal.is_absolute() else (target_root or snapshot.root) / literal
+        # Check before collapsing '..': an alias followed by traversal is still an alias.
+        selected = selected.absolute()
+        if target_root is not None:
+            # Only the initializer's explicit logical output base can be absent.
+            selected = Path(os.path.abspath(selected))
+        try:
+            _no_symlink_components(selected)
+        except RunConfigurationInvalid as exc:
+            raise RunConfigurationInvalid(
+                str(exc),
+                diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+                fields=(field,),
+            ) from exc
+        selected = Path(os.path.abspath(selected))
+        if not selected.is_dir():
+            raise RunConfigurationInvalid(
+                "Every target path must select an existing directory",
+                diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+                fields=(field,),
+            )
+        paths.append(selected)
+    if len(set(paths)) != len(paths):
+        raise RunConfigurationInvalid(
+            "target.repositories must select distinct canonical repository paths",
+            diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+            fields=("target.repositories",),
+        )
+    return tuple(paths)
+
+
+def resolve_run_configuration_targets(
+    snapshot: RunConfigurationSnapshot,
+    *,
+    target_root: Path | None = None,
+) -> tuple[RunConfigurationTarget, ...]:
+    """Resolve the entire authored set from one observation of the League scope."""
+    from oh_goon.runtime.state import LocalState
+    from oh_goon.services.repository_discovery import RepositoryDiscoveryService
+
+    paths = _target_paths(snapshot, target_root)
+    field = "target.repository" if len(paths) == 1 else "target.repositories"
+    try:
+        locations, exclusions = LocalState.inspect_configuration_scope()
+    except sqlite3.Error as exc:
+        raise RunConfigurationInvalid(
+            "Existing local scope is unavailable; inspect local-state compatibility before preparation",
+            diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+            fields=(field,),
+        ) from exc
+    discovery = RepositoryDiscoveryService()
+    targets = []
+    for selected in paths:
+        if str(selected) in exclusions:
+            raise RunConfigurationInvalid(
+                "A selected repository is excluded from the current League",
+                diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+                fields=(field,),
+            )
+        containing = discovery.containing_git_root(locations, selected)
+        registered = selected in locations or containing == selected
+        if selected not in locations and containing is not None and containing != selected:
+            raise RunConfigurationInvalid(
+                "Every target path must select the exact repository root",
+                diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+                fields=(field,),
+            )
+        targets.append(
+            RunConfigurationTarget(
+                RepositoryIdentity.model_validate({"path": selected}),
+                registered,
+                repository_subject_instance_id(selected),
+            )
+        )
+    snapshot.require_fresh()
+    return tuple(targets)
+
+
+def resolve_run_configuration_target(
+    snapshot: RunConfigurationSnapshot,
+    *,
+    target_root: Path | None = None,
+) -> RunConfigurationTarget:
+    """Require a singular context instead of inventing a primary repository."""
+    targets = resolve_run_configuration_targets(snapshot, target_root=target_root)
+    if len(targets) != 1:
+        raise RunConfigurationInvalid("This selection requires a single repository context")
+    return targets[0]
+
+
+def register_run_configuration_target(
+    snapshot: RunConfigurationSnapshot,
+    target: RunConfigurationTarget,
+    locations: LocationService,
+    *,
+    target_root: Path | None = None,
+    targets: tuple[RunConfigurationTarget, ...] | None = None,
+) -> dict[str, str]:
+    """Register one member only after revalidating the entire incoming target set."""
+    from oh_goon.services.repository_discovery import RepositoryDiscoveryService
+
+    selected_targets = targets if targets is not None else (target,)
+    if target not in selected_targets:
+        raise RunConfigurationInvalid("Registration target is outside the selected repository set")
+
+    def validate(folders: tuple[Path, ...], exclusions: frozenset[str]) -> None:
+        paths = _target_paths(snapshot, target_root)
+        if paths != tuple(item.repository.path for item in selected_targets):
+            raise RunConfigurationInvalid("The selected repository set changed before registration")
+        for selected, member in zip(paths, selected_targets, strict=True):
+            if repository_subject_instance_id(selected) != member.repository_instance_id:
+                raise RunConfigurationInvalid("A selected repository changed before registration")
+            if str(selected) in exclusions:
+                raise RunConfigurationInvalid(
+                    "A selected repository is excluded from the current League",
+                    diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+                    fields=("target.repository" if len(paths) == 1 else "target.repositories",),
+                )
+            if (
+                selected not in folders
+                and RepositoryDiscoveryService().containing_git_root((selected,), selected)
+                != selected
+            ):
+                raise RunConfigurationInvalid(
+                    "Automatic registration requires exact Git roots; filesystem subjects require explicit League registration",
+                    diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+                    fields=("target.repository" if len(paths) == 1 else "target.repositories",),
+                )
+        snapshot.require_fresh()
+
+    return locations.register_target(target.repository.path, validate=validate)
+
+
+def require_run_configuration_registration_target(target: RunConfigurationTarget) -> None:
+    """Reject a known invalid automatic registration before runtime initialization."""
+    from oh_goon.services.repository_discovery import RepositoryDiscoveryService
+
+    selected = target.repository.path
+    if (
+        not target.registered
+        and RepositoryDiscoveryService().containing_git_root((selected,), selected) != selected
+    ):
+        raise RunConfigurationInvalid(
+            "Automatic registration requires an exact Git root; filesystem subjects require explicit League registration",
+            diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+            fields=("target.repository",),
+        )
 
 
 def load_run_configuration(path: Path) -> RunConfigurationSnapshot:
@@ -251,6 +464,9 @@ def load_run_configuration(path: Path) -> RunConfigurationSnapshot:
             "run.yml path cannot contain parent traversal", diagnostic_code="CONFIG_PATH_INVALID"
         )
     _no_symlink_components(selected_path)
+    if selected_path.is_dir():
+        selected_path /= "run.yml"
+        _no_symlink_components(selected_path)
     root = selected_path.parent
     selected, relative = _regular_file(selected_path, root)
     before = stat_caller_file(selected)
@@ -279,7 +495,7 @@ def load_run_configuration(path: Path) -> RunConfigurationSnapshot:
             for error in exc.errors(include_input=False, include_url=False)
         )
         raise RunConfigurationInvalid(
-            "run.yml is invalid; correct the named version 1 selection fields",
+            "run.yml is invalid; correct the named version 2 selection fields",
             diagnostic_code="CONFIG_SCHEMA_INVALID",
             fields=fields,
         ) from exc
@@ -309,8 +525,8 @@ def _configuration_repositories(
     snapshot: RunConfigurationSnapshot,
     repositories: Iterable[RepositoryIdentity | RepositoryCatalogEntry],
 ) -> tuple[RepositoryIdentity, ...]:
-    requested = snapshot.selection.target.selected_ids()
-    matches: dict[str, list[RepositoryIdentity]] = {identifier: [] for identifier in requested}
+    paths = _target_paths(snapshot)
+    matches: dict[Path, list[RepositoryIdentity]] = {path: [] for path in paths}
     for entry in repositories:
         if isinstance(entry, RepositoryIdentity):
             repository = entry
@@ -318,41 +534,25 @@ def _configuration_repositories(
             if entry.scope is not FleetScope.INCLUDED:
                 continue
             repository = entry.repository
-        if repository.repository_id in matches:
-            matches[repository.repository_id].append(repository)
+        if repository.path in matches:
+            matches[repository.path].append(repository)
     if any(len(entries) != 1 for entries in matches.values()):
         raise RunConfigurationInvalid(
-            "run.yml target must name exactly one included registered repository for every selected ID",
+            "run.yml target must name exactly one included registered repository for every selected path",
             diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
-            fields=("target.repository_id" if len(requested) == 1 else "target.repository_ids",),
+            fields=("target.repository" if len(paths) == 1 else "target.repositories",),
         )
     snapshot.require_fresh()
-    snapshot.agent_repository_root()
-    snapshot.agent_skill_root()
-    if snapshot.selection.repair is not None:
-        from oh_goon.integrations.agent_patch_apply import validate_write_roots
-
-        try:
-            validate_write_roots(snapshot.selection.repair.write_roots)
-        except FleetPlanInvalid as exc:
-            raise RunConfigurationInvalid(
-                "repair requires explicit contained write roots",
-                diagnostic_code="CONFIG_SCHEMA_INVALID",
-                fields=("repair.write_roots",),
-            ) from exc
-    return tuple(matches[identifier][0] for identifier in requested)
+    snapshot.validate_authoring_paths()
+    return tuple(matches[path][0] for path in paths)
 
 
-def _plural_repository_instances(
+def _repository_instances(
     repositories: tuple[RepositoryIdentity, ...],
 ) -> tuple[tuple[str, str], ...]:
-    return (
-        tuple(
-            (repository.repository_id, repository_subject_instance_id(repository.path))
-            for repository in repositories
-        )
-        if len(repositories) > 1
-        else ()
+    return tuple(
+        (repository.repository_id, repository_subject_instance_id(repository.path))
+        for repository in repositories
     )
 
 
@@ -363,9 +563,9 @@ def normalize_run_configuration(
     plan_templates: PlanTemplateStore | None = None,
     acquired_plan: Path | None = None,
 ) -> NormalizedRunConfiguration:
-    """Select an explicit registered target; discovery and execution remain original owners."""
+    """Select the explicit complete set; discovery and execution remain original owners."""
     selected = _configuration_repositories(snapshot, repositories)
-    instances = _plural_repository_instances(selected)
+    instances = _repository_instances(selected)
     source = snapshot.source_path(
         selected[0].path if len(selected) == 1 else None,
         plan_templates=plan_templates,
@@ -383,6 +583,8 @@ def capture_run_configuration_source(
     allow_network: bool = False,
     update: bool = False,
     update_applications: bool = False,
+    targets: tuple[RunConfigurationTarget, ...] | None = None,
+    source_graph: FleetPlanSourceGraph | None = None,
 ) -> tuple[NormalizedRunConfiguration, FleetPlanSourceGraph]:
     """Acquire only explicitly, then capture one original source graph before closing Git."""
     from oh_goon.core.errors import ExecutionLockRejected
@@ -393,10 +595,43 @@ def capture_run_configuration_source(
         parse_execution_lock,
     )
 
-    selected = _configuration_repositories(snapshot, repositories)
-    instances = _plural_repository_instances(selected)
+    selected = (
+        tuple(target.repository for target in targets)
+        if targets is not None
+        else _configuration_repositories(snapshot, repositories)
+    )
+    instances = (
+        tuple(
+            (target.repository.repository_id, target.repository_instance_id) for target in targets
+        )
+        if targets is not None
+        else _repository_instances(selected)
+    )
+    # An already captured target cannot silently rebound before native acquisition.
+    if targets is not None:
+        if not targets or _repository_instances(selected) != instances:
+            raise RunConfigurationInvalid("A selected repository changed before source acquisition")
+        snapshot.require_fresh()
+
+    def normalized(plan: Path) -> NormalizedRunConfiguration:
+        return NormalizedRunConfiguration(
+            snapshot,
+            selected,
+            plan,
+            repository_instances=instances,
+            registrations=tuple(target.registered for target in targets)
+            if targets is not None
+            else (),
+        )
+
     locked: tuple[LockedExecutionSource, ...] | None = ()
-    if snapshot.lock_path.exists() or snapshot.lock_path.is_symlink():
+    lock_present = snapshot.lock_path.exists() or snapshot.lock_path.is_symlink()
+    if not lock_present and allow_network and not acquire:
+        raise ExecutionLockRejected(
+            "Locked execution requires goon.lock before source acquisition; explicitly prepare run.yml",
+            reason="missing",
+        )
+    if lock_present:
         try:
             lock_path, _ = locate_caller_file(snapshot.lock_path, root=snapshot.root)
             lock_bytes = read_caller_file_bytes(
@@ -454,8 +689,8 @@ def capture_run_configuration_source(
         )
         if frozen is None and not acquire:
             raise FleetPlanSourceAcquisitionRequired(
-                "Git Plan requires explicit acquisition with lock; "
-                "inspect its contract first with 'oh-goon config inspect run.yml --acquire'"
+                "Git Plan source acquisition requires explicit workflow preparation; "
+                "inspect its contract first with 'oh-goon workflow inspect run.yml --acquire'"
             )
         pinned = frozen or next(
             (item for item in locked if (item.git, item.ref) == (selection.git, selection.ref)),
@@ -492,9 +727,13 @@ def capture_run_configuration_source(
                 update_applications=update_applications,
                 allow_source_network=allow_network,
             )
-            return NormalizedRunConfiguration(snapshot, selected, plan, instances), graph
+            return normalized(plan), graph
     plan = snapshot.source_path(selected[0].path if len(selected) == 1 else None)
-    return NormalizedRunConfiguration(snapshot, selected, plan, instances), resolver.analyze_source(
+    if source_graph is not None:
+        if source_graph.root.path != plan:
+            raise FleetPlanInvalid("Captured source graph does not match the selected Plan")
+        return normalized(plan), source_graph
+    return normalized(plan), resolver.analyze_source(
         plan,
         locked_sources=locked,
         acquire_sources=acquire,

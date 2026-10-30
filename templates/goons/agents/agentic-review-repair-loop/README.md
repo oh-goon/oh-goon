@@ -7,10 +7,12 @@ Compose four Skill reviews, adjudication, scoped repair and native project check
 **Prerequisites:** Pinned review Skills, local adjudication/repair Skills, a configured model provider and explicit executable regression/verification scripts. Repairs need admitted write roots and fresh authorization.
 
 ```sh
-oh-goon templates init agents/agentic-review-repair-loop --kind goon --output ./workflow
+oh-goon init --template agents/agentic-review-repair-loop --kind goon --output ./workflow --draft
 ```
 
-Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Result:** Typed review/adjudication/proposal records and native apply/check outcomes.
 

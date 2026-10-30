@@ -28,12 +28,12 @@ On POSIX, Oh Goon actively re-hardens its canonical data/configuration roots to 
 A built release contains the React application inside the Python package. Normal startup is:
 
 ```bash
-oh-goon start
+oh-goon app start
 ```
 
 The command binds only to `127.0.0.1:8787`, creates a process-local 256-bit access capability, prints the exact `#access=...` launch URL and saved League preference path, then serves both API and UI from one process. The browser exchanges that fragment for an HttpOnly `SameSite=Strict` cookie and removes the fragment before rendering normal workflows. Node, npm and Vite are contributor/build-time tools only.
 
-`oh-goon serve` remains the lower-level API/server command. Contributor source checkouts use `make dev` when they want Vite hot reload.
+`oh-goon app serve` remains the lower-level API/server command. Contributor source checkouts use `make dev` when they want Vite hot reload.
 
 ## What survives between uses
 
@@ -61,7 +61,7 @@ The existing `locations` SQLite table remains the transactionally consistent run
 
 Ordinary startup never promotes the SQLite location projection into `league.yml`. A missing `league.yml` means the user currently has no configured League folders, so startup clears any stale location projection before admission. Canonical Journal facts and unresolved ownership are durable execution authority, separate from that disposable location projection. Reset refuses incompatible or unresolved operational state and never reconstructs current preferences from obsolete SQLite rows; `league.yml` remains the sole League-folder authority.
 
-Before `make dev`, `oh-goon start`, or `oh-goon serve` launches application processes, Oh-Goon runs `local-state prelaunch-check`. This is intentionally stronger than the manual read-only `local-state check`. For an existing database, the prelaunch proof opens that exact file non-creating (`mode=rw`), acquires `BEGIN IMMEDIATE`, and rolls back without semantic mutation; this proves SQLite can create/acquire the write/journal locking it will need. If the database does not yet exist, the real path remains absent while Oh-Goon creates a disposable sibling SQLite database, commits/reopens/checks it, and removes it and its sidecars. Failure to write, lock, commit, reopen, integrity-check, or clean up stops startup before uvicorn/Vite. SQLite remains format authority; this is storage admission evidence, not repair or migration.
+Before `make dev`, `oh-goon app start`, or `oh-goon app serve` launches application processes, Oh-Goon runs `local-state prelaunch-check`. This is intentionally stronger than the manual read-only `local-state check`. For an existing database, the prelaunch proof opens that exact file non-creating (`mode=rw`), acquires `BEGIN IMMEDIATE`, and rolls back without semantic mutation; this proves SQLite can create/acquire the write/journal locking it will need. If the database does not yet exist, the real path remains absent while Oh-Goon creates a disposable sibling SQLite database, commits/reopens/checks it, and removes it and its sidecars. Failure to write, lock, commit, reopen, integrity-check, or clean up stops startup before uvicorn/Vite. SQLite remains format authority; this is storage admission evidence, not repair or migration.
 
 Normal add/remove writes must not publish `league.yml` and the SQLite admission projection independently. `LocalState` is the only read-modify-write owner; `LeagueFolderStore` exposes only read plus whole-value replacement. Runtime mutation and startup reconciliation hold the exact `league.yml` file lock across their SQLite transaction, so cooperating maintenance/file writers cannot interleave between preference observation, projection preparation, publication, commit or compensation. The projection is prepared first, then `league.yml` is atomically replaced. If the transaction response is ambiguous after publication, `LocalState` rereads the committed SQLite projection while still holding that file lock: the intended projection proves the mutation committed and keeps the new preference, while the previous projection proves rollback and permits restoring the previous preference. An unverified or unexpected projection fails closed instead of promoting disposable SQLite state into `league.yml`. Startup reconciliation uses the same one-way proof: if its SQLite commit response is lost, it returns success only when a fresh projection exactly equals the locked `league.yml` tuple; otherwise the startup error remains visible. Tests must compare committed reads and restart/reload state, not a mutable in-memory shadow.
 
@@ -69,7 +69,7 @@ Normal add/remove writes must not publish `league.yml` and the SQLite admission 
 
 For compatible, fully settled state, `make local-state-reset` explicitly deletes only the selected SQLite database and its sidecars. `league.yml` remains; the next `make dev` recreates the operational store and restores the League-folder projection.
 
-For the same compatible, settled case in a built release, use `oh-goon local-state reset --yes` from that exact release, then `oh-goon start`. The existing reset owner validates schema/integrity, canonical Journal and ownership before deletion; active Runs, incomplete campaigns, unsettled leases/effects or owned workspace allocations block reset. Confirmation does not override the refusal.
+For the same compatible, settled case in a built release, use `oh-goon local-state reset --yes` from that exact release, then `oh-goon app start`. The existing reset owner validates schema/integrity, canonical Journal and ownership before deletion; active Runs, incomplete campaigns, unsettled leases/effects or owned workspace allocations block reset. Confirmation does not override the refusal.
 
 An incompatible/unknown store is preserved unchanged. Stop admission, settle ownership through its matching original runtime, archive that state and schema metadata read-only, then explicitly select a fresh generation. A new state root cannot prove an older writer is gone; operators must preserve this drain/fence precondition across generations. See the [cutover and rollback contract](development/AGENT_RUNTIME_OWNERS.md#execution-state-cutover-and-recovery).
 
@@ -89,6 +89,15 @@ oh-goon run /path/to/workflow/run.yml
 ```
 
 The local CLI stays attached until the durable FleetRun is terminal. This is intentionally different from the browser API, which is asynchronous because the local app process remains alive and watches the same run. There is no second local-run state machine.
+
+`runs` commands observe existing state through the original SQLite, Journal and
+Game Tape owners. They do not bootstrap or repair a database, reconcile saved
+League folders, recover an interrupted Run or cancel work on shutdown. A
+nonterminal recorded Run stays nonterminal until its execution/recovery owner
+settles it. Missing or incompatible state refuses with recovery guidance.
+Native SQLite sidecars and empty identity-guard locks remain coordination
+metadata. Explicit artifact export retains its declared destination and
+content-store effects.
 
 ## Shared Plans and Shared Runs
 
@@ -110,7 +119,7 @@ Normal CLI selection uses the single `run.yml` contract. See [`development/SHARE
 
 For repeated Shared Runs, save a **Lineup** instead of re-selecting the same Teams each time. A Lineup remembers only exact managed Team roots and survives restarts/operational DB resets as local configuration. It does not auto-run anything and it does not inspect or inherit repository `goon.yml` files.
 
-The browser requests the read-only Shared Plan preview automatically whenever the selected Plan or repositories change; `Run` remains disabled until the latest exact selection is accepted. Normal CLI users inspect their explicit selection with `oh-goon config inspect run.yml`. A moved or removed saved repository is shown as unavailable and must be fixed explicitly; oh-goon never silently substitutes another repository.
+The browser requests the read-only Shared Plan preview automatically whenever the selected Plan or repositories change; `Run` remains disabled until the latest exact selection is accepted. Normal CLI users inspect their explicit selection with `oh-goon workflow inspect run.yml`. A moved or removed saved repository is shown as unavailable and must be fixed explicitly; oh-goon never silently substitutes another repository.
 
 
 ## Container persistence boundary

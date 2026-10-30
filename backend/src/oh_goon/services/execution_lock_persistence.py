@@ -109,7 +109,7 @@ def load_execution_lock(path: Path) -> ExecutionLock:
     lock_path = navigation_path(path)
     if not lock_path.is_file():
         raise ExecutionLockRejected(
-            f"Locked execution requires {LOCK_FILE_NAME}; run 'oh-goon lock' to generate it",
+            f"Locked execution requires {LOCK_FILE_NAME}; run 'oh-goon workflow prepare run.yml' to generate it",
             reason="missing",
         )
     try:

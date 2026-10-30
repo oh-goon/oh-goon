@@ -16,6 +16,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli import main
 from oh_goon.cli_parser import build_parser
 from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.game_tape import GameTapeSummary
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
 from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.git import GitService
@@ -59,7 +60,23 @@ def native_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespa
     detail = SimpleNamespace(
         run=SimpleNamespace(fleet_run_id="native-run", status=FleetRunStatus.COMPLETED),
         outcome=FleetRunOutcome.SUCCESS,
-        game_tape=SimpleNamespace(repositories=()),
+        game_tape=SimpleNamespace(
+            repositories=(),
+            why_not=None,
+            summary=GameTapeSummary(
+                repositories=0,
+                passed=0,
+                failed=0,
+                attention_required=0,
+                not_run=0,
+                planned_steps=0,
+                executed_steps=0,
+                passed_steps=0,
+                failed_steps=0,
+                skipped_steps=0,
+                not_run_steps=0,
+            ),
+        ),
         model_dump_json=Mock(return_value='{"fleet_run_id":"native-run"}'),
     )
     runtime = SimpleNamespace(
@@ -636,12 +653,11 @@ def test_native_plan_run_reuses_frozen_cli_selection_and_original_run_owner(
     monkeypatch.setattr("oh_goon.cli_ai.load_agent_providers", load)
     import yaml
 
-    from oh_goon.core.models.repository import RepositoryIdentity
-
     root = native_cli.workspace.parent
     league = root / "league.yml"
     league.write_text(yaml.safe_dump({"version": 1, "folders": [str(native_cli.workspace)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(league.parent / "test-state.db"))
     monkeypatch.setenv("OH_GOON_PROVIDERS_FILE", str(native_cli.config))
     skill = root / "skills/task"
     skill.mkdir(parents=True)
@@ -663,13 +679,9 @@ steps:
     config.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "repository-goon"},
-                "target": {
-                    "repository_id": RepositoryIdentity.model_validate(
-                        {"path": native_cli.workspace}
-                    ).repository_id
-                },
+                "target": {"repository": str(native_cli.workspace)},
                 "inputs": {"repo": "local:project", "skill": "local:skills/task"},
                 "agent": {
                     "implementation": "pi",
@@ -682,6 +694,8 @@ steps:
         )
     )
     argv = ["run", str(config), "--json"]
+    assert main(["workflow", "prepare", str(config)]) == 0
+    load.reset_mock()
     assert main(argv) == 0
     load.assert_called_once_with(native_cli.config)
     call = native_cli.runtime.plans.run.call_args.kwargs
@@ -718,24 +732,19 @@ steps:
     monkeypatch.setattr("oh_goon.services.agent_authoring_sources.capture_agent_sources", capture)
     import yaml
 
-    from oh_goon.core.models.repository import RepositoryIdentity
-
     league = root / "league.yml"
     league.write_text(yaml.safe_dump({"version": 1, "folders": [str(native_cli.workspace)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(league.parent / "test-state.db"))
     monkeypatch.setenv("OH_GOON_PROVIDERS_FILE", str(native_cli.config))
     recipe.rename(native_cli.workspace / "goon.yml")
     config = root / "run.yml"
     config.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "repository-goon"},
-                "target": {
-                    "repository_id": RepositoryIdentity.model_validate(
-                        {"path": native_cli.workspace}
-                    ).repository_id
-                },
+                "target": {"repository": str(native_cli.workspace)},
                 "inputs": {"repo": "local:project", "skill": "local:skills/task"},
                 "agent": {
                     "implementation": "pi",
@@ -747,7 +756,7 @@ steps:
             }
         )
     )
-    argv = ["lock", str(config)]
+    argv = ["workflow", "prepare", str(config)]
     assert main(argv) == 0
     capture.assert_called_once()
     before = load_execution_lock(root / "goon.lock").digest
@@ -761,7 +770,7 @@ def test_native_workspace_flags_require_explicit_agent_before_app(
     native_cli: SimpleNamespace,
 ) -> None:
     with pytest.raises(SystemExit):
-        main(["lock", "goon.yml", "--native-workspace", str(native_cli.workspace)])
+        main(["workflow", "prepare", "goon.yml", "--native-workspace", str(native_cli.workspace)])
     native_cli.build.assert_not_called()
 
 
@@ -851,7 +860,7 @@ def test_ai_always_emits_one_durable_handoff_reference_at_admission(
         if line.startswith("Durable Run handoff argv: ")
     ]
     assert len(references) == 1
-    assert json.loads(references[0]) == ["oh-goon", "plan", "handoff", "native-run", "--json"]
+    assert json.loads(references[0]) == ["oh-goon", "runs", "handoff", "native-run", "--json"]
 
 
 @pytest.mark.parametrize(

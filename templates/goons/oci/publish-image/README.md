@@ -7,10 +7,12 @@ Build one OCI archive, publish that workspace explicitly, then copy the archive 
 **Prerequisites:** A compatible isolated builder, selected base-pull registry and separate destination publication registry with declared host credentials.
 
 ```sh
-oh-goon templates init oci/publish-image --kind plan --output ./workflow
+oh-goon init --template oci/publish-image --kind plan --output ./workflow --draft
 ```
 
-The [oci/publish-image Plan](../../../plans/oci/publish-image/README.md) supplies the surrounding policy and ordered work. Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+The [oci/publish-image Plan](../../../plans/oci/publish-image/README.md) supplies the surrounding policy and ordered work. Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** `OCI_DIGEST` and `OCI_REFERENCE`; the base registry is not inferred as the destination.
 

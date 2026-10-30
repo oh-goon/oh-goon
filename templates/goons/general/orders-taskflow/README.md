@@ -36,8 +36,10 @@ Initialize by the project path; no manual repository ID transfer is needed:
 
 ```bash
 oh-goon league add-folder "$PWD"
-oh-goon templates init general/orders-taskflow --kind goon --output ../orders-workflow --repository "$PWD"
+oh-goon init --template general/orders-taskflow --kind goon --output /absolute/path/to/orders-workflow --repository "$PWD"
 ```
+
+Choose that absolute output path as the sibling `../orders-workflow` used below; its parent must already exist.
 
 To execute this checkout's own root Goon, keep the generated target identity and
 replace the generated `source` in `../orders-workflow/run.yml` with:
@@ -52,30 +54,31 @@ The included `run.yml` illustrates this selection, while the initializer fills
 the registered target. Run the normal lock/waited-execution path:
 
 ```bash
-oh-goon lock ../orders-workflow/run.yml
-oh-goon run ../orders-workflow/run.yml
+cd ../orders-workflow
+oh-goon workflow prepare ./run.yml
+oh-goon run ./run.yml
 ```
 
 The expected result is three successful Steps and `total_order_value` of
-`1236.70`. `config inspect` and `config validate` are optional diagnostics.
+`1236.70`. `workflow inspect` and `workflow validate` are optional diagnostics.
 Editing an input or source requires explicitly locking again; running never
 refreshes a stale lock. The [Git-selected example](../../../../examples/airflow-taskflow-showcase/README.md)
 selects the Plan and package from one pinned upstream revision instead, while
 retaining the same real application repository as subject.
 
 Run prints its ID and an export command with the exact recorded Step ID.
-`plan tape`, `plan steps`, `plan logs` and `plan outputs` inspect that Run;
+`runs tape`, `runs steps`, `runs logs` and `runs outputs` inspect that Run;
 raw process logs have their own transient availability. The final
 `.showcase/result.json` uses `retention: content_store`, so its actual bytes can
 be exported after attempt cleanup or process restart:
 
 ```bash
 mkdir -p ../orders-results
-oh-goon plan outputs RUN_ID --json
-oh-goon plan export-artifact RUN_ID --step STEP_ID --path .showcase/result.json --output ../orders-results/official.json
+oh-goon runs outputs RUN_ID --json
+oh-goon runs export-artifact RUN_ID --step STEP_ID --path .showcase/result.json --output ../orders-results/official.json
 ```
 
-Use the Step ID printed by completion or `plan outputs`. Export checks the
+Use the Step ID printed by completion or `runs outputs`. Export checks the
 recorded retained reference, raw file hash and size before creating a new local
 file. Existing destinations are refused. Retention is owned by the
 [existing content store](../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md);

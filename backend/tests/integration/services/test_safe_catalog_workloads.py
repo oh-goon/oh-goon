@@ -17,7 +17,6 @@ from oh_goon.core.models.fleet_observation import DependencyObservationSnapshot
 from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FleetRunDetail
-from oh_goon.core.product_identity import repository_id
 from oh_goon.integrations.hashmarks.dependencies import assess_locked_dependencies
 from oh_goon.runtime.league_folders import LeagueFolderStore
 
@@ -119,15 +118,15 @@ def _run_selection(
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "catalog-plan", "name": template},
-                "target": {"repository_id": repository_id(repository)},
+                "target": {"repository": str(repository)},
                 "inputs": inputs,
             }
         )
     )
-    assert main(["config", "validate", str(selection), "--json"]) == 0
-    assert main(["lock", str(selection)]) == 0
+    assert main(["workflow", "validate", str(selection), "--json"]) == 0
+    assert main(["workflow", "prepare", str(selection)]) == 0
     capsys.readouterr()
     assert main(["run", str(selection), "--json"]) == expected
     receipt = json.loads(capsys.readouterr().out)

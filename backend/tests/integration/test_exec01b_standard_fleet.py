@@ -219,13 +219,13 @@ def test_cli_explicit_standard_local_wait_runs_and_prints_terminal_tape(
     configuration.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "repository-goon"},
-                "target": {"repository_id": repository_id(repo)},
+                "target": {"repository": str(repo)},
             }
         )
     )
-    assert main(["lock", str(configuration)]) == 0
+    assert main(["workflow", "prepare", str(configuration)]) == 0
     capsys.readouterr()
     result = main(["run", str(configuration), "--json"])
     captured = capsys.readouterr()

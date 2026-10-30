@@ -376,7 +376,7 @@ frontend-lock:
 
 
 start:
-	cd backend && uv run --offline --frozen --no-sync oh-goon start
+	cd backend && uv run --offline --frozen --no-sync oh-goon app start
 
 local-state-check:
 	backend/.venv/bin/oh-goon-local-state check
@@ -606,6 +606,7 @@ test-real-lifecycle:
 		scripts/tests/test_run_logging.py::test_logged_runner_suppresses_spinner_frames_when_output_is_captured \
 		scripts/tests/test_run_logging.py::test_logged_runner_uses_one_live_spinner_line_on_a_real_terminal \
 		backend/tests/integration/api/test_real_lifecycle_golden.py \
+		backend/tests/integration/services/test_cli_workflow_lifecycle.py \
 		backend/tests/integration/api/test_api_recovery.py \
 		backend/tests/integration/api/test_api_run_lifecycle.py::test_execution_observations_api_projects_existing_run_game_tape_facts \
 		backend/tests/unit/runtime/test_executor_readmission.py::test_readmission_creates_new_intent_and_preserves_source_run \

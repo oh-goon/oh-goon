@@ -75,8 +75,8 @@ def test_waited_public_run_cancels_owned_process_and_reopens_terminal_evidence(
     cli("league", "add-folder", str(repository))
     workflow = tmp_path / "workflow"
     cli(
-        "templates",
         "init",
+        "--template",
         "general/orders-taskflow",
         "--kind",
         "goon",
@@ -105,7 +105,10 @@ def test_waited_public_run_cancels_owned_process_and_reopens_terminal_evidence(
     )
     (workflow / "plan.yml").write_text("goons:\n- import: general/wait\n  from: goons\n")
     selection = workflow / "run.yml"
-    cli("lock", str(selection))
+    selected = yaml.safe_load(selection.read_text())
+    selected.pop("inputs", None)
+    selection.write_text(yaml.safe_dump(selected))
+    cli("workflow", "prepare", str(selection))
     child_handle: int | None = None
     with (tmp_path / "stdout").open("w+") as stdout, (tmp_path / "stderr").open("w+") as stderr:
         process = subprocess.Popen(
@@ -134,9 +137,9 @@ def test_waited_public_run_cancels_owned_process_and_reopens_terminal_evidence(
             assert receipt["cancellation_requested"] is True
             assert receipt["cleanup"] == "not-established-by-interruption"
             run_id = receipt["fleet_run_id"]
-            status = json.loads(cli("plan", "status", run_id, "--json"))
-            steps = json.loads(cli("plan", "steps", run_id, "--json"))
-            handoff = json.loads(cli("plan", "handoff", run_id, "--json"))
+            status = json.loads(cli("runs", "show", run_id, "--json"))
+            steps = json.loads(cli("runs", "steps", run_id, "--json"))
+            handoff = json.loads(cli("runs", "handoff", run_id, "--json"))
             assert status["status"] == "CANCELLED" and status["outcome"] == "CANCELLED"
             assert steps["repositories"][0]["steps"][0]["status"] == "CANCELLED"
             assert steps["repositories"][0]["steps"][1]["status"] == "NOT_RUN"

@@ -38,7 +38,7 @@ class _JournalOwner:
 
 
 def _cli(owner, *argv):
-    args = build_parser().parse_args(["plan", "events", "run-3", *argv])
+    args = build_parser().parse_args(["runs", "events", "run-3", *argv])
     return run_plan_command(SimpleNamespace(runs=owner), args)
 
 

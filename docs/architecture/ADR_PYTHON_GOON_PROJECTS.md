@@ -60,7 +60,7 @@ The existing source-policy owner permits non-live dotenv templates, without
 using Git ignore rules or adding a content secret scanner.
 
 The original lock owner stores application pins in the same execution-source
-collection as Plan/Goon pins. `--update-applications` refreshes applications
+collection as Plan/Goon pins. `--refresh applications` refreshes applications
 explicitly; other source refresh scopes cannot advance them. A repair candidate
 can be recaptured through its original owner without changing an independently
 captured verifier. Historical readers consume retained facts and never fetch the
@@ -305,7 +305,7 @@ The original Run owner binds retained publication to the captured project's
 allocated attempt workspace and real registered repository, after verified
 process settlement and before scratch disposal. Artifact records describe
 stored bytes; they do not add strict execution receipts. The public
-`plan export-artifact` command selects the recorded Run/Step artifact and
+`runs export-artifact` command selects the recorded Run/Step artifact and
 verifies its retained identity under a read lease before exporting bytes.
 
 Explicit `purpose: cicd` keeps strict preparation, isolation and publication
@@ -357,14 +357,14 @@ the shipped catalog; local and remote packages do not shadow it.
 A complete example selects both its authoring root and exact Plan in `run.yml`:
 
 ```yaml
-version: 1
+version: 2
 source:
   kind: git-plan
   git: https://github.com/your-org/workflows.git
   ref: main
   path: examples/orders
   plan: plan.yml
-target: {repository_id: REPOSITORY_ID}
+target: {repository: /absolute/path/to/project}
 ```
 
 The Plan and its contained local imports come from the same selected revision.
@@ -384,8 +384,8 @@ Goons; `.goonskills.yml` remains the separate Skill source contract.
 - All selected paths sharing one origin/ref use one captured commit, regardless
   of import order. Adding a package or selecting a Plan from that same source
   retains its existing pin until explicit source refresh.
-- `lock run.yml --update-goons` explicitly refreshes Goon/Plan source pins.
-  `--update-skills` refreshes Skill pins independently.
+- `workflow prepare run.yml --refresh goons` explicitly refreshes Goon/Plan source pins.
+  `--refresh skills` refreshes Skill pins independently.
 - Inspection and validation use cached source only; unavailable source reports
   acquisition is required without hiding a network fetch.
 - Acquisition does not execute project code, install Python dependencies,

@@ -609,16 +609,12 @@ def _check_certification_progress(root: Path) -> list[Violation]:
     if not plan_cli.is_file():
         return []
     text = plan_cli.read_text(encoding="utf-8")
-    # Architecture owns observable progress vocabulary and the existing Run/Game
-    # Tape presentation boundary.  The Run/Game Tape relationship is proven from
+    # Architecture owns the public progress descriptor and existing Run/Game
+    # Tape presentation boundary. The Run/Game Tape relationship is proven from
     # the application/service/domain graph below; private method/helper spelling is
     # never architecture authority. TTY detection, wait-loop call paths, local
     # variables, and branch choreography remain executable behavior contracts.
-    required = (
-        "Observed activity: Goon",
-        "Certification working",
-        "OH_GOON_PROGRESS_FD",
-    )
+    required = ("OH_GOON_PROGRESS_FD",)
     violations = [
         Violation(
             plan_cli,

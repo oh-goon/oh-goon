@@ -1,6 +1,6 @@
-version: 1
+version: 2
 source: {kind: file-plan, path: plan.yml}
-target: {repository_id: REPOSITORY_ID}
+target: {repository: REPOSITORY_PATH}
 inputs:
   repo: local:team/app
   skill: local:team/search

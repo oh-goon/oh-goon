@@ -107,7 +107,7 @@ class _Runs:
 
 def _run(runs, *args):
     parser = build_parser()
-    parsed = parser.parse_args(["plan", *args])
+    parsed = parser.parse_args(["runs", *args])
     return run_plan_command(SimpleNamespace(runs=runs), parsed)
 
 

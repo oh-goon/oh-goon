@@ -7,10 +7,12 @@ Check formatting and lint with Ruff, using the selected project’s native confi
 **Prerequisites:** The selected locked group must supply Ruff; Ruff reads its native project configuration.
 
 ```sh
-oh-goon templates init python/ruff --kind goon --output ./workflow
+oh-goon init --template python/ruff --kind goon --output ./workflow --draft
 ```
 
-Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** Native format/lint outcomes.
 

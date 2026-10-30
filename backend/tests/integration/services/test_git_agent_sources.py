@@ -115,9 +115,9 @@ def test_native_git_agent_lock_runs_same_commit_after_branch_advance_and_cache_l
         for team in scan["teams"]
         if Path(team["repository"]["path"]) == repository
     )
-    selected["target"] = {"repository_id": target["repository_id"]}
+    selected["target"] = {"repository": target["path"]}
     configuration.write_text(yaml.safe_dump(selected, sort_keys=False))
-    cli("lock", str(configuration))
+    cli("workflow", "prepare", str(configuration))
     lock_path = workflow / "goon.lock"
     lock_bytes = lock_path.read_bytes()
     lock = load_execution_lock(lock_path)
@@ -130,7 +130,7 @@ def test_native_git_agent_lock_runs_same_commit_after_branch_advance_and_cache_l
             shutil.rmtree(tmp_path / "cache/oh-goon/skill-sources")
         result = json.loads(cli("run", str(configuration), "--json"))
         assert result["status"] == "COMPLETED" and result["outcome"] == "SUCCESS"
-        tape = json.loads(cli("plan", "tape", result["fleet_run_id"], "--json"))
+        tape = json.loads(cli("runs", "tape", result["fleet_run_id"], "--json"))
         assert tape["status"] == "PASSED"
         steps = tape["repositories"][0]["steps"]
         assert len(steps) == 1 and steps[0]["status"] == "PASSED"

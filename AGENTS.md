@@ -185,7 +185,7 @@ An Atomic Goon may instead select one independent `application` source: a litera
 local `path`, or explicit Git origin/ref/contained project path. Application code
 needs no Goon files. The original source graph captures it and the original Step
 owners execute its retained bytes; source selection grants no target effects.
-Native environment selection remains explicit. `lock --update-applications`
+Native environment selection remains explicit. `workflow prepare --refresh applications`
 refreshes application Git pins separately from Goon/Plan and Skill pins. A Run
 still requires its actual registered repository subject; do not manufacture one
 for target-free execution. See `docs/development/GOON_AUTHORING.md`.
@@ -208,7 +208,7 @@ for target-free execution. See `docs/development/GOON_AUTHORING.md`.
   the root authoring workspace. Omitted `from:` selects the shipped catalog;
   local packages never shadow shipped imports. Git imports use explicit
   `from: {git: URL, ref: REF, path: exact/category/name}`; `goon.lock` pins the
-  selected commit, and only `lock --update-goons` refreshes it. A `git-plan`
+  selected commit, and only `workflow prepare --refresh goons` refreshes it. A `git-plan`
   selection explicitly names its authoring root and contained Plan at one revision.
   Shared Plan storage owns only its
   Plan file and refuses external local imports. See `templates/README.md`.

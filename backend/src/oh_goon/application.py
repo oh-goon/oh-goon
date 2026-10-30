@@ -7,6 +7,7 @@ from oh_goon.core.errors import RuntimeQuiescing
 from oh_goon.runtime.lifecycle import RuntimeLifecycleState
 
 if TYPE_CHECKING:
+    from oh_goon._application_foundation import RuntimeStartupPurpose
     from oh_goon.engine.command import CommandTerminal
     from oh_goon.engine.git import GitService
     from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
@@ -67,6 +68,14 @@ class ApplicationRuntime:
     scout: ScoutService
     _lifecycle: RuntimeLifecycle
     _schedule_scheduler: ScheduleScheduler
+    _startup_purpose: RuntimeStartupPurpose = "application"
+
+    @classmethod
+    def build_registration_service(cls) -> LocationService:
+        """Use the original LocalState guard without starting application recovery."""
+        from oh_goon._application_services import build_registration_service
+
+        return build_registration_service()
 
     @classmethod
     def build(
@@ -77,6 +86,7 @@ class ApplicationRuntime:
         terminal: CommandTerminal | None = None,
         standard_process_isolation: ProcessIsolationBackend | None = None,
         git_service: GitService | None = None,
+        startup_purpose: RuntimeStartupPurpose = "application",
     ) -> ApplicationRuntime:
         # Concrete dependencies remain statically visible in the private application wiring
         # modules, but are materialized only when a process runtime is actually built.
@@ -89,6 +99,7 @@ class ApplicationRuntime:
                 terminal=terminal,
                 standard_process_isolation=standard_process_isolation,
                 git_service=git_service,
+                startup_purpose=startup_purpose,
                 standard_local=standard_local_profile(
                     standard_local, deployment_selected=fleet_provisioner is not None
                 ),
@@ -96,6 +107,8 @@ class ApplicationRuntime:
         )
 
     def start_background(self) -> None:
+        if self._startup_purpose != "application":
+            raise RuntimeQuiescing("Selected startup purpose cannot start background work")
         state = self._lifecycle.mark_running()
         if state is not RuntimeLifecycleState.RUNNING:
             raise RuntimeQuiescing(f"Runtime cannot restart background work from {state.value}")
@@ -106,7 +119,7 @@ class ApplicationRuntime:
             return
         self._schedule_scheduler.stop()
         self.runs.quiesce()
-        if not wait_for_runs:
+        if not wait_for_runs and self._startup_purpose != "observation":
             self.runs.cancel_active_for_shutdown()
         self.runs.shutdown(wait=True)
         self._lifecycle.close()

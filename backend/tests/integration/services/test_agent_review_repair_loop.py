@@ -117,9 +117,9 @@ model = "synthetic/reviewer"
             configuration.write_text(
                 yaml.safe_dump(
                     {
-                        "version": 1,
+                        "version": 2,
                         "source": {"kind": "file-plan", "path": "plan.yml"},
-                        "target": {"repository_id": repository_id(repo)},
+                        "target": {"repository": str(repo)},
                         "inputs": {"repo": "local:repo"},
                         "agent": {
                             "model_profile": "review",
@@ -131,7 +131,7 @@ model = "synthetic/reviewer"
                 )
             )
             parser = build_parser()
-            assert main(["lock", str(configuration)]) == 0
+            assert main(["workflow", "prepare", str(configuration)]) == 0
             capsys.readouterr()
             runtime = ApplicationRuntime.build(standard_local=True)
             try:
@@ -1173,9 +1173,9 @@ def test_protected_native_campaign_keeps_exact_phase_scope_through_real_apply(
             configuration.write_text(
                 yaml.safe_dump(
                     {
-                        "version": 1,
+                        "version": 2,
                         "source": {"kind": "file-plan", "path": "plan.yml"},
-                        "target": {"repository_id": repository_id(repo)},
+                        "target": {"repository": str(repo)},
                         "inputs": options["inputs"],
                         "agent": {
                             "implementation": selected.agent,

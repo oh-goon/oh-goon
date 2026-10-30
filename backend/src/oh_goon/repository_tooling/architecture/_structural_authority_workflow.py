@@ -418,12 +418,10 @@ def _check_make_orchestration_ownership(path: Path, facts: MakeSemanticFacts) ->
     for commands in facts.target_commands.values():
         for command in commands:
             argv = tuple(token.lower().replace("_", "-") for token in _command_argv(command))
-            if (
-                len(argv) >= 3 and argv[0].endswith("oh-goon") and argv[1:3] == ("plan", "run")
-            ) or (
-                len(argv) >= 5
+            if (len(argv) >= 2 and argv[0].endswith("oh-goon") and argv[1] == "run") or (
+                len(argv) >= 4
                 and Path(argv[0]).name in {"python", "python3"}
-                and argv[1:4] == ("-m", "oh-goon", "plan")
+                and argv[1:4] == ("-m", "oh-goon", "run")
             ):
                 violations.append(
                     Violation(

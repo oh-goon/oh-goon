@@ -354,7 +354,14 @@ def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
     for key in plans.keys():
         source = plans.source(key)
         guide = source.path.with_name("README.md").read_text()
-        example = re.search(r"```yaml\n(version: 1\nsource:.*?\n)```", guide, re.S)
+        example = next(
+            (
+                block
+                for block in re.findall(r"```yaml\n(.*?)\n```", guide, re.S)
+                if re.search(r"^source:", block, re.M)
+            ),
+            None,
+        )
         if example is None:
             input_example = re.search(r"```yaml\n(inputs:.*?\n)```", guide, re.S)
             if input_example is None:
@@ -365,7 +372,7 @@ def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
                 resolver.resolve(source.path, inputs=inputs)
             continue
         selection = tmp_path / "run.yml"
-        selection.write_text(example.group(1))
+        selection.write_text(example)
         snapshot = load_run_configuration(selection)
         assert snapshot.source_path(plan_templates=plans) == source.path
         if key in agent_plans:

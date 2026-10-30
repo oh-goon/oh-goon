@@ -80,7 +80,7 @@ miss; captured Skill bytes and worktree locations are not stored in the lock.
 
 The resolver transports those resolved pins in `ResolvedFleetPlan`. Lock hashing
 consumes that exact representation, including through repair phase Plans. Normal
-runs and lock regeneration retain pins. `oh-goon lock run.yml --update-skills` explicitly
+runs and lock regeneration retain pins. `oh-goon workflow prepare run.yml --refresh skills` explicitly
 resolves selectors again and atomically writes a new lock after successful capture.
 Changed declarations require that explicit update. No cache miss can select a
 new branch head. See [Agent Skills](AGENT_SKILLS.md) for the configuration.
@@ -95,10 +95,10 @@ authoring root in `path` and exact contained Plan in `plan`. Their
 Native Git acquisition is shared with application and Skill sources; it does not
 change their execution lifecycle.
 
-The first `lock` explicitly acquires source. Subsequent locking and execution
+The first `workflow prepare` explicitly acquires source. Subsequent locking and execution
 retain its commit, even when a branch/tag moves or the disposable cache is lost.
 Cache recovery may acquire that exact commit; unavailable content refuses and
-never advances the pin. `oh-goon lock run.yml --update-goons` explicitly refreshes
+never advances the pin. `oh-goon workflow prepare run.yml --refresh goons` explicitly refreshes
 declared Goon and Plan pins, subject to the shared-origin rule below.
 
 ## Independent application sources
@@ -115,7 +115,7 @@ application selection inside Git-owned authoring also retains its original Git
 coordinates and commit rather than a disposable checkout path.
 
 Ordinary locking and execution retain application pins after ref movement or
-cache loss. `oh-goon lock run.yml --update-applications` explicitly refreshes
+cache loss. `oh-goon workflow prepare run.yml --refresh applications` explicitly refreshes
 application pins. It does not refresh Goon/Plan or Skill pins. Captured source
 does not grant effects on the original application, its acquisition cache or
 another repository; the actual registered target retains its independent
@@ -130,20 +130,20 @@ selected root Plan and application paths. Written import order does not choose
 the revision. Duplicate selections, conflicting commits and more than one root
 Git Plan are invalid.
 
-Refresh flags select source kinds: `--update-goons` refreshes Goons and Plans,
-`--update-applications` refreshes applications, and `--update-skills` refreshes
+Refresh flags select source kinds: `--refresh goons` refreshes Goons and Plans,
+`--refresh applications` refreshes applications, and `--refresh skills` refreshes
 Skill collections independently. If Goon/Plan and application selections share
 an origin/ref, refreshing only one kind refuses rather than advancing or
 reinterpreting the retained kind. Deliberately refresh that execution-source
 cohort with both flags:
 
 ```sh
-oh-goon lock run.yml --update-goons --update-applications
+oh-goon workflow prepare run.yml --refresh goons --refresh applications
 ```
 
 This shared-commit rule applies to `execution_sources`; Skill collection pins
 remain under their separate refresh scope. Changed Skill declarations require
-`--update-skills`, and a cache miss never grants any refresh scope.
+`--refresh skills`, and a cache miss never grants any refresh scope.
 
 ## Captured source delivery
 
@@ -158,8 +158,8 @@ Native acquisition keeps a source lease through that capture; continuation can
 restore an expired checkout or lost cache without reopening a retired path or
 silently accepting changed local authoring.
 
-Inspection/validation are cached-only and report acquisition-required source
-without fetching. Acquisition captures source without executing project code,
+Inspection/validation use cached source by default and report acquisition-required
+source without fetching. Explicit `--acquire` permits native source acquisition. Acquisition captures source without executing project code,
 installing dependencies or initializing submodules. The receiver consumes the
 captured package rather than reopening an author checkout or refetching a ref.
 Native Git inspects indexed attributes before materializing source. A selected
@@ -203,7 +203,7 @@ Shared Plans are input-parametric control-plane documents, so one persisted sour
 Generate or refresh the lock with:
 
 ```text
-oh-goon lock path/to/run.yml
+oh-goon workflow prepare path/to/run.yml
 ```
 
 Generation captures the selected `run.yml`, validates and resolves through the

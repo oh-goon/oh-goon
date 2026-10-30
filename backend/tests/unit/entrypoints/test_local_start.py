@@ -10,7 +10,7 @@ def test_start_requires_bundled_ui_without_starting_server(
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state.db"))
     monkeypatch.setattr("oh_goon.api.ui.built_ui_available", lambda: False)
 
-    assert main(["start"]) == 2
+    assert main(["app", "start"]) == 2
 
     output = capsys.readouterr().out
     assert "bundled oh-goon UI is not present" in output
@@ -49,7 +49,7 @@ def test_start_serves_one_loopback_app_and_reports_saved_league(
     monkeypatch.setattr("uvicorn.Config", FakeConfig)
     monkeypatch.setattr("uvicorn.Server", FakeServer)
 
-    assert main(["start"]) == 0
+    assert main(["app", "start"]) == 0
     assert observed == {
         "app": "oh_goon.api.app:app",
         "host": "127.0.0.1",

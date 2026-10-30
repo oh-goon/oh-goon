@@ -31,6 +31,7 @@ from oh_goon.services.fleet_plan_input_resolution import materialize_projected_i
 from oh_goon.services.fleet_plan_input_routing import _binding_origin
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph, FleetPlanSourceNode
+from oh_goon.services.run_configuration import NormalizedRunConfiguration
 
 
 def _lock_records(root: Path) -> dict[str, Any]:
@@ -58,7 +59,7 @@ def _lock_records(root: Path) -> dict[str, Any]:
 
 
 def inspect_run_configuration(
-    normalized: Any,
+    normalized: NormalizedRunConfiguration,
     resolver: FleetPlanResolver,
     *,
     source_graph: FleetPlanSourceGraph | None = None,
@@ -70,7 +71,7 @@ def inspect_run_configuration(
     agent_source = graph.has_agent_source_contract()
     if (snapshot.selection.agent is not None) != agent_source:
         raise FleetPlanInvalid("agent selection must match the selected source's Agent contract")
-    if agent_source:
+    if snapshot.selection.agent is not None:
         graph.validate_agent_selection(
             native_selected=snapshot.selection.agent.implementation is not None,
             require_review_phases=snapshot.selection.repair is not None,
@@ -302,9 +303,28 @@ def inspect_run_configuration(
             else:
                 steps.append({**declaration, "proof": "resolved-membership;authored-declarations"})
     lock_records = _lock_records(snapshot.root)
+    registrations = normalized.registrations or tuple(True for _ in normalized.repositories)
+    selected_targets = [
+        {
+            **repository.model_dump(mode="json"),
+            "selection": literal,
+            "registration": "included" if registered else "unavailable",
+            "authority": "selected;not-admitted",
+        }
+        for repository, literal, registered in zip(
+            normalized.repositories,
+            snapshot.selection.target.selected_paths(),
+            registrations,
+            strict=True,
+        )
+    ]
     return {
-        "schema": "oh-goon.run-configuration/v1",
-        "status": "inputs-valid" if diagnostic is None else "contract-inspected",
+        "schema": "oh-goon.run-configuration/v2",
+        "status": "registration-unavailable"
+        if not normalized.registered
+        else "inputs-valid"
+        if diagnostic is None
+        else "contract-inspected",
         "diagnostic": diagnostic,
         "configuration": {"path": snapshot.relative_path, "sha256": snapshot.sha256},
         "source": {
@@ -313,12 +333,12 @@ def inspect_run_configuration(
             "sha256": graph.root.source_sha256,
             "git_sources": [pin.model_dump(mode="json") for pin in graph.execution_sources],
         },
-        "target": normalized.repository.model_dump(mode="json")
-        if len(normalized.repositories) == 1
+        "target": selected_targets[0]
+        if len(selected_targets) == 1
         else {
-            "repositories": [
-                repository.model_dump(mode="json") for repository in normalized.repositories
-            ]
+            "repositories": selected_targets,
+            "registration": "included" if normalized.registered else "unavailable",
+            "authority": "selected;not-admitted",
         },
         "inputs": inputs,
         "unrouted_inputs": list(interface.unrouted_inputs),

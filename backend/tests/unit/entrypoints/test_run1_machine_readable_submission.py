@@ -21,7 +21,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PublishedPlanOutputEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
-from oh_goon.core.models.game_tape import GameTapeWhyNotDiagnostic
+from oh_goon.core.models.game_tape import GameTapeSummary, GameTapeWhyNotDiagnostic
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
 from tests.factories.fleet_plan_targets import structural_fleet_plan_target
@@ -32,6 +32,22 @@ _PLAN = ResolvedFleetPlan.create(
     execution=VerificationExecutionPolicy(),
     steps=(ResolvedCommandStep(step_id="verify", argv=("true",), timeout_seconds=30),),
 )
+
+
+def _summary(*, passed: int = 0, failed: int = 0, not_run: int = 0) -> GameTapeSummary:
+    return GameTapeSummary(
+        repositories=1,
+        passed=int(bool(passed) and not failed and not not_run),
+        failed=int(bool(failed)),
+        attention_required=0,
+        not_run=int(bool(not_run) and not passed and not failed),
+        planned_steps=passed + failed + not_run,
+        executed_steps=passed + failed,
+        passed_steps=passed,
+        failed_steps=failed,
+        skipped_steps=0,
+        not_run_steps=not_run,
+    )
 
 
 def _args(*flags: str):
@@ -110,7 +126,13 @@ def test_waited_run_json_reuses_original_terminal_classification_without_stdout_
     def fake_wait(runtime, run_id, *, admitted_run):
         assert admitted_run.fleet_run_id == run_id == "fleet-1"
         command._progress_print("Observed activity: real owner")
-        return SimpleNamespace(run=SimpleNamespace(status=status), outcome=outcome)
+        return SimpleNamespace(
+            run=SimpleNamespace(status=status),
+            outcome=outcome,
+            game_tape=SimpleNamespace(
+                summary=_summary(passed=int(code == 0), failed=int(code != 0)), why_not=None
+            ),
+        )
 
     monkeypatch.setattr(command, "_wait_for_terminal_with_progress", fake_wait)
     runtime = _runtime()
@@ -121,6 +143,9 @@ def test_waited_run_json_reuses_original_terminal_classification_without_stdout_
     assert value["status"] == status.value
     assert value["outcome"] == outcome.value
     assert value["fleet_run_id"] == "fleet-1"
+    assert value["steps"]["executed"] == 1
+    assert value["steps"]["passed"] == int(code == 0)
+    assert value["steps"]["failed"] == int(code != 0)
     assert len(streams.out.strip().splitlines()) == 1
 
 
@@ -173,6 +198,7 @@ def test_waited_human_completion_shows_recorded_outputs_without_changing_outcome
         run=SimpleNamespace(status=status, fleet_run_id="fleet-1"),
         outcome=outcome,
         game_tape=SimpleNamespace(
+            summary=_summary(passed=1),
             why_not=None,
             repositories=(SimpleNamespace(repository=SimpleNamespace(name="iris"), steps=(step,)),),
         ),
@@ -188,9 +214,9 @@ def test_waited_human_completion_shows_recorded_outputs_without_changing_outcome
     assert "Evidence: 104 bytes; sha256:" + "b" * 64 in output
     assert "Retained reference" not in output
     assert "Failed Step" not in output
-    assert "Inspect Run: oh-goon plan handoff fleet-1" in output
-    assert "Inspect outputs: oh-goon plan outputs fleet-1" in output
-    assert "Read logs (while available): oh-goon plan logs fleet-1" in output
+    assert "Inspect Run: oh-goon runs handoff fleet-1" in output
+    assert "Inspect outputs: oh-goon runs outputs fleet-1" in output
+    assert "Read logs (while available): oh-goon runs logs fleet-1" in output
     assert [row[0] for row in runtime.plans.calls] == ["preflight", "run"]
 
 
@@ -220,6 +246,7 @@ def test_waited_human_failure_shows_original_guidance_and_failed_step(monkeypatc
         run=SimpleNamespace(status=FleetRunStatus.FAILED, fleet_run_id="fleet-1"),
         outcome=FleetRunOutcome.FAILED,
         game_tape=SimpleNamespace(
+            summary=_summary(failed=1, not_run=1),
             why_not=failure,
             repositories=(
                 SimpleNamespace(repository=SimpleNamespace(name="iris"), steps=(step, not_run)),
@@ -270,6 +297,7 @@ def test_completion_preview_reports_omissions_retention_and_shell_safe_readback(
     detail = SimpleNamespace(
         run=SimpleNamespace(fleet_run_id=run_id),
         game_tape=SimpleNamespace(
+            summary=_summary(failed=9),
             why_not=None,
             repositories=(
                 SimpleNamespace(
@@ -293,7 +321,7 @@ def test_completion_preview_reports_omissions_retention_and_shell_safe_readback(
         for line in output.splitlines()
         if line.startswith("Inspect Run: ")
     )
-    assert shlex.split(readback) == ["oh-goon", "plan", "handoff", run_id]
+    assert shlex.split(readback) == ["oh-goon", "runs", "handoff", run_id]
     export = next(
         line.removeprefix("  Export artifact: ")
         for line in output.splitlines()
@@ -301,7 +329,7 @@ def test_completion_preview_reports_omissions_retention_and_shell_safe_readback(
     )
     assert shlex.split(export) == [
         "oh-goon",
-        "plan",
+        "runs",
         "export-artifact",
         run_id,
         "--repository-id",
@@ -334,7 +362,7 @@ def test_wait_interruption_requests_original_durable_cancellation(monkeypatch, c
     assert receipt["execution_status"] == status.value
     assert receipt["execution_terminal"] is status.terminal
     assert receipt["cleanup"] == "not-established-by-interruption"
-    assert receipt["readback_argv"] == ["oh-goon", "plan", "handoff", "fleet-1", "--json"]
+    assert receipt["readback_argv"] == ["oh-goon", "runs", "handoff", "fleet-1", "--json"]
 
 
 def test_interrupted_cancel_refusal_retains_durable_readback_and_uncertainty(monkeypatch, capsys):

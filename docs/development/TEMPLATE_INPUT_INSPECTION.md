@@ -1,7 +1,7 @@
 # Run configuration and inspection
 
 Normal CLI execution selects one explicit `run.yml`. It chooses an existing
-Plan or repository Goon, registered targets, scalar caller values, and relevant
+Plan or repository Goon, a registered target, scalar caller values, and relevant
 agent or bounded-repair selections. It does not define Steps, permissions,
 provider connections, native model settings, or a second workflow language.
 
@@ -30,67 +30,95 @@ with the absolute `--project /path/to/oh-goon/backend`. Built releases use the
 installed command directly.
 
 ```sh
-oh-goon league add-folder /absolute/path/to/repository
-oh-goon templates init python/quality --kind plan --output ./workflow --repository /absolute/path/to/repository
+oh-goon init --template python/quality --repository /absolute/path/to/project --no-input
+oh-goon run ./workflow --no-input
 ```
 
-`--kind` is required because a Plan and a Goon may share the same catalog key.
-For a single Goon, use `oh-goon templates init python/test --kind goon --output ./workflow --repository /absolute/path/to/repository`.
-A Plan selection uses the catalog directly; a Goon selection creates a minimal
-`plan.yml` importing that exact Goon and selects the file from `run.yml`. Neither
-mode copies the selected Goon implementation or invents another source owner.
+Workflow invocation preserves existing execution history and League projections.
+Unresolved earlier work is refused through the original admission guards; use
+the matching runtime's recovery tools to settle its authority. Application
+startup retains recovery and reconciliation. A new operational database may
+derive its initial projection from already-saved League preferences; this does
+not register additional targets. Missing Run locks refuse before source work
+or runtime construction.
 
-The initializer resolves `--repository` through the existing League registry
-and writes its canonical identity. No scan or manual repository-ID copying is
-needed. Keep that generated target and edit only the inputs you need. For example,
-these values select the `backend` project and ty:
+`--kind` defaults to `plan`; a single Goon uses `--kind goon`. An unchanged Plan
+stays selected directly from the catalog. A Goon selection creates a minimal
+`plan.yml` importing that exact Goon. The default output directory is `workflow`.
 
-```yaml
-inputs:
-  project: backend
-  dependency_group: dev
-  typechecker: ty
-```
+Normal initialization requires an explicit exact repository root. It validates
+known source/input/output conditions first, registers only that Git root through
+the existing League/LocalState owner when needed, and publishes the complete
+workflow with the first canonical lock in one exclusive native rename. Existing
+registered filesystem subjects remain supported. A container directory is not a
+request to register child Git roots. Registration is a separate durable effect:
+if later preparation/publication fails, the result reports whether registration
+committed and whether a complete workflow became visible. A publication whose
+final durability check fails remains visible and is reported incomplete; it is
+never silently rolled back over a concurrent writer.
 
-Omitting `--repository` deliberately leaves a target placeholder for later
-selection. An unregistered explicit path refuses before publishing the workflow. See the
-[template first-run guide](../../templates/README.md) for headless registration.
+The new directory must not exist, even if empty. Unsupported native exclusive
+publication fails before commit. Failed precommit scratch is removed only under
+its retained ownership; foreign/replaced entries are preserved.
 
-Repeat `--repository PATH` for a context-free catalog, file or Git Plan over
-several actual applications. The generated `target.repository_ids` contains an
-explicit unique set of at least two registered identities. It is mutually
-exclusive with the existing singular `target.repository_id`; a single path
-keeps that original form. The same Plan/inputs execute through one Fleet Run
-and its existing target scheduler. Every requested member must resolve;
-duplicates or unavailable members refuse before application work. Repository
-Goons, Agent and repair sources require one target. See
-[the parallel walkthrough](../../templates/README.md#one-plan-over-several-applications).
-
-The Python values above illustrate this repository's layout. Native uv, Ruff,
-Pytest and the selected type checker retain their project configuration and
-results. The shortest execution path after editing is:
+Supply typed caller choices directly, for example:
 
 ```sh
-oh-goon lock ./workflow/run.yml
-oh-goon run ./workflow/run.yml
+oh-goon init --template python/quality --repository /absolute/path/to/project \
+  --input project=backend --input dependency_group=dev --input typechecker=ty --no-input
 ```
 
-Inspection and validation are optional diagnostics; lock and run still use the
-canonical validation owners. To see the selected inputs or check values separately:
+`--input NAME=VALUE` transports literal text to the original compiler's coercion
+and constraints. For a string input, `--input label=null` means the string
+`null`; `--input-null label` supplies explicit null. Names may occur only once
+across both flags. Missing required values may be prompted only in an interactive
+TTY. `--no-input`, `--json`, non-TTY input and EOF refuse missing values before
+registration or output publication. Optional omissions retain compiler defaults.
+
+Use `init --draft` when authoring an incomplete Agent or bounded-repair workflow.
+It omits missing fields, reports NOT_READY and required actions, and publishes
+no lock or Run. It does not register a target. Complete the v2 selection and
+explicitly prepare it; placeholder strings are not admission evidence.
+
+`run.yml` uses `version: 2` and exactly one of `target.repository` (one path) or
+`target.repositories` (at least two distinct paths). A relative path resolves
+from that exact file's parent; an absolute path is explicit. Repeat init's
+`--repository` to select an exact set. Catalog, file and Git Plans resolve one
+source graph for the full set without inventing a primary repository.
+Repository Goons, Agent and repair workflows remain singular.
+Selecting a directory means exactly its `run.yml`; there is no upward search,
+CWD default, Git-ancestor fallback or symlink-component traversal. Internal
+repository IDs and instances remain runtime authority and are not authored.
+
+Every selected root is checked before registration or source acquisition.
+Duplicate, missing, excluded or replaced members refuse the full selection;
+the CLI never drops one or expands it into siblings. Registration is explicit
+for each selected root, and partial durable registrations are reported if a
+later registration, lock or publication operation fails.
+
+After reviewing source/input changes:
 
 ```sh
-oh-goon config inspect ./workflow/run.yml
-oh-goon config inspect ./workflow/run.yml --json
-oh-goon config validate ./workflow/run.yml
+oh-goon workflow prepare ./workflow
+oh-goon run ./workflow --no-input
 ```
 
-Generation refuses an existing destination. It does not overwrite a project or
-copy an unchanged shipped Plan. Inspection and validation do not start a Run,
-write a lock, fetch remote Goon/Plan or Skill sources by default, contact a model, read native private config,
-or grant permission. Locking and execution use the original resolver and
-Fleet lifecycle. A completed validation is not an executed check or APP PASS.
+Inspection and validation are optional read-only diagnostics:
 
-For a new Git selection, `oh-goon config inspect ./workflow/run.yml --acquire`
+```sh
+oh-goon workflow inspect ./workflow --json
+oh-goon workflow validate ./workflow
+```
+
+They do not initialize/repair a database, register a target, write a lock, contact
+a model or execute a Step. Inspection can describe an unregistered target with
+registration unavailable; validation/preparation/Run require current registration.
+Fresh CI explicitly uses `workflow prepare ./workflow --register-target --no-input`.
+Default read operations do not acquire sources; `--acquire` explicitly allows the
+existing Git owner to acquire them. A successful validation is not an executed
+check or APP PASS.
+
+For a new Git selection, `oh-goon workflow inspect ./workflow/run.yml --acquire`
 explicitly permits the existing Git acquisition owner to capture its source
 before required input values are known. It does not write `goon.lock`, install
 the project or start execution. JSON and human inspection report requested
@@ -119,14 +147,14 @@ imports use the normal explicit `from: ./goons` source grammar.
 A complete Git example selects its authoring root and Plan separately:
 
 ```yaml
-version: 1
+version: 2
 source:
   kind: git-plan
   git: https://github.com/your-org/workflows.git
   ref: main
   path: examples/orders
   plan: plan.yml
-target: {repository_id: REPOSITORY_ID}
+target: {repository: /absolute/path/to/project}
 ```
 
 `path` is the authoring root inside that Git revision; `plan` is an exact
@@ -136,13 +164,13 @@ an explicit Git `from:` mapping in the local Plan; see
 [Goon authoring](GOON_AUTHORING.md#project-owned-goons-and-caller-overrides).
 Neither selection searches for a nearby Plan or shadows shipped imports.
 
-`lock` explicitly acquires source and records its exact commit in `goon.lock`.
+`workflow prepare` explicitly acquires source and records its exact commit in `goon.lock`.
 Ordinary lock regeneration and runs keep the pin; a missing cache may recover
-that same commit. `lock run.yml --update-goons` explicitly refreshes Goon/Plan
-selectors independently of `--update-applications` and `--update-skills`.
-Inspection and validation use cached source only; unavailable source reports acquisition is required without
+that same commit. `workflow prepare run.yml --refresh goons` explicitly refreshes Goon/Plan
+selectors independently of `--refresh applications` and `--refresh skills`.
+Inspection and validation use cached source by default; unavailable source reports acquisition is required without
 network effects. Acquisition does not run project code or install dependencies.
-Explicit `config inspect --acquire` also permits acquisition for contract
+Explicit `workflow inspect --acquire` or `workflow validate --acquire` permits acquisition for contract
 discovery before a successful lock; installation and execution remain unproven.
 
 `inputs` supplies scalar values only. The imported Goon and canonical binder
@@ -186,13 +214,13 @@ unsupported or stale authority refuses; there is no unlocked fallback.
 
 ## Locking and actionable refusals
 
-Run `oh-goon lock ./workflow/run.yml` after reviewing a change to `run.yml`,
+Run `oh-goon workflow prepare ./workflow/run.yml` after reviewing a change to `run.yml`,
 Plan execution policy, ordered imports, Goon behavior or requirements, or captured
 application code, metadata, native lock or resources. Target-project dependencies
 remain native uv authority; `goon.lock` does not replace `uv.lock` or prove that
 dependencies are installed. Ordinary relocking preserves recorded Git Plan/Goon,
-application and Skill commits. Select `--update-goons`, `--update-applications`
-or `--update-skills` only when you intend to refresh that source class.
+application and Skill commits. Select `--refresh goons`, `--refresh applications`
+or `--refresh skills` only when you intend to refresh that source class.
 
 Lock refusals explain the boundary the existing owner could establish:
 
@@ -210,12 +238,12 @@ input value or identify an individual changed source file from a digest. A
 numbered Goon occurrence refers to its position in the ordered execution list;
 repeated imports remain distinct. The diagnostic reports bounded occurrence
 numbers when available and does not expose caller values, private paths or raw
-source names. Read the selected contract with `config inspect` when you need
+source names. Read the selected contract with `workflow inspect` when you need
 input definitions. A refusal never refreshes pins or repairs a lock implicitly.
 
 ## One human and JSON report
 
-`config inspect` renders the same local captured selection as `--json`.
+`workflow inspect` renders the same local captured selection as `--json`.
 Its report is evidence at the inspected level: source selection, typed input
 contracts and their Goon owners, selected groups, and unresolved conditions.
 An unprobed provider or native executable remains unknown. Contract inspection,
@@ -252,16 +280,16 @@ work fails. Its human completion report includes failed Steps and their recorded
 exit codes, declared artifact paths and evidence, and commands for that Run:
 
 ```sh
-oh-goon plan status RUN_ID
-oh-goon plan steps RUN_ID
-oh-goon plan outputs RUN_ID
-oh-goon plan handoff RUN_ID
+oh-goon runs show RUN_ID
+oh-goon runs steps RUN_ID
+oh-goon runs outputs RUN_ID
+oh-goon runs handoff RUN_ID
 ```
 
 These views reopen the original durable Run and Game Tape after the execution
-process exits. `plan outputs` reports hashes, byte counts and retained references
+process exits. `runs outputs` reports hashes, byte counts and retained references
 when present; it does not download artifact bytes. An `evidence` artifact does
-not promise retained file bytes. Read `oh-goon plan logs RUN_ID` while transient
+not promise retained file bytes. Read `oh-goon runs logs RUN_ID` while transient
 logs are still available. Historical evidence stays separate from current
 workspace files and current source. See the [artifact retention contract](TEMPLATE_ARTIFACT_RETENTION.md).
 

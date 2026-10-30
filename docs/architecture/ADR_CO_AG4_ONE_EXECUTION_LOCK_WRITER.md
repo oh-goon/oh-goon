@@ -2,7 +2,7 @@
 
 ## Context
 
-Plan source inspection, validation and preview work outside Fleet. The direct `oh-goon lock` command still initialized the application runtime and SQLite before calling `FleetPlanService.lock`, even though `lock` has no Run membership or database-state requirement.
+Plan source inspection, validation and preview work outside Fleet. The direct `oh-goon workflow prepare` command still initialized the application runtime and SQLite before calling `FleetPlanService.lock`, even though `lock` has no Run membership or database-state requirement.
 
 ## Decision
 

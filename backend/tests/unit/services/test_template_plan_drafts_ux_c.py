@@ -75,8 +75,8 @@ def test_values_are_canonical_and_validate_with_actual_caller_file_reader(origin
     assert "abcdef1234567890abcdef1234567890abcdef12" not in json.dumps(result.report)
     path = tmp_path / "run.yml"
     path.write_text(
-        "version: 1\nsource: {kind: file-plan, path: plan.yml}\n"
-        "target: {repository_id: selected-repository}\n" + result.values_yaml,
+        "version: 2\nsource: {kind: file-plan, path: plan.yml}\n"
+        "target: {repository: .}\n" + result.values_yaml,
         encoding="utf-8",
     )
     snap = load_run_configuration(path)
@@ -219,42 +219,39 @@ def test_all_shipped_plans_generate_canonical_readonly_proposals(key):
     assert parse_plan_template(proposal.plan_yaml).steps == source.compiled.steps
 
 
-@pytest.mark.parametrize("kind", ["plan", "goon"])
-def test_reviewer_authoring_generates_a_normal_ordered_composite(tmp_path, monkeypatch, kind):
-    from collections import Counter
+def initialize_draft(key, output, **kwargs):
+    from oh_goon.services.template_plan_drafts import initialize_run_configuration
 
+    return initialize_run_configuration(key, output, draft=True, **kwargs)
+
+
+@pytest.mark.parametrize("kind", ["plan", "goon"])
+def test_reviewer_authoring_preserves_order_companions_and_compiler_contract(tmp_path, kind):
     import yaml
 
-    from oh_goon.runtime.goon_templates import GoonTemplateStore
-    from oh_goon.services.template_plan_drafts import initialize_run_configuration
     from tests.factories.agent_review import agent_review_case
 
-    reads = Counter()
-    read_source = GoonTemplateStore.source
-
-    def source(store, key):
-        reads[key] += 1
-        return read_source(store, key)
-
-    monkeypatch.setattr(GoonTemplateStore, "source", source)
-    output = tmp_path / "workflow"
     requested = (
         ("consumer", "local:skills/canonical-consumer-contract-review"),
         ("authority", "local:skills/single-source-of-truth-review"),
     )
-    path = initialize_run_configuration(
-        "agents/agentic-review-repair-loop", output, reviewers=requested, kind=kind
+    result = initialize_draft(
+        "agents/agentic-review-repair-loop",
+        tmp_path / "workflow",
+        reviewers=requested,
+        kind=kind,
     )
-    assert reads["agents/agentic-review-repair-loop"] == 1
-    assert all(count == 1 for count in reads.values())
-    snapshot = load_run_configuration(path)
-    assert snapshot.selection.source.kind == "file-plan"
-    assert snapshot.selection.agent.implementation is None
-    assert snapshot.selection.agent.model_profile == "REQUIRED_MODEL_PROFILE"
-    assert snapshot.selection.repair.write_roots == ("REQUIRED_WRITE_ROOT",)
-    assert "reviews" not in yaml.safe_load(path.read_text())
-    composite = output / "goons/agents/review-repair/goon.yml"
-    authored = yaml.safe_load(composite.read_text())
+    output = result.path.parent
+    selected = yaml.safe_load(result.path.read_text())
+    assert selected["source"] == {"kind": "file-plan", "path": "plan.yml"}
+    assert "target" not in selected
+    assert "model_profile" not in selected["agent"]
+    assert "write_roots" not in selected["repair"]
+    assert {"target.repository", "agent.model_profile", "repair.write_roots"} <= set(
+        result.required_fields
+    )
+    assert result.execution_digest is None and not (output / "goon.lock").exists()
+    authored = yaml.safe_load((output / "goons/agents/review-repair/goon.yml").read_text())
     assert [(edge["as"], edge["with"]["skill"]) for edge in authored["goons"][:2]] == list(
         requested
     )
@@ -264,24 +261,21 @@ def test_reviewer_authoring_generates_a_normal_ordered_composite(tmp_path, monke
         ).read_text()
     )
     assert authored["goons"][2:] == [
-        edge for edge in original["goons"] if edge["phase"] != "review"
+        edge for edge in original["goons"] if edge.get("phase") != "review"
     ]
+    assert not (output / ".goonskills.yml").exists()
     for relative in ("skills/adjudicate/SKILL.md", "skills/repair/SKILL.md"):
         assert (output / relative).is_file()
-    assert not (output / ".goonskills.yml").exists()
-    # Real source capture and resolver prove the generated authoring format runs
-    # through the existing graph, binder and phased source owners.
+    # The generated authored sources still pass the original real phased resolver.
     resolver, _, _, options = agent_review_case(tmp_path / "fixture")
-    resolved, _, _ = resolver.resolve_frozen_agents(snapshot.source_path(), **options)
+    resolved, _, _ = resolver.resolve_frozen_agents(output / "plan.yml", **options)
     from oh_goon.core.agent_review_plan import agent_review_phases
 
-    phases = agent_review_phases(resolved)
-    assert [len(phases[name]) for name in phases] == [2, 1, 2, 1, 1]
+    assert [len(phase) for phase in agent_review_phases(resolved).values()] == [2, 1, 2, 1, 1]
     assert [item.import_id for item in resolved.imports if item.phase == "review"] == [
         "agents-review-repair.consumer",
         "agents-review-repair.authority",
     ]
-    assert resolver.analyze_source(snapshot.source_path()).has_agent_source_contract()
 
 
 @pytest.mark.parametrize(
@@ -296,67 +290,30 @@ def test_reviewer_authoring_generates_a_normal_ordered_composite(tmp_path, monke
     ],
 )
 def test_invalid_reviewer_intent_fails_before_publication(tmp_path, reviewers):
-    from oh_goon.services.template_plan_drafts import initialize_run_configuration
-
     output = tmp_path / "workflow"
     with pytest.raises(FleetPlanInvalid):
-        initialize_run_configuration(
+        initialize_draft(
             "agents/agentic-review-repair-loop", output, reviewers=reviewers, kind="plan"
         )
     assert not output.exists()
 
 
-def test_reviewer_authoring_refuses_other_plans_and_any_existing_destination(tmp_path):
-    from oh_goon.services.template_plan_drafts import initialize_run_configuration
-
+def test_reviewer_authoring_refuses_other_plans_and_existing_destination(tmp_path):
     selected = (("review", "local:skills/review"),)
     with pytest.raises(FleetPlanInvalid, match="Reviewer authoring"):
-        initialize_run_configuration(
-            "python/quality", tmp_path / "new", reviewers=selected, kind="plan"
-        )
+        initialize_draft("python/quality", tmp_path / "new", reviewers=selected, kind="plan")
     output = tmp_path / "existing"
     output.mkdir()
+    (output / "user.lock").write_text("preserve")
     with pytest.raises(FleetPlanInvalid, match="already exists"):
-        initialize_run_configuration(
+        initialize_draft(
             "agents/agentic-review-repair-loop", output, reviewers=selected, kind="plan"
         )
-    assert list(output.iterdir()) == []
-
-
-def test_failed_companion_publication_has_no_run_selection_and_keeps_foreign_files(
-    tmp_path, monkeypatch
-):
-    import os
-
-    from oh_goon.services.template_plan_drafts import initialize_run_configuration
-
-    output = tmp_path / "workflow"
-    link = os.link
-
-    def conflict(source, target, **kwargs):
-        if target == "goon.yml":
-            (output / "goons/agents/review-repair/goon.yml").write_text(
-                "concurrently authored user data\n"
-            )
-        return link(source, target, **kwargs)
-
-    monkeypatch.setattr(os, "link", conflict)
-    with pytest.raises(FileExistsError):
-        initialize_run_configuration(
-            "agents/agentic-review-repair-loop",
-            output,
-            reviewers=(("review", "local:skills/review"),),
-            kind="plan",
-        )
-    assert not (output / "run.yml").exists()
-    assert (output / "goons/agents/review-repair/goon.yml").read_text() == (
-        "concurrently authored user data\n"
-    )
-    assert not list(tmp_path.glob(".workflow.*"))
+    assert (output / "user.lock").read_text() == "preserve"
 
 
 @pytest.mark.parametrize(
-    ("key", "native", "repair"),
+    "key,native,repair",
     [
         ("agents/native-review", True, False),
         ("agents/native-coding", True, False),
@@ -364,118 +321,85 @@ def test_failed_companion_publication_has_no_run_selection_and_keeps_foreign_fil
     ],
 )
 @pytest.mark.parametrize("kind", ["plan", "goon"])
-def test_default_agent_selections_follow_the_compiled_harness_and_phases(
+def test_draft_agent_defaults_follow_compiled_harness_without_fabricating_required_values(
     tmp_path, key, native, repair, kind
 ):
-    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+    import yaml
 
-    path = initialize_run_configuration(key, tmp_path / "workflow", kind=kind)
-    selected = load_run_configuration(path).selection
-    assert selected.source.kind == ("catalog-plan" if kind == "plan" else "file-plan")
-    assert (selected.agent.implementation == "codex") is native
-    assert (selected.agent.profile == "isolated-managed") is native
-    assert (selected.agent.model_profile == "REQUIRED_MODEL_PROFILE") is not native
-    assert (selected.repair is not None) is repair
-    files = {
-        item.relative_to(path.parent).as_posix()
-        for item in path.parent.rglob("*")
-        if item.is_file()
-    }
-    expected = {"run.yml"} if kind == "plan" else {"plan.yml", "run.yml"}
-    if repair:
-        from oh_goon.services.template_plan_drafts import AGENT_REVIEW_COMPANION_PATHS
-
-        expected.update(AGENT_REVIEW_COMPANION_PATHS)
-    assert files == expected
+    result = initialize_draft(key, tmp_path / "workflow", kind=kind)
+    selected = yaml.safe_load(result.path.read_text())
+    assert selected["source"]["kind"] == ("catalog-plan" if kind == "plan" else "file-plan")
+    assert (selected["agent"].get("implementation") == "codex") is native
+    assert (selected["agent"].get("profile") == "isolated-managed") is native
+    assert "model_profile" not in selected["agent"]
+    assert ("repair" in selected) is repair
+    assert "target.repository" in result.required_fields
+    with pytest.raises(FleetPlanInvalid):
+        load_run_configuration(result.path)
 
 
-def test_agent_initialization_copies_exact_bundled_companions(tmp_path):
+def test_agent_draft_copies_exact_bundled_companions_and_missing_bundle_refuses(
+    tmp_path, monkeypatch
+):
+    from oh_goon.services import template_plan_drafts
     from oh_goon.services.agent_skill_registry import read_goonskills
-    from oh_goon.services.template_plan_drafts import (
-        AGENT_REVIEW_COMPANION_PATHS,
-        AGENT_REVIEW_EXAMPLE,
-        initialize_run_configuration,
-    )
 
-    path = initialize_run_configuration(
+    result = initialize_draft(
         "agents/agentic-review-repair-loop", tmp_path / "workflow", kind="plan"
     )
-    example = Path(__file__).resolve().parents[4] / "examples" / AGENT_REVIEW_EXAMPLE
-    for relative in AGENT_REVIEW_COMPANION_PATHS:
-        assert (path.parent / relative).read_bytes() == (example / relative).read_bytes()
-    registry = read_goonskills(path.parent / ".goonskills.yml")
-    assert len(registry.aliases) == 4
-
-
-def test_interrupted_skill_publication_never_publishes_run_selection(tmp_path, monkeypatch):
-    import os
-
-    from oh_goon.services.template_plan_drafts import initialize_run_configuration
-
-    output = tmp_path / "workflow"
-    linked = os.link
-
-    def interrupt(source, target, **kwargs):
-        if target == "SKILL.md":
-            raise KeyboardInterrupt
-        return linked(source, target, **kwargs)
-
-    monkeypatch.setattr(os, "link", interrupt)
-    with pytest.raises(KeyboardInterrupt):
-        initialize_run_configuration("agents/agentic-review-repair-loop", output, kind="plan")
-    assert not (output / "run.yml").exists()
-    assert (output / ".goonskills.yml").is_file()
-    assert not list(output.rglob(".oh-goon-authoring-*"))
-
-
-def test_missing_bundled_companion_refuses_before_workflow_publication(tmp_path, monkeypatch):
-    from oh_goon.services import template_plan_drafts
-
-    valid = template_plan_drafts.initialize_run_configuration(
-        "agents/agentic-review-repair-loop", tmp_path / "valid", kind="plan"
+    example = (
+        Path(__file__).resolve().parents[4] / "examples" / template_plan_drafts.AGENT_REVIEW_EXAMPLE
     )
-    assert (valid.parent / "skills/adjudicate/SKILL.md").is_file()
-    read_companions = template_plan_drafts.agent_review_companion_files
+    for relative in template_plan_drafts.AGENT_REVIEW_COMPANION_PATHS:
+        assert (result.path.parent / relative).read_bytes() == (example / relative).read_bytes()
+    assert len(read_goonskills(result.path.parent / ".goonskills.yml").aliases) == 4
+    read = template_plan_drafts.agent_review_companion_files
     monkeypatch.setattr(
-        template_plan_drafts,
-        "agent_review_companion_files",
-        lambda _: read_companions(tmp_path / "incomplete-installation"),
+        template_plan_drafts, "agent_review_companion_files", lambda _: read(tmp_path / "absent")
     )
-    output = tmp_path / "refused"
     with pytest.raises(FleetPlanInvalid):
-        template_plan_drafts.initialize_run_configuration(
-            "agents/agentic-review-repair-loop", output, kind="plan"
-        )
-    assert not output.exists()
+        initialize_draft("agents/agentic-review-repair-loop", tmp_path / "refused", kind="plan")
+    assert not (tmp_path / "refused").exists()
 
 
-def test_infrastructure_goon_initialization_leaves_policy_with_the_authored_plan(tmp_path):
+def test_infrastructure_draft_retains_original_plan_execution_policy(tmp_path):
+    import yaml
+
     from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose
     from oh_goon.integrations.fleet_plan_compilation import (
         compile_plan_document,
         parse_fleet_yaml_document,
     )
-    from oh_goon.services.template_plan_drafts import initialize_run_configuration
 
-    path = initialize_run_configuration("oci/image", tmp_path / "workflow", kind="goon")
-    plan_path = path.parent / "plan.yml"
-    document = parse_fleet_yaml_document(plan_path.read_text(), source=str(plan_path))
+    result = initialize_draft("oci/image", tmp_path / "workflow", kind="goon")
+    plan = result.path.parent / "plan.yml"
+    document = parse_fleet_yaml_document(plan.read_text(), source=str(plan))
     assert document.payload == {"goons": ["oci/image"]}
-    compiled = compile_plan_document(document, source=str(plan_path))
-    assert compiled.execution is not None
+    compiled = compile_plan_document(document, source=str(plan))
     assert compiled.execution.purpose is ExecutionPurpose.VERIFICATION
-    selected = load_run_configuration(path).selection
-    assert selected.source.kind == "file-plan"
-    assert dict(selected.inputs) == {"base_registry_hostname": "REQUIRED_base_registry_hostname"}
-    assert selected.agent is None and selected.repair is None
-    assert sorted(item.name for item in path.parent.iterdir()) == ["plan.yml", "run.yml"]
+    selected = yaml.safe_load(result.path.read_text())
+    assert "inputs" not in selected
+    assert "inputs.base_registry_hostname" in result.required_fields
 
 
-def test_goon_initialization_reads_each_imported_catalog_source_once(tmp_path, monkeypatch):
+def test_plural_agent_initialization_refuses_before_publishing_a_draft(tmp_path):
+    roots = (tmp_path / "one", tmp_path / "two")
+    for root in roots:
+        root.mkdir()
+    output = tmp_path / "workflow"
+    with pytest.raises(FleetPlanInvalid, match="single repository"):
+        initialize_draft("agents/native-review", output, kind="plan", repositories=roots)
+    assert not output.exists()
+    assert not tuple(tmp_path.glob(".oh-goon-init-*"))
+
+
+def test_initialization_analyzes_each_imported_goon_once_and_preserves_root_snapshot(
+    tmp_path, monkeypatch
+):
     from collections import Counter
 
     from oh_goon.runtime.goon_templates import GoonTemplateStore
-    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
     reads = Counter()
     original = GoonTemplateStore.source
@@ -485,59 +409,80 @@ def test_goon_initialization_reads_each_imported_catalog_source_once(tmp_path, m
         return original(store, key)
 
     monkeypatch.setattr(GoonTemplateStore, "source", source)
-    initialize_run_configuration("python/quality", tmp_path / "workflow", kind="goon")
+    initialize_draft("python/quality", tmp_path / "workflow", kind="goon")
     assert reads == {"python/quality": 1, "python/ruff": 1, "python/typecheck": 1, "python/test": 1}
+    root = PlanTemplateStore().source("python/quality")
+    graph = FleetPlanResolver(goon_templates=GoonTemplateStore()).analyze_source(
+        root.path, root_snapshot=root
+    )
+    assert graph.root.source_sha256 == root.sha256
+    assert graph.root.compiled == root.compiled
+    assert graph.root.step_positions == root.step_positions
 
 
-def test_parent_retarget_cannot_redirect_workflow_publication(tmp_path, monkeypatch):
-    import tempfile
+@pytest.fixture
+def typed_graph(tmp_path):
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
-    from oh_goon.services.template_plan_drafts import initialize_run_configuration
-
-    selected_parent = tmp_path / "selected"
-    selected_parent.mkdir()
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    original = tempfile.TemporaryDirectory
-
-    def retarget(*args, **kwargs):
-        selected_parent.rename(tmp_path / "original-parent")
-        selected_parent.symlink_to(outside, target_is_directory=True)
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(tempfile, "TemporaryDirectory", retarget)
-    with pytest.raises(OSError):
-        initialize_run_configuration("python/quality", selected_parent / "workflow", kind="plan")
-    assert not list(outside.iterdir())
-    assert not list((tmp_path / "original-parent").iterdir())
+    package = tmp_path / "goons/general/typed"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# general/typed\n\nTyped input fixture.\n")
+    (package / "goon.yml").write_text(
+        "inputs:\n"
+        "  text: {type: string}\n"
+        "  enabled: {type: boolean, default: true}\n"
+        "  count: {type: integer, min: 0, max: 2, default: 1}\n"
+        "  optional: {type: string, optional: true}\n"
+        "  pick: {type: choice, choices: [a, b], default: a}\n"
+        "steps:\n- run: python --version\n"
+    )
+    plan = tmp_path / "plan.yml"
+    plan.write_text("goons:\n- import: general/typed\n  from: goons\n")
+    return FleetPlanResolver().analyze_source(plan)
 
 
-def test_parent_retarget_after_pinning_refuses_completion_and_never_follows_symlink(
-    tmp_path, monkeypatch
-):
-    import os
+def test_initialization_uses_native_types_defaults_and_explicit_null(typed_graph):
+    from oh_goon.services.template_plan_drafts import bind_initialization_inputs
 
-    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+    assert bind_initialization_inputs(
+        typed_graph,
+        {
+            "text": "null=日本語",
+            "enabled": "false",
+            "count": "0",
+            "optional": None,
+        },
+    ) == {"text": "null=日本語", "enabled": False, "count": 0, "optional": None, "pick": "a"}
 
-    selected_parent = tmp_path / "selected"
-    selected_parent.mkdir()
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    linked = os.link
 
-    def retarget(source, target, **kwargs):
-        if target == "plan.yml":
-            selected_parent.rename(tmp_path / "original-parent")
-            selected_parent.symlink_to(outside, target_is_directory=True)
-        return linked(source, target, **kwargs)
+@pytest.mark.parametrize(
+    "values,code",
+    [
+        ({"text": "ok", "count": "3"}, "INVALID_INPUT_VALUE"),
+        ({"text": "ok", "enabled": "yes"}, "INVALID_INPUT_VALUE"),
+        ({"text": None}, "INVALID_INPUT_VALUE"),
+        ({"text": "ok", "pick": "c"}, "INVALID_INPUT_VALUE"),
+        ({"unknown": "private"}, "UNKNOWN_INPUT"),
+        ({}, "MISSING_REQUIRED_INPUT"),
+    ],
+)
+def test_invalid_or_missing_initialization_values_fail_before_prompt(typed_graph, values, code):
+    from oh_goon.core.errors import FleetPlanInputRejected
+    from oh_goon.services.template_plan_drafts import bind_initialization_inputs
 
-    monkeypatch.setattr(os, "link", retarget)
-    with pytest.raises(OSError, match="directory changed"):
-        initialize_run_configuration(
-            "agents/agentic-review-repair-loop",
-            selected_parent / "workflow",
-            reviewers=(("review", "local:skills/review"),),
-            kind="plan",
-        )
-    assert not list(outside.iterdir())
-    assert not (tmp_path / "original-parent/workflow/run.yml").exists()
+    with pytest.raises(FleetPlanInputRejected) as rejected:
+        bind_initialization_inputs(typed_graph, values)
+    assert rejected.value.diagnostic_code == code
+
+
+def test_initialization_prompts_only_compiler_required_names(typed_graph):
+    from oh_goon.services.template_plan_drafts import bind_initialization_inputs
+
+    prompted = []
+
+    def prompt(item):
+        prompted.append(item.definition.name)
+        return "日本語"
+
+    assert bind_initialization_inputs(typed_graph, {}, prompt=prompt)["text"] == "日本語"
+    assert prompted == ["text"]

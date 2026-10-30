@@ -187,7 +187,7 @@ def test_run4_output_readback_uses_original_real_game_tape_evidence(tmp_path: Pa
         calls.append(run_id)
         return detail
 
-    args = build_parser().parse_args(["plan", "outputs", "run4-real", "--json"])
+    args = build_parser().parse_args(["runs", "outputs", "run4-real", "--json"])
     assert run_plan_command(SimpleNamespace(runs=SimpleNamespace(get=get)), args) == 0
     printed = capsys.readouterr().out
     view = json.loads(printed)

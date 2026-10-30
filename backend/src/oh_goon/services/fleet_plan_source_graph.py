@@ -21,6 +21,7 @@ from oh_goon.core.product_identity import stable_id
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations.fleet_plan_compilation import GoonTemplateProvider
 from oh_goon.integrations.fleet_plan_source_snapshot import (
+    FleetPlanSourceSnapshot,
     FleetPlanStepPosition,
     read_fleet_plan_source,
 )
@@ -238,6 +239,7 @@ def analyze_fleet_plan_sources(
     *,
     containment_root: Path,
     compiled_overrides: Mapping[Path, CompiledExecutionTemplate] | None = None,
+    root_snapshot: FleetPlanSourceSnapshot | None = None,
     goon_templates: GoonTemplateProvider | None = None,
     root_expected_name: str | None = None,
     locked_sources: tuple[LockedExecutionSource, ...] | None = (),
@@ -273,7 +275,7 @@ def analyze_fleet_plan_sources(
     overrides = {
         canonical_path(item): template for item, template in (compiled_overrides or {}).items()
     }
-    root = _read_node(path, overrides, expected_name=root_expected_name)
+    root = _read_node(path, overrides, expected_name=root_expected_name, snapshot=root_snapshot)
     if plan_source is not None:
         assert plan_source.plan is not None
         logical = (PurePosixPath(plan_source.path) / plan_source.plan).as_posix()
@@ -400,11 +402,16 @@ def _read_node(
     overrides: Mapping[Path, CompiledExecutionTemplate],
     *,
     expected_name: str | None = None,
+    snapshot: FleetPlanSourceSnapshot | None = None,
 ) -> FleetPlanSourceNode:
+    if snapshot is not None and canonical_path(snapshot.path) != canonical_path(path):
+        raise FleetPlanInvalid("Captured Plan source differs from the selected Plan")
     override = overrides.get(canonical_path(path))
     if override is not None:
+        if snapshot is not None:
+            raise FleetPlanInvalid("Captured Plan source cannot be mixed with a compiled override")
         return FleetPlanSourceNode(path=path, compiled=override)
-    source = read_fleet_plan_source(
+    source = snapshot or read_fleet_plan_source(
         path, kind="goon" if path.name == "goon.yml" else "plan", expected_name=expected_name
     )
     return FleetPlanSourceNode(
@@ -455,7 +462,7 @@ def _load_goon_child(
         if frozen is None and not build.acquire_sources:
             raise FleetPlanSourceAcquisitionRequired(
                 "Git Goon source requires explicit acquisition with lock; "
-                "inspect its contract first with 'oh-goon config inspect run.yml --acquire'"
+                "inspect its contract first with 'oh-goon workflow inspect run.yml --acquire'"
             )
         source_key = (selection.git, selection.ref)
         selected_commit = _selected_git_commit(build, "goon", source_key)

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from types import MappingProxyType
 
 import pytest
 
+from oh_goon.application import ApplicationRuntime
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError, canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
@@ -111,27 +113,40 @@ def test_untrusted_deployment_probe_fails_closed_before_any_work(tmp_path, monke
         conn.close()
 
 
-def test_readiness_does_not_enter_cli_or_create_ambient_deployment(tmp_path, monkeypatch):
+def test_readiness_does_not_enter_cli_or_create_ambient_deployment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from oh_goon import cli
 
     monkeypatch.setenv("OH_GOON_FLEET_PROVISIONER", "fake")
     monkeypatch.setenv("OH_GOON_FLEET_ISSUER_KEYS", "fake")
-    observed = []
+    observed: list[str] = []
     monkeypatch.setattr(cli, "_run_pre_runtime_command", lambda _args: None)
+
+    def build(
+        _cls: type[object],
+        *,
+        standard_local: bool = False,
+        startup_purpose: str = "application",
+        standard_process_isolation: object | None = None,
+        git_service: object | None = None,
+    ) -> object:
+        assert startup_purpose == "workflow"
+        assert (standard_process_isolation, git_service) == (None, None)
+        observed.append("standard-local" if standard_local else "ordinary-no-provisioner")
+        return object()
+
     monkeypatch.setattr(
-        cli.ApplicationRuntime,
+        ApplicationRuntime,
         "build",
-        classmethod(
-            lambda cls, *, standard_local=False: observed.append(
-                "standard-local" if standard_local else "ordinary-no-provisioner"
-            )
-            or object()
-        ),
+        classmethod(build),
     )
     monkeypatch.setattr(cli, "_execute_stateful_command", lambda _runtime, _args: 2)
     from tests.factories.run_configuration import write_run_configuration
 
     configuration = write_run_configuration(tmp_path, monkeypatch)
+    assert cli.main(["workflow", "prepare", str(configuration)]) == 0
+    assert observed == []
     assert cli.main(["run", str(configuration), "--fleet-run-id", "durable-run"]) == 2
     assert observed == ["standard-local"]
 

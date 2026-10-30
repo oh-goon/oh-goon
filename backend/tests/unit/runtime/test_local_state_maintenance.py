@@ -86,7 +86,7 @@ def test_local_state_reset_deletes_database_and_sqlite_sidecars_only(
     assert unrelated.read_text() == "keep"
     output = capsys.readouterr().out
     assert "make dev (source)" in output
-    assert "oh-goon start (built release)" in output
+    assert "oh-goon app start (built release)" in output
 
 
 def test_local_state_reset_durably_publishes_each_existing_file_absence(
@@ -144,7 +144,7 @@ def test_stateful_cli_turns_schema_mismatch_into_actionable_startup_error(
     with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(f"PRAGMA user_version = {DATABASE_SCHEMA_VERSION - 1}")
 
-    assert main(["doctor"]) == 2
+    assert main(["doctor", "--runtime"]) == 2
     output = capsys.readouterr().out
     assert "Local oh-goon database schema mismatch" in output
     assert str(path) in output
@@ -179,7 +179,7 @@ def test_contract45_journal_refuses_at_schema_boundary_without_decoding_or_mutat
         pytest.fail("incompatible storage must refuse before Journal payload decoding")
 
     monkeypatch.setattr(JournalFactCodec, "decode", unexpected_decode)
-    assert main(["doctor"]) == 2
+    assert main(["doctor", "--runtime"]) == 2
     output = capsys.readouterr().out
     assert f"found 89; expected {DATABASE_SCHEMA_VERSION}" in output
     assert "matching original runtime" in output
@@ -244,7 +244,7 @@ def test_incompatible_journal_refuses_before_codec_or_ddl_without_mutation(
     monkeypatch.setattr(sqlite3, "connect", traced_connect)
     with pytest.raises(DatabaseSchemaMismatch):
         LocalDatabase(path, journal_mode="WAL")
-    assert main(["doctor"]) == 2
+    assert main(["doctor", "--runtime"]) == 2
     output = capsys.readouterr().out
     assert f"found {legacy_schema}; expected {DATABASE_SCHEMA_VERSION}" in output
     assert "matching original runtime" in output and "JournalCorruption" not in output
@@ -263,7 +263,7 @@ def test_serve_stops_before_uvicorn_on_stale_local_state(tmp_path, monkeypatch, 
     with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(f"PRAGMA user_version = {DATABASE_SCHEMA_VERSION - 1}")
 
-    assert main(["serve"]) == 2
+    assert main(["app", "serve"]) == 2
     output = capsys.readouterr().out
     assert "Startup stopped before opening the application." in output
     assert "Source checkout: make local-state-reset" in output

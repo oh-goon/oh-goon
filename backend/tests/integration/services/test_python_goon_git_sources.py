@@ -84,7 +84,8 @@ def test_git_package_and_complete_example_keep_pins_across_cache_loss(tmp_path):
         return completed.stdout
 
     cli("league", "add-folder", str(repository))
-    target = json.loads(cli("league", "scan", "--json"))["teams"][0]["repository"]["repository_id"]
+    target = json.loads(cli("league", "scan", "--json"))["teams"][0]["repository"]
+    assert Path(target["path"]) == repository
     workflow = tmp_path / "workflow"
     workflow.mkdir()
     selection = workflow / "run.yml"
@@ -100,15 +101,15 @@ def test_git_package_and_complete_example_keep_pins_across_cache_loss(tmp_path):
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": target},
+                "target": {"repository": str(repository)},
             }
         )
     )
-    cli("config", "inspect", str(selection), "--json", expected=2)
+    cli("workflow", "inspect", str(selection), "--json", expected=2)
     assert not (tmp_path / "cache/oh-goon/skill-sources").exists()
-    cli("lock", str(selection))
+    cli("workflow", "prepare", str(selection))
     lock_path = workflow / "goon.lock"
     locked = yaml.safe_load(lock_path.read_text())
     assert locked["execution_sources"][0]["commit"] == original
@@ -117,7 +118,7 @@ def test_git_package_and_complete_example_keep_pins_across_cache_loss(tmp_path):
     def run_and_read(expected_total):
         receipt = json.loads(cli("run", str(selection), "--json"))
         assert receipt["outcome"] == "SUCCESS"
-        output = json.loads(cli("plan", "outputs", receipt["fleet_run_id"], "--json"))
+        output = json.loads(cli("runs", "outputs", receipt["fleet_run_id"], "--json"))
         steps = output["repositories"][0]["steps"]
         result = steps[2]["artifacts"][0]
         expected_bytes = (json.dumps({"total_order_value": expected_total}) + "\n").encode()
@@ -128,17 +129,17 @@ def test_git_package_and_complete_example_keep_pins_across_cache_loss(tmp_path):
     run_and_read("1236.70")
     (package / "src/orders_pipeline/data/official.json").write_text('{"1001":5.00}\n')
     changed = commit()
-    cli("lock", str(selection))
+    cli("workflow", "prepare", str(selection))
     assert yaml.safe_load(lock_path.read_text()) == locked
     shutil.rmtree(tmp_path / "cache/oh-goon/skill-sources")
     run_and_read("1236.70")
     offline = tmp_path / "offline-upstream"
     source.rename(offline)
     try:
-        cli("config", "inspect", str(selection), "--json")
+        cli("workflow", "inspect", str(selection), "--json")
     finally:
         offline.rename(source)
-    cli("lock", str(selection), "--update-goons")
+    cli("workflow", "prepare", str(selection), "--refresh", "goons")
     assert yaml.safe_load(lock_path.read_text())["execution_sources"][0]["commit"] == changed
     run_and_read("5.00")
 
@@ -147,7 +148,7 @@ def test_git_package_and_complete_example_keep_pins_across_cache_loss(tmp_path):
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {
                     "kind": "git-plan",
                     "git": str(source),
@@ -155,11 +156,11 @@ def test_git_package_and_complete_example_keep_pins_across_cache_loss(tmp_path):
                     "path": ".",
                     "plan": "example/plan.yml",
                 },
-                "target": {"repository_id": target},
+                "target": {"repository": str(repository)},
             }
         )
     )
-    cli("lock", str(selection))
+    cli("workflow", "prepare", str(selection))
     complete = yaml.safe_load(lock_path.read_text())
     assert complete["execution_sources"][0]["kind"] == "plan"
     assert complete["execution_sources"][0]["commit"] == changed

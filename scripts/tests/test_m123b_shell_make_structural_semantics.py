@@ -279,7 +279,7 @@ def test_workflow_make_helper_variable_extraction_is_representation_only(
 def test_workflow_make_comment_cannot_create_direct_plan_path(tmp_path: Path) -> None:
     makefile = (
         _workflow_makefile()
-        + "\n# oh-goon plan run is forbidden outside the workflow owner\n"
+        + "\n# oh-goon run is forbidden outside the workflow owner\n"
     )
     root = _workflow_root(tmp_path, makefile)
     assert not any(
@@ -291,7 +291,7 @@ def test_workflow_make_comment_cannot_create_direct_plan_path(tmp_path: Path) ->
 def test_workflow_make_alias_cannot_hide_direct_plan_path(tmp_path: Path) -> None:
     makefile = (
         _workflow_makefile()
-        + "\nCLI = backend/.venv/bin/oh-goon\nshadow:\n\t@$(CLI) plan run plan.yml\n"
+        + "\nCLI = backend/.venv/bin/oh-goon\nshadow:\n\t@$(CLI) run run.yml\n"
     )
     root = _workflow_root(tmp_path, makefile)
     assert any(

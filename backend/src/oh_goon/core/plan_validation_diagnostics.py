@@ -9,18 +9,21 @@ import re
 from typing import NotRequired, TypedDict
 
 from oh_goon.core.errors import (
+    DurableStateBusy,
+    ExecutionBusy,
     ExecutionLockRejected,
     FleetPlanInputRejected,
     FleetPlanSourceAcquisitionRequired,
     RunConfigurationInvalid,
+    RuntimeSafetyBlocked,
 )
 
 _SCHEMA = "oh-goon.plan-validation-diagnostic/v1"
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,63}\Z")
 _CONFIG_ACTIONS = {
-    "CONFIG_SCHEMA_INVALID": "Correct the named run.yml fields using the version 1 selection contract.",
+    "CONFIG_SCHEMA_INVALID": "Correct the named version 2 run.yml fields; select literal directory paths with target.repository or target.repositories.",
     "CONFIG_PATH_INVALID": "Select an existing regular source contained in the workflow root; remove traversal and symlink aliases.",
-    "CONFIG_TARGET_UNAVAILABLE": "Register the target directory with 'oh-goon league add-folder PATH' and select it during initialization with '--repository PATH'; confirm the repository remains included.",
+    "CONFIG_TARGET_UNAVAILABLE": "Select exact target roots in target.repository or target.repositories; use 'oh-goon workflow prepare run.yml --register-target' for explicit registration, and confirm every target remains included.",
     "CONFIG_CHANGED": "The captured configuration changed; inspect the current run.yml and explicitly regenerate goon.lock.",
 }
 _CONFIG_FIELDS = frozenset(
@@ -34,7 +37,8 @@ _CONFIG_FIELDS = frozenset(
         "ref",
         "plan",
         "target",
-        "repository_id",
+        "repository",
+        "repositories",
         "inputs",
         "agent",
         "implementation",
@@ -51,6 +55,7 @@ _CONFIG_FIELDS = frozenset(
     }
 )
 _NEXT_ACTIONS = {
+    "DUPLICATE_INPUT": "Supply each input once using either --input NAME=VALUE or --input-null NAME.",
     "EXTERNAL_INPUT_NOT_OBSERVED": "Inspection does not read environment-backed inputs; explicit lock and run use the original environment authority.",
     "UNKNOWN_INPUT": "Inspect the accepted input names; remove unrecognized caller inputs.",
     "MISSING_REQUIRED_INPUT": "Supply required caller values, then retry validation.",
@@ -60,18 +65,18 @@ _NEXT_ACTIONS = {
     "AMBIGUOUS_PROJECTED_INPUT": "Select recipient imports explicitly with pass: or with: for each shared input.",
 }
 _LOCK_ACTIONS = {
-    "missing": "goon.lock is missing. Generate it with 'oh-goon lock run.yml', then retry the run.",
+    "missing": "goon.lock is missing. Generate it with 'oh-goon workflow prepare run.yml', then retry the run.",
     "unreadable": "goon.lock could not be captured as a bounded regular file. Restore a readable lock without symlink aliases and retry; preserve existing Git and Skill pins.",
     "malformed": "goon.lock is malformed or exceeds its size bound. Restore the generated lock from version control before relocking; do not hand edit its pins or digests.",
     "unsupported_version": "goon.lock uses an unsupported format. Use the matching Oh-Goon version or explicitly regenerate the lock after reviewing the selected sources and pins.",
     "invalid_digest": "goon.lock failed its integrity check. Restore the generated lock from version control before relocking; its recorded pins cannot be trusted.",
-    "plan_changed": "The Plan's execution policy, root Steps, requirements, Goon order or native Agent selection changed. Review the intended change, then run 'oh-goon lock run.yml'.",
-    "goons_changed": "A Goon's execution, requirements or bound input values changed. Inspect the selected contract, review the intended change, then run 'oh-goon lock run.yml'.",
-    "configuration_changed": "run.yml changed since locking. Review its source, target, inputs and Agent/repair selections, then run 'oh-goon lock run.yml' before execution or source acquisition.",
-    "external_changed": "A file recorded in goon.lock changed. Review the selected configuration and external files, then run 'oh-goon lock run.yml'.",
-    "skills_changed": "The selected Skill source pins changed. Review the intended selection, then run 'oh-goon lock run.yml'; use --update-skills only to explicitly refresh those pins.",
-    "sources_changed": "The selected Git Plan, Goon or application pins changed. Review the selection, then run 'oh-goon lock run.yml'; use --update-goons or --update-applications only for an intentional refresh.",
-    "execution_changed": "The resolved execution differs from goon.lock. Review the intended change, then run 'oh-goon lock run.yml'.",
+    "plan_changed": "The Plan's execution policy, root Steps, requirements, Goon order or native Agent selection changed. Review the intended change, then run 'oh-goon workflow prepare run.yml'.",
+    "goons_changed": "A Goon's execution, requirements or bound input values changed. Inspect the selected contract, review the intended change, then run 'oh-goon workflow prepare run.yml'.",
+    "configuration_changed": "run.yml changed since locking. Review its source, target, inputs and Agent/repair selections, then run 'oh-goon workflow prepare run.yml' before execution or source acquisition.",
+    "external_changed": "A file recorded in goon.lock changed. Review the selected configuration and external files, then run 'oh-goon workflow prepare run.yml'.",
+    "skills_changed": "The selected Skill source pins changed. Review the intended selection, then run 'oh-goon workflow prepare run.yml'; use --refresh skills only to explicitly refresh those pins.",
+    "sources_changed": "The selected Git Plan, Goon or application pins changed. Review the selection, then run 'oh-goon workflow prepare run.yml'; use --refresh goons or --refresh applications only for an intentional refresh.",
+    "execution_changed": "The resolved execution differs from goon.lock. Review the intended change, then run 'oh-goon workflow prepare run.yml'.",
 }
 
 
@@ -99,8 +104,28 @@ def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
             {
                 field
                 for field in exc.fields
-                if field and all(part in _CONFIG_FIELDS for part in field.split("."))
+                if field
+                and (
+                    all(part in _CONFIG_FIELDS for part in field.split("."))
+                    or re.fullmatch(r"target\.repositories\.[0-9]{1,5}", field)
+                )
             }
+        )
+    elif isinstance(exc, (DurableStateBusy, ExecutionBusy)):
+        code = "PLAN_RESOLUTION_REJECTED"
+        inputs = []
+        stage = "plan_resolution"
+        action = (
+            "Wait for active execution to settle, or inspect retained ownership through "
+            "the original matching runtime's recovery tools; then retry."
+        )
+    elif isinstance(exc, RuntimeSafetyBlocked):
+        code = "PLAN_RESOLUTION_REJECTED"
+        inputs = []
+        stage = "plan_resolution"
+        action = (
+            "Inspect the matching runtime's safety and recovery findings; resolve "
+            "the reported authority before retrying."
         )
     elif isinstance(exc, ExecutionLockRejected) and exc.reason in _LOCK_ACTIONS:
         # Keep the existing transport schema; only the rejecting lock owner
@@ -126,8 +151,8 @@ def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
         inputs = []
         stage = "plan_resolution"
         action = (
-            "Inspect the selected Git contract with 'oh-goon config inspect run.yml --acquire', "
-            "or freeze its source and values with 'oh-goon lock run.yml'."
+            "Inspect the selected Git contract with 'oh-goon workflow inspect run.yml --acquire', "
+            "or freeze its source and values with 'oh-goon workflow prepare run.yml'."
         )
     elif isinstance(exc, FleetPlanInputRejected) and exc.diagnostic_code in _NEXT_ACTIONS:
         code = exc.diagnostic_code

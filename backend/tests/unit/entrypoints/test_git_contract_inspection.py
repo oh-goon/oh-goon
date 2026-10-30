@@ -9,7 +9,6 @@ import pytest
 import yaml
 
 from oh_goon.cli import main
-from oh_goon.core.models.repository import RepositoryIdentity
 
 
 def _commit(root: Path) -> str:
@@ -41,6 +40,7 @@ def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: dict[str
     league = tmp_path / "league.yml"
     league.write_text(yaml.safe_dump({"version": 1, "folders": [str(target)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(league.parent / "test-state.db"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     workflow = tmp_path / "workflow"
     workflow.mkdir(exist_ok=True)
@@ -48,13 +48,9 @@ def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: dict[str
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": source,
-                "target": {
-                    "repository_id": RepositoryIdentity.model_validate(
-                        {"path": target}
-                    ).repository_id
-                },
+                "target": {"repository": str(target)},
             }
         )
     )
@@ -118,12 +114,13 @@ def test_git_contract_can_be_acquired_before_inputs_and_reports_captured_identit
     league = tmp_path / "league.yml"
     league.write_text(yaml.safe_dump({"version": 1, "folders": [str(target)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(league.parent / "test-state.db"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     workflow = tmp_path / "workflow"
     workflow.mkdir()
     selection = workflow / "run.yml"
     payload = {
-        "version": 1,
+        "version": 2,
         "source": {
             "kind": "git-plan",
             "git": str(upstream),
@@ -131,19 +128,17 @@ def test_git_contract_can_be_acquired_before_inputs_and_reports_captured_identit
             "path": ".",
             "plan": "plan.yml",
         },
-        "target": {
-            "repository_id": RepositoryIdentity.model_validate({"path": target}).repository_id
-        },
+        "target": {"repository": str(target)},
     }
     selection.write_text(yaml.safe_dump(payload))
-    assert main(["config", "inspect", str(selection), "--json"]) == 2
+    assert main(["workflow", "inspect", str(selection), "--json"]) == 2
     refused = json.loads(capsys.readouterr().out)
     assert refused["code"] == "SOURCE_ACQUISITION_REQUIRED"
-    assert "config inspect run.yml --acquire" in refused["safe_next_action"]
+    assert "workflow inspect run.yml --acquire" in refused["safe_next_action"]
     from oh_goon.api.schemas.league import SafePlanInputDiagnostic
 
     assert SafePlanInputDiagnostic.model_validate(refused).code == "SOURCE_ACQUISITION_REQUIRED"
-    assert main(["config", "inspect", str(selection), "--acquire", "--json"]) == 0
+    assert main(["workflow", "inspect", str(selection), "--acquire", "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "contract-inspected"
     contracts = {item["name"]: item["contract"] for item in report["inputs"]}
@@ -162,15 +157,16 @@ def test_git_contract_can_be_acquired_before_inputs_and_reports_captured_identit
     assert source["execution"] == "not-started"
     assert not (workflow / "goon.lock").exists()
     assert "oh-goon-git-" not in json.dumps(report)
-    with pytest.raises(SystemExit) as exc:
-        main(["config", "validate", str(selection), "--acquire"])
-    assert exc.value.code == 2
-    capsys.readouterr()
+    assert main(["workflow", "validate", str(selection), "--acquire", "--json"]) == 2
+    validation = json.loads(capsys.readouterr().out)
+    assert validation["status"] == "contract-inspected"
+    assert validation["diagnostic"]["code"] == "MISSING_REQUIRED_INPUT"
+    assert validation["proof"]["admission"] == "not-started"
     payload["inputs"] = {"level": 2}
     selection.write_text(yaml.safe_dump(payload))
-    assert main(["lock", str(selection)]) == 0
+    assert main(["workflow", "prepare", str(selection)]) == 0
     capsys.readouterr()
-    assert main(["config", "inspect", str(selection), "--json"]) == 0
+    assert main(["workflow", "inspect", str(selection), "--json"]) == 0
     locked = json.loads(capsys.readouterr().out)
     assert locked["status"] == "inputs-valid"
     assert locked["source"]["git"]["commit"] == commit
@@ -178,7 +174,7 @@ def test_git_contract_can_be_acquired_before_inputs_and_reports_captured_identit
     assert group["group"] == "dev" and group["group_state"] == "resolved"
     assert "oh-goon-git-" not in json.dumps(locked)
     assert locked["configuration_evidence"] is not None
-    assert main(["config", "inspect", str(selection)]) == 0
+    assert main(["workflow", "inspect", str(selection)]) == 0
     human = capsys.readouterr().out
     assert commit in human and "Dependency group: 'dev' | resolved" in human
 
@@ -230,12 +226,12 @@ def test_dependency_groups_use_exact_resolved_occurrences_and_preserve_string_pr
             }
         )
     )
-    assert main(["config", "inspect", str(selection), "--json"]) == 2
+    assert main(["workflow", "inspect", str(selection), "--json"]) == 2
     refused = json.loads(capsys.readouterr().out)
     assert refused["code"] == "SOURCE_ACQUISITION_REQUIRED"
-    assert "config inspect run.yml --acquire" in refused["safe_next_action"]
+    assert "workflow inspect run.yml --acquire" in refused["safe_next_action"]
     assert str(upstream) not in json.dumps(refused)
-    assert main(["config", "inspect", str(selection), "--acquire", "--json"]) == 0
+    assert main(["workflow", "inspect", str(selection), "--acquire", "--json"]) == 0
     output = capsys.readouterr().out
     report = json.loads(output)
     assert report["status"] == "inputs-valid"
@@ -249,7 +245,7 @@ def test_dependency_groups_use_exact_resolved_occurrences_and_preserve_string_pr
     assert "oh-goon-git-" not in output
     if private:
         assert all(group not in output for group in groups)
-    assert main(["config", "inspect", str(selection), "--acquire"]) == 0
+    assert main(["workflow", "inspect", str(selection), "--acquire"]) == 0
     human = capsys.readouterr().out
     if private:
         assert "resolved-redacted" in human and all(group not in human for group in groups)
@@ -306,7 +302,7 @@ def test_git_plan_nested_local_and_remote_goons_keep_logical_paths_and_shipped_i
             "plan": "plans/selected.yml",
         },
     )
-    assert main(["config", "inspect", str(selection), "--acquire", "--json"]) == 0
+    assert main(["workflow", "inspect", str(selection), "--acquire", "--json"]) == 0
     output = capsys.readouterr().out
     report = json.loads(output)
     assert report["status"] == "inputs-valid"

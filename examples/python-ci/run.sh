@@ -67,7 +67,7 @@ matches = [
 if len(matches) != 1:
     raise SystemExit("Expected exactly one included registered workload repository")
 selection = {
-    "version": 1,
+    "version": 2,
     "source": {
         "kind": "git-plan",
         "git": root.as_uri(),
@@ -75,13 +75,13 @@ selection = {
         "path": ".",
         "plan": plan,
     },
-    "target": {"repository_id": matches[0]["repository_id"]},
+    "target": {"repository": str(root)},
 }
 with Path(destination).open("x", encoding="utf-8") as output:
     json.dump(selection, output, indent=2)
     output.write("\n")
 PY
-    "$task_cli" lock "$task_state/workflow/run.yml" >&2
+    "$task_cli" workflow prepare "$task_state/workflow/run.yml" >&2
     git -C "$task_tool" rev-parse HEAD > "$task_state/tool-commit.txt"
     git -C "$task_tool" status --porcelain=v1 --untracked-files=normal > "$task_state/tool-status.txt"
     "$task_cli" --version > "$task_state/tool-version.txt"
@@ -120,7 +120,7 @@ if not isinstance(run_id, str) or not run_id:
 
 for view in ("status", "tape", "outputs"):
     with (state / f"{view}.json").open("wb") as output:
-        subprocess.run([cli, "plan", view, run_id, "--json"], stdout=output, check=True)
+        subprocess.run([cli, "runs", "show" if view == "status" else view, run_id, "--json"], stdout=output, check=True)
 with (state / "tape.json").open(encoding="utf-8") as source:
     tape = json.load(source)
 if not tape["terminal"]:
@@ -167,7 +167,7 @@ for repository in outputs["repositories"]:
             export_receipt = state / "last-export.json"
             with export_receipt.open("wb") as output:
                 subprocess.run(
-                    [cli, "plan", "export-artifact", run_id,
+                    [cli, "runs", "export-artifact", run_id,
                      "--repository-id", repository["repository"]["repository_id"],
                      "--step", step["step_id"], "--path", artifact["path"],
                      "--output", str(destination), "--json"],

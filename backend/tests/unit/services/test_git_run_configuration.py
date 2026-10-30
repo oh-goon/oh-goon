@@ -85,9 +85,9 @@ def _case(
     path.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": selection,
-                "target": {"repository_id": repository.repository_id},
+                "target": {"repository": str(repository.path)},
             }
         )
     )
@@ -117,7 +117,7 @@ def test_git_plan_plural_capture_keeps_one_source_graph_and_exact_target_set(
     second.mkdir()
     repositories = (repository, RepositoryIdentity.model_validate({"path": second}))
     payload = yaml.safe_load(snapshot.content)
-    payload["target"] = {"repository_ids": [item.repository_id for item in repositories]}
+    payload["target"] = {"repositories": [str(item.path) for item in repositories]}
     snapshot.path.write_text(yaml.safe_dump(payload))
     selected = load_run_configuration(snapshot.path)
     analyze = Mock(wraps=resolver.analyze_source)

@@ -6,8 +6,6 @@ from typing import Any
 import pytest
 import yaml
 
-from oh_goon.core.models.repository import RepositoryIdentity
-
 
 def write_run_configuration(
     root: Path,
@@ -28,6 +26,7 @@ def write_run_configuration(
     preferences = root / "league.yml"
     preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(repo)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(root / "state.sqlite3"))
     if plan_content is not None:
         (root / "plan.yml").write_text(plan_content, encoding="utf-8")
         source = {"kind": "file-plan", "path": "./plan.yml"}
@@ -35,11 +34,9 @@ def write_run_configuration(
         (repo / "goon.yml").write_text(goon_content, encoding="utf-8")
         source = {"kind": "repository-goon"}
     selection: dict[str, Any] = {
-        "version": 1,
+        "version": 2,
         "source": source or {"kind": "catalog-plan", "name": "python/quality"},
-        "target": {
-            "repository_id": RepositoryIdentity.model_validate({"path": repo}).repository_id
-        },
+        "target": {"repository": "repository"},
     }
     if inputs:
         selection["inputs"] = inputs

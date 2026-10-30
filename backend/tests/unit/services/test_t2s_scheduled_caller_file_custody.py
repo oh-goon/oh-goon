@@ -23,8 +23,8 @@ from tests.factories.schedules import schedule_create
 def _fresh(tmp_path: Path, content="inputs:\n  coverage_threshold: 85\n"):
     source = tmp_path / "run.yml"
     source.write_text(
-        "version: 1\nsource: {kind: catalog-plan, name: python/quality}\n"
-        "target: {repository_id: selected-repository}\n" + content
+        "version: 2\nsource: {kind: catalog-plan, name: python/quality}\n"
+        "target: {repository: .}\n" + content
     )
     identity = load_run_configuration(source).authority()
     return source, identity
@@ -196,9 +196,18 @@ def test_schedule_create_reschedule_cas_and_changed_file_do_not_reselect_without
         definition=definitions.get,
         replace_prepared=definitions.replace,
     )
-    service.repository_instance_ids_for_target = lambda target, repository_ids: {
-        rid: "instance-" + rid for rid in repository_ids
-    }
+
+    def repository_instances(
+        target: FleetPlanTarget,
+        *,
+        repository_ids: set[str],
+        expected_repository_instance_ids: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        assert target.plan == baseline.plan
+        assert expected_repository_instance_ids is None
+        return {rid: "instance-" + rid for rid in repository_ids}
+
+    service.repository_instance_ids_for_target = repository_instances
     opts = dict(
         schedule_id="daily",
         extensions_path=None,
@@ -217,8 +226,8 @@ def test_schedule_create_reschedule_cas_and_changed_file_do_not_reselect_without
         service.reschedule(Path("plan.yml"), caller_input_file=original_identity, **opts)
     assert definitions.get("daily") == first
     source.write_text(
-        "version: 1\nsource: {kind: catalog-plan, name: python/quality}\n"
-        "target: {repository_id: selected-repository}\ninputs: {coverage_threshold: 86}\n"
+        "version: 2\nsource: {kind: catalog-plan, name: python/quality}\n"
+        "target: {repository: .}\ninputs: {coverage_threshold: 86}\n"
     )
     new_identity = load_run_configuration(source).authority()
     second = service.reschedule(Path("plan.yml"), caller_input_file=new_identity, **opts)

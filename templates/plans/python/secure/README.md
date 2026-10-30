@@ -7,23 +7,23 @@ Run Python quality, then uv and Trivy vulnerability scanners.
 **Prerequisites:** A committed `pyproject.toml` and native `uv.lock`; the selected group must supply Ruff, pytest and the chosen type checker. Prepare it with native `uv sync --locked --group dev` in the selected project. Native uv vulnerability audit support. Native Trivy and its declared online egress; configured strict content-store publication for the report. A missing scanner or unavailable network cannot establish a scan result. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
 ```sh
-oh-goon templates init python/secure --kind plan --output ./workflow
+oh-goon init --template python/secure --kind plan --output ./workflow --draft
 ```
 
-Edit `workflow/run.yml` with your registered target and caller choices. Omitted options keep their Goon-owned defaults:
+This explicit draft is NOT_READY. Set `target.repository` to your exact registered repository path and fill the required caller choices in `workflow/run.yml`. Omitted options keep their Goon-owned defaults:
 
 ```yaml
-version: 1
+version: 2
 source: {kind: catalog-plan, name: python/secure}
-target: {repository_id: REPOSITORY_ID}
+target: {repository: /absolute/path/to/project}
 inputs:
   typechecker: ty
 ```
 
 ```sh
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
+oh-goon workflow inspect ./workflow/run.yml
+oh-goon workflow validate ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 

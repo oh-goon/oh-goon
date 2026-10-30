@@ -141,7 +141,7 @@ executes a Step. The input schema remains owned by the original Goon.
 The normal CLI selects one versioned `run.yml`; it captures the configuration
 bytes, contained path and file identity once. Its scalar `inputs` mapping feeds
 the original binder. The config does not copy child schemas or define a second
-value-resolution precedence. `config inspect`, `config validate`, `lock` and
+value-resolution precedence. `workflow inspect`, `workflow validate`, `lock` and
 `run` consume that one selection. See the
 [configuration guide](TEMPLATE_INPUT_INSPECTION.md) for the supported grammar.
 
@@ -176,9 +176,9 @@ input may have no root YAML mark. The trace retains at most 4096 decisions and
 reports the omitted count without changing execution membership. Values,
 defaults, patterns, file contents and native argv are not copied into this trace.
 
-`config inspect` and `config validate` return safe configuration and authoring
+`workflow inspect` and `workflow validate` return safe configuration and authoring
 explanations without admission. Their human and JSON output use the same captured
-selection and canonical owner projections. `plan tape RUN_ID [--json]` and
+selection and canonical owner projections. `runs tape RUN_ID [--json]` and
 `dev explain-run RUN_ID --json` expose retained configuration through Game Tape,
 without rereading source or resolving current values. Missing historical lineage
 is unavailable, not reconstructed.
@@ -207,7 +207,7 @@ An import may select `from: ./goons` beside its static `category/name` identity.
 An explicit Git `from: {git: URL, ref: REF, path: exact/category/name}` selects
 one package. A `git-plan` run selection captures an exact Plan and its contained
 local packages at one revision. Both feed this same source graph and binder;
-`goon.lock` retains their exact commits, and `lock --update-goons` is the explicit
+`goon.lock` retains their exact commits, and `workflow prepare --refresh goons` is the explicit
 source refresh. Read-only inspection uses cached source only. See
 [Goon authoring](GOON_AUTHORING.md#project-owned-goons-and-caller-overrides)
 and [run configuration](TEMPLATE_INPUT_INSPECTION.md#source-and-value-owners).

@@ -12,14 +12,14 @@ oh-goon league add-folder /absolute/path/to/local-search/repos
 oh-goon league scan --json
 ```
 
-Edit the included `run.yml`: set the registered sample repository's `target.repository_id` and set `agent.repository_root` to the absolute path of the copied `repos` directory. Keep `agent.skill_root: skills`; it is relative to `run.yml`. `inputs.repo`, `inputs.skill` and `agent.acceptance` select the existing captured-source contract.
+Edit the included `run.yml`: set the registered sample repository's `target.repository` and set `agent.repository_root` to the absolute path of the copied `repos` directory. Keep `agent.skill_root: skills`; it is relative to `run.yml`. `inputs.repo`, `inputs.skill` and `agent.acceptance` select the existing captured-source contract.
 
 ```sh
-oh-goon config inspect ./run.yml
-oh-goon config validate ./run.yml
-oh-goon lock ./run.yml
+oh-goon workflow inspect ./run.yml
+oh-goon workflow validate ./run.yml
+oh-goon workflow prepare ./run.yml
 oh-goon run ./run.yml --json
-oh-goon plan tape RUN_ID --json
+oh-goon runs tape RUN_ID --json
 ```
 
 The Plan imports the project-owned Goon with `from: ./goons`; its unique inputs project from that Goon. The search reads frozen repository bytes, reports evidence for the captured identity and preserves native failure/cancellation results. It does not claim that an absent match proves repository-wide absence. The small `SKILL.md` is product test data; reusable Skills belong to [agentsCookbook](https://github.com/Hugloss/agentsCookbook).

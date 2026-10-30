@@ -277,3 +277,6 @@ class ExecutionCoordinator:
 
     def assert_idle(self, connection: sqlite3.Connection) -> None:
         self._leases.assert_idle(connection)
+
+    def assert_scope_idle(self, connection: sqlite3.Connection) -> None:
+        self._leases.assert_scope_idle(connection)

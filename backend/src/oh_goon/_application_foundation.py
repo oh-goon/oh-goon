@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.capability_registry import capability_definitions
@@ -51,6 +52,8 @@ from oh_goon.services.repository_effect_fence import RepositoryEffectFence
 from oh_goon.services.repository_effect_settlement import RepositoryEffectSettlement
 from oh_goon.services.runtime_safety import RuntimeSafetyService
 
+RuntimeStartupPurpose = Literal["application", "workflow", "observation"]
+
 
 @dataclass(frozen=True, slots=True)
 class RuntimeFoundation:
@@ -84,6 +87,7 @@ class RuntimeFoundation:
     terminal: CommandTerminal | None = None
     standard_process_isolation: ProcessIsolationBackend | None = None
     git_service: GitService | None = None
+    startup_purpose: RuntimeStartupPurpose = "application"
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,13 +112,18 @@ def _build_capability_runtime(
     diagnostics: DiagnosticRouter,
     terminal: CommandTerminal | None = None,
     standard_process_isolation: ProcessIsolationBackend | None = None,
+    startup_purpose: RuntimeStartupPurpose = "application",
 ) -> tuple[FleetExecutorPool, CapabilityExecutor, FleetContentStore]:
     executor_pool = FleetExecutorPool(database, configuration)
     process_isolation_backends = (
         tuple(item.backend for item in configuration.executors) if configuration is not None else ()
     )
     path_authority = configuration.path_authority if configuration is not None else None
-    content_store = FleetContentStore(content_store_root)
+    content_store = (
+        FleetContentStore(content_store_root, initialize=False)
+        if startup_purpose == "observation"
+        else FleetContentStore(content_store_root)
+    )
     runners: dict[CapabilityRunnerKind, CapabilityRunner] = {
         CapabilityRunnerKind.ENGINE: EngineRunner(git),
         CapabilityRunnerKind.RECIPE: UvRecipeRunner(),
@@ -153,8 +162,12 @@ def _require_complete_runner_wiring(
         )
 
 
-def _build_local_state_foundation() -> _LocalStateFoundation:
-    database = LocalDatabase()
+def _build_local_state_foundation(
+    *, startup_purpose: RuntimeStartupPurpose = "application"
+) -> _LocalStateFoundation:
+    database = (
+        LocalDatabase(read_only=True) if startup_purpose == "observation" else LocalDatabase()
+    )
     league_folders = LeagueFolderStore()
     journal = Journal(database)
     execution = ExecutionCoordinator(database)
@@ -164,7 +177,10 @@ def _build_local_state_foundation() -> _LocalStateFoundation:
         mutation_guard=DurableScopeMutationGuard(execution, journal),
         league_folders=league_folders,
     )
-    state.reconcile_league_folders()
+    if startup_purpose == "application" or (
+        startup_purpose == "workflow" and database.initialized_new_state
+    ):
+        state.reconcile_league_folders()
     return _LocalStateFoundation(database, journal, execution, state)
 
 
@@ -175,6 +191,8 @@ def _prove_startup_safety(
     schedule_executions: ScheduleExecutionStore,
     reconciler: RepositoryReconciler,
     settlement: RepositoryEffectSettlement,
+    *,
+    recover: bool = True,
 ) -> tuple[RepositoryEffectRecovery, SystemInvariantAuditor, RuntimeSafetyService]:
     effect_recovery = RepositoryEffectRecovery(
         state.database,
@@ -184,7 +202,8 @@ def _prove_startup_safety(
         reconciler,
         settlement,
     )
-    effect_recovery.recover()
+    if recover:
+        effect_recovery.recover()
     auditor = SystemInvariantAuditor(
         state.database,
         state.journal,
@@ -210,6 +229,7 @@ def build_runtime_foundation(
     terminal: CommandTerminal | None = None,
     standard_process_isolation: ProcessIsolationBackend | None = None,
     git_service: GitService | None = None,
+    startup_purpose: RuntimeStartupPurpose = "application",
 ) -> RuntimeFoundation:
     """Compose the selected local or strict Fleet execution profile.
 
@@ -219,6 +239,8 @@ def build_runtime_foundation(
     """
     from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 
+    if startup_purpose not in {"application", "workflow", "observation"}:
+        raise ValueError("Unknown runtime startup purpose")
     if fleet_provisioner is not None and type(fleet_provisioner) is not FleetPreworkProvisioner:
         raise TrustProtocolError(
             "production Fleet provisioner must be an explicit native authority"
@@ -228,7 +250,7 @@ def build_runtime_foundation(
     # Repository evidence has one required producer in every execution profile.
     # Reject an unavailable runtime before opening state or recovering effects.
     require_loaded_hashmarks_runtime()
-    local = _build_local_state_foundation()
+    local = _build_local_state_foundation(startup_purpose=startup_purpose)
     database = local.database
     state_paths = ApplicationStatePathLayout.from_database(database.path)
     if standard_process_isolation is not None:
@@ -253,9 +275,12 @@ def build_runtime_foundation(
         schedule_executions,
         effect_reconciler,
         effect_settlement,
+        recover=startup_purpose == "application",
     )
     diagnostics = DiagnosticRouter(
-        (
+        (StderrDiagnosticSink(),)
+        if startup_purpose == "observation"
+        else (
             StderrDiagnosticSink(),
             JsonlDiagnosticSink(state_paths.diagnostics_log),
         )
@@ -276,7 +301,11 @@ def build_runtime_foundation(
         )
     )
     supervisor = RunExecutionSupervisor(diagnostics=diagnostics)
-    configuration = configured_executor_pool(control_state_root=state_paths.executor_control)
+    configuration = (
+        None
+        if startup_purpose == "observation"
+        else configured_executor_pool(control_state_root=state_paths.executor_control)
+    )
     path_authority = configuration.path_authority if configuration is not None else None
     extension_store = FleetExtensionStore(state_paths.extensions, path_authority=path_authority)
     tool_store = FleetToolStore(state_paths.plan_tools, path_authority=path_authority)
@@ -294,6 +323,7 @@ def build_runtime_foundation(
         diagnostics=diagnostics,
         terminal=terminal,
         standard_process_isolation=standard_process_isolation,
+        startup_purpose=startup_purpose,
     )
     repository_effects = RepositoryEffectExecution(
         capability_executor,
@@ -337,4 +367,5 @@ def build_runtime_foundation(
         terminal=terminal,
         standard_process_isolation=standard_process_isolation,
         git_service=git,
+        startup_purpose=startup_purpose,
     )

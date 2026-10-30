@@ -13,8 +13,8 @@ from oh_goon.services.run_configuration import load_run_configuration
 def _file(tmp_path: Path, inputs: str = "inputs: {coverage_threshold: 85}\n") -> Path:
     path = tmp_path / "run.yml"
     path.write_text(
-        "version: 1\nsource: {kind: catalog-plan, name: python/quality}\n"
-        "target: {repository_id: selected-repository}\n" + inputs,
+        "version: 2\nsource: {kind: catalog-plan, name: python/quality}\n"
+        "target: {repository: .}\n" + inputs,
         encoding="utf-8",
     )
     return path

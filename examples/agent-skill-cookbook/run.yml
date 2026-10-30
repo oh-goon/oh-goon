@@ -1,6 +1,6 @@
-version: 1
+version: 2
 source: {kind: catalog-plan, name: agents/native-review}
-target: {repository_id: REPOSITORY_ID}
+target: {repository: REPOSITORY_PATH}
 inputs:
   repo: local:my-project
   skill: cookbook/codebase-finding-derivation

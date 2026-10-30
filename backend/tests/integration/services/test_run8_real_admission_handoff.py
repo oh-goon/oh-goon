@@ -50,7 +50,7 @@ class _ResultOperation:
 
 
 def _read(runtime, capsys, *argv: str) -> dict:
-    parsed = build_parser().parse_args(("plan", *argv, "--json"))
+    parsed = build_parser().parse_args(("runs", *argv, "--json"))
     assert run_plan_command(runtime, parsed) == 0
     return json.loads(capsys.readouterr().out)
 
@@ -92,7 +92,7 @@ def test_original_fleet_sqlite_terminal_handoff_restarts_without_hashmarks(
         live_output=GameTapeLiveOutputStore(),
     )
     runtime = SimpleNamespace(runs=reader)
-    status = _read(runtime, capsys, "status", run_id)
+    status = _read(runtime, capsys, "show", run_id)
     handoff = _read(runtime, capsys, "handoff", run_id)
     tape = _read(runtime, capsys, "tape", run_id)
     steps = _read(runtime, capsys, "steps", run_id)

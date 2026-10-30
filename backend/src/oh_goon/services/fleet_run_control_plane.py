@@ -167,7 +167,7 @@ def _recorded_export_artifact(
     if len(matches) != 1:
         raise FleetPlanInvalid(
             "The recorded Step is ambiguous across repositories; select --repository-id "
-            "from 'oh-goon plan steps RUN_ID --json'"
+            "from 'oh-goon runs steps RUN_ID --json'"
         )
     owner, step = matches[0]
     if (
@@ -376,13 +376,26 @@ class FleetRunControlPlane:
                         DiagnosticRouter((StderrDiagnosticSink(),)).emit(event)
 
     def repository_instance_ids_for_prepared_plan(
-        self, target: FleetPlanTarget, *, repository_ids: set[str]
+        self,
+        target: FleetPlanTarget,
+        *,
+        repository_ids: set[str],
+        expected_repository_instance_ids: dict[str, str] | None = None,
     ) -> dict[str, str]:
         intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)
         scope = _requested_repository_scope(
             intent, repository_ids=repository_ids, all_repositories=False
         )
-        return self._admission.repository_instance_ids(intent, repository_scope=scope)
+        instances = self._admission.repository_instance_ids(intent, repository_scope=scope)
+        if (
+            expected_repository_instance_ids is not None
+            and instances != expected_repository_instance_ids
+        ):
+            raise FleetPlanSourceStale(
+                "Schedule repository selection changed during preparation; reload the current "
+                "League before creating the Schedule"
+            )
+        return instances
 
     @contextmanager
     def project_source_transport_for_prepared_plan(

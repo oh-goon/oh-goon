@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.product_identity import repository_id
 from oh_goon.integrations.git_source_preparation import git_source_cache
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -119,7 +120,7 @@ def _registered_target(cli: Callable[..., str], repository: Path) -> str:
 
 
 def _workflow(
-    root: Path, target: str, application: dict[str, str], *, lock_mode: str = "frozen"
+    root: Path, target: Path, application: dict[str, str], *, lock_mode: str = "frozen"
 ) -> Path:
     package = root / "goons/general/independent-orders"
     package.mkdir(parents=True)
@@ -137,9 +138,9 @@ def _workflow(
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": target},
+                "target": {"repository": str(target)},
             },
             sort_keys=False,
         )
@@ -159,8 +160,8 @@ def _run_and_read(
     receipt = json.loads(cli("run", str(selection), "--json", expected=0 if total else 1))
     assert receipt["status"] == "COMPLETED"
     run_id = str(receipt["fleet_run_id"])
-    tape = json.loads(cli("plan", "tape", run_id, "--json"))
-    outputs = json.loads(cli("plan", "outputs", run_id, "--json"))
+    tape = json.loads(cli("runs", "tape", run_id, "--json"))
+    outputs = json.loads(cli("runs", "outputs", run_id, "--json"))
     steps = tape["repositories"][0]["steps"]
     assert [step["step_id"].rsplit(".", 1)[-1] for step in steps] == [
         "extract",
@@ -202,7 +203,7 @@ def test_local_application_uses_unchanged_native_code_and_keeps_three_run_histor
     environment = _cli_environment(tmp_path)
     cli = _cli(tmp_path, environment)
     target = _registered_target(cli, repository)
-    selected = _workflow(tmp_path / "workflow", target, {"path": str(application)})
+    selected = _workflow(tmp_path / "workflow", repository, {"path": str(application)})
 
     # This is the actual standalone orders application, without its workflow.
     # Native development installs the same entrypoint the separate Goon invokes.
@@ -231,13 +232,13 @@ def test_local_application_uses_unchanged_native_code_and_keeps_three_run_histor
     assert json.loads((direct_output / ".showcase/result.json").read_text()) == {
         "total_order_value": "1236.70"
     }
-    inspection = json.loads(cli("config", "inspect", str(selected), "--json"))
+    inspection = json.loads(cli("workflow", "inspect", str(selected), "--json"))
     assert inspection["status"] == "inputs-valid"
 
     history = []
     for fixture, total in (("official", "1236.70"), ("invalid", None), ("changed", "60.00")):
         _select(selected, fixture)
-        cli("lock", str(selected))
+        cli("workflow", "prepare", str(selected))
         run_id, tape, outputs = _run_and_read(cli, selected, total, repository_id=target)
         steps = tape["repositories"][0]["steps"]
         source = steps[0]["project_source"]
@@ -279,11 +280,11 @@ def test_local_application_uses_unchanged_native_code_and_keeps_three_run_histor
     # all attempt workspaces are gone; later success cannot rewrite old failure.
     shutil.rmtree(selected.parent)
     for run_id, original_tape, original_outputs in history:
-        reopened = json.loads(cli("plan", "tape", run_id, "--json"))
+        reopened = json.loads(cli("runs", "tape", run_id, "--json"))
         for field in ("status", "execution_reference", "configuration", "repositories"):
             assert reopened[field] == original_tape[field]
         assert (
-            json.loads(cli("plan", "outputs", run_id, "--json"))["repositories"]
+            json.loads(cli("runs", "outputs", run_id, "--json"))["repositories"]
             == (original_outputs["repositories"])
         )
 
@@ -299,8 +300,8 @@ def test_git_application_keeps_its_own_pin_across_ref_changes_and_cache_loss(
     cli = _cli(tmp_path, environment)
     target = _registered_target(cli, repository)
     coordinates = {"git": str(repository), "ref": "main", "path": subdirectory}
-    selected = _workflow(tmp_path / "workflow", target, coordinates)
-    cli("lock", str(selected))
+    selected = _workflow(tmp_path / "workflow", repository, coordinates)
+    cli("workflow", "prepare", str(selected))
     lock_path = selected.with_name("goon.lock")
     original_lock = yaml.safe_load(lock_path.read_text())
 
@@ -323,14 +324,14 @@ def test_git_application_keeps_its_own_pin_across_ref_changes_and_cache_loss(
     }
     (application / "src/orders_pipeline/data/official.json").write_text('{"1001":5.00}\n')
     changed_commit = _commit(repository)
-    cli("lock", str(selected))
+    cli("workflow", "prepare", str(selected))
     assert yaml.safe_load(lock_path.read_text()) == original_lock
-    cli("lock", str(selected), "--update-goons")
+    cli("workflow", "prepare", str(selected), "--refresh", "goons")
     assert pin()["commit"] == original_commit
     shutil.rmtree(git_source_cache(environment))
     _, retained_tape, _ = _run_and_read(cli, selected, "1236.70", repository_id=target)
     assert retained_tape["repositories"][0]["steps"][0]["project_source"] == captured
-    cli("lock", str(selected), "--update-applications")
+    cli("workflow", "prepare", str(selected), "--refresh", "applications")
     assert pin()["commit"] == changed_commit
     _, refreshed_tape, _ = _run_and_read(cli, selected, "5.00", repository_id=target)
     refreshed = refreshed_tape["repositories"][0]["steps"][0]["project_source"]
@@ -351,8 +352,8 @@ def test_registered_filesystem_application_runs_and_exports_without_git(tmp_path
     assert json.loads(cli("league", "scan", "--json"))["teams"] == []
     workflow = tmp_path / "workflow"
     cli(
-        "templates",
         "init",
+        "--template",
         "general/orders-taskflow",
         "--kind",
         "goon",
@@ -362,7 +363,7 @@ def test_registered_filesystem_application_runs_and_exports_without_git(tmp_path
         str(workflow),
     )
     selection = workflow / "run.yml"
-    target = yaml.safe_load(selection.read_text())["target"]["repository_id"]
+    target = repository_id(repository)
     package = workflow / "goons/general/independent-orders"
     package.mkdir(parents=True)
     (package / "README.md").write_text("# general/independent-orders\n")
@@ -386,11 +387,14 @@ def test_registered_filesystem_application_runs_and_exports_without_git(tmp_path
     (workflow / "plan.yml").write_text(
         "goons:\n- import: general/independent-orders\n  from: ./goons\n"
     )
-    cli("lock", str(selection))
+    selected = yaml.safe_load(selection.read_text())
+    selected.pop("inputs", None)
+    selection.write_text(yaml.safe_dump(selected))
+    cli("workflow", "prepare", str(selection))
     receipt = json.loads(cli("run", str(selection), "--json"))
     assert receipt["outcome"] == "SUCCESS"
     run_id = receipt["fleet_run_id"]
-    tape = json.loads(cli("plan", "tape", run_id, "--json"))
+    tape = json.loads(cli("runs", "tape", run_id, "--json"))
     recorded_repository = tape["repositories"][0]
     assert recorded_repository["repository"]["repository_id"] == target
     assert Path(recorded_repository["repository"]["path"]) == repository
@@ -409,12 +413,12 @@ def test_registered_filesystem_application_runs_and_exports_without_git(tmp_path
     assert list(scratch.iterdir()) == []
     shutil.rmtree(repository)
     shutil.rmtree(workflow)
-    reopened = json.loads(cli("plan", "tape", run_id, "--json"))
+    reopened = json.loads(cli("runs", "tape", run_id, "--json"))
     assert reopened["repositories"] == tape["repositories"]
     destination = tmp_path / "retained-orders.json"
     exported = json.loads(
         cli(
-            "plan",
+            "runs",
             "export-artifact",
             run_id,
             "--step",
@@ -442,7 +446,7 @@ def test_plain_application_source_does_not_require_python_or_goon_metadata(
     assert set(path.name for path in repository.iterdir()) == {"scripts", ".git"}
     environment = _cli_environment(tmp_path)
     cli = _cli(tmp_path, environment)
-    target = _registered_target(cli, repository)
+    _registered_target(cli, repository)
     workflow = tmp_path / "workflow"
     package = workflow / "goons/general/shell-application"
     package.mkdir(parents=True)
@@ -459,16 +463,16 @@ def test_plain_application_source_does_not_require_python_or_goon_metadata(
     selected.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": target},
+                "target": {"repository": str(repository)},
             }
         )
     )
-    cli("lock", str(selected))
+    cli("workflow", "prepare", str(selected))
     receipt = json.loads(cli("run", str(selected), "--json"))
     assert receipt["outcome"] == "SUCCESS"
-    tape = json.loads(cli("plan", "tape", receipt["fleet_run_id"], "--json"))
+    tape = json.loads(cli("runs", "tape", receipt["fleet_run_id"], "--json"))
     step = tape["repositories"][0]["steps"][0]
     assert step["status"] == "PASSED" and step["settlement"]["cleanup"] == "VERIFIED"
     assert step["uv"] is None
@@ -485,7 +489,7 @@ def test_application_retained_result_exports_after_attempt_disposal(tmp_path: Pa
     environment = _cli_environment(tmp_path)
     cli = _cli(tmp_path, environment)
     target = _registered_target(cli, repository)
-    selected = _workflow(tmp_path / "workflow", target, {"path": str(application)})
+    selected = _workflow(tmp_path / "workflow", repository, {"path": str(application)})
     goon = selected.parent / "goons/general/independent-orders/goon.yml"
     declaration = yaml.safe_load(goon.read_text())
     declaration["steps"] = [
@@ -495,10 +499,10 @@ def test_application_retained_result_exports_after_attempt_disposal(tmp_path: Pa
         }
     ]
     goon.write_text(yaml.safe_dump(declaration, sort_keys=False))
-    cli("lock", str(selected))
+    cli("workflow", "prepare", str(selected))
     receipt = json.loads(cli("run", str(selected), "--json"))
     assert receipt["outcome"] == "SUCCESS"
-    tape = json.loads(cli("plan", "tape", receipt["fleet_run_id"], "--json"))
+    tape = json.loads(cli("runs", "tape", receipt["fleet_run_id"], "--json"))
     (step,) = tape["repositories"][0]["steps"]
     assert step["status"] == "PASSED" and step["settlement"]["cleanup"] == "VERIFIED"
     assert step["project_source"]["application"] == {"path": str(application)}
@@ -524,7 +528,7 @@ def test_application_retained_result_exports_after_attempt_disposal(tmp_path: Pa
     destination = tmp_path / "retained result.json"
     exported = json.loads(
         cli(
-            "plan",
+            "runs",
             "export-artifact",
             receipt["fleet_run_id"],
             "--step",
@@ -551,8 +555,8 @@ def test_repeated_application_occurrences_preserve_independent_output_lineage(
     application = _orders_application(repository)
     environment = _cli_environment(tmp_path)
     cli = _cli(tmp_path, environment)
-    target = _registered_target(cli, repository)
-    selected = _workflow(tmp_path / "workflow", target, {"path": str(application)})
+    _registered_target(cli, repository)
+    selected = _workflow(tmp_path / "workflow", repository, {"path": str(application)})
     selected.with_name("plan.yml").write_text(
         yaml.safe_dump(
             {
@@ -568,10 +572,10 @@ def test_repeated_application_occurrences_preserve_independent_output_lineage(
             }
         )
     )
-    cli("lock", str(selected))
+    cli("workflow", "prepare", str(selected))
     receipt = json.loads(cli("run", str(selected), "--json"))
     assert receipt["outcome"] == "SUCCESS"
-    tape = json.loads(cli("plan", "tape", receipt["fleet_run_id"], "--json"))
+    tape = json.loads(cli("runs", "tape", receipt["fleet_run_id"], "--json"))
     steps = tape["repositories"][0]["steps"]
     assert len(steps) == len({step["step_id"] for step in steps}) == 6
     assert len({step["project_source"]["content_sha256"] for step in steps}) == 1
@@ -611,8 +615,10 @@ def test_application_uv_lock_mode_matches_native_uv_without_rewriting_source(
 
     cli = _cli(tmp_path, environment)
     target = _registered_target(cli, repository)
-    selected = _workflow(tmp_path / "workflow", target, {"path": str(application)}, lock_mode=mode)
-    cli("lock", str(selected))
+    selected = _workflow(
+        tmp_path / "workflow", repository, {"path": str(application)}, lock_mode=mode
+    )
+    cli("workflow", "prepare", str(selected))
     if mode == "frozen":
         _, tape, _ = _run_and_read(cli, selected, "1236.70", repository_id=target)
         preparation = tape["repositories"][0]["steps"][0]["attempts"][0]["uv_preparation"]
@@ -620,7 +626,7 @@ def test_application_uv_lock_mode_matches_native_uv_without_rewriting_source(
     else:
         receipt = json.loads(cli("run", str(selected), "--json", expected=1))
         assert receipt["outcome"] != "SUCCESS"
-        tape = json.loads(cli("plan", "tape", receipt["fleet_run_id"], "--json"))
+        tape = json.loads(cli("runs", "tape", receipt["fleet_run_id"], "--json"))
         steps = tape["repositories"][0]["steps"]
         assert [step["status"] for step in steps] == ["FAILED", "SKIPPED", "SKIPPED"]
         assert not steps[-1]["artifacts"]
@@ -636,7 +642,7 @@ def test_independent_application_example_runs_after_replacing_its_placeholders(
     application = _orders_application(repository)
     environment = _cli_environment(tmp_path)
     cli = _cli(tmp_path, environment)
-    target = _registered_target(cli, repository)
+    _registered_target(cli, repository)
     workflow = tmp_path / "workflow"
     shutil.copytree(ROOT / "examples/independent-application", workflow)
     declarations = tuple(workflow.rglob("goon.yml"))
@@ -648,21 +654,21 @@ def test_independent_application_example_runs_after_replacing_its_placeholders(
     goon.write_text(yaml.safe_dump(declaration, sort_keys=False))
     selected = workflow / "run.yml"
     configuration = yaml.safe_load(selected.read_text())
-    configuration["target"]["repository_id"] = target
+    configuration["target"] = {"repository": str(repository)}
     selected.write_text(yaml.safe_dump(configuration, sort_keys=False))
-    inspection = json.loads(cli("config", "inspect", str(selected), "--json"))
+    inspection = json.loads(cli("workflow", "inspect", str(selected), "--json"))
     assert inspection["status"] == "inputs-valid"
-    cli("config", "validate", str(selected), "--json")
-    cli("lock", str(selected))
+    cli("workflow", "validate", str(selected), "--json")
+    cli("workflow", "prepare", str(selected))
     receipt = json.loads(cli("run", str(selected), "--json"))
     assert receipt["outcome"] == "SUCCESS"
-    tape = json.loads(cli("plan", "tape", receipt["fleet_run_id"], "--json"))
+    tape = json.loads(cli("runs", "tape", receipt["fleet_run_id"], "--json"))
     assert tape["status"] == "PASSED"
     step = tape["repositories"][0]["steps"][0]
     assert step["project_source"]["application"]["path"] == str(application)
     assert step["uv"]["lock_mode"] == "frozen"
     assert step["settlement"]["cleanup"] == "VERIFIED"
-    handoff = json.loads(cli("plan", "handoff", receipt["fleet_run_id"], "--json"))
+    handoff = json.loads(cli("runs", "handoff", receipt["fleet_run_id"], "--json"))
     assert handoff["recorded_steps"]["steps"][0]["project_source"] == step["project_source"]
     assert not (application / ".showcase").exists()
     assert _git(repository, "status", "--porcelain") == ""
@@ -676,8 +682,8 @@ def test_python_application_cannot_fall_back_to_an_uninstalled_host_command(
     application = _orders_application(repository)
     environment = _cli_environment(tmp_path)
     cli = _cli(tmp_path, environment)
-    target = _registered_target(cli, repository)
-    selected = _workflow(tmp_path / "workflow", target, {"path": str(application)})
+    _registered_target(cli, repository)
+    selected = _workflow(tmp_path / "workflow", repository, {"path": str(application)})
     goon = selected.parent / "goons/general/independent-orders/goon.yml"
     declaration = yaml.safe_load(goon.read_text())
     declaration["steps"] = [
@@ -685,10 +691,10 @@ def test_python_application_cannot_fall_back_to_an_uninstalled_host_command(
         {"run": "orders-pipeline run --fixture official"},
     ]
     goon.write_text(yaml.safe_dump(declaration, sort_keys=False))
-    cli("lock", str(selected))
+    cli("workflow", "prepare", str(selected))
     receipt = json.loads(cli("run", str(selected), "--json", expected=1))
     assert receipt["outcome"] != "SUCCESS"
-    tape = json.loads(cli("plan", "tape", receipt["fleet_run_id"], "--json"))
+    tape = json.loads(cli("runs", "tape", receipt["fleet_run_id"], "--json"))
     steps = tape["repositories"][0]["steps"]
     assert [step["status"] for step in steps] == ["FAILED", "SKIPPED"]
     assert not (application / ".showcase").exists()
@@ -701,16 +707,16 @@ def test_application_escape_refuses_before_native_install_and_preserves_prior_lo
     application = _orders_application(repository)
     environment = _cli_environment(tmp_path)
     cli = _cli(tmp_path, environment)
-    target = _registered_target(cli, repository)
-    selected = _workflow(tmp_path / "workflow", target, {"path": str(application)})
-    cli("lock", str(selected))
+    _registered_target(cli, repository)
+    selected = _workflow(tmp_path / "workflow", repository, {"path": str(application)})
+    cli("workflow", "prepare", str(selected))
     lock = selected.with_name("goon.lock")
     valid_lock = lock.read_bytes()
     assert not (application / ".venv").exists()
     outside = tmp_path / "unselected-private-file"
     outside.write_text("UNSELECTED_PRIVATE_CONTENT")
     (application / "escaping-resource").symlink_to(outside)
-    rejected = cli("lock", str(selected), expected=2)
+    rejected = cli("workflow", "prepare", str(selected), expected=2)
     assert "UNSELECTED_PRIVATE_CONTENT" not in rejected
     assert lock.read_bytes() == valid_lock
     assert not (application / ".venv").exists()

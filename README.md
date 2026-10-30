@@ -98,13 +98,13 @@ Frontend development materialization is npm-owned. `make init` and `make fronten
 
 ### Built release
 
-`oh-goon start` is for built releases only. An installed release contains the built React UI and does not require Node/npm at runtime:
+`oh-goon app start` is for built releases only. An installed release contains the built React UI and does not require Node/npm at runtime:
 
 ```bash
-oh-goon start
+oh-goon app start
 ```
 
-Open the exact `http://127.0.0.1:8787/#access=...` URL printed by `oh-goon start`. If you are working from a source checkout, use `make dev` instead.
+Open the exact `http://127.0.0.1:8787/#access=...` URL printed by `oh-goon app start`. If you are working from a source checkout, use `make dev` instead.
 
 Global installation is optional. The source `make cli-install` target builds a
 standard wheel and therefore needs
@@ -124,31 +124,42 @@ Both modes resolve into the same immutable execution representation and then use
 
 Choose folders in the UI to discover Git repositories. Every discovered Git root remains visible as a repository; missing or invalid `goon.yml` files are reported rather than silently skipped.
 
-For normal CLI work, register the target folder and select its repository path
-when creating one `run.yml`:
+For a trusted local Python project, initialize a workflow and run it:
 
 ```bash
-oh-goon league add-folder /absolute/path/to/repository
-oh-goon templates init python/quality --kind plan --output ./workflow --repository /absolute/path/to/repository
-# Edit relevant workflow/run.yml inputs for the selected project.
-oh-goon lock ./workflow/run.yml
-oh-goon run ./workflow/run.yml
+oh-goon init --template python/quality --repository /absolute/path/to/project --no-input
+oh-goon run ./workflow --no-input
 ```
 
-The path must identify a registered repository; initialization fills its target
-ID in `run.yml`. Ordinary verification uses trusted local execution. The
-selected project supplies its own native lock and declared tools.
-`templates list --kind plan`, `config inspect` and `config validate` are optional
-discovery and diagnostics before locking.
-Inspection is local and read-only. Validation proves the selected source and
-typed inputs; neither diagnostic grants permission or proves native prerequisites.
-Locking freezes execution identity, and Run admission checks freshness before
-effects. The [configuration guide](docs/development/TEMPLATE_INPUT_INSPECTION.md)
-explains catalog, file, repository Goon and pinned Git selections and their owners.
+The project supplies its native `pyproject.toml`, `uv.lock` and declared tools.
+Initialization validates caller choices, explicitly registers that exact Git root
+when needed, and publishes `workflow/run.yml` with its first canonical `goon.lock`.
+It reports registration and publication separately if a later operation fails.
+An existing destination is refused. `--kind plan` is the default; select
+`--kind goon` for a single catalog Goon.
 
-This is a clean replacement of the former Plan-path plus input/agent flag
-assembly. Unsupported commands, old selection files and unknown schema versions
-are refused; there is no compatibility parser, conversion or fallback route.
+`run.yml` uses `version: 2` and `target.repository`, a path relative to the
+selection file's directory or an explicit absolute path. Repeated `--repository`
+selects one Plan over an exact set in `target.repositories`; Repository Goons
+and Agent/repair workflows remain singular. Existing registered
+filesystem subjects remain usable. Target selection never searches parent Git
+roots or registers a container's descendants. After editing source or inputs,
+review the change and run `oh-goon workflow prepare ./workflow` before running.
+Run performs fresh Fleet admission and waits for the recorded terminal outcome.
+
+`templates list`, `workflow inspect`, `workflow validate` and stateless `doctor`
+provide optional discovery and diagnostics. Inspection and validation are local
+and read-only by default; `--acquire` explicitly permits source acquisition.
+Neither diagnostic proves native prerequisites or grants execution authority.
+Use `init --draft` for incomplete Agent/repair authoring; it reports NOT_READY
+and requires completion and explicit preparation. The
+[configuration guide](docs/development/TEMPLATE_INPUT_INSPECTION.md) owns the full
+source, input, target and effect contract.
+
+The common commands are `init`, `workflow`, `run`, `runs` and `doctor`. Built app
+lifecycle commands live under `app`. Superseded `config`, `lock`, `templates init`,
+Plan readback aliases and v1 selection files are refused. Historical Run and
+recovery facts remain readable through their original owners.
 
 ## Plan → Goon → Step
 

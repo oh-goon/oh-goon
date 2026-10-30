@@ -536,15 +536,15 @@ def test_shared_agent_uses_selected_skill_root_lock_and_recovers_exact_git_pin(
     configuration.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": selected["repository_ids"][0]},
+                "target": {"repository": str(root / "repos/repo")},
                 "inputs": selected["inputs"],
                 "agent": {**selected["agent"], "skill_root": "."},
             }
         )
     )
-    assert main(["lock", str(configuration)]) == 0
+    assert main(["workflow", "prepare", str(configuration)]) == 0
     capsys.readouterr()
     lock_path = root / "goon.lock"
     lock_bytes = lock_path.read_bytes()

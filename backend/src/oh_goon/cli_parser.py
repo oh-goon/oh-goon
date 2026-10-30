@@ -4,8 +4,8 @@ import argparse
 from pathlib import Path
 
 from oh_goon import __version__
-from oh_goon.cli_parser_goons import add_goon_commands
-from oh_goon.cli_parser_plans import add_plan_commands
+from oh_goon.cli_parser_goons import add_goon_commands, add_init_command
+from oh_goon.cli_parser_plans import add_plan_commands, add_workflow_commands
 from oh_goon.core import engine_policy_defaults as policy_defaults
 from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.capability_registry import capability_definitions
@@ -22,6 +22,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     subparsers = parser.add_subparsers(dest="command")
 
+    add_init_command(subparsers)
+    add_workflow_commands(subparsers)
+    doctor = subparsers.add_parser(
+        "doctor", help="Check native CLI tools without initializing application state"
+    )
+    doctor.add_argument(
+        "--runtime",
+        action="store_true",
+        help="Explicitly initialize and inspect the original runtime health owner",
+    )
+    doctor.add_argument("--json", action="store_true", dest="as_json")
     _add_agent_commands(subparsers)
     from oh_goon.cli_ai import add_ai_command
 
@@ -62,25 +73,27 @@ def _add_agent_commands(subparsers: argparse._SubParsersAction[argparse.Argument
 def _add_local_app_commands(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    subparsers.add_parser(
+    app = subparsers.add_parser("app", help="Start, inspect or stop the local application")
+    commands = app.add_subparsers(dest="app_command", required=True)
+    commands.add_parser(
         "start",
         help="Start the complete local app from the bundled UI; no Node/npm runtime required",
     )
-    status = subparsers.add_parser(
+    status = commands.add_parser(
         "status", help="Show the exact current launch bound to this workspace"
     )
     status.add_argument("--json", action="store_true", dest="as_json")
-    subparsers.add_parser(
+    commands.add_parser(
         "open", help="Open the exact observed ready endpoint for this workspace launch"
     )
-    logs = subparsers.add_parser(
+    logs = commands.add_parser(
         "logs", help="Show safe structured Launch Events for this workspace launch"
     )
     logs.add_argument("--json", action="store_true", dest="as_json")
-    subparsers.add_parser(
+    commands.add_parser(
         "stop", help="Request stop from the exact birth-proven owner of this workspace launch"
     )
-    serve = subparsers.add_parser("serve", help="Start the local FastAPI server")
+    serve = commands.add_parser("serve", help="Start the local FastAPI server")
     serve.add_argument(
         "--host",
         default="127.0.0.1",
@@ -88,7 +101,6 @@ def _add_local_app_commands(
         help="Loopback host only; oh-goon never binds to a public interface.",
     )
     serve.add_argument("--port", type=int, default=8787)
-    subparsers.add_parser("doctor", help="Check required and optional local tools")
 
 
 def _add_local_state_commands(

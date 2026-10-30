@@ -347,9 +347,9 @@ def test_schedule_keeps_captured_package_after_source_removal_and_serialization(
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": repository_id(repository)},
+                "target": {"repository": str(repository)},
             }
         )
     )

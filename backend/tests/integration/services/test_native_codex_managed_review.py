@@ -312,7 +312,6 @@ def test_installed_managed_codex_reviews_without_workspace_or_host_effects(
                 detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=70)
             else:
                 from oh_goon.cli import main
-                from oh_goon.core.product_identity import repository_id
 
                 config = catalog.model_dump(mode="json")
                 config["native_agents"] = {"codex": selected.definition.model_dump(mode="json")}
@@ -329,13 +328,16 @@ def test_installed_managed_codex_reviews_without_workspace_or_host_effects(
                     assert (
                         main(
                             [
-                                "templates",
                                 "init",
+                                "--template",
                                 "agents/native-review",
                                 "--kind",
                                 kind,
                                 "--output",
                                 str(workflow),
+                                "--repository",
+                                str(repo),
+                                "--draft",
                             ]
                         )
                         == 0
@@ -343,7 +345,7 @@ def test_installed_managed_codex_reviews_without_workspace_or_host_effects(
                 selection = workflow / "run.yml"
                 shutil.copytree(skill, workflow / "skills/managed")
                 payload = yaml.safe_load(selection.read_text())
-                payload["target"]["repository_id"] = repository_id(repo)
+                payload["target"] = {"repository": str(repo)}
                 payload["inputs"] = {"repo": "local:app", "skill": "local:managed", "goal": _TASK}
                 payload["agent"] = {
                     "implementation": "codex",
@@ -355,11 +357,11 @@ def test_installed_managed_codex_reviews_without_workspace_or_host_effects(
                 selection.write_text(yaml.safe_dump(payload, sort_keys=False))
                 for command in ("inspect", "validate"):
                     with redirect_stdout(StringIO()) as output:
-                        result = main(["config", command, str(selection), "--json"])
+                        result = main(["workflow", command, str(selection), "--json"])
                     assert result == 0, output.getvalue()
                     assert json.loads(output.getvalue())["status"] == "inputs-valid"
                 with redirect_stdout(StringIO()):
-                    assert main(["lock", str(selection)]) == 0
+                    assert main(["workflow", "prepare", str(selection)]) == 0
                 assert endpoint.request_count == 0
                 with redirect_stdout(StringIO()) as output:
                     result = main(["run", str(selection), "--json"])

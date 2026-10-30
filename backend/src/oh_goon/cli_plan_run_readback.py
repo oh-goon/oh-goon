@@ -24,9 +24,31 @@ def _print_json(value: object) -> None:
     print(json.dumps(value, sort_keys=True, ensure_ascii=False))
 
 
+def run_completion_facts(detail: FleetRunDetail) -> dict[str, object]:
+    """Use the original Game Tape summary and guidance from this exact read cut."""
+    tape = detail.game_tape
+    summary = tape.summary
+    return {
+        "steps": {
+            "planned": summary.planned_steps,
+            "executed": summary.executed_steps,
+            "passed": summary.passed_steps,
+            "failed": summary.failed_steps,
+            "skipped": summary.skipped_steps,
+            "not_run": summary.not_run_steps,
+        },
+        "why_not": tape.why_not.model_dump(mode="json") if tape.why_not is not None else None,
+    }
+
+
 def print_run_completion(detail: FleetRunDetail) -> None:
     """Show bounded original completion evidence from the supplied terminal read cut."""
     tape = detail.game_tape
+    summary = tape.summary
+    print(
+        f"Steps: {summary.executed_steps} executed; {summary.passed_steps} passed; "
+        f"{summary.failed_steps} failed; {summary.skipped_steps} skipped; {summary.not_run_steps} not run"
+    )
     if tape.why_not is not None:
         print(f"Failure: {tape.why_not.code}: {tape.why_not.message}")
         print(f"Next action: {tape.why_not.safe_next_action}")
@@ -49,7 +71,7 @@ def print_run_completion(detail: FleetRunDetail) -> None:
         ("Inspect outputs", "outputs"),
         ("Read logs (while available)", "logs"),
     ):
-        print(f"{label}: " + shlex.join(("oh-goon", "plan", command, detail.run.fleet_run_id)))
+        print(f"{label}: " + shlex.join(("oh-goon", "runs", command, detail.run.fleet_run_id)))
 
 
 def _print_completion_outputs(tape: GameTape, *, fleet_run_id: str) -> None:
@@ -83,7 +105,7 @@ def _print_completion_outputs(tape: GameTape, *, fleet_run_id: str) -> None:
                     + shlex.join(
                         (
                             "oh-goon",
-                            "plan",
+                            "runs",
                             "export-artifact",
                             fleet_run_id,
                             "--repository-id",
@@ -186,7 +208,7 @@ def _tape(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 if step.reason is not None:
                     print(f"    Recorded reason: {step.reason}")
         print(
-            "For durable output evidence use 'plan outputs'; for transient bytes use 'plan logs'."
+            "For durable output evidence use 'plan outputs'; for transient bytes use 'runs logs'."
         )
     return 0
 
@@ -279,7 +301,7 @@ def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                     f"{len(step_output['outputs'])} published outputs, "
                     f"{len(step_output['artifacts'])} artifacts"
                 )
-        print("Evidence metadata only; raw output uses 'plan logs' when available.")
+        print("Evidence metadata only; raw output uses 'runs logs' when available.")
     return 0
 
 
@@ -288,7 +310,7 @@ def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 # All destinations are the existing read-only Plan CLI views; consumers still
 # decide which evidence to inspect and the original owner decides its meaning.
 _READBACK_EVIDENCE_KINDS = (
-    ("status", "durable_run_projection"),
+    ("show", "durable_run_projection"),
     ("events", "durable_journal"),
     ("tape", "durable_game_tape_projection"),
     ("steps", "durable_game_tape_projection"),
@@ -301,7 +323,7 @@ def _readback_references(fleet_run_id: str) -> dict[str, dict[str, object]]:
     """Render navigable original views without classifying the Run or logs."""
     views: dict[str, dict[str, object]] = {}
     for command, evidence_kind in _READBACK_EVIDENCE_KINDS:
-        argv = ["oh-goon", "plan", command, fleet_run_id]
+        argv = ["oh-goon", "runs", command, fleet_run_id]
         item: dict[str, object] = {"argv": argv, "evidence_kind": evidence_kind}
         if command == "events":
             argv.extend(("--after", "0", "--limit", "100"))
@@ -493,6 +515,7 @@ def _campaign(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 
 
 _READ_COMMANDS = {
+    "show": _status,
     "status": _status,
     "events": _events,
     "logs": _logs,
@@ -507,7 +530,8 @@ _READ_COMMANDS = {
 def run_plan_readback(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     """Dispatch presentation only; do not interpret Run truth or start work."""
     try:
-        return _READ_COMMANDS[args.plan_command](runtime, args)
+        command = args.runs_command if args.command == "runs" else args.plan_command
+        return _READ_COMMANDS[command](runtime, args)
     except FleetDomainError as exc:
         if args.as_json:
             _print_json(
