@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import { StatusBadge } from "@/components/common/StatusBadge";
-import type { GameTapeFailureHistory, GameTapeStepExecution } from "@generated/models";
-import type { GameTapeArtifact } from "@/features/game-tape/gameTapeArtifacts";
+import type { GameTapeArtifactObservation, GameTapeFailureHistory, GameTapeStepExecution } from "@generated/models";
+import type { GameTapeArtifact, GameTapeArtifactOwner } from "@/features/game-tape/gameTapeArtifacts";
 import { GameTapeStepArtifacts } from "@/features/game-tape/components/GameTapeStepArtifacts";
 import { GameTapeNativeAgentObservations } from "@/features/game-tape/components/GameTapeNativeAgentObservations";
 import { GameTapeProjectSource } from "@/features/game-tape/components/GameTapeProjectSource";
@@ -16,7 +16,7 @@ import {
   statusTone,
 } from "@/features/game-tape/gameTapeFormat";
 
-export function GameTapeStepInspector({ step, artifacts = [], failureHistory = null, failureHistoryLoading = false, technicalOpen = false, onClose, onOpenEvidence, onPreviousFailure, onNextFailure, onComparePreviousOccurrence, onTechnicalOpenChange }: { step: GameTapeStepExecution; artifacts?: readonly GameTapeArtifact[]; failureHistory?: GameTapeFailureHistory | null; failureHistoryLoading?: boolean; technicalOpen?: boolean; onClose?(): void; onOpenEvidence?(): void; onPreviousFailure?(): void; onNextFailure?(): void; onComparePreviousOccurrence?(): void; onTechnicalOpenChange?: (open: boolean) => void }) {
+export function GameTapeStepInspector({ step, artifacts = [], artifactOwner, observation, failureHistory = null, failureHistoryLoading = false, technicalOpen = false, onClose, onOpenEvidence, onPreviousFailure, onNextFailure, onComparePreviousOccurrence, onTechnicalOpenChange }: { step: GameTapeStepExecution; artifacts?: readonly GameTapeArtifact[]; artifactOwner?: GameTapeArtifactOwner; observation?: GameTapeArtifactObservation | null; failureHistory?: GameTapeFailureHistory | null; failureHistoryLoading?: boolean; technicalOpen?: boolean; onClose?(): void; onOpenEvidence?(): void; onPreviousFailure?(): void; onNextFailure?(): void; onComparePreviousOccurrence?(): void; onTechnicalOpenChange?: (open: boolean) => void }) {
   const { t } = useTranslation();
   const renderIdentity = step.step_execution_id;
   const currentIdentity = useRef(renderIdentity);
@@ -80,7 +80,7 @@ export function GameTapeStepInspector({ step, artifacts = [], failureHistory = n
         <small>{t("gameTape.failureHistory.contract")}</small>
       </> : null}
     </section> : null}
-    <GameTapeStepArtifacts artifacts={artifacts} ownerIdentity={step.step_execution_id} />
+    <GameTapeStepArtifacts artifacts={artifacts} ownerIdentity={step.step_execution_id} artifactOwner={artifactOwner} observation={observation} />
     <section className="game-tape-provenance" aria-label={t("gameTape.settlement.title")}>
       <strong>{t("gameTape.settlement.title")}</strong>
       {step.settlement ? <dl className="game-tape-inspector__facts">

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable, Iterator
+from functools import partial
 from os import PathLike
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -26,7 +27,12 @@ from oh_goon.core.models.fleet_plan_evidence import (
 )
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_step_primitives import PlanArtifactDeclaration
-from oh_goon.core.models.game_tape import GameTapeStepExecution, GameTapeWhy
+from oh_goon.core.models.game_tape import (
+    GameTapeArtifactObservation,
+    GameTapeArtifactObservationBudget,
+    GameTapeStepExecution,
+    GameTapeWhy,
+)
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import (
     CompletedFleetRun,
@@ -118,7 +124,9 @@ def export_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
         artifacts=(artifact,),
         why=GameTapeWhy(declaration="train", reached=True, explanation="Declared training Step"),
     )
-    recorded_repository = SimpleNamespace(repository=repository, steps=(step,))
+    recorded_repository = SimpleNamespace(
+        repository=repository, steps=(step,), repository_execution_id="recorded-repository"
+    )
     target = structural_fleet_plan_target(plan)
     now = utc_now()
     run = CompletedFleetRun(
@@ -137,6 +145,7 @@ def export_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
         FleetRunDetail,
         SimpleNamespace(
             run=run,
+            journal_revision=17,
             game_tape=SimpleNamespace(
                 status=GameTapeStatus.PASSED, repositories=(recorded_repository,)
             ),
@@ -648,3 +657,272 @@ def test_postpublication_durability_failure_identifies_visible_destination(
     )
     assert export_case.destination.read_bytes() == export_case.payload
     assert not list(export_case.destination.parent.glob(".oh-goon-export-*"))
+
+
+def _observe(
+    case: SimpleNamespace, budget: GameTapeArtifactObservationBudget | None = None
+) -> GameTapeArtifactObservation:
+    owner: FleetRunControlPlane = case.owner
+    return owner._observe_artifact_availability(
+        case.detail, budget or GameTapeArtifactObservationBudget()
+    )
+
+
+def test_artifact_observation_verifies_then_rechecks_released_reference(
+    export_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import oh_goon.services.fleet_run_control_plane as module
+
+    case = export_case
+    monkeypatch.setattr(module, "TemporaryDirectory", partial(TemporaryDirectory, dir=tmp_path))
+    before = case.step.model_dump(mode="json")
+    first = _observe(case)
+    item = first.observations[0]
+    assert (item.status, item.reason, item.staging_cleanup) == ("AVAILABLE", "VERIFIED", "VERIFIED")
+    assert first.journal_revision == 17
+    assert first.total_artifacts == 1 and first.omitted_artifacts == 0
+    assert first.bytes_scheduled == case.artifact.byte_count
+    assert not list(tmp_path.glob(".oh-goon-artifact-observation-*"))
+    case.store.release_reference(
+        case.retained.reference_id, owner_repository_id=case.retained.owner_repository_id
+    )
+    second = _observe(case)
+    assert (second.observations[0].status, second.observations[0].reason) == (
+        "UNAVAILABLE",
+        "REFERENCE_UNAVAILABLE",
+    )
+    assert first.observations[0].status == "AVAILABLE"
+    assert case.step.model_dump(mode="json") == before
+    with pytest.raises(FleetPlanInvalid):
+        _export(case)
+
+
+@pytest.mark.parametrize(
+    "defect", ["missing-object", "same-size-corruption", "raw-sha", "foreign-ref", "tree-ref"]
+)
+def test_artifact_observation_distinguishes_unavailable_retained_bytes(
+    export_case: SimpleNamespace, defect: str
+) -> None:
+    case = export_case
+    if defect == "missing-object":
+        case.stored.path.unlink()
+        expected = "OBJECT_MISSING"
+    elif defect == "same-size-corruption":
+        case.stored.path.write_bytes(b"x" * len(case.payload))
+        expected = "IDENTITY_MISMATCH"
+    elif defect == "raw-sha":
+        _set_artifacts(case, (case.artifact.model_copy(update={"sha256": "f" * 64}),))
+        expected = "IDENTITY_MISMATCH"
+    elif defect == "tree-ref":
+        tree = case.source.parent / "tree-source"
+        tree.mkdir()
+        (tree / "entry").write_bytes(case.payload)
+        retained_tree = case.store.put_tree(
+            RepositoryScopedPath.create(
+                owner_repository_id=case.retained.owner_repository_id,
+                root=tree,
+                path=tree,
+                label="retained tree reference",
+            )
+        )
+        _set_artifacts(
+            case,
+            (
+                case.artifact.model_copy(
+                    update={
+                        "retained_object": case.retained.model_copy(
+                            update={"reference_id": retained_tree.reference_id}
+                        )
+                    }
+                ),
+            ),
+        )
+        expected = "IDENTITY_MISMATCH"
+    else:
+        peer = case.store.put_file(
+            RepositoryScopedPath.create(
+                owner_repository_id="repo-" + "f" * 20,
+                root=case.source.parent,
+                path=case.source,
+                label="peer observation reference",
+            )
+        )
+        _set_artifacts(
+            case,
+            (
+                case.artifact.model_copy(
+                    update={
+                        "retained_object": case.retained.model_copy(
+                            update={"reference_id": peer.reference_id}
+                        )
+                    }
+                ),
+            ),
+        )
+        expected = "REFERENCE_UNAVAILABLE"
+    result = _observe(case)
+    assert (result.observations[0].status, result.observations[0].reason) == (
+        "UNAVAILABLE",
+        expected,
+    )
+    assert not case.destination.exists()
+    assert not list(ContentStorePathLayout.from_root(case.store.root).leases.glob("*/lease-*.json"))
+
+
+@pytest.mark.parametrize(
+    "defect,status,reason",
+    [
+        ("missing", "UNAVAILABLE", "NOT_COLLECTED"),
+        ("evidence", "UNAVAILABLE", "NOT_RETAINED"),
+        ("duplicate", "REFUSED", "DECLARATION_MISMATCH"),
+        ("wrong-owner", "REFUSED", "OWNER_MISMATCH"),
+        ("cleanup", "REFUSED", "PRODUCER_UNSETTLED"),
+        ("cancelled", "REFUSED", "RUN_CANCELLED"),
+    ],
+)
+def test_artifact_observation_refuses_unproven_selection_before_content_reads(
+    export_case: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    defect: str,
+    status: str,
+    reason: str,
+) -> None:
+    case = export_case
+    if defect == "missing":
+        _set_artifacts(case, (MissingPlanArtifact(path=case.artifact.path),))
+    elif defect == "evidence":
+        _set_artifacts(case, (case.artifact.model_copy(update={"retained_object": None}),))
+    elif defect == "duplicate":
+        _set_artifacts(case, (case.artifact, case.artifact))
+    elif defect == "wrong-owner":
+        _set_artifacts(
+            case,
+            (
+                case.artifact.model_copy(
+                    update={
+                        "retained_object": case.retained.model_copy(
+                            update={"owner_repository_id": "repo-" + "f" * 20}
+                        )
+                    }
+                ),
+            ),
+        )
+    elif defect == "cleanup":
+        case.recorded_repository.steps = (
+            case.step.model_copy(
+                update={"status": GameTapeStatus.FAILED, "settlement": PlanStepSettlementEvidence()}
+            ),
+        )
+    else:
+        case.detail.run = case.detail.run.model_copy(update={"status": FleetRunStatus.CANCELLED})
+        case.detail.game_tape.status = GameTapeStatus.CANCELLED
+    read = Mock(side_effect=AssertionError("Unproven observation read retained content"))
+    monkeypatch.setattr(case.store, "materialize_file", read)
+    item = _observe(case).observations[0]
+    assert (item.status, item.reason, item.staging_cleanup) == (status, reason, "NOT_REQUIRED")
+    read.assert_not_called()
+
+
+def test_artifact_observation_budget_omissions_and_no_store_are_honest(
+    export_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = export_case
+    read = Mock(side_effect=AssertionError("Omitted observation read retained content"))
+    monkeypatch.setattr(case.store, "materialize_file", read)
+    omitted = _observe(case, GameTapeArtifactObservationBudget(artifact_limit=0))
+    assert omitted.total_artifacts == omitted.omitted_artifacts == 1
+    assert omitted.observations == () and omitted.bytes_scheduled == 0
+    small = _observe(case, GameTapeArtifactObservationBudget(byte_budget=0))
+    assert (small.observations[0].status, small.observations[0].reason) == (
+        "UNOBSERVED",
+        "BYTE_BUDGET",
+    )
+    assert small.bytes_scheduled == 0
+    case.owner._content_store = None
+    assert _observe(case).observations[0].reason == "STORE_UNAVAILABLE"
+    read.assert_not_called()
+
+
+def test_artifact_observation_deadline_cancels_copy_and_closes_scratch(
+    export_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import oh_goon.services.fleet_run_control_plane as module
+    from oh_goon.engine.errors import OperationCancelledError
+
+    now = [0.0]
+    monkeypatch.setattr(module, "monotonic", lambda: now[0])
+    monkeypatch.setattr(module, "TemporaryDirectory", partial(TemporaryDirectory, dir=tmp_path))
+
+    def stall(
+        reference_id: str,
+        destination: RepositoryScopedPath,
+        *,
+        expected_identity: SnapshotIdentity | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> Never:
+        now[0] = 2.0
+        assert cancel_requested is not None and cancel_requested()
+        raise OperationCancelledError("controlled observation deadline")
+
+    monkeypatch.setattr(export_case.store, "materialize_file", stall)
+    item = _observe(
+        export_case, GameTapeArtifactObservationBudget(time_budget_seconds=1)
+    ).observations[0]
+    assert (item.status, item.reason, item.staging_cleanup) == (
+        "UNOBSERVED",
+        "TIME_BUDGET",
+        "VERIFIED",
+    )
+    assert not list(tmp_path.glob(".oh-goon-artifact-observation-*"))
+
+
+def test_artifact_observation_cleanup_failure_does_not_rewrite_verified_bytes(
+    export_case: SimpleNamespace, failed_export_cleanup: list[TemporaryDirectory[str]]
+) -> None:
+    item = _observe(export_case).observations[0]
+    assert item.status == "AVAILABLE" and item.reason == "VERIFIED"
+    assert item.staging_cleanup == "FAILED" and item.cleanup_failure == "STAGING_CLEANUP_FAILED"
+    assert "synthetic staging cleanup failure" not in item.model_dump_json()
+
+
+def test_artifact_observation_io_failure_is_unobserved_without_private_error_text(
+    export_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        export_case.store, "materialize_file", Mock(side_effect=OSError("PRIVATE_CANARY"))
+    )
+    item = _observe(export_case).observations[0]
+    assert (item.status, item.reason) == ("UNOBSERVED", "READ_FAILED")
+    assert "PRIVATE_CANARY" not in item.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "observe,limit,byte_budget,seconds",
+    [
+        (False, 0, None, None),
+        (True, -1, None, None),
+        (True, None, 65 * 1024 * 1024, None),
+        (True, None, None, float("nan")),
+    ],
+)
+def test_artifact_observation_invalid_options_refuse_before_journal_read(
+    export_case: SimpleNamespace,
+    observe: bool,
+    limit: int | None,
+    byte_budget: int | None,
+    seconds: float | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    journal = Mock()
+    owner: FleetRunControlPlane = export_case.owner
+    monkeypatch.setattr(owner, "_journal", journal)
+    with pytest.raises(FleetPlanInvalid, match="budget"):
+        FleetRunControlPlane.get(
+            owner,
+            "recorded-run",
+            observe_artifacts=observe,
+            artifact_limit=limit,
+            artifact_byte_budget=byte_budget,
+            artifact_time_budget_seconds=seconds,
+        )
+    journal.read_view.assert_not_called()

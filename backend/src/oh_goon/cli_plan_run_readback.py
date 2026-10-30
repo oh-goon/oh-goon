@@ -24,6 +24,73 @@ def _print_json(value: object) -> None:
     print(json.dumps(value, sort_keys=True, ensure_ascii=False))
 
 
+def _artifact_readback_detail(
+    runtime: ApplicationRuntime, args: argparse.Namespace
+) -> FleetRunDetail:
+    observe = getattr(args, "observe_artifacts", False)
+    limit = getattr(args, "artifact_limit", None)
+    byte_budget = getattr(args, "artifact_byte_budget", None)
+    time_budget = getattr(args, "artifact_time_budget_seconds", None)
+    if observe or any(value is not None for value in (limit, byte_budget, time_budget)):
+        return runtime.runs.get(
+            args.fleet_run_id,
+            observe_artifacts=observe,
+            artifact_limit=limit,
+            artifact_byte_budget=byte_budget,
+            artifact_time_budget_seconds=time_budget,
+        )
+    return runtime.runs.get(args.fleet_run_id)
+
+
+def _print_artifact_observation(tape: GameTape) -> None:
+    snapshot = tape.artifact_observation
+    if snapshot is None:
+        print(
+            "Artifact availability: UNOBSERVED (not requested; collection evidence is historical)."
+        )
+        print(
+            "Check availability: "
+            + shlex.join(("oh-goon", "plan", "outputs", tape.fleet_run_id, "--observe-artifacts"))
+        )
+        return
+    print(
+        f"Artifact availability: {len(snapshot.observations)} entries; "
+        f"{snapshot.omitted_artifacts} omitted; journal revision {snapshot.journal_revision}"
+    )
+    print(
+        "Verified availability is point-in-time evidence; export checks its live reference again."
+    )
+    for item in snapshot.observations:
+        print(
+            f"  {item.repository_id}/{item.step_id}: {json.dumps(item.path, ensure_ascii=True)} "
+            f"[{item.status}] {item.reason} (checked {item.checked_at.isoformat()})"
+        )
+        if item.cleanup_failure is not None:
+            print(
+                f"    Observation staging cleanup: {item.staging_cleanup} ({item.cleanup_failure})"
+            )
+        if item.status == "AVAILABLE":
+            print(
+                "    Export with recheck: "
+                + shlex.join(
+                    (
+                        "oh-goon",
+                        "plan",
+                        "export-artifact",
+                        snapshot.fleet_run_id,
+                        "--repository-id",
+                        item.repository_id,
+                        "--step",
+                        item.step_id,
+                        "--path",
+                        item.path,
+                        "--output",
+                        "./" + PurePosixPath(item.path).name,
+                    )
+                )
+            )
+
+
 def print_run_completion(detail: FleetRunDetail) -> None:
     """Show bounded original completion evidence from the supplied terminal read cut."""
     tape = detail.game_tape
@@ -97,6 +164,7 @@ def _print_completion_outputs(tape: GameTape, *, fleet_run_id: str) -> None:
                         )
                     )
                 )
+                print("  Recorded selection hint; current byte availability has not been checked.")
     if next(artifacts, None) is not None:
         print("More artifacts are recorded; inspect outputs below.")
 
@@ -163,7 +231,7 @@ def _logs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 def _tape(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     # Use the already-owned FleetRunDetail Game Tape, not a second journal
     # replay, event interpretation, status reducer or output store.
-    tape = runtime.runs.get(args.fleet_run_id).game_tape
+    tape = _artifact_readback_detail(runtime, args).game_tape
     if args.as_json:
         _print_json(tape.model_dump(mode="json"))
     else:
@@ -188,6 +256,7 @@ def _tape(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         print(
             "For durable output evidence use 'plan outputs'; for transient bytes use 'plan logs'."
         )
+        _print_artifact_observation(tape)
     return 0
 
 
@@ -229,7 +298,7 @@ def _steps(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     # All output/artifact/evidence objects come verbatim from the same Game Tape
     # projection. Raw process output is transient and stays with plan logs.
-    tape = runtime.runs.get(args.fleet_run_id).game_tape
+    tape = _artifact_readback_detail(runtime, args).game_tape
     repositories: list[dict[str, Any]] = []
     for repo in tape.repositories:
         steps: list[dict[str, Any]] = []
@@ -264,6 +333,11 @@ def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         "schema": "oh-goon.plan-run-outputs/v1",
         "fleet_run_id": tape.fleet_run_id,
         "repositories": repositories,
+        "artifact_observation": (
+            tape.artifact_observation.model_dump(mode="json")
+            if tape.artifact_observation is not None
+            else None
+        ),
     }
     if args.as_json:
         _print_json(result)
@@ -280,6 +354,7 @@ def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                     f"{len(step_output['artifacts'])} artifacts"
                 )
         print("Evidence metadata only; raw output uses 'plan logs' when available.")
+        _print_artifact_observation(tape)
     return 0
 
 
@@ -397,6 +472,11 @@ def run_handoff_projection(detail: FleetRunDetail) -> dict[str, Any]:
         "schema": "oh-goon.plan-run-handoff/v1",
         "fleet_run_id": detail.run.fleet_run_id,
         "journal_revision": detail.journal_revision,
+        "artifact_observation": (
+            tape.artifact_observation.model_dump(mode="json")
+            if tape.artifact_observation is not None
+            else None
+        ),
         "campaign_journal": detail.campaign_journal.model_dump(mode="json")
         if detail.campaign_journal is not None
         else None,
@@ -446,7 +526,7 @@ def run_handoff_projection(detail: FleetRunDetail) -> dict[str, Any]:
 
 def _handoff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     """Read the original Run once; render its reusable non-authorizing handoff."""
-    detail = runtime.runs.get(args.fleet_run_id)
+    detail = _artifact_readback_detail(runtime, args)
     result = run_handoff_projection(detail)
     if args.as_json:
         _print_json(result)
@@ -468,6 +548,7 @@ def _handoff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             "Inspect exact evidence using the structured readback argv references "
             "from --json; raw logs may be unavailable."
         )
+        _print_artifact_observation(detail.game_tape)
     return 0
 
 

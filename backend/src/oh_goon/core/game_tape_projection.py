@@ -97,6 +97,7 @@ def project_game_tape(detail: FleetRunDetail) -> GameTape:
         why_not=_why_not(detail),
         play_by_play=project_execution_ledger(detail),
         repositories=repositories,
+        artifact_observation=detail.artifact_observation,
     )
 
 

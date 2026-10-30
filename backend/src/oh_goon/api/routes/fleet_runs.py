@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response
 
@@ -10,7 +11,12 @@ from oh_goon.core.models.fleet_failures import (
     FleetFailureInventory,
     FleetFailureRepositoryPage,
 )
-from oh_goon.core.models.game_tape import GameTapeRunDiff
+from oh_goon.core.models.game_tape import (
+    MAX_ARTIFACT_OBSERVATION_BYTES,
+    MAX_ARTIFACT_OBSERVATION_COUNT,
+    MAX_ARTIFACT_OBSERVATION_SECONDS,
+    GameTapeRunDiff,
+)
 from oh_goon.core.models.game_tape_failure_history import GameTapeFailureHistory
 from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
 from oh_goon.core.models.game_tape_performance import GameTapePerformanceReport
@@ -273,7 +279,26 @@ def game_tape_failure_history(
 def get_fleet_run(
     fleet_run_id: str,
     control_plane: FleetRunControlPlane = Depends(fleet_run_control_plane),
+    observe_artifacts: bool = False,
+    artifact_limit: Annotated[int | None, Query(ge=0, le=MAX_ARTIFACT_OBSERVATION_COUNT)] = None,
+    artifact_byte_budget: Annotated[
+        int | None, Query(ge=0, le=MAX_ARTIFACT_OBSERVATION_BYTES)
+    ] = None,
+    artifact_time_budget_seconds: Annotated[
+        float | None, Query(gt=0, le=MAX_ARTIFACT_OBSERVATION_SECONDS)
+    ] = None,
 ) -> FleetRunDetail:
+    if observe_artifacts or any(
+        value is not None
+        for value in (artifact_limit, artifact_byte_budget, artifact_time_budget_seconds)
+    ):
+        return control_plane.get(
+            fleet_run_id,
+            observe_artifacts=observe_artifacts,
+            artifact_limit=artifact_limit,
+            artifact_byte_budget=artifact_byte_budget,
+            artifact_time_budget_seconds=artifact_time_budget_seconds,
+        )
     return control_plane.get(fleet_run_id)
 
 

@@ -471,6 +471,102 @@ class GameTapeEvent(ImmutableModel):
     message: str = Field(min_length=1, max_length=500)
 
 
+ArtifactAvailabilityReason = Literal[
+    "VERIFIED",
+    "NOT_COLLECTED",
+    "NOT_RETAINED",
+    "RUN_CANCELLED",
+    "RUN_INTERRUPTED",
+    "PRODUCER_UNSETTLED",
+    "DECLARATION_MISMATCH",
+    "OWNER_MISMATCH",
+    "IDENTITY_MISMATCH",
+    "REFERENCE_UNAVAILABLE",
+    "OBJECT_MISSING",
+    "STORE_UNAVAILABLE",
+    "READ_FAILED",
+    "BYTE_BUDGET",
+    "TIME_BUDGET",
+]
+ArtifactAvailabilityStatus = Literal["AVAILABLE", "UNAVAILABLE", "UNOBSERVED", "REFUSED"]
+ArtifactObservationCleanup = Literal["NOT_REQUIRED", "VERIFIED", "FAILED"]
+
+
+class GameTapeArtifactAvailability(ImmutableModel):
+    """One point-in-time read observation, separate from collected artifact evidence."""
+
+    repository_execution_id: str
+    repository_id: str
+    step_execution_id: str
+    step_id: str
+    path: str
+    recorded_status: Literal["PRESENT", "MISSING"]
+    recorded_sha256: str | None = None
+    recorded_byte_count: int | None = Field(default=None, ge=0)
+    reference_id: str | None = None
+    status: ArtifactAvailabilityStatus
+    reason: ArtifactAvailabilityReason
+    checked_at: AwareDatetime
+    staging_cleanup: ArtifactObservationCleanup = "NOT_REQUIRED"
+    cleanup_failure: Literal["STAGING_CLEANUP_FAILED"] | None = None
+
+    @model_validator(mode="after")
+    def validate_verified_availability(self) -> GameTapeArtifactAvailability:
+        if self.status == "AVAILABLE" and (
+            self.reason != "VERIFIED"
+            or self.recorded_status != "PRESENT"
+            or self.recorded_sha256 is None
+            or self.recorded_byte_count is None
+            or self.reference_id is None
+            or self.staging_cleanup == "NOT_REQUIRED"
+        ):
+            raise ValueError(
+                "Available artifact bytes require a completed verification observation"
+            )
+        if (self.staging_cleanup == "FAILED") != (self.cleanup_failure is not None):
+            raise ValueError("Artifact staging cleanup failure must be explicit")
+        return self
+
+
+MAX_ARTIFACT_OBSERVATION_COUNT = 64
+MAX_ARTIFACT_OBSERVATION_BYTES = 64 * 1024 * 1024
+MAX_ARTIFACT_OBSERVATION_SECONDS = 10
+
+
+class GameTapeArtifactObservationBudget(ImmutableModel):
+    """Explicit bounds for one read-only retained-byte observation."""
+
+    artifact_limit: int = Field(default=32, ge=0, le=MAX_ARTIFACT_OBSERVATION_COUNT, strict=True)
+    byte_budget: int = Field(
+        default=16 * 1024 * 1024, ge=0, le=MAX_ARTIFACT_OBSERVATION_BYTES, strict=True
+    )
+    time_budget_seconds: float = Field(default=5, gt=0, le=MAX_ARTIFACT_OBSERVATION_SECONDS)
+
+
+class GameTapeArtifactObservation(GameTapeArtifactObservationBudget):
+    """Bounded ephemeral verification of one recorded Run cut; never a retention promise."""
+
+    schema_name: Literal["oh-goon.artifact-availability/v1"] = "oh-goon.artifact-availability/v1"
+    fleet_run_id: str
+    journal_revision: int | None = Field(default=None, ge=0)
+    started_at: AwareDatetime
+    finished_at: AwareDatetime
+    total_artifacts: int = Field(ge=0)
+    omitted_artifacts: int = Field(ge=0)
+    bytes_scheduled: int = Field(ge=0)
+    observations: tuple[GameTapeArtifactAvailability, ...] = Field(max_length=64)
+
+    @model_validator(mode="after")
+    def validate_observation_accounting(self) -> GameTapeArtifactObservation:
+        if len(self.observations) + self.omitted_artifacts != self.total_artifacts:
+            raise ValueError("Artifact observation membership must account for the recorded scope")
+        if len(self.observations) > self.artifact_limit or self.bytes_scheduled > self.byte_budget:
+            raise ValueError("Artifact observation exceeds its selected budget")
+        if self.finished_at < self.started_at:
+            raise ValueError("Artifact observation completion precedes its start")
+        return self
+
+
 class GameTape(ImmutableModel):
     """Read-only projection of canonical Fleet admission and execution evidence."""
 
@@ -506,6 +602,7 @@ class GameTape(ImmutableModel):
 
     play_by_play: tuple[GameTapeEvent, ...] = Field(default_factory=tuple)
     repositories: tuple[GameTapeRepositoryExecution, ...]
+    artifact_observation: GameTapeArtifactObservation | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

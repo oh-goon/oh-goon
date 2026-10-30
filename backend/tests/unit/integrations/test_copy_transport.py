@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import os
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -205,3 +206,170 @@ def test_copy_data_keeps_cancellation_checks_on_stream_fallback(
         os.close(destination_fd)
 
     assert checks > 3
+
+
+def test_copy_limit_admits_exact_size_and_refuses_excess_before_destination_creation(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    source.write_bytes(b"bounded")
+    destination = tmp_path / "exact"
+    subject.copy_regular_file(source, destination, max_bytes=7)
+    assert destination.read_bytes() == b"bounded"
+    refused = tmp_path / "refused"
+    with pytest.raises(subject.FileCopyLimitExceeded):
+        subject.copy_regular_file(source, refused, max_bytes=6)
+    assert not refused.exists()
+
+
+@pytest.mark.parametrize("transport", ["reflink", "copy_file_range", "stream"])
+@pytest.mark.parametrize("grow", [False, True])
+def test_bounded_copy_preserves_native_transport_and_refuses_source_growth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    transport: Literal["reflink", "copy_file_range", "stream"],
+    grow: bool,
+) -> None:
+    payload = b"bounded"
+    source_fd, destination_fd, destination = _open_pair(tmp_path, payload)
+    source = tmp_path / "source.bin"
+    read = os.read
+    write = os.write
+    grew = False
+    requested: list[int] = []
+
+    def grow_source() -> None:
+        nonlocal grew
+        if grow and not grew:
+            with source.open("ab") as stream:
+                stream.write(b"unexpected-growth")
+            grew = True
+
+    def clone(source_descriptor: int, destination_descriptor: int) -> bool:
+        if transport != "reflink":
+            return False
+        grow_source()
+        data = os.pread(source_descriptor, source.stat().st_size, 0)
+        assert os.pwrite(destination_descriptor, data, 0) == len(data)
+        return True
+
+    def kernel_copy(source_descriptor: int, destination_descriptor: int, count: int) -> int:
+        if transport == "stream":
+            raise OSError(errno.EXDEV, "kernel copy unavailable")
+        requested.append(count)
+        grow_source()
+        data = read(source_descriptor, count)
+        return write(destination_descriptor, data) if data else 0
+
+    def bounded_read(descriptor: int, count: int) -> bytes:
+        if descriptor == source_fd:
+            requested.append(count)
+            grow_source()
+        return read(descriptor, count)
+
+    monkeypatch.setattr(subject, "_try_reflink", clone)
+    monkeypatch.setattr(os, "copy_file_range", kernel_copy, raising=False)
+    monkeypatch.setattr(os, "read", bounded_read)
+    try:
+        if grow:
+            with pytest.raises(subject.FileCopyLimitExceeded):
+                subject.copy_regular_file_data(
+                    source_fd, destination_fd, check_cancel=lambda: None, max_bytes=len(payload)
+                )
+        else:
+            observed = subject.copy_regular_file_data(
+                source_fd, destination_fd, check_cancel=lambda: None, max_bytes=len(payload)
+            )
+            assert observed == transport
+            assert destination.read_bytes() == payload
+    finally:
+        os.close(source_fd)
+        os.close(destination_fd)
+    assert destination.stat().st_size <= len(payload)
+    assert all(0 < count <= len(payload) for count in requested)
+
+
+def test_bounded_copy_continues_partial_kernel_prefix_through_stream_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = b"bounded-copy"
+    source_fd, destination_fd, destination = _open_pair(tmp_path, payload)
+    monkeypatch.setattr(subject, "_try_reflink", lambda *_args: False)
+    calls = 0
+
+    def partial_then_refuse(source_descriptor: int, destination_descriptor: int, count: int) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return os.write(destination_descriptor, os.read(source_descriptor, min(count, 3)))
+        raise OSError(errno.EXDEV, "kernel copy unavailable after prefix")
+
+    monkeypatch.setattr(os, "copy_file_range", partial_then_refuse, raising=False)
+    try:
+        observed = subject.copy_regular_file_data(
+            source_fd, destination_fd, check_cancel=lambda: None, max_bytes=len(payload)
+        )
+    finally:
+        os.close(source_fd)
+        os.close(destination_fd)
+    assert observed == "stream"
+    assert destination.read_bytes() == payload
+
+
+def test_bounded_copy_admits_empty_file(tmp_path: Path) -> None:
+    source = tmp_path / "empty"
+    source.touch()
+    destination = tmp_path / "copy"
+    subject.copy_regular_file(source, destination, max_bytes=0)
+    assert destination.read_bytes() == b""
+
+
+@pytest.mark.parametrize("invalid", [-1, True])
+def test_invalid_copy_limit_refuses_before_creating_destination(
+    tmp_path: Path, invalid: int
+) -> None:
+    source = tmp_path / "source"
+    source.write_bytes(b"bounded")
+    destination = tmp_path / "refused"
+    with pytest.raises(ValueError, match="max_bytes"):
+        subject.copy_regular_file(source, destination, max_bytes=invalid)
+    assert not destination.exists()
+
+
+def test_bounded_copy_cancellation_closes_owned_file_descriptors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.write_bytes(b"bounded")
+    destination = tmp_path / "copy"
+    opened: list[int] = []
+    original_open = os.open
+
+    def track_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        descriptor = original_open(path, flags, mode, dir_fd=dir_fd)
+        if os.fspath(path) in {str(source), str(destination)}:
+            opened.append(descriptor)
+        return descriptor
+
+    checks = 0
+
+    def cancel() -> None:
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise RuntimeError("cancelled")
+
+    monkeypatch.setattr(os, "open", track_open)
+    with pytest.raises(RuntimeError, match="cancelled"):
+        subject.copy_regular_file(source, destination, max_bytes=7, check_cancel=cancel)
+    assert len(opened) == 2
+    for descriptor in opened:
+        with pytest.raises(OSError) as closed:
+            os.fstat(descriptor)
+        assert closed.value.errno == errno.EBADF

@@ -1,10 +1,11 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { GameTapeArtifact } from "@/features/game-tape/gameTapeArtifacts";
+import type { GameTapeArtifactObservation } from "@generated/models";
+import { matchingArtifactObservation, type GameTapeArtifact, type GameTapeArtifactOwner } from "@/features/game-tape/gameTapeArtifacts";
 import { canonicalIdentity } from "@/domain/identity/canonicalValue";
 
-export function GameTapeStepArtifacts({ artifacts, ownerIdentity }: { artifacts: readonly GameTapeArtifact[]; ownerIdentity?: string }) {
+export function GameTapeStepArtifacts({ artifacts, ownerIdentity, artifactOwner, observation }: { artifacts: readonly GameTapeArtifact[]; ownerIdentity?: string; artifactOwner?: GameTapeArtifactOwner; observation?: GameTapeArtifactObservation | null }) {
   const { t } = useTranslation();
   const renderOwner = ownerIdentity ?? canonicalIdentity({ artifacts });
   const currentOwner = useRef(renderOwner);
@@ -24,12 +25,19 @@ export function GameTapeStepArtifacts({ artifacts, ownerIdentity }: { artifacts:
     <header><div><span className="eyebrow">{t("gameTape.evidence.artifacts")}</span><strong>{t("gameTape.evidence.artifactCount", { count: artifacts.length })}</strong></div><small>{t("gameTape.evidence.artifactRule")}</small></header>
     <div>{artifacts.map((artifact) => {
       const present = artifact.status === "PRESENT" && "sha256" in artifact;
+      const availability = matchingArtifactObservation(observation, artifactOwner, artifact);
       const digestCopyKey = `${artifact.path}:sha256`;
       const referenceCopyKey = `${artifact.path}:reference`;
       return <article key={artifact.path}>
         <span aria-hidden="true">{present ? "✓" : "!"}</span>
         <div>
           <b>{artifact.path}</b>
+          {availability ? <div role="status">
+            <strong>{t(`gameTape.evidence.availability.${availability.status}`)}</strong>
+            <small>{t(`gameTape.evidence.availabilityReason.${availability.reason}`)}</small>
+            <small>{t("gameTape.evidence.checkedAt", { time: availability.checked_at })}</small>
+            {availability.staging_cleanup === "FAILED" ? <small>{t("gameTape.evidence.stagingCleanupFailed")}</small> : null}
+          </div> : <small>{t("gameTape.evidence.availabilityNotChecked")}</small>}
           {present ? <>
             <small>{t("gameTape.evidence.retainedArtifact", { bytes: artifact.byte_count, digest: artifact.sha256.slice(0, 12) })}</small>
             <div className="button-row">

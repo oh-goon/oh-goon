@@ -1,9 +1,93 @@
 import { GameTapeStatus } from "@generated/enums";
-import type { AgentCampaignReadback, AgentCampaignResult, GameTapeFailureHistory, GameTapeLiveOutputBatch, GameTapeLiveOutputChunk, GameTapeRunDiff } from "@generated/models";
+import type { AgentCampaignReadback, AgentCampaignResult, FleetRunDetail, GameTapeArtifactObservation, GameTapeFailureHistory, GameTapeLiveOutputBatch, GameTapeLiveOutputChunk, GameTapeRunDiff } from "@generated/models";
 
 import { PRIMARY_REPOSITORY } from "./identities";
 import { FIXTURE_PLAN_ID } from "./plans";
+import { ARTIFACT_OBSERVATION_RELEASE_EVENT, ARTIFACT_OBSERVATION_REQUEST_EVENT, ARTIFACT_OBSERVATION_RESPONSE_EVENT, type BrowserFixtureScenarioDefinition } from "./scenarios";
 import { FIXTURE_FINISHED, FIXTURE_NOW } from "./time";
+
+export async function fixtureArtifactReadback(
+  detail: FleetRunDetail,
+  mode: BrowserFixtureScenarioDefinition["artifactObservation"],
+  observeArtifacts: boolean,
+): Promise<FleetRunDetail> {
+  if (mode === undefined) return detail;
+  detail.journal_revision = 203;
+  detail.game_tape.journal_revision = 203;
+  detail.game_tape.artifact_observation = null;
+  fixtureArtifactEvidence(detail);
+  if (observeArtifacts) {
+    const runId = detail.run.fleet_run_id;
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(ARTIFACT_OBSERVATION_REQUEST_EVENT, { detail: { runId } }));
+    if (mode === "held") {
+      await new Promise<void>((resolve) => window.addEventListener(ARTIFACT_OBSERVATION_RELEASE_EVENT, () => resolve(), { once: true }));
+    }
+    detail.game_tape.artifact_observation = fixtureArtifactObservation(detail);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(ARTIFACT_OBSERVATION_RESPONSE_EVENT, { detail: { runId } }));
+  }
+  return detail;
+}
+
+/** Recorded artifact evidence is unchanged by the separately requested observation. */
+function fixtureArtifactEvidence(detail: FleetRunDetail): void {
+  const repository = detail.game_tape.repositories[0];
+  const step = repository?.steps?.[0];
+  if (!repository || !step) throw new Error("Artifact fixture requires a recorded producer Step");
+  step.artifacts = ["metrics", "model", "evaluation", "manifest"].map((name, index) => ({
+    status: "PRESENT",
+    path: `ml-output/${name}.json`,
+    sha256: String(index + 1).repeat(64),
+    byte_count: 64,
+    retained_object: {
+      kind: "file",
+      sha256: String(index + 5).repeat(64),
+      byte_count: 64,
+      entry_count: 1,
+      object_id: `file-sha256-${String(index + 5).repeat(64)}`,
+      reference_id: `ref-${String(index + 1).repeat(32)}`,
+      owner_repository_id: repository.repository.repository_id,
+    },
+  }));
+}
+
+function fixtureArtifactObservation(detail: FleetRunDetail): GameTapeArtifactObservation {
+  const repository = detail.game_tape.repositories[0];
+  const step = repository?.steps?.[0];
+  if (!repository || !step) throw new Error("Artifact fixture requires a recorded producer Step");
+  const observations: GameTapeArtifactObservation["observations"] = (step.artifacts ?? []).slice(0, 2).map((artifact, index) => {
+    if (artifact.status !== "PRESENT") throw new Error("Artifact fixture requires present evidence");
+    return {
+      repository_execution_id: repository.repository_execution_id,
+      repository_id: repository.repository.repository_id,
+      step_execution_id: step.step_execution_id,
+      step_id: step.step_id,
+      path: artifact.path,
+      recorded_status: artifact.status,
+      recorded_sha256: artifact.sha256,
+      recorded_byte_count: artifact.byte_count,
+      reference_id: artifact.retained_object?.reference_id ?? null,
+      status: index === 0 ? "AVAILABLE" : "UNAVAILABLE",
+      reason: index === 0 ? "VERIFIED" : "REFERENCE_UNAVAILABLE",
+      checked_at: FIXTURE_FINISHED,
+      staging_cleanup: index === 0 ? "VERIFIED" : "NOT_REQUIRED",
+      cleanup_failure: null,
+    };
+  });
+  return {
+    schema_name: "oh-goon.artifact-availability/v1",
+    fleet_run_id: detail.run.fleet_run_id,
+    journal_revision: detail.journal_revision ?? null,
+    started_at: FIXTURE_FINISHED,
+    finished_at: FIXTURE_FINISHED,
+    artifact_limit: 2,
+    byte_budget: 1024,
+    time_budget_seconds: 3,
+    total_artifacts: step.artifacts?.length ?? 0,
+    omitted_artifacts: 2,
+    bytes_scheduled: 64,
+    observations,
+  };
+}
 
 export function fixtureCampaignResultForId(campaignId: string): AgentCampaignResult {
   if (campaignId !== "campaign-browser-refused") throw new Error("Unknown fixture campaign");

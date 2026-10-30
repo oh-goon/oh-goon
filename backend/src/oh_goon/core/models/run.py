@@ -9,7 +9,11 @@ from oh_goon.core.models.agent_repair import AgentCampaignReadback
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_plan_trust_receipt import RepositoryFleetPlanTrustReceipt
-from oh_goon.core.models.game_tape import GameTape, GameTapeProducerImplementationProvenance
+from oh_goon.core.models.game_tape import (
+    GameTape,
+    GameTapeArtifactObservation,
+    GameTapeProducerImplementationProvenance,
+)
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import (
@@ -234,6 +238,9 @@ class FleetRunDetail(ImmutableModel):
     storage_maintenance: tuple[FleetContentMaintenanceFact, ...] = Field(default_factory=tuple)
     scheduling: SchedulingEnvelope | None = None
     producer_implementation_provenance: GameTapeProducerImplementationProvenance | None = Field(
+        default=None, exclude=True, repr=False
+    )
+    artifact_observation: GameTapeArtifactObservation | None = Field(
         default=None, exclude=True, repr=False
     )
 

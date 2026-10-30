@@ -1,18 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createApiClient } from "@/app/createApiClient";
+import { readOperation } from "@/app/api/httpTransport";
 import { writeOperation } from "@/app/api/mutationTransport";
 import { MutationController } from "@/domain/concurrency/MutationController";
 import { operations as op } from "@generated/operations";
 
 vi.mock("@/app/api/mutationTransport", () => ({ writeOperation: vi.fn() }));
+vi.mock("@/app/api/httpTransport", () => ({ readOperation: vi.fn() }));
 
 const write = vi.mocked(writeOperation);
+const read = vi.mocked(readOperation);
 
 describe("createApiClient write fence transport", () => {
   beforeEach(() => {
     write.mockReset();
+    read.mockReset();
     write.mockResolvedValue({ outcome: "saved", value: undefined, causalityRevision: 1 } as never);
+  });
+
+  it("requests artifact byte observation only through an explicit read selection", () => {
+    const client = createApiClient(new MutationController());
+    const options = { signal: new AbortController().signal };
+    void client.fleetRunDetail("recorded-run", options);
+    void client.fleetRunDetail("recorded-run", options, false);
+    void client.fleetRunDetail("recorded-run", options, true);
+    expect(read).toHaveBeenNthCalledWith(1, op.get_fleet_run.operationId, { path: { fleet_run_id: "recorded-run" } }, options);
+    expect(read).toHaveBeenNthCalledWith(2, op.get_fleet_run.operationId, { path: { fleet_run_id: "recorded-run" } }, options);
+    expect(read).toHaveBeenNthCalledWith(3, op.get_fleet_run.operationId, { path: { fleet_run_id: "recorded-run" }, query: { observe_artifacts: true } }, options);
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("transports reviewed Agent selection and nullable caller inputs unchanged", () => {

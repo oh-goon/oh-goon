@@ -119,6 +119,13 @@ edit the existing app/domain/feature owner
 Use the nearest colocated test path for app/domain/common-component work instead of the feature placeholder. Stop on the focused failure before running the complete frontend gate. If the required `@generated/*` contract is wrong or missing, leave this loop and fix the backend/generator authority first; do not recreate the fact in frontend source.
 
 Artifact evidence stays under the canonical Step that produced or declared it. The shared artifact component exposes PRESENT/MISSING, path/size/digest and backend-recorded retained-object identity progressively; it does not guess MIME or content previews from filenames.
+An explicit **Check artifact availability** action requests one bounded backend
+observation for the selected Run. Outputs, Logs/Evidence and the Step inspector
+share that snapshot, including refusals and omitted artifacts. Ordinary reads,
+navigation and refresh invalidation do not scan retained bytes. The browser
+renders an already supplied observation without checking the bytes again and
+matches observations to the recorded repository, Step, path, hash and reference;
+availability describes the check time and never rewrites collection-time evidence.
 
 ## Durable Run review state
 

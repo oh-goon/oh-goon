@@ -320,6 +320,18 @@ class FleetPlanInvalid(InvalidRequest):
     code = "FLEET_PLAN_INVALID"
 
 
+class FleetContentReferenceUnavailable(FleetPlanInvalid):
+    """The retained reference is unavailable within its selected repository scope."""
+
+
+class FleetContentObjectUnavailable(FleetPlanInvalid):
+    """An authorized retained reference has no available content object."""
+
+
+class FleetContentIntegrityError(FleetPlanInvalid):
+    """Retained content differs from its accepted identity or bounded size."""
+
+
 class FleetPlanSourceAcquisitionRequired(FleetPlanInvalid):
     """The selected Git source has no acquired/pinned source authority yet."""
 
