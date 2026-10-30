@@ -165,7 +165,8 @@ Scoped packages use the existing behavior-based test owners: Scout projections u
 
 ## Change impact
 
-After choosing the source owner and matching test owner, use this escalation map. Directory ownership tells you the **default** validation; public-contract changes add the root checks below.
+Use this map to find focused proof. Directory ownership locates a test owner;
+it does not automatically select its complete campaign before merge.
 
 ```text
 api/          → unit/api + backend integration/api
@@ -177,9 +178,14 @@ services/     → unit/services + integration/services when orchestration bounda
 cli*.py       → unit/entrypoints
 ```
 
-For product behavior, ask: **did the public FastAPI/OpenAPI contract change?** If yes, run `make -C ../../.. generate`, `check-generated`, `test-integration`, and `frontend-check`. If no, keep product behavior inside backend validation. A core/service change does not trigger generation merely because API code eventually calls it. Repository-tooling changes follow [the tooling loop](../../../scripts/README.md) and the root change-impact table; generation/release boundaries add their existing escalation checks.
+Public FastAPI/OpenAPI changes add generation/freshness and the smallest affected
+consumer proof. Other product changes stay with their affected backend owners.
+Repository tooling uses [its focused loop](../../../scripts/README.md).
+`make check` admits relevant fast checks; complete owners run daily. A critical
+native/lifecycle reproducer remains a named pre-merge obligation.
 
-CLI syntax/help changes should update the owning user/contributor documentation when command examples change. Repository-layout or owner-map changes are repository-tooling work and must also run root architecture/tooling checks.
+CLI syntax/help changes update their owning documentation. Layout/owner-map
+changes need architecture and focused tooling/protection proof.
 
 
 

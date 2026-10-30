@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 MAKEFLAGS += --no-print-directory
 
-DEVELOPMENT_TEST_RUNNER = bash scripts/development_test.sh
+DEVELOPMENT_TEST_RUNNER = bash scripts/development_check.sh
 DEVELOPMENT_CHECK_RUNNER = bash scripts/development_check.sh
 APPLICATION_VERIFY_RUNNER = bash scripts/application_verify.sh
 DEVELOPMENT_RESOURCE_RUNNER = bash scripts/development_test_resources.sh
@@ -46,6 +46,9 @@ CERTIFICATION_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_
 
 .PHONY: a1-native-kernel-custody-test backend-python-capability-check python-static-sanity ruff-repair phase-evidence-convergence-check native-qualification-boundary-check candidate-convergence-preflight pre-commit pre-commit-acquire help init verify diagnostic-dependency-check backend-lock-check backend-package-build-check source-transport-clean sync venv-clean strict-executor-setup certification-preflight certification-database-preflight repository-understanding-test-batch repository-understanding-tests-batched certification-state-reset logs test-log certify-log diagnostics-log local-state-prelaunch-check local-state-reset storage-status storage-prune acceptance-release acceptance-browser-container acceptance-container acceptance-product acceptance-scale local-runtime-verification strict-local-runtime-acceptance release-locks-check release-version-set release-source-clean release-source-package-artifact frontend-install backend-dependencies-check frontend-functional-certification template-startability-certification frontend-lock start local-state-check local-state-path diagnostics-path local-state-reset dev release-accept docker-prepare docker-up docker-up-opensuse docker-down docker-accept docker-accept-opensuse lint i18n-check format format-check typecheck architecture goon-compile api-schema api-types goon-tool-authority contracts generate check-generated test test-python test-tooling test-tooling-complete test-frontend frontend-typecheck frontend-architecture frontend-build test-integration test-sqlite-real-usage test-real-lifecycle test-real-world test-real-world-parallel coverage-python coverage-report test-sqlite-coverage test-journal-coverage quality-check quality-raise check check-backend check-tooling check-frontend backend-check tooling-check frontend-check build-release assemble-release scout-load-probe scout-http-load-probe scout-network-certification scout-proxy-certification scout-overhead-certification scout-crash-restart-certification scout-failure-isolation-certification scout-corruption-recovery-certification scout-retention-checkpoint-certification diagnostic-system-check cli-install diagnostic-startup-check frontend-lock-check browser-setup browser-localhost-transport-preflight browser-preflight browser-harness-preflight browser-system-deps browser-runtime-preflight browser-targeted-certification browser-required-certification browser-test browser-check-system-chromium certification-explain repository-understanding-exam prepare-release certify test-execution-fast test-python-core-diagnostic test-python-dependency-complete test-python-complete verify-p0 verify-p1 verify-local init-doctor goon-static-admission backend-install theme-contrast test-python-profile tool-session-qualification tool-session-qualification-status recovery-status recovery-checkpoint recovery-resume qualify-native-wsl frontend-schedule-plan-input-regression
 
+.PHONY: change-check merge-check broad-diagnostic
+VERIFY_BASE ?= origin/main
+VERIFY_WORKERS ?= 1
 .PHONY: release-check release-check-plan check-backend-quality check-backend-tests check-tooling-quality check-tooling-tests test-backend-integration test-cross-owner-integration
 .PHONY: test-python-projects
 
@@ -81,11 +84,10 @@ help:
 	  '  make coverage-report  Show the detailed Python coverage table from the latest collected data' \
 	  '' \
 	  'Golden change loops (stop on first failure):' \
-	  '  backend internal: focused test -> backend-check' \
-	  '  public API: focused API test -> backend-check -> generate -> check-generated -> test-integration -> frontend-check' \
-	  '  frontend feature: focused colocated test -> frontend-check' \
-	  '  template: focused template tests -> architecture -> backend-check' \
-	  '  tooling: focused scripts test -> architecture -> tooling-check' \
+	  '  changed behavior: focused test -> make check -> required merge-gate' \
+	  '  make test/check: relevant fast feedback; complete portfolios run daily' \
+	  '  make merge-check: exact change admission + trusted-base merge control' \
+	  '  make broad-diagnostic: explicit broad local diagnostic' \
 	  '' \
 	  'Completion evidence:' \
 	  '  owner | focused validation | escalation gates | generated | architecture | unverified' \
@@ -736,6 +738,15 @@ quality-raise:
 
 test:
 	@$(DEVELOPMENT_TEST_FRONTDOOR)
+
+change-check:
+	uv run --offline --frozen --no-sync --project backend oh-goon-verify-change --base "$(VERIFY_BASE)" --mode focused --workers "$(VERIFY_WORKERS)"
+
+merge-check:
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-verify-change --base "$(VERIFY_BASE)" --mode merge --workers "$(VERIFY_WORKERS)"
+
+broad-diagnostic:
+	@OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh broad-diagnostic $(DEVELOPMENT_RESOURCE_RUNNER) bash scripts/development_test.sh
 
 strict-executor-setup:
 	@bash scripts/strict_executor_setup.sh

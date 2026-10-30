@@ -40,6 +40,7 @@ oh-goon-dependency-policy = "oh_goon.repository_tooling.dependency_resolution_bo
 oh-goon-hosted-dependency-capability = "oh_goon.repository_tooling.hosted_dependency_capability:main"
 oh-goon-project-dependency-capability = "oh_goon.repository_tooling.project_dependency_capability:main"
 oh-goon-test-batches = "oh_goon.repository_tooling.test_batches:main"
+oh-goon-verify-change = "oh_goon.repository_tooling.development_verification:main"
 oh-goon-run-log = "oh_goon.repository_tooling.run_logging:main"
 oh-goon-tool-session-batches = "oh_goon.repository_tooling.tool_session_batches:main"
 oh-goon-hashmarks-shards = "oh_goon.repository_tooling.hashmarks_shard_execution:main"

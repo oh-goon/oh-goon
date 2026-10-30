@@ -12,7 +12,7 @@ name: Focused behavior feedback
         description: Next owner check to display as UNVERIFIED guidance (never executed)
         required: true
         type: string
-        default: make backend-check
+        default: make merge-check
 
 permissions:
   contents: read
@@ -34,14 +34,11 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24.19.0"
-          package-manager-cache: false
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.12.5"
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
       - name: Install native test tools
         run: |
           sudo apt-get update
@@ -57,7 +54,7 @@ jobs:
           printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
           printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
       - name: Materialize committed locks
-        run: make init
+        run: uv sync --project backend --frozen --group dev --group quality
       - name: Run explicit focused selection
         env:
           TEST_SELECTION: ${{ inputs.test_selection }}
@@ -79,5 +76,6 @@ jobs:
           The job result covers only the explicit selected tests at the checked-out commit.
           Failure, empty selection, interruption and timeout do not establish PASS.
           The next owner check is printed as UNVERIFIED guidance and is never executed.
-          Mark the PR ready for review to run all seven required checks.
+          Mark the PR ready for review for candidate-bound merge verification.
+          Complete unrelated and exhaustive coverage runs in the daily campaign.
           EOF

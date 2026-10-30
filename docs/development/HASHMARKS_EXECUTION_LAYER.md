@@ -170,3 +170,16 @@ answer truth remain outside repository retrieval.
 Detailed producer implementation provenance is unavailable until a supported
 public diagnostic API exists; the public loaded implementation identity remains
 authoritative.
+
+## Relevant development admission
+
+The development check owner consumes supported Hashmarks verifier nominations
+for the captured Git change set. Direct and bounded indirect source-qualified
+links remain distinct from owner-completeness or negative evidence. One native
+map/read session serves the supplied paths; producer bounds and source-member
+provenance remain in the bounded selection artifact. Oh-Goon applies accepted
+fast/daily cadence and native result admission; it does not infer another impact
+graph. Missing consumer proof stays SELECTION_UNVERIFIED or uses a specifically
+justified bounded fallback. Policy protection is a named execution-policy
+obligation, not a Hashmarks-inferred relationship. See the
+[CI contract](../CI_CD_CONTRACT.md#repository-checks-on-github).

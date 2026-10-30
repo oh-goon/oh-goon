@@ -37,7 +37,7 @@ def _minimal_repo(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (root / "Makefile").write_text(
-        "DEVELOPMENT_TEST_RUNNER = bash scripts/development_test.sh\n"
+        "DEVELOPMENT_TEST_RUNNER = bash scripts/development_check.sh\n"
         "DEVELOPMENT_RESOURCE_RUNNER = bash scripts/development_test_resources.sh\n"
         'CERTIFICATION_RUNNER = env UV_CACHE_DIR="$(CERTIFICATION_UV_CACHE)" uv run --isolated --frozen --offline --no-dev --project backend oh-goon-workflow\n'
         "RUN_LOG_DIR ?= /tmp/oh-goon-test-logs\n"
@@ -154,8 +154,8 @@ def test_make_workflow_assignment_whitespace_is_representation_invariant(
     makefile.write_text(
         makefile.read_text(encoding="utf-8")
         .replace(
-            "DEVELOPMENT_TEST_RUNNER = bash scripts/development_test.sh",
-            "DEVELOPMENT_TEST_RUNNER=bash scripts/development_test.sh",
+            "DEVELOPMENT_TEST_RUNNER = bash scripts/development_check.sh",
+            "DEVELOPMENT_TEST_RUNNER=bash scripts/development_check.sh",
         )
         .replace(
             "DEVELOPMENT_RESOURCE_RUNNER = bash scripts/development_test_resources.sh",
@@ -229,8 +229,8 @@ def test_make_workflow_assignment_operator_remains_semantic(
     makefile = root / "Makefile"
     makefile.write_text(
         makefile.read_text(encoding="utf-8").replace(
-            "DEVELOPMENT_TEST_RUNNER = bash scripts/development_test.sh",
-            "DEVELOPMENT_TEST_RUNNER := bash scripts/development_test.sh",
+            "DEVELOPMENT_TEST_RUNNER = bash scripts/development_check.sh",
+            "DEVELOPMENT_TEST_RUNNER := bash scripts/development_check.sh",
         ),
         encoding="utf-8",
     )

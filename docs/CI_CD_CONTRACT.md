@@ -6,130 +6,90 @@ This document is the short product-level contract for local CI/CD execution. The
 
 ## Repository checks on GitHub
 
-The repository's [required-checks workflow](../.github/workflows/ci.yml) runs on
-pull-request updates and draft/readiness transitions, pushes to `main`, and
-merge-queue groups. Ready pull requests, `main` and merge-queue groups run all
-seven routine checks. Six parallel matrix jobs materialize the committed uv/npm
-locks through `make init`, then invoke `backend-check`, `frontend-check`,
-`tooling-check`, `architecture`, `check-generated` or `test-integration`.
-The integration target executes both backend and cross-owner integration tests.
-That required job also runs `make test-python-projects`: each shipped Python
-application's own tests use its committed native uv lock and an owned external
-environment. Iris and Orders select their development groups; Orders' external
-Airflow adapter has its own explicitly selected optional qualification. The
-standalone setup stays outside the strict qualification rings. Ordinary
-`make release-check` includes the same project check.
-The seventh stable check name remains `build-release`; its job uses GitHub's
-`needs: checks` to wait for all six successful matrix jobs in the same workflow.
-Every checkout explicitly selects the same `github.sha`.
+Ordinary updates use [relevant verification](../.github/workflows/ci.yml).
+Hashmarks supplies source-qualified direct and indirect verifier nominations;
+Oh-Goon admits the affected fast tests, bounded real proofs and applicable
+static/contracts. The existing native batch owner collects and executes that
+flat membership. It retains source/configuration/environment identity and exact
+results. A nomination does not establish whole-owner coverage, and bounded
+producer qualifiers remain visible.
 
-The release job then runs `make assemble-release`, using the existing
-[release owner](../scripts/release/build_release.sh) to check native locks before
-materialization, check version coherence, build fresh frontend assets, build the
-wheel and verify its contents. Assembly consumes the committed generated
-contracts already checked by `check-generated`; it does not regenerate source
-or rerun the completed test suites. Local `make build-release` retains its full
-`generate` → `release-check` → assembly journey. `assemble-release` is an explicit
-artifact assembly action; its caller owns validation scheduling, and it grants
-no APP certificate or release promotion. Unknown release actions reject before
-cleanup or native work. Make and native tools retain dependency/build/result
-authority; GitHub owns hosted scheduling and merge enforcement.
+The same admission is available locally through `make check` or `make test`.
+Use a focused owner test while editing; these front doors do not run unrelated
+complete suites. `VERIFY_BASE=<commit> make check` selects an explicit comparison.
+`make merge-check` produces candidate-bound selected proof for independent gate
+validation. `make broad-diagnostic`, complete owner targets and `make release-check`
+remain explicit broad diagnostics/daily/release actions, not hidden prerequisites
+of ordinary changes.
 
-Require all seven checks from the GitHub Actions app for `main`, require the branch
-to be up to date, and apply those requirements to administrators without bypass.
-Require changes through a pull request and disallow force pushes and deletion.
-These are GitHub repository settings; the workflow file alone does not enforce
-them. Keep existing stronger review requirements when updating the settings.
+A ready PR or merge group checks its effective checkout SHA against its actual
+base. The PR head is recorded separately where it differs. Native Git accounts
+for additions, deletions and both sides of renames; local feedback also includes
+untracked source. Unknown consumer scope remains `SELECTION_UNVERIFIED`; it never
+passes as an empty selection or silently launches the daily corpus. Governing
+instructions, workflow/result policy and selector changes require the named
+**verification-policy protection** obligation. Shared fixture or dependency
+uncertainty cannot be excused by that generic policy proof.
 
-To configure the existing [`main` ruleset](https://github.com/oh-goon/oh-goon/rules/25700231),
-open Settings → Rules → Rulesets and edit it rather than creating a duplicate.
-Set enforcement to **Active** for the default branch, add **Require a pull
-request before merging** and **Require status checks to pass**, select all seven
-names above from GitHub Actions, and require the branch to be up to date. Keep
-the bypass list empty and retain the deletion and force-push blocks. Enabling a
-ruleset containing only deletion/force-push rules does not require PRs or checks.
-The managed GitHub app can read ruleset metadata but cannot administer these
-settings; verify the active rules and check names independently of a green
-workflow run.
+`daily` marks expensive ordinary journeys assigned to daily execution. It is
+separate from `slow` (exhaustive variants), `process`, `scale` and `certification`.
+Normal selected pytest excludes `certification`, `slow` and `daily`; a necessary
+critical/reproducer proof must be explicitly admitted rather than omitted by
+association. Changed daily test logic needs meaningful bounded execution; missing
+precision blocks qualification instead of expanding every parameter automatically.
+All retained portable instances, including unrelated fast tests, remain in the
+unfiltered daily portfolio.
 
-Draft pull requests run only the nonrequired `draft-feedback` job: locked setup,
-lint, format, architecture and lock checks, followed by a bounded behavior smoke
-selection through the existing qualified pytest batch runner. The explicit selection
-in `ci.yml` checks domain errors, authoring validation and execution-lock behavior;
-it is not an impact selection or proof of coverage of the PR's changes. It uses one
-worker, a 120-second batch timeout and a 300-second suite budget. Failure and timeout
-fail the job. Its output and job summary label the scope `FOCUSED / NOT_FULLY_VERIFIED`.
-Mark a draft
-ready for review to launch all seven routine checks for its current commit; later
-ready-PR pushes also run all seven. Returning to draft starts cheap feedback and
-cancels superseded runs through the existing concurrency policy. Focused tests
-remain the local iteration loop; draft feedback is not test or merge completion.
+The candidate job emits **MERGE_PROOF_READY** only after its selected checks.
+The required **merge-gate** separately checks out the immutable base controller,
+inspects the candidate as data, and validates the bounded same-run proof artifact.
+It never executes or imports candidate code. Missing, skipped, failed, cancelled,
+stale or mismatched proof cannot qualify. The base control also rejects missing
+owners and changed tests without meaningful execution. Absence of reviewed base
+controls is **CUTOVER_UNVERIFIED**. Draft feedback has the distinct nonrequired
+name **draft-feedback** and means **FOCUSED / NOT_FULLY_VERIFIED**.
 
-For behavior specific to the issue, open Actions → **Focused behavior feedback** →
-**Run workflow**, select the draft branch, and enter one checkout-relative pytest
-file, directory or native node ID plus its next owner-check command. For example,
-`backend/tests/unit/services/test_execution_lock.py` with `make backend-check`, or
-`scripts/tests/test_github_actions_contract.py` with `make tooling-check`.
-The workflow must first exist on the default branch for GitHub's manual trigger
-to be available. Each run checks out the selected ref's exact event SHA. Inputs
-are quoted argv data, never shell source; the next check is inert `UNVERIFIED`
-guidance. Empty or missing selections fail rather than falling back to all tests.
-The selected run uses the same native lock setup and CPU-budget wrapper, one worker,
-a 180-second batch timeout and a 600-second suite budget. Large owner selections
-can exceed that budget; use a smaller explicit selection or the full owner gate.
-It has its own concurrency group, does not cancel required CI and publishes only
-`focused-behavior`, never one of the seven required check names. Ready-PR, main,
-merge-group and complete release selections remain unchanged. Complete portable
-coverage, including exhaustive `slow` variants, remains available through the
-existing explicit `make release-check` workflow.
+Only needed toolchains are materialized with native committed locks. Python-only
+work does not install/build the frontend. Node/npm is prepared only for admitted
+frontend obligations. Native uv/npm download caches are distinct from PASS
+receipts; virtual environments, mutable databases and test outcomes are not
+shared as source-independent proof. Selected Python tests retain the original
+hosted native runtime view and its owned SDK-overlay cleanup through
+`ci_native_runtime.sh`; static/docs checks do not mount it. CPU budgets and
+process cleanup retain their existing native owners.
 
-The full job's draft condition is evaluated before matrix expansion, as specified
-by [GitHub's job-condition contract](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idif).
-Its name expression includes a `full-checks-pending-review` fallback outside the
-seven required check names. The dependent release job likewise uses the separate
-`release-pending-review` draft name. For the skipped, unexpanded matrix, the observed
-GitHub jobs API displays that expression literally; it does not publish the
-seven target names. Verify this namespace separation when changing scheduling.
-Never conditionally skip a required check under its ordinary name:
-[GitHub treats a skipped job as success](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions).
-A new draft commit does not report the seven full checks; repository settings must require those
-exact names. Workflow scheduling does not install or prove those settings.
+PR, merge-group and main-health concurrency are separate. Superseded PR work is
+cancelled; main pushes execute only distinct installed-source/CLI smoke. The
+complete Python CI example is a daily reusable/manual workflow, not an additional
+complete journey on every ordinary update. Package/build smoke is admitted when
+its actual distribution boundary changes; ordinary docs do not assemble a release.
 
-Routine required jobs have no path filters or allowed failures. Full Git history supplies
-the PR-base quality-floor comparison. Local and hosted `backend-check` run native
-mypy with `backend/pyproject.toml`'s configured `oh_goon` package selection before
-behavior tests. Test-file typing uses separately selected tooling or edited-test
-checks. Hosted `backend-check` selects unit and
-dependency-complete tests through Make's `BACKEND_CHECK_TEST_ROOTS`; the required
-`test-integration` job owns backend and cross-owner integration tests. Together
-they cover the bounded ordinary backend suite once, selecting `not certification
-and not slow`. Local `make backend-check`
-retains pytest's complete default testpaths. Make passes the selected roots
-directly in pytest's argv rather than `PYTEST_ADDOPTS`, so nested pytest processes
-do not inherit an unrelated test-root selection. Both hosted pytest jobs stop at
-their first failure and report the 40 slowest setup/call/teardown durations above
-50 ms. A successful run
-covers the selected ordinary tests; no successful test receipts are reused across changed
-source. Publish coherent changes after focused checks so superseded full runs can
-be cancelled by the workflow's existing concurrency policy. Ubuntu 26.04 supplies the
-native Bubblewrap overlay features used by the selected agent tests. Each matrix
-runner enables unprivileged user namespaces for the ordinary Bubblewrap tests;
-the dependent artifact assembly job does not execute those tests again.
-The backend and integration jobs qualify this repository's Python/Node/Git
-runtime with the hosted image's unused Android SDK temporarily covered by an
-empty read-only tmpfs. This is restricted to disposable GitHub-hosted runners
-and the physical `/usr/local/lib/android/sdk` directory; a symlink or existing
-mount is rejected. The native Bubblewrap view must confirm the same empty,
-read-only mount before Make runs. All exposed paths still receive full fresh
-validation, and product runtime selection is unchanged. The same shell normally
-unmounts its owned overlay on success, failure or handled cancellation; cleanup
-failure fails a passing check and preserves an earlier check failure. Forced VM
-termination remains GitHub's resource lifecycle, not verified shell cleanup.
-Hosted runners use read-only tokens and do not retain checkout credentials or
-receive repository secrets. Installed-agent,
-live-account, browser, and privileged certification remain explicit qualification;
-portable checks exclude the existing `certification` marker. Workflow files are
-authored source and participate in canonical source/archive identity.
+### Effective protection and cutover
+
+Install reviewed base controls and establish daily coverage first. Exercise the
+fast route and its decisive negative scenarios against an exact candidate. Then
+configure the existing main ruleset and any legacy protection to require
+**merge-gate** from GitHub Actions, retain review/bypass restrictions and require
+an up-to-date branch or verified merge queue. Prove that a failing candidate is
+blocked. Remove obsolete required check names only after replacement enforcement
+is established, without an unprotected interval. Do not retain duplicate complete
+and selective gates indefinitely.
+
+Workflow YAML alone does not enforce branch rules. An unavailable ruleset or
+legacy-protection read means effective enforcement remains unverified. Keep the
+replacement PR in draft until reviewed source, daily execution and the required
+administrator cutover are ready. A green optional workflow is not merge protection.
+A bounded manual replay uses **Relevant verification → Run workflow** with an
+immutable base SHA; it does not alter default-branch settings.
+
+The normal required gate targets p95 ≤300 seconds and aims for p50 ≤120 seconds,
+including queue, setup, selection, execution and aggregation. Local warm focused
+feedback aims for p50 ≤10 seconds and p95 ≤30 seconds. These are measured goals,
+not permission to shorten timeouts or truncate membership. Timing is provisional
+until representative ordinary observations exist; 30 samples are an initial
+empirical cohort, not a prerequisite for safe functional cutover. Report cold/warm
+setup, failures, cancellation and fallback separately using existing timestamps
+and receipts.
 
 ## Use Oh-Goon in another repository's CI
 
@@ -161,47 +121,18 @@ authorized issue. CI and local testing are part of that workflow. Test count and
 coverage percentages are diagnostics; success means retaining meaningful defect
 detection while reducing avoidable waiting and repeated work.
 
-Use the existing focused loop during edits and run the applicable owner escalation
-on a coherent change. Draft CI adds automatic smoke feedback; its separately
-selectable behavior workflow tests the issue-specific selection. Required ready-PR
-checks verify the complete ordinary merge selection, with independent jobs running
-concurrently. Backend and integration hosted jobs request two workers from the
-existing bounded batch runner under the same native two-CPU quota. Local defaults
-remain one worker; `BACKEND_CHECK_TEST_WORKERS` and `INTEGRATION_TEST_WORKERS` expose
-that same explicit runner setting for isolation/performance qualification. Native
-capacity and memory admission may reduce concurrency. No new scheduler, test
-selector, cache or result authority is introduced. Every successful run must still
-account for its exact complete selected membership. Worker changes require real
-isolation proof; increased concurrency cannot excuse a flaky or missing result.
+Use focused tests while editing and the admitted fast merge proof for a coherent
+candidate. Complete unrelated owners are daily work. Relevance and cadence are
+separate: retain the smallest real applicable boundary proof before merge and
+leave exhaustive variants daily unless a specific critical obligation or defect
+reproducer requires them now. Neither touching an owner nor editing a slow case
+automatically selects its full campaign.
 
-Do not turn a slow test into a release-only test solely because of its duration.
-Fast, isolated and deterministic integration tests are a design requirement.
-Share infrastructure only when the tested contract permits it, keep mutable test
-state independent, and retain fresh-process, crash/reopen and native-tool proofs
-where the boundary itself is under test. Follow the owning
-[fixture lifecycle rules](development/TEST_QUALITY.md#fast-integration-and-infrastructure-lifecycle)
-across local, hosted and supported container environments. Preserve explicit
-cleanup and report missing host capabilities instead of substituting mocks for
-native qualification.
-
-Measure time to first actionable result, PR critical-path duration, repeated
-collection/setup, flake/rerun frequency, defects caught before merge and idle time
-between completed issues. Attribute costs with native durations and existing batch
-resource reports; compare exact source, environment, CPU budget and test membership,
-and distinguish warm caches and resumed work. Store measurements in the owning
-issue or PR, not a telemetry database or repository status file. These indicators
-guide optimization; they do not justify weaker assertions or omitted verification.
-
-Use focused owner tests while editing. Draft feedback stays inexpensive. Routine
-ready-PR/main checks include meaningful `process` and `scale` regressions, including
-physical timeout, cancellation, permission and truthful-result boundaries. A slow
-wall-clock result alone is not a reason to exclude a test.
-
-The `slow` marker is reserved for exhaustive full-corpus variants whose ordinary
-regression behavior has a bounded counterpart. Routine backend/integration checks
-and `tooling-check` select `not certification and not slow`; the local
-`test-tooling` inner loop additionally omits real process tests. Redundant or
-prose/private-name assertions are removed rather than preserved as release gates.
+Materialize only needed native toolchains and reuse valid dependency caches.
+Keep mutable state isolated and native result/resource authority unchanged.
+Record queue, selection, setup, execution, failure and aggregation through
+existing GitHub timestamps and receipts. Report normal/scoped/fallback routes
+and cold/warm conditions honestly; a timing goal cannot truncate admitted tests.
 
 `make release-check` runs the complete portable suite, including `slow`, through
 the same existing check owners. Backend unit/dependency-complete, backend

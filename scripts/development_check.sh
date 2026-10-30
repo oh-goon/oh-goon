@@ -64,15 +64,7 @@ run(){
 # Each semantic check proves its own executable/dependency readiness. Do not predict
 # backend availability with a separate --help probe before the real operation.
 if capture_workspace_integrity; then
-  run "Backend fast unit" test-python
-  run "Repository tooling" test-tooling
-  run "Architecture" architecture
-  run "Generated contracts" check-generated
-
-# Frontend package readiness is not predicted here. The native npm-backed targets
-# below are the semantic authority and report their own dependency/tool failures.
-  run "Frontend typecheck" frontend-typecheck
-  run "Frontend unit" test-frontend
+  run "Changed behavior" change-check
   if ! verify_workspace_integrity; then
     record "Workspace integrity" BLOCKED "source-owned workspace changed or disappeared; rerun make check"
   fi
@@ -87,8 +79,8 @@ done
 printf '\n'
 if (( failed )); then
   echo "RESULT: FAILED"
-  echo "Development feedback only; run make verify when you need whole-app diagnosis."
+  echo "Focused change feedback failed; fix the reported owner before continuing."
   exit 1
 fi
 echo "RESULT: PASSED"
-echo "Development checks passed. Run make verify for exhaustive diagnosis; make certify remains final authority."
+echo "FOCUSED / NOT_FULLY_VERIFIED: selected feedback passed; required merge proof and daily full remain separate."
