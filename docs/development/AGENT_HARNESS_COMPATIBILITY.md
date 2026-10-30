@@ -171,6 +171,77 @@ uncertainty, real-account native sign-in/refresh retention, cross-Run native
 session adoption and complete private-store alias/API/plugin boundaries.
 Linux proof does not qualify WSL2/container execution or strict custody.
 
+## Pi persistent-session protocol QA — HUG-39
+
+[HUG-39](https://linear.app/hugloss/issue/HUG-39) qualifies the selected installed
+Pi protocol before any persistent-session execution feature is implemented.
+Existing Pi Runs remain ephemeral (`--no-session`); lifecycle and compaction
+checks above do not establish cross-Run session adoption.
+
+Start with an explicitly selected public Pi installation and disposable native
+configuration, a local synthetic provider and a separate session directory.
+Never inspect personal authentication or history. Use the original command
+supervisor and physical cleanup evidence; exercise the real Bubblewrap mount
+boundary independently of temporary model/configuration teardown.
+
+The investigation must distinguish native session identity, selected leaf,
+first persisted file creation, normal process close and exact reopen in a fresh
+process. Test missing, renamed, empty and malformed resources and interruption
+during a turn. A fallback to a new session is an unsafe exact-open result,
+even when the native command exits successfully. Observe native behavior without
+adding an Oh-Goon transcript parser, repair algorithm or session store.
+
+Record whether headless JSON supplies an unambiguous opened-existing identity
+acknowledgment. Select native RPC only if that proof requires it; any required
+bidirectional channel must remain within the existing Step/process owner and
+be qualified separately in [HUG-139](https://linear.app/hugloss/issue/HUG-139).
+Native persistence observations do not establish power-loss durability,
+exclusive access against unmanaged writers, new Run admission or independent
+verification. Keep unsupported modes and unrun hosts explicit. Actual outcomes
+belong to the issue and exact-source evidence; these instructions are not PASS.
+
+### Installed Pi 1.3.0 disposition
+
+The [installed session probe][pi-session-tests] characterizes the native protocol
+under Linux Bubblewrap using a test-owned extension that supplies synthetic
+model replies. Each launch has a distinct physical execution ID, IP networking
+denied, no inference broker and independently disposed private configuration.
+The writable session directory is inside the disposable qualification workspace;
+this does not grant product authority for an external persistent session mount.
+
+| Native observation | Qualification consequence |
+| --- | --- |
+| JSON emits the session header before the turn; fresh-process reopen preserves its ID and delivers the earlier conversation to the synthetic provider. | JSON supplies session identity, but no active-leaf or opened-existing acknowledgment. |
+| Correlated RPC `get_state` supplies session ID/file; `get_entries` supplies the active leaf. | **DG-01: select native RPC for pre-turn session and branch identity**, conditional on the existing supervised input-channel proof in HUG-139. The probe uses bounded one-shot requests; sustained bidirectional control remains unqualified. |
+| A new native identity and setup entries can exist without a session file after normal close. First user conversation creates the file. | Identity, close and persistence are separate facts. |
+| Missing/renamed explicit paths create fresh in-memory identities; an absent `--session-id` may create that very ID. Empty files are rewritten. | Neither selector is an exact-open refusal mechanism. Matching an ID alone cannot prove an old resource was opened. |
+| Wholly malformed nonempty files refuse; a valid session with a torn tail can load and gain a newline. A saved session can be selected from another requested cwd. | Format acceptance and header identity do not establish complete history, project authorization or unchanged bytes. No controller repair is added. |
+| Cancellation after native assistant generation starts retains the user prompt without a successful assistant turn; the original command owner proves process-group quiescence. | Retained conversation does not establish successful work. Interrupted isolation acknowledgment and power-loss durability remain unproven. |
+
+**Retain** Pi's existing ephemeral command and terminal/compaction mappings.
+**Unqualified:** persistent Oh-Goon Runs, fail-before-effect exact open,
+exclusive/migration-safe custody, complete package sealing, WSL2/containers and
+power-loss durability. Neither JSON nor RPC supplies an opened-old flag or a
+durable-save acknowledgment. RPC is the minimum identity transport selected for
+the next work package, not permission to enable resume or a second process loop.
+Existing Run/Step/Journal admission, independent verification and the dependent
+HUG-40/41/43 work packages still own product enablement.
+
+After native backend setup, select the complete public release and effective
+entrypoint explicitly, outside personal authentication/configuration:
+
+```bash
+OH_GOON_NATIVE_PI=/public/pi-release/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js \
+OH_GOON_NATIVE_PI_RUNTIME_ROOT=/public/pi-release \
+uv run --offline --frozen --no-sync --project backend pytest -q -s \
+  -m certification backend/tests/integration/services/test_native_pi_session_protocol.py
+```
+
+The fixture verifies Pi 1.3.0 and records entrypoint SHA-256, host and original
+process receipts. The entrypoint hash does not seal Node or its imported package
+bytes; changed implementations require requalification (HUG-137). No live
+account, paid inference, transcript parser or product command change is involved.
+
 ## Upgrade and subtraction review
 
 For a native integration change, review the applicable IDs and record an explicit
@@ -211,3 +282,4 @@ environment-specific and privileged qualification runs only when selected.
 [cli-readonly-tests]: ../../backend/tests/integration/services/test_native_cli_readonly.py
 [cli-lifecycle-tests]: ../../backend/tests/integration/services/test_native_cli_lifecycle.py
 [cli-compaction-tests]: ../../backend/tests/integration/services/test_native_cli_compaction.py
+[pi-session-tests]: ../../backend/tests/integration/services/test_native_pi_session_protocol.py
