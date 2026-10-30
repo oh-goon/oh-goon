@@ -23,6 +23,10 @@ module-name = "orders_pipeline"
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
 
+[tool.pytest.ini_options]
+addopts = "-m 'not airflow'"
+markers = ["airflow: optional adapter comparison requiring the separately selected airflow dependency group"]
+
 [build-system]
 requires = ["uv_build>=0.10.0"]
 build-backend = "uv_build"

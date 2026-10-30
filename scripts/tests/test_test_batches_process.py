@@ -768,7 +768,8 @@ def test_timeout_bisection_reuses_completed_member_without_duplicate_coverage(
     )
     assert result.returncode == 0, result.stdout
     assert first_count.read_text(encoding="utf-8") == "1"
-    membership = json.loads(report.read_text(encoding="utf-8"))["membership_receipt"]
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    membership = payload["membership_receipt"]
     assert len(membership["selected"]) == 2
     assert membership["completed"] == membership["selected"]
     assert membership["missing"] == []
@@ -783,5 +784,8 @@ def test_timeout_bisection_reuses_completed_member_without_duplicate_coverage(
     first_member, second_member = membership["selected"]
     assert attempts_by_member[first_member] == ["PASSED"]
     assert sorted(attempts_by_member[second_member]) == ["PASSED", "STARTED"]
+    from oh_goon.repository_tooling.daily_regression import native_membership
+
+    assert native_membership(payload)[:2] == (True, True)
     assert len(membership["retry_bisection_lineage"]) == 1
     assert membership["retry_bisection_lineage"][0]["action"] == "bisect_shard"

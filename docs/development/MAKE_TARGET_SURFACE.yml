@@ -30,9 +30,13 @@ noncanonical_make_target_classes:
   - browser-check-system-chromium
   - browser-test
   - check-backend
+  - check-backend-quality
+  - check-backend-tests
   - check-frontend
   - check-generated
   - check-tooling
+  - check-tooling-quality
+  - check-tooling-tests
   - coverage-python
   - coverage-report
   - format
@@ -58,6 +62,7 @@ noncanonical_make_target_classes:
   - release-accept
   - release-locks-check
   - release-check
+  - release-check-plan
   - ruff-repair
   - repository-understanding-exam
   - repository-understanding-test-batch
@@ -75,6 +80,8 @@ noncanonical_make_target_classes:
   - test-execution-fast
   - test-frontend
   - test-integration
+  - test-backend-integration
+  - test-cross-owner-integration
   - test-journal-coverage
   - test-log
   - test-python

@@ -21,10 +21,13 @@ RECIPE = Path("examples/python-ci")
 PLAN = RECIPE / "plan.yml"
 SCRIPT = ROOT / RECIPE / "run.sh"
 WHEEL = "airflow_oh_goon_orders-0.1.0-py3-none-any.whl"
-pytestmark = pytest.mark.skipif(
-    os.name != "posix" or shutil.which("uv") is None or shutil.which("git") is None,
-    reason="native POSIX Git and uv required",
-)
+pytestmark = [
+    pytest.mark.daily,
+    pytest.mark.skipif(
+        os.name != "posix" or shutil.which("uv") is None or shutil.which("git") is None,
+        reason="native POSIX Git and uv required",
+    ),
+]
 
 
 @pytest.fixture(scope="module")

@@ -1,18 +1,19 @@
 name: Python CI example
 
 "on":
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-  push:
-    branches: [main]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: python-example-${{ github.run_id }}-${{ github.run_attempt }}
+  cancel-in-progress: false
 
 jobs:
   python-ci-example:
@@ -21,20 +22,24 @@ jobs:
     timeout-minutes: 20
     env:
       UV_PYTHON: "3.12"
+      SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.12.5"
-          enable-cache: false
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
       - name: Prepare exact candidate CLI outside the workload
         run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git clone --no-hardlinks "$GITHUB_WORKSPACE" "$RUNNER_TEMP/oh-goon-tool"
-          git -C "$RUNNER_TEMP/oh-goon-tool" checkout --detach "$GITHUB_SHA"
+          git -C "$RUNNER_TEMP/oh-goon-tool" checkout --detach "$SOURCE_SHA"
           make -C "$RUNNER_TEMP/oh-goon-tool" backend-install
       - name: Execute the committed Python CI example
         run: |

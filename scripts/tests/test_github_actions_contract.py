@@ -245,7 +245,11 @@ esac
 
 
 def _run_required_check(
-    tmp_path: Path, target: str, overrides: dict[str, str] | None = None
+    tmp_path: Path,
+    target: str,
+    overrides: dict[str, str] | None = None,
+    *,
+    native_runtime: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[str], bool]:
     """Execute native Bash while every privileged/tool effect is simulated."""
     bash = shutil.which("bash", path=os.defpath)
@@ -269,8 +273,16 @@ def _run_required_check(
         executable.write_text(f"#!{bash}\n" + _SDK_SHIM)
         executable.chmod(0o755)
     events, marker = tmp_path / "events", tmp_path / "mounted-owner"
-    steps = _workflow()["jobs"]["checks"]["steps"]
-    script = [step["run"] for step in steps if "run" in step][-1]
+    if native_runtime:
+        script = (
+            "set -- make "
+            + shlex.quote(target)
+            + "\n"
+            + (ROOT / "scripts/ci_native_runtime.sh").read_text()
+        )
+    else:
+        steps = _workflow()["jobs"]["checks"]["steps"]
+        script = [step["run"] for step in steps if "run" in step][-1]
     script = script.replace("${{ matrix.target }}", target).replace(
         "/usr/local/lib/android/sdk", str(sdk)
     )
@@ -297,6 +309,30 @@ def _run_required_check(
         events.read_text().splitlines() if events.exists() else [],
         marker.exists(),
     )
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    ("options", "status", "retained"),
+    [
+        ({}, 0, False),
+        ({"SIM_CHECK_STATUS": "17"}, 17, False),
+        ({"SIM_VIEW_STATUS": "17"}, 17, False),
+        ({"SIM_CLEANUP_STATUS": "23"}, 1, True),
+        ({"SIM_TERM": "1"}, 143, False),
+    ],
+)
+def test_shared_native_runtime_retains_original_boundary_and_cleanup(
+    tmp_path: Path, options: dict[str, str], status: int, retained: bool
+) -> None:
+    result, events, mounted = _run_required_check(
+        tmp_path, "backend-check", options, native_runtime=True
+    )
+    assert result.returncode == status, result.stdout + result.stderr
+    assert mounted is retained
+    assert "mount" in events
+    if options.get("SIM_VIEW_STATUS"):
+        assert not any(event.startswith("make:") for event in events)
 
 
 @pytest.mark.process
@@ -846,34 +882,3 @@ def test_complete_release_check_executes_each_native_surface_once() -> None:
         assert options.batch_size == batch_size and options.batch_timeout == 180
     assert not any("pytest" in command for command in commands)
     assert sum(command[-3:] == ["npm", "run", "check"] for command in commands) == 1
-
-
-def test_complete_release_verification_is_explicit_and_uses_the_selected_source() -> (
-    None
-):
-    workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/release-validation.yml").read_text()
-    )
-    assert workflow["on"] == {
-        "workflow_dispatch": None,
-        "release": {"types": ["published"]},
-    }
-    assert workflow["permissions"] == {"contents": "read"}
-    assert len(workflow["jobs"]) == 1
-    job = next(iter(workflow["jobs"].values()))
-    assert "continue-on-error" not in job
-    assert all(
-        "continue-on-error" not in step and "if" not in step for step in job["steps"]
-    )
-    checkout = next(
-        step
-        for step in job["steps"]
-        if step.get("uses", "").startswith("actions/checkout@")
-    )
-    assert checkout["with"]["ref"] == "${{ github.sha }}"
-    assert checkout["with"]["persist-credentials"] is False
-    _cpu_preparation(job)
-    assert [step["run"] for step in job["steps"] if "run" in step][-2:] == [
-        "make init",
-        "make release-check",
-    ]

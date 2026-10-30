@@ -211,11 +211,95 @@ explicit qualification and are never silently admitted by a release command.
 
 Local `make build-release` performs this complete check before artifact assembly.
 The [complete release workflow](../.github/workflows/release-validation.yml) also
-runs it on the exact selected commit when dispatched manually or when a release
-is published. The published-release event records post-publication verification;
-pre-publication verification is supplied by the local release-build journey.
+runs the same canonical owners daily and on explicit manual dispatch. Its
+`release` mode qualifies the selected immutable candidate before publication;
+the former published-release trigger is removed. Portable success does not
+replace the separately required APP/native/browser/host qualification or the
+release owner's final source/artifact promotion checks. An older nightly SHA
+cannot qualify a newer release. Existing exact-candidate evidence may be reused
+only when the release owner already admits that reuse.
 Routine PR artifact assembly continues to wait for the seven-check dependency
 chain without repeating completed suites or claiming APP certification.
+
+## Daily full regression
+
+The full workflow runs at **02:23 UTC every day** (03:23 Swedish winter time,
+04:23 summer time), including days when main has not changed. PR updates and
+main pushes do not trigger it. GitHub's scheduler is best effort; a cron entry
+does not establish that a campaign actually ran.
+
+The campaign freezes one main commit before work. Every owner checks out that
+same SHA. `make release-check-plan` projects the existing Make owner's complete
+portfolio, and the workflow consumes it with `fail-fast: false` and at most one
+owner runner. Local `make release-check` invokes the same owners with native
+Make `-k`, so a failed quality or integration owner does not suppress independent
+owners. There is no change filter, fast/daily marker exclusion, or reusable test
+PASS in this campaign. The marker is `not certification`: both `slow` exhaustive
+variants and expensive ordinary `daily` journeys remain included. Dependency
+downloads may use native uv/npm caches; environments and project code are
+materialized for the current checkout.
+
+The portable environment is explicitly **Ubuntu 26.04, Python 3.12, Node
+24.19.0 and uv 0.12.5**, with two CPUs per native test scope. This campaign does
+not claim other OS/Python variants, installed models, privileged custody or
+browser/APP qualification. The latter remain separately selected obligations.
+The Orders project's native pytest configuration deselects its optional
+`airflow` comparison: the separate Airflow dependency group is not selected by
+the portable application-test owner. Ordinary project directories are
+discovered without enumerating individual filenames.
+The full owner set covers backend unit/dependency-complete tests, backend and
+cross-owner integrations, repository tooling, shipped Python projects,
+frontend checks, architecture, generated freshness and lock validation. Native
+discovery adds new portable tests automatically; no duplicate test-file list is
+maintained in the workflow.
+
+Each owner retains bounded native results outside the source checkout. The final
+join requires the exact SHA, UTC slot, Actions run/attempt and complete owner
+partition. Missing, cancelled, timed-out, unexpectedly skipped/xfail or foreign
+evidence cannot become a qualifying green. A failing native test campaign can
+have complete coverage; setup failure or an unfinished owner is `INCOMPLETE`.
+Native `-ra` output retains non-PASS reasons. The batch owner's original member
+and discovery receipts remain the result authority.
+
+One daily concurrency domain never cancels an active campaign. Manual catch-up
+uses the same UTC slot and the first attempt's frozen source. When a slot
+already has an attempt, use **Re-run jobs** on that Actions run rather than
+creating a new campaign to overwrite a red result. Release qualification has a
+separate concurrency domain. A queued daily run can still be delayed by account
+capacity; separate groups do not reserve runners. The initial one-owner ceiling
+limits contention. PR latency during a real overlap remains a live qualification
+obligation, not a claim made by this configuration.
+
+Run a missed slot through Actions → **Daily and release verification** →
+**Run workflow**, mode `daily`, with its UTC `YYYY-MM-DD` slot. Leave `ref` blank
+to freeze current main when there was no prior attempt. For release
+qualification, select mode `release` and an exact commit SHA; no publication
+occurs. The command-line equivalent is:
+
+```sh
+gh workflow run release-validation.yml -f mode=daily -f slot=2026-10-30
+gh run rerun RUN_ID
+uv run --offline --frozen --no-sync --project backend oh-goon-daily-regression health --repository oh-goon/oh-goon
+```
+
+The health command reads existing Actions run metadata and bounded result
+artifacts. It reports the expected daily slot, latest attempt, latest complete
+result and last green separately. A fresh completed red is **fresh and failing**;
+an in-progress or incomplete attempt does not refresh completion. A missed slot
+is visible immediately; more than 36 hours without a complete result is the
+outer stale alarm. Missing/expired artifacts remain unknown. No second
+scheduler, monitoring database or fallback cron is introduced.
+
+The repository maintainer **@Hugloss** owns the daily Actions notification and
+next-working-day triage, including checking the expected slot from outside the
+workflow. A workflow cannot detect its own failure to start. Preserve the failed
+SHA and smallest reproducer; classify product, test, infrastructure or missing
+capability failures. Confirmed product defects hold relevant releases and add
+their reproducer to affected future changes. An unrelated failure does not make
+every PR wait for full regression. If a campaign exceeds its slot, preserve the
+active attempt, report overdue coverage and repair runtime/capacity; repeatedly
+cancelling it would prevent full completion. Owner jobs have a finite two-hour
+limit, and every uncompleted owner remains explicit in the final report.
 
 ## Why this exists
 

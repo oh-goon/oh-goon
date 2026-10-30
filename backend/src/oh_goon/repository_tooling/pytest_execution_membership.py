@@ -27,6 +27,9 @@ RUN_SCHEMA = "oh-goon.pytest-execution-run/v1"
 ATTEMPT_IDENTITY_SCHEMA = "oh-goon.pytest-execution-attempt/v1"
 MEMBERSHIP_IDENTITY_SCHEMA = "oh-goon.pytest-logical-membership/v1"
 _TERMINAL_STATUSES = frozenset({"PASSED", "FAILED", "NON_PASSED"})
+PYTEST_NATIVE_OUTCOMES = frozenset(
+    {"PASSED", "FAILED", "SKIPPED", "XFAILED", "XPASSED", "UNREPORTED"}
+)
 
 
 def _identity(payload: object) -> str:
@@ -109,6 +112,7 @@ class ExecutionMembershipReceipt:
     attempt_records: tuple[dict[str, object], ...]
     retry_bisection_lineage: tuple[dict[str, object], ...]
     terminal_success: bool
+    effective_pytest_outcomes: tuple[dict[str, object], ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -177,9 +181,18 @@ class ExecutionMembershipStore:
         attempt_identity: str,
         observed_batch_identity: str,
         status: str,
+        pytest_outcomes: list[dict[str, str]] | None = None,
     ) -> Path:
         if status not in _TERMINAL_STATUSES:
             raise ValueError(f"unsupported pytest member terminal status: {status}")
+        if pytest_outcomes is not None and any(
+            not isinstance(row, dict)
+            or set(row) != {"nodeid", "outcome"}
+            or not isinstance(row["nodeid"], str) or not row["nodeid"]
+            or row["outcome"] not in PYTEST_NATIVE_OUTCOMES
+            for row in pytest_outcomes
+        ):
+            raise ValueError("unsupported native pytest item outcome")
         path = self.record_started(
             member,
             attempt_identity=attempt_identity,
@@ -200,6 +213,8 @@ class ExecutionMembershipStore:
                 "pytest execution-membership attempt identity changed before terminal write"
             )
         payload["status"] = status
+        if pytest_outcomes is not None:
+            payload["pytest_outcomes"] = pytest_outcomes
         payload["completed_at_utc"] = datetime.now(UTC).isoformat()
         _atomic_json_write(path, payload)
         return path
@@ -313,6 +328,39 @@ class ExecutionMembershipStore:
             and accepted_terminal_set == selected_set
             and completed_set == selected_set
         )
+        # Use the SAME unique successful terminal row already accepted above.
+        # Earlier interrupted attempts remain diagnostics, never a timestamp-based
+        # replacement for the original correctness/member authority.
+        by_member: dict[str, list[dict[str, object]]] = {}
+        for row in terminal_rows:
+            by_member.setdefault(str(row["member"]), []).append(row)
+        effective: list[dict[str, object]] = []
+        for member in sorted(selected_set):
+            status = (
+                "RESUMED"
+                if member in resumed_set
+                else "PASSED"
+                if member in passed_set
+                else "FAILED"
+                if member in terminal_by_status["FAILED"]
+                else "NON_PASSED"
+                if member in terminal_by_status["NON_PASSED"]
+                else "UNSTARTED"
+            )
+            accepted = [row for row in by_member.get(member, []) if row.get("status") == status]
+            effective_row = accepted[0] if len(accepted) == 1 else None
+            effective.append(
+                {
+                    "member": member,
+                    "status": status,
+                    "attempt_identity": effective_row.get("attempt_identity")
+                    if effective_row
+                    else None,
+                    "pytest_outcomes": effective_row.get("pytest_outcomes", [])
+                    if effective_row
+                    else [],
+                }
+            )
         receipt = ExecutionMembershipReceipt(
             schema=MEMBERSHIP_SCHEMA,
             suite_identity=self.suite_identity,
@@ -333,6 +381,7 @@ class ExecutionMembershipStore:
             attempt_records=rows,
             retry_bisection_lineage=recovery_lineage,
             terminal_success=terminal_success,
+            effective_pytest_outcomes=tuple(effective),
         )
         path = self.run_directory / "membership-receipt.json"
         _atomic_json_write(path, receipt.as_dict())
