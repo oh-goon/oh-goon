@@ -33,8 +33,16 @@ def test_public_application_entrypoint_passes_exact_deployment_provisioner(monke
         terminal=None,
         standard_process_isolation=None,
         git_service=None,
+        run_resource_scope=None,
+        run_resource_envelope=None,
     ):
-        assert (terminal, standard_process_isolation, git_service) == (None, None, None)
+        assert (
+            terminal,
+            standard_process_isolation,
+            git_service,
+            run_resource_scope,
+            run_resource_envelope,
+        ) == (None, None, None, None, None)
         observed.append((fleet_provisioner, standard_local))
         return built
 
