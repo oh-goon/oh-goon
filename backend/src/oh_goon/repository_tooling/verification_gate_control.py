@@ -61,6 +61,11 @@ def non_executable_documentation(root: Path, path: str) -> bool:
     return len(content) <= 1024 * 1024 and "```" not in content and "~~~" not in content
 
 
+def is_generated_contract_path(path: str) -> bool:
+    """The existing one-way OpenAPI/frontend generator owns these artifacts."""
+    return path == "generated/openapi/openapi.json" or path.startswith("generated/frontend/")
+
+
 def required_static_obligations(paths: Sequence[str]) -> set[str]:
     """Existing static/contract authorities, independent of test relevance."""
     obligations = {"architecture"}
@@ -192,18 +197,25 @@ def validate_merge_proof(
         for path in changed_paths
         if root is not None and non_executable_documentation(root, path)
     }
+    contract_only = any(map(is_generated_contract_path, changed_paths)) and all(
+        is_generated_contract_path(path) or path in plain_docs for path in changed_paths
+    )
     behavior_required = plan.get("behavioral_status") == "REQUIRED"
     if not behavior_required:
         for path in changed_paths:
             if path not in plain_docs:
                 raise ValueError("Executable inputs cannot claim behavioral NOT_APPLICABLE")
-    if behavior_required and not (plan.get("pytest") or plan.get("frontend")):
+    if behavior_required and not (plan.get("pytest") or plan.get("frontend")) and not contract_only:
         raise ValueError("Executable changes have no behavioral proof")
     evidence = plan.get("evidence", {})
-    if behavior_required and (
-        not isinstance(evidence, Mapping)
-        or not evidence.get("producer_implementation_identity")
-        or evidence.get("owner_coverage") != "not-claimed"
+    if (
+        behavior_required
+        and not contract_only
+        and (
+            not isinstance(evidence, Mapping)
+            or not evidence.get("producer_implementation_identity")
+            or evidence.get("owner_coverage") != "not-claimed"
+        )
     ):
         raise ValueError("Required producer evidence is missing or overclaimed")
     outcomes = result.get("outcomes")
@@ -287,6 +299,8 @@ def validate_merge_proof(
         raise ValueError("Changed tests have no meaningful execution proof")
     observations = {row.get("changed_path"): row for row in evidence.get("observations", [])}
     for source in changed_paths:
+        if is_generated_contract_path(source):
+            continue
         if is_verification_policy_path(source) and not source.endswith(".py"):
             continue
         if source in plain_docs:

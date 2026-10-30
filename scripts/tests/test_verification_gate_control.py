@@ -262,6 +262,55 @@ def test_effective_native_category_cannot_hide_behind_member_passed(
         _validate(plan, result)
 
 
+def test_generated_only_contract_repair_requires_native_freshness_and_consumers() -> (
+    None
+):
+    plan, _result = _proof()
+    plan.update(
+        changed_paths=[
+            "generated/openapi/openapi.json",
+            "generated/frontend/models.ts",
+        ],
+        static=["architecture", "generated", "frontend"],
+        pytest=[],
+        frontend=[],
+        evidence={},
+    )
+    result: dict[str, Any] = {
+        "plan": copy.deepcopy(plan),
+        "status": "MERGE_PROOF_READY",
+        "outcomes": [
+            {"owner": name, "returncode": 0}
+            for name in (
+                "Architecture",
+                "Generated contracts",
+                "Frontend typecheck",
+                "Frontend lint",
+                "Frontend architecture",
+                "Frontend i18n:check",
+            )
+        ],
+    }
+    validate_merge_proof(
+        plan,
+        result,
+        candidate=plan["candidate"],
+        base=plan["base"],
+        changed_paths=plan["changed_paths"],
+        control_base=None,
+    )
+    result["outcomes"][1]["returncode"] = 1
+    with pytest.raises(ValueError, match="failed"):
+        validate_merge_proof(
+            plan,
+            result,
+            candidate=plan["candidate"],
+            base=plan["base"],
+            changed_paths=plan["changed_paths"],
+            control_base=None,
+        )
+
+
 def test_historical_timeout_does_not_replace_the_original_effective_pass() -> None:
     plan, result = _proof()
     receipt = result["outcomes"][0]["native_report"]["membership_receipt"]
