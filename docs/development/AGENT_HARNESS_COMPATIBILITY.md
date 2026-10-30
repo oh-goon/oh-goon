@@ -164,6 +164,35 @@ uncertainty, real-account native sign-in/refresh retention, cross-Run native
 session adoption and complete private-store alias/API/plugin boundaries.
 Linux proof does not qualify WSL2/container execution or strict custody.
 
+## Pi persistent-session protocol QA — HUG-39
+
+[HUG-39](https://linear.app/hugloss/issue/HUG-39) qualifies the selected installed
+Pi protocol before any persistent-session execution feature is implemented.
+Existing Pi Runs remain ephemeral (`--no-session`); lifecycle and compaction
+checks above do not establish cross-Run session adoption.
+
+Start with an explicitly selected public Pi installation and disposable native
+configuration, a local synthetic provider and a separate session directory.
+Never inspect personal authentication or history. Use the original command
+supervisor and physical cleanup evidence; exercise the real Bubblewrap mount
+boundary independently of temporary model/configuration teardown.
+
+The investigation must distinguish native session identity, selected leaf,
+first durable file creation, normal process close and exact reopen in a fresh
+process. Test missing, renamed, empty and malformed resources and interruption
+during a turn. A fallback to a new session is an unsafe exact-open result,
+even when the native command exits successfully. Observe native behavior without
+adding an Oh-Goon transcript parser, repair algorithm or session store.
+
+Record whether headless JSON supplies an unambiguous opened-existing identity
+acknowledgment. Select native RPC only if that proof requires it; any required
+bidirectional channel must remain within the existing Step/process owner and
+be qualified separately in [HUG-139](https://linear.app/hugloss/issue/HUG-139).
+Native persistence observations do not establish power-loss durability,
+exclusive access against unmanaged writers, new Run admission or independent
+verification. Keep unsupported modes and unrun hosts explicit. Actual outcomes
+belong to the issue and exact-source evidence; these instructions are not PASS.
+
 ## Upgrade and subtraction review
 
 For a native integration change, review the applicable IDs and record an explicit
