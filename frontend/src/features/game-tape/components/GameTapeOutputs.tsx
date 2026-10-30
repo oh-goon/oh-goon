@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 
-import type { GameTape as GameTapeModel } from "@generated/models";
+import type { GameTape as GameTapeModel, GameTapeArtifactObservation } from "@generated/models";
 import { GameTapeStepArtifacts } from "@/features/game-tape/components/GameTapeStepArtifacts";
 
-export function GameTapeOutputs({ tape }: { tape: GameTapeModel }) {
+export function GameTapeOutputs({ tape, observation }: { tape: GameTapeModel; observation?: GameTapeArtifactObservation | null }) {
   const { t } = useTranslation();
   const entries = tape.repositories.flatMap((repository) =>
     (repository.steps ?? [])
@@ -20,7 +20,7 @@ export function GameTapeOutputs({ tape }: { tape: GameTapeModel }) {
           <strong>{t("gameTape.outputs.published")}</strong>
           <ul>{(step.outputs ?? []).map((output) => <li key={output.name}><code>{output.name}</code><span>{output.byte_count} B</span><code title={output.sha256}>{output.sha256.slice(0, 12)}</code></li>)}</ul>
         </section> : null}
-        <GameTapeStepArtifacts artifacts={step.artifacts ?? []} ownerIdentity={step.step_execution_id} />
+        <GameTapeStepArtifacts artifacts={step.artifacts ?? []} ownerIdentity={step.step_execution_id} observation={observation} artifactOwner={{ repository_execution_id: repository.repository_execution_id, repository_id: repository.repository.repository_id, step_execution_id: step.step_execution_id, step_id: step.step_id }} />
       </article>)}
     </div>}
   </section>;

@@ -1,13 +1,23 @@
 import errno
+import json
 import os
 import stat
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import (
+    FleetContentIntegrityError,
+    FleetContentObjectUnavailable,
+    FleetContentReferenceUnavailable,
+    FleetPlanInvalid,
+)
 from oh_goon.core.path_authority import RepositoryScopedPath
 from oh_goon.core.path_layouts import ContentStorePathLayout
+from oh_goon.engine.errors import OperationCancelledError
+from oh_goon.integrations._copy_transport import copy_regular_file
 from oh_goon.integrations.content_snapshot import snapshot_identity
 from oh_goon.integrations.content_snapshot_proof import (
     snapshot_metadata_fingerprint,
@@ -316,6 +326,101 @@ def test_retained_file_materialization_refuses_invalid_authority_or_destination(
     if defect == "existing":
         assert destination.read_bytes() == b"keep-existing"
     assert source.read_bytes() == b"original-model"
+    assert not list(ContentStorePathLayout.from_root(store.root).leases.glob("*/lease-*.json"))
+
+
+@pytest.mark.parametrize("defect", ["released", "foreign", "missing-object", "invalid-reference"])
+def test_retained_file_reads_classify_scoped_reference_and_object_unavailability(
+    tmp_path: Path, defect: str
+) -> None:
+    source = tmp_path / "source"
+    source.write_bytes(b"retained model")
+    store = FleetContentStore(tmp_path / "store")
+    retained = store.put_file(_owned(source, OWNER))
+    baseline = tmp_path / "baseline"
+    assert (
+        store.materialize_file(retained.reference_id, _destination(baseline, OWNER))
+        == retained.identity
+    )
+    assert baseline.read_bytes() == source.read_bytes()
+    selected_owner = OWNER
+    expected: type[FleetPlanInvalid] = FleetContentReferenceUnavailable
+    if defect == "released":
+        store.release_reference(retained.reference_id, owner_repository_id=OWNER)
+    elif defect == "foreign":
+        selected_owner = OTHER
+    elif defect == "missing-object":
+        retained.path.unlink()
+        expected = FleetContentObjectUnavailable
+    else:
+        reference = ContentStorePathLayout.from_root(store.root).reference(
+            OWNER, retained.reference_id
+        )
+        payload = json.loads(reference.read_text())
+        payload["object_id"] = "invalid-object"
+        reference.write_text(json.dumps(payload), encoding="utf-8")
+    destination = tmp_path / "unavailable"
+    with pytest.raises(expected) as rejected:
+        store.materialize_file(retained.reference_id, _destination(destination, selected_owner))
+    assert rejected.value.code == FleetPlanInvalid.code
+    assert not destination.exists()
+    assert not list(ContentStorePathLayout.from_root(store.root).leases.glob("*/lease-*.json"))
+
+
+@pytest.mark.parametrize("defect", ["size", "tampered", "growth", "cancelled"])
+def test_retained_file_verification_bounds_copy_and_closes_lease_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str
+) -> None:
+    import oh_goon.integrations.fleet_content_store as module
+
+    source = tmp_path / "source"
+    payload = b"retained model"
+    source.write_bytes(payload)
+    store = FleetContentStore(tmp_path / "store")
+    retained = store.put_file(_owned(source, OWNER))
+    baseline = tmp_path / "baseline"
+    assert (
+        store.materialize_file(
+            retained.reference_id,
+            _destination(baseline, OWNER),
+            expected_identity=retained.identity,
+        )
+        == retained.identity
+    )
+    assert baseline.read_bytes() == payload
+    identity = retained.identity
+    if defect == "size":
+        identity = replace(identity, byte_count=len(payload) - 1)
+    elif defect == "tampered":
+        retained.path.write_bytes(b"X" * len(payload))
+    elif defect == "growth":
+
+        def grow_after_metadata_check(
+            source: str | Path,
+            destination: str | Path,
+            *,
+            check_cancel: Callable[[], None] | None = None,
+            label: str = "owned file copy",
+            max_bytes: int | None = None,
+        ) -> Path:
+            with Path(source).open("ab") as stream:
+                stream.write(b"unexpected-growth")
+            return copy_regular_file(
+                source, destination, check_cancel=check_cancel, label=label, max_bytes=max_bytes
+            )
+
+        monkeypatch.setattr(module, "copy_regular_file", grow_after_metadata_check)
+    destination = tmp_path / "unverified"
+    expected = OperationCancelledError if defect == "cancelled" else FleetContentIntegrityError
+    with pytest.raises(expected):
+        store.materialize_file(
+            retained.reference_id,
+            _destination(destination, OWNER),
+            expected_identity=identity,
+            cancel_requested=(lambda: True) if defect == "cancelled" else None,
+        )
+    if destination.exists():
+        assert destination.stat().st_size <= len(payload)
     assert not list(ContentStorePathLayout.from_root(store.root).leases.glob("*/lease-*.json"))
 
 

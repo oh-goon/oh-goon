@@ -80,9 +80,9 @@ export function createApiClient(mutations: MutationController): ApiClient {
       { query: { limit, ...(beforeRevision === undefined ? {} : { before_revision: beforeRevision }), ...(outcome === undefined ? {} : { outcome }), ...(status === undefined ? {} : { status }), ...(source === undefined ? {} : { source }), ...(repositoryId === undefined ? {} : { repository_id: repositoryId }), ...(fromAt === undefined ? {} : { from_at: fromAt }), ...(toAt === undefined ? {} : { to_at: toAt }), ...(planQuery === undefined || planQuery === "" ? {} : { plan_query: planQuery }) } },
       options,
     ),
-    fleetRunDetail: (runId, options) => readOperation(
+    fleetRunDetail: (runId, options, observeArtifacts) => readOperation(
       op.get_fleet_run.operationId,
-      { path: { fleet_run_id: runId } },
+      { path: { fleet_run_id: runId }, ...(observeArtifacts === true ? { query: { observe_artifacts: true } } : {}) },
       options,
     ),
     agentCampaign: (campaignId, options) => readOperation(

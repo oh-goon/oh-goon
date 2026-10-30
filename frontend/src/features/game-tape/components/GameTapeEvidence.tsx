@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { GameTapeFailureNavigationState } from "@generated/enums";
 import type {
   GameTape,
+  GameTapeArtifactObservation,
   GameTapeFailureHistory,
   GameTapeLiveFailureAnchor,
   GameTapeLiveOutputBatch,
@@ -24,7 +25,7 @@ import {
   statusTone,
 } from "@/features/game-tape/gameTapeFormat";
 
-export function GameTapeEvidence({ tape, selectedId, onSelect, failureHistory, failureHistoryLoading, liveOutput, artifacts, logQuery = "", logStream = "all", logPageFromEnd = 0, rawLogsOpen = false, onLogQueryChange, onLogStreamChange, onLogPageChange, onRawLogsOpenChange }: { tape: GameTape; selectedId: string | null; onSelect(id: string): void; failureHistory: GameTapeFailureHistory | null; failureHistoryLoading: boolean; liveOutput: GameTapeLiveOutputBatch | null; artifacts: ReadonlyMap<string, GameTapeArtifact[]>; logQuery?: string; logStream?: GameTapeLogStream; logPageFromEnd?: number; rawLogsOpen?: boolean; onLogQueryChange?: (query: string) => void; onLogStreamChange?: (stream: GameTapeLogStream) => void; onLogPageChange?: (pageFromEnd: number) => void; onRawLogsOpenChange?: (open: boolean) => void }) {
+export function GameTapeEvidence({ tape, selectedId, onSelect, failureHistory, failureHistoryLoading, liveOutput, artifacts, observation, logQuery = "", logStream = "all", logPageFromEnd = 0, rawLogsOpen = false, onLogQueryChange, onLogStreamChange, onLogPageChange, onRawLogsOpenChange }: { tape: GameTape; selectedId: string | null; onSelect(id: string): void; failureHistory: GameTapeFailureHistory | null; failureHistoryLoading: boolean; liveOutput: GameTapeLiveOutputBatch | null; artifacts: ReadonlyMap<string, GameTapeArtifact[]>; observation?: GameTapeArtifactObservation | null; logQuery?: string; logStream?: GameTapeLogStream; logPageFromEnd?: number; rawLogsOpen?: boolean; onLogQueryChange?: (query: string) => void; onLogStreamChange?: (stream: GameTapeLogStream) => void; onLogPageChange?: (pageFromEnd: number) => void; onRawLogsOpenChange?: (open: boolean) => void }) {
   const { t } = useTranslation();
   const contexts = gameTapeStepContexts(tape);
   const selectedContext = findGameTapeStepContext(contexts, selectedId);
@@ -56,7 +57,7 @@ export function GameTapeEvidence({ tape, selectedId, onSelect, failureHistory, f
             <GameTapeLiveLogs batch={liveOutput} repositoryId={selectedContext.repository.repository.repository_id} stepId={selected.step_id} focusSequence={liveAnchor?.sequence ?? null} query={logQuery} stream={logStream} pageFromEnd={logPageFromEnd} onQueryChange={onLogQueryChange} onStreamChange={onLogStreamChange} onPageChange={onLogPageChange} />
           </details>
           {selected.failure ? <FailureHistoryPanel history={failureHistory} loading={failureHistoryLoading} /> : null}
-          <GameTapeStepArtifacts artifacts={artifacts.get(gameTapeArtifactKey(selectedContext.repository.repository.repository_id, selected.step_id)) ?? []} ownerIdentity={selected.step_execution_id} />
+          <GameTapeStepArtifacts artifacts={artifacts.get(gameTapeArtifactKey(selectedContext.repository.repository.repository_id, selected.step_id)) ?? []} ownerIdentity={selected.step_execution_id} observation={observation} artifactOwner={{ repository_execution_id: selectedContext.repository.repository_execution_id, repository_id: selectedContext.repository.repository.repository_id, step_execution_id: selected.step_execution_id, step_id: selected.step_id }} />
         </> : <div className="game-tape-no-selection"><strong>{t("gameTape.logs.selectStep")}</strong><span>{t("gameTape.logs.selectStepHelp")}</span></div>}
       </div>
     </div>

@@ -29,6 +29,7 @@ class _Facts:
 class _Tape:
     def __init__(self, run_id, *, stage="ADMISSION"):
         self.fleet_run_id = run_id
+        self.artifact_observation = None
         self.plan_id = "plan-one"
         self.status = SimpleNamespace(value="FAILED")
         self.receipt = _Facts({"validation": "canonical-receipt"})

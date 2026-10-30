@@ -28,6 +28,7 @@ class _Model:
 class _Tape:
     def __init__(self, status=GameTapeStatus.FAILED, *, focus=(), why_not=None, count=0):
         self.status = status
+        self.fleet_run_id = ""
         self.plan_id = "canonical-plan"
         self.summary = _Model({"failed_steps": 1, "executed_steps": 2})
         self.receipt = _Model({"validation": "PASSED", "finished_at": "canonical-time"})
@@ -43,6 +44,7 @@ class _Tape:
         self.why_not = why_not
         self.enforcer_receipt_available = False
         self.repositories = ()
+        self.artifact_observation = None
 
 
 class _RunOwner:
@@ -57,6 +59,7 @@ class _RunOwner:
         self.calls.append(("get", run_id))
         if self.reject:
             raise InvalidRequest("unknown Fleet Run")
+        self.tape.fleet_run_id = run_id
         return SimpleNamespace(
             run=SimpleNamespace(
                 fleet_run_id=run_id,

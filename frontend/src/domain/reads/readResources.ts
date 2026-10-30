@@ -52,6 +52,7 @@ const READ_RESOURCES = {
   "agent-campaign": ["run-history"],
   "game-tape-diff": ["run-history"],
   "game-tape-performance": ["run-history"],
+  "game-tape-artifacts": ["run-history"],
   "game-tape-failure-history": ["run-history"],
   "game-tape-live-output": ["run-live-output"],
   "history-list-more": ["run-history"],

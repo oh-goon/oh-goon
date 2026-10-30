@@ -220,7 +220,8 @@
     "gameTapeFailureHistory": "Det gick inte att läsa exakt Game Tape-felhistorik.",
     "gameTapeLiveOutput": "Live-output för Game Tape kunde inte läsas.",
     "schedule": "Schemaåtgärden kunde inte slutföras.",
-    "scout": "Scout-bevis kunde inte laddas."
+    "scout": "Scout-bevis kunde inte laddas.",
+    "artifactObservation": "oh-goon kunde inte kontrollera tillgängligheten för artefakter."
   },
   "common": {
     "notAvailable": "—",
@@ -1253,7 +1254,7 @@
       "artifactDetails": "Artifact-evidence",
       "path": "Sökväg",
       "retention": "Retention",
-      "retainedDurably": "Durabelt retained av repository-scoped evidence",
+      "retainedDurably": "Registrerad referens till sparade byte",
       "noRetainedReference": "Ingen durable retained-object reference registrerad",
       "referenceId": "Reference-ID",
       "ownerRepository": "Ägande repository",
@@ -1263,7 +1264,39 @@
       "copyDigest": "Kopiera SHA-256",
       "digestCopied": "SHA-256 kopierad",
       "copyReference": "Kopiera retained reference",
-      "referenceCopied": "Reference kopierad"
+      "referenceCopied": "Reference kopierad",
+      "availabilityTitle": "Artefakters tillgänglighet",
+      "checkAvailability": "Kontrollera artefakters tillgänglighet",
+      "checkingAvailability": "Kontrollerar artefakters tillgänglighet…",
+      "availabilityRule": "En uttrycklig kontroll verifierar sparade byte inom begränsade ramar. Resultatet gäller kontrolltillfället; export kontrollerar igen. Registrerad evidens ändras inte.",
+      "availabilityNotChecked": "Aktuell tillgänglighet för byte har inte kontrollerats för denna post.",
+      "checkedAt": "Kontrollerad {{time}}",
+      "stagingCleanupFailed": "Bytekontrollen rapporterade ett fel vid städning av temporära filer.",
+      "observationSummary": "{{count}} av {{total}} artefaktposter ingick i kontrollen.",
+      "observationOmitted": "{{count}} artefakter utelämnades från kontrollen.",
+      "availability": {
+        "AVAILABLE": "Tillgänglig vid kontroll",
+        "UNAVAILABLE": "Otillgänglig vid kontroll",
+        "UNOBSERVED": "Inte observerad",
+        "REFUSED": "Observation nekad"
+      },
+      "availabilityReason": {
+        "VERIFIED": "Sparade byte matchade den registrerade identiteten.",
+        "NOT_COLLECTED": "Artefakten saknades vid insamlingen.",
+        "NOT_RETAINED": "Ingen referens till sparade byte registrerades.",
+        "RUN_CANCELLED": "Run avbryts eller är avbruten.",
+        "RUN_INTERRUPTED": "Run avbröts oväntat.",
+        "PRODUCER_UNSETTLED": "Producerande Step saknar verifierat avslut och verifierad städning.",
+        "DECLARATION_MISMATCH": "Registrerad evidens matchar inte artefaktdeklarationen.",
+        "OWNER_MISMATCH": "Referensen tillhör inte det registrerade repositoryt.",
+        "IDENTITY_MISMATCH": "Sparade byte eller metadata skiljer sig från den registrerade identiteten.",
+        "REFERENCE_UNAVAILABLE": "Den registrerade referensen till sparade byte är otillgänglig.",
+        "OBJECT_MISSING": "Det sparade objektet saknas.",
+        "STORE_UNAVAILABLE": "Innehållslagret är otillgängligt.",
+        "READ_FAILED": "Sparade byte kunde inte kontrolleras.",
+        "BYTE_BUDGET": "Artefakten överskred återstående bytebudget.",
+        "TIME_BUDGET": "Tidsbudgeten för observationen tog slut."
+      }
     },
     "state": {
       "PLANNED": "Planerad. Körningen har ännu inte blivit admitted.",

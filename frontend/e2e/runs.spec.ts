@@ -2,8 +2,66 @@ import { expect, test } from "@playwright/test";
 
 import { LONG_GOON_NAME, LONG_PLAN_NAME, LONG_REPOSITORY_NAME, LONG_STEP_NAME } from "./fixtures/identities";
 import { DEFAULT_RUN_ID, FAILED_RUN_ID } from "./fixtures/runIds";
+import { ARTIFACT_OBSERVATION_RELEASE_EVENT, ARTIFACT_OBSERVATION_REQUEST_EVENT, ARTIFACT_OBSERVATION_RESPONSE_EVENT } from "./fixtures/scenarios";
 import { openFixture, openRunFixture } from "./helpers/navigation";
 import { gameTapeFlow, gameTapeFlowSearch, gameTapeInspector, gameTapeRegion, runHistoryRegion } from "./helpers/locators";
+
+test("Artifact availability is checked explicitly and remains separate from recorded evidence", async ({ page }) => {
+  await page.addInitScript((eventName) => {
+    window.addEventListener(eventName, () => {
+      document.documentElement.dataset.artifactObservationRequests = String(Number(document.documentElement.dataset.artifactObservationRequests ?? "0") + 1);
+    });
+  }, ARTIFACT_OBSERVATION_REQUEST_EVENT);
+  await openRunFixture(page, { scenario: "artifact-observation", view: "outputs" });
+  const tape = gameTapeRegion(page);
+  const metrics = tape.locator(".game-tape-artifacts article").filter({ hasText: "ml-output/metrics.json" });
+  await expect(metrics.getByText("Current byte availability has not been checked for this record.", { exact: true })).toBeVisible();
+  await metrics.getByText("Artifact evidence", { exact: true }).click();
+  await expect(metrics.getByText("Recorded retained reference", { exact: true })).toBeVisible();
+  await expect(page.locator("html")).not.toHaveAttribute("data-artifact-observation-requests");
+  await expect(tape.getByText("Available when checked", { exact: true })).toHaveCount(0);
+
+  await tape.getByRole("button", { name: "Check artifact availability", exact: true }).click();
+
+  await expect(page.locator("html")).toHaveAttribute("data-artifact-observation-requests", "1");
+  await expect(metrics.getByText("Available when checked", { exact: true })).toBeVisible();
+  const model = tape.locator(".game-tape-artifacts article").filter({ hasText: "ml-output/model.json" });
+  await expect(model.getByText("Unavailable when checked", { exact: true })).toBeVisible();
+  await expect(tape.getByText("2 artifacts were omitted from this check.", { exact: true })).toBeVisible();
+  await expect(metrics.getByText("1".repeat(64), { exact: true })).toBeVisible();
+  await expect(metrics.getByText(`ref-${"1".repeat(32)}`, { exact: true })).toBeVisible();
+
+  await tape.getByRole("button", { name: "Steps", exact: true }).click();
+  await gameTapeFlow(page).getByRole("button", { name: /Step 1: ruff-format-and-static-quality/ }).first().click();
+  await expect(gameTapeInspector(page).getByText("Available when checked", { exact: true })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-artifact-observation-requests", "1");
+});
+
+test("A late artifact observation cannot attach to a different selected Run", async ({ page }) => {
+  await page.addInitScript((eventName) => {
+    window.addEventListener(eventName, () => {
+      document.documentElement.dataset.artifactObservationRequests = String(Number(document.documentElement.dataset.artifactObservationRequests ?? "0") + 1);
+    });
+  }, ARTIFACT_OBSERVATION_REQUEST_EVENT);
+  await openRunFixture(page, { scenario: "artifact-observation-held", view: "outputs" });
+  const tape = gameTapeRegion(page);
+  await tape.getByRole("button", { name: "Check artifact availability", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-artifact-observation-requests", "1");
+
+  await page.getByLabel("Loaded runs").selectOption(FAILED_RUN_ID);
+  await expect(page).toHaveURL(new RegExp(`run=${FAILED_RUN_ID}`));
+  await page.evaluate(({ release, response }) => new Promise<void>((resolve) => {
+    window.addEventListener(response, () => resolve(), { once: true });
+    window.dispatchEvent(new Event(release));
+  }), { release: ARTIFACT_OBSERVATION_RELEASE_EVENT, response: ARTIFACT_OBSERVATION_RESPONSE_EVENT });
+  await tape.getByRole("button", { name: "Outputs", exact: true }).click();
+
+  await expect(tape.getByText("Available when checked", { exact: true })).toHaveCount(0);
+  await expect(tape.getByText("Unavailable when checked", { exact: true })).toHaveCount(0);
+  await expect(tape.getByText("2 artifacts were omitted from this check.", { exact: true })).toHaveCount(0);
+  await expect(tape.getByText("ml-output/metrics.json", { exact: true }).first()).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-artifact-observation-requests", "1");
+});
 
 test("A refused campaign without Runs opens by ID and survives browser reload", async ({ page }) => {
   await openFixture(page, "runs");
