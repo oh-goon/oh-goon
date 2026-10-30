@@ -188,7 +188,8 @@ class ExecutionMembershipStore:
         if pytest_outcomes is not None and any(
             not isinstance(row, dict)
             or set(row) != {"nodeid", "outcome"}
-            or not isinstance(row["nodeid"], str) or not row["nodeid"]
+            or not isinstance(row["nodeid"], str)
+            or not row["nodeid"]
             or row["outcome"] not in PYTEST_NATIVE_OUTCOMES
             for row in pytest_outcomes
         ):

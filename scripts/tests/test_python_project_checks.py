@@ -59,15 +59,10 @@ def test_required_project_checks_select_frozen_application_tests_without_airflow
     orders_tests = next(
         command
         for command in commands
-        if str(tmp_path / "templates/goons/general/orders-taskflow/tests")
-        in command
+        if str(tmp_path / "templates/goons/general/orders-taskflow/tests") in command
     )
     assert (
-        str(
-            tmp_path
-            / "templates/goons/general/orders-taskflow/tests"
-        )
-        in orders_tests
+        str(tmp_path / "templates/goons/general/orders-taskflow/tests") in orders_tests
     )
     assert not any("test_airflow_adapter" in argument for argument in orders_tests)
 
