@@ -43,6 +43,7 @@ class _Tape:
         self.why_not = why_not
         self.enforcer_receipt_available = False
         self.repositories = ()
+        self.artifact_observation = None
 
 
 class _RunOwner:
@@ -57,6 +58,7 @@ class _RunOwner:
         self.calls.append(("get", run_id))
         if self.reject:
             raise InvalidRequest("unknown Fleet Run")
+        self.tape.fleet_run_id = run_id
         return SimpleNamespace(
             run=SimpleNamespace(
                 fleet_run_id=run_id,

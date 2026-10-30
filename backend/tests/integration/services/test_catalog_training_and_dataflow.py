@@ -10,10 +10,13 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 import yaml
 
+from oh_goon.api import dependencies
+from oh_goon.api.app import app as api_app
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli import main
 from oh_goon.core.models.fleet_plan_evidence import (
@@ -21,8 +24,11 @@ from oh_goon.core.models.fleet_plan_evidence import (
 )
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.product_identity import repository_id
+from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.runtime.league_folders import LeagueFolderStore
+from tests.integration.api.client import authenticated_api_client
 
 ROOT = Path(__file__).resolve().parents[4]
 FIXTURES = ROOT / "template-certification" / "fixtures"
@@ -430,6 +436,141 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
     reopened_metrics, reopened_model, _ = exported_training(first_id, "reopened")
     assert reopened_metrics == first_metrics
     assert reopened_model == first_model
+
+    # One original Run survives scratch disposal and reference release. Live
+    # observations must not rewrite its collection-time evidence or outcome.
+    recorded = first_outputs["repositories"][0]["steps"][0]
+    artifacts = {artifact["path"]: artifact for artifact in recorded["artifacts"]}
+    total_bytes = sum(artifact["byte_count"] for artifact in artifacts.values())
+    observation_flags = (
+        "--observe-artifacts",
+        "--artifact-limit",
+        "2",
+        "--artifact-byte-budget",
+        str(total_bytes),
+        "--artifact-time-budget-seconds",
+        "5",
+    )
+    observed_paths = set(artifacts)
+    for view in ("outputs", "tape", "handoff"):
+        default_view = json.loads(_cli(tmp_path, "plan", view, first_id, "--json"))
+        assert default_view["artifact_observation"] is None
+        observed_view = json.loads(
+            _cli(tmp_path, "plan", view, first_id, *observation_flags, "--json")
+        )
+        batch = observed_view["artifact_observation"]
+        assert batch["fleet_run_id"] == first_id
+        assert batch["total_artifacts"] == 2 and batch["omitted_artifacts"] == 0
+        assert batch["bytes_scheduled"] == total_bytes
+        assert {item["path"] for item in batch["observations"]} == observed_paths
+        for item in batch["observations"]:
+            original_artifact = artifacts[item["path"]]
+            assert item["status"] == "AVAILABLE" and item["reason"] == "VERIFIED"
+            assert item["recorded_sha256"] == original_artifact["sha256"]
+            assert item["recorded_byte_count"] == original_artifact["byte_count"]
+            assert item["reference_id"] == original_artifact["retained_object"]["reference_id"]
+            assert item["staging_cleanup"] == "VERIFIED"
+    human = _cli(tmp_path, "plan", "outputs", first_id, *observation_flags)
+    assert "AVAILABLE" in human
+    assert "VERIFIED" in human
+    assert all(path in human for path in observed_paths)
+    selected_path = "ml-output/iris-training-metrics.json"
+    selected_reference = artifacts[selected_path]["retained_object"]
+    owner_id = first_outputs["repositories"][0]["repository"]["repository_id"]
+    assert selected_reference["owner_repository_id"] == owner_id
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(tmp_path / "league.yml"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    api_runtime = ApplicationRuntime.build(standard_local=True)
+    api_app.dependency_overrides[dependencies.fleet_run_control_plane] = lambda: api_runtime.runs
+    client = authenticated_api_client(api_app)
+    observation_parameters = {
+        "observe_artifacts": "true",
+        "artifact_limit": "2",
+        "artifact_byte_budget": str(total_bytes),
+        "artifact_time_budget_seconds": "5",
+    }
+    try:
+        with monkeypatch.context() as unobserved:
+            forbidden_read = Mock(side_effect=AssertionError("Default read probed retained bytes"))
+            for name in (
+                "get",
+                "acquire_lease",
+                "materialize_file",
+                "preflight_reference_metadata",
+            ):
+                unobserved.setattr(FleetContentStore, name, forbidden_read)
+            default_api = client.get(f"/api/fleet/runs/{first_id}")
+            assert default_api.status_code == 200
+            api_original = default_api.json()
+            assert api_original["game_tape"]["artifact_observation"] is None
+            forbidden_read.assert_not_called()
+        available_api = client.get(f"/api/fleet/runs/{first_id}", params=observation_parameters)
+        assert available_api.status_code == 200
+        api_batch = available_api.json()["game_tape"]["artifact_observation"]
+        assert api_batch["journal_revision"] == available_api.json()["journal_revision"]
+        assert api_batch["total_artifacts"] == 2 and api_batch["omitted_artifacts"] == 0
+        assert [
+            {key: value for key, value in item.items() if key != "checked_at"}
+            for item in api_batch["observations"]
+        ] == [
+            {key: value for key, value in item.items() if key != "checked_at"}
+            for item in batch["observations"]
+        ]
+        store = FleetContentStore(
+            ApplicationStatePathLayout.from_database(tmp_path / "runtime.sqlite").content_store
+        )
+        store.release_reference(selected_reference["reference_id"], owner_repository_id=owner_id)
+        after_release = json.loads(
+            _cli(tmp_path, "plan", "outputs", first_id, *observation_flags, "--json")
+        )
+        released_batch = after_release["artifact_observation"]
+        released_observations = {item["path"]: item for item in released_batch["observations"]}
+        assert released_observations[selected_path]["status"] == "UNAVAILABLE"
+        assert released_observations[selected_path]["reason"] == "REFERENCE_UNAVAILABLE"
+        assert (
+            released_observations["ml-output/iris-model-parameters.json"]["status"] == "AVAILABLE"
+        )
+        released_api = client.get(f"/api/fleet/runs/{first_id}", params=observation_parameters)
+        assert released_api.status_code == 200
+        assert [
+            {key: value for key, value in item.items() if key != "checked_at"}
+            for item in released_api.json()["game_tape"]["artifact_observation"]["observations"]
+        ] == [
+            {key: value for key, value in item.items() if key != "checked_at"}
+            for item in released_batch["observations"]
+        ]
+        unchanged_api = client.get(f"/api/fleet/runs/{first_id}")
+        assert unchanged_api.status_code == 200
+        assert unchanged_api.json() == api_original
+        human_unavailable = _cli(tmp_path, "plan", "outputs", first_id, *observation_flags)
+        assert "UNAVAILABLE" in human_unavailable and "REFERENCE_UNAVAILABLE" in human_unavailable
+        assert selected_path in human_unavailable
+        assert after_release["repositories"] == first_outputs["repositories"]
+        assert json.loads(_cli(tmp_path, "plan", "outputs", first_id, "--json")) == first_outputs
+        original_status = json.loads(_cli(tmp_path, "plan", "status", first_id, "--json"))
+        assert original_status["status"] == "COMPLETED" and original_status["outcome"] == "SUCCESS"
+        refused = json.loads(
+            _cli(
+                tmp_path,
+                "plan",
+                "export-artifact",
+                first_id,
+                "--step",
+                recorded["step_id"],
+                "--path",
+                selected_path,
+                "--output",
+                str(tmp_path / "released-metrics.json"),
+                "--json",
+                expected=2,
+            )
+        )
+        assert refused["status"] == "error"
+        assert not (tmp_path / "released-metrics.json").exists()
+    finally:
+        client.close()
+        api_runtime.shutdown(wait_for_runs=True)
+        api_app.dependency_overrides.clear()
 
 
 @pytest.mark.parametrize("tests_pass", [True, False])

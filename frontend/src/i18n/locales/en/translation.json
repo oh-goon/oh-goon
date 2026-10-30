@@ -220,7 +220,8 @@
     "gameTapeFailureHistory": "Could not load exact Game Tape failure history.",
     "gameTapeLiveOutput": "Live Game Tape output could not be read.",
     "schedule": "The Schedule operation could not be completed.",
-    "scout": "Scout evidence could not be loaded."
+    "scout": "Scout evidence could not be loaded.",
+    "artifactObservation": "oh-goon could not check artifact availability."
   },
   "common": {
     "notAvailable": "—",
@@ -1253,7 +1254,7 @@
       "artifactDetails": "Artifact evidence",
       "path": "Path",
       "retention": "Retention",
-      "retainedDurably": "Durably retained by repository-scoped evidence",
+      "retainedDurably": "Recorded retained reference",
       "noRetainedReference": "No durable retained-object reference recorded",
       "referenceId": "Reference ID",
       "ownerRepository": "Owner repository",
@@ -1263,7 +1264,39 @@
       "copyDigest": "Copy SHA-256",
       "digestCopied": "SHA-256 copied",
       "copyReference": "Copy retained reference",
-      "referenceCopied": "Reference copied"
+      "referenceCopied": "Reference copied",
+      "availabilityTitle": "Artifact availability",
+      "checkAvailability": "Check artifact availability",
+      "checkingAvailability": "Checking artifact availability…",
+      "availabilityRule": "An explicit check verifies retained bytes within bounded limits. Results describe the check time; export checks again. Recorded evidence remains unchanged.",
+      "availabilityNotChecked": "Current byte availability has not been checked for this record.",
+      "checkedAt": "Checked at {{time}}",
+      "stagingCleanupFailed": "The byte check reported a staging cleanup failure.",
+      "observationSummary": "{{count}} of {{total}} artifact records included in this check.",
+      "observationOmitted": "{{count}} artifacts were omitted from this check.",
+      "availability": {
+        "AVAILABLE": "Available when checked",
+        "UNAVAILABLE": "Unavailable when checked",
+        "UNOBSERVED": "Not observed",
+        "REFUSED": "Observation refused"
+      },
+      "availabilityReason": {
+        "VERIFIED": "Retained bytes matched the recorded identity.",
+        "NOT_COLLECTED": "The artifact was missing when collected.",
+        "NOT_RETAINED": "No retained byte reference was recorded.",
+        "RUN_CANCELLED": "The Run is cancelling or cancelled.",
+        "RUN_INTERRUPTED": "The Run was interrupted.",
+        "PRODUCER_UNSETTLED": "The producing Step has no verified settlement and cleanup.",
+        "DECLARATION_MISMATCH": "Recorded evidence does not match the artifact declaration.",
+        "OWNER_MISMATCH": "The retained reference does not belong to the recorded repository.",
+        "IDENTITY_MISMATCH": "Retained bytes or metadata differ from the recorded identity.",
+        "REFERENCE_UNAVAILABLE": "The recorded retained reference is unavailable.",
+        "OBJECT_MISSING": "The retained object is missing.",
+        "STORE_UNAVAILABLE": "The content store is unavailable.",
+        "READ_FAILED": "Retained bytes could not be checked.",
+        "BYTE_BUDGET": "The artifact exceeded the remaining byte budget.",
+        "TIME_BUDGET": "The observation time budget was exhausted."
+      }
     },
     "state": {
       "PLANNED": "Planned. Execution has not been admitted yet.",

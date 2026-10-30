@@ -5,13 +5,16 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from oh_goon.services.fleet_local_lace_takeover import OriginalLocalLaceTakeoverCoordinator
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import monotonic
 from typing import Any, Literal
+
+from pydantic import ValidationError
 
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
 from oh_goon.core.capability_registry import (
@@ -20,6 +23,9 @@ from oh_goon.core.capability_registry import (
 )
 from oh_goon.core.errors import (
     ExecutorReadmissionNotAllowed,
+    FleetContentIntegrityError,
+    FleetContentObjectUnavailable,
+    FleetContentReferenceUnavailable,
     FleetPlanInvalid,
     FleetPlanSourceStale,
     InvalidRunTransition,
@@ -45,9 +51,21 @@ from oh_goon.core.models.fleet_failures import (
     FleetFailureInventory,
     FleetFailureRepositoryPage,
 )
-from oh_goon.core.models.fleet_plan_evidence import PresentPlanArtifact
+from oh_goon.core.models.fleet_plan_evidence import PlanArtifactEvidence, PresentPlanArtifact
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
-from oh_goon.core.models.game_tape import GameTape, GameTapeRunDiff
+from oh_goon.core.models.fleet_plan_step_primitives import PlanArtifactDeclaration
+from oh_goon.core.models.game_tape import (
+    ArtifactAvailabilityReason,
+    ArtifactAvailabilityStatus,
+    ArtifactObservationCleanup,
+    GameTape,
+    GameTapeArtifactAvailability,
+    GameTapeArtifactObservation,
+    GameTapeArtifactObservationBudget,
+    GameTapeRepositoryExecution,
+    GameTapeRunDiff,
+    GameTapeStepExecution,
+)
 from oh_goon.core.models.game_tape_failure_history import GameTapeFailureHistory
 from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
 from oh_goon.core.models.game_tape_performance import GameTapePerformanceReport
@@ -77,6 +95,7 @@ from oh_goon.core.run_identity import (
     with_retained_agent_deliveries,
     with_retained_project_deliveries,
 )
+from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
     FleetRunFailureStage,
     FleetRunOutcome,
@@ -86,6 +105,7 @@ from oh_goon.core.vocabulary import (
     GameTapeStatus,
     OperationAction,
 )
+from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.exact_file_write import (
     ExactPublicationDurabilityError,
@@ -128,6 +148,25 @@ class FleetArtifactExport:
     cleanup_failure: str | None = None
 
 
+class _ArtifactReadRefused(FleetPlanInvalid):
+    def __init__(self, message: str, reason: ArtifactAvailabilityReason) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+def _artifact_declarations(
+    detail: FleetRunDetail,
+) -> dict[tuple[str, str], tuple[PlanArtifactDeclaration, ...]]:
+    if not isinstance(detail.run.target, FleetPlanTarget):
+        return {}
+    entries: dict[tuple[str, str], tuple[PlanArtifactDeclaration, ...]] = {}
+    for step in detail.run.target.plan.steps:
+        for declaration in step.artifacts:
+            key = (step.step_id, declaration.path)
+            entries[key] = (*entries.get(key, ()), declaration)
+    return entries
+
+
 def _cleanup_artifact_export(temporary: TemporaryDirectory[str]) -> str | None:
     try:
         temporary.cleanup()
@@ -143,18 +182,12 @@ def _recorded_export_artifact(
     artifact_path: str,
     repository_id: str | None,
 ) -> tuple[str, PresentPlanArtifact]:
-    target = detail.run.target
-    if not isinstance(target, FleetPlanTarget):
-        raise FleetPlanInvalid("The recorded Run has no declared Plan artifacts")
+    if not isinstance(detail.run.target, FleetPlanTarget):
+        raise _ArtifactReadRefused(
+            "The recorded Run has no declared Plan artifacts", "DECLARATION_MISMATCH"
+        )
     tape = detail.game_tape
-    if detail.run.status in {
-        FleetRunStatus.CANCELLING,
-        FleetRunStatus.CANCELLED,
-    } or tape.status in {
-        GameTapeStatus.CANCELLED,
-        GameTapeStatus.INTERRUPTED,
-    }:
-        raise FleetPlanInvalid("Artifact export refuses a cancelling, cancelled or interrupted Run")
+    _require_artifact_read_run(detail, tape)
     matches = [
         (repository.repository.repository_id, step)
         for repository in tape.repositories
@@ -170,38 +203,176 @@ def _recorded_export_artifact(
             "from 'oh-goon plan steps RUN_ID --json'"
         )
     owner, step = matches[0]
+    return owner, _qualified_artifact(
+        detail, tape, owner, step, artifact_path, _artifact_declarations(detail)
+    )
+
+
+def _qualified_artifact(
+    detail: FleetRunDetail,
+    tape: GameTape,
+    owner: str,
+    step: GameTapeStepExecution,
+    artifact_path: str,
+    declarations: dict[tuple[str, str], tuple[PlanArtifactDeclaration, ...]],
+) -> PresentPlanArtifact:
+    _require_artifact_read_run(detail, tape)
     if (
         step.status not in {GameTapeStatus.PASSED, GameTapeStatus.FAILED}
         or step.settlement.outcome not in {"SUCCESS", "FAILED", "TIMED_OUT", "OUTPUT_LIMITED"}
         or step.settlement.cleanup != "VERIFIED"
     ):
-        raise FleetPlanInvalid(
-            "Artifact export requires a settled Step with verified process cleanup"
+        raise _ArtifactReadRefused(
+            "Artifact export requires a settled Step with verified process cleanup",
+            "PRODUCER_UNSETTLED",
         )
-    declarations = [
-        declaration
-        for resolved in target.plan.steps
-        if resolved.step_id == step_id
-        for declaration in resolved.artifacts
-        if declaration.path == artifact_path
-    ]
-    if len(declarations) != 1 or declarations[0].retention != "content_store":
-        raise FleetPlanInvalid("The selected artifact was not declared for content-store retention")
+    selected = declarations.get((step.step_id, artifact_path), ())
+    if len(selected) != 1:
+        raise _ArtifactReadRefused(
+            "The selected artifact was not declared for content-store retention",
+            "DECLARATION_MISMATCH",
+        )
+    if selected[0].retention != "content_store":
+        raise _ArtifactReadRefused(
+            "The selected artifact was not declared for content-store retention", "NOT_RETAINED"
+        )
     evidence = [artifact for artifact in step.artifacts if artifact.path == artifact_path]
-    if len(evidence) != 1 or not isinstance(evidence[0], PresentPlanArtifact):
-        raise FleetPlanInvalid("The selected artifact has no recorded present file")
+    if len(evidence) > 1:
+        raise _ArtifactReadRefused(
+            "The selected artifact has no recorded present file", "DECLARATION_MISMATCH"
+        )
+    if not evidence or not isinstance(evidence[0], PresentPlanArtifact):
+        raise _ArtifactReadRefused(
+            "The selected artifact has no recorded present file", "NOT_COLLECTED"
+        )
     artifact = evidence[0]
     retained = artifact.retained_object
     if retained is None:
-        raise FleetPlanInvalid("The selected artifact has no recorded retained content reference")
+        raise _ArtifactReadRefused(
+            "The selected artifact has no recorded retained content reference", "NOT_RETAINED"
+        )
     if (
         retained.owner_repository_id != owner
         or retained.kind != "file"
         or retained.byte_count != artifact.byte_count
         or retained.entry_count != 1
     ):
-        raise FleetPlanInvalid("The retained artifact reference does not match its Run evidence")
-    return owner, artifact
+        raise _ArtifactReadRefused(
+            "The retained artifact reference does not match its Run evidence",
+            "OWNER_MISMATCH" if retained.owner_repository_id != owner else "IDENTITY_MISMATCH",
+        )
+    return artifact
+
+
+def _require_artifact_read_run(detail: FleetRunDetail, tape: GameTape) -> None:
+    if not isinstance(detail.run.target, FleetPlanTarget):
+        raise _ArtifactReadRefused(
+            "The recorded Run has no declared Plan artifacts", "DECLARATION_MISMATCH"
+        )
+    if detail.run.status in {
+        FleetRunStatus.CANCELLING,
+        FleetRunStatus.CANCELLED,
+    } or tape.status in {
+        GameTapeStatus.CANCELLED,
+        GameTapeStatus.INTERRUPTED,
+    }:
+        raise _ArtifactReadRefused(
+            "Artifact export refuses a cancelling, cancelled or interrupted Run",
+            "RUN_INTERRUPTED" if tape.status is GameTapeStatus.INTERRUPTED else "RUN_CANCELLED",
+        )
+
+
+def _verify_retained_artifact(
+    store: FleetContentStore,
+    artifact: PresentPlanArtifact,
+    staged: RepositoryScopedPath,
+    *,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> None:
+    retained = artifact.retained_object
+    assert retained is not None
+    observed = store.materialize_file(
+        retained.reference_id,
+        staged,
+        expected_identity=SnapshotIdentity(
+            retained.sha256, retained.byte_count, retained.entry_count
+        ),
+        cancel_requested=cancel_requested,
+    )
+    if (
+        observed.sha256 != retained.sha256
+        or observed.byte_count != retained.byte_count
+        or observed.entry_count != retained.entry_count
+    ):
+        raise FleetContentIntegrityError(
+            "Retained artifact bytes differ from the recorded Run evidence"
+        )
+
+    def check_cancel() -> None:
+        if cancel_requested is not None and cancel_requested():
+            raise OperationCancelledError("Cancelled while verifying retained artifact bytes")
+
+    raw_sha256, byte_count = sha256_file_with_size(staged.path, check_cancel=check_cancel)
+    if raw_sha256 != artifact.sha256 or byte_count != artifact.byte_count:
+        raise FleetContentIntegrityError(
+            "Exported artifact bytes differ from their recorded SHA-256"
+        )
+
+
+def _artifact_observation_result(
+    repository: GameTapeRepositoryExecution,
+    step: GameTapeStepExecution,
+    record: PlanArtifactEvidence,
+    status: ArtifactAvailabilityStatus,
+    reason: ArtifactAvailabilityReason,
+    staging_cleanup: ArtifactObservationCleanup = "NOT_REQUIRED",
+) -> GameTapeArtifactAvailability:
+    present = record if isinstance(record, PresentPlanArtifact) else None
+    return GameTapeArtifactAvailability(
+        repository_execution_id=repository.repository_execution_id,
+        repository_id=repository.repository.repository_id,
+        step_execution_id=step.step_execution_id,
+        step_id=step.step_id,
+        path=record.path,
+        recorded_status=record.status,
+        recorded_sha256=present.sha256 if present is not None else None,
+        recorded_byte_count=present.byte_count if present is not None else None,
+        reference_id=(
+            present.retained_object.reference_id
+            if present is not None and present.retained_object is not None
+            else None
+        ),
+        status=status,
+        reason=reason,
+        checked_at=utc_now(),
+        staging_cleanup=staging_cleanup,
+        cleanup_failure="STAGING_CLEANUP_FAILED" if staging_cleanup == "FAILED" else None,
+    )
+
+
+def _artifact_observation_budget(
+    observe: bool,
+    artifact_limit: int | None,
+    byte_budget: int | None,
+    time_budget: float | None,
+) -> GameTapeArtifactObservationBudget | None:
+    if not observe:
+        if any(value is not None for value in (artifact_limit, byte_budget, time_budget)):
+            raise FleetPlanInvalid("Artifact observation budgets require observe_artifacts")
+        return None
+    defaults = GameTapeArtifactObservationBudget()
+    try:
+        return GameTapeArtifactObservationBudget(
+            artifact_limit=defaults.artifact_limit if artifact_limit is None else artifact_limit,
+            byte_budget=defaults.byte_budget if byte_budget is None else byte_budget,
+            time_budget_seconds=defaults.time_budget_seconds
+            if time_budget is None
+            else time_budget,
+        )
+    except ValidationError:
+        raise FleetPlanInvalid(
+            "Artifact observation budget is outside the supported bounds"
+        ) from None
 
 
 class FleetRunControlPlane:
@@ -600,7 +771,18 @@ class FleetRunControlPlane:
     def cancel(self, fleet_run_id: str) -> FleetRunState:
         return self._lifecycle.cancel(fleet_run_id)
 
-    def get(self, fleet_run_id: str) -> FleetRunDetail:
+    def get(
+        self,
+        fleet_run_id: str,
+        *,
+        observe_artifacts: bool = False,
+        artifact_limit: int | None = None,
+        artifact_byte_budget: int | None = None,
+        artifact_time_budget_seconds: float | None = None,
+    ) -> FleetRunDetail:
+        budget = _artifact_observation_budget(
+            observe_artifacts, artifact_limit, artifact_byte_budget, artifact_time_budget_seconds
+        )
         detail = self._journal.read_view().required_run_detail(fleet_run_id)
         try:
             from oh_goon.integrations.hashmarks.runtime_contract import (
@@ -610,9 +792,125 @@ class FleetRunControlPlane:
             provenance = loaded_hashmarks_producer_provenance()
         except ImportError:
             provenance = None
-        if provenance is None:
-            return detail
-        return detail.model_copy(update={"producer_implementation_provenance": provenance})
+        if provenance is not None:
+            detail = detail.model_copy(update={"producer_implementation_provenance": provenance})
+        if budget is not None:
+            detail = detail.model_copy(
+                update={"artifact_observation": self._observe_artifact_availability(detail, budget)}
+            )
+        return detail
+
+    def _observe_artifact_availability(
+        self, detail: FleetRunDetail, budget: GameTapeArtifactObservationBudget
+    ) -> GameTapeArtifactObservation:
+        """Verify a bounded sample from one captured read cut without changing history."""
+        started = utc_now()
+        deadline = monotonic() + budget.time_budget_seconds
+        tape = detail.game_tape
+        declarations = _artifact_declarations(detail)
+        candidates: list[
+            tuple[GameTapeRepositoryExecution, GameTapeStepExecution, PlanArtifactEvidence]
+        ] = []
+        total = 0
+        for repository in tape.repositories:
+            for step in repository.steps:
+                for record in step.artifacts:
+                    total += 1
+                    if len(candidates) < budget.artifact_limit:
+                        candidates.append((repository, step, record))
+        observations: list[GameTapeArtifactAvailability] = []
+        scheduled = 0
+        for repository, step, record in candidates:
+            try:
+                artifact = _qualified_artifact(
+                    detail,
+                    tape,
+                    repository.repository.repository_id,
+                    step,
+                    record.path,
+                    declarations,
+                )
+            except _ArtifactReadRefused as error:
+                state: ArtifactAvailabilityStatus = (
+                    "UNAVAILABLE"
+                    if error.reason in {"NOT_COLLECTED", "NOT_RETAINED"}
+                    else "REFUSED"
+                )
+                observations.append(
+                    _artifact_observation_result(repository, step, record, state, error.reason)
+                )
+                continue
+            if self._content_store is None:
+                reason: ArtifactAvailabilityReason = "STORE_UNAVAILABLE"
+            elif monotonic() >= deadline:
+                reason = "TIME_BUDGET"
+            elif artifact.byte_count > budget.byte_budget - scheduled:
+                reason = "BYTE_BUDGET"
+            else:
+                scheduled += artifact.byte_count
+                observations.append(
+                    self._observe_retained_artifact(repository, step, artifact, deadline)
+                )
+                continue
+            observations.append(
+                _artifact_observation_result(repository, step, record, "UNOBSERVED", reason)
+            )
+        return GameTapeArtifactObservation(
+            **budget.model_dump(),
+            fleet_run_id=detail.run.fleet_run_id,
+            journal_revision=detail.journal_revision,
+            started_at=started,
+            finished_at=utc_now(),
+            total_artifacts=total,
+            omitted_artifacts=total - len(observations),
+            bytes_scheduled=scheduled,
+            observations=tuple(observations),
+        )
+
+    def _observe_retained_artifact(
+        self,
+        repository: GameTapeRepositoryExecution,
+        step: GameTapeStepExecution,
+        artifact: PresentPlanArtifact,
+        deadline: float,
+    ) -> GameTapeArtifactAvailability:
+        store = self._content_store
+        assert store is not None
+        temporary: TemporaryDirectory[str] | None = None
+        state: ArtifactAvailabilityStatus = "UNOBSERVED"
+        reason: ArtifactAvailabilityReason = "READ_FAILED"
+        cleanup: ArtifactObservationCleanup = "NOT_REQUIRED"
+        try:
+            temporary = TemporaryDirectory(prefix=".oh-goon-artifact-observation-")
+            staged = RepositoryScopedPath.create(
+                owner_repository_id=repository.repository.repository_id,
+                root=Path(temporary.name),
+                path=Path(temporary.name) / "artifact",
+                label="recorded artifact availability observation",
+            )
+            _verify_retained_artifact(
+                store, artifact, staged, cancel_requested=lambda: monotonic() >= deadline
+            )
+            if monotonic() >= deadline:
+                reason = "TIME_BUDGET"
+            else:
+                state, reason = "AVAILABLE", "VERIFIED"
+        except FleetContentReferenceUnavailable:
+            state, reason = "UNAVAILABLE", "REFERENCE_UNAVAILABLE"
+        except FleetContentObjectUnavailable:
+            state, reason = "UNAVAILABLE", "OBJECT_MISSING"
+        except FleetContentIntegrityError:
+            state, reason = "UNAVAILABLE", "IDENTITY_MISMATCH"
+        except OperationCancelledError:
+            reason = "TIME_BUDGET" if monotonic() >= deadline else "READ_FAILED"
+        except (FleetPlanInvalid, OSError):
+            # No exception-string classifier and no private store paths in the read model.
+            reason = "READ_FAILED"
+        finally:
+            if temporary is not None:
+                failure = _cleanup_artifact_export(temporary)
+                cleanup = "VERIFIED" if failure is None else "FAILED"
+        return _artifact_observation_result(repository, step, artifact, state, reason, cleanup)
 
     def export_artifact(
         self,
@@ -646,29 +944,16 @@ class FleetRunControlPlane:
         temporary = TemporaryDirectory(prefix=".oh-goon-export-", dir=target.parent)
         try:
             staged = Path(temporary.name) / "artifact"
-            observed = self._content_store.materialize_file(
-                retained.reference_id,
+            _verify_retained_artifact(
+                self._content_store,
+                artifact,
                 RepositoryScopedPath.create(
                     owner_repository_id=owner,
                     root=Path(temporary.name),
                     path=staged,
                     label="recorded artifact export",
                 ),
-                expected_identity=SnapshotIdentity(
-                    retained.sha256, retained.byte_count, retained.entry_count
-                ),
             )
-            if (
-                observed.sha256 != retained.sha256
-                or observed.byte_count != retained.byte_count
-                or observed.entry_count != retained.entry_count
-            ):
-                raise FleetPlanInvalid(
-                    "Retained artifact bytes differ from the recorded Run evidence"
-                )
-            raw_sha256, byte_count = sha256_file_with_size(staged)
-            if raw_sha256 != artifact.sha256 or byte_count != artifact.byte_count:
-                raise FleetPlanInvalid("Exported artifact bytes differ from their recorded SHA-256")
             publish_prepared_file(staged, target)
         except BaseException as error:
             if isinstance(error, ExactPublicationDurabilityError):

@@ -16,7 +16,7 @@ if sys.platform == "win32":
 else:
     import fcntl
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import FleetContentReferenceUnavailable, FleetPlanInvalid
 from oh_goon.core.path_authority import ensure_private_directory
 from oh_goon.core.path_layouts import ContentStorePathLayout
 from oh_goon.integrations.exact_file_write import prepared_text_file, replace_prepared_file
@@ -261,7 +261,7 @@ def object_id_for_reference(
         raise _unavailable_reference(owner_repository_id, reference_id)
     object_id = str(payload.get("object_id", ""))
     if not is_object_id(object_id):
-        raise FleetPlanInvalid(
+        raise FleetContentReferenceUnavailable(
             f"Fleet content reference has invalid object identity: {reference_id}"
         )
     return object_id
@@ -466,8 +466,10 @@ def read_json_record(path: Path) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def _unavailable_reference(owner_repository_id: str, reference_id: str) -> FleetPlanInvalid:
-    return FleetPlanInvalid(
+def _unavailable_reference(
+    owner_repository_id: str, reference_id: str
+) -> FleetContentReferenceUnavailable:
+    return FleetContentReferenceUnavailable(
         f"Fleet content reference is unavailable to repository {owner_repository_id}: {reference_id}"
     )
 
