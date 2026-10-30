@@ -39,9 +39,15 @@ def provisioner(ids: tuple[str, ...]) -> FleetPreworkProvisioner:
 
 
 def service(*, provisioned: FleetPreworkProvisioner | None, authenticated=True, store=None):
-    owner = object.__new__(FleetRunLifecycle)
-    owner._require_authenticated_fleet = authenticated
-    owner._fleet_provisioner = provisioned
+    forbidden = Mock(spec_set=(), side_effect=AssertionError("effect before HTTP ingress"))
+    owner = FleetRunLifecycle(
+        forbidden,
+        forbidden,
+        forbidden,
+        forbidden,
+        require_authenticated_fleet=authenticated,
+        fleet_provisioner=provisioned,
+    )
     control = object.__new__(FleetRunControlPlane)
     control._lifecycle = owner
     plans = FleetPlanService(object(), control, object(), object(), object())

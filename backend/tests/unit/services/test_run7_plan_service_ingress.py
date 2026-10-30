@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -26,18 +27,25 @@ class _ForbiddenResolver:
 
 
 def _real_owner(*, provisioned_ids: tuple[str, ...] | None, authenticated: bool = True):
-    lifecycle = object.__new__(FleetRunLifecycle)
-    lifecycle._require_authenticated_fleet = authenticated
-    if provisioned_ids is None:
-        lifecycle._fleet_provisioner = None
-    else:
+    provisioner: FleetPreworkProvisioner | None = None
+    if provisioned_ids is not None:
         provisioner = object.__new__(FleetPreworkProvisioner)
         object.__setattr__(
             provisioner,
             "enrolled",
             tuple(SimpleNamespace(run_id=run_id) for run_id in provisioned_ids),
         )
-        lifecycle._fleet_provisioner = provisioner
+    # Use the original constructor so every admission policy has its real default.
+    # These ports must remain untouched before the tested identity/preparation cut.
+    forbidden = cast(Any, _ForbiddenResolver())
+    lifecycle = FleetRunLifecycle(
+        forbidden,
+        forbidden,
+        forbidden,
+        forbidden,
+        require_authenticated_fleet=authenticated,
+        fleet_provisioner=provisioner,
+    )
     control = object.__new__(FleetRunControlPlane)
     control._lifecycle = lifecycle
     return FleetPlanService(_ForbiddenResolver(), control, object(), object(), object()), control
