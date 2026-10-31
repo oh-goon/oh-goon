@@ -54,6 +54,54 @@ do not turn this guide into a perpetual PASS list. Older ADR/checkpoint results
 describe their original source. Follow [documentation anti-drift](DOCUMENTATION_ANTI_DRIFT.md)
 when current and historical explanations disagree.
 
+### Smaller local-agent contributor trials
+
+[HUG-81](https://linear.app/hugloss/issue/HUG-81) owns blind first-use and
+contributor-usability trials. A documentation audit, native protocol fixture or
+successful stronger-agent review does not qualify a smaller local model to
+maintain this repository. Keep those evidence claims separate.
+
+Before inference, record the source revision, task and behavioral acceptance,
+exact model/artifact and quantization, serving runtime, native harness/version,
+context and output limits, tools, host resources, deadline and assistance rules.
+Use an isolated disposable checkout and a fresh session with normal repository
+entrypoints. Keep evaluator-only answers and prior solutions outside the
+candidate's accessible source and history. Record any source exclusions or
+controlled historical defect explicitly; first verify the unchanged baseline,
+then reproduce the failure before admitting a repair trial.
+
+Use a bounded sample of actual contributor work:
+
+| Task | Independent acceptance |
+| --- | --- |
+| Triage an audit or qualification request | Locate the current owner and existing capability, distinguish missing implementation from missing proof, and justify a focused next action or LEAVE ALONE disposition. |
+| Fix one small reproduced defect | Meet the observable requirement, preserve meaningful regression coverage and authority boundaries, and leave a reviewable diff with the applicable focused checks. |
+| Recover from a failed check or fresh-context handoff | Preserve existing work, interpret the actual failure, choose a safe next action, and distinguish PASS, product failure, environment block and incomplete evidence. |
+
+Execute through the selected existing native harness and verification owners;
+do not replace repository evidence, inference, tool execution or result
+accounting with a study-specific agent loop. Python uses uv and the backend
+project. Necessary focused boundary proof stays in the edit loop; unrelated
+complete portfolios remain daily. Do not weaken tests or change execution
+policy to make a participant finish.
+
+An independent reviewer inspects the answer/diff and native check results.
+Record unassisted completion, assisted completion, incorrect/incomplete work
+and environment-blocked attempts separately, including interventions, corrective
+attempts, elapsed/resource cost and exact evidence. A native process exit zero
+alone is not task completion. Safe uncertainty or asking for help does not
+complete an unfinished fix. Unexecuted tasks remain NOT_RUN; one configuration
+does not qualify other models, hosts or harness modes.
+
+Keep prompts, trial records and bounded results with HUG-81 and its existing
+evidence owners, outside source. Report actionable navigation, instruction,
+tooling, environment and model-capability findings separately. Improve the
+responsible repository owner when a trial demonstrates a problem; reusable
+evaluation methods belong in agentsCookbook. This study adds no model score,
+test runner, per-PR inference requirement or universal release gate. The
+separate [Repository Understanding exam](../certification/README.md) retains
+its answer-free preparation, grading and qualification authority.
+
 ### Everyday CLI readback and diagnostics
 
 Packet B uses the existing history, live-output, health and native-catalog

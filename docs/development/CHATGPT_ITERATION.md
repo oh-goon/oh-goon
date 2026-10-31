@@ -18,6 +18,11 @@ handoff notes help locate it. Contributor policy remains in
    is not evidence that a mechanism needs rebuilding. Locate the current owner,
    existing regression and specific missing proof before choosing an edit.
 
+For practical QA of smaller local coding agents, use the existing
+[contributor trials](REAL_LIFECYCLE_QA.md#smaller-local-agent-contributor-trials).
+Its independent task review is separate from this continuation guide and native
+protocol qualification.
+
 ## Iterate through existing owners
 
 Use the [focused edit loop](../DEVELOPMENT.md#focused-edit-loop) for the concrete
