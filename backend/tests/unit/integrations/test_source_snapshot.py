@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import errno
+import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -55,6 +58,78 @@ def test_filtered_source_identity_is_the_canonical_execution_tree_identity(tmp_p
 
     (source / "backend/uv.lock").write_text("different-committed-lock", encoding="utf-8")
     assert source_snapshot_identity(source) != bound
+
+
+def test_source_snapshot_refuses_dataset_above_byte_bound_before_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    dataset = source / "dataset.csv"
+    payload = b"label,value\nA,12\n"
+    dataset.write_bytes(payload)
+    baseline = snapshot_source_directory(
+        source, tmp_path / "baseline", label="dataset source", max_bytes=len(payload)
+    )
+    assert baseline.byte_count == len(payload)
+    assert (tmp_path / "baseline/dataset.csv").read_bytes() == payload
+
+    destination = tmp_path / "refused"
+    original_open = os.open
+
+    def refuse_oversized_copy(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        assert not (
+            Path(path) == destination / "dataset.csv" and flags & (os.O_WRONLY | os.O_RDWR)
+        ), "oversized dataset reached a destination write"
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", refuse_oversized_copy)
+    with pytest.raises(FleetPlanInvalid, match="exceeds source bounds"):
+        snapshot_source_directory(
+            source, destination, label="dataset source", max_bytes=len(payload) - 1
+        )
+    assert not destination.exists()
+    assert dataset.read_bytes() == payload
+    assert source_snapshot_identity(source) == baseline
+
+
+def test_source_snapshot_discards_partial_enospc_copy_without_changing_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    payload = b"private-data-canary\n"
+    (source / "dataset.csv").write_bytes(payload)
+    baseline = snapshot_source_directory(source, tmp_path / "baseline", label="dataset source")
+    destination = tmp_path / "failed"
+    target = destination / "dataset.csv"
+    original_write = os.write
+    partial_copies: list[bytes] = []
+
+    def fail_dataset_write(fd: int, data: bytes) -> int:
+        if target.exists():
+            opened = os.fstat(fd)
+            selected = target.stat()
+            if (opened.st_dev, opened.st_ino) == (selected.st_dev, selected.st_ino):
+                assert original_write(fd, data[:4]) == 4
+                partial_copies.append(target.read_bytes())
+                raise OSError(errno.ENOSPC, "No space left on device")
+        return original_write(fd, data)
+
+    monkeypatch.setattr(os, "write", fail_dataset_write)
+    with pytest.raises(OSError) as failed:
+        snapshot_source_directory(source, destination, label="dataset source")
+    assert failed.value.errno == errno.ENOSPC
+    assert partial_copies == [payload[:4]]
+    assert not destination.exists()
+    assert (source / "dataset.csv").read_bytes() == payload
+    assert source_snapshot_identity(source) == baseline
 
 
 def test_source_snapshot_rejects_symlink_escape(tmp_path: Path) -> None:
@@ -118,8 +193,6 @@ def test_source_snapshot_binds_authored_report_names_and_excludes_frontend_outpu
 def test_application_snapshot_refuses_live_dotenv_before_reading_private_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, live_name: str
 ) -> None:
-    from oh_goon.integrations import source_snapshot
-
     source = tmp_path / "source"
     (source / "nested").mkdir(parents=True)
     (source / "README.md").write_text("ordinary application source\n")
@@ -133,13 +206,19 @@ def test_application_snapshot_refuses_live_dotenv_before_reading_private_bytes(
     assert (destination / "nested/.env.example").is_file()
     private = source / "nested" / live_name
     private.write_text("PRIVATE_DOTENV_TEST_VALUE=must-not-be-read\n")
-    original_open = source_snapshot.os.open
+    original_open = os.open
 
-    def refuse_private_open(path, *args, **kwargs):
+    def refuse_private_open(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
         assert Path(path) != private, "dotenv restriction must precede opening private bytes"
-        return original_open(path, *args, **kwargs)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
 
-    monkeypatch.setattr(source_snapshot.os, "open", refuse_private_open)
+    monkeypatch.setattr(os, "open", refuse_private_open)
     with pytest.raises(FleetPlanInvalid, match="live dotenv state") as refused:
         snapshot_source_directory(
             source,
@@ -172,21 +251,44 @@ def test_application_snapshot_refuses_dotenv_races_and_discards_partial_copy(
     copy = source_snapshot._copy_source_tree
     private = (destination if injection == "snapshot_after_copy" else source) / "nested/.env"
 
-    def inject_at_copy(root, current, target, *args, **kwargs):
+    def inject_at_copy(
+        root: Path,
+        current: Path,
+        target: Path,
+        cancel_requested: Callable[[], bool] | None,
+        label: str,
+        exclude_paths: tuple[str, ...] = (),
+        *,
+        reject_dotenv_state: bool = False,
+    ) -> None:
         if current == root and injection == "before_copy":
             private.write_text("PRIVATE_RACE_TEST_VALUE=must-not-be-read\n")
-        copy(root, current, target, *args, **kwargs)
+        copy(
+            root,
+            current,
+            target,
+            cancel_requested,
+            label,
+            exclude_paths,
+            reject_dotenv_state=reject_dotenv_state,
+        )
         if current == root and injection != "before_copy":
             private.write_text("PRIVATE_RACE_TEST_VALUE=must-not-be-read\n")
 
-    original_open = source_snapshot.os.open
+    original_open = os.open
 
-    def refuse_private_open(path, *args, **kwargs):
+    def refuse_private_open(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
         assert Path(path) != private, "raced dotenv must be refused before a private read"
-        return original_open(path, *args, **kwargs)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
 
     monkeypatch.setattr(source_snapshot, "_copy_source_tree", inject_at_copy)
-    monkeypatch.setattr(source_snapshot.os, "open", refuse_private_open)
+    monkeypatch.setattr(os, "open", refuse_private_open)
     with pytest.raises(FleetPlanInvalid, match="live dotenv state") as refused:
         snapshot_source_directory(
             source, destination, label="application", reject_dotenv_state=True
