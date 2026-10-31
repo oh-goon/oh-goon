@@ -18,12 +18,18 @@ VERIFICATION_POLICY_TESTS = (
     "scripts/tests/test_verification_gate_control.py",
     "scripts/tests/test_development_verification.py",
 )
+REAL_LIFECYCLE_QA_PATHS = (
+    "docs/development/REAL_LIFECYCLE_QA.md",
+    "docs/development/REAL_LIFECYCLE_QA.yml",
+)
+REAL_LIFECYCLE_QA_TEST = "scripts/tests/test_real_lifecycle_qa_contract.py"
 
 
 def is_verification_policy_path(path: str) -> bool:
     """The existing contributor, verification and result-authority boundaries."""
     return (
-        path.startswith((".github/workflows/", "backend/src/oh_goon/repository_tooling/"))
+        path in REAL_LIFECYCLE_QA_PATHS
+        or path.startswith((".github/workflows/", "backend/src/oh_goon/repository_tooling/"))
         or Path(path).name == "AGENTS.md"
         or path
         in {
@@ -50,6 +56,26 @@ def is_verification_policy_path(path: str) -> bool:
             "frontend/src/README.md",
         }
         or path.startswith("backend/src/oh_goon/integrations/hashmarks/")
+    )
+
+
+def required_policy_tests(paths: Sequence[str]) -> tuple[str, ...]:
+    """Keep qualification-ledger proof conditional on its governing source."""
+    if not any(map(is_verification_policy_path, paths)):
+        return ()
+    return VERIFICATION_POLICY_TESTS + (
+        (REAL_LIFECYCLE_QA_TEST,) if any(path in REAL_LIFECYCLE_QA_PATHS for path in paths) else ()
+    )
+
+
+def required_policy_obligations(paths: Sequence[str]) -> tuple[str, ...]:
+    """Name the protection independently re-derived from actual changed paths."""
+    if not any(map(is_verification_policy_path, paths)):
+        return ()
+    return ("verification-policy protection",) + (
+        ("real-lifecycle QA protection",)
+        if any(path in REAL_LIFECYCLE_QA_PATHS for path in paths)
+        else ()
     )
 
 
@@ -189,12 +215,13 @@ def validate_merge_proof(
         raise ValueError("Verification admission state is unknown")
     if not required_static_obligations(changed_paths) <= set(plan.get("static", [])):
         raise ValueError("Applicable static or contract authority was omitted")
-    policy_change = any(map(is_verification_policy_path, changed_paths))
+    policy_tests = required_policy_tests(changed_paths)
+    policy_change = bool(policy_tests)
     if (policy_change or plan.get("policy_status") == "REVIEW_REQUIRED") and control_base != base:
         raise ValueError("CUTOVER_UNVERIFIED: policy changes require trusted-base controls")
     if policy_change and (
-        "verification-policy protection" not in plan.get("obligations", [])
-        or not set(VERIFICATION_POLICY_TESTS) <= set(plan.get("pytest", []))
+        not set(required_policy_obligations(changed_paths)) <= set(plan.get("obligations", []))
+        or not set(policy_tests) <= set(plan.get("pytest", []))
     ):
         raise ValueError("Required independent verification-policy protection was omitted")
     plain_docs = {
@@ -283,7 +310,7 @@ def validate_merge_proof(
         pytest_files = require_native_pytest_pass(
             row.get("native_report", {}), expected_source=plan.get("source_identity")
         )
-        if policy_change and not set(VERIFICATION_POLICY_TESTS) <= pytest_files:
+        if policy_change and not set(policy_tests) <= pytest_files:
             raise ValueError("Required verification-policy tests have no execution proof")
         if pytest_files != {path.split("::", 1)[0] for path in plan.get("pytest", [])}:
             raise ValueError("Admitted pytest files differ from native execution proof")

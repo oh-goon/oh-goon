@@ -6,6 +6,8 @@ from typing import Any
 import pytest
 
 from oh_goon.repository_tooling.verification_gate_control import (
+    REAL_LIFECYCLE_QA_PATHS,
+    REAL_LIFECYCLE_QA_TEST,
     VERIFICATION_POLICY_TESTS,
     is_verification_policy_path,
     required_static_obligations,
@@ -250,6 +252,8 @@ def test_executable_change_cannot_claim_behavioral_na() -> None:
         "scripts/README.md",
         "frontend/README.md",
         "frontend/src/README.md",
+        "docs/development/REAL_LIFECYCLE_QA.md",
+        "docs/development/REAL_LIFECYCLE_QA.yml",
     ),
 )
 def test_policy_ingresses_cannot_self_approve_as_ordinary(path: str) -> None:
@@ -278,22 +282,30 @@ def test_policy_ingresses_cannot_self_approve_as_ordinary(path: str) -> None:
         "scripts/README.md",
         "frontend/README.md",
         "frontend/src/README.md",
+        "docs/development/REAL_LIFECYCLE_QA.md",
+        "docs/development/REAL_LIFECYCLE_QA.yml",
     ),
 )
-def test_governing_readme_admits_independently_bound_policy_proof(path: str) -> None:
+def test_governing_policy_admits_independently_bound_proof(path: str) -> None:
     plan, result = _proof()
+    required = VERIFICATION_POLICY_TESTS + (
+        (REAL_LIFECYCLE_QA_TEST,) if path in REAL_LIFECYCLE_QA_PATHS else ()
+    )
+    obligations = ["verification-policy protection"]
+    if path in REAL_LIFECYCLE_QA_PATHS:
+        obligations.append("real-lifecycle QA protection")
     plan.update(
         changed_paths=[path],
         policy_status="REVIEW_REQUIRED",
-        obligations=["verification-policy protection"],
-        pytest=list(VERIFICATION_POLICY_TESTS),
+        obligations=obligations,
+        pytest=list(required),
         static=sorted(required_static_obligations([path])),
     )
     plan["evidence"]["observations"] = [
         {"changed_path": path, "state": "UNAVAILABLE", "nominations": []}
     ]
     native = result["outcomes"][0]
-    nodes = [f"{test_file}::test_policy" for test_file in VERIFICATION_POLICY_TESTS]
+    nodes = [f"{test_file}::test_policy" for test_file in required]
     native["native_report"]["native_collection"] = {
         "discovered": list(nodes),
         "deselected": [],
@@ -347,7 +359,7 @@ def test_governing_readme_admits_independently_bound_policy_proof(path: str) -> 
     with pytest.raises(ValueError, match="trusted-base"):
         validate(plan, result, None)
 
-    for test_file in VERIFICATION_POLICY_TESTS:
+    for test_file in required:
         incomplete_plan, incomplete_result = copy.deepcopy((plan, result))
         incomplete_plan["pytest"].remove(test_file)
         incomplete_result["plan"] = copy.deepcopy(incomplete_plan)
@@ -368,6 +380,49 @@ def test_governing_readme_admits_independently_bound_policy_proof(path: str) -> 
         ]
         with pytest.raises(ValueError, match="policy tests have no execution proof"):
             validate(plan, incomplete_result, plan["base"])
+
+    if path in REAL_LIFECYCLE_QA_PATHS:
+        incomplete_plan, incomplete_result = copy.deepcopy((plan, result))
+        incomplete_plan["policy_status"] = "ORDINARY"
+        incomplete_plan["obligations"].remove("real-lifecycle QA protection")
+        incomplete_result["plan"] = copy.deepcopy(incomplete_plan)
+        with pytest.raises(ValueError, match="policy protection was omitted"):
+            validate(incomplete_plan, incomplete_result, plan["base"])
+
+        incomplete_result = copy.deepcopy(result)
+        receipt = incomplete_result["outcomes"][0]["native_report"][
+            "membership_receipt"
+        ]
+        qa_outcome = next(
+            row
+            for row in receipt["effective_pytest_outcomes"]
+            if row["member"] == f"{REAL_LIFECYCLE_QA_TEST}::test_policy"
+        )
+        qa_outcome["pytest_outcomes"][0]["outcome"] = "SKIPPED"
+        with pytest.raises(ValueError, match="native category is skipped"):
+            validate(plan, incomplete_result, plan["base"])
+
+    extra_result = copy.deepcopy(result)
+    report = extra_result["outcomes"][0]["native_report"]
+    extra_file = (
+        "scripts/tests/test_other_qa_contract.py"
+        if path in REAL_LIFECYCLE_QA_PATHS
+        else REAL_LIFECYCLE_QA_TEST
+    )
+    extra_node = f"{extra_file}::test_extra"
+    report["native_collection"]["discovered"].append(extra_node)
+    report["membership_receipt"]["selected"].append(extra_node)
+    report["membership_receipt"]["passed"].append(extra_node)
+    report["membership_receipt"]["effective_pytest_outcomes"].append(
+        {
+            "member": extra_node,
+            "status": "PASSED",
+            "attempt_identity": "extra-proof",
+            "pytest_outcomes": [{"nodeid": extra_node, "outcome": "PASSED"}],
+        }
+    )
+    with pytest.raises(ValueError, match="Admitted pytest files"):
+        validate(plan, extra_result, plan["base"])
 
 
 @pytest.mark.parametrize("value", ("node", {}, [True]))

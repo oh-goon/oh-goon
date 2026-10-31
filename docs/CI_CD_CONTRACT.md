@@ -37,6 +37,13 @@ instructions, workflow/result policy and selector changes require the named
 **verification-policy protection** obligation. Shared fixture or dependency
 uncertainty cannot be excused by that generic policy proof.
 
+`REAL_LIFECYCLE_QA.md` and `REAL_LIFECYCLE_QA.yml` govern qualification.
+Changing either requires the named **real-lifecycle QA protection** obligation:
+its existing ledger/Make contract test in addition to the two verification-policy
+checks. The immutable base controller derives the same requirements from actual
+changed paths. Other documentation and shared fixtures retain their own evidence
+requirements.
+
 Merge-mode plan admission retains diagnostic JSON but refuses unresolved scope
 or missing required behavioral proof before publishing toolchain-selection outputs
 or preparing frontend/native-test capabilities. Focused plan inspection remains
