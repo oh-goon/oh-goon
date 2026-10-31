@@ -169,6 +169,9 @@ Initialization validates inputs, registers only the selected exact Git root if
 needed, and publishes `run.yml` and its first canonical lock together. `--output`
 defaults to `workflow`; an existing destination is refused. `--kind` defaults to
 `plan`, while `--kind goon` selects a single Goon explicitly.
+If interruption prevents the caller receiving the publication receipt, the
+response reports publication as unverified. Inspect the destination and retained
+registration facts before retrying; absence of a return value is not rollback.
 
 For `python/quality`, the project needs `pyproject.toml` and native `uv.lock`;
 its selected dependency group supplies Ruff, pytest and the chosen type checker.
@@ -204,3 +207,66 @@ authoring. `runs show|handoff|steps|outputs RUN_ID` reopens retained execution
 facts; `runs logs RUN_ID` reports transient retention honestly. `app` owns browser
 lifecycle commands. Shared Plan, Lineup and Schedule operations retain their
 existing multi-repository and instance authority.
+
+### Find and explain a previous Run
+
+```bash
+oh-goon runs list --limit 20 --json
+oh-goon runs explain RUN_ID
+oh-goon runs show --last --repository-id REPOSITORY_ID --plan-id PLAN_ID --json
+```
+
+The list supplies exact Run, Plan and repository identities from the selected
+state root. Its `next_before_revision` continues the original admission-ordered
+page through `--before-revision`; it does not sort by an inferred completion
+time. `--last` requires both exact Plan and repository IDs from that history.
+It never chooses a global latest Run or guesses a scope from the current
+directory. A historical failed Run can be read successfully without granting
+retry, repair or replay authority.
+
+```bash
+oh-goon runs logs RUN_ID --after 0 --json
+oh-goon runs logs RUN_ID --after 0 --follow
+```
+
+JSON snapshots carry the original `next_sequence`, retained cursor and dropped
+chunk count. Advance with that cursor. Text follow is available only while the
+original live-output owner is active, and stops when it seals or becomes
+unavailable. Ctrl-C stops following; it does not cancel the Run. A fresh CLI
+after that owner closes can report `UNAVAILABLE`; use durable `runs explain`,
+`runs events` or `runs handoff` for recorded facts. `--follow --json` refuses;
+JSON consumers use bounded snapshots rather than an unbounded transcript.
+
+### JSON and shell results
+
+Each supported `--json` invocation publishes one JSON value on stdout, including
+argument/configuration refusal and interruption. Owner schemas and Run/Step
+facts remain intact. `_cli.schema` is `oh-goon.cli/v1`; `_cli.exit_code` and
+`_cli.exit_kind` describe the CLI invocation, separately from recorded Step exit
+codes or a historical Run outcome. The reply is bounded to 1 MiB. Oversized or
+invalid presentation fails with a typed error and an action to select a smaller
+page or bounded handoff; it does not invent successful evidence or alter a Run.
+Runtime cleanup and private reply-staging cleanup are separate `_cli` observations.
+An original successful Run can remain successful while CLI cleanup is unverified
+and the invocation returns nonzero. Private staging settles before the final
+reply is published; exception messages and private staging paths are withheld.
+
+| Shell exit | Meaning |
+| --- | --- |
+| `0` | The command or evidence read succeeded. |
+| `1` | The command reported non-success; for `run`, admitted execution was non-successful. |
+| `2` | Arguments, configuration, startup or presentation were refused/failed. |
+| `3` | Requested Run evidence or transient output is unavailable. |
+| `130` / `143` | The invocation was interrupted by SIGINT / SIGTERM. |
+
+Progress/operator hints use stderr. JSON uses ASCII escapes independently of
+terminal width, locale, color or TTY. Framework diagnostics do not echo raw
+exceptions, private task values or dotenv contents. The original execution
+owner still applies its declared secret redaction; this is not a promise to
+redact arbitrary application data deliberately published as outputs.
+
+Basic `oh-goon doctor --json` reports native tools and selected state/config
+paths without opening the operational database. `doctor --runtime --json`
+explicitly observes an existing compatible runtime; it does not initialize,
+repair or recover it. Guided native setup and its qualification limits are in
+[Agent providers](AGENT_PROVIDERS.md#set-up-a-native-execution-profile).

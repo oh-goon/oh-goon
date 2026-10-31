@@ -2,16 +2,26 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
+
+import pytest
 
 from oh_goon.cli import main
 from oh_goon.workflow import APP_PLAN, SELF_VERIFY_PLAN
 
 
-def test_self_verify_plan_json_exposes_canonical_fleet_selector(monkeypatch, capsys) -> None:
+def test_self_verify_plan_json_exposes_canonical_fleet_selector(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = Path(__file__).resolve().parents[4]
     monkeypatch.chdir(root)
     assert main(["self", "verify", "--plan", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
+    assert payload.pop("_cli") == {
+        "schema": "oh-goon.cli/v1",
+        "exit_code": 0,
+        "exit_kind": "SUCCESS",
+    }
     assert payload == {
         "command": "oh-goon self verify",
         "execution_authority": "FleetPlanService.run",
@@ -20,7 +30,9 @@ def test_self_verify_plan_json_exposes_canonical_fleet_selector(monkeypatch, cap
     }
 
 
-def test_self_certify_plan_selects_existing_app_certification(monkeypatch, capsys) -> None:
+def test_self_certify_plan_selects_existing_app_certification(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = Path(__file__).resolve().parents[4]
     monkeypatch.chdir(root)
     assert main(["self", "certify", "--plan", "--json"]) == 0
@@ -29,7 +41,9 @@ def test_self_certify_plan_selects_existing_app_certification(monkeypatch, capsy
     assert payload["execution_authority"] == "FleetPlanService.run"
 
 
-def test_dev_shards_json_remains_diagnostic_only(monkeypatch, capsys) -> None:
+def test_dev_shards_json_remains_diagnostic_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = Path(__file__).resolve().parents[4]
     monkeypatch.chdir(root)
     assert main(["dev", "shards", "scripts-non-certification", "--json"]) == 0
@@ -40,7 +54,9 @@ def test_dev_shards_json_remains_diagnostic_only(monkeypatch, capsys) -> None:
     assert payload["missing"] == 0
 
 
-def test_self_setup_reports_checkpoint_parent_input(monkeypatch, capsys, tmp_path) -> None:
+def test_self_setup_reports_checkpoint_parent_input(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     from oh_goon.repository_tooling import self_certification_artifacts
 
     root = Path(__file__).resolve().parents[4]
@@ -58,11 +74,13 @@ def test_self_setup_reports_checkpoint_parent_input(monkeypatch, capsys, tmp_pat
     assert main(["self", "setup"]) == 0
     output = capsys.readouterr().out
     assert "parent-source-zip: MISSING" in output
-    assert parent["artifact"] in output
-    assert parent["sha256"] in output
+    assert cast(str, parent["artifact"]) in output
+    assert cast(str, parent["sha256"]) in output
 
 
-def test_self_verify_plan_output_is_compact_and_names_normal_authority(monkeypatch, capsys) -> None:
+def test_self_verify_plan_output_is_compact_and_names_normal_authority(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = Path(__file__).resolve().parents[4]
     monkeypatch.chdir(root)
     assert main(["self", "verify", "--plan"]) == 0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -9,6 +10,7 @@ import stat
 import sys
 import tomllib
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -34,24 +36,38 @@ from oh_goon.integrations.exact_file_write import (
     prepared_text_file,
     publish_text_file,
     replace_prepared_file,
+    require_expected_exact_file_revision,
 )
 
 _MAX_CONFIG_BYTES = 262_144
 
 
-def agent_providers_path(environment: Mapping[str, str], explicit: Path | None = None) -> Path:
+@dataclass(frozen=True, slots=True)
+class AgentProviderCatalog:
+    """One bounded authored catalog and its exact publication revision."""
+
+    config: AgentProvidersConfig
+    revision: str | None
+
+
+def agent_providers_path(
+    environment: Mapping[str, str], explicit: Path | None = None, *, resolve: bool = True
+) -> Path:
     if explicit is not None:
-        return explicit.expanduser().resolve()
-    if environment.get("OH_GOON_PROVIDERS_FILE"):
-        return Path(environment["OH_GOON_PROVIDERS_FILE"]).expanduser().resolve()
-    if os.name == "nt" and environment.get("APPDATA"):
-        base = Path(environment["APPDATA"])
-    elif sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support"
+        path = explicit
+    elif environment.get("OH_GOON_PROVIDERS_FILE"):
+        path = Path(environment["OH_GOON_PROVIDERS_FILE"])
     else:
-        config_home = environment.get("XDG_CONFIG_HOME")
-        base = Path(config_home).expanduser() if config_home else Path.home() / ".config"
-    return (base / "oh-goon" / "providers.json").resolve()
+        if os.name == "nt" and environment.get("APPDATA"):
+            base = Path(environment["APPDATA"])
+        elif sys.platform == "darwin":
+            base = Path.home() / "Library" / "Application Support"
+        else:
+            config_home = environment.get("XDG_CONFIG_HOME")
+            base = Path(config_home).expanduser() if config_home else Path.home() / ".config"
+        path = base / "oh-goon" / "providers.json"
+    expanded = path.expanduser()
+    return expanded.resolve() if resolve else expanded.absolute()
 
 
 def _json_fields(items: list[tuple[str, object]]) -> dict[str, object]:
@@ -63,13 +79,63 @@ def _json_fields(items: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def load_agent_providers(path: Path) -> AgentProvidersConfig:
-    path = path.expanduser().resolve()
-    if not path.is_file():
-        raise AgentProviderError(f"Cannot read provider configuration at {path}")
+def _catalog_authoring_metadata(path: Path) -> os.stat_result | None:
     try:
-        with path.open("rb") as stream:
-            data = stream.read(_MAX_CONFIG_BYTES + 1)
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or metadata.st_size > _MAX_CONFIG_BYTES
+    ):
+        raise AgentProviderError(
+            "Catalog authoring requires one bounded regular file without aliases"
+        )
+    return metadata
+
+
+def require_agent_provider_authoring_paths(paths: tuple[Path, ...]) -> None:
+    """Admit only the exact selected regular catalog/schema authoring paths."""
+    for path in dict.fromkeys(paths):
+        _catalog_authoring_metadata(path)
+
+
+def read_agent_provider_catalog(
+    path: Path, *, missing_ok: bool = False, for_authoring: bool = False
+) -> AgentProviderCatalog:
+    """Read authored values once, retaining relative paths for catalog updates."""
+    try:
+        if for_authoring:
+            metadata = _catalog_authoring_metadata(path)
+            if metadata is None:
+                if missing_ok:
+                    return AgentProviderCatalog(AgentProvidersConfig(), None)
+                raise AgentProviderError("Selected catalog is unavailable for authoring")
+            if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_NONBLOCK"):
+                raise AgentProviderError(
+                    "Safe catalog authoring requires native no-follow file operations"
+                )
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                opened = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or opened.st_nlink != 1
+                    or (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino)
+                ):
+                    raise AgentProviderError("Selected catalog changed before its authoring read")
+                with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                    data = stream.read(_MAX_CONFIG_BYTES + 1)
+            finally:
+                os.close(descriptor)
+        else:
+            if missing_ok and not path.exists():
+                return AgentProviderCatalog(AgentProvidersConfig(), None)
+            if not path.is_file():
+                raise AgentProviderError(f"Cannot read provider configuration at {path}")
+            with path.open("rb") as stream:
+                data = stream.read(_MAX_CONFIG_BYTES + 1)
     except OSError as exc:
         raise AgentProviderError(f"Cannot read provider configuration at {path}") from exc
     if len(data) > _MAX_CONFIG_BYTES:
@@ -101,6 +167,18 @@ def load_agent_providers(path: Path) -> AgentProvidersConfig:
             "Native authentication and configuration remain service-owned; "
             "Codex/OpenCode configuration directories cannot be exposed to agent tools"
         )
+    return AgentProviderCatalog(config, hashlib.sha256(data).hexdigest())
+
+
+def load_agent_providers(path: Path) -> AgentProvidersConfig:
+    path = path.expanduser().resolve()
+    return resolve_agent_provider_catalog(read_agent_provider_catalog(path).config, path)
+
+
+def resolve_agent_provider_catalog(
+    config: AgentProvidersConfig, path: Path
+) -> AgentProvidersConfig:
+    """Resolve the captured catalog's paths without another source read."""
     providers = {
         name: provider.model_copy(
             update={"ca_file": str((path.parent / Path(provider.ca_file).expanduser()).resolve())}
@@ -338,21 +416,45 @@ def create_agent_providers(path: Path, config: AgentProvidersConfig) -> Path:
     path = path.expanduser().resolve()
     if path.suffix.lower() != ".json":
         raise AgentProviderError("Provider setup requires a .json configuration path")
-    schema_path = path.with_suffix(".schema.json")
+    if path.exists():
+        raise AgentProviderError(f"Provider configuration already exists; edit {path}")
+    return save_agent_provider_catalog(path, config, expected_revision=None)
+
+
+def save_agent_provider_catalog(
+    path: Path, config: AgentProvidersConfig, *, expected_revision: str | None
+) -> Path:
+    """Publish a catalog update only against its captured authored revision."""
+    if path.suffix.lower() != ".json":
+        raise AgentProviderError("Guided native setup requires a .json configuration path")
     payload = config.model_dump(mode="json", by_alias=True, exclude_none=True, exclude_unset=True)
-    payload["$schema"] = schema_path.name
     AgentProvidersConfig.model_validate(payload)
+    schema_path = path.with_suffix(".schema.json")
+    if expected_revision is None:
+        payload["$schema"] = schema_path.name
     content = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
     if len(content.encode("utf-8")) > _MAX_CONFIG_BYTES:
         raise AgentProviderError("Provider configuration exceeds 262144 bytes")
-    schema = json.dumps(AgentProvidersConfig.model_json_schema(), indent=2) + "\n"
-    if path.exists():
-        raise AgentProviderError(f"Provider configuration already exists; edit {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     with exact_file_write_lock(path):
-        if path.exists():
-            raise AgentProviderError(f"Provider configuration already exists; edit {path}")
-        publish_text_file(schema_path, schema)
+        require_agent_provider_authoring_paths((path, schema_path))
+        require_expected_exact_file_revision(
+            path,
+            expected_revision,
+            invalid_error=lambda: AgentProviderError(
+                "Provider configuration is not a regular file"
+            ),
+            changed_error=lambda _current, _expected: AgentProviderError(
+                "Provider configuration changed during setup; inspect it and run setup again"
+            ),
+            removed_error=lambda: AgentProviderError(
+                "Provider configuration was removed during setup; run setup again"
+            ),
+        )
+        if expected_revision is None:
+            publish_text_file(
+                schema_path, json.dumps(AgentProvidersConfig.model_json_schema(), indent=2) + "\n"
+            )
         with prepared_text_file(path, content) as prepared:
             replace_prepared_file(prepared, path)
     return path

@@ -7,10 +7,13 @@ executor, trust authority, retry decision, or simulated kernel containment.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn, cast
 
 import pytest
 
+from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.errors import InvalidRequest
@@ -18,16 +21,16 @@ from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 
 
 class _Facts:
-    def __init__(self, data):
+    def __init__(self, data: dict[str, Any]) -> None:
         self.data = data
 
-    def model_dump(self, *, mode):
+    def model_dump(self, *, mode: str) -> dict[str, Any]:
         assert mode == "json"
         return self.data
 
 
 class _Tape:
-    def __init__(self, run_id, *, stage="ADMISSION"):
+    def __init__(self, run_id: str, *, stage: str = "ADMISSION") -> None:
         self.fleet_run_id = run_id
         self.artifact_observation = None
         self.plan_id = "plan-one"
@@ -88,7 +91,7 @@ class _Tape:
         )
         self.repositories = (repo,)
 
-    def model_dump(self, *, mode):
+    def model_dump(self, *, mode: str) -> dict[str, Any]:
         assert mode == "json"
         return {
             "fleet_run_id": self.fleet_run_id,
@@ -98,13 +101,13 @@ class _Tape:
 
 
 class _CanonicalRuns:
-    def __init__(self, run_id, *, stage="ADMISSION"):
+    def __init__(self, run_id: str, *, stage: str = "ADMISSION") -> None:
         self.run_id = run_id
-        self.calls = []
+        self.calls: list[tuple[object, ...]] = []
         self.reject = False
         self.tape = _Tape(run_id, stage=stage)
 
-    def get(self, run_id):
+    def get(self, run_id: str) -> SimpleNamespace:
         self.calls.append(("get", run_id))
         if self.reject:
             raise InvalidRequest("original owner: Run unknown")
@@ -125,7 +128,7 @@ class _CanonicalRuns:
             campaign_journal=None,
         )
 
-    def events(self, run_id, after=0, *, limit=None):
+    def events(self, run_id: str, after: int = 0, *, limit: int | None = None) -> SimpleNamespace:
         self.calls.append(("events", run_id, after, limit))
         assert run_id == self.run_id
         assert limit is not None and 1 <= limit <= 100
@@ -151,7 +154,7 @@ class _CanonicalRuns:
             },
         )
 
-    def game_tape_live_output(self, run_id, *, after):
+    def game_tape_live_output(self, run_id: str, *, after: int) -> SimpleNamespace:
         self.calls.append(("live-output", run_id, after))
         assert run_id == self.run_id
         return SimpleNamespace(
@@ -168,20 +171,20 @@ class _CanonicalRuns:
             },
         )
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> NoReturn:
         raise AssertionError(f"Unexpected authority/mutation call: {name}")
 
 
 class _CanonicalPlans:
-    def __init__(self, run_id):
+    def __init__(self, run_id: str) -> None:
         self.run_id = run_id
-        self.calls = []
+        self.calls: list[tuple[object, ...]] = []
 
-    def require_cli_plan_preparation(self, run_id):
+    def require_cli_plan_preparation(self, run_id: str) -> None:
         self.calls.append(("preflight", run_id))
         assert run_id == self.run_id
 
-    def run(self, path, **kwargs):
+    def run(self, path: Path, **kwargs: object) -> SimpleNamespace:
         self.calls.append(("run", str(path)))
         assert kwargs["fleet_run_id"] == self.run_id
         return SimpleNamespace(
@@ -190,22 +193,26 @@ class _CanonicalPlans:
             target=SimpleNamespace(plan=SimpleNamespace(plan_id="plan-one")),
         )
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> NoReturn:
         raise AssertionError(f"Unexpected second Plan owner: {name}")
 
 
-def _invoke(runtime, capsys, argv):
+def _invoke(
+    runtime: SimpleNamespace, capsys: pytest.CaptureFixture[str], argv: list[str]
+) -> tuple[int | None, dict[str, Any]]:
     args = build_parser().parse_args(argv)
     if args.command == "dev":
         args.command, args.plan_command = "plan", "run"
-    code = run_plan_command(runtime, args)
+    code = run_plan_command(cast(ApplicationRuntime, runtime), args)
     streams = capsys.readouterr()
     assert streams.err == ""
     assert len(streams.out.strip().splitlines()) == 1, streams.out
     return code, json.loads(streams.out)
 
 
-def test_full_agent_run_id_resume_and_existing_evidence_views(capsys):
+def test_full_agent_run_id_resume_and_existing_evidence_views(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Submit once, resume by Run ID, then inspect without a second executor."""
     run_id = "fleet-run6-identity"
     plans = _CanonicalPlans(run_id)
@@ -252,7 +259,7 @@ def test_full_agent_run_id_resume_and_existing_evidence_views(capsys):
         assert argv[3] == run_id
         assert argv[-1] == "--json"
         code, response = _invoke(runtime, capsys, argv[1:])
-        assert code == 0
+        assert code == (3 if name == "logs" else 0)
         if name == "show":
             assert response["outcome"] == "FAILED"
         elif name == "events":
@@ -289,7 +296,9 @@ def test_full_agent_run_id_resume_and_existing_evidence_views(capsys):
 
 
 @pytest.mark.parametrize("stage", ["ADMISSION", "CONTAINMENT", "EXECUTION"])
-def test_no_repair_policy_or_retry_permission_in_readback_references(capsys, stage):
+def test_no_repair_policy_or_retry_permission_in_readback_references(
+    capsys: pytest.CaptureFixture[str], stage: str
+) -> None:
     run_id = "run-failure"
     runs = _CanonicalRuns(run_id, stage=stage)
     code, handoff = _invoke(
@@ -306,7 +315,9 @@ def test_no_repair_policy_or_retry_permission_in_readback_references(capsys, sta
     assert runs.calls == [("get", run_id)]
 
 
-def test_argv_is_not_a_shell_command_even_with_shell_sensitive_run_identity(capsys):
+def test_argv_is_not_a_shell_command_even_with_shell_sensitive_run_identity(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     run_id = "run; echo SHOULD_NOT_EXECUTE"
     runs = _CanonicalRuns(run_id)
     _, handoff = _invoke(SimpleNamespace(runs=runs), capsys, ["runs", "handoff", run_id, "--json"])
@@ -318,7 +329,9 @@ def test_argv_is_not_a_shell_command_even_with_shell_sensitive_run_identity(caps
     assert runs.calls == [("get", run_id)]
 
 
-def test_unknown_run_does_not_offer_unverified_navigation(capsys):
+def test_unknown_run_does_not_offer_unverified_navigation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     runs = _CanonicalRuns("unknown")
     runs.reject = True
     code, result = _invoke(

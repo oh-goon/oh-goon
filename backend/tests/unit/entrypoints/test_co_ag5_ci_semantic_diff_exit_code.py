@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -28,7 +29,12 @@ def _plans() -> tuple[Path, Path]:
 
 
 @pytest.mark.parametrize("as_json", [False, True])
-def test_changes_report_exit_one_and_original_projection(monkeypatch, capsys, tmp_path, as_json):
+def test_changes_report_exit_one_and_original_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    as_json: bool,
+) -> None:
     _stateless(monkeypatch)
     before, after = _plans()
     expected = FleetPlanResolver(goon_templates=GoonTemplateStore()).diff(before, after)
@@ -39,8 +45,14 @@ def test_changes_report_exit_one_and_original_projection(monkeypatch, capsys, tm
     assert main(argv) == 1
     output = capsys.readouterr().out
     if as_json:
-        assert json.loads(output) == json.loads(expected.model_dump_json())
-        assert "changed" not in json.loads(output)  # existing schema unchanged
+        actual = json.loads(output)
+        assert actual.pop("_cli") == {
+            "schema": "oh-goon.cli/v1",
+            "exit_code": 1,
+            "exit_kind": "NON_SUCCESS",
+        }
+        assert actual == json.loads(expected.model_dump_json())
+        assert "changed" not in actual  # existing owner schema unchanged
     else:
         assert f"Before: {expected.before_plan_id}" in output
         assert f"After:  {expected.after_plan_id}" in output
@@ -48,7 +60,11 @@ def test_changes_report_exit_one_and_original_projection(monkeypatch, capsys, tm
 
 
 @pytest.mark.parametrize("as_json", [False, True])
-def test_unchanged_resolved_meaning_returns_zero(monkeypatch, capsys, as_json):
+def test_unchanged_resolved_meaning_returns_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    as_json: bool,
+) -> None:
     _stateless(monkeypatch)
     before, _ = _plans()
     argv = ["plan", "diff", str(before), str(before), "--exit-code"]
@@ -64,7 +80,11 @@ def test_unchanged_resolved_meaning_returns_zero(monkeypatch, capsys, as_json):
         assert "Execution meaning: unchanged" in output
 
 
-def test_source_relocation_respects_original_resolved_name_semantics(monkeypatch, capsys, tmp_path):
+def test_source_relocation_respects_original_resolved_name_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
     _stateless(monkeypatch)
     before, _ = _plans()
     copied = tmp_path / "quality" / "plan.yml"
@@ -78,7 +98,10 @@ def test_source_relocation_respects_original_resolved_name_semantics(monkeypatch
     assert diff["steps"] == []
 
 
-def test_backward_compatible_default_exit_even_when_changed(monkeypatch, capsys):
+def test_backward_compatible_default_exit_even_when_changed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     _stateless(monkeypatch)
     before, after = _plans()
     assert main(["plan", "diff", str(before), str(after), "--json"]) == 0
@@ -86,7 +109,12 @@ def test_backward_compatible_default_exit_even_when_changed(monkeypatch, capsys)
 
 
 @pytest.mark.parametrize("as_json", [False, True])
-def test_invalid_plan_remains_exit_two_and_does_not_write(monkeypatch, capsys, tmp_path, as_json):
+def test_invalid_plan_remains_exit_two_and_does_not_write(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    as_json: bool,
+) -> None:
     _stateless(monkeypatch)
     before, _ = _plans()
     bad = tmp_path / "bad-plan.yml"
@@ -101,7 +129,10 @@ def test_invalid_plan_remains_exit_two_and_does_not_write(monkeypatch, capsys, t
     assert not (tmp_path / "goon.lock").exists()
 
 
-def test_existing_stateful_dispatch_adapter_matches_same_exit_contract(monkeypatch, capsys):
+def test_existing_stateful_dispatch_adapter_matches_same_exit_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Service dispatch is compatibility-only; never start a second diff implementation."""
     from argparse import Namespace
 
@@ -110,7 +141,8 @@ def test_existing_stateful_dispatch_adapter_matches_same_exit_contract(monkeypat
 
     before, after = _plans()
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
-    service = FleetPlanService(resolver, None, None, None, None)
+    unused = cast(Any, None)
+    service = FleetPlanService(resolver, unused, unused, unused, unused)
     args = Namespace(
         before=before,
         after=after,
@@ -121,7 +153,7 @@ def test_existing_stateful_dispatch_adapter_matches_same_exit_contract(monkeypat
         exit_code=True,
     )
     runtime = type("Runtime", (), {"plans": service})()
-    assert _diff(runtime, args) == 1
+    assert _diff(cast(Any, runtime), args) == 1
     assert json.loads(capsys.readouterr().out) == json.loads(
         resolver.diff(before, after).model_dump_json()
     )

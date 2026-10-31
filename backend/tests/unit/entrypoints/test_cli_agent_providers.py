@@ -1,12 +1,21 @@
+from __future__ import annotations
+
 import json
+from collections.abc import Sequence
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Never
 
 import pytest
 
 from oh_goon.cli import main
-from oh_goon.core.models.agent_providers import AgentProviderError, AgentReply
+from oh_goon.core.models.agent_providers import (
+    AgentMessage,
+    AgentProviderError,
+    AgentReply,
+    ResolvedAgentModel,
+)
 
 CONFIG = """version = 1
 default_model = "review"
@@ -22,7 +31,7 @@ model = "selected-model"
 
 
 @pytest.fixture
-def no_runtime(monkeypatch):
+def no_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     import oh_goon.cli as cli
 
     monkeypatch.setattr(
@@ -34,8 +43,12 @@ def no_runtime(monkeypatch):
 
 @pytest.mark.parametrize("command", ["list", "validate"])
 def test_provider_discovery_is_offline_and_does_not_require_credentials(
-    tmp_path, monkeypatch, capsys, no_runtime, command
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_runtime: None,
+    command: str,
+) -> None:
     from oh_goon.integrations.agent_provider_client import AgentProviderClient
 
     monkeypatch.setattr(
@@ -54,7 +67,12 @@ def test_provider_discovery_is_offline_and_does_not_require_credentials(
     assert report["providers"]["gateway"]["api_key_env"] == "MY_KEY"
 
 
-def test_path_does_not_read_or_create_configuration(tmp_path, monkeypatch, capsys, no_runtime):
+def test_path_does_not_read_or_create_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_runtime: None,
+) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert main(["agent", "providers", "path", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["config"] == str(tmp_path / "oh-goon/providers.json")
@@ -111,17 +129,23 @@ def test_saved_native_default_is_visible_without_api_setup(
 
 @pytest.mark.parametrize("source", ["argument", "file", "stdin"])
 def test_explicit_request_uses_selected_profile_and_bounded_prompt(
-    tmp_path, monkeypatch, capsys, no_runtime, source
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_runtime: None,
+    source: str,
+) -> None:
     from oh_goon.integrations.agent_provider_client import AgentProviderClient
 
     path = tmp_path / "providers.toml"
     path.write_text(CONFIG)
     monkeypatch.setenv("MY_KEY", "PRIVATE_KEY")
     monkeypatch.setenv("MY_OTHER_KEY", "OTHER_PRIVATE_KEY")
-    observed = []
+    observed: list[tuple[ResolvedAgentModel, Sequence[AgentMessage]]] = []
 
-    def complete(self, selected, messages):
+    def complete(
+        self: AgentProviderClient, selected: ResolvedAgentModel, messages: Sequence[AgentMessage]
+    ) -> AgentReply:
         observed.append((selected, messages))
         return AgentReply(
             selected.profile, selected.provider_name, selected.model, "hello", "completed"
@@ -145,7 +169,12 @@ def test_explicit_request_uses_selected_profile_and_bounded_prompt(
     assert "PRIVATE_KEY" not in output
 
 
-def test_missing_selected_key_fails_before_request(tmp_path, monkeypatch, capsys, no_runtime):
+def test_missing_selected_key_fails_before_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_runtime: None,
+) -> None:
     from oh_goon.integrations.agent_provider_client import AgentProviderClient
 
     path = tmp_path / "providers.toml"
@@ -158,12 +187,15 @@ def test_missing_selected_key_fails_before_request(tmp_path, monkeypatch, capsys
         lambda *args, **kwargs: pytest.fail("missing credentials must fail before network"),
     )
     assert main(["agent", "providers", "request", "--config", str(path), "--prompt", "hello"]) == 2
-    assert "MY_KEY" in capsys.readouterr().err
+    assert "AGENT_PROVIDER_ERROR" in capsys.readouterr().err
 
 
 def test_request_refusal_and_configuration_errors_are_safe_json(
-    tmp_path, monkeypatch, capsys, no_runtime
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_runtime: None,
+) -> None:
     from oh_goon.integrations.agent_provider_client import AgentProviderClient
 
     path = tmp_path / "providers.toml"
@@ -171,7 +203,7 @@ def test_request_refusal_and_configuration_errors_are_safe_json(
     monkeypatch.setenv("MY_KEY", "PRIVATE_KEY")
     monkeypatch.setenv("MY_OTHER_KEY", "OTHER_PRIVATE_KEY")
 
-    def refuse(*args):
+    def refuse(*args: Any) -> Never:
         raise AgentProviderError("Selected provider request timed out")
 
     monkeypatch.setattr(AgentProviderClient, "complete", refuse)
@@ -181,17 +213,25 @@ def test_request_refusal_and_configuration_errors_are_safe_json(
         )
         == 2
     )
-    report = json.loads(capsys.readouterr().err)
-    assert report["status"] == "rejected" and "timed out" in report["error"]
+    output = capsys.readouterr()
+    report = json.loads(output.out)
+    assert output.err == ""
+    assert report["status"] == "rejected" and report["code"] == "AGENT_PROVIDER_ERROR"
     path.write_text(CONFIG.replace('api_key_env = "MY_KEY"', 'api_key = "PRIVATE_KEY"'))
     assert main(["agent", "providers", "validate", "--config", str(path), "--json"]) == 2
-    assert "PRIVATE_KEY" not in capsys.readouterr().err
+    output = capsys.readouterr()
+    assert "PRIVATE_KEY" not in output.out + output.err
+    assert json.loads(output.out)["status"] == "rejected"
 
 
 @pytest.mark.parametrize("provider", ["ollama", "litellm"])
 def test_setup_creates_an_offline_schema_backed_catalog_and_keeps_existing_settings(
-    tmp_path, monkeypatch, capsys, no_runtime, provider
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_runtime: None,
+    provider: str,
+) -> None:
     from oh_goon.integrations.agent_provider_client import AgentProviderClient
     from oh_goon.runtime.agent_providers import load_agent_providers
 
@@ -211,13 +251,16 @@ def test_setup_creates_an_offline_schema_backed_catalog_and_keeps_existing_setti
     config = load_agent_providers(path)
     assert config.resolve(None, environment={}).model == "team/model:tag"
     assert main(command) == 2
-    assert "already exists" in capsys.readouterr().err
+    assert "AGENT_PROVIDER_ERROR" in capsys.readouterr().err
     assert path.read_bytes() == raw
 
 
 def test_invalid_setup_cannot_create_files_or_print_accidental_credentials(
-    tmp_path, monkeypatch, capsys, no_runtime
-):
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_runtime: None,
+) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert (
         main(

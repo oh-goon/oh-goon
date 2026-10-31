@@ -57,11 +57,31 @@ def run_service_command(args: argparse.Namespace) -> int:
             args.agent, executable=args.executable, socket_path=args.socket
         )
     except AgentProviderError as exc:
-        message = str(exc)
-        print(
-            json.dumps({"status": "rejected", "error": message}) if args.as_json else message,
-            file=sys.stderr,
-        )
+        connecting = args.service_command == "connect"
+        report = {
+            "schema": "oh-goon.native-service/v1",
+            "status": "rejected",
+            "agent": args.agent,
+            "operation": args.service_command,
+            "code": exc.code,
+            "retryable": exc.retryable,
+            "execution_admitted": False,
+            "error": "Native service connection was refused or incomplete"
+            if connecting
+            else "Native service setup arguments were refused",
+            "safe_next_action": (
+                "Check the explicit agent, endpoint/socket, timeout and native readiness. "
+                "No closed-transport or successful-operation result was established."
+                if connecting
+                else "Select the supported agent, absolute public executable and required socket. "
+                "No service was started or connected."
+            ),
+        }
+        if args.as_json:
+            print(json.dumps(report))
+        else:
+            print(f"{report['code']}: {report['error']}", file=sys.stderr)
+            print(report["safe_next_action"], file=sys.stderr)
         return 2
     if args.as_json:
         print(json.dumps(recipe, indent=2, ensure_ascii=False))

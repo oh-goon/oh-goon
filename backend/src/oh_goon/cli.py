@@ -31,7 +31,7 @@ from oh_goon.runtime.storage_health import storage_unavailable_reason
 
 def _print_runtime_database_identity_lost(reason: str) -> None:
     print("OH-GOON RUNTIME DATABASE IDENTITY LOST")
-    print(f"Reason: {reason}")
+    print("Reason: the original SQLite identity owner could not establish database identity.")
     print(
         "The admitted SQLite identity could not be re-proven after bounded observation-only checks."
     )
@@ -51,10 +51,25 @@ def _print_runtime_database_identity_lost(reason: str) -> None:
 
 def _print_runtime_storage_unavailable(reason: str) -> None:
     print("OH-GOON RUNTIME STORAGE UNAVAILABLE")
-    print(f"Reason: {reason}")
+    print("Reason: the original storage owner reported unavailable execution storage.")
     print("Execution evidence/state storage became unavailable after runtime startup.")
     print("This is an environment/storage failure, not a source or test result.")
     print("Restore writable host storage, then rerun the owning command.")
+
+
+def _print_runtime_json_failure(code: str) -> None:
+    import json
+
+    print(
+        json.dumps(
+            {
+                "schema": "oh-goon.cli-runtime-error/v1",
+                "status": "error",
+                "code": code,
+                "safe_next_action": "Preserve existing state and inspect the selected runtime/storage authority before retrying; this diagnostic grants no reset, repair or replay authority.",
+            }
+        )
+    )
 
 
 def _shutdown_after_primary_failure(runtime: ApplicationRuntime) -> None:
@@ -189,12 +204,20 @@ def _build_application_runtime(
         if startup_purpose == "observation":
             _print_readback_failure(exc, as_json=as_json, fleet_run_id=readback_id)
             return None
-        print(str(exc))
+        if as_json:
+            _print_runtime_json_failure("STATE_SCHEMA_INCOMPATIBLE")
+        else:
+            print(
+                "Runtime startup refused: STATE_SCHEMA_INCOMPATIBLE. Inspect the selected state with doctor."
+            )
     except DatabasePathIdentityLost as exc:
         if startup_purpose == "observation":
             _print_readback_failure(exc, as_json=as_json, fleet_run_id=readback_id)
             return None
-        _print_runtime_database_identity_lost(str(exc))
+        if as_json:
+            _print_runtime_json_failure("RUNTIME_DATABASE_IDENTITY_LOST")
+        else:
+            _print_runtime_database_identity_lost(str(exc))
     except Exception as exc:
         if startup_purpose == "observation":
             if isinstance(
@@ -205,7 +228,10 @@ def _build_application_runtime(
         reason = storage_unavailable_reason(exc)
         if reason is None:
             raise
-        _print_runtime_storage_unavailable(reason)
+        if as_json:
+            _print_runtime_json_failure("RUNTIME_STORAGE_UNAVAILABLE")
+        else:
+            _print_runtime_storage_unavailable(reason)
     return None
 
 
@@ -251,18 +277,32 @@ def _execute_stateful_command(runtime: ApplicationRuntime, args: argparse.Namesp
             _print_readback_failure(exc, as_json=args.as_json, fleet_run_id=args.fleet_run_id)
             return 2
         if isinstance(exc, DatabasePathIdentityLost):
-            _print_runtime_database_identity_lost(str(exc))
+            if getattr(args, "as_json", False):
+                _print_runtime_json_failure("RUNTIME_DATABASE_IDENTITY_LOST")
+            else:
+                _print_runtime_database_identity_lost(str(exc))
             return 2
         reason = storage_unavailable_reason(exc)
         if reason is None:
             raise
-        _print_runtime_storage_unavailable(reason)
+        if getattr(args, "as_json", False):
+            _print_runtime_json_failure("RUNTIME_STORAGE_UNAVAILABLE")
+        else:
+            _print_runtime_storage_unavailable(reason)
         return 2
 
     shutdown_failure = _shutdown_after_completed_command(runtime)
     if shutdown_failure is not None:
         kind, reason = shutdown_failure
-        if kind == "database_identity":
+        if getattr(args, "as_json", False):
+            from oh_goon.cli_result import record_cli_cleanup_failure
+
+            record_cli_cleanup_failure(
+                "RUNTIME_DATABASE_IDENTITY_LOST"
+                if kind == "database_identity"
+                else "RUNTIME_STORAGE_UNAVAILABLE"
+            )
+        elif kind == "database_identity":
             _print_runtime_database_identity_lost(reason)
         else:
             _print_runtime_storage_unavailable(reason)
@@ -297,6 +337,23 @@ def _prepare_registered_workflow(args: argparse.Namespace) -> int:
             register_prepared_configuration_target(args, locations)
         lock = generate_stateless_lock(args, lock_owner=lock_owner)
     except BaseException as exc:
+        if isinstance(exc, KeyboardInterrupt):
+            import json
+
+            from oh_goon.cli_result import CliTermination
+
+            report = {
+                "schema": "oh-goon.workflow-prepare/v1",
+                "status": "interrupted",
+                "code": "CLI_INTERRUPTED",
+                "target_registration": getattr(args, "_target_registration", None),
+                "safe_next_action": "Inspect retained target-registration and lock facts before retrying; interruption grants no repair, replay or rollback authority.",
+            }
+            if args.as_json:
+                print(json.dumps(report, sort_keys=True))
+            else:
+                print(report["safe_next_action"])
+            return 143 if isinstance(exc, CliTermination) else 130
         identity_lost = isinstance(exc, DatabasePathIdentityLost)
         storage_reason = storage_unavailable_reason(exc)
         if identity_lost or storage_reason is not None:
@@ -339,6 +396,22 @@ def main(
     *,
     fleet_provisioner: FleetPreworkProvisioner | None = None,
 ) -> int:
+    from oh_goon.cli_result import invoke_cli
+
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    options = arguments[: arguments.index("--")] if "--" in arguments else arguments
+    return invoke_cli(
+        lambda: _main(arguments, fleet_provisioner=fleet_provisioner),
+        possible_json=any(option == "--json" or option.startswith("--json=") for option in options),
+        propagate=(TrustProtocolError,) if fleet_provisioner is not None else (),
+    )
+
+
+def _main(
+    argv: list[str] | None = None,
+    *,
+    fleet_provisioner: FleetPreworkProvisioner | None = None,
+) -> int:
     """Run the CLI; only an in-process deployment can transport Fleet authority.
 
     The shell executable passes no provisioner. This keyword accepts only the
@@ -348,6 +421,31 @@ def main(
     """
     parser = build_parser()
     args = parser.parse_args(argv)
+    from oh_goon.cli_result import CliUsageRejected, select_json_output
+
+    select_json_output(bool(getattr(args, "as_json", False)))
+    if args.command == "runs":
+        if (
+            args.runs_command not in {"list", "export-artifact"}
+            and not getattr(args, "last", False)
+            and (getattr(args, "repository_id", None) or getattr(args, "plan_id", None))
+        ):
+            raise CliUsageRejected(
+                "RUN_SCOPE_WITHOUT_LAST",
+                "Select an exact Run ID alone, or use --last with both exact --repository-id and --plan-id.",
+            )
+        if getattr(args, "last", False) and not (
+            getattr(args, "repository_id", None) and getattr(args, "plan_id", None)
+        ):
+            raise CliUsageRejected(
+                "RUN_SCOPE_REQUIRED",
+                "Select both exact --repository-id and --plan-id from runs list in this state root.",
+            )
+        if getattr(args, "follow", False) and getattr(args, "as_json", False):
+            raise CliUsageRejected(
+                "JSON_FOLLOW_UNSUPPORTED",
+                "Use bounded JSON snapshots with --after, or text --follow while the original owner is active.",
+            )
     if args.command is None:
         parser.print_help()
         return 0
@@ -482,6 +580,11 @@ def main(
 
         return run_provider_command(args)
 
+    if args.command == "agent" and args.agent_command == "setup":
+        from oh_goon.cli_agent_providers import run_native_setup_command
+
+        return run_native_setup_command(args)
+
     if args.command == "agent" and args.agent_command == "service":
         from oh_goon.cli_agent_services import run_service_command
 
@@ -511,10 +614,10 @@ def main(
 
         return run_stateless_lock(args)
 
-    if args.command == "doctor" and not args.runtime:
-        from oh_goon.cli_runtime_state import run_basic_doctor
+    if args.command == "doctor":
+        from oh_goon.cli_runtime_state import run_basic_doctor, run_runtime_doctor
 
-        return run_basic_doctor(args)
+        return run_runtime_doctor(args) if args.runtime else run_basic_doctor(args)
 
     if args.command == "app":
         args.command = args.app_command
@@ -536,7 +639,9 @@ def main(
 
             selected, isolation, git = native_plan_selection(args)
         except (FleetDomainError, OSError, ValueError) as exc:
-            print(str(exc), file=sys.stderr)
+            from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
+
+            print_safe_plan_diagnostic(exc, as_json=bool(getattr(args, "as_json", False)))
             return 2
         args._native_agent = selected
         runtime = _build_application_runtime(
@@ -544,6 +649,7 @@ def main(
             standard_process_isolation=isolation,
             git_service=git,
             startup_purpose=startup_purpose,
+            as_json=bool(getattr(args, "as_json", False)),
         )
     elif args.command == "runs":
         runtime = _build_application_runtime(
@@ -556,12 +662,14 @@ def main(
                 run_resource_scope=resource_handoff.scope,
                 run_resource_envelope=resource_evidence,
                 startup_purpose=startup_purpose,
+                as_json=bool(getattr(args, "as_json", False)),
             )
         else:
             runtime = _build_application_runtime(
                 fleet_provisioner=fleet_provisioner,
                 standard_local=standard_local,
                 startup_purpose=startup_purpose,
+                as_json=bool(getattr(args, "as_json", False)),
             )
     if runtime is None:
         return 2

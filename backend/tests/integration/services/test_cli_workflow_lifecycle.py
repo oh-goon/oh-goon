@@ -1,10 +1,11 @@
-"""Native CLI A journeys and prohibited effects across fresh process boundaries."""
+"""Native CLI workflow/readback journeys across fresh process boundaries."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -268,6 +269,230 @@ def test_two_commands_execute_native_python_then_preserve_recorded_run_after_rel
     )
 
 
+def test_packet_b_reads_two_original_runs_with_exact_scope_and_no_mutations(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "state"
+    environment = _environment(state)
+    receipts = []
+    repositories = []
+    workflows = []
+    for index, name in enumerate(("alpha", "beta")):
+        repository = tmp_path / name
+        repository.mkdir()
+        subprocess.run(["git", "init", "-q", str(repository)], check=True, timeout=10)
+        script = f"{name}-check.sh"
+        (repository / script).write_text(f"printf packet-b-{name}\nexit {0 if index == 0 else 7}\n")
+        (repository / "goon.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "steps": [
+                        {
+                            "id": "check",
+                            "run": f"sh {script}",
+                        }
+                    ]
+                }
+            )
+        )
+        workflow = tmp_path / f"{name}-workflow"
+        workflow.mkdir()
+        (workflow / "run.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "version": 2,
+                    "source": {"kind": "repository-goon"},
+                    "target": {"repository": f"../{name}"},
+                }
+            )
+        )
+        prepared = json.loads(
+            _cli(
+                environment,
+                tmp_path,
+                "workflow",
+                "prepare",
+                str(workflow),
+                "--register-target",
+                "--no-input",
+                "--json",
+            )
+        )
+        assert prepared["_cli"]["exit_kind"] == "SUCCESS"
+        receipt = json.loads(
+            _cli(
+                environment,
+                tmp_path,
+                "run",
+                str(workflow),
+                "--no-input",
+                "--json",
+                expected=0 if index == 0 else 1,
+            )
+        )
+        assert receipt["fleet_run_id"]
+        assert receipt["_cli"]["exit_kind"] == ("SUCCESS" if index == 0 else "NON_SUCCESS")
+        receipts.append(receipt)
+        repositories.append(repository)
+        workflows.append(workflow)
+
+    assert receipts[0]["fleet_run_id"] != receipts[1]["fleet_run_id"]
+    assert receipts[0]["plan_id"] != receipts[1]["plan_id"]
+    assert receipts[0]["outcome"] == "SUCCESS"
+    assert receipts[1]["outcome"] != "SUCCESS"
+    before_database = _database_snapshot(state / "runtime.sqlite")
+    before_state = _snapshot(state)
+    before_state.pop("runtime.sqlite")
+    before_sources = [_snapshot(path) for path in (*repositories, *workflows)]
+
+    shows = []
+    tapes = []
+    for receipt in receipts:
+        run_id = receipt["fleet_run_id"]
+        shown = json.loads(_cli(environment, tmp_path, "runs", "show", run_id, "--json"))
+        tape = json.loads(_cli(environment, tmp_path, "runs", "tape", run_id, "--json"))
+        explained = json.loads(_cli(environment, tmp_path, "runs", "explain", run_id, "--json"))
+        assert shown["_cli"]["exit_kind"] == "SUCCESS"
+        assert shown["outcome"] == receipt["outcome"] == explained["outcome"]
+        assert shown["fleet_run_id"] == tape["fleet_run_id"] == explained["fleet_run_id"]
+        assert shown["status"] == receipt["status"] == explained["status"]
+        assert explained["why_not"] == tape["why_not"]
+        assert explained["summary"] == tape["summary"]
+        assert explained["game_tape_status"] == tape["status"]
+        for tail in ((), ("--follow",)):
+            unavailable = _cli(
+                environment,
+                tmp_path,
+                "runs",
+                "logs",
+                run_id,
+                *tail,
+                *(() if tail else ("--json",)),
+                expected=3,
+            )
+            if tail:
+                assert "Transient output unavailable" in unavailable
+            else:
+                unavailable_report = json.loads(unavailable)
+                assert unavailable_report["state"] == "UNAVAILABLE"
+                assert unavailable_report["available"] is False
+                assert unavailable_report["_cli"]["exit_kind"] == "EVIDENCE_UNAVAILABLE"
+        shows.append(shown)
+        tapes.append(tape)
+
+    first_page = json.loads(_cli(environment, tmp_path, "runs", "list", "--limit", "1", "--json"))
+    assert [row["fleet_run_id"] for row in first_page["items"]] == [receipts[1]["fleet_run_id"]]
+    cursor = first_page["next_before_revision"]
+    assert cursor == first_page["items"][0]["admitted_revision"]
+    second_page = json.loads(
+        _cli(
+            environment,
+            tmp_path,
+            "runs",
+            "list",
+            "--limit",
+            "1",
+            "--before-revision",
+            str(cursor),
+            "--json",
+        )
+    )
+    assert [row["fleet_run_id"] for row in second_page["items"]] == [receipts[0]["fleet_run_id"]]
+    assert second_page["next_before_revision"] is None
+
+    repository_ids = [tape["repositories"][0]["repository"]["repository_id"] for tape in tapes]
+    assert repository_ids[0] != repository_ids[1]
+    for index, receipt in enumerate(receipts):
+        scoped = (
+            "--repository-id",
+            repository_ids[index],
+            "--plan-id",
+            receipt["plan_id"],
+        )
+        last = json.loads(_cli(environment, tmp_path, "runs", "show", "--last", *scoped, "--json"))
+        assert last == shows[index]
+        history = json.loads(_cli(environment, tmp_path, "runs", "list", *scoped, "--json"))
+        assert [row["fleet_run_id"] for row in history["items"]] == [receipt["fleet_run_id"]]
+        assert history["items"][0]["outcome"] == receipt["outcome"]
+        assert history["items"][0]["targets"][0]["repository_id"] == repository_ids[index]
+        refused = json.loads(
+            _cli(
+                environment,
+                tmp_path,
+                "runs",
+                "show",
+                "--last",
+                "--repository-id",
+                repository_ids[index],
+                "--plan-id",
+                receipts[1 - index]["plan_id"],
+                "--json",
+                expected=3,
+            )
+        )
+        assert refused["_cli"]["exit_kind"] == "EVIDENCE_UNAVAILABLE"
+        assert refused["fleet_run_id"] is None
+
+    # Exercise the actual copyable readback examples, without executing other
+    # source/application commands or interpreting their shell text.
+    in_fence = False
+    documented: list[list[str]] = []
+    for line in (ROOT / "docs/QUICKSTART.md").read_text(encoding="utf-8").splitlines():
+        if line.startswith("```"):
+            in_fence = not in_fence
+        elif in_fence and line.startswith("oh-goon runs "):
+            documented.append(shlex.split(line))
+    assert documented, "Quickstart must retain executable Run readback examples"
+    substitutions = {
+        "RUN_ID": str(receipts[0]["fleet_run_id"]),
+        "REPOSITORY_ID": str(repository_ids[0]),
+        "PLAN_ID": str(receipts[0]["plan_id"]),
+    }
+    for command in documented:
+        arguments = [substitutions.get(token, token) for token in command[1:]]
+        expected_exit = 3 if arguments[1] == "logs" else 0
+        output = _cli(environment, tmp_path, *arguments, expected=expected_exit)
+        if "--json" in arguments:
+            report = json.loads(output)
+            assert report["_cli"]["exit_code"] == expected_exit
+            if arguments[1] == "list":
+                assert [row["fleet_run_id"] for row in report["items"]] == [
+                    receipt["fleet_run_id"] for receipt in reversed(receipts)
+                ]
+            else:
+                assert report["fleet_run_id"] == receipts[0]["fleet_run_id"]
+            if arguments[1] == "logs":
+                assert report["state"] == "UNAVAILABLE"
+                assert report["_cli"]["exit_kind"] == "EVIDENCE_UNAVAILABLE"
+        else:
+            assert receipts[0]["fleet_run_id"] in output
+            if arguments[1] == "logs":
+                assert "Transient output unavailable" in output
+    assert _database_snapshot(state / "runtime.sqlite") == before_database
+    after_state = _snapshot(state)
+    after_state.pop("runtime.sqlite")
+    assert after_state == before_state
+    assert [_snapshot(path) for path in (*repositories, *workflows)] == before_sources
+
+
+@pytest.mark.parametrize("refusal", ["last-scope", "json-follow"])
+def test_packet_b_invalid_readback_options_refuse_before_any_state_open(
+    tmp_path: Path, refusal: str
+) -> None:
+    state = tmp_path / "must-not-open"
+    arguments = (
+        ("runs", "show", "--last", "--json")
+        if refusal == "last-scope"
+        else ("runs", "logs", "unread-run", "--follow", "--json")
+    )
+    report = json.loads(_cli(_environment(state), tmp_path, *arguments, expected=2))
+    assert report["code"] == (
+        "RUN_SCOPE_REQUIRED" if refusal == "last-scope" else "JSON_FOLLOW_UNSUPPORTED"
+    )
+    assert report["_cli"]["exit_kind"] == "COMMAND_ERROR"
+    assert not state.exists()
+
+
 @pytest.mark.parametrize("database", ["absent", "corrupt"])
 def test_basic_readonly_commands_do_not_initialize_or_repair_state(
     tmp_path: Path, database: str
@@ -526,7 +751,17 @@ def test_run_readback_does_not_recover_interrupted_history_or_reconcile_scope(
         return
 
     for command in ("show", "events", "logs", "steps", "outputs", "tape", "handoff"):
-        report = json.loads(_cli(environment, tmp_path, "runs", command, run_id, "--json"))
+        report = json.loads(
+            _cli(
+                environment,
+                tmp_path,
+                "runs",
+                command,
+                run_id,
+                "--json",
+                expected=3 if command == "logs" else 0,
+            )
+        )
         if command == "show":
             assert report["status"] == "RUNNING"
         elif command == "logs":

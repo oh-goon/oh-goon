@@ -2,6 +2,70 @@
 
 Oh-Goon defaults to the installed Codex CLI for managed coding tasks. Save the trusted local sign-in profile below as `default_native_profile` once, then run tasks without repeating `--agent` or `--profile`. Codex retains authentication, refresh and native session authority. No API key or local model server is needed for that profile. OpenCode, Pi and managed API connections remain explicit choices. Direct OpenAI API connections use API keys.
 
+## Set up a native execution profile
+
+`oh-goon agent setup <codex|pi|opencode>` authors one profile in the existing JSON
+provider catalog. It resolves the selected installed executable, validates the
+original native execution policy and observes only its bounded `--version`
+command. It does not submit a task, connect to a model or inspect native login
+files. Setup reports `configured_not_qualified`: a version observation is not
+installed-mode, authentication or independent-verifier qualification.
+
+For the existing typed Codex sign-in connection, select its home, model and
+reasoning explicitly:
+
+```sh
+oh-goon agent setup codex --config providers.json --profile signed-in \
+  --mode codex-login --executable /public/bin/codex \
+  --workspace-root /path/to/projects --home /path/to/existing/.codex \
+  --model YOUR_NATIVE_MODEL --reasoning-effort low --make-default --no-input
+```
+
+`codex-service` selects the existing native service connection with the same
+explicit home/model/reasoning inputs. The original execution owner still checks
+its qualified service version and grants when a Run is admitted. Setup retains
+the current native model/configuration contract; it does not read settings to
+guess these protected connection choices.
+
+For Pi, OpenCode or broker-backed Codex, first configure a model/provider profile,
+then select it with managed setup:
+
+```sh
+oh-goon agent setup pi --config providers.json --profile company-pi \
+  --executable /public/bin/pi --workspace-root /path/to/projects \
+  --mode managed --inference-profile company --no-input --json
+```
+
+Managed setup uses the existing Bubblewrap profile and supported provider wire
+protocols. `--runtime-root` explicitly selects public runtime dependencies when
+needed. Omit `--executable` to reuse the catalog's selection or native PATH lookup.
+Existing native definitions are reused without replacement; select a new profile
+name rather than overwriting one. Unrelated provider/model/profile values and the
+current default remain intact. Only `--make-default` changes the native default.
+Publication refuses a catalog changed since setup read it.
+For protected Codex modes, both requested and resolved catalog/schema paths must
+remain outside the selected native home. Guided authoring rejects symlink,
+hard-link and nonregular file entries before reading their content; it uses a
+bounded native no-follow read for an existing catalog. General execution catalog
+reads retain their existing compatibility. This authoring admission does not
+establish hostile ancestor/mount TOCTOU custody or a new execution guarantee.
+
+Missing policy choices prompt only on an interactive terminal. `--no-input` and
+`--json` refuse them before native work or publication. Guided authoring supports
+JSON; a TOML destination returns `UNSUPPORTED_CATALOG_FORMAT` before the version
+probe and preserves its bytes. Existing native execution continues to read both
+JSON and TOML catalogs, so TOML may still be authored manually.
+
+Provider and setup refusals publish typed codes and safe next actions. Native
+exception text, notes and validation context are not public diagnostics. JSON
+refusals use a single versioned stdout object, with operator hints on stderr.
+
+Compatibility disposition: retain `NATIVE-CLI-SELECTION` and
+`CODEX-SERVICE-PROTOCOL` from the [harness inventory](development/AGENT_HARNESS_COMPATIBILITY.md).
+Setup delegates selection to those owners; native argument, session, tool,
+terminal and settlement mappings are unchanged. Their installed qualifications
+do not transfer to a newly authored profile.
+
 ## Run a native coding agent
 
 `oh-goon ai` runs the installed Codex CLI through the existing Fleet

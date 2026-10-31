@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 import json
 import sqlite3
+from typing import Any
 
 import pytest
 
 from oh_goon import cli, cli_runtime
+from oh_goon.application import ApplicationRuntime
 from oh_goon.runtime.database import DatabasePathIdentityLost
 
 
 class _Parser:
-    def parse_args(self, _argv):
+    def parse_args(self, _argv: list[str] | None) -> argparse.Namespace:
         return argparse.Namespace(command="plan", plan_command=None)
 
-    def print_help(self):
+    def print_help(self) -> None:
         raise AssertionError("help must not replace storage failure")
 
 
@@ -28,20 +31,20 @@ class _Runtime:
         raise sqlite3.OperationalError("unable to open database file")
 
 
-def _prepare(monkeypatch, runtime: _Runtime) -> None:
+def _prepare(monkeypatch: pytest.MonkeyPatch, runtime: _Runtime) -> None:
     monkeypatch.setattr(cli, "build_parser", lambda: _Parser())
     monkeypatch.setattr(cli, "run_local_state_command", lambda _args: None)
     monkeypatch.setattr(cli, "run_start_command", lambda _args: None)
     monkeypatch.setattr(cli, "run_enforcer_compare_command", lambda _args: None)
 
-    def build(_cls, *, standard_local=None):
+    def build(_cls: type[ApplicationRuntime], /, *, standard_local: bool | None = None) -> _Runtime:
         return runtime
 
-    monkeypatch.setattr(cli.ApplicationRuntime, "build", classmethod(build))
+    monkeypatch.setattr(ApplicationRuntime, "build", classmethod(build))
 
 
 def test_cli_reports_primary_runtime_storage_loss_once_and_shutdown_cannot_mask_it(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     runtime = _Runtime()
     _prepare(monkeypatch, runtime)
@@ -60,7 +63,9 @@ def test_cli_reports_primary_runtime_storage_loss_once_and_shutdown_cannot_mask_
     assert runtime.shutdown_calls == 1
 
 
-def test_cli_turns_storage_loss_during_shutdown_into_failure(monkeypatch, capsys) -> None:
+def test_cli_turns_storage_loss_during_shutdown_into_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     runtime = _Runtime()
     _prepare(monkeypatch, runtime)
     monkeypatch.setattr(cli_runtime, "run_stateful_command", lambda _runtime, _args: 0)
@@ -71,7 +76,9 @@ def test_cli_turns_storage_loss_during_shutdown_into_failure(monkeypatch, capsys
     assert runtime.shutdown_calls == 1
 
 
-def test_cli_reports_database_identity_replacement_without_traceback(monkeypatch, capsys) -> None:
+def test_cli_reports_database_identity_replacement_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     runtime = _Runtime()
     _prepare(monkeypatch, runtime)
     monkeypatch.setattr(runtime, "shutdown", lambda **_kwargs: None)
@@ -99,7 +106,7 @@ def test_cli_reports_database_identity_replacement_without_traceback(monkeypatch
 
 
 def test_cli_preserves_nonzero_primary_result_when_shutdown_loses_database_identity(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     runtime = _Runtime()
     _prepare(monkeypatch, runtime)
@@ -107,30 +114,37 @@ def test_cli_preserves_nonzero_primary_result_when_shutdown_loses_database_ident
     monkeypatch.setattr(
         runtime,
         "shutdown",
-        lambda **_kwargs: (_ for _ in ()).throw(DatabasePathIdentityLost("file is not a database")),
+        lambda **_kwargs: (_ for _ in ()).throw(
+            DatabasePathIdentityLost("file is not a database: PRIVATE_DATABASE_IDENTITY_CANARY")
+        ),
     )
 
     assert cli.main([]) == 7
-    output = capsys.readouterr().out
+    captured = capsys.readouterr()
+    output = captured.out
     assert output.count("OH-GOON RUNTIME DATABASE IDENTITY LOST") == 1
-    assert "file is not a database" in output
+    assert "file is not a database" not in output + captured.err
+    assert "PRIVATE_DATABASE_IDENTITY_CANARY" not in output + captured.err
 
 
-def test_cli_closes_runtime_when_stateful_dispatch_loading_fails(monkeypatch) -> None:
-    import builtins
-
+def test_cli_closes_runtime_when_stateful_dispatch_loading_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     runtime = _Runtime()
     _prepare(monkeypatch, runtime)
     original_import = builtins.__import__
 
-    def unavailable_dispatch(name, *args, **kwargs):
+    def unavailable_dispatch(name: str, *args: Any, **kwargs: Any) -> Any:
         if name == "oh_goon.cli_runtime":
-            raise ModuleNotFoundError("stateful dispatch unavailable", name=name)
+            raise ModuleNotFoundError("PRIVATE_DISPATCH_IMPORT_CANARY", name=name)
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", unavailable_dispatch)
-    with pytest.raises(ModuleNotFoundError, match="stateful dispatch unavailable"):
-        cli.main([])
+    assert cli.main([]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err.count("CLI_COMMAND_FAILED") == 1
+    assert "PRIVATE_DISPATCH_IMPORT_CANARY" not in captured.out + captured.err
+    assert "Traceback" not in captured.out + captured.err
     assert runtime.shutdown_calls == 1
 
 
@@ -148,15 +162,18 @@ def test_cli_closes_runtime_when_stateful_dispatch_loading_fails(monkeypatch) ->
     ],
 )
 def test_run_readback_reports_lost_authority_as_one_safe_json_result(
-    monkeypatch, capsys, failure, code
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: Exception,
+    code: str,
 ) -> None:
     runtime = _Runtime()
 
-    def build(_cls, **kwargs):
+    def build(_cls: type[ApplicationRuntime], /, **kwargs: Any) -> _Runtime:
         assert kwargs == {"startup_purpose": "observation"}
         return runtime
 
-    monkeypatch.setattr(cli.ApplicationRuntime, "build", classmethod(build))
+    monkeypatch.setattr(ApplicationRuntime, "build", classmethod(build))
     monkeypatch.setattr(
         cli_runtime,
         "run_stateful_command",
@@ -171,3 +188,64 @@ def test_run_readback_reports_lost_authority_as_one_safe_json_result(
     assert report["status"] == "error"
     assert captured.err == "" and "PRIVATE_DATABASE_PATH" not in captured.out
     assert runtime.shutdown_calls == 1
+
+
+@pytest.mark.parametrize(
+    "failure,code",
+    [
+        (
+            DatabasePathIdentityLost("PRIVATE_POST_RESULT_CLEANUP_CANARY"),
+            "RUNTIME_DATABASE_IDENTITY_LOST",
+        ),
+        (
+            sqlite3.OperationalError(
+                "unable to open database file: PRIVATE_POST_RESULT_CLEANUP_CANARY"
+            ),
+            "RUNTIME_STORAGE_UNAVAILABLE",
+        ),
+    ],
+)
+def test_json_cleanup_failure_keeps_original_successful_owner_payload_and_safe_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: Exception,
+    code: str,
+) -> None:
+    runtime = _Runtime()
+    owner_payload = {
+        "schema": "original-run-owner/v1",
+        "status": "COMPLETED",
+        "fleet_run_id": "recorded-run",
+        "outcome": "SUCCESS",
+    }
+
+    def build(_cls: type[ApplicationRuntime], /, **arguments: Any) -> _Runtime:
+        assert arguments == {"startup_purpose": "observation"}
+        return runtime
+
+    def emit_result(_runtime: object, _args: argparse.Namespace) -> int:
+        print(json.dumps(owner_payload))
+        return 0
+
+    def failed_cleanup(*, wait_for_runs: bool) -> None:
+        assert not wait_for_runs
+        runtime.shutdown_calls += 1
+        raise failure
+
+    monkeypatch.setattr(ApplicationRuntime, "build", classmethod(build))
+    monkeypatch.setattr(cli_runtime, "run_stateful_command", emit_result)
+    monkeypatch.setattr(runtime, "shutdown", failed_cleanup)
+
+    assert cli.main(["runs", "show", "recorded-run", "--json"]) == 2
+
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert {name: report[name] for name in owner_payload} == owner_payload
+    assert report["_cli"] == {
+        "schema": "oh-goon.cli/v1",
+        "exit_code": 2,
+        "exit_kind": "COMMAND_ERROR",
+        "cleanup": {"status": "UNVERIFIED", "code": code},
+    }
+    assert "PRIVATE_POST_RESULT_CLEANUP_CANARY" not in captured.out + captured.err
+    assert captured.err == "" and runtime.shutdown_calls == 1
