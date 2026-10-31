@@ -115,11 +115,15 @@ lifecycles:
     test: backend/tests/unit/runtime/test_fleet_worker_settlement.py::test_fleet_worker_fails_closed_if_current_capability_no_longer_matches_admission
 
 - id: shared-plan-multi-repository
-  journey: shared-plan select -> freeze source -> explicit multi-repository run -> history/readback
-  entrypoint: SharedPlanService
-  durable_observation: one exact plan source with explicit repository scope and stable history
-  required_modes: [boundary, adversarial]
+  journey: saved-Lineup selection -> freeze Shared Plan -> exact multi-repository Run -> saved Schedule -> source removal and restart -> occurrence -> fresh readback
+  entrypoint: SharedPlanService / ScheduleService.tick
+  durable_observation: exact selected targets and immutable Run facts survive restart and source removal, with matching fresh CLI/API/Game Tape views and no decoy or duplicate work
+  required_modes: [lifecycle, boundary, adversarial]
   proofs:
+  - mode: lifecycle
+    test: backend/tests/integration/services/test_shared_plan_real_workflows.py::test_saved_shared_plan_lineup_executes_exact_targets_and_reopens_cli_api_history
+  - mode: lifecycle
+    test: backend/tests/integration/services/test_shared_plan_real_workflows.py::test_saved_shared_schedule_ticks_frozen_source_once_per_selected_target_after_restart
   - mode: boundary
     test: backend/tests/unit/services/test_shared_run_scope.py::test_shared_plan_run_still_preserves_explicit_multi_repository_scope
   - mode: adversarial
