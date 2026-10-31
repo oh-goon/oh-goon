@@ -107,7 +107,14 @@ def live_content(tmp_path: Path) -> Iterator[_LiveContent]:
 
 @pytest.mark.parametrize(
     "fault",
-    ["permission", "malformed", "missing-view", "missing-view-denied", "missing-view-interrupted"],
+    [
+        "permission",
+        "malformed",
+        "missing-state",
+        "missing-view",
+        "missing-view-denied",
+        "missing-view-interrupted",
+    ],
 )
 @pytest.mark.parametrize(
     "operation", ["staging", "orphan-owner", "garbage-collect", "retention-budget"]
@@ -131,6 +138,10 @@ def test_unobservable_live_creator_never_authorizes_content_cleanup(
                 raise PermissionError("native child identity is unavailable")
             if fault.startswith("missing-view"):
                 raise FileNotFoundError("live child is absent from this proc view")
+            if fault == "missing-state":
+                observed = native_read(path, *args, **kwargs)
+                header, fields = observed.rsplit(")", 1)
+                return header + ") " + " ".join(fields.split()[1:]) + "\n"
             return "unparseable process observation\n"
         return native_read(path, *args, **kwargs)
 

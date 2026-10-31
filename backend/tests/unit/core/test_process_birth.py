@@ -41,7 +41,7 @@ def test_linux_proc_birth_identity_uses_boot_and_start_ticks_not_pid_alone(tmp_p
     )
     identity = observe_process_birth(77, proc_root=proc)
     assert identity == ProcessBirthIdentity(pid=77, boot_id="boot-a", start_ticks=123456)
-    assert process_birth_matches(identity, proc_root=proc)  # type: ignore[arg-type]
+    assert process_birth_matches(identity, proc_root=proc)
 
 
 def test_pid_reuse_is_rejected_when_start_ticks_change(tmp_path: Path) -> None:
@@ -102,3 +102,32 @@ def test_state_observation_reads_the_native_record_once(
     monkeypatch.setattr(Path, "read_text", observed)
     assert observe_process_state(88, proc_root=proc) == "S"
     assert reads == [proc / "88/stat"]
+    reads.clear()
+    assert observe_process_birth(88, proc_root=proc) == ProcessBirthIdentity(
+        pid=88, boot_id="boot-a", start_ticks=1
+    )
+    assert reads == [proc / "sys/kernel/random/boot_id", proc / "88/stat"]
+
+
+@pytest.mark.parametrize("state", list("RSDZTtWXxKPI"))
+def test_native_state_codes_preserve_birth_and_executable_liveness(
+    tmp_path: Path, state: str
+) -> None:
+    proc = _proc_tree(tmp_path, pid=88, boot_id="boot-a", start_ticks=1, state=state)
+    assert observe_process_birth(88, proc_root=proc) == ProcessBirthIdentity(
+        pid=88, boot_id="boot-a", start_ticks=1
+    )
+    assert observe_process_state(88, proc_root=proc) == state
+    assert observe_process_liveness(88, proc_root=proc) is (state not in {"Z", "X", "x"})
+
+
+def test_process_observations_refuse_shifted_stat_fields(tmp_path: Path) -> None:
+    proc = _proc_tree(tmp_path, pid=88, boot_id="boot-a", start_ticks=1)
+    assert observe_process_birth(88, proc_root=proc) is not None
+    assert observe_process_state(88, proc_root=proc) == "S"
+    path = proc / "88/stat"
+    header, fields = path.read_text().rsplit(")", 1)
+    path.write_text(header + ") " + " ".join(fields.split()[1:]) + "\n")
+    assert observe_process_birth(88, proc_root=proc) is None
+    assert observe_process_state(88, proc_root=proc) is None
+    assert observe_process_liveness(88, proc_root=proc) is None

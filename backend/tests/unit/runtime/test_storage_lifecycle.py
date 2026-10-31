@@ -218,6 +218,7 @@ def test_active_workspace_refusal_precedes_completed_log_deletion(tmp_path: Path
     assert report.removed_run_workspaces == ("oh-goon-plan-candidate",)
 
 
+@pytest.mark.process
 @pytest.mark.skipif(sys.platform != "linux", reason="native Linux process visibility proof")
 @pytest.mark.parametrize("visibility", ["missing", "transient-missing"])
 def test_missing_proc_view_cannot_retire_a_live_workspace_execution_owner(
