@@ -12,14 +12,19 @@ import json
 import os
 import shutil
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 import pytest
 
+from oh_goon.core.models.agent_providers import AgentProviderError
 from oh_goon.engine.command import CommandCancelledError, CommandResult, run_command
-from oh_goon.integrations.agent_native_execution import native_executable_sha256
+from oh_goon.integrations.agent_native_execution import (
+    native_executable_sha256,
+    validate_native_agent_arguments,
+)
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import (
     StandardIsolatedProcessRequest,
@@ -393,3 +398,213 @@ def test_installed_pi_interrupted_turn_retains_prompt_without_success(pi_probe: 
         and entry["message"].get("stopReason") == "stop"
         for entry in entries["entries"]
     )
+
+
+def _native_arguments(probe: _PiProbe, fragments: Mapping[str, tuple[str, ...]]) -> dict[str, Any]:
+    # This exact selected distribution owns argument interpretation. Importing
+    # its parser does not enter Pi startup, load an extension or invoke a model.
+    parser = probe.program.parent.parent / "cli" / "args.js"
+    assert parser.is_file() and parser.is_relative_to(probe.public_runtime)
+    node = shutil.which("node", path="/usr/bin:/bin")
+    assert node, "Selected installed parser qualification requires native Node.js"
+    script = """
+      import { pathToFileURL } from "node:url";
+      const { parseArgs } = await import(pathToFileURL(process.argv[1]).href);
+      const fragments = JSON.parse(process.argv[2]);
+      const observed = {};
+      for (const [name, fragment] of Object.entries(fragments)) {
+        const parsed = parseArgs([...fragment, "--mode", "json", "--no-session"]);
+        observed[name] = {...parsed, unknownFlags: Object.fromEntries(parsed.unknownFlags)};
+      }
+      process.stdout.write(JSON.stringify(observed));
+    """
+    result = probe.backend.execute(
+        StandardIsolatedProcessRequest(
+            workspace=probe.workspace,
+            cwd=probe.workspace / "project",
+            argv=(
+                node,
+                "--input-type=module",
+                "--eval",
+                script,
+                str(parser),
+                json.dumps(fragments),
+            ),
+            env={"PATH": "/usr/bin:/bin", "PI_SKIP_VERSION_CHECK": "1", "NO_COLOR": "1"},
+            backend_configuration_id=probe.backend.configuration_identity(),
+            require_workspace_current=lambda: None,
+            read_only_mounts=(
+                StandardReadOnlyMount(probe.public_runtime, PurePosixPath(probe.public_runtime)),
+            ),
+            read_only_workspace=True,
+            input_data=b"",
+        ),
+        timeout=10,
+        cancel_requested=None,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout_truncated
+    assert result.supervisor.final_process_group_quiescent
+    assert result.physical_execution_id
+    isolation = result.standard_isolation
+    assert isolation is not None and isolation.filesystem_cleanup == "verified"
+    assert isolation.workspace_read_only
+    assert isolation.host_and_external_ip_networking == "denied"
+    assert not isolation.broker_socket_mounted
+    assert not tuple(probe.session.parent.iterdir())
+    with parser.open("rb") as stream:
+        parser_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+    print(
+        json.dumps(
+            {
+                "native_parser_sha256": parser_sha256,
+                "physical_execution_id": result.physical_execution_id,
+                "supervisor": result.supervisor.receipt_identity,
+                "cases": sorted(fragments),
+            }
+        )
+    )
+    parsed = json.loads(result.stdout)
+    assert isinstance(parsed, dict)
+    return parsed
+
+
+def test_installed_pi_terminator_and_positionals_change_owned_task_boundary(
+    pi_probe: _PiProbe,
+) -> None:
+    fragments = {
+        "terminator": ("--",),
+        "theme-value-terminator": ("--use-theme", "--"),
+        "tui-value-terminator": ("--tui-mode", "--"),
+        "theme-value-owned-option": ("--use-theme", "--resume"),
+        "tui-value-owned-option": ("--tui-mode", "--resume"),
+        "positional-task": ("UNADMITTED_TASK",),
+        "boolean-before-task": ("--offline", "UNADMITTED_TASK"),
+        "file-input": ("@unadmitted-task.txt",),
+        "boolean-before-file": ("--offline", "@unadmitted-task.txt"),
+    }
+    observed = _native_arguments(pi_probe, fragments)
+    for name in ("terminator", "theme-value-terminator", "tui-value-terminator"):
+        assert "mode" not in observed[name]
+        assert "noSession" not in observed[name]
+        assert observed[name]["messages"] == ["--mode", "json", "--no-session"]
+    # These two native options decline flag-leading values and report fatal
+    # diagnostics. This proves framing refusal, not reachable model work.
+    for name in (
+        "theme-value-terminator",
+        "tui-value-terminator",
+        "theme-value-owned-option",
+        "tui-value-owned-option",
+    ):
+        assert any(item["type"] == "error" for item in observed[name]["diagnostics"])
+    for name in ("theme-value-owned-option", "tui-value-owned-option"):
+        assert observed[name]["resume"] is True
+        assert observed[name]["mode"] == "json" and observed[name]["noSession"] is True
+    assert observed["positional-task"]["messages"] == ["UNADMITTED_TASK"]
+    assert observed["boolean-before-task"]["offline"] is True
+    assert observed["boolean-before-task"]["messages"] == ["UNADMITTED_TASK"]
+    assert observed["file-input"]["fileArgs"] == ["unadmitted-task.txt"]
+    assert observed["boolean-before-file"]["offline"] is True
+    assert observed["boolean-before-file"]["fileArgs"] == ["unadmitted-task.txt"]
+    for fragment in fragments.values():
+        with pytest.raises(AgentProviderError):
+            validate_native_agent_arguments("pi", fragment)
+
+
+def test_installed_pi_missing_option_values_consume_owned_transport(pi_probe: _PiProbe) -> None:
+    options = (
+        "--provider",
+        "--model",
+        "--thinking",
+        "--models",
+        "--system-prompt",
+        "--append-system-prompt",
+        "--extension",
+        "-e",
+        "--skill",
+        "--prompt-template",
+        "--theme",
+        "--tools",
+        "-t",
+        "--exclude-tools",
+        "-xt",
+    )
+    fragments = {option: (option,) for option in options}
+    for option, parsed in _native_arguments(pi_probe, fragments).items():
+        assert "mode" not in parsed, option
+        assert parsed["messages"] == ["json"], option
+        assert parsed["noSession"] is True, option
+    for fragment in fragments.values():
+        with pytest.raises(AgentProviderError):
+            validate_native_agent_arguments("pi", fragment)
+
+
+def test_installed_pi_reserved_equals_options_reach_extension_flag_map(pi_probe: _PiProbe) -> None:
+    values = {
+        "mode": "rpc",
+        "session": "foreign.jsonl",
+        "session-id": "foreign-identity",
+        "session-dir": "foreign-directory",
+        "fork": "foreign.jsonl",
+        "continue": "true",
+        "resume": "true",
+        "no-session": "false",
+        "print": "true",
+    }
+    fragments = {name: (f"--{name}={value}",) for name, value in values.items()}
+    for name, parsed in _native_arguments(pi_probe, fragments).items():
+        assert parsed["unknownFlags"] == {name: values[name]}
+        assert parsed["mode"] == "json" and parsed["noSession"] is True
+        assert parsed["messages"] == [] and parsed["fileArgs"] == []
+    for fragment in fragments.values():
+        with pytest.raises(AgentProviderError):
+            validate_native_agent_arguments("pi", fragment)
+
+
+def test_installed_pi_explicit_native_settings_preserve_owned_transport(pi_probe: _PiProbe) -> None:
+    arguments = (
+        "--provider",
+        "synthetic-provider",
+        "--model",
+        "synthetic-model",
+        "--thinking",
+        "low",
+        "--extension",
+        "./native-settings.mjs",
+        "--skill",
+        "./native-skill.md",
+        "--theme",
+        "./native-theme.json",
+        "--tools",
+        "read,bash",
+        "--offline",
+        "--no-extensions",
+    )
+    fragments = {
+        "settings": arguments,
+        "opaque-model-value": ("--model", "--session"),
+        "opaque-extension-value": ("--extension", "--mode"),
+        "opaque-system-prompt": ("--system-prompt", "--session"),
+        "extension-flag-value": ("--custom-fixture", "opaque-value"),
+    }
+    for fragment in fragments.values():
+        validate_native_agent_arguments("pi", fragment)
+    observed = _native_arguments(pi_probe, fragments)
+    for parsed in observed.values():
+        assert parsed["mode"] == "json" and parsed["noSession"] is True
+        assert parsed["messages"] == [] and parsed["fileArgs"] == []
+        assert parsed["diagnostics"] == []
+    assert observed["opaque-model-value"]["model"] == "--session"
+    assert "session" not in observed["opaque-model-value"]
+    assert observed["opaque-extension-value"]["extensions"] == ["--mode"]
+    assert observed["opaque-system-prompt"]["systemPrompt"] == "--session"
+    assert observed["extension-flag-value"]["unknownFlags"] == {"custom-fixture": "opaque-value"}
+    parsed = observed["settings"]
+    assert parsed["unknownFlags"] == {}
+    assert parsed["provider"] == "synthetic-provider" and parsed["model"] == "synthetic-model"
+    assert parsed["thinking"] == "low"
+    assert parsed["extensions"] == ["./native-settings.mjs"]
+    assert parsed["skills"] == ["./native-skill.md"]
+    assert parsed["themes"] == ["./native-theme.json"]
+    assert parsed["tools"] == ["read", "bash"]
+    assert parsed["offline"] is True and parsed["noExtensions"] is True

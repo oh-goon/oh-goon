@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import tomllib
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -322,6 +323,27 @@ def test_pi_literal_credentials_reject_before_executable_discovery(
     assert "PRIVATE-KEY" not in str(captured.value)
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    [("--",), ("--session", "PRIVATE-history"), ("--thinking",), ("@PRIVATE-task",)],
+)
+def test_pi_owned_arguments_reject_before_unavailable_native_resources(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    config = AgentProvidersConfig(
+        native_agents={
+            "pi": NativeAgentDefinition(
+                executable=str(tmp_path / "unavailable-pi"),
+                configuration_directory=str(tmp_path / "unavailable-config"),
+                arguments=arguments,
+            )
+        }
+    )
+    with pytest.raises(AgentProviderError, match="Native Pi") as refused:
+        resolve_native_agent(config, "pi", "local", workspace=tmp_path, environment={})
+    assert "PRIVATE" not in str(refused.value)
+
+
 def test_forged_protected_login_rejects_before_native_home_access(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -433,8 +455,6 @@ def test_backend_delegation_rejects_competing_native_policy_arguments(
 def test_codex_service_resolution_freezes_public_facts_without_native_state_or_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import oh_goon.runtime.agent_providers as provider_owner
-
     program = executable(tmp_path / "codex")
     workspace = tmp_path / "repo"
     workspace.mkdir()
@@ -463,7 +483,7 @@ def test_codex_service_resolution_freezes_public_facts_without_native_state_or_e
     catalog.unlink()
     monkeypatch.setattr(Path, "home", lambda: pytest.fail("native home was discovered"))
     monkeypatch.setattr(
-        provider_owner.shutil,
+        shutil,
         "which",
         lambda *args, **kwargs: pytest.fail("explicit executable was rediscovered"),
     )
@@ -531,7 +551,7 @@ def test_codex_service_conflicts_reject_before_native_path_or_executable_discove
         lambda *args, **kwargs: pytest.fail("native path inspected before rejection"),
     )
     monkeypatch.setattr(
-        provider_owner.shutil,
+        shutil,
         "which",
         lambda *args, **kwargs: pytest.fail("native executable discovered before rejection"),
     )

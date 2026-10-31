@@ -24,6 +24,79 @@ _MAX_EVENT_RECORD_BYTES = 256 * 1024
 _MAX_OBSERVATIONS = 128
 _MAX_FINAL_TEXT_BYTES = 65536
 
+# Arity protects the adapter-owned suffix, rather than interpreting native
+# values. Pi still validates those values and resolves models/extensions. Keep
+# these framing facts qualified against the selected installed parser.
+_PI_VALUE_OPTIONS = frozenset(
+    {
+        "--provider",
+        "--model",
+        "--models",
+        "--system-prompt",
+        "--append-system-prompt",
+        "--name",
+        "-n",
+        "--tools",
+        "-t",
+        "--exclude-tools",
+        "-xt",
+        "--thinking",
+        "--extension",
+        "-e",
+        "--skill",
+        "--prompt-template",
+        "--theme",
+        "--use-theme",
+        "--tui-mode",
+    }
+)
+_PI_FLAG_OPTIONS = frozenset(
+    {
+        "--no-tools",
+        "-nt",
+        "--no-builtin-tools",
+        "-nbt",
+        "--no-extensions",
+        "-ne",
+        "--no-mcp",
+        "--no-skills",
+        "-ns",
+        "--no-prompt-templates",
+        "-np",
+        "--no-themes",
+        "--no-context-files",
+        "-nc",
+        "--verbose",
+        "--approve",
+        "-a",
+        "--no-approve",
+        "-na",
+        "--offline",
+    }
+)
+_PI_OWNED_OPTIONS = frozenset(
+    {
+        "--session",
+        "--session-id",
+        "--session-dir",
+        "--continue",
+        "-c",
+        "--resume",
+        "-r",
+        "--fork",
+        "--no-session",
+        "--mode",
+        "--print",
+        "-p",
+        "--export",
+        "--help",
+        "-h",
+        "--version",
+        "-v",
+        "--list-models",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class NativeAgentCommand:
@@ -186,6 +259,10 @@ def native_agent_command(
     """
     if selected.agent not in ("opencode", "pi", "codex"):
         raise AgentProviderError("Unsupported native command protocol")
+    arguments = selected.definition.arguments
+    validate_native_agent_arguments(
+        selected.agent, arguments, sandbox_owner=selected.profile.sandbox_owner
+    )
     if (
         selected.agent in {"codex", "opencode"}
         and selected.definition.configuration_directory is not None
@@ -201,10 +278,6 @@ def native_agent_command(
         raise AgentProviderError("Native command requires its prepared prompt file")
     if not workspace.is_absolute():
         raise AgentProviderError("Native command requires an absolute workspace")
-    arguments = selected.definition.arguments
-    validate_native_agent_arguments(
-        selected.agent, arguments, sandbox_owner=selected.profile.sandbox_owner
-    )
     if (
         selected.profile.sandbox_owner == "execution_backend"
         and selected.profile.backend != "bubblewrap"
@@ -287,17 +360,61 @@ def validate_native_agent_arguments(
             for argument in arguments
         ):
             raise AgentProviderError("Execution backend owns the native sandbox selection")
-    if agent == "pi" and any(argument.partition("=")[0] == "--api-key" for argument in arguments):
-        raise AgentProviderError("Native credentials must not be supplied in command arguments")
+    if agent == "pi":
+        _validate_pi_argument_framing(arguments)
+        return
     reserved = {
         "opencode": {"--server", "--attach", "--standalone", "--no-standalone", "--dir"},
-        "pi": {"--mode", "--print", "-p"},
         "codex": {"--remote", "--remote-auth-token-env", "--no-daemon", "--cd", "-C", "--worktree"},
     }[agent]
     if any(argument.partition("=")[0] in reserved for argument in arguments):
         raise AgentProviderError(
             "Native arguments cannot replace the owned terminal/server/workspace transport"
         )
+
+
+def _validate_pi_argument_framing(arguments: tuple[str, ...]) -> None:
+    """Keep extra argv from changing native transport, task or session authority.
+
+    Only option boundaries are inspected. Values remain opaque; in particular,
+    a value spelling an owned flag is not itself another option. Unknown long
+    flags retain Pi's extension-flag framing, including inline equals values.
+    """
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        option, separator, _ = argument.partition("=")
+        if option == "--api-key":
+            raise AgentProviderError("Native credentials must not be supplied in command arguments")
+        if argument == "--" or option in _PI_OWNED_OPTIONS:
+            raise AgentProviderError(
+                "Native Pi arguments cannot replace the owned terminal/task/session transport"
+            )
+        if argument in _PI_VALUE_OPTIONS:
+            if index + 1 == len(arguments) or (
+                argument in {"--use-theme", "--tui-mode"} and arguments[index + 1].startswith("-")
+            ):
+                raise AgentProviderError(
+                    "Native Pi argument requires its own value before the owned terminal transport"
+                )
+            index += 2
+        elif argument in _PI_FLAG_OPTIONS:
+            index += 1
+        elif argument.startswith("--") and len(option) > 2:
+            # Pi routes unknown long options to extension flags. Only a following
+            # non-option/non-file token can be their separate value; never take
+            # any byte from the adapter-owned suffix to complete caller intent.
+            index += 1
+            if (
+                not separator
+                and index < len(arguments)
+                and not arguments[index].startswith(("-", "@"))
+            ):
+                index += 1
+        else:
+            raise AgentProviderError(
+                "Native Pi arguments cannot add positional task/file inputs or unknown short options"
+            )
 
 
 def require_codex_authentication_home_separation(home: Path, tool_roots: tuple[Path, ...]) -> None:

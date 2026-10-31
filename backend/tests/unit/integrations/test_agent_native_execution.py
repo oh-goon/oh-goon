@@ -236,6 +236,83 @@ def test_pi_literal_credentials_are_rejected_without_echoing_values(
     assert "PRIVATE-KEY" not in str(captured.value)
 
 
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("--session", "PRIVATE-history"),
+        ("--session=PRIVATE-history",),
+        ("--session-id", "PRIVATE-identity"),
+        ("--session-id=PRIVATE-identity",),
+        ("--session-dir", "PRIVATE-directory"),
+        ("--session-dir=PRIVATE-directory",),
+        ("--continue",),
+        ("-c",),
+        ("--resume",),
+        ("-r",),
+        ("--fork", "PRIVATE-history"),
+        ("--no-session",),
+        ("--mode", "rpc"),
+        ("--mode=rpc",),
+        ("--print", "PRIVATE-task"),
+        ("-p",),
+        ("--export", "PRIVATE-destination"),
+        ("--",),
+        ("--", "PRIVATE-task"),
+        ("PRIVATE-task",),
+        ("@PRIVATE-file",),
+        ("--verbose", "PRIVATE-task"),
+        ("--offline", "@PRIVATE-file"),
+        ("--model",),
+        ("--offline", "--thinking"),
+        ("--extension",),
+        ("--use-theme", "--"),
+        ("--tui-mode", "--mode"),
+    ],
+)
+@pytest.mark.parametrize("interactive", (False, True))
+def test_pi_cannot_replace_owned_task_session_or_transport_before_prompt_access(
+    tmp_path: Path, arguments: tuple[str, ...], interactive: bool
+) -> None:
+    # A missing prompt distinguishes the early authority refusal from later
+    # prepared-input validation; the existing positive command tests own the
+    # valid headless/interactive baseline.
+    with pytest.raises(AgentProviderError, match="Native Pi") as refused:
+        native_agent_command(
+            selection("pi", arguments=arguments),
+            prompt_file=tmp_path / "not-prepared-private-prompt",
+            workspace=tmp_path,
+            interactive=interactive,
+        )
+    assert "PRIVATE" not in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("--model", "user/native-model", "--thinking", "high"),
+        ("--offline", "--verbose", "--no-tools", "--no-context-files"),
+        ("--extension", "/public/plugin.mjs", "--plugin-setting", "caller-value"),
+        ("--plugin-setting=--session", "--plugin-boolean"),
+        ("--system-prompt", "--session", "--append-system-prompt", "@literal-value"),
+        ("--name", "caller-name", "--tools", "read,bash", "--exclude-tools", "edit"),
+        ("--use-theme", "caller-theme", "--tui-mode", "regular"),
+    ],
+)
+def test_pi_nonconflicting_native_options_and_opaque_values_are_not_rewritten(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    prompt = tmp_path / "prompt"
+    prompt.write_text("Frozen task")
+    command = native_agent_command(
+        selection("pi", arguments=arguments),
+        prompt_file=prompt,
+        workspace=tmp_path,
+        interactive=False,
+    )
+    assert command.argv == ("/native/pi", *arguments, "--mode", "json", "--no-session")
+    assert command.input_file == prompt
+
+
 def test_pi_settled_is_required_after_agent_end_and_tool_errors_can_recover() -> None:
     prefix = events(
         {"type": "agent_start"},
