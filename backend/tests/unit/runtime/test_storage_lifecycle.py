@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import errno
+import os
+import select
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from oh_goon.core.errors import ExecutionBusy
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution.sqlite_lease import SQLiteExecutionLeaseStore
@@ -52,6 +59,91 @@ def test_measure_storage_does_not_follow_symlinked_directory(tmp_path: Path) -> 
     assert measured.bytes < 100 + root.lstat().st_size + outside.lstat().st_size
 
 
+@pytest.mark.parametrize("boundary", ["metadata", "directory"])
+def test_measure_storage_refuses_incomplete_usage_instead_of_reporting_a_partial_total(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
+) -> None:
+    root = tmp_path / "usage"
+    blocked = root / "unavailable"
+    blocked.mkdir(parents=True)
+    (blocked / "payload").write_bytes(b"retained model" * 100)
+    native_stat = Path.lstat
+    native_scandir = os.scandir
+
+    def metadata(path: Path) -> os.stat_result:
+        if boundary == "metadata" and path == root:
+            raise PermissionError(errno.EACCES, "injected metadata denial", str(path))
+        return native_stat(path)
+
+    def directory(path: str | os.PathLike[str] | int) -> Any:
+        if boundary == "directory" and not isinstance(path, int) and Path(path) == blocked:
+            raise PermissionError(errno.EACCES, "injected directory denial", str(path))
+        return native_scandir(path)
+
+    # Establish a complete native baseline before introducing the precise denial.
+    measured = measure_storage(root)
+    assert measured is not None and measured.bytes >= (blocked / "payload").stat().st_size
+    monkeypatch.setattr(Path, "lstat", metadata)
+    monkeypatch.setattr(os, "scandir", directory)
+    with pytest.raises(PermissionError) as caught:
+        measure_storage(root)
+    assert caught.value.errno == errno.EACCES
+
+
+def test_measure_storage_distinguishes_missing_from_unavailable(tmp_path: Path) -> None:
+    assert measure_storage(None) is None
+    assert measure_storage(tmp_path / "absent") is None
+    path = tmp_path / "model.json"
+    path.write_bytes(b"model parameters")
+    measured = measure_storage(path)
+    assert measured is not None
+    assert measured.entries == 1 and measured.bytes == path.stat().st_size
+
+
+def test_measure_storage_closes_open_directory_handles_after_a_walk_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "observed"
+    blocked = root / "blocked"
+    blocked.mkdir(parents=True)
+    assert measure_storage(root) is not None
+    native_scandir = os.scandir
+    observed: list[Any] = []
+
+    class Scan:
+        def __init__(self, iterator: Any) -> None:
+            self.iterator = iterator
+            self.closed = False
+
+        def __iter__(self) -> Any:
+            return self
+
+        def __next__(self) -> Any:
+            return next(self.iterator)
+
+        def __enter__(self) -> Any:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            self.close()
+
+        def close(self) -> None:
+            self.iterator.close()
+            self.closed = True
+
+    def directory(path: str | os.PathLike[str] | int) -> Any:
+        if not isinstance(path, int) and Path(path) == blocked:
+            raise PermissionError(errno.EACCES, "injected directory denial", str(path))
+        scan = Scan(native_scandir(path))
+        observed.append(scan)
+        return scan
+
+    monkeypatch.setattr(os, "scandir", directory)
+    with pytest.raises(PermissionError):
+        measure_storage(root)
+    assert observed and all(scan.closed for scan in observed)
+
+
 def test_generic_prune_refuses_run_workspaces_without_database_authority(tmp_path: Path) -> None:
     env = _environment(tmp_path)
     database_path = Path(env["XDG_DATA_HOME"]) / "oh-goon" / "oh-goon.db"
@@ -89,6 +181,114 @@ def test_generic_prune_removes_workspace_only_while_execution_is_idle(tmp_path: 
         assert workspace.exists()
     finally:
         leases.finish_as_owner(lease, lambda _connection: None)
+
+
+def test_active_workspace_refusal_precedes_completed_log_deletion(tmp_path: Path) -> None:
+    from oh_goon.runtime.run_log_retention import MAX_RETAINED_RUN_LOG_FILES
+
+    def prepared(root: Path) -> tuple[dict[str, str], LocalDatabase, Path]:
+        environment = _environment(root)
+        database_path = Path(environment["XDG_DATA_HOME"]) / "oh-goon" / "oh-goon.db"
+        database = LocalDatabase(database_path)
+        layout = ApplicationStatePathLayout.from_database(database_path)
+        (layout.run_workspaces / "oh-goon-plan-candidate").mkdir(parents=True)
+        logs = Path(environment["XDG_STATE_HOME"]) / "oh-goon/run-logs/repository/test"
+        logs.mkdir(parents=True)
+        for index in range(MAX_RETAINED_RUN_LOG_FILES + 2):
+            (logs / f"20261031T000000Z-{1000 + index}.log").write_text("completed\n")
+        return environment, database, logs
+
+    baseline, _, _ = prepared(tmp_path / "idle")
+    assert prune_generic_storage(baseline).removed_run_logs == 2
+
+    environment, database, logs = prepared(tmp_path / "active")
+    before = {path.name: path.read_bytes() for path in logs.iterdir()}
+    leases = SQLiteExecutionLeaseStore(database)
+    lease, _ = leases.acquire_direct_with(
+        expected_durable_revision=database.durable_revision(), mutate=lambda _connection: None
+    )
+    try:
+        with pytest.raises(Exception, match="execution"):
+            prune_generic_storage(environment)
+        assert {path.name: path.read_bytes() for path in logs.iterdir()} == before
+    finally:
+        leases.finish_as_owner(lease, lambda _connection: None)
+    report = prune_generic_storage(environment)
+    assert report.removed_run_logs == 2
+    assert report.removed_run_workspaces == ("oh-goon-plan-candidate",)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="native Linux process visibility proof")
+@pytest.mark.parametrize("visibility", ["missing", "transient-missing"])
+def test_missing_proc_view_cannot_retire_a_live_workspace_execution_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, visibility: str
+) -> None:
+    environment = _environment(tmp_path)
+    database_path = Path(environment["XDG_DATA_HOME"]) / "oh-goon/oh-goon.db"
+    database = LocalDatabase(database_path)
+    workspace = (
+        ApplicationStatePathLayout.from_database(database_path).run_workspaces
+        / "oh-goon-plan-live-child"
+    )
+    workspace.mkdir(parents=True)
+    script = """\
+import sys
+from pathlib import Path
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.execution.sqlite_lease import SQLiteExecutionLeaseStore
+database = LocalDatabase(Path(sys.argv[1]))
+store = SQLiteExecutionLeaseStore(database)
+lease, _ = store.acquire_direct_with(
+    expected_durable_revision=database.durable_revision(), mutate=lambda connection: None
+)
+print("owner-ready", flush=True)
+sys.stdin.readline()
+store.finish_as_owner(lease, lambda connection: None)
+"""
+    with subprocess.Popen(
+        [sys.executable, "-c", script, str(database_path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ) as child:
+        assert child.stdout is not None
+        try:
+            assert select.select([child.stdout], [], [], 10)[0]
+            assert child.stdout.readline().strip() == "owner-ready"
+            with pytest.raises(ExecutionBusy):
+                prune_generic_storage(environment)
+            native_read = Path.read_text
+            masked = False
+
+            def hidden_stat(path: Path, *args: Any, **kwargs: Any) -> str:
+                nonlocal masked
+                if path == Path(f"/proc/{child.pid}/stat") and (
+                    visibility == "missing" or not masked
+                ):
+                    masked = True
+                    raise FileNotFoundError(errno.ENOENT, "injected unavailable view", str(path))
+                return native_read(path, *args, **kwargs)
+
+            monkeypatch.setattr(Path, "read_text", hidden_stat)
+            assert child.poll() is None
+            os.kill(child.pid, 0)
+            with pytest.raises(ExecutionBusy):
+                prune_generic_storage(environment)
+            assert workspace.is_dir()
+            with database.transaction() as connection:
+                assert (
+                    connection.execute("SELECT owner_pid FROM execution_lease").fetchone()[0]
+                    == child.pid
+                )
+        finally:
+            try:
+                stdout, stderr = child.communicate(input="release\n", timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                stdout, stderr = child.communicate(timeout=10)
+        assert child.returncode == 0, (stdout, stderr)
+    assert prune_generic_storage(environment).removed_run_workspaces == (workspace.name,)
 
 
 def test_generic_storage_prune_does_not_claim_unclassified_cache_authority(tmp_path: Path) -> None:
@@ -219,7 +419,7 @@ def test_storage_census_treats_old_developer_cache_tree_as_unclassified(tmp_path
 
 
 def test_generic_prune_reports_cleanup_incomplete_without_claiming_removal(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     env = _environment(tmp_path)
     database_path = Path(env["XDG_DATA_HOME"]) / "oh-goon" / "oh-goon.db"
@@ -245,7 +445,7 @@ def test_generic_prune_reports_cleanup_incomplete_without_claiming_removal(
 
 
 def test_generic_prune_treats_parallel_cleanup_absence_as_success(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     env = _environment(tmp_path)
     database_path = Path(env["XDG_DATA_HOME"]) / "oh-goon" / "oh-goon.db"
@@ -272,7 +472,7 @@ def test_generic_prune_treats_parallel_cleanup_absence_as_success(
 
 
 def test_certification_workspace_cleanup_failure_is_not_misreported_as_refusal(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from oh_goon.services.certification_bootstrap import reconcile_certification_run_workspaces
     from oh_goon.services.certification_workspace_retention import certification_state_root

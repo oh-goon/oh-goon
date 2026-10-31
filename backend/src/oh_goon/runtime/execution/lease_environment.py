@@ -4,7 +4,7 @@ import os
 from datetime import UTC, datetime
 from typing import Protocol
 
-from oh_goon.core.process_birth import observe_process_birth, observe_process_liveness
+from oh_goon.core.process_birth import observe_process_birth, observe_process_state
 
 
 class LeaseEnvironment(Protocol):
@@ -22,9 +22,11 @@ class SystemLeaseEnvironment:
         return os.getpid()
 
     def process_alive(self, pid: int) -> bool:
-        observed = observe_process_liveness(pid)
-        if observed is not None:
-            return observed
+        state = observe_process_state(pid)
+        if state is not None:
+            return state not in {"Z", "X", "x"}
+        # A missing/unreadable proc view is not kernel absence. Reuse the
+        # original conservative OS lookup before retiring execution ownership.
         try:
             os.kill(pid, 0)
         except ProcessLookupError:

@@ -66,7 +66,7 @@ def observe_process_birth(
     try:
         boot_id = (proc_root / "sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
         stat = (proc_root / str(target_pid) / "stat").read_text(encoding="utf-8").strip()
-    except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
+    except (OSError, UnicodeError):
         return None
     if not boot_id:
         return None
@@ -115,6 +115,27 @@ def observe_process_liveness(pid: int, *, proc_root: Path = Path("/proc")) -> bo
     weaker platform fallback without confusing it with positive Linux evidence.
     """
 
+    try:
+        state = _read_process_state(pid, proc_root=proc_root)
+    except FileNotFoundError:
+        return False
+    return None if state is None else state not in {"Z", "X", "x"}
+
+
+def observe_process_state(pid: int, *, proc_root: Path = Path("/proc")) -> str | None:
+    """Read one valid native state; missing or unreadable views remain unknown.
+
+    Unlike the legacy liveness projection, None includes an absent stat record.
+    Callers requiring kernel absence must establish that through their OS owner.
+    A later birth observation cannot explain why an earlier stat read was absent.
+    """
+    try:
+        return _read_process_state(pid, proc_root=proc_root)
+    except FileNotFoundError:
+        return None
+
+
+def _read_process_state(pid: int, *, proc_root: Path) -> str | None:
     if pid <= 0:
         raise ValueError("process pid must be positive")
     if not proc_root.is_dir():
@@ -122,14 +143,19 @@ def observe_process_liveness(pid: int, *, proc_root: Path = Path("/proc")) -> bo
     try:
         stat = (proc_root / str(pid) / "stat").read_text(encoding="utf-8").strip()
     except FileNotFoundError:
-        return False
-    except (NotADirectoryError, PermissionError, OSError):
+        raise
+    except (OSError, UnicodeError):
         return None
     close = stat.rfind(")")
-    if close < 0 or close + 2 > len(stat):
+    opening = stat.find("(")
+    if opening <= 0 or close < opening or close + 2 > len(stat):
         return None
     tail = stat[close + 1 :].strip().split()
-    if not tail:
+    if len(tail) <= 19 or len(tail[0]) != 1:
         return None
-    state = tail[0]
-    return state not in {"Z", "X", "x"}
+    try:
+        if int(stat[:opening].strip()) != pid or int(tail[19]) < 0:
+            return None
+    except ValueError:
+        return None
+    return tail[0]

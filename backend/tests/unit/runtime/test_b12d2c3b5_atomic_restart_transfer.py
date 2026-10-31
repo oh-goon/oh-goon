@@ -275,7 +275,7 @@ def test_process_liveness_permission_denied_is_not_dead_owner_proof(monkeypatch)
     from oh_goon.runtime.execution import lease_environment as authority
 
     host = authority.SystemLeaseEnvironment()
-    monkeypatch.setattr(authority, "observe_process_liveness", lambda pid: None)
+    monkeypatch.setattr(authority, "observe_process_state", lambda pid: None)
 
     def denied(pid, signal):
         raise PermissionError("EPERM")

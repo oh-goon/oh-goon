@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from oh_goon.core.process_birth import (
     ProcessBirthIdentity,
     observe_process_birth,
     observe_process_liveness,
+    observe_process_state,
     process_birth_matches,
 )
 
@@ -61,3 +64,41 @@ def test_process_liveness_does_not_treat_zombie_pid_as_live(tmp_path: Path) -> N
     (live / "88" / "stat").unlink()
     assert observe_process_liveness(88, proc_root=live) is False
     assert observe_process_liveness(88, proc_root=tmp_path / "missing-proc") is None
+
+
+def test_state_observation_keeps_missing_distinct_from_a_recorded_terminal_state(
+    tmp_path: Path,
+) -> None:
+    proc = _proc_tree(tmp_path, pid=88, boot_id="boot-a", start_ticks=1)
+    assert observe_process_state(88, proc_root=proc) == "S"
+    _proc_tree(tmp_path, pid=88, boot_id="boot-a", start_ticks=1, state="Z")
+    assert observe_process_state(88, proc_root=proc) == "Z"
+    (proc / "88/stat").unlink()
+    assert observe_process_state(88, proc_root=proc) is None
+    assert observe_process_state(88, proc_root=tmp_path / "unavailable") is None
+    assert observe_process_liveness(88, proc_root=proc) is False
+
+
+@pytest.mark.parametrize("bad_stat", ["88 (worker) Z", "wrong pid", "89 (worker) Z"])
+def test_state_observation_refuses_unqualified_process_records(
+    tmp_path: Path, bad_stat: str
+) -> None:
+    proc = _proc_tree(tmp_path, pid=88, boot_id="boot-a", start_ticks=1)
+    (proc / "88/stat").write_text(bad_stat)
+    assert observe_process_state(88, proc_root=proc) is None
+
+
+def test_state_observation_reads_the_native_record_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proc = _proc_tree(tmp_path, pid=88, boot_id="boot-a", start_ticks=1)
+    native_read = Path.read_text
+    reads: list[Path] = []
+
+    def observed(path: Path, **kwargs: str) -> str:
+        reads.append(path)
+        return native_read(path, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", observed)
+    assert observe_process_state(88, proc_root=proc) == "S"
+    assert reads == [proc / "88/stat"]
