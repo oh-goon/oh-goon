@@ -60,7 +60,7 @@ def _tooling_messages(tmp_path: Path, makefile: str) -> list[str]:
 
 def _workflow_makefile() -> str:
     return """\
-DEV = bash scripts/development_test.sh
+DEV = bash scripts/development_check.sh
 RESOURCES = bash scripts/development_test_resources.sh
 FLOW = backend/.venv/bin/oh-goon-workflow
 LOGGER = bash scripts/run_logged.sh
@@ -285,6 +285,22 @@ def test_workflow_make_comment_cannot_create_direct_plan_path(tmp_path: Path) ->
     assert not any(
         "direct Plan execution path" in item.message
         for item in check_make_single_path(root)
+    )
+
+
+def test_workflow_make_cannot_restore_the_old_broad_default(tmp_path: Path) -> None:
+    root = _workflow_root(tmp_path)
+    assert check_make_single_path(root) == []
+    _write(
+        root,
+        "Makefile",
+        _workflow_makefile().replace(
+            "DEV = bash scripts/development_check.sh",
+            "DEV = bash scripts/development_test.sh",
+        ),
+    )
+    assert any(
+        "one-line delegation" in item.message for item in check_make_single_path(root)
     )
 
 

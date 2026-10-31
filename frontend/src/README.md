@@ -112,13 +112,13 @@ Change backend response semantics
 Behavior tests stay colocated with the authored source owner. Feature tests remain inside their `features/<feature>/` directory; app/domain/common-component tests remain beside those owners. `../tests/` is support-only, with shared service-free frontend test support at `../tests/support/`.
 ## Change impact
 
-Frontend changes normally stay frontend-local: run the colocated tests and `npm run check`. Escalate only for these boundaries:
+Frontend changes normally stay frontend-local: run affected colocated tests and `make -C .. check`. Add only applicable boundary proof; complete frontend portfolios run daily. The following owners guide the additional proof:
 
 ```text
-features/<feature>/ or components/common/ → colocated tests + frontend check
-app/ navigation/providers                → app tests + frontend check
-app/api transport or API binding         → app/domain tests + frontend check + root cross-owner test when the generated contract boundary changes
-domain/ API/read/mutation facts          → colocated domain tests + frontend check
+features/<feature>/ or components/common/ → colocated tests + applicable frontend static checks
+app/ navigation/providers                → app tests + applicable frontend static checks
+app/api transport or API binding         → app/domain tests + affected contract-consumer proof when the generated boundary changes
+domain/ API/read/mutation facts          → colocated domain tests + applicable static checks
 i18n/                                    → frontend check + npm run i18n:check
 styles/                                  → frontend check
 ```

@@ -21,10 +21,13 @@ from oh_goon.integrations.git_source_preparation import git_source_cache
 
 ROOT = Path(__file__).resolve().parents[4]
 ORDERS = ROOT / "templates/goons/general/orders-taskflow"
-pytestmark = pytest.mark.skipif(
-    os.name != "posix" or shutil.which("uv") is None,
-    reason="native POSIX Git and uv required",
-)
+pytestmark = [
+    pytest.mark.daily,
+    pytest.mark.skipif(
+        os.name != "posix" or shutil.which("uv") is None,
+        reason="native POSIX Git and uv required",
+    ),
+]
 
 
 def _git(repository: Path, *arguments: str) -> str:

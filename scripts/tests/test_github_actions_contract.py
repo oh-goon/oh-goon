@@ -9,7 +9,6 @@ import socket
 import subprocess
 import sys
 import tempfile
-import tomllib
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -43,12 +42,13 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
     ]
     ((preparation_index, preparation),) = preparations
     assert isinstance(preparation, str)
-    make_indices = [
+    effect_indices = [
         index
         for index, command in enumerate(runs)
-        if "make" in shlex.split(command, comments=True)
+        if {"make", "scripts/development_test_resources.sh"}
+        & set(shlex.split(command, comments=True))
     ]
-    assert make_indices and all(preparation_index < index for index in make_indices)
+    assert effect_indices and all(preparation_index < index for index in effect_indices)
     for scope in [job, *job["steps"]]:
         assert scope.get("env", {}).get("OH_GOON_TEST_CPUS") not in ("0", 0)
     for command in runs:
@@ -56,71 +56,30 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
     return preparation
 
 
-def test_required_checks_run_for_ready_pull_requests_main_and_merge_groups() -> None:
-    workflow = _workflow()
-    assert workflow["on"] == {
-        "pull_request": {
-            "types": [
-                "opened",
-                "synchronize",
-                "reopened",
-                "ready_for_review",
-                "converted_to_draft",
-            ]
-        },
-        "push": {"branches": ["main"]},
-        "merge_group": None,
-    }
-    assert set(workflow["jobs"]) == {"checks", "draft-feedback", "release"}
-    checks = workflow["jobs"]["checks"]
-    assert checks["name"] == (
-        "${{ github.event_name == 'pull_request' && github.event.pull_request.draft "
-        "&& 'full-checks-pending-review' || matrix.target }}"
-    )
-    assert checks["if"] == (
-        "github.event_name != 'pull_request' || github.event.pull_request.draft == false"
-    )
-    assert "matrix" not in checks["if"]
-    assert checks["strategy"]["fail-fast"] is False
-    assert set(checks["strategy"]["matrix"]["target"]) == {
-        "backend-check",
-        "frontend-check",
-        "tooling-check",
-        "architecture",
-        "check-generated",
-        "test-integration",
-    }
-    assert "continue-on-error" not in checks
-    for step in checks["steps"]:
-        assert "if" not in step
-        assert "continue-on-error" not in step
-    commands = [step["run"] for step in checks["steps"] if "run" in step]
-    assert "make init" in commands
-    _cpu_preparation(checks)
-
-
 @pytest.mark.process
 @pytest.mark.parametrize(
-    "job_name",
-    ["draft-feedback", "checks", "release", "complete-release", "focused-behavior"],
+    "workflow_name",
+    ["ci.yml", "release-validation.yml", "focused-feedback.yml"],
 )
 @pytest.mark.parametrize("manager_status", [0, 17])
 def test_native_cpu_preparation_proves_user_bus_before_make_without_opting_out(
-    tmp_path: Path, job_name: str, manager_status: int
+    tmp_path: Path, workflow_name: str, manager_status: int
 ) -> None:
     bash = shutil.which("bash", path=os.defpath)
     if bash is None:
         pytest.skip("native Bash is unavailable")
-    if job_name == "focused-behavior":
-        job = _focused_workflow()["jobs"][job_name]
-    elif job_name == "complete-release":
-        workflow = yaml.safe_load(
-            (ROOT / ".github/workflows/release-validation.yml").read_text()
+    workflow = yaml.safe_load((ROOT / ".github/workflows" / workflow_name).read_text())
+    jobs = [
+        job
+        for job in workflow["jobs"].values()
+        if any(
+            {"loginctl", "systemctl"}
+            <= set(shlex.split(step.get("run", ""), comments=True))
+            for step in job.get("steps", [])
         )
-        job = workflow["jobs"]["full-regression"]
-    else:
-        job = _workflow()["jobs"][job_name]
-    preparation = _cpu_preparation(job)
+    ]
+    assert len(jobs) == 1
+    preparation = _cpu_preparation(jobs[0])
     commands = tmp_path / "commands"
     commands.mkdir()
     events = tmp_path / "events"
@@ -269,11 +228,12 @@ def _run_required_check(
         executable.write_text(f"#!{bash}\n" + _SDK_SHIM)
         executable.chmod(0o755)
     events, marker = tmp_path / "events", tmp_path / "mounted-owner"
-    steps = _workflow()["jobs"]["checks"]["steps"]
-    script = [step["run"] for step in steps if "run" in step][-1]
-    script = script.replace("${{ matrix.target }}", target).replace(
-        "/usr/local/lib/android/sdk", str(sdk)
+    script = (
+        (ROOT / "scripts/ci_native_runtime.sh")
+        .read_text()
+        .replace("/usr/local/lib/android/sdk", str(sdk))
     )
+    script = "set -- make " + shlex.quote(target) + "\n" + script
     # Keep cancellation bound to our child even if a missing trap lets it exec Make.
     script = "export SDK_WORKFLOW_PID=$$\n" + script
     result = subprocess.run(
@@ -297,53 +257,6 @@ def _run_required_check(
         events.read_text().splitlines() if events.exists() else [],
         marker.exists(),
     )
-
-
-@pytest.mark.process
-@pytest.mark.parametrize(
-    "target",
-    [
-        "backend-check",
-        "frontend-check",
-        "tooling-check",
-        "architecture",
-        "check-generated",
-        "test-integration",
-    ],
-)
-@pytest.mark.parametrize("check_status", [0, 17])
-def test_required_check_executes_exact_matrix_target_and_preserves_its_status(
-    tmp_path: Path, target: str, check_status: int
-) -> None:
-    result, events, mounted = _run_required_check(
-        tmp_path, target, {"SIM_CHECK_STATUS": str(check_status)}
-    )
-    assert result.returncode == check_status, result.stderr
-    expected = [f"make:{target}"]
-    if target == "test-integration" and check_status == 0:
-        expected.append("make:test-python-projects")
-    if target in {"backend-check", "test-integration"}:
-        expected = ["mount", "view", *expected, "umount"]
-    assert events == expected
-    assert not mounted
-
-
-@pytest.mark.process
-def test_required_integration_project_failure_preserves_status_and_releases_sdk_overlay(
-    tmp_path: Path,
-) -> None:
-    result, events, mounted = _run_required_check(
-        tmp_path, "test-integration", {"SIM_PROJECT_CHECK_STATUS": "23"}
-    )
-    assert result.returncode == 23, result.stderr
-    assert events == [
-        "mount",
-        "view",
-        "make:test-integration",
-        "make:test-python-projects",
-        "umount",
-    ]
-    assert not mounted
 
 
 @pytest.mark.process
@@ -432,46 +345,6 @@ def test_sdk_overlay_lifecycle_preserves_outcome_and_cleans_only_owned_mounts(
     assert mounted is retained_mount
 
 
-def test_release_assembles_only_after_all_six_checks_for_the_same_source() -> None:
-    jobs = _workflow()["jobs"]
-    checks, release = jobs["checks"], jobs["release"]
-    assert release["needs"] == "checks"
-    assert release["if"] == checks["if"]
-    assert release["name"] == (
-        "${{ github.event_name == 'pull_request' && github.event.pull_request.draft "
-        "&& 'release-pending-review' || 'build-release' }}"
-    )
-    assert "strategy" not in release
-    assert "continue-on-error" not in release
-    assert all(
-        "if" not in step and "continue-on-error" not in step
-        for step in release["steps"]
-    )
-    preparation = _cpu_preparation(release)
-    assert [
-        step["run"]
-        for step in release["steps"]
-        if "run" in step and step["run"] != preparation
-    ] == [
-        "make init",
-        "make assemble-release",
-    ]
-    assert set(checks["strategy"]["matrix"]["target"]) | {"build-release"} == {
-        "backend-check",
-        "frontend-check",
-        "tooling-check",
-        "architecture",
-        "check-generated",
-        "test-integration",
-        "build-release",
-    }
-    # Native GitHub needs/checkout authority replaces no source or test resolver.
-    assert "always()" not in release["if"]
-    assert not any(
-        "download-artifact" in step.get("uses", "") for step in release["steps"]
-    )
-
-
 @pytest.mark.parametrize("workflow_name", ["ci.yml", "focused-feedback.yml"])
 def test_pull_request_checks_have_read_only_uncredentialed_execution(
     workflow_name: str,
@@ -480,20 +353,32 @@ def test_pull_request_checks_have_read_only_uncredentialed_execution(
         (ROOT / ".github/workflows" / workflow_name).read_text(encoding="utf-8")
     )
     assert workflow["permissions"] == {"contents": "read"}
-    for job in workflow["jobs"].values():
+    for job_name, job in workflow["jobs"].items():
         assert "permissions" not in job
         assert "secrets" not in job
         for step in job["steps"]:
             if "uses" in step:
                 assert re.fullmatch(r"[\w/-]+@[0-9a-f]{40}", step["uses"])
-        checkout = next(
+        checkouts = [
             step
             for step in job["steps"]
             if step.get("uses", "").startswith("actions/checkout@")
-        )
-        assert checkout["with"]["ref"] == "${{ github.sha }}"
-        assert checkout["with"]["persist-credentials"] is False
-        assert checkout["with"]["fetch-depth"] == 0
+        ]
+        if not checkouts:
+            continue
+        if "merge-gate" in job.get("name", ""):
+            assert [step["with"]["ref"] for step in checkouts] == [
+                job["env"]["BASE_SHA"],
+                "${{ github.sha }}",
+            ]
+            assert len({step["with"]["path"] for step in checkouts}) == 2
+        else:
+            assert len(checkouts) == 1
+            assert checkouts[0]["with"]["ref"] == "${{ github.sha }}"
+        for checkout in checkouts:
+            assert checkout["with"]["persist-credentials"] is False
+            if job_name != "main-health":
+                assert checkout["with"]["fetch-depth"] == 0
 
 
 def _make_commands(
@@ -566,53 +451,6 @@ def _batch_invocations(
     return invocations
 
 
-def test_draft_feedback_keeps_separate_names_and_adds_bounded_focused_behavior() -> (
-    None
-):
-    jobs = _workflow()["jobs"]
-    draft = jobs["draft-feedback"]
-    required_names = [*jobs["checks"]["strategy"]["matrix"]["target"], "build-release"]
-    assert draft["name"] not in required_names
-    assert "full-checks-pending-review" not in required_names
-    assert draft["if"] == (
-        "github.event_name == 'pull_request' && github.event.pull_request.draft == true"
-    )
-    assert "strategy" not in draft and "continue-on-error" not in draft
-    assert all("continue-on-error" not in step for step in draft["steps"])
-    summary = draft["steps"][-1]
-    assert summary["if"] == "always()"
-    assert "NOT_FULLY_VERIFIED" in summary["run"]
-    assert all("if" not in step for step in draft["steps"][:-1])
-    commands = [step["run"] for step in draft["steps"] if "run" in step]
-    preparation = _cpu_preparation(draft)
-    assert [command for command in commands if command != preparation][:2] == [
-        "make init",
-        "make lint format-check architecture release-locks-check",
-    ]
-    native_commands = _make_commands(
-        ["init", "lint", "format-check", "architecture", "release-locks-check"]
-    )
-    assert not any(
-        "pytest" in command
-        or any(word.endswith("/oh-goon-test-batches") for word in command)
-        for command in native_commands
-    )
-    smoke = draft["steps"][-2]["run"]
-    command = shlex.split(smoke.replace("\\\n", " "))
-    assert command[:3] == ["bash", "scripts/development_test_resources.sh", "uv"]
-    runner = command.index("oh-goon-test-batches")
-    with patch.object(sys, "argv", command[runner:]):
-        _parser, options = parse_batch_args()
-    assert options.focused and options.qualified and options.show_output
-    assert options.next_check == "make backend-check"
-    assert options.workers == 1 and options.batch_size == 64
-    assert options.batch_timeout == 120 and options.suite_timeout == 300
-    assert options.marker == "not certification and not slow"
-    assert not options.resume and options.batch is None
-    assert len(options.paths) == 3
-    assert all((ROOT / path).is_file() for path in options.paths)
-
-
 def _focused_workflow() -> dict[str, Any]:
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/focused-feedback.yml").read_text(encoding="utf-8")
@@ -634,8 +472,7 @@ def test_manual_focused_run_never_publishes_required_checks_or_cancels_full_ci()
     assert workflow["concurrency"]["group"].startswith("${{ github.workflow }}-")
     assert set(workflow["jobs"]) == {"focused-behavior"}
     job = workflow["jobs"]["focused-behavior"]
-    required = _workflow()["jobs"]["checks"]["strategy"]["matrix"]["target"]
-    assert job["name"] not in [*required, "build-release"]
+    assert job["name"] != "merge-gate"
     assert "continue-on-error" not in job and job["timeout-minutes"] == 15
     assert job["steps"][-1]["if"] == "always()"
     assert "NOT_FULLY_VERIFIED" in job["steps"][-1]["run"]
@@ -722,87 +559,7 @@ def test_manual_focused_run_refuses_empty_input_before_launch(
     assert result.stderr == ""
 
 
-def test_hosted_backend_roots_partition_the_complete_suite_without_nested_selection() -> (
-    None
-):
-    checks = _workflow()["jobs"]["checks"]
-    selection = {row["target"]: row for row in checks["strategy"]["matrix"]["include"]}
-    assert set(selection) == {"backend-check", "test-integration"}
-    roots = selection["backend-check"]["backend_test_roots"]
-    assert checks["env"]["BACKEND_CHECK_TEST_ROOTS"] == (
-        "${{ matrix.backend_test_roots || '' }}"
-    )
-    assert "--ignore" not in checks["env"]["PYTEST_ADDOPTS"]
-    assert not any(root in checks["env"]["PYTEST_ADDOPTS"] for root in roots.split())
-
-    # Without an explicit hosted partition, pytest retains its native testpaths.
-    ((default_cwd, default),) = _batch_invocations(_make_commands(["backend-check"]))
-    assert default_cwd == Path("backend")
-    assert default.paths == []
-    ((backend_cwd, backend),) = _batch_invocations(
-        _make_commands(["backend-check"], roots)
-    )
-    assert backend_cwd == Path("backend")
-    assert backend.paths == [Path(path) for path in roots.split()]
-    integration = _batch_invocations(_make_commands(["test-integration"]))
-    assert [cwd for cwd, _options in integration] == [Path("backend"), Path(".")]
-    assert [options.paths for _cwd, options in integration] == [
-        [Path("tests/integration")],
-        [Path("tests/integration")],
-    ]
-    options = [default, backend, *(arguments for _cwd, arguments in integration)]
-    assert [option.pytest_config for option in options] == [
-        Path("pyproject.toml"),
-        Path("pyproject.toml"),
-        Path("pyproject.toml"),
-        Path("backend/pyproject.toml"),
-    ]
-    assert all(
-        option.qualified and option.show_output and option.workers == 1
-        for option in options
-    )
-    assert all(option.marker == "not certification and not slow" for option in options)
-    assert all(
-        option.granularity == "tests" and option.batch_timeout == 180
-        for option in options
-    )
-    assert [option.batch_size for option in options] == [64, 64, 8, 8]
-    assert all(option.pytest_arg == [] and option.exclude == [] for option in options)
-    assert all(option.batch is None and not option.resume for option in options)
-    pytest_config = tomllib.loads((ROOT / "backend/pyproject.toml").read_text())
-    testpaths = pytest_config["tool"]["pytest"]["ini_options"]["testpaths"]
-    admitted_roots = [str(path) for path in (*backend.paths, *integration[0][1].paths)]
-    assert sorted(admitted_roots) == sorted(testpaths)
-    assert len(admitted_roots) == len(set(admitted_roots))
-
-    # Hosted parallelism uses the original runner and selection, within the same
-    # native two-CPU budget; local defaults and release selection remain serial.
-    assert selection["backend-check"]["backend_test_workers"] == 2
-    assert selection["test-integration"]["integration_test_workers"] == 2
-    assert checks["env"]["BACKEND_CHECK_TEST_WORKERS"] == (
-        "${{ matrix.backend_test_workers || 1 }}"
-    )
-    assert checks["env"]["INTEGRATION_TEST_WORKERS"] == (
-        "${{ matrix.integration_test_workers || 1 }}"
-    )
-    hosted = _batch_invocations(
-        _make_commands(["backend-check", "test-integration"], roots, workers=2)
-    )
-    assert [cwd for cwd, _arguments in hosted] == [
-        Path("backend"),
-        Path("backend"),
-        Path("."),
-    ]
-    for (_cwd, parallel), serial in zip(
-        hosted, [backend, *[a for _c, a in integration]], strict=True
-    ):
-        assert parallel.workers == 2
-        assert vars(parallel) | {"workers": 1} == vars(serial)
-
-
-def test_routine_tooling_keeps_process_and_scale_coverage_while_deferring_exhaustive_cases() -> (
-    None
-):
+def test_explicit_ordinary_tooling_keeps_process_and_scale_coverage() -> None:
     commands = _make_commands(["tooling-check"])
     batches = [
         command
@@ -848,32 +605,179 @@ def test_complete_release_check_executes_each_native_surface_once() -> None:
     assert sum(command[-3:] == ["npm", "run", "check"] for command in commands) == 1
 
 
-def test_complete_release_verification_is_explicit_and_uses_the_selected_source() -> (
+def _merge_aggregate() -> dict[str, Any]:
+    aggregates = [
+        job
+        for job in _workflow()["jobs"].values()
+        if "merge-gate" in job.get("name", "")
+    ]
+    assert len(aggregates) == 1
+    aggregate = aggregates[0]
+    assert isinstance(aggregate, dict)
+    return aggregate
+
+
+def test_relevant_events_keep_merge_candidates_and_main_health_distinct() -> None:
+    workflow = _workflow()
+    events = workflow["on"]
+    assert "merge_group" in events and "pull_request" in events
+    assert set(events["push"]) == {"branches"}
+    assert events["push"]["branches"] == ["main"]
+    assert "schedule" not in events and "pull_request_target" not in events
+    assert "ready_for_review" in events["pull_request"]["types"]
+    assert "edited" in events["pull_request"]["types"]
+    assert "github.event_name" in workflow["concurrency"]["group"]
+    assert "github.event.pull_request.number" in workflow["concurrency"]["group"]
+    assert workflow["concurrency"]["cancel-in-progress"] is True
+
+    proof = workflow["jobs"]["verify"]
+    assert proof["if"] == (
+        "github.event_name != 'push' && "
+        "(github.event.action != 'edited' || github.event.changes.base != null)"
+    )
+    assert "github.event.changes.base" in workflow["concurrency"]["group"]
+    assert "'metadata' || 'candidate'" in workflow["concurrency"]["group"]
+    assert "edit-not-applicable" in _merge_aggregate()["name"]
+    assert "github.event.pull_request.base.sha" in proof["env"]["BASE_SHA"]
+    assert "github.event.merge_group.base_sha" in proof["env"]["BASE_SHA"]
+    assert "github.event.pull_request.head.sha" in proof["env"]["REQUESTED_HEAD"]
+    assert "github.event.merge_group.head_sha" in proof["env"]["REQUESTED_HEAD"]
+    assert workflow["jobs"]["main-health"]["if"] == "github.event_name == 'push'"
+
+
+def test_fast_paths_have_no_hidden_complete_gate_or_unconditional_frontend_setup() -> (
     None
 ):
-    workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/release-validation.yml").read_text()
-    )
-    assert workflow["on"] == {
-        "workflow_dispatch": None,
-        "release": {"types": ["published"]},
+    workflow = _workflow()
+    full_targets = {
+        "backend-check",
+        "tooling-check",
+        "release-check",
+        "build-release",
+        "assemble-release",
+        "test-integration",
+        "test-python-projects",
+        "frontend-check",
     }
-    assert workflow["permissions"] == {"contents": "read"}
-    assert len(workflow["jobs"]) == 1
-    job = next(iter(workflow["jobs"].values()))
-    assert "continue-on-error" not in job
-    assert all(
-        "continue-on-error" not in step and "if" not in step for step in job["steps"]
-    )
-    checkout = next(
-        step
-        for step in job["steps"]
-        if step.get("uses", "").startswith("actions/checkout@")
-    )
-    assert checkout["with"]["ref"] == "${{ github.sha }}"
-    assert checkout["with"]["persist-credentials"] is False
-    _cpu_preparation(job)
-    assert [step["run"] for step in job["steps"] if "run" in step][-2:] == [
-        "make init",
-        "make release-check",
+    for job in workflow["jobs"].values():
+        for step in job["steps"]:
+            words = shlex.split(step.get("run", ""), comments=True)
+            assert not full_targets.intersection(words)
+            assert words[:2] != ["make", "init"]
+            if step.get("uses", "").startswith("actions/setup-node@") or words[:2] == [
+                "make",
+                "frontend-install",
+            ]:
+                assert step["if"] == "steps.selection.outputs.frontend == 'true'"
+    for command in _make_commands(["check", "merge-check"]):
+        assert not full_targets.intersection(command)
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "result", ["success", "failure", "cancelled", "skipped", "", "neutral"]
+)
+def test_required_aggregate_rejects_every_non_success_dependency(
+    tmp_path: Path, result: str
+) -> None:
+    aggregate = _merge_aggregate()
+    assert "always()" in aggregate["if"]
+    assert "needs." not in aggregate["if"]
+    assert "continue-on-error" not in aggregate
+    assert "draft-feedback" in aggregate["name"]
+    guards = [
+        (step, key)
+        for step in aggregate["steps"]
+        for key, value in step.get("env", {}).items()
+        if isinstance(value, str)
+        and re.fullmatch(r"\$\{\{ needs\.\w+\.result \}\}", value)
     ]
+    assert len(guards) == 1
+    step, key = guards[0]
+    assert "continue-on-error" not in step and "if" not in step
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    observed = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={"PATH": os.defpath, key: result},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert observed.returncode == (0 if result == "success" else 1), observed.stderr
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("exit_code", [0, 17, 124])
+def test_merge_control_uses_only_the_trusted_base_and_keeps_its_failure(
+    tmp_path: Path, exit_code: int
+) -> None:
+    job = _merge_aggregate()
+    steps = [step for step in job["steps"] if "--trusted-root" in step.get("run", "")]
+    assert len(steps) == 1
+    step = steps[0]
+    assert "continue-on-error" not in step
+    assert step["if"] == "github.event.pull_request.draft != true"
+    assert "${{" not in step["run"]
+    checkouts = [
+        value["with"]
+        for value in job["steps"]
+        if value.get("uses", "").startswith("actions/checkout@")
+    ]
+    trusted, candidate = [value["path"] for value in checkouts]
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    recorded = tmp_path / "arguments"
+    uv = binaries / "uv"
+    uv.write_text(
+        '#!/bin/sh\nprintf "%s\\0" "$@" > "$RECORDED"\nexit "$CONTROL_STATUS"\n'
+    )
+    uv.chmod(0o755)
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    head = "a" * 40
+    # Evidence fields are data even when an invalid field contains shell syntax.
+    base = "$(touch injected); `touch injected`"
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            "PATH": str(binaries) + os.pathsep + os.defpath,
+            "RECORDED": str(recorded),
+            "CONTROL_STATUS": str(exit_code),
+            "GITHUB_SHA": head,
+            "BASE_SHA": base,
+            "REQUESTED_HEAD": head,
+            "GITHUB_WORKSPACE": str(tmp_path),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == exit_code, result.stderr
+    arguments = recorded.read_bytes().decode().split("\0")[:-1]
+    assert arguments[:8] == [
+        "run",
+        "--offline",
+        "--frozen",
+        "--no-sync",
+        "--project",
+        f"{trusted}/backend",
+        "python",
+        "-I",
+    ]
+    assert (
+        arguments[8]
+        == f"{trusted}/backend/src/oh_goon/repository_tooling/verification_gate_control.py"
+    )
+    for flag, value in (
+        ("--root", str(tmp_path / candidate)),
+        ("--trusted-root", str(tmp_path / trusted)),
+        ("--base", base),
+        ("--control-base", base),
+        ("--candidate", head),
+        ("--head", head),
+    ):
+        assert arguments[arguments.index(flag) + 1] == value
+    assert not (tmp_path / "injected").exists()

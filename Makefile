@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 MAKEFLAGS += --no-print-directory
 
-DEVELOPMENT_TEST_RUNNER = bash scripts/development_test.sh
+DEVELOPMENT_TEST_RUNNER = bash scripts/development_check.sh
 DEVELOPMENT_CHECK_RUNNER = bash scripts/development_check.sh
 APPLICATION_VERIFY_RUNNER = bash scripts/application_verify.sh
 DEVELOPMENT_RESOURCE_RUNNER = bash scripts/development_test_resources.sh
@@ -22,6 +22,12 @@ BACKEND_CHECK_TEST_ROOTS ?=
 # Local checks stay serial; hosted jobs can use the existing bounded worker owner.
 BACKEND_CHECK_TEST_WORKERS ?= 1
 INTEGRATION_TEST_WORKERS ?= 1
+OH_GOON_PYTEST_REPORT_PATH ?=
+OH_GOON_PYTHON_PROJECT_REPORT_DIRECTORY ?=
+PYTEST_REPORT_ARGUMENT = $(if $(OH_GOON_PYTEST_REPORT_PATH),--report-path "$(OH_GOON_PYTEST_REPORT_PATH)",)
+# Canonical complete portable owners. Daily Actions consumes this same plan;
+# membership inside each owner remains native pytest/npm authority.
+RELEASE_CHECK_TARGETS = check-backend-quality check-backend-tests check-tooling-quality check-tooling-tests test-backend-integration test-cross-owner-integration test-python-projects frontend-check architecture check-generated release-locks-check
 # Native pytest marker expressions: routine checks retain meaningful process/scale
 # regressions; only exhaustive variants with bounded counterparts are deferred.
 CHECK_PYTEST_MARKER ?= not certification and not slow
@@ -40,7 +46,10 @@ CERTIFICATION_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_
 
 .PHONY: a1-native-kernel-custody-test backend-python-capability-check python-static-sanity ruff-repair phase-evidence-convergence-check native-qualification-boundary-check candidate-convergence-preflight pre-commit pre-commit-acquire help init verify diagnostic-dependency-check backend-lock-check backend-package-build-check source-transport-clean sync venv-clean strict-executor-setup certification-preflight certification-database-preflight repository-understanding-test-batch repository-understanding-tests-batched certification-state-reset logs test-log certify-log diagnostics-log local-state-prelaunch-check local-state-reset storage-status storage-prune acceptance-release acceptance-browser-container acceptance-container acceptance-product acceptance-scale local-runtime-verification strict-local-runtime-acceptance release-locks-check release-version-set release-source-clean release-source-package-artifact frontend-install backend-dependencies-check frontend-functional-certification template-startability-certification frontend-lock start local-state-check local-state-path diagnostics-path local-state-reset dev release-accept docker-prepare docker-up docker-up-opensuse docker-down docker-accept docker-accept-opensuse lint i18n-check format format-check typecheck architecture goon-compile api-schema api-types goon-tool-authority contracts generate check-generated test test-python test-tooling test-tooling-complete test-frontend frontend-typecheck frontend-architecture frontend-build test-integration test-sqlite-real-usage test-real-lifecycle test-real-world test-real-world-parallel coverage-python coverage-report test-sqlite-coverage test-journal-coverage quality-check quality-raise check check-backend check-tooling check-frontend backend-check tooling-check frontend-check build-release assemble-release scout-load-probe scout-http-load-probe scout-network-certification scout-proxy-certification scout-overhead-certification scout-crash-restart-certification scout-failure-isolation-certification scout-corruption-recovery-certification scout-retention-checkpoint-certification diagnostic-system-check cli-install diagnostic-startup-check frontend-lock-check browser-setup browser-localhost-transport-preflight browser-preflight browser-harness-preflight browser-system-deps browser-runtime-preflight browser-targeted-certification browser-required-certification browser-test browser-check-system-chromium certification-explain repository-understanding-exam prepare-release certify test-execution-fast test-python-core-diagnostic test-python-dependency-complete test-python-complete verify-p0 verify-p1 verify-local init-doctor goon-static-admission backend-install theme-contrast test-python-profile tool-session-qualification tool-session-qualification-status recovery-status recovery-checkpoint recovery-resume qualify-native-wsl frontend-schedule-plan-input-regression
 
-.PHONY: release-check
+.PHONY: change-check merge-check broad-diagnostic
+VERIFY_BASE ?= origin/main
+VERIFY_WORKERS ?= 1
+.PHONY: release-check release-check-plan check-backend-quality check-backend-tests check-tooling-quality check-tooling-tests test-backend-integration test-cross-owner-integration
 .PHONY: test-python-projects
 
 .DEFAULT:
@@ -75,11 +84,10 @@ help:
 	  '  make coverage-report  Show the detailed Python coverage table from the latest collected data' \
 	  '' \
 	  'Golden change loops (stop on first failure):' \
-	  '  backend internal: focused test -> backend-check' \
-	  '  public API: focused API test -> backend-check -> generate -> check-generated -> test-integration -> frontend-check' \
-	  '  frontend feature: focused colocated test -> frontend-check' \
-	  '  template: focused template tests -> architecture -> backend-check' \
-	  '  tooling: focused scripts test -> architecture -> tooling-check' \
+	  '  changed behavior: focused test -> make check -> required merge-gate' \
+	  '  make test/check: relevant fast feedback; complete portfolios run daily' \
+	  '  make merge-check: exact change admission + trusted-base merge control' \
+	  '  make broad-diagnostic: explicit broad local diagnostic' \
 	  '' \
 	  'Completion evidence:' \
 	  '  owner | focused validation | escalation gates | generated | architecture | unverified' \
@@ -131,7 +139,7 @@ help:
 	  '  make strict-local-runtime-acceptance Production-shaped strict Fleet runtime/cancel/restart acceptance' \
 	  '  make browser-targeted-certification Run the seven Gate D Chromium specs sequentially, one worker/process each' \
 	  '  make browser-required-certification Run the complete required browser suite after preflights' \
-	  '  make check            Broad development feedback with PASS/FAIL/BLOCKED summary' \
+	  '  make check            Relevant fast feedback with PASS/FAIL/BLOCKED summary' \
 	  '    normal make test runs native uv/.venv backend and npm frontend tests; host-only sampling requires explicit opt-in' \
 	  '  make local-state-check Inspect this checkout local-state schema without mutation' \
 	  '  make local-state-prelaunch-check Prove SQLite write/lock/storage semantics before app launch' \
@@ -147,7 +155,7 @@ help:
 	  '  make test-log         Show the latest saved make test output' \
 	  '  make certify-log      Show the latest saved make certify output' \
 	  '  make diagnostics-log  Show passive application diagnostic evidence' \
-	  '  make check            Broad development feedback; use docs/DEVELOPMENT.md for focused edits' \
+	  '  make check            Relevant fast feedback; see docs/DEVELOPMENT.md' \
 	  '  make build-release    Build validated locked release artifacts' \
 	  '  make assemble-release Assemble locked artifacts after caller-owned checks' \
 	  '  make release-check    Run the complete portable regression suite' \
@@ -565,7 +573,7 @@ a1-native-kernel-custody-test:
 # Certification-marked recursive tests remain owned by APP certification.
 # OH_GOON_OPAQUE_TOOLS: bash dd git node uv
 test-tooling-complete:
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --granularity files --batch-size 4 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker "$(TOOLING_COMPLETE_TEST_MARKER)"
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --granularity files --batch-size 4 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker "$(TOOLING_COMPLETE_TEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
 
 test-frontend:
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run test
@@ -579,12 +587,16 @@ frontend-architecture:
 frontend-build:
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run build
 
-test-integration:
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualified native pytest batches | complete ordinary selection' -- sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualified native pytest batches' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)"
+test-integration: test-backend-integration test-cross-owner-integration
+
+test-backend-integration:
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualified native pytest batches | complete ordinary selection' -- sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
+
+test-cross-owner-integration:
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualified native pytest batches' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
 
 test-python-projects:
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'STANDALONE PYTHON PROJECT TESTS' 'Owner: native uv | Iris and orders application tests' -- uv run --offline --frozen --no-sync --project backend oh-goon-python-project-checks
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'STANDALONE PYTHON PROJECT TESTS' 'Owner: native uv | Iris and orders application tests' -- uv run --offline --frozen --no-sync --project backend oh-goon-python-project-checks $(if $(OH_GOON_PYTHON_PROJECT_REPORT_DIRECTORY),--report-directory "$(OH_GOON_PYTHON_PROJECT_REPORT_DIRECTORY)" --continue-independent,)
 
 # Compact production-shaped SQLite lifetime gate. This deliberately crosses the
 # worker/wait/restart boundary and complements component/fault-matrix coverage.
@@ -728,6 +740,15 @@ quality-raise:
 test:
 	@$(DEVELOPMENT_TEST_FRONTDOOR)
 
+change-check:
+	uv run --offline --frozen --no-sync --project backend oh-goon-verify-change --base "$(VERIFY_BASE)" --mode focused --workers "$(VERIFY_WORKERS)"
+
+merge-check:
+	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-verify-change --base "$(VERIFY_BASE)" --mode merge --workers "$(VERIFY_WORKERS)"
+
+broad-diagnostic:
+	@OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_logged.sh broad-diagnostic $(DEVELOPMENT_RESOURCE_RUNNER) bash scripts/development_test.sh
+
 strict-executor-setup:
 	@bash scripts/strict_executor_setup.sh
 
@@ -757,19 +778,27 @@ diagnostics-log:
 logs:
 	@if [ ! -d "$(RUN_LOG_DIR)" ]; then echo "No Oh-Goon run logs exist yet."; else find "$(RUN_LOG_DIR)" -maxdepth 2 -type f -name '*.log' -printf '%TY-%Tm-%Td %TH:%TM  %p\n' | sort -r; fi
 
-check-backend:
+check-backend: check-backend-quality check-backend-tests
+
+check-backend-quality:
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality ruff check src tests
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality ruff format --check src tests
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality mypy
 	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --project backend oh-goon-quality-ratchet guard
-	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --granularity tests --workers $(BACKEND_CHECK_TEST_WORKERS) --batch-size 64 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(BACKEND_CHECK_TEST_ROOTS)
+
+check-backend-tests:
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml --granularity tests --workers $(BACKEND_CHECK_TEST_WORKERS) --batch-size 64 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(PYTEST_REPORT_ARGUMENT) $(BACKEND_CHECK_TEST_ROOTS)
 
 backend-check: check-backend
 
-check-tooling:
+check-tooling: check-tooling-quality check-tooling-tests
+
+check-tooling-quality:
 	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING QUALITY [1/4]' 'Owner: ruff | lint' -- uv run --offline --frozen --no-sync --group quality --project backend ruff check scripts tests/integration
 	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING QUALITY [2/4]' 'Owner: ruff | format check' -- uv run --offline --frozen --no-sync --group quality --project backend ruff format --check scripts tests/integration
 	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING QUALITY [3/4]' 'Owner: mypy | type check' -- uv run --offline --frozen --no-sync --group quality --project backend mypy --config-file backend/pyproject.toml scripts/tests tests/integration
+
+check-tooling-tests:
 	@$(RUN_STEP) 'TOOLING QUALITY [4/4]' 'Owner: Oh-Goon | bounded tooling tests' -- $(MAKE) test-tooling-complete TOOLING_COMPLETE_TEST_MARKER="$(CHECK_PYTEST_MARKER)"
 
 tooling-check: check-tooling
@@ -798,7 +827,11 @@ assemble-release:
 
 # Exhaustive portable regression is a release action, separate from APP/native qualification.
 release-check:
-	$(MAKE) backend-check tooling-check test-integration test-python-projects frontend-check architecture check-generated BACKEND_CHECK_TEST_ROOTS="tests/unit tests/dependency_complete" CHECK_PYTEST_MARKER="not certification"
+	$(MAKE) -k $(RELEASE_CHECK_TARGETS) BACKEND_CHECK_TEST_ROOTS="tests/unit tests/dependency_complete" CHECK_PYTEST_MARKER="not certification" PYTEST_RESUME=""
+
+# This list is generated from the original Make owner, never a second CI registry.
+release-check-plan:
+	@printf '%s\n' '$(RELEASE_CHECK_TARGETS)' | awk 'BEGIN {printf "["} {for (i=1;i<=NF;i++) printf "%s\"%s\"", i==1 ? "" : ",", $$i} END {print "]"}'
 
 acceptance-release:
 	$(MAKE) repository-understanding-exam

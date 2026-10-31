@@ -110,71 +110,56 @@ Agent-oriented repository comprehension is testable without granting write autho
 
 ## Focused edit loop
 
-For an issue-to-PR loop, keep the PR in draft while editing: each update runs
-static checks and a small automatic behavior smoke selection. Use Actions →
-**Focused behavior feedback** → **Run workflow** on that branch to run the
-specific pytest file, owner directory or node for the issue, with its next owner
-check shown as unverified guidance. This workflow becomes available after it lands
-on the default branch. Its bounded job does not replace required checks or claim
-coverage of unselected behavior. Run the relevant owner checks for the coherent
-change, then mark the PR ready to launch all seven required checks. Merge and
-close the issue after the required results for that commit pass; do not wait for
-full CI after each edit. See the [hosted feedback contract](CI_CD_CONTRACT.md).
+For an issue-to-PR loop, run the affected file or native node while editing.
+`make check` and `make test` then apply the same relevant fast policy as hosted
+verification. They do not run unrelated complete owners. Set `VERIFY_BASE` to an
+explicit comparison commit when the default `origin/main` is not appropriate.
 
-Choose the test file or native pytest node for the behavior you are editing.
-After `make init`, run the existing batch owner with explicit focused scope:
+```bash
+uv run --offline --frozen --no-sync --project backend pytest -c backend/pyproject.toml backend/tests/unit/core/test_error_kinds.py
+make check
+VERIFY_BASE=<base-sha> make merge-check
+```
+
+Known-large selections still use the original bounded batch owner:
 
 ```bash
 bash scripts/development_test_resources.sh \
   uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
-  --qualified --focused --next-check "make backend-check" backend/tests/unit/core/test_error_kinds.py
+  --qualified --focused --next-check "make merge-check" backend/tests/unit/core/test_error_kinds.py
 ```
 
-Replace the path and next check with the relevant owner. Native pytest still
-owns collection, node IDs, markers and failures. `--focused` requires an explicit
-selection and a nonblank `--next-check`; that command is printed guidance and is
-never executed. The terminal and optional `--report-path` JSON retain the native
-selected result and label full verification `NOT_FULLY_VERIFIED`. A missing file,
-empty selection, failure, interruption or timeout cannot establish broader PASS.
+Native pytest owns collection, parameter identities, markers and results.
+A focused result is **FOCUSED / NOT_FULLY_VERIFIED**. Candidate-bound selected
+checks produce **MERGE_PROOF_READY**; the independent trusted-base aggregate
+alone establishes **MERGE_VERIFIED** for its exact candidate and obligations.
+None of these claim the daily full suite ran. Inspect the reported reason when
+selection is unverified; a broad directory name is not a reason to run its whole
+corpus.
 
-Already bounded files can also use the native pytest command in the
-[backend guide](../backend/README.md#golden-execution-loops). That remains focused
-evidence. Use the batch owner for large selections, bounded process deadlines or
-exact-member resume/reporting; its collection and admission have their own cost.
-
-| Edited boundary | Focused selection | Next escalation still unverified |
-| --- | --- | --- |
-| Backend behavior | Relevant `backend/tests/unit/<owner>/` file or node | `make backend-check` |
-| Repository tooling | Relevant `scripts/tests/` file or node | `make test-tooling`, then `make architecture` and `make tooling-check` |
-| Public API or generator | Owning API/compiler regression | Existing backend/tooling checks, then `make generate`, `make check-generated`, `make test-integration`, `make frontend-check` |
-| Shipped templates | Relevant template/compiler regression | `make architecture` and `make backend-check` |
-
-For a frontend edit, select the colocated file through native Vitest:
+For frontend behavior, select its actual colocated Vitest file:
 
 ```bash
-bash scripts/development_test_resources.sh \
-  npm --prefix frontend run test -- src/domain/identity/canonicalValue.test.ts
+npm --prefix frontend run test -- src/domain/identity/canonicalValue.test.ts
 ```
 
-That result covers the requested frontend selection; `make frontend-check`
-remains unverified until run. Browser/theme changes add their owning checks in
-[AGENTS.md](../AGENTS.md). Shared fixtures, generated contracts, deleted tests and
-unknown impact do not make a focused selection cover unselected owners. Choose
-the union of their required checks before review.
+API/schema edits add generated freshness and affected consumer checks; SQLite,
+process and isolation edits retain their smallest necessary real boundary proof.
+A specific critical slow reproducer may be required with its named reason.
+Changing a daily corpus does not automatically execute every parameter, but
+changed test logic must execute meaningfully. Collection alone is insufficient.
+Complete unrelated/exhaustive coverage runs once daily. Use `make broad-diagnostic`
+or a complete owner gate only for an explicit broader diagnosis; use
+`make release-check` for complete portable qualification. APP/browser/native
+certification keeps its existing separately selected authority.
 
-`make check` aggregates backend, tooling, architecture, generated contracts and
-frontend checks. `make test` also includes integration and frontend functional
-checks. Run these broad commands on a stable batch; use the explicit selection
-above while editing. Their original selection and exit semantics remain intact.
-`make verify` remains whole-app diagnosis and `make certify` owns APP completion.
-
-For measurements, record the source, host/toolchain, exact command, CPU budget,
-selected members, collection time and actual outcome. Distinguish fresh receipts
-from resumed work: reused PASS evidence makes elapsed timing non-comparable.
-Fresh processes do not imply cold filesystem/package caches. Use the existing
-batch resource report and native import-time profiling to locate a cost before
-changing its owner; keep results in the issue/PR evidence rather than a new
-benchmark registry.
+Publish one coherent PR after focused proof, fix the first actual failure, then
+mark it ready for the fast required gate. Merge/close only through the authorized
+repository workflow and continue to the next issue without waiting for unrelated
+daily work. The [CI contract](CI_CD_CONTRACT.md#repository-checks-on-github) owns
+manual replay, daily catch-up and safe protection cutover. No per-PR benchmark
+report or separate test-selection manifest is required. Use existing timestamps
+and native receipts for provisional timing and scope evidence.
 
 ### Resume input authority
 

@@ -1,46 +1,163 @@
-name: Complete release verification
+name: Daily and release verification
+run-name: ${{ inputs.mode == 'release' && 'release-full' || 'daily-full' }} | ${{ inputs.slot || 'scheduled' }} | ${{ inputs.ref || github.sha }}
 
 "on":
+  schedule:
+    - cron: '23 2 * * *'
   workflow_dispatch:
-  release:
-    types: [published]
+    inputs:
+      mode:
+        description: Daily catch-up or exact-candidate pre-publication portable qualification
+        type: choice
+        options: [daily, release]
+        default: daily
+        required: true
+      slot:
+        description: UTC daily slot YYYY-MM-DD; blank uses the most recent 02:23 UTC slot
+        type: string
+        default: ''
+      ref:
+        description: Exact commit SHA; blank freezes this workflow's main SHA
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
+# One daily owner runner at a time. Main and PR updates cannot cancel it.
+# A catch-up shares the daily domain and preserves the first slot's rerun lineage.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: oh-goon-full-${{ inputs.mode == 'release' && format('release-{0}', inputs.ref || github.sha) || 'daily' }}
+  cancel-in-progress: false
 
 jobs:
-  full-regression:
-    name: release-check
+  campaign:
+    name: freeze-full-campaign
     runs-on: ubuntu-26.04
-    timeout-minutes: 90
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.admit.outputs.run }}
+      sha: ${{ steps.admit.outputs.sha }}
+      slot: ${{ steps.admit.outputs.slot }}
+      mode: ${{ steps.admit.outputs.mode }}
+      targets: ${{ steps.plan.outputs.targets }}
     env:
-      UV_PYTHON: "3.12"
+      UV_PYTHON: '3.12'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate explicit campaign inputs before checkout
+        env:
+          CAMPAIGN_REF: ${{ inputs.ref }}
+          CAMPAIGN_SLOT: ${{ inputs.slot }}
+        run: |
+          set -euo pipefail
+          if [ -n "$CAMPAIGN_REF" ] && [[ ! "$CAMPAIGN_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'ref must be an exact lowercase commit SHA' >&2
+            exit 2
+          fi
+          if [ -n "$CAMPAIGN_SLOT" ]; then
+            [[ "$CAMPAIGN_SLOT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+            test "$(TZ=UTC date --date="$CAMPAIGN_SLOT" +%F)" = "$CAMPAIGN_SLOT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bind selected source before materialization
+        id: source
+        env:
+          CAMPAIGN_MODE: ${{ inputs.mode || 'daily' }}
+          CAMPAIGN_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          source_sha=$(git rev-parse HEAD)
+          if [ -n "$CAMPAIGN_REF" ]; then test "$CAMPAIGN_REF" = "$source_sha"; fi
+          if [ "$CAMPAIGN_MODE" = daily ]; then git merge-base --is-ancestor "$source_sha" origin/main; fi
+          printf 'sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: '0.12.5'
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Prepare the original metadata owner
+        run: uv sync --project backend --frozen --no-default-groups
+      - name: Freeze source and admit one slot
+        id: admit
+        env:
+          CAMPAIGN_MODE: ${{ inputs.mode || 'daily' }}
+          CAMPAIGN_SLOT: ${{ inputs.slot }}
+          CAMPAIGN_REF: ${{ inputs.ref }}
+          FROZEN_SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$FROZEN_SOURCE_SHA"
+          mkdir -m 700 "$RUNNER_TEMP/full-admission"
+          uv run --offline --frozen --no-sync --project backend oh-goon-daily-regression prepare \
+            --repository "$GITHUB_REPOSITORY" --mode "$CAMPAIGN_MODE" --slot "$CAMPAIGN_SLOT" \
+            --sha "$FROZEN_SOURCE_SHA" --run-id "$GITHUB_RUN_ID" \
+            --output "$RUNNER_TEMP/full-admission/campaign.json"
+      - name: Consume the canonical complete Make plan
+        id: plan
+        if: steps.admit.outputs.run == 'true'
+        run: printf 'targets=%s\n' "$(make --no-print-directory -s release-check-plan)" >> "$GITHUB_OUTPUT"
+      - name: Explain coalesced slot
+        if: steps.admit.outputs.run == 'false'
+        run: |
+          cat "$RUNNER_TEMP/full-admission/campaign.json" >> "$GITHUB_STEP_SUMMARY"
+          printf '\nThis slot already has an attempt. Use its Actions rerun to retry the same frozen source; no duplicate full campaign started.\n' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.admit.outputs.run == 'false'
+        with:
+          name: daily-result-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/full-admission/campaign.json
+          if-no-files-found: error
+          retention-days: 30
+
+  full-regression:
+    name: full / ${{ matrix.target }}
+    needs: campaign
+    if: needs.campaign.outputs.run == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        target: ${{ fromJSON(needs.campaign.outputs.targets) }}
+    env:
+      UV_PYTHON: '3.12'
+      CHECK_PYTEST_MARKER: not certification
+      BACKEND_CHECK_TEST_ROOTS: tests/unit tests/dependency_complete
+      BACKEND_CHECK_TEST_WORKERS: '2'
+      INTEGRATION_TEST_WORKERS: '2'
+      PYTEST_ADDOPTS: -ra --durations=40 --durations-min=0.05
+      PYTEST_RESUME: ''
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.campaign.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24.19.0"
-          package-manager-cache: false
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
-          version: "0.12.5"
-          enable-cache: false
-      - name: Install native test tools
+          version: '0.12.5'
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install demanded native isolation tools
+        if: matrix.target == 'check-backend-tests' || matrix.target == 'test-backend-integration' || matrix.target == 'test-cross-owner-integration' || matrix.target == 'check-tooling-tests'
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Prepare native test CPU control
         run: |
-          # This disposable runner owns its native systemd user manager.
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
           runner_uid=$(id -u)
           sudo loginctl enable-linger "$runner_uid"
@@ -48,7 +165,107 @@ jobs:
           test -S "/run/user/$runner_uid/bus"
           printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
           printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
-      - name: Materialize committed locks
-        run: make init
-      - name: Verify the complete portable suite
-        run: make release-check
+      - name: Materialize committed backend locks
+        run: uv sync --project backend --frozen --group dev --group quality --group build
+      - name: Materialize frontend consumers
+        if: matrix.target == 'frontend-check' || matrix.target == 'check-generated' || matrix.target == 'check-tooling-tests' || matrix.target == 'release-locks-check'
+        run: make frontend-install
+      - name: Run one complete native owner
+        id: owner
+        env:
+          FULL_TARGET: ${{ matrix.target }}
+          FROZEN_SHA: ${{ needs.campaign.outputs.sha }}
+          FULL_SLOT: ${{ needs.campaign.outputs.slot }}
+        run: |
+          set -uo pipefail
+          source_verified() {
+            test "$(git rev-parse HEAD)" = "$FROZEN_SHA" && git diff --quiet HEAD && [ -z "$(git ls-files --others --exclude-standard)" ]
+          }
+          source_verified || exit 2
+          evidence="$RUNNER_TEMP/full-owner"
+          mkdir -m 700 "$evidence"
+          report_args=()
+          native_runtime=()
+          case "$FULL_TARGET" in
+            check-backend-tests|check-tooling-tests|test-backend-integration|test-cross-owner-integration)
+              report_args=(--requires-native-report --native-report "$evidence/pytest.json")
+              native_runtime=(bash scripts/ci_native_runtime.sh) ;;
+            test-python-projects)
+              report_args=(--project-report "$evidence/projects/summary.json") ;;
+            frontend-check)
+              export OH_GOON_VITEST_JSON_REPORT="$evidence/vitest.json"
+              report_args=(--vitest-report "$evidence/vitest.json") ;;
+            check-backend-quality|check-tooling-quality|architecture|check-generated|release-locks-check) ;;
+            *) printf 'Unclassified full owner: %s\n' "$FULL_TARGET" >&2; exit 2 ;;
+          esac
+          owner_status=0
+          OH_GOON_PYTEST_REPORT_PATH="$evidence/pytest.json" OH_GOON_PYTHON_PROJECT_REPORT_DIRECTORY="$evidence/projects" "${native_runtime[@]}" make "$FULL_TARGET" || owner_status=$?
+          source_status=VERIFIED
+          if ! source_verified; then
+            echo 'Source changed during full owner execution; evidence is not qualified' >&2
+            source_status=CHANGED
+          fi
+          uv run --offline --frozen --no-sync --project backend oh-goon-daily-regression record-owner \
+            --target "$FULL_TARGET" --sha "$FROZEN_SHA" --slot "$FULL_SLOT" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --exit-code "$owner_status" \
+            --source-status "$source_status" \
+            "${report_args[@]}" --output "$evidence/owner.json" || exit 2
+          if [ "$source_status" != VERIFIED ] && [ "$owner_status" = 0 ]; then exit 2; fi
+          exit "$owner_status"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: full-owner-${{ matrix.target }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/full-owner/
+          if-no-files-found: error
+          retention-days: 30
+
+  hosted-python-example:
+    needs: [campaign, full-regression]
+    if: always() && needs.campaign.outputs.run == 'true'
+    uses: ./.github/workflows/python-ci-example.yml
+    with:
+      source_sha: ${{ needs.campaign.outputs.sha }}
+
+  result:
+    name: full-regression-result
+    needs: [campaign, full-regression, hosted-python-example]
+    if: always() && needs.campaign.outputs.run == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: '3.12'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.campaign.outputs.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: '0.12.5'
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --project backend --frozen --no-default-groups
+      - name: Reconcile exact owner results
+        env:
+          FROZEN_SHA: ${{ needs.campaign.outputs.sha }}
+          FULL_SLOT: ${{ needs.campaign.outputs.slot }}
+          FULL_MODE: ${{ needs.campaign.outputs.mode }}
+          FULL_TARGETS: ${{ needs.campaign.outputs.targets }}
+          OWNER_JOB_RESULT: ${{ needs.full-regression.result }}
+          HOSTED_EXAMPLE_RESULT: ${{ needs.hosted-python-example.result }}
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/full-result"
+          uv run --offline --frozen --no-sync --project backend oh-goon-daily-regression aggregate \
+            --repository "$GITHUB_REPOSITORY" --mode "$FULL_MODE" --sha "$FROZEN_SHA" --slot "$FULL_SLOT" \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --targets "$FULL_TARGETS" \
+            --job-result "$OWNER_JOB_RESULT" --hosted-example-result "$HOSTED_EXAMPLE_RESULT" \
+            --output "$RUNNER_TEMP/full-result/campaign.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: daily-result-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/full-result/campaign.json
+          if-no-files-found: error
+          retention-days: 30

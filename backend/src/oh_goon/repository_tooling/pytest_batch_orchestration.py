@@ -745,6 +745,7 @@ def _execution_report(
         "schema": execution_report_contract.execution_report_schema(),
         "status": "PASS" if state.failures == 0 else "FAIL",
         "granularity": args.granularity,
+        "marker": args.marker,
         "batch_timeout_seconds": args.batch_timeout,
         "suite_timeout_seconds": args.suite_timeout,
         "timeout_bisection": not args.no_timeout_bisection,
@@ -764,6 +765,15 @@ def _execution_report(
         "execution_run_identity": plan.run_identity,
         "membership_receipt_path": str(receipt_path),
         "membership_receipt": receipt.as_dict(),
+        "native_collection": {
+            "root": (
+                plan.invocation.cwd.relative_to(plan.invocation.source_root).as_posix()
+                if plan.invocation.cwd.is_relative_to(plan.invocation.source_root)
+                else plan.invocation.cwd.as_posix()
+            ),
+            "discovered": list(plan.discovered_members),
+            "deselected": list(plan.native_deselected),
+        },
         "batches": sorted(state.batch_reports, key=lambda item: int(item["batch_index"])),
     }
     if diagnostics is not None:

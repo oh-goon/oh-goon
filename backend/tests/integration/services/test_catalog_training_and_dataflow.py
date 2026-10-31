@@ -32,9 +32,12 @@ from tests.integration.api.client import authenticated_api_client
 ROOT = Path(__file__).resolve().parents[4]
 FIXTURES = ROOT / "template-certification" / "fixtures"
 IRIS_PROJECT = ROOT / "templates/goons/ml/iris-train"
-pytestmark = pytest.mark.skipif(
-    os.name != "posix" or shutil.which("uv") is None, reason="native POSIX uv required"
-)
+pytestmark = [
+    pytest.mark.daily,
+    pytest.mark.skipif(
+        os.name != "posix" or shutil.which("uv") is None, reason="native POSIX uv required"
+    ),
+]
 
 
 def _native(argv: list[str], repository: Path) -> subprocess.CompletedProcess[str]:

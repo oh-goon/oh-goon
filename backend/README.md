@@ -18,11 +18,11 @@ Hashmarks dependency. Use root `make init` when working with both backend and
 frontend. `make -C .. diagnostic-system-check` is an optional diagnostic after
 initialization; it is not a prerequisite for installing the environment.
 
-Before finishing a backend change, run the complete backend owner check from this directory:
+Before submitting a backend change, run focused owner tests and `make -C .. check`.
+The same relevant fast policy supplies hosted proof; complete backend/integration
+portfolios run daily. Add the smallest actual API/DB/process proof needed for
+the changed boundary, with a named reason for any necessary slow exception.
 
-```bash
-make -C .. backend-check
-```
 
 The backend check includes mypy's strict `oh_goon` package selection from
 `pyproject.toml` before behavior tests. Edited test files receive separately
@@ -119,9 +119,14 @@ frontend/
 ```
 
 Never fix a backend contract bug by hand-editing `../generated/`.
-## When to escalate beyond backend-check
+## When a boundary needs additional proof
 
-Stay backend-local by default. If the public FastAPI/OpenAPI surface changed, run from repository root: `make generate`, `make check-generated`, `make test-integration`, and `make frontend-check`. If repository ownership/layout or its navigation docs changed, also run `make tooling-check` and `make architecture`. See `src/oh_goon/README.md` for the owner-by-owner impact map.
+Stay backend-local by default. Public API/schema changes add regeneration,
+generated freshness and affected consumer checks. Repository ownership/layout
+changes add architecture and focused tooling protection. Unknown scope remains
+unverified; it does not automatically select a complete owner. See the
+[root policy](../AGENTS.md#tests-and-change-impact-checks).
+
 
 
 ## Golden execution loops
@@ -131,7 +136,7 @@ Stay backend-local by default. If the public FastAPI/OpenAPI surface changed, ru
 ```text
 edit the existing owner
 → uv run --offline --frozen --no-sync pytest tests/unit/<owner>/<focused_test>.py
-→ make -C .. backend-check
+→ make -C .. check
 → stop
 ```
 
@@ -142,7 +147,7 @@ If the focused test fails, fix that failure before running the broad backend gat
 ```text
 edit backend API/model authority
 → uv run --offline --frozen --no-sync pytest tests/unit/api/<focused_test>.py
-→ make -C .. backend-check
+→ make -C .. check
 → make -C .. generate
 → make -C .. check-generated
 → make -C .. test-integration
