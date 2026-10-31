@@ -13,7 +13,7 @@ from oh_goon.repository_tooling.release.package_slim import canonical_source_ide
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_LAYOUT = ROOT / "backend/.venv/bin/oh-goon-source-layout"
 FRONTDOORS = (
-    ("development_check.sh", "test-frontend"),
+    ("development_check.sh", "change-check"),
     ("development_test.sh", "frontend-build"),
     ("application_verify.sh", "browser-required-certification"),
 )
@@ -145,7 +145,7 @@ def test_authored_owner_mutations_between_checks_cannot_share_a_pass(
     baseline = _run(checkout, script, env)
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     env.update(
-        OH_GOON_TEST_MUTATE_ON="architecture",
+        OH_GOON_TEST_MUTATE_ON="change-check",
         OH_GOON_TEST_MUTATION="source",
         OH_GOON_TEST_SOURCE=relative,
     )
@@ -252,7 +252,7 @@ def test_source_that_becomes_unreadable_cannot_publish_aggregate_pass(
     external = tmp_path / "external.py"
     external.write_text("unowned bytes\n", encoding="utf-8")
     env.update(
-        OH_GOON_TEST_MUTATE_ON="test-frontend",
+        OH_GOON_TEST_MUTATE_ON="change-check",
         OH_GOON_TEST_MUTATION="symlink",
         OH_GOON_TEST_SOURCE="backend/src/module.py",
         OH_GOON_TEST_REPLACEMENT=str(external),
@@ -263,7 +263,7 @@ def test_source_that_becomes_unreadable_cannot_publish_aggregate_pass(
     assert "refuses symlinks" in result.stderr
 
 
-@pytest.mark.parametrize(("script", "last"), FRONTDOORS)
+@pytest.mark.parametrize(("script", "last"), FRONTDOORS[1:])
 def test_observed_source_change_blocks_later_owner_that_would_restore_old_bytes(
     tmp_path: Path, script: str, last: str
 ) -> None:

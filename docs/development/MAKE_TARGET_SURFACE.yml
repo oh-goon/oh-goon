@@ -35,6 +35,8 @@ noncanonical_make_target_classes:
   - check-frontend
   - check-generated
   - check-tooling
+  - change-check
+  - merge-check
   - check-tooling-quality
   - check-tooling-tests
   - coverage-python
@@ -78,6 +80,7 @@ noncanonical_make_target_classes:
   - scout-retention-checkpoint-certification
   - source-transport-clean
   - test-execution-fast
+  - broad-diagnostic
   - test-frontend
   - test-integration
   - test-backend-integration

@@ -263,7 +263,7 @@ def _check_make_frontdoors(root: Path, path: Path, facts: MakeSemanticFacts) -> 
     runner_bindings = [
         name
         for name in test_chain
-        if facts.variables.get(name) == "bash scripts/development_test.sh"
+        if facts.variables.get(name) == "bash scripts/development_check.sh"
     ]
     if runner_bindings and any(
         facts.variable_operators.get(name) != "=" for name in runner_bindings
@@ -283,7 +283,7 @@ def _check_make_frontdoors(root: Path, path: Path, facts: MakeSemanticFacts) -> 
             "bash",
             "scripts/development_test_resources.sh",
             "bash",
-            "scripts/development_test.sh",
+            "scripts/development_check.sh",
         ),
     ):
         violations.append(

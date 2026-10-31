@@ -63,7 +63,11 @@ uv run --offline --frozen --no-sync pytest tests/unit/<owner>/<focused_test>.py
 uv run --offline --frozen --no-sync ruff check src tests
 ```
 
-Before finishing backend work, run `make -C .. backend-check`. Use `make -C .. architecture` when repository ownership/contracts changed.
+Before submitting backend work, use `make -C .. check` for affected fast proof
+and applicable static/boundary checks. Complete backend/integration portfolios
+run daily; a specific critical regression may require a named additional proof.
+Use architecture when its governed boundary changed. Do not make the complete
+backend gate a per-edit or per-PR prerequisite.
 
 ## Backend-specific safety
 
