@@ -72,15 +72,43 @@ def run_lock_with_owner(
 
 def run_stateless_lock(args: argparse.Namespace) -> int:
     """Skip app DB/Fleet initialization, not the original atomic lock writer."""
-    return run_lock_with_owner(args, _stateless_lock_owner(args))
+
+    def write_selected_lock(
+        plan: Path,
+        *,
+        inputs: dict[str, PlanInputValue] | None,
+        output: Path | None,
+    ) -> ExecutionLock:
+        # Keep selection failures inside the same bounded CLI presentation as
+        # publication failures, while permitting explicit early composition.
+        return prepare_stateless_lock(args)(plan, inputs=inputs, output=output)
+
+    return run_lock_with_owner(args, write_selected_lock)
 
 
-def generate_stateless_lock(args: argparse.Namespace) -> ExecutionLock:
+def generate_stateless_lock(
+    args: argparse.Namespace, *, lock_owner: Callable[..., ExecutionLock] | None = None
+) -> ExecutionLock:
     """Compose the same original lock owner without CLI presentation."""
-    return _stateless_lock_owner(args)(args.plan, inputs=plan_inputs(args), output=args.output)
+    owner = lock_owner if lock_owner is not None else prepare_stateless_lock(args)
+    return owner(args.plan, inputs=plan_inputs(args), output=args.output)
 
 
-def _stateless_lock_owner(args: argparse.Namespace) -> Callable[..., ExecutionLock]:
+def prepare_stateless_lock(args: argparse.Namespace) -> Callable[..., ExecutionLock]:
+    """Resolve native selection once, before registration or lock publication."""
+    selected = bool(
+        args.agent_repository_root
+        or args.agent_skill_root
+        or args.allow_agent_acceptance
+        or args.native_agent
+    )
+    native, git = None, None
+    if args.native_agent is not None:
+        from oh_goon.cli_ai import native_plan_selection
+
+        native, _, git = native_plan_selection(args)
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(), git_service=git)
+
     def canonical_lock(
         plan: Path,
         *,
@@ -95,18 +123,6 @@ def _stateless_lock_owner(args: argparse.Namespace) -> Callable[..., ExecutionLo
                 diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
                 fields=("target.repository",),
             )
-        selected = bool(
-            args.agent_repository_root
-            or args.agent_skill_root
-            or args.allow_agent_acceptance
-            or args.native_agent
-        )
-        native, git = None, None
-        if args.native_agent is not None:
-            from oh_goon.cli_ai import native_plan_selection
-
-            native, _, git = native_plan_selection(args)
-        resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(), git_service=git)
         if not selected:
             return _generate_execution_lock(
                 resolver,

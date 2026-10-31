@@ -104,6 +104,12 @@ reconcile unrelated scope merely to make registration possible. Exercise the
 original idle guard with valid interrupted history: registration refuses while
 preserving that history and the prior League projection.
 
+For native Agent preparation, validate the selected provider arguments before
+explicit target registration. Carry that same resolved native selection into
+the original lock owner after registration; do not reload provider defaults.
+Exercise invalid Pi task/session arguments with an unregistered Git target and
+a valid control, preserving target, source-capture and lock refusal boundaries.
+
 Run readback must use the original Journal/Game Tape projections under observed
 database authority. Normal application startup is effectful: League projection
 reconciliation and interrupted-Run recovery may write durable facts. Exercise a

@@ -276,7 +276,11 @@ def _prepare_registered_workflow(args: argparse.Namespace) -> int:
         prepare_configuration,
         register_prepared_configuration_target,
     )
-    from oh_goon.cli_lock import generate_stateless_lock, run_lock_with_owner
+    from oh_goon.cli_lock import (
+        generate_stateless_lock,
+        prepare_stateless_lock,
+        run_lock_with_owner,
+    )
     from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
     from oh_goon.services.run_configuration import (
         load_run_configuration,
@@ -287,10 +291,11 @@ def _prepare_registered_workflow(args: argparse.Namespace) -> int:
         snapshot = load_run_configuration(args.configuration)
         targets = resolve_run_configuration_targets(snapshot)
         prepare_configuration(args, snapshot=snapshot, targets=targets)
+        lock_owner = prepare_stateless_lock(args)
         if any(not target.registered for target in targets):
             locations = ApplicationRuntime.build_registration_service()
             register_prepared_configuration_target(args, locations)
-        lock = generate_stateless_lock(args)
+        lock = generate_stateless_lock(args, lock_owner=lock_owner)
     except BaseException as exc:
         identity_lost = isinstance(exc, DatabasePathIdentityLost)
         storage_reason = storage_unavailable_reason(exc)
