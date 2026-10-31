@@ -673,6 +673,44 @@ def test_fast_paths_have_no_hidden_complete_gate_or_unconditional_frontend_setup
         assert not full_targets.intersection(command)
 
 
+def test_selected_proof_prepares_the_original_native_python_build_environment() -> None:
+    native = next(
+        command
+        for command in _make_commands(["backend-install"])
+        if command[:2] == ["uv", "sync"]
+    )
+    steps = _workflow()["jobs"]["verify"]["steps"]
+    preparations = [
+        (index, step, shlex.split(step.get("run", "")))
+        for index, step in enumerate(steps)
+        if shlex.split(step.get("run", ""))[:2] == ["uv", "sync"]
+    ]
+    ((index, preparation, hosted),) = preparations
+    native_groups = {
+        native[position + 1]
+        for position, value in enumerate(native)
+        if value == "--group"
+    }
+    hosted_groups = {
+        hosted[position + 1]
+        for position, value in enumerate(hosted)
+        if value == "--group"
+    }
+    assert "build" in native_groups and hosted_groups == native_groups
+    assert (
+        hosted[hosted.index("--project") + 1] == native[native.index("--project") + 1]
+    )
+    assert "--frozen" in hosted and "if" not in preparation
+    assert index < next(
+        position for position, step in enumerate(steps) if step.get("id") == "selection"
+    )
+    assert index < next(
+        position
+        for position, step in enumerate(steps)
+        if "--execute" in shlex.split(step.get("run", ""))
+    )
+
+
 @pytest.mark.process
 @pytest.mark.parametrize(
     ("mode", "admission_status"),
