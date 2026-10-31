@@ -31,6 +31,13 @@ instructions, workflow/result policy and selector changes require the named
 **verification-policy protection** obligation. Shared fixture or dependency
 uncertainty cannot be excused by that generic policy proof.
 
+Merge-mode plan admission retains diagnostic JSON but refuses unresolved scope
+or missing required behavioral proof before publishing toolchain-selection outputs
+or preparing frontend/native-test capabilities. Focused plan inspection remains
+available for incomplete selections. Execution applies the same selection guard
+after checking the retained plan's current source; early refusal does not establish
+verification or relax the independent trusted-base gate.
+
 `daily` marks expensive ordinary journeys assigned to daily execution. It is
 separate from `slow` (exhaustive variants), `process`, `scale` and `certification`.
 Normal selected pytest excludes `certification`, `slow` and `daily`; a necessary

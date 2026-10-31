@@ -37,7 +37,10 @@ def test_private_json_transport_publishes_and_reopens_real_files(
     assert list(scratch.iterdir()) == [target]
 
 
-def test_plan_cli_publishes_after_actual_source_admission(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mode", ["focused", "merge"])
+def test_plan_cli_publishes_after_actual_source_admission(
+    tmp_path: Path, mode: str
+) -> None:
     source = tmp_path / "source"
     source.mkdir()
     owner._git(source, "init", "-q")
@@ -61,7 +64,18 @@ def test_plan_cli_publishes_after_actual_source_admission(tmp_path: Path) -> Non
     scratch.mkdir(mode=0o700)
     target = scratch / "plan.json"
     assert (
-        owner.main(["--root", str(source), "--base", "HEAD", "--plan", str(target)])
+        owner.main(
+            [
+                "--root",
+                str(source),
+                "--base",
+                "HEAD",
+                "--mode",
+                mode,
+                "--plan",
+                str(target),
+            ]
+        )
         == 0
     )
     plan = owner.ChangeVerificationPlan.model_validate_json(target.read_bytes())
@@ -227,6 +241,116 @@ def test_unproven_selection_refuses_merge_before_commands(
     monkeypatch.setattr(owner, "_commands", forbidden)
     with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
         owner.execute_change(repository, plan, mode="merge", workers=1)
+
+
+@pytest.mark.parametrize("mode", ["focused", "merge"])
+@pytest.mark.parametrize("cause", ["unproven-scope", "missing-behavior"])
+@pytest.mark.parametrize("existing_outputs", [False, True])
+def test_plan_cli_rejects_ineligible_merge_before_capability_outputs(
+    repository: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+    cause: str,
+    existing_outputs: bool,
+) -> None:
+    (repository / "behavior.py").write_text("answer = 1\n", encoding="utf-8")
+    valid = owner.admit_change(
+        repository, base="HEAD", nominator=lambda _root, paths: _evidence(paths)
+    )
+    assert not valid.unverified and valid.pytest
+    plan = valid.model_copy(
+        update=(
+            {"unverified": ("NO_QUALIFIED_VERIFIER:behavior.py",)}
+            if cause == "unproven-scope"
+            else {"pytest": (), "frontend": ()}
+        )
+    )
+    admissions: list[Path] = []
+
+    def admitted(root: Path, **_kwargs: Any) -> owner.ChangeVerificationPlan:
+        admissions.append(root)
+        return plan
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("plan inspection must never execute checks")
+
+    monkeypatch.setattr(owner, "admit_change", admitted)
+    monkeypatch.setattr(owner, "execute_change", forbidden)
+    control = tmp_path_factory.mktemp("merge-plan-control")
+    target, outputs = control / "plan.json", control / "outputs"
+    previous = "existing=value\n" if existing_outputs else ""
+    if existing_outputs:
+        outputs.write_text(previous, encoding="utf-8")
+    result = owner.main(
+        [
+            "--root",
+            str(repository),
+            "--base",
+            "HEAD",
+            "--mode",
+            mode,
+            "--plan",
+            str(target),
+            "--github-output",
+            str(outputs),
+        ]
+    )
+    assert admissions == [repository]
+    assert owner.ChangeVerificationPlan.model_validate_json(target.read_bytes()) == plan
+    if mode == "merge":
+        assert result == 2
+        assert "SELECTION_UNVERIFIED" in capsys.readouterr().err
+        assert outputs.exists() == existing_outputs
+        if existing_outputs:
+            assert outputs.read_text(encoding="utf-8") == previous
+    else:
+        assert result == 0
+        assert outputs.read_text(encoding="utf-8") == (
+            previous + f"frontend=false\npytest={'true' if plan.pytest else 'false'}\n"
+        )
+
+
+@pytest.mark.parametrize("relative", ["behavior.py", "generated/frontend/models.ts"])
+def test_merge_plan_cli_keeps_qualified_behavior_and_generated_contract_paths(
+    repository: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: str,
+) -> None:
+    path = repository / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("answer = 1\n", encoding="utf-8")
+    plan = owner.admit_change(
+        repository, base="HEAD", nominator=lambda _root, paths: _evidence(paths)
+    )
+    assert not plan.unverified
+    assert bool(plan.pytest) == (relative == "behavior.py")
+    monkeypatch.setattr(owner, "admit_change", lambda *_args, **_kwargs: plan)
+    control = tmp_path_factory.mktemp("qualified-plan-control")
+    outputs = control / "outputs"
+    assert (
+        owner.main(
+            [
+                "--root",
+                str(repository),
+                "--base",
+                "HEAD",
+                "--mode",
+                "merge",
+                "--plan",
+                str(control / "plan.json"),
+                "--github-output",
+                str(outputs),
+            ]
+        )
+        == 0
+    )
+    assert outputs.read_text(encoding="utf-8") == (
+        f"frontend={'true' if 'frontend' in plan.static else 'false'}\n"
+        f"pytest={'true' if plan.pytest else 'false'}\n"
+    )
 
 
 def test_source_change_invalidates_admitted_plan_before_work(

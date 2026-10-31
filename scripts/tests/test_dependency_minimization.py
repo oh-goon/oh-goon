@@ -87,7 +87,14 @@ def test_normal_backend_install_delegates_one_materialization_operation_to_nativ
         assert "oh-goon-test-batches --qualified" in block
         assert "--group quality" not in block
 
-    for target in ("test-integration", "test-real-lifecycle"):
+    integration_targets = (
+        makefile.split("test-integration:", 1)[1].splitlines()[0].split()
+    )
+    assert integration_targets == [
+        "test-backend-integration",
+        "test-cross-owner-integration",
+    ]
+    for target in (*integration_targets, "test-real-lifecycle"):
         block = makefile.split(f"{target}:", 1)[1].split("\n\n", 1)[0]
         assert "oh-goon-test-batches --qualified" in block
         assert ".venv/bin/python -m pytest" not in block

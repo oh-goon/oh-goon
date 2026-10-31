@@ -65,6 +65,7 @@ def test_execution_report_projection_follows_schema_owner_mutation(
     )
     args = argparse.Namespace(
         granularity="files",
+        marker="not certification and not daily",
         batch_timeout=10,
         suite_timeout=20,
         no_timeout_bisection=False,
@@ -75,6 +76,9 @@ def test_execution_report_projection_follows_schema_owner_mutation(
     plan = SimpleNamespace(
         reusable_members=frozenset(),
         selected_members=("a.py",),
+        invocation=SimpleNamespace(cwd=ROOT / "backend", source_root=ROOT),
+        discovered_members=("a.py::test_fast", "a.py::test_daily"),
+        native_deselected=("a.py::test_daily",),
         resume_context=SimpleNamespace(
             source_identity="sha256:source",
             test_plan_identity="sha256:plan",
@@ -103,6 +107,12 @@ def test_execution_report_projection_follows_schema_owner_mutation(
     )
 
     assert payload["schema"] == f"{FAMILY}/v7"
+    assert payload["marker"] == "not certification and not daily"
+    assert payload["native_collection"] == {
+        "root": "backend",
+        "discovered": ["a.py::test_fast", "a.py::test_daily"],
+        "deselected": ["a.py::test_daily"],
+    }
     assert "diagnostics" not in payload
     diagnostics = {
         "resource_budget": {"requested_workers": 4, "effective_workers": 2},
