@@ -43,6 +43,11 @@ def is_verification_policy_path(path: str) -> bool:
             "docs/development/TEST_SETUP_ISOLATION_QA.md",
             "docs/development/HASHMARKS_EXECUTION_LAYER.md",
             "docs/development/MAKE_TARGET_SURFACE.yml",
+            "backend/README.md",
+            "backend/src/oh_goon/README.md",
+            "scripts/README.md",
+            "frontend/README.md",
+            "frontend/src/README.md",
         }
         or path.startswith("backend/src/oh_goon/integrations/hashmarks/")
     )
@@ -275,12 +280,14 @@ def validate_merge_proof(
             executed_files.update(frontend_files)
         if row["owner"] != "Native pytest":
             continue
-        executed_files.update(
-            require_native_pytest_pass(
-                row.get("native_report", {}), expected_source=plan.get("source_identity")
-            )
+        pytest_files = require_native_pytest_pass(
+            row.get("native_report", {}), expected_source=plan.get("source_identity")
         )
-
+        if policy_change and not set(VERIFICATION_POLICY_TESTS) <= pytest_files:
+            raise ValueError("Required verification-policy tests have no execution proof")
+        if pytest_files != {path.split("::", 1)[0] for path in plan.get("pytest", [])}:
+            raise ValueError("Admitted pytest files differ from native execution proof")
+        executed_files.update(pytest_files)
     changed_tests = {
         observation["changed_path"]
         for observation in plan.get("evidence", {}).get("observations", [])

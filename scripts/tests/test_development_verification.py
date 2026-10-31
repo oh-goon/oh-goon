@@ -15,6 +15,9 @@ from oh_goon.integrations.hashmarks.development_verification import (
 from oh_goon.repository_tooling import development_verification as owner
 from oh_goon.engine.command import run_command
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
+from oh_goon.repository_tooling.verification_gate_control import (
+    VERIFICATION_POLICY_TESTS,
+)
 
 
 def test_private_json_transport_publishes_and_reopens_real_files(
@@ -412,3 +415,94 @@ def test_execution_uses_original_native_batch_membership_without_full_targets() 
     receipt = result["outcomes"][0]["native_report"]["membership_receipt"]
     assert receipt["selected"] == receipt["passed"]
     assert not receipt["non_passed"]
+
+
+@pytest.mark.parametrize(
+    ("relative", "expected_static"),
+    (
+        ("backend/README.md", {"architecture", "python"}),
+        ("backend/src/oh_goon/README.md", {"architecture", "python"}),
+        ("scripts/README.md", {"architecture"}),
+        ("frontend/README.md", {"architecture", "frontend"}),
+        ("frontend/src/README.md", {"architecture", "frontend"}),
+    ),
+)
+def test_owning_readme_uses_required_policy_proof_with_real_source_and_nominations(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: str,
+    expected_static: set[str],
+) -> None:
+    monkeypatch.setattr(owner, "canonical_source_identity", canonical_source_identity)
+    readme = repository / relative
+    readme.parent.mkdir(parents=True, exist_ok=True)
+    readme.write_text("Original contributor command guidance.\n", encoding="utf-8")
+    for selected in VERIFICATION_POLICY_TESTS:
+        test = repository / selected
+        test.parent.mkdir(parents=True, exist_ok=True)
+        test.write_text(
+            "def test_policy_fixture() -> None:\n    assert True\n", encoding="utf-8"
+        )
+    owner._git(repository, "add", ".")
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "governing source fixture",
+    )
+    readme.write_text("Updated contributor command guidance.\n", encoding="utf-8")
+    actual = nominate_changed_verification(
+        repository, (), required=VERIFICATION_POLICY_TESTS
+    )
+
+    def nominate(
+        _root: Path, paths: tuple[str, ...], *, required: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
+        assert paths == (relative,)
+        assert required == VERIFICATION_POLICY_TESTS
+        result = copy.deepcopy(actual)
+        result["observations"] = [
+            {"changed_path": relative, "state": "UNAVAILABLE", "stale": False}
+        ]
+        return result
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+    assert plan.changed_paths == (relative,)
+    assert plan.source_identity == canonical_source_identity(repository)
+    assert plan.behavioral_status == "REQUIRED"
+    assert plan.policy_status == "REVIEW_REQUIRED"
+    assert plan.obligations == ("verification-policy protection",)
+    assert set(plan.pytest) == set(VERIFICATION_POLICY_TESTS)
+    assert set(plan.static) == expected_static
+    assert not plan.unverified
+    assert plan.evidence["owner_coverage"] == "not-claimed"
+
+    def missing(
+        _root: Path, paths: tuple[str, ...], *, required: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
+        result = nominate(_root, paths, required=required)
+        result["required_checks"].pop()
+        return result
+
+    assert (
+        "VERIFICATION_POLICY_PROTECTION_UNAVAILABLE"
+        in owner.admit_change(repository, base="HEAD", nominator=missing).unverified
+    )
+
+    def stale(
+        _root: Path, paths: tuple[str, ...], *, required: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
+        result = nominate(_root, paths, required=required)
+        result["observations"][0]["stale"] = True
+        return result
+
+    assert (
+        f"NO_QUALIFIED_VERIFIER:{relative}"
+        in owner.admit_change(repository, base="HEAD", nominator=stale).unverified
+    )
