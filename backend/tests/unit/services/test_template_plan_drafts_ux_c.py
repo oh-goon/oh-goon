@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -336,6 +337,156 @@ def test_draft_agent_defaults_follow_compiled_harness_without_fabricating_requir
     assert "target.repository" in result.required_fields
     with pytest.raises(FleetPlanInvalid):
         load_run_configuration(result.path)
+
+
+@pytest.mark.parametrize("kind", ["plan", "goon"])
+@pytest.mark.parametrize("acceptance", [None, "native"], ids=["compiled-default", "caller-choice"])
+def test_complete_native_draft_preserves_one_acceptance_selection_through_preparation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: Literal["plan", "goon"],
+    acceptance: str | None,
+) -> None:
+    import argparse
+
+    import yaml
+
+    from oh_goon.cli_configuration import prepare_configuration
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+    from oh_goon.services.run_configuration_inspection import inspect_run_configuration
+    from oh_goon.services.template_plan_drafts import initialize_run_configuration
+
+    repository = tmp_path / "target"
+    repository.mkdir()
+    league = tmp_path / "league.yml"
+    league.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
+    initial_league = league.read_bytes()
+    database = tmp_path / "state.sqlite"
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(database))
+    inputs = {"repo": "local:target", "skill": "local:skills/review"}
+    if acceptance is not None:
+        inputs["acceptance"] = acceptance
+    result = initialize_run_configuration(
+        "agents/native-review",
+        tmp_path / "workflow",
+        kind=kind,
+        repositories=(repository,),
+        inputs=inputs,
+        draft=True,
+    )
+    selected = yaml.safe_load(result.path.read_text())
+    expected = acceptance or "agentic-review"
+    assert selected["agent"]["acceptance"] == expected
+    assert "acceptance" not in selected["inputs"]
+    assert result.required_fields == ()
+    snapshot = load_run_configuration(result.path)
+    assert snapshot.inputs["acceptance"] == expected
+    args = argparse.Namespace(
+        command="workflow",
+        workflow_command="prepare",
+        configuration=result.path,
+        register_target=False,
+    )
+    prepare_configuration(args, snapshot=snapshot)
+    report = inspect_run_configuration(
+        args._run_configuration, FleetPlanResolver(), source_graph=args._source_graph
+    )
+    assert args._run_configuration.inputs["acceptance"] == expected
+    assert report["status"] == "inputs-valid" and report["diagnostic"] is None
+    assert report["proof"]["admission"] == "not-started"
+    assert league.read_bytes() == initial_league
+    assert not database.exists() and not result.path.with_name("goon.lock").exists()
+
+
+@pytest.mark.parametrize(
+    "native_invalid", (False, True), ids=("ready-control", "owned-native-argv")
+)
+def test_ready_initializer_rejects_native_arguments_before_registration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    native_invalid: bool,
+) -> None:
+    from unittest.mock import Mock
+
+    from oh_goon import cli_ai
+    from oh_goon.application import ApplicationRuntime
+    from oh_goon.cli import main
+    from oh_goon.engine.git import GitService
+    from oh_goon.runtime.agent_providers import load_agent_providers
+    from oh_goon.runtime.league_folders import LeagueFolderStore
+    from oh_goon.services.agent_authoring_sources import capture_agent_sources
+    from oh_goon.services.execution_lock_persistence import (
+        load_execution_lock,
+        write_execution_lock,
+    )
+
+    repository = tmp_path / "target"
+    repository.mkdir()
+    assert GitService().run("init", "-q", str(repository)).returncode == 0
+    league = tmp_path / "league.yml"
+    database = tmp_path / "state.sqlite"
+    providers = tmp_path / "providers.json"
+    providers.write_text(
+        json.dumps(
+            {
+                "native_agents": {
+                    "codex": {
+                        "executable": str(tmp_path / "unavailable-codex"),
+                        "arguments": ["--remote=PRIVATE_NATIVE_CONTROL"],
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(database))
+    monkeypatch.setenv("OH_GOON_PROVIDERS_FILE", str(providers))
+    build_registration = Mock(wraps=ApplicationRuntime.build_registration_service)
+    load = Mock(wraps=load_agent_providers)
+    capture = Mock(wraps=capture_agent_sources)
+    publish = Mock(wraps=write_execution_lock)
+    monkeypatch.setattr(ApplicationRuntime, "build_registration_service", build_registration)
+    monkeypatch.setattr(cli_ai, "load_agent_providers", load)
+    monkeypatch.setattr("oh_goon.services.agent_authoring_sources.capture_agent_sources", capture)
+    monkeypatch.setattr("oh_goon.services.execution_lock_persistence.write_execution_lock", publish)
+    output = tmp_path / "workflow"
+    arguments = [
+        "init",
+        "--template",
+        "agents/native-review" if native_invalid else "python/quality",
+        "--repository",
+        str(repository),
+        "--output",
+        str(output),
+        "--no-input",
+        "--json",
+    ]
+    if native_invalid:
+        arguments += ["--input", "repo=local:target", "--input", "skill=local:skills/review"]
+    assert main(arguments) == (2 if native_invalid else 0)
+    rendered = capsys.readouterr()
+    report = json.loads(rendered.out)
+    assert "PRIVATE_NATIVE_CONTROL" not in rendered.out + rendered.err
+    if native_invalid:
+        load.assert_called_once_with(providers)
+        build_registration.assert_not_called()
+        capture.assert_not_called()
+        publish.assert_not_called()
+        assert report["publication"] == "not_published"
+        assert "target_registration" not in report
+        assert not league.exists() and not database.exists() and not output.exists()
+    else:
+        load.assert_not_called()
+        build_registration.assert_called_once_with()
+        publish.assert_called_once()
+        assert report["status"] == "ready"
+        assert report["target_registration"]["status"] == "registered"
+        assert LeagueFolderStore(league).list() == (repository,)
+        assert database.exists()
+        assert load_execution_lock(output / "goon.lock").digest == report["execution_digest"]
+    assert not list(tmp_path.glob(".oh-goon-init-*"))
 
 
 def test_agent_draft_copies_exact_bundled_companions_and_missing_bundle_refuses(

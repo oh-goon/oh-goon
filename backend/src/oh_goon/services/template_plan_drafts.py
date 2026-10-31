@@ -228,13 +228,16 @@ def initialize_run_configuration(
                 companions.pop(".goonskills.yml")
             files.update(companions)
         if graph.has_agent_source_contract():
-            acceptance = next(
-                (
-                    item.definition.default
-                    for item in interface
-                    if item.definition.name == "acceptance"
+            acceptance = values.pop(
+                "acceptance",
+                next(
+                    (
+                        item.definition.default
+                        for item in interface
+                        if item.definition.name == "acceptance"
+                    ),
+                    None,
                 ),
-                None,
             )
             selection = (
                 {"implementation": DEFAULT_NATIVE_AGENT, "profile": DEFAULT_NATIVE_AGENT_PROFILE}

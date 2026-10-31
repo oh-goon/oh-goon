@@ -94,7 +94,7 @@ def _run_initialization(args: argparse.Namespace) -> int:
         prepare_configuration,
         register_prepared_configuration_target,
     )
-    from oh_goon.cli_lock import generate_stateless_lock
+    from oh_goon.cli_lock import generate_stateless_lock, prepare_stateless_lock
     from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
     from oh_goon.integrations.exact_file_write import ExactPublicationDurabilityError
     from oh_goon.runtime.database import DatabasePathIdentityLost
@@ -121,10 +121,11 @@ def _run_initialization(args: argparse.Namespace) -> int:
             as_json=args.as_json,
         )
         prepare_configuration(lock_args, target_root=final, snapshot=snapshot, source_graph=graph)
+        lock_owner = prepare_stateless_lock(lock_args)
         if not lock_args._run_configuration.registered:
             locations = ApplicationRuntime.build_registration_service()
             register_prepared_configuration_target(lock_args, locations, target_root=final)
-        lock = generate_stateless_lock(lock_args)
+        lock = generate_stateless_lock(lock_args, lock_owner=lock_owner)
         _verify_initialized_configuration(lock_args)
         return lock.digest
 

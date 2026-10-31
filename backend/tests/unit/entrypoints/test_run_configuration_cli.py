@@ -594,7 +594,7 @@ def test_plural_initialization_retains_all_registration_receipts_after_lock_fail
 
     roots, preferences, output, arguments = fresh_initialization_targets
 
-    def fail_lock(_args):
+    def fail_lock(_args, **_kwargs):
         raise OSError("Canonical lock publication refused")
 
     monkeypatch.setattr("oh_goon.cli_lock.generate_stateless_lock", fail_lock)

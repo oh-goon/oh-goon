@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import oh_goon.cli_run_resources as resource_cli
+from oh_goon.cli_parser import build_parser
 from oh_goon.cli_run_resources import (
     CapturedRunResourceHandoff,
     PreparedRunResourceHandoff,
@@ -38,7 +39,11 @@ from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.journal import Journal, RunResourceObservationContext
 from oh_goon.services.run_configuration import RunConfigurationSnapshot, load_run_configuration
 from tests.factories.journal import admit_run, start_run, terminalize_run
-from tests.factories.run_resources import run_resource_admission, run_resource_envelope
+from tests.factories.run_resources import (
+    run_resource_admission,
+    run_resource_envelope,
+    run_resource_observation,
+)
 
 
 def _invocation(
@@ -90,6 +95,86 @@ def _transferred_header(prepared: PreparedRunResourceHandoff) -> tuple[str, int]
     descriptor = os.dup(prepared.descriptor)
     header["descriptor"] = descriptor
     return json.dumps(header), descriptor
+
+
+@pytest.mark.skipif(
+    not atomic_execution_bytes_supported()
+    or not hasattr(os, "pidfd_open")
+    or not hasattr(signal, "pidfd_send_signal"),
+    reason="Linux sealed transport and pidfd unavailable",
+)
+@pytest.mark.parametrize(
+    "selection",
+    (
+        "file",
+        "directory",
+        "terminated-directory",
+        "dash-directory",
+        "dash-file",
+        "root-directory",
+        "root-and-run-terminators",
+    ),
+)
+def test_budgeted_child_preserves_public_argument_framing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str
+) -> None:
+    workflow = tmp_path / "--workflow"
+    workflow.mkdir()
+    snapshot, state, scope = _invocation(workflow)
+    monkeypatch.chdir(tmp_path)
+    selected = {
+        "file": str(snapshot.path),
+        "directory": str(workflow),
+        "terminated-directory": str(workflow),
+        "dash-directory": "--workflow",
+        "dash-file": "--workflow/run.yml",
+        "root-directory": str(workflow),
+        "root-and-run-terminators": "--workflow",
+    }[selection]
+    original = (
+        ["run", selected, "--json"]
+        if selection in {"file", "directory", "root-directory"}
+        else ["run", "--json", "--", selected]
+    )
+    if selection in {"root-directory", "root-and-run-terminators"}:
+        original.insert(0, "--")
+    parser = build_parser()
+    args = parser.parse_args(original)
+    assert args.command == "run"
+    monkeypatch.setattr(resource_cli, "prepare_run_resource_scope", lambda *args: scope)
+    monkeypatch.setattr(resource_cli.ResolvedCliState, "capture", lambda environment: state)
+    monkeypatch.setattr(
+        resource_cli._RunResourceParent,
+        "finish",
+        lambda parent: run_resource_observation(run_resource_envelope(scope.fleet_run_id)),
+    )
+    boundary = RuntimeError("Stop at the native command boundary")
+
+    def observe_command(*command: str, **options: object) -> None:
+        entrypoint = command.index("oh_goon")
+        assert command[entrypoint - 3 : entrypoint] == (sys.executable, "-I", "-m")
+        child = command[entrypoint + 1 :]
+        restored = parser.parse_args(child)
+        assert restored.configuration == args.configuration
+        assert restored.as_json == args.as_json
+        assert restored.fleet_run_id is None
+        assert restored._resource_handoff is not None
+        descriptor = json.loads(restored._resource_handoff)["descriptor"]
+        passed_descriptors = options["pass_fds"]
+        assert isinstance(passed_descriptors, tuple)
+        assert descriptor in passed_descriptors
+        os.fstat(descriptor)
+        # Caller tokens retain their order and spelling, including their terminator.
+        handoff = child.index("--_resource-handoff")
+        assert (*child[:handoff], *child[handoff + 2 :]) == tuple(original)
+        raise boundary
+
+    monkeypatch.setattr(resource_cli, "run_command", observe_command)
+    with pytest.raises(RuntimeError) as raised:
+        resource_cli.run_with_resource_envelope(args, snapshot, original)
+    assert raised.value is boundary
+    assert not state.database.exists()
+    assert not state.league_preferences.exists()
 
 
 @pytest.mark.skipif(not atomic_execution_bytes_supported(), reason="Linux sealed FD unavailable")

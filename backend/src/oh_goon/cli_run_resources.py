@@ -501,6 +501,8 @@ def run_with_resource_envelope(
     resources = snapshot.selection.resources
     if resources is None or args.fleet_run_id is not None:
         raise FleetPlanInvalid("Whole-Run resources require a fresh ordinary waited CLI Run")
+    # The original parser selected the literal Run command, possibly after a root '--'.
+    handoff_position = argv.index("run") + 1
     environment = dict(os.environ)
     result = None
     observation = None
@@ -532,9 +534,11 @@ def run_with_resource_envelope(
                     "-I",
                     "-m",
                     "oh_goon",
-                    *argv,
+                    *argv[:handoff_position],
+                    # Keep adapter metadata before the Run parser's optional '--'.
                     "--_resource-handoff",
                     handoff.header,
+                    *argv[handoff_position:],
                 ),
             )
             primary: BaseException | None = None

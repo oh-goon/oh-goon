@@ -83,6 +83,12 @@ Report partial durable effects accurately. Typed text and explicit null values
 must reach the compiler unchanged; zero/false/nullable/default/choice cases need
 native proof. JSON, non-TTY, EOF and `--no-input` cannot wait for required input.
 
+For Agent drafts, project the compiler-bound acceptance choice into
+`agent.acceptance` exactly once, including an explicit caller override. Complete
+public inputs must not leave a duplicate `inputs.acceptance` that makes the v2
+selection unloadable. Reload the generated selection through its original owner;
+draft publication still grants no registration or Run effects.
+
 Default inspection/validation/basic diagnosis are read-only and network-free.
 Preparation may perform only its explicitly selected registration/acquisition and
 lock effects. Running never registers, refreshes moving refs, repairs authority
@@ -98,14 +104,20 @@ append through the original database owner while `runs` remains observational.
 Protocol tests do not establish physical scope enforcement; unavailable native
 budget, cancellation and group-OOM cells remain unqualified.
 
+Preserve native CLI argument framing through that envelope. An explicit `--`
+terminator and a dash-leading workflow selector must reach the original child
+parser unchanged. Adapter-owned handoff options precede the caller's terminator;
+file/directory authority still comes from the same sealed capture.
+
 Initialization and explicit preparation registration compose only the original
 LocalState/LocationService authority. They must not recover interrupted Runs or
 reconcile unrelated scope merely to make registration possible. Exercise the
 original idle guard with valid interrupted history: registration refuses while
 preserving that history and the prior League projection.
 
-For native Agent preparation, validate the selected provider arguments before
-explicit target registration. Carry that same resolved native selection into
+For native Agent initialization and preparation, validate the selected provider
+arguments before explicit target registration. Carry that same resolved native
+selection into
 the original lock owner after registration; do not reload provider defaults.
 Exercise invalid Pi task/session arguments with an unregistered Git target and
 a valid control, preserving target, source-capture and lock refusal boundaries.
@@ -129,6 +141,10 @@ metadata, and normal application startup retains its recovery authority.
 Trace public and internal CLI callers, generated authoring, examples, CI, Shared
 Plans, Lineups, Schedules and frontend copy commands before retiring an old form.
 Preserve meaningful refusal and historical readback tests while migrating callers.
+For Shared Plans, execute a saved Plan over a saved Lineup containing distinct
+repository shapes, then reopen the original Run through fresh CLI/API/Game Tape
+readers. Exercise a saved Schedule occurrence through the original scheduler;
+mocked submission or preview alone does not prove these execution boundaries.
 Begin with the existing run-configuration entrypoint tests, then native first-use
 journeys and the applicable owner checks. Record observed outcomes in the CLI A
 issues and HUG-69; this guide is not an implementation-status or PASS registry.
