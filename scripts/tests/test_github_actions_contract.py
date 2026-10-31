@@ -675,6 +675,117 @@ def test_fast_paths_have_no_hidden_complete_gate_or_unconditional_frontend_setup
 
 @pytest.mark.process
 @pytest.mark.parametrize(
+    ("mode", "admission_status"),
+    [("focused", 0), ("merge", 0), ("merge", 2), ("merge", 17), ("merge", 124)],
+)
+def test_candidate_admission_passes_mode_and_stops_setup_after_rejection(
+    tmp_path: Path, mode: str, admission_status: int
+) -> None:
+    bash = shutil.which("bash", path=os.defpath)
+    git = shutil.which("git", path=os.defpath)
+    assert bash is not None and git is not None
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+
+    def native_git(*arguments: str) -> str:
+        return subprocess.run(
+            [git, "-C", str(checkout), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+
+    native_git("init", "-q")
+    readme = checkout / "README.md"
+    for text in ("Original source.\n", "Candidate source.\n"):
+        readme.write_text(text, encoding="utf-8")
+        native_git("add", "README.md")
+        native_git(
+            "-c",
+            "user.name=Verifier",
+            "-c",
+            "user.email=verifier@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "source fixture",
+        )
+    base = native_git("rev-parse", "HEAD^")
+    candidate = native_git("rev-parse", "HEAD")
+    scripts = checkout / "scripts"
+    scripts.mkdir()
+    (scripts / "development_test_resources.sh").write_text(
+        '#!/bin/sh\nexec "$@"\n', encoding="utf-8"
+    )
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    uv = binaries / "uv"
+    uv.write_text(
+        '#!/bin/sh\nprintf "%s\\0" "$@" > "$ADMISSION_ARGUMENTS"\n'
+        'exit "$ADMISSION_STATUS"\n',
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir(mode=0o700)
+    recorded, environment_file = tmp_path / "arguments", tmp_path / "github-env"
+    post_admission = tmp_path / "post-admission-setup"
+    proof = _workflow()["jobs"]["verify"]
+    step = next(value for value in proof["steps"] if value.get("id") == "selection")
+    assert "if" not in step and "continue-on-error" not in step
+    # A later setup effect must not start after this real admission step fails.
+    command = step["run"] + '\nprintf prepared > "$POST_ADMISSION_SETUP"\n'
+    requested_head = "$(touch injected); `touch injected`"
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", command],
+        cwd=checkout,
+        env={
+            "PATH": str(binaries) + os.pathsep + os.defpath,
+            "RUNNER_TEMP": str(runner_temp),
+            "GITHUB_ENV": str(environment_file),
+            "GITHUB_OUTPUT": str(tmp_path / "github-output"),
+            "BASE_SHA": base,
+            "GITHUB_SHA": candidate,
+            "REQUESTED_HEAD": requested_head,
+            "VERIFY_MODE": mode,
+            "ADMISSION_ARGUMENTS": str(recorded),
+            "ADMISSION_STATUS": str(admission_status),
+            "POST_ADMISSION_SETUP": str(post_admission),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == admission_status, result.stderr
+    assert post_admission.exists() is (admission_status == 0)
+    assert not (checkout / "injected").exists()
+    arguments = recorded.read_bytes().decode().split("\0")[:-1]
+    assert arguments[:7] == [
+        "run",
+        "--offline",
+        "--frozen",
+        "--no-sync",
+        "--project",
+        "backend",
+        "oh-goon-verify-change",
+    ]
+    assert "--mode" in arguments, "admission must receive the requested proof mode"
+    for flag, value in (
+        ("--base", base),
+        ("--candidate", candidate),
+        ("--head", requested_head),
+        ("--mode", mode),
+    ):
+        assert arguments[arguments.index(flag) + 1] == value
+    control = Path(environment_file.read_text().strip().removeprefix("CONTROL_DIR="))
+    assert control.parent == runner_temp and control.is_dir()
+    assert arguments[arguments.index("--plan") + 1] == str(control / "plan.json")
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
     "result", ["success", "failure", "cancelled", "skipped", "", "neutral"]
 )
 def test_required_aggregate_rejects_every_non_success_dependency(
