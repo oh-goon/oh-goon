@@ -1,3 +1,5 @@
+import { lstatSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 
 import { defineConfig } from "vitest/config";
@@ -9,6 +11,36 @@ const domBackedTypeScriptTests = [
   "src/app/pages/runReviewState.test.ts",
 ];
 
+const nativeJsonReport = process.env.OH_GOON_VITEST_JSON_REPORT;
+delete process.env.OH_GOON_VITEST_JSON_REPORT;
+if (nativeJsonReport !== undefined) {
+  const checkout = fileURLToPath(new URL("..", import.meta.url));
+  const parent = dirname(nativeJsonReport);
+  const fromCheckout = relative(checkout, nativeJsonReport);
+  if (
+    !isAbsolute(nativeJsonReport) ||
+    resolve(nativeJsonReport) !== nativeJsonReport ||
+    (fromCheckout !== ".." && !fromCheckout.startsWith(`..${sep}`) && !isAbsolute(fromCheckout)) ||
+    realpathSync(parent) !== parent
+  ) {
+    throw new Error("Vitest JSON reports require a canonical absolute path outside source");
+  }
+  const metadata = lstatSync(parent);
+  if (
+    !metadata.isDirectory() ||
+    (metadata.mode & 0o077) !== 0 ||
+    (typeof process.getuid === "function" && metadata.uid !== process.getuid())
+  ) {
+    throw new Error("Vitest JSON report directory must be private and caller owned");
+  }
+  try {
+    lstatSync(nativeJsonReport);
+    throw new Error("Vitest JSON report must use a fresh destination");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -18,6 +50,9 @@ export default defineConfig({
     },
   },
   test: {
+    ...(nativeJsonReport === undefined
+      ? {}
+      : { reporters: ["default", "json"], outputFile: { json: nativeJsonReport } }),
     globals: true,
     exclude: ["e2e/**/*.spec.ts", "e2e-runtime/**", "node_modules/**", "dist/**"],
     clearMocks: true,

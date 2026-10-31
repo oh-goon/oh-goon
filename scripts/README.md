@@ -40,14 +40,14 @@ For an architecture/repository-tooling change:
 edit the existing pyproject-owned module
 -> uv run --offline --frozen --no-sync --project backend pytest -c backend/pyproject.toml scripts/tests/<focused_test>.py
 -> make architecture
--> make tooling-check
+-> make check
 -> stop
 ```
 
 Stop on the focused tooling-test failure before running broader gates. If the
-generator/schema compiler changed, complete this local loop first, then run
-`make generate`, `make check-generated`, `make test-integration`, and
-`make frontend-check` because that named contract boundary was crossed.
+generator/schema compiler changed, complete focused compiler/generator proof, generation/freshness and the smallest
+actual consumer proof. Complete tooling/integration portfolios remain daily; a
+necessary critical reproducer is a named exception.
 
 Do not introduce an agent workflow runner, dependency graph, change manifest, or
 second command-classification system. Existing Make targets remain the executable

@@ -1,44 +1,52 @@
-name: Required checks
+name: Relevant verification
 
 "on":
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
+  merge_group:
   push:
     branches: [main]
-  merge_group:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Immutable base for a bounded candidate replay
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: relevant-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'edited' && !github.event.changes.base && 'metadata' || 'candidate' }}
   cancel-in-progress: true
 
 jobs:
-  draft-feedback:
-    name: draft-feedback
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
+  verify:
+    name: selected-proof
+    if: github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       UV_PYTHON: "3.12"
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || inputs.base }}
+      REQUESTED_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+      VERIFY_MODE: ${{ github.event.pull_request.draft && 'focused' || 'merge' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24.19.0"
-          package-manager-cache: false
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.12.5"
-          enable-cache: false
-      - name: Prepare native test CPU control
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+          cache-suffix: py312-dev-quality
+      - name: Materialize only the Python verification environment
+        run: uv sync --project backend --frozen --group dev --group quality
+      - name: Prepare the native two-CPU check boundary
         run: |
-          # This disposable runner owns its native systemd user manager.
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
           runner_uid=$(id -u)
           sudo loginctl enable-linger "$runner_uid"
@@ -46,191 +54,148 @@ jobs:
           test -S "/run/user/$runner_uid/bus"
           printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
           printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
-      - name: Materialize committed locks
-        run: make init
-      - name: Run draft feedback
-        run: make lint format-check architecture release-locks-check
-      - name: Run focused behavior smoke tests
+      - name: Admit the exact candidate once
+        id: selection
         run: |
+          control_dir=$(mktemp -d "$RUNNER_TEMP/oh-goon-relevant.XXXXXX")
+          export CONTROL_DIR="$control_dir"
+          printf 'CONTROL_DIR=%s\n' "$control_dir" >> "$GITHUB_ENV"
+          test -n "$BASE_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$BASE_SHA" "$GITHUB_SHA"
           bash scripts/development_test_resources.sh \
-            uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
-            --qualified --focused --next-check 'make backend-check' --show-output \
-            --granularity tests --workers 1 --batch-size 64 \
-            --batch-timeout 120 --suite-timeout 300 --marker 'not certification and not slow' \
-            backend/tests/unit/core/test_error_kinds.py \
-            backend/tests/unit/integrations/test_fleet_plan_compilation_adversarial.py \
-            backend/tests/unit/services/test_execution_lock.py
-      - name: Explain draft verification scope
-        if: always()
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          ### Draft feedback: FOCUSED / NOT_FULLY_VERIFIED
-          The behavior smoke selection checks domain errors, authoring validation and execution locks.
-          It does not establish coverage of this PR's changed behavior or replace the seven required checks.
-          Run **Focused behavior feedback** on this branch to select another pytest file, owner or node.
-          Mark the PR ready for review to run all required checks for its current commit.
-          EOF
-  checks:
-    # Job conditions run before matrix expansion. A draft's skipped stub must
-    # never publish one of the seven required check names as a skipped success.
-    name: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && 'full-checks-pending-review' || matrix.target }}
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: ubuntu-26.04
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - backend-check
-          - frontend-check
-          - tooling-check
-          - architecture
-          - check-generated
-          - test-integration
-        include:
-          - target: backend-check
-            backend_test_roots: tests/unit tests/dependency_complete
-            backend_test_workers: 2
-          - target: test-integration
-            integration_test_workers: 2
-    env:
-      UV_PYTHON: "3.12"
-      BACKEND_CHECK_TEST_ROOTS: ${{ matrix.backend_test_roots || '' }}
-      BACKEND_CHECK_TEST_WORKERS: ${{ matrix.backend_test_workers || 1 }}
-      INTEGRATION_TEST_WORKERS: ${{ matrix.integration_test_workers || 1 }}
-      PYTEST_ADDOPTS: >-
-        ${{ matrix.target == 'test-integration'
-            && '-vv --maxfail=1 --durations=40 --durations-min=0.05 -o faulthandler_timeout=120 -o faulthandler_exit_on_timeout=false'
-            || matrix.target == 'backend-check'
-            && '--maxfail=1 --durations=40 --durations-min=0.05'
-            || '' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
+            uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \
+            --base "$BASE_SHA" --candidate "$GITHUB_SHA" --head "$REQUESTED_HEAD" \
+            --plan "$CONTROL_DIR/plan.json" --github-output "$GITHUB_OUTPUT"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.selection.outputs.frontend == 'true'
         with:
           node-version: "24.19.0"
-          package-manager-cache: false
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          version: "0.12.5"
-          enable-cache: false
-      - name: Install native test tools
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Materialize the selected frontend toolchain
+        if: steps.selection.outputs.frontend == 'true'
+        run: make frontend-install
+      - name: Prepare capabilities consumed by selected Python tests
+        if: steps.selection.outputs.pytest == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
-          # Native Bubblewrap tests need user namespaces on this disposable VM.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Prepare native test CPU control
+      - name: Execute admitted proof through existing owners
+        env:
+          SELECTED_PYTEST: ${{ steps.selection.outputs.pytest }}
         run: |
-          # This disposable runner owns its native systemd user manager.
-          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
-          runner_uid=$(id -u)
-          sudo loginctl enable-linger "$runner_uid"
-          sudo systemctl start "user@$runner_uid.service"
-          test -S "/run/user/$runner_uid/bus"
-          printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
-          printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
-      - name: Materialize committed locks
-        run: make init
-      - name: Run required check
-        run: |
-          set -euo pipefail
-          case "${{ matrix.target }}" in
-            backend-check|test-integration)
-              # The hosted image's optional Android SDK is outside this repo's
-              # Python/Node/Git test runtime. Validate the actual smaller view;
-              # never cache metadata or skip validation of exposed paths.
-              test "${RUNNER_ENVIRONMENT:-}" = github-hosted
-              sdk_root=/usr/local/lib/android/sdk
-              if [ -e "$sdk_root" ] || [ -L "$sdk_root" ]; then
-                test -d "$sdk_root"
-                test "$(readlink -e "$sdk_root")" = "$sdk_root"
-                if mountpoint -q -- "$sdk_root"; then
-                  echo "CI SDK overlay target is already mounted" >&2
-                  exit 1
-                fi
-                sdk_source="oh-goon-ci-sdk-$GITHUB_RUN_ID-$$"
-                sdk_mounted=0
-                cleanup_sdk() {
-                  check_status=$?
-                  trap - EXIT INT TERM
-                  if sdk_current_source=$(findmnt -rn --first-only --direction backward --target "$sdk_root" --output SOURCE) &&
-                    [ "$sdk_current_source" = "$sdk_source" ]; then
-                    if sudo umount -- "$sdk_root"; then
-                      echo "CI SDK overlay released"
-                    else
-                      echo "CI SDK overlay cleanup failed" >&2
-                      if [ "$check_status" = 0 ]; then check_status=1; fi
-                    fi
-                  elif [ "$sdk_mounted" = 1 ]; then
-                    echo "CI SDK overlay cleanup ownership is unverified" >&2
-                    if [ "$check_status" = 0 ]; then check_status=1; fi
-                  fi
-                  exit "$check_status"
-                }
-                trap cleanup_sdk EXIT
-                trap 'exit 130' INT
-                trap 'exit 143' TERM
-                sudo mount -t tmpfs -o ro,nodev,nosuid,noexec,size=4k "$sdk_source" "$sdk_root"
-                sdk_mounted=1
-                findmnt -rn --first-only --direction backward --target "$sdk_root" --output SOURCE,FSTYPE,OPTIONS
-                sdk_identity=$(stat -Lc '%d:%i' "$sdk_root")
-                bwrap --unshare-user --unshare-pid --unshare-net --die-with-parent --ro-bind /usr /usr --ro-bind /lib /lib --ro-bind /lib64 /lib64 --proc /proc --dev /dev -- /usr/bin/python3 -I -S - "$sdk_identity" <<'PY'
-          import os
-          import sys
-          path = "/usr/local/lib/android/sdk"
-          metadata = os.stat(path)
-          assert f"{metadata.st_dev}:{metadata.st_ino}" == sys.argv[1]
-          assert os.statvfs(path).f_flag & os.ST_RDONLY
-          with os.scandir(path) as entries:
-              assert next(entries, None) is None
-          print("Native SDK overlay identity, emptiness and read-only view verified")
-          PY
-              fi
-              ;;
-          esac
-          make "${{ matrix.target }}"
-          if [ "${{ matrix.target }}" = test-integration ]; then
-            make test-python-projects
+          native_view=()
+          if [ "$SELECTED_PYTEST" = true ]; then
+            native_view=(bash scripts/ci_native_runtime.sh)
           fi
-  release:
-    # A draft must never publish a skipped success under a required check name.
-    name: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && 'release-pending-review' || 'build-release' }}
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    needs: checks
+          "${native_view[@]}" \
+          bash scripts/development_test_resources.sh \
+            uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \
+            --execute "$CONTROL_DIR/plan.json" --mode "$VERIFY_MODE" --workers 2 \
+            --report "$CONTROL_DIR/result.json"
+      - name: Retain bounded selection and native receipts
+        if: always() && env.CONTROL_DIR != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relevant-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CONTROL_DIR }}/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Explain scope and next action
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          Relevant checks use the exact effective checkout and its supplied base.
+          Draft feedback is **FOCUSED / NOT_FULLY_VERIFIED**. A ready candidate requires
+          complete selected proof and trusted-base control before **MERGE_VERIFIED**.
+          Missing, failed, skipped, cancelled or stale proof cannot qualify.
+          Full unrelated/exhaustive regression runs daily; it is not claimed here.
+          Inspect the bounded JSON artifact for identities, selected tests and reasons.
+          Run `make check` for focused local feedback. Run `make merge-check` for the
+          same admitted merge policy. Timing remains PROVISIONAL until measured.
+          EOF
+  merge-gate:
+    name: ${{ github.event_name == 'push' && 'merge-not-applicable' || github.event.action == 'edited' && !github.event.changes.base && 'edit-not-applicable' || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}
+    if: always() && github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base != null)
+    needs: verify
     runs-on: ubuntu-26.04
-    timeout-minutes: 20
+    timeout-minutes: 5
+    env:
+      UV_PYTHON: "3.12"
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || inputs.base }}
+      REQUESTED_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+    steps:
+      - name: Require completed candidate proof
+        env:
+          PROOF_RESULT: ${{ needs.verify.result }}
+        run: test "$PROOF_RESULT" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event.pull_request.draft != true
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || inputs.base }}
+          path: trusted-base
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event.pull_request.draft != true
+        with:
+          ref: ${{ github.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require reviewed bootstrap controls
+        if: github.event.pull_request.draft != true
+        run: |
+          test -f trusted-base/backend/src/oh_goon/repository_tooling/verification_gate_control.py || {
+            echo 'CUTOVER_UNVERIFIED: trusted-base controls must be reviewed and installed first' >&2
+            exit 1
+          }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: github.event.pull_request.draft != true
+        with:
+          name: relevant-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: proof
+          digest-mismatch: error
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        if: github.event.pull_request.draft != true
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: trusted-base/backend/uv.lock
+          cache-suffix: py312-base-control
+      - name: Materialize the immutable base controller
+        if: github.event.pull_request.draft != true
+        run: uv sync --project trusted-base/backend --frozen --no-default-groups
+      - name: Independently validate untrusted candidate evidence
+        if: github.event.pull_request.draft != true
+        run: |
+          uv run --offline --frozen --no-sync --project trusted-base/backend python -I \
+            trusted-base/backend/src/oh_goon/repository_tooling/verification_gate_control.py \
+            --plan proof/plan.json --result proof/result.json \
+            --candidate "$GITHUB_SHA" --base "$BASE_SHA" --control-base "$BASE_SHA" \
+            --head "$REQUESTED_HEAD" \
+            --root "$GITHUB_WORKSPACE/candidate" --trusted-root "$GITHUB_WORKSPACE/trusted-base"
+  main-health:
+    name: main-health
+    if: github.event_name == 'push'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
     env:
       UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24.19.0"
-          package-manager-cache: false
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.12.5"
-          enable-cache: false
-      - name: Prepare native test CPU control
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --project backend --frozen
+      - name: Observe installed source and CLI startup
         run: |
-          # This disposable runner owns its native systemd user manager.
-          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
-          runner_uid=$(id -u)
-          sudo loginctl enable-linger "$runner_uid"
-          sudo systemctl start "user@$runner_uid.service"
-          test -S "/run/user/$runner_uid/bus"
-          printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
-          printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
-      - name: Materialize committed locks
-        run: make init
-      - name: Assemble checked source
-        run: make assemble-release
+          uv run --offline --frozen --no-sync --project backend oh-goon-source-layout check
+          uv run --offline --frozen --no-sync --project backend oh-goon --help

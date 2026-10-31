@@ -49,6 +49,8 @@ from tests.factories.agent_review import agent_review_case
 from tests.factories.python_goon_projects import write_isolated_build_project
 from tests.integration.api.client import authenticated_api_client
 
+pytestmark = pytest.mark.daily
+
 
 @pytest.fixture
 def installed_cli(monkeypatch):

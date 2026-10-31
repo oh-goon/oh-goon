@@ -223,7 +223,7 @@ for target-free execution. See `docs/development/GOON_AUTHORING.md`.
 ## Tests and change-impact checks
 
 Optimize verified issue-to-merge throughput, not test count. Use focused feedback
-while editing, then the complete required merge checks once the change is coherent.
+while editing, then the relevant required merge proof once the change is coherent.
 Preserve meaningful behavioral coverage while reducing repeated setup and safely
 parallelizing existing owners. The development backbone is defined in
 [`docs/CI_CD_CONTRACT.md`](docs/CI_CD_CONTRACT.md#fast-feedback-and-complete-release-verification)
@@ -245,28 +245,36 @@ an absence property is itself the contract. Test count and line coverage are
 diagnostics, not quality targets. Local policy is in
 `docs/development/TEST_QUALITY.md`; reusable review methods belong in agentsCookbook.
 
-Run the narrow owner check first and diagnose its first failure. Run the union
-of applicable escalation rows after the focused checks; do not regenerate
-unrelated output or broaden testing to hide a failure.
+Run the narrow owner check first and diagnose its first failure. Ordinary local
+and PR work selects affected fast tests, applicable static/contracts and the
+smallest meaningful real boundary proof through the same admission owner.
+Use `make check`/`make test` for relevant focused feedback and `make merge-check`
+for candidate-bound proof. Unrelated complete suites and expensive journeys run
+once daily; do not duplicate them locally before submitting a PR. A necessary
+slow security/isolation/durability proof or defect reproducer is a named narrow
+exception, never automatic full-owner expansion. Unknown protection scope stays
+`SELECTION_UNVERIFIED` or uses a justified bounded fallback.
 
 Constrained agent/tool sessions follow [Tool-session qualification](docs/development/TOOL_SESSION_QUALIFICATION.md): start known-large pytest surfaces in the existing resume-safe batch runner; already bounded owner files may run directly.
 For chat resets, use the [session continuation guide](docs/development/CHATGPT_ITERATION.md) to recover the current task and evidence through existing owners.
 
-| Changed boundary | Required escalation |
+| Changed boundary | Applicable pre-merge proof |
 | --- | --- |
-| Public API/OpenAPI | `make backend-check`, `make generate`, `make check-generated`, `make test-integration`, `make frontend-check` |
-| API generator/schema compiler | `make test-tooling`, `make generate`, `make check-generated`, `make test-integration`, `make frontend-check` |
-| Shipped Goon/Plan package or template layout | focused backend template tests, `make architecture`, `make backend-check` |
-| Repository/source/test layout, AGENTS, owner maps | `make test-tooling`, `make architecture`, `make tooling-check` |
-| Release assembly/version identity | `make check-generated`, `make tooling-check`, `make build-release` when dependencies are available |
-| Frontend behavior | `make frontend-check` |
-| Browser, accessibility, visibility, theme | `make theme-contrast`, focused browser test, `make certify` for canonical APP completion; `make browser-setup` if engines are missing |
-| Backend-internal behavior | `make backend-check`; regenerate only for an API change |
+| Public API/OpenAPI | owning API proof, current generated contract and affected consumer checks |
+| API generator/schema compiler | compiler/generator regression, regeneration/freshness and bounded consumer proof |
+| Shipped Goon/Plan package or template layout | focused template/compiler and necessary native invocation proof; architecture |
+| Repository/source/test layout, AGENTS, owner maps | focused tooling/protection tests and architecture |
+| Release assembly/version identity | focused release identity/package smoke and generated freshness; exact release qualification before publication |
+| Frontend behavior | affected component tests and applicable frontend static checks |
+| Browser, accessibility, visibility, theme | focused browser/theme proof; APP/full browser qualification remains separately selected |
+| Backend-internal behavior | affected unit and smallest necessary API/DB/process boundary proof |
 | Documentation only | owning documentation checks; no regeneration unless its contract changed |
 
-Routine CI keeps meaningful process and scale regressions. Mark only exhaustive
-variants with bounded ordinary counterparts as `slow`; keep them in complete
-`make release-check` verification. Remove obsolete filename/private-name/prose
+Routine CI keeps affected meaningful process and scale regressions. Mark only exhaustive
+variants with bounded ordinary counterparts as `slow`; `daily` separately marks
+expensive ordinary journeys. Keep both in complete daily `make release-check`
+verification. Changed daily logic needs meaningful bounded validation; collection
+alone cannot replace execution. Remove obsolete filename/private-name/prose
 assertions, and require a valid baseline for every mutation regression. See
 `docs/development/TEST_QUALITY.md` and `docs/CI_CD_CONTRACT.md`.
 

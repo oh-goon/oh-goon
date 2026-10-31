@@ -12,7 +12,7 @@ Enter this package directory directly, or copy the whole directory outside the O
 
 ```bash
 uv sync --frozen --no-default-groups --group dev
-uv run --no-sync pytest tests/test_operations.py tests/test_cli.py
+uv run --no-sync pytest tests
 uv run --no-sync orders-pipeline run --fixture official
 uv run --no-sync orders-pipeline extract --fixture official
 uv run --no-sync orders-pipeline transform --data '{"1001":301.27,"1002":433.21,"1003":502.22}'
@@ -24,6 +24,12 @@ The application and its ordinary tests need neither Airflow nor OH-Goon. `run --
 `extract` and `run` require an explicit fixture; the Goon owns the workflow default. `transform --data` accepts JSON data, and `load --total` accepts the scalar total. OH-Goon transports the preceding Step's actual output value into those arguments. Its Goon deliberately invokes the three individual commands as three separately observed Steps.
 
 Native frozen synchronization consumes the committed resolution without rewriting it or checking metadata freshness. The development environment explicitly selects `dev` for pytest; OH-Goon's managed workload installs base dependencies only in its separate owned environment.
+
+The native project pytest configuration discovers the whole test directory and
+excludes the optional `airflow` marker from ordinary development and portable
+daily checks. New ordinary tests join discovery automatically. The comparison
+below explicitly overrides that marker after selecting its separate dependency
+group; deselection is not reported as an executed or skipped adapter test.
 
 ## OH-Goon
 
@@ -104,7 +110,7 @@ This project's explicit optional `airflow` group pins **Airflow 3.3.2** and its 
 
 ```bash
 uv sync --frozen --no-default-groups --group dev --group airflow --python 3.12
-OH_GOON_REQUIRE_AIRFLOW_TESTS=1 uv run --no-sync pytest tests/test_airflow_adapter.py
+OH_GOON_REQUIRE_AIRFLOW_TESTS=1 uv run --no-sync pytest -m airflow tests/test_airflow_adapter.py
 ```
 
 The ordinary application environment does not install Airflow. Register `dags/orders_taskflow.py` in the selected Airflow environment's DAG folder; the adapter reads installed package resources and can be copied independently of the source tree. Follow the [official installation instructions](https://airflow.apache.org/docs/apache-airflow/3.3.2/installation/installing-from-pypi.html) for a separate scheduler/worker deployment.

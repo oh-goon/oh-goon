@@ -30,6 +30,8 @@ build = [
 ]
 
 [project.scripts]
+oh-goon-daily-regression = "oh_goon.repository_tooling.daily_regression:main"
+oh-goon-verify-gate = "oh_goon.repository_tooling.verification_gate_control:main"
 oh-goon-python-project-checks = "oh_goon.repository_tooling.python_project_checks:main"
 oh-goon-trust-census = "oh_goon.repository_tooling.trust_authority_census:main"
 oh-goon-offline-custody-review = "oh_goon.repository_tooling.offline_custody_review:main"
@@ -38,6 +40,7 @@ oh-goon-dependency-policy = "oh_goon.repository_tooling.dependency_resolution_bo
 oh-goon-hosted-dependency-capability = "oh_goon.repository_tooling.hosted_dependency_capability:main"
 oh-goon-project-dependency-capability = "oh_goon.repository_tooling.project_dependency_capability:main"
 oh-goon-test-batches = "oh_goon.repository_tooling.test_batches:main"
+oh-goon-verify-change = "oh_goon.repository_tooling.development_verification:main"
 oh-goon-run-log = "oh_goon.repository_tooling.run_logging:main"
 oh-goon-tool-session-batches = "oh_goon.repository_tooling.tool_session_batches:main"
 oh-goon-hashmarks-shards = "oh_goon.repository_tooling.hashmarks_shard_execution:main"
@@ -180,6 +183,7 @@ testpaths = ["tests/unit", "tests/dependency_complete", "tests/integration"]
 pythonpath = ["."]
 addopts = "-q --strict-markers --strict-config"
 markers = [
+  "daily: complete ordinary journey or broad campaign retained in daily regression; relevant bounded or necessary critical proof runs before merge",
   "slow: exhaustive full-corpus checks with bounded regression counterparts; run by complete/release verification",
   "process: real child-process lifecycle tests excluded from the inner development gate",
   "no_resume: external state has no cross-invocation reusable PASS authority",

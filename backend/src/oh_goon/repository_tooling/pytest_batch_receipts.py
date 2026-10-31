@@ -32,6 +32,7 @@ _ADMISSION_ROOT = Path.cwd()
 _EXPECTED_COUNTS: dict[str, int] = {}
 _STATE: dict[str, dict[str, Any]] = {}
 _ITEM_STATE: dict[str, bool] = {}
+_ITEM_OUTCOME: dict[str, str] = {}
 _NODE_TO_MEMBER: dict[str, str] = {}
 
 
@@ -110,6 +111,7 @@ def pytest_collection_finish(session: Any) -> None:
     _EXPECTED_COUNTS.clear()
     _STATE.clear()
     _ITEM_STATE.clear()
+    _ITEM_OUTCOME.clear()
     _NODE_TO_MEMBER.clear()
     collection_path = os.environ.get("OH_GOON_PYTEST_RECEIPT_COLLECTION")
     if collection_path:
@@ -134,7 +136,9 @@ def pytest_collection_finish(session: Any) -> None:
             continue
         _NODE_TO_MEMBER[item.nodeid] = member
         _EXPECTED_COUNTS[member] = _EXPECTED_COUNTS.get(member, 0) + 1
-        _STATE.setdefault(member, {"completed": 0, "failed": False, "non_passed": False})
+        _STATE.setdefault(
+            member, {"completed": 0, "failed": False, "non_passed": False, "pytest_outcomes": []}
+        )
 
 
 def pytest_runtest_logstart(nodeid: str, location: Any) -> None:
@@ -155,11 +159,22 @@ def _observe_report(report: Any, state: dict[str, Any]) -> None:
     if report.failed:
         state["failed"] = True
         _ITEM_STATE[report.nodeid] = True
+        _ITEM_OUTCOME[report.nodeid] = "FAILED"
     elif report.skipped or getattr(report, "wasxfail", None) is not None:
         state["non_passed"] = True
         _ITEM_STATE[report.nodeid] = True
+        if _ITEM_OUTCOME.get(report.nodeid) != "FAILED":
+            _ITEM_OUTCOME[report.nodeid] = (
+                "XFAILED"
+                if report.skipped and getattr(report, "wasxfail", None) is not None
+                else "SKIPPED"
+                if report.skipped
+                else "XPASSED"
+            )
     else:
         _ITEM_STATE.setdefault(report.nodeid, False)
+        if report.when == "call":
+            _ITEM_OUTCOME.setdefault(report.nodeid, "PASSED")
 
 
 def _terminal_status(state: dict[str, Any]) -> str:
@@ -178,6 +193,7 @@ def _record_execution_terminal(member: str, status: str) -> None:
         attempt_identity=_ATTEMPT_IDENTITY,
         observed_batch_identity=_BATCH_IDENTITY,
         status=status,
+        pytest_outcomes=_STATE[member]["pytest_outcomes"],
     )
 
 
@@ -191,6 +207,9 @@ def pytest_runtest_logreport(report: Any) -> None:
     _observe_report(report, state)
     if report.when != "teardown":
         return
+    state["pytest_outcomes"].append(
+        {"nodeid": report.nodeid, "outcome": _ITEM_OUTCOME.get(report.nodeid, "UNREPORTED")}
+    )
     state["completed"] += 1
     if state["completed"] != _EXPECTED_COUNTS[member]:
         return

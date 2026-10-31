@@ -22,9 +22,12 @@ from tests.factories.run_resources import require_native_run_resource_context
 
 ROOT = Path(__file__).resolve().parents[4]
 FIXTURE = ROOT / "template-certification/fixtures/python/standard"
-pytestmark = pytest.mark.skipif(
-    os.name != "posix" or shutil.which("uv") is None, reason="native POSIX uv required"
-)
+pytestmark = [
+    pytest.mark.daily,
+    pytest.mark.skipif(
+        os.name != "posix" or shutil.which("uv") is None, reason="native POSIX uv required"
+    ),
+]
 
 
 @pytest.fixture(scope="module")

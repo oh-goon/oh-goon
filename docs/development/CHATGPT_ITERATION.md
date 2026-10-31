@@ -39,13 +39,15 @@ resource defect in its existing owner rather than introducing another runner.
 Start known-large surfaces with [tool-session qualification](TOOL_SESSION_QUALIFICATION.md)
 or the existing resume-safe batch owner. Reuse only receipts accepted by that
 owner for the exact source, selection and toolchain; an interrupted or timed-out
-unit remains unverified. Follow the root escalation matrix for the final slice.
-Focused PASS does not establish owner-gate, APP or release completion.
+unit remains unverified. Follow the root relevant-proof policy for the final slice. Do not run complete
+unrelated owners locally before a PR; they run daily. Focused PASS does not
+establish merge, APP or release completion.
 
 Publish coherent updates using the existing
 [hosted-check contract](../CI_CD_CONTRACT.md#repository-checks-on-github).
-Draft feedback is the cheap iteration lane; ready PRs still require all routine
-checks on the current head, including documentation changes. Diagnose a failing
+Draft feedback is the cheap iteration lane; ready PRs require the admitted fast
+proof for the effective candidate/base. Necessary critical regressions remain
+required; unrelated complete owners run daily. Diagnose a failing
 hosted check from its native failure evidence before changing code or retrying.
 
 ## Leave a usable handoff

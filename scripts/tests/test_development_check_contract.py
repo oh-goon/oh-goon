@@ -64,7 +64,7 @@ def _native_frontdoor_commands(target: str, log_directory: Path) -> list[list[st
     ("target", "runner"),
     (
         ("check", "scripts/development_check.sh"),
-        ("test", "scripts/development_test.sh"),
+        ("test", "scripts/development_check.sh"),
         ("verify", "scripts/application_verify.sh"),
     ),
 )
@@ -170,105 +170,68 @@ def test_standalone_python_advisory_caps_both_pipeline_processes(
     assert pipeline[4].endswith("exit 0")
 
 
-def test_fast_check_does_not_run_complete_or_browser_certification_targets() -> None:
-    text = SCRIPT.read_text(encoding="utf-8")
-    assert "test-python-complete" not in text
-    assert "test-tooling-complete" not in text
-    assert "browser-targeted-certification" not in text
-    assert "browser-required-certification" not in text
-    assert "certification-setup" not in text
-    assert "test-python" in text
-    assert "test-tooling" in text
-
-
-def test_fast_check_runs_normal_owners_without_local_checkpoint_history(
+def test_fast_check_delegates_one_relevant_owner_without_archive_history(
     tmp_path: Path,
 ) -> None:
-    """An ordinary checkout must not fail because archive-only inputs are absent."""
     script = _isolated_runner(tmp_path)
-    checkout = script.parent.parent
     calls = tmp_path / "calls"
     fake = tmp_path / "make"
     fake.write_text(
         "#!/bin/sh\n"
-        "target=''\n"
-        'for arg in "$@"; do case "$arg" in --*) ;; *) target="$arg" ;; esac; done\n'
-        'printf \'%s\\n\' "$target" >> "$OH_GOON_TEST_CALLS"\n'
-        'case "$target" in phase-evidence-convergence-check|recovery-checkpoint) exit 23 ;; esac\n',
+        'printf \'%s\\n\' "$*" >> "$OH_GOON_TEST_CALLS"\n'
+        'test "$*" = "--no-print-directory change-check"\n',
         encoding="utf-8",
     )
     fake.chmod(0o755)
-
-    completed = subprocess.run(
+    result = subprocess.run(
         ["bash", str(script)],
-        cwd=checkout,
+        cwd=script.parent.parent,
         env={**os.environ, "MAKE": str(fake), "OH_GOON_TEST_CALLS": str(calls)},
         text=True,
         capture_output=True,
+        timeout=10,
     )
-
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    invoked = set(calls.read_text(encoding="utf-8").splitlines())
-    assert {
-        "test-python",
-        "test-tooling",
-        "architecture",
-        "check-generated",
-        "test-frontend",
-    } <= invoked
-    assert not {"phase-evidence-convergence-check", "recovery-checkpoint"} & invoked
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls.read_text().splitlines() == ["--no-print-directory change-check"]
 
 
-def test_fast_check_reports_multiple_independent_failures(tmp_path: Path) -> None:
-    script = _isolated_runner(tmp_path)
-    fake = tmp_path / "make"
-    fake.write_text(
-        "#!/bin/sh\n"
-        "target=''\n"
-        'for arg in "$@"; do case "$arg" in --*) ;; *) target="$arg" ;; esac; done\n'
-        'case "$target" in test-python) exit 4 ;; architecture) exit 5 ;; *) exit 0 ;; esac\n',
-        encoding="utf-8",
-    )
-    fake.chmod(0o755)
-    completed = subprocess.run(
-        ["bash", str(script)],
-        cwd=script.parent.parent,
-        env={**os.environ, "MAKE": str(fake)},
-        text=True,
-        capture_output=True,
-    )
-    assert completed.returncode == 1
-    assert "Backend fast unit" in completed.stdout and "FAIL" in completed.stdout
-    assert "Architecture" in completed.stdout and "FAIL" in completed.stdout
-    assert "Frontend unit" in completed.stdout and "PASS" in completed.stdout
-    assert "make verify" in completed.stdout
-
-
-def test_fast_check_lets_backend_and_frontend_operations_report_their_own_failures(
+def test_fast_check_retains_native_failure_and_starts_no_unrelated_owner(
     tmp_path: Path,
 ) -> None:
     script = _isolated_runner(tmp_path)
+    calls = tmp_path / "calls"
     fake = tmp_path / "make"
     fake.write_text(
         "#!/bin/sh\n"
-        "target=''\n"
-        'for arg in "$@"; do case "$arg" in --*) ;; *) target="$arg" ;; esac; done\n'
-        'case "$target" in test-python) exit 23 ;; frontend-typecheck) exit 41 ;; *) exit 0 ;; esac\n',
+        'printf \'%s\\n\' "$*" >> "$OH_GOON_TEST_CALLS"\n'
+        'exit "$OH_GOON_TEST_CHECK_STATUS"\n',
         encoding="utf-8",
     )
     fake.chmod(0o755)
-    completed = subprocess.run(
+    environment = {
+        **os.environ,
+        "MAKE": str(fake),
+        "OH_GOON_TEST_CALLS": str(calls),
+        "OH_GOON_TEST_CHECK_STATUS": "0",
+    }
+    valid = subprocess.run(
         ["bash", str(script)],
         cwd=script.parent.parent,
-        env={**os.environ, "MAKE": str(fake)},
+        env=environment,
         text=True,
         capture_output=True,
+        timeout=10,
     )
-    assert completed.returncode == 1
-    assert "Backend dependencies" not in completed.stdout
-    assert "Backend fast unit" in completed.stdout and "FAIL" in completed.stdout
-    assert "Frontend typecheck" in completed.stdout and "FAIL" in completed.stdout
-    assert "Frontend unit" in completed.stdout and "PASS" in completed.stdout
-    source = SCRIPT.read_text(encoding="utf-8")
-    assert "backend-dependencies-check" not in source
-    assert "frontend-dependencies-check" not in source
+    assert valid.returncode == 0, valid.stdout + valid.stderr
+    calls.unlink()
+    invalid = subprocess.run(
+        ["bash", str(script)],
+        cwd=script.parent.parent,
+        env={**environment, "OH_GOON_TEST_CHECK_STATUS": "23"},
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert invalid.returncode == 1
+    assert "exit 23" in invalid.stdout
+    assert calls.read_text().splitlines() == ["--no-print-directory change-check"]

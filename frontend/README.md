@@ -26,10 +26,10 @@ npm run test
 
 `make frontend-install` delegates directly to native `npm ci`. The same native npm ownership applies during APP certification; Oh-Goon does not maintain a separate certification dependency cache or offline-install authority.
 
-Before finishing a frontend change, run:
+For ordinary frontend changes, use affected colocated tests and relevant proof:
 
 ```bash
-npm run check
+make -C .. check
 ```
 
 For a focused functional diagnostic, use:
@@ -112,7 +112,7 @@ For a frontend-authored feature/presentation change:
 ```text
 edit the existing app/domain/feature owner
 → npm run test -- src/features/<feature>
-→ npm run check
+→ make -C .. check
 → stop
 ```
 

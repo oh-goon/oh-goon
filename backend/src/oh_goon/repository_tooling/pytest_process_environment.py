@@ -37,6 +37,20 @@ _NATIVE_PYTHON_IMPORT_ENVIRONMENT = (
     "PYTHONNOUSERSITE",
     "PYTHONSAFEPATH",
 )
+_TEST_REPORT_ENVIRONMENT = frozenset(
+    {
+        "OH_GOON_PYTEST_REPORT_PATH",
+        "OH_GOON_PYTHON_PROJECT_REPORT_DIRECTORY",
+        "OH_GOON_VITEST_JSON_REPORT",
+    }
+)
+
+
+def without_test_report_environment(environment: Mapping[str, str]) -> dict[str, str]:
+    """Report destinations belong to the controller, not nested test/tool invocations."""
+    return {
+        name: value for name, value in environment.items() if name not in _TEST_REPORT_ENVIRONMENT
+    }
 
 
 def isolated_pytest_environment(
@@ -44,7 +58,7 @@ def isolated_pytest_environment(
 ) -> dict[str, str]:
     """Preserve qualified native plugins; isolate ambient plugins in default batches."""
 
-    env = dict(os.environ if base is None else base)
+    env = without_test_report_environment(os.environ if base is None else base)
     if not qualified:
         env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     return env

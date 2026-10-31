@@ -25,11 +25,27 @@ Reusable test-review methods live in agentsCookbook: [coverage design review](ht
 - Removing an obsolete or duplicate assertion is valid when stronger proof still protects the behavior. Do not replace a deleted prose assertion with new wording assertions.
 - Every mutation test starts from a valid baseline and proves its specific defect is rejected. A pre-existing unrelated failure is not negative coverage.
 - Use small real source/archive fixtures for policy and transition tests. Keep one composition proof for a production corpus; do not copy and reparse the whole checkout for every local mutation.
-- `slow` identifies an exhaustive corpus variant with a bounded ordinary counterpart. Unique process, cancellation, permission, identity and concurrency regressions stay in routine CI even when slow. Raw timing, test count and line coverage do not decide this classification. `make release-check` restores all portable exhaustive variants.
+- `slow` identifies an exhaustive corpus variant with a bounded ordinary counterpart. Affected process, cancellation, permission, identity and concurrency requirements retain their smallest adequate real pre-merge proof. A specific necessary slow reproducer is a named exception; directory ownership alone does not select an entire campaign. Raw timing, test count and line coverage do not decide this classification. `daily` separately identifies expensive ordinary journeys. The unfiltered daily `make release-check` includes both, plus unrelated fast tests.
 - A skip, timeout, unavailable dependency or interrupted native/browser run remains unverified. Retain the observed failure and explain its tested source and environment; later isolated success does not erase a combined-run failure.
 - Tests exercise code; coverage measures which code ran; native qualification observes supported hosts; certification belongs to the product's explicit certification owner. Cookbook review results do not substitute for any of these outcomes.
 
 Use [Real lifecycle QA](REAL_LIFECYCLE_QA.md) for Oh-Goon's critical process, persistence, release-artifact and restart journeys. Use [Development](../DEVELOPMENT.md) for the current source commands and [Generated files](GENERATED_FILES.md) when a backend contract changes.
+
+## Relevance and cadence
+
+Hashmarks nominates repository relevance; the existing verification owner admits
+fast/bounded obligations and applies cadence once. Related exhaustive work may
+remain daily when an adequate bounded proof exists. Keep native qualifications
+and producer bounds visible; do not upgrade nominations to whole-owner coverage.
+Changed/new daily logic needs meaningful bounded execution, not collection-only
+or arbitrary parameter truncation. Unknown critical scope stays unverified or
+uses a specifically justified bounded fallback. A skip/xfail cannot satisfy an
+admitted required proof, and unexpected xpass needs diagnosis.
+
+Cadence/removal reviews establish the active requirement, old baseline validity,
+retained detection and applicable frequency. Coherent equivalent cases can be
+reviewed together; no per-test approval ceremony is added. Keep complete daily
+execution/discovery and exact-candidate release obligations intact.
 
 ## Fast integration and infrastructure lifecycle
 
