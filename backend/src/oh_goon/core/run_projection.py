@@ -31,6 +31,7 @@ from oh_goon.core.models.run import (
     RunningFleetRun,
 )
 from oh_goon.core.models.run_admission import (
+    DirectFleetExecutionAdmission,
     FleetExecutionAdmission,
     FleetRepositoryScope,
     PlanRepositoryAdmissionEvidence,
@@ -56,6 +57,7 @@ from oh_goon.core.models.run_events import (
     RunCancelRequestedEvent,
     RunCompletedEvent,
     RunFailedEvent,
+    RunResourcesObservedEvent,
     RunStartedEvent,
     StepAttemptCreatedEvent,
     StepCancelledEvent,
@@ -68,6 +70,7 @@ from oh_goon.core.models.run_events import (
     TerminationRequestedEvent,
 )
 from oh_goon.core.models.run_launch import ApplicationLaunchReceipt
+from oh_goon.core.models.run_resources import RunResourceEnvelopeObservation
 from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceFact
 from oh_goon.core.models.target import OperationTarget
@@ -106,6 +109,7 @@ class _RunFold:
     completed_reports: list[OperationReport] = field(default_factory=list)
     storage_maintenance: list[FleetContentMaintenanceFact] = field(default_factory=list)
     lifecycle_events: list[FleetRunEvent] = field(default_factory=list)
+    resource_observation: RunResourceEnvelopeObservation | None = None
 
     @classmethod
     def from_admitted(cls, event: RunAdmittedEvent) -> _RunFold:
@@ -135,6 +139,31 @@ class _RunFold:
             raise InvalidRunTransition(
                 "Fleet run event stream can contain only one RUN_ADMITTED event"
             )
+        if isinstance(event, RunResourcesObservedEvent):
+            if not isinstance(state, _TERMINAL_STATES):
+                raise InvalidRunTransition(
+                    "Final native resource observation requires a terminal Run"
+                )
+            admitted = (
+                self.execution.resource_envelope
+                if isinstance(self.execution, DirectFleetExecutionAdmission)
+                else None
+            )
+            observed = event.observation
+            if (
+                admitted is None
+                or admitted.fleet_run_id != observed.fleet_run_id
+                or admitted.unit_name != observed.unit_name
+                or admitted.invocation_id != observed.invocation_id
+            ):
+                raise InvalidRunTransition(
+                    "Native resource observation differs from original admission"
+                )
+            if self.resource_observation is not None:
+                raise InvalidRunTransition("Run resource observation is already recorded")
+            self.resource_observation = observed
+            self.lifecycle_events.append(event)
+            return
         reconciliation_events = (
             ReconciliationRequiredEvent,
             ReconciliationStartedEvent,
@@ -541,6 +570,7 @@ class _RunFold:
         return FleetRunDetail(
             run=state,
             execution=self.execution,
+            resource_observation=self.resource_observation,
             repository_admissions=self.repository_admissions,
             application_launch=self.application_launch,
             scheduling=self.scheduling,

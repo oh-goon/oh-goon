@@ -27,6 +27,17 @@ A typed evidence domain may maintain a rebuildable index when querying raw Run e
 
 Scout owns optional analytical resource observations such as CPU, memory and execution frequency. Its sidecar can be rebuilt or removed without changing execution truth or the basic Execution Overview. Scout reuses the canonical repository Run observation projection and adds only resource-specific evidence.
 
+An explicitly budgeted local CLI Run also records its native execution envelope
+in the original admission and Run/Game Tape projections. Those facts identify
+the systemd scope, invocation, requested limits and observed kernel ceilings;
+they establish what contained the Run. They do not create a resource analytics
+store. A final native observation reports available CPU time, memory peak, OOM
+facts and cleanup convergence separately from the Run's existing outcome.
+Missing measurements remain unknown, including accounting lost when systemd
+retires a successful scope. An exit signal alone does not establish an OOM.
+Missing final observation evidence is not a measured zero or a successful
+cleanup claim. See [local Run budgets](development/TEMPLATE_INPUT_INSPECTION.md#limit-a-local-run).
+
 ## Future metric rule
 
 For every new observability request, choose the existing owner before adding storage or models:

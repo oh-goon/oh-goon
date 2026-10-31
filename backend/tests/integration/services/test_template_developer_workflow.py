@@ -16,7 +16,9 @@ import yaml
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli import main
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.product_identity import repository_id
+from tests.factories.run_resources import require_native_run_resource_context
 
 ROOT = Path(__file__).resolve().parents[4]
 FIXTURE = ROOT / "template-certification/fixtures/python/standard"
@@ -213,9 +215,18 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
         assert json.loads(cli("plan", "outputs", run_id, "--json")) == views["outputs"]
 
 
+@pytest.mark.parametrize(
+    "budgeted",
+    (False, pytest.param(True, marks=pytest.mark.no_resume)),
+    ids=("inherited", "whole-run-budget"),
+)
 def test_plural_configuration_runs_actual_applications_concurrently_and_keeps_target_history(
     tmp_path: Path,
+    budgeted: bool,
 ) -> None:
+    budget = CicdResourcePolicy(cpu_millis=2000, memory_mib=1024, max_processes=256)
+    if budgeted:
+        require_native_run_resource_context(budget)
     environment = {
         name: value for name, value in os.environ.items() if not name.startswith("OH_GOON_")
     }
@@ -234,6 +245,10 @@ def test_plural_configuration_runs_actual_applications_concurrently_and_keeps_ta
 barrier=$1
 read -r application < application.txt
 read -r quantity unit_price < order.txt
+"""
+    if budgeted:
+        verify += 'cat /proc/self/cgroup > "$barrier/$application.cgroup"\n'
+    verify += r"""
 printf '%s\n' "$$" > "$barrier/$application.started"
 attempt=0
 while [ ! -f "$barrier/one.started" ] || [ ! -f "$barrier/two.started" ]; do
@@ -272,6 +287,9 @@ printf '%s\n' "$total"
     repository_ids = {repository_id(application) for application in applications}
     assert set(config["target"]["repository_ids"]) == repository_ids
     assert "repository_id" not in config["target"]
+    if budgeted:
+        config["resources"] = budget.model_dump(exclude_none=True)
+        selection.write_text(yaml.safe_dump(config, sort_keys=False))
     package = workflow / "goons/general/verify-order"
     package.mkdir(parents=True)
     (package / "README.md").write_text("# general/verify-order\n\nVerify each order.\n")
@@ -321,6 +339,21 @@ printf '%s\n' "$total"
     assert len(admissions) == 1
     assert set(admissions[0]["repository_scope"]["repository_ids"]) == repository_ids
     assert {item["repository_id"] for item in admissions[0]["targets"]} == repository_ids
+    if budgeted:
+        envelope = admissions[0]["execution"]["resource_envelope"]
+        assert envelope["resources"] == budget.model_dump()
+        assert envelope["fleet_run_id"] == run_id
+        assert receipt["resource_observation_persistence"] == "RECORDED"
+        assert receipt["resource_observation"]["cleanup"] == "VERIFIED"
+        assert tape["resource_observation"] == receipt["resource_observation"]
+        memberships = []
+        for application in applications:
+            rows = (barrier / f"{application.name}.cgroup").read_text().splitlines()
+            unified = [row.removeprefix("0::") for row in rows if row.startswith("0::")]
+            assert len(unified) == 1
+            assert unified[0].endswith("/" + envelope["unit_name"])
+            memberships.append(unified[0])
+        assert len(set(memberships)) == 1
     assert (
         len({(barrier / f"{application.name}.started").read_text() for application in applications})
         == 2
@@ -357,6 +390,10 @@ printf '%s\n' "$total"
     failed_steps = partition[repository_id(applications[1])]
     assert [step["status"] for step in failed_steps] == ["FAILED", "SKIPPED"]
     assert failed_steps[0]["exit_code"] == 7
+    if budgeted:
+        assert failed["resource_observation_persistence"] == "RECORDED"
+        assert failed["resource_observation"]["cleanup"] == "VERIFIED"
+        assert failed_tape["resource_observation"] == failed["resource_observation"]
     assert (applications[0] / "completed.txt").is_file()
     assert not (applications[1] / "completed.txt").exists()
     reopened = json.loads(cli("plan", "tape", run_id, "--json"))

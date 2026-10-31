@@ -9,6 +9,7 @@ from __future__ import annotations
 from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -46,11 +47,15 @@ def args(*, run_id: str | None = None, inputs=None) -> Namespace:
 
 def lifecycle(*, provisioner: FleetPreworkProvisioner | None, authenticated=True):
     # No database or native host effects are needed to exercise the owner.
-    owner = object.__new__(FleetRunLifecycle)
-    owner._require_authenticated_fleet = authenticated
-    owner._standard_local_fleet = False
-    owner._fleet_provisioner = provisioner
-    return owner
+    forbidden = Mock(spec_set=(), side_effect=AssertionError("effect before CLI ingress"))
+    return FleetRunLifecycle(
+        forbidden,
+        forbidden,
+        forbidden,
+        forbidden,
+        require_authenticated_fleet=authenticated,
+        fleet_provisioner=provisioner,
+    )
 
 
 def provisioner(run_ids: tuple[str, ...]) -> FleetPreworkProvisioner:

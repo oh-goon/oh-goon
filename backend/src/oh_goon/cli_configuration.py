@@ -16,15 +16,18 @@ from oh_goon.runtime.league_folders import LeagueFolderStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from oh_goon.services.run_configuration import (
+    RunConfigurationSnapshot,
     capture_run_configuration_source,
     load_run_configuration,
 )
 from oh_goon.services.run_configuration_inspection import inspect_run_configuration
 
 
-def prepare_configuration(args: argparse.Namespace) -> None:
+def prepare_configuration(
+    args: argparse.Namespace, *, snapshot: RunConfigurationSnapshot | None = None
+) -> None:
     """Capture the selected file once, then transport its existing invocation facts."""
-    snapshot = load_run_configuration(args.configuration)
+    snapshot = snapshot if snapshot is not None else load_run_configuration(args.configuration)
     locations = LeagueFolderStore().list()
     discovery = RepositoryDiscoveryService()
     requested = snapshot.selection.target.selected_ids()
@@ -52,6 +55,12 @@ def prepare_configuration(args: argparse.Namespace) -> None:
     agent = snapshot.selection.agent
     repair = snapshot.selection.repair
     agent_source = graph.has_agent_source_contract()
+    if snapshot.selection.resources is not None and (
+        agent_source or isinstance(graph.root.compiled.execution, CicdExecutionPolicy)
+    ):
+        raise FleetPlanInvalid(
+            "Whole-Run resources require ordinary local execution without Agent Steps"
+        )
     if len(selected.repositories) > 1 and agent_source:
         raise FleetPlanInvalid("Agent execution requires a single repository")
     if (agent is not None) != agent_source:

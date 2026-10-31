@@ -21,6 +21,10 @@ that native scope placement retains the caller's aggregate limits; see the
 a changed resource context remains **unqualified** until separately exercised.
 The earlier installed results retain their recorded mode and environment scope.
 
+Whole-Run `run.yml` budgets currently exclude Agent and repair workflows.
+Disposition: **retain** the existing harness adaptations; this CLI resource
+boundary does not replace their protocols or qualify another harness context.
+
 | Installed check on this Linux host | Result and precise limit |
 | --- | --- |
 | OpenCode 2.1.2, [service readiness and stdin lease][opencode-installed-service] | **PASS**, two tests: bounded authenticated readiness/PID, client closure preserving the server, original-owner cancellation, plus actual `--stdio` endpoint discovery and parent stdin closure producing native exit 0 and process quiescence. No service-session execution qualification. |

@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.services.run_configuration import load_run_configuration
+from oh_goon.services.run_configuration import (
+    MAX_RUN_CONFIGURATION_HANDOFF_BYTES,
+    decode_run_configuration_snapshot,
+    encode_run_configuration_snapshot,
+    load_run_configuration,
+)
 
 
 def _file(tmp_path: Path, inputs: str = "inputs: {coverage_threshold: 85}\n") -> Path:
@@ -18,6 +24,87 @@ def _file(tmp_path: Path, inputs: str = "inputs: {coverage_threshold: 85}\n") ->
         encoding="utf-8",
     )
     return path
+
+
+def test_resources_are_optional_without_changing_existing_captured_authority(
+    tmp_path: Path,
+) -> None:
+    source = _file(tmp_path)
+    original = source.read_bytes()
+    snapshot = load_run_configuration(source)
+    assert snapshot.selection.resources is None
+    assert "resources" not in snapshot.selection.model_dump()
+    assert snapshot.external_artifacts() == (("run.yml", original),)
+
+    with source.open("a", encoding="utf-8") as stream:
+        stream.write("resources: {cpu_millis: 1500, memory_mib: 1024, max_processes: 96}\n")
+    selected = load_run_configuration(source)
+    assert selected.selection.resources is not None
+    assert selected.selection.resources.cpu_millis == 1500
+    assert selected.selection.resources.memory_bytes == 1024 * 1024 * 1024
+    assert selected.selection.resources.max_processes == 96
+
+
+@pytest.mark.parametrize(
+    "resources",
+    ("{}", "{cpu_millis: 99}", "{memory_mib: 63}", "{max_processes: 15}", "{unknown: 7}"),
+)
+def test_invalid_resource_requests_refuse_at_configuration_capture(
+    tmp_path: Path, resources: str
+) -> None:
+    source = _file(tmp_path)
+    with source.open("a", encoding="utf-8") as stream:
+        stream.write(f"resources: {resources}\n")
+    with pytest.raises(FleetPlanInvalid, match="selection fields"):
+        load_run_configuration(source)
+
+
+def test_snapshot_handoff_transports_original_values_without_source_reads_or_yaml_reparse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.services import run_configuration
+
+    source = _file(tmp_path)
+    with source.open("a", encoding="utf-8") as stream:
+        stream.write("resources: {cpu_millis: 1500}\n")
+    snapshot = load_run_configuration(source)
+    encoded = encode_run_configuration_snapshot(snapshot)
+
+    def forbidden(*args: object, **kwargs: object) -> object:
+        raise AssertionError("Captured selections cannot be read or interpreted again")
+
+    monkeypatch.setattr(run_configuration.yaml, "load", forbidden)
+    monkeypatch.setattr(run_configuration, "read_caller_file_bytes", forbidden)
+    source.unlink()
+    restored = decode_run_configuration_snapshot(encoded)
+    assert restored.selection == snapshot.selection
+    assert restored.content == snapshot.content
+    assert restored.identity == snapshot.identity
+    assert restored.inputs == {"coverage_threshold": 85}
+    assert restored.selection.resources is not None
+    assert restored.selection.resources.cpu_millis == 1500
+
+
+@pytest.mark.parametrize("corruption", ("bytes", "base64", "schema", "oversized"))
+def test_snapshot_handoff_refuses_corrupt_or_unbounded_transport(
+    tmp_path: Path, corruption: str
+) -> None:
+    snapshot = load_run_configuration(_file(tmp_path))
+    encoded = encode_run_configuration_snapshot(snapshot)
+    assert decode_run_configuration_snapshot(encoded).identity == snapshot.identity
+    payload = json.loads(encoded)
+    if corruption == "bytes":
+        payload["content_base64"] = "Y2hhbmdlZA=="
+    elif corruption == "base64":
+        payload["content_base64"] = "!"
+    elif corruption == "schema":
+        payload["schema_version"] = "not-supported"
+    else:
+        encoded = b" " * (MAX_RUN_CONFIGURATION_HANDOFF_BYTES + 1)
+    if corruption != "oversized":
+        encoded = json.dumps(payload).encode("utf-8")
+    with pytest.raises(FleetPlanInvalid, match="(handoff|bytes)"):
+        decode_run_configuration_snapshot(encoded)
 
 
 @pytest.mark.parametrize(

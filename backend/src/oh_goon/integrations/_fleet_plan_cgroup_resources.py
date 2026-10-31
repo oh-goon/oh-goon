@@ -1233,6 +1233,7 @@ def _read_bound_cgroup_control(descriptor: int, name: str, limit: int) -> str:
         "cgroup.events",
         "cgroup.procs",
         "cgroup.type",
+        "memory.oom.group",
         "cpu.max",
         "pids.max",
         *_STANDARD_MEMORY_CONTROLS,

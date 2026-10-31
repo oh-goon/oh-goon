@@ -26,6 +26,7 @@ from oh_goon.core.models.run_launch import (
     ApplicationLaunchReceipt,
     UnmanagedApplicationLaunchReceipt,
 )
+from oh_goon.core.models.run_resources import RunResourceEnvelopeObservation
 from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
 from oh_goon.core.models.target import OperationTarget
@@ -81,6 +82,17 @@ class RunAdmittedEvent(_FleetRunEventBase):
 
 class RunStartedEvent(_FleetRunEventBase):
     event_type: Literal[FleetRunEventType.RUN_STARTED]
+
+
+class RunResourcesObservedEvent(_FleetRunEventBase):
+    event_type: Literal[FleetRunEventType.RUN_RESOURCES_OBSERVED]
+    observation: RunResourceEnvelopeObservation
+
+    @model_validator(mode="after")
+    def validate_run_binding(self) -> RunResourcesObservedEvent:
+        if self.observation.fleet_run_id != self.fleet_run_id:
+            raise ValueError("Native resource observation must belong to the same Run")
+        return self
 
 
 class RepositoryStartedEvent(_FleetRunEventBase):
@@ -246,6 +258,7 @@ class RunFailedEvent(_FleetRunEventBase):
 type FleetRunEvent = Annotated[
     RunAdmittedEvent
     | RunStartedEvent
+    | RunResourcesObservedEvent
     | RepositoryStartedEvent
     | StepReachedEvent
     | StepStartedEvent
