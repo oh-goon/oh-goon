@@ -19,6 +19,7 @@ from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 from oh_goon.application import ApplicationRuntime
+from oh_goon.cli_result import CliTermination, record_cli_cleanup_failure
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.agent_providers import (
     DEFAULT_NATIVE_AGENT,
@@ -65,7 +66,8 @@ def add_ai_command(
         help="Seed a fresh native session from one explicit durable Run handoff as untrusted context",
     )
     parser.add_argument("--config", type=Path, help="Provider/native execution catalog")
-    prompt = parser.add_mutually_exclusive_group(required=True)
+    parser.add_argument("task", nargs="?", help="Task text, alternative to --prompt/--prompt-file")
+    prompt = parser.add_mutually_exclusive_group()
     prompt.add_argument("--prompt", help="Task for the selected native agent")
     prompt.add_argument("--prompt-file", type=Path, help="UTF-8 task file, or - for stdin")
     mode = parser.add_mutually_exclusive_group()
@@ -83,7 +85,12 @@ def _task(args: argparse.Namespace) -> str:
     from oh_goon.core.models.fleet_plan import MAX_AGENT_TASK_CHARS
 
     data: bytes
-    if args.prompt is not None:
+    positional = getattr(args, "task", None)
+    if sum(value is not None for value in (positional, args.prompt, args.prompt_file)) != 1:
+        raise AgentProviderError("Supply one task, --prompt, or --prompt-file")
+    if positional is not None:
+        data = positional.encode("utf-8")
+    elif args.prompt is not None:
         data = args.prompt.encode("utf-8")
     elif args.prompt_file == Path("-"):
         data = sys.stdin.buffer.read(_MAX_TASK_BYTES + 1)
@@ -248,11 +255,41 @@ def run_ai_command(args: argparse.Namespace) -> int:
             print(f"Status: {detail.run.status.value}")
             print(f"Outcome: {detail.outcome.value}")
         return result
-    except KeyboardInterrupt:
-        print("Native run interrupted during setup.", file=sys.stderr)
-        return 130
+    except KeyboardInterrupt as interruption:
+        if args.as_json:
+            print(
+                json.dumps(
+                    {
+                        "schema": "oh-goon.native-run-error/v1",
+                        "status": "interrupted",
+                        "code": "NATIVE_SETUP_INTERRUPTED",
+                        "cleanup": "not-established-by-interruption",
+                    }
+                )
+            )
+        else:
+            print("Native run interrupted during setup.", file=sys.stderr)
+        return 143 if isinstance(interruption, CliTermination) else 130
     except (FleetDomainError, OSError, ValueError, UnicodeError) as exc:
-        print(str(exc), file=sys.stderr)
+        code = (
+            "AGENT_PROVIDER_ERROR"
+            if isinstance(exc, AgentProviderError)
+            else "NATIVE_COMMAND_ERROR"
+        )
+        action = "Review the selected native profile, workspace policy, installed tools and model connection. Inspect retained Run evidence before retrying; this diagnostic grants no repair or replay authority."
+        if args.as_json:
+            print(
+                json.dumps(
+                    {
+                        "schema": "oh-goon.native-run-error/v1",
+                        "status": "error",
+                        "code": code,
+                        "safe_next_action": action,
+                    }
+                )
+            )
+        else:
+            print(f"{code}: {action}", file=sys.stderr)
         return 2
 
 
@@ -278,14 +315,21 @@ def _run_and_close(
             verification,
             handoff_from=handoff_from,
         )
-        if result not in (0, 130):
+        if result not in (0, 130, 143):
             _print_failure_stderr(runtime, detail)
     except BaseException:
         _shutdown_after_primary_failure(runtime)
         raise
     cleanup = _shutdown_after_completed_command(runtime)
     if cleanup is not None:
-        print(f"Native Run cleanup failed: {cleanup[1]}", file=sys.stderr)
+        record_cli_cleanup_failure(
+            "RUNTIME_DATABASE_IDENTITY_LOST"
+            if cleanup[0] == "database_identity"
+            else "RUNTIME_STORAGE_UNAVAILABLE"
+        )
+        print(
+            "Native Run cleanup is unverified; inspect the original Run handoff.", file=sys.stderr
+        )
         result = result if result else 2
     return result, detail
 
@@ -393,7 +437,7 @@ def _run_selected(
         print(f"Fleet Run ID: {admitted.fleet_run_id}", file=sys.stderr)
         _print_handoff_reference(admitted.fleet_run_id)
         detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as interruption:
         if admitted is None:
             raise
         runtime.runs.cancel(admitted.fleet_run_id)
@@ -404,7 +448,7 @@ def _run_selected(
             file=sys.stderr,
         )
         print("Cleanup evidence: inspect durable Run handoff.", file=sys.stderr)
-        return 130, detail
+        return (143 if isinstance(interruption, CliTermination) else 130), detail
     return (0 if detail.outcome is FleetRunOutcome.SUCCESS else 1), detail
 
 

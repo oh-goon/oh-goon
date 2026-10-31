@@ -54,6 +54,27 @@ do not turn this guide into a perpetual PASS list. Older ADR/checkpoint results
 describe their original source. Follow [documentation anti-drift](DOCUMENTATION_ANTI_DRIFT.md)
 when current and historical explanations disagree.
 
+### Everyday CLI readback and diagnostics
+
+Packet B uses the existing history, live-output, health and native-catalog
+owners. [CLI workflow lifecycle tests](../../backend/tests/integration/services/test_cli_workflow_lifecycle.py)
+exercise separate admitted Runs and fresh-process list/explain/scoped-last
+readback, original admission cursors, unavailable transient logs and unchanged
+state after reads. [Navigation tests](../../backend/tests/unit/entrypoints/test_cli_runs_navigation.py)
+cover original live cursor/omission facts and read-only follow interruption.
+[JSON boundary tests](../../backend/tests/unit/entrypoints/test_cli_json_contract.py)
+cover bounded single-value publication, safe refusal, native pre-runtime
+signals and locale independence while preserving owner facts and numeric exits.
+
+[Doctor tests](../../backend/tests/unit/entrypoints/test_cli_doctor.py) exercise
+missing/corrupt/incompatible/read-only/compatible state through fresh commands;
+[health tests](../../backend/tests/unit/services/test_system_health.py) retain
+native stalled/noisy tool probes. [Native setup tests](../../backend/tests/unit/entrypoints/test_cli_native_setup.py)
+protect catalog publication, preserved profiles, pre-effect refusal and private
+diagnostics. A native version observation remains `NOT_QUALIFIED` for model,
+authentication and original-Run behavior. Use the applicable installed harness
+proof before promoting those claims; references here are not recorded passes.
+
 ## CLI workflow cutover qualification
 
 The original Fleet/Step lifecycle, compiler-owned typed inputs, canonical execution

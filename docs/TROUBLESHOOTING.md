@@ -31,6 +31,16 @@ make local-state-check
 make local-state-path
 ```
 
+`oh-goon doctor --json` remains available when the database is missing, corrupt,
+incompatible or not writable. It lists the selected DB, League, provider and
+application-state paths and native tool facts without opening that database or
+reading private configuration bodies. `oh-goon doctor --runtime --json` is a
+separate observation of existing state: a `STATE_*` refusal preserves the store,
+and a successful observation uses the original runtime health findings. Neither
+doctor command authorizes reset, repair or recovery. Native version probes have
+a five-second deadline and bounded output; a stalled/noisy tool is reported as
+broken rather than blocking diagnosis indefinitely.
+
 Stop new admission and use the matching original runtime's lifecycle/recovery owners to settle active Runs, incomplete campaigns, leases, workspace owners and uncertain effects. If any ownership remains unresolved, cutover stays blocked. After resolution, preserve the old state and schema metadata read-only outside the active state directory, then explicitly select a fresh generation. See the [execution-state cutover contract](development/AGENT_RUNTIME_OWNERS.md#execution-state-cutover-and-recovery).
 
 For compatible state whose ownership is fully settled, a source checkout can explicitly clear its disposable history:
@@ -59,6 +69,14 @@ For contributor diagnosis:
 uv run --locked --project backend oh-goon dev explain-run <run-id>
 make architecture
 ```
+
+For CLI readback, start with `oh-goon runs list`, then use
+`oh-goon runs explain RUN_ID`. Exact scoped `--last` requires both Plan and
+repository identities from that list in the selected state root. `runs logs`
+exit `3` means its requested transient evidence is unavailable, not that the
+historical Run failed. `runs handoff RUN_ID --json` retains durable outcome,
+uncertainty and safe navigation facts. Stopping text log follow with Ctrl-C is
+read-only and does not request Run cancellation.
 
 ## Generated API files are stale
 

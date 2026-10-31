@@ -232,7 +232,7 @@ def test_ai_defaults_to_codex_with_the_selected_signed_in_profile(
         monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     if selection == "interactive":
         assert main([*argv, "--interactive"]) == 2
-        assert "headless" in capsys.readouterr().err
+        assert "NATIVE_COMMAND_ERROR" in capsys.readouterr().err
         native_cli.build.assert_not_called()
         load.assert_called_once_with(native_cli.config)
         terminal.assert_not_called()
@@ -310,7 +310,7 @@ def test_ai_does_not_change_configured_parent_or_excluded_repository(
     native_cli.runtime.repositories.exclusions.return_value = [{"path": str(native_cli.workspace)}]
     assert main(native_cli.argv) == 2
     native_cli.runtime.plans.run_native_agent.assert_not_called()
-    assert "excluded" in capsys.readouterr().err
+    assert "AGENT_PROVIDER_ERROR" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("outcome", [FleetRunOutcome.FAILED, FleetRunOutcome.ATTENTION_REQUIRED])
@@ -460,13 +460,71 @@ def test_ai_ctrl_c_uses_original_cancel_and_wait(native_cli: SimpleNamespace) ->
     native_cli.runtime.shutdown.assert_called_once_with(wait_for_runs=False)
 
 
+def test_ai_positional_task_uses_the_original_native_run(native_cli: SimpleNamespace) -> None:
+    assert main([*native_cli.argv[:-2], "concise native task"]) == 0
+    assert (
+        native_cli.runtime.plans.run_native_agent.call_args.kwargs["task"] == "concise native task"
+    )
+    native_cli.runtime.plans.run_native_agent.assert_called_once()
+    native_cli.runtime.shutdown.assert_called_once_with(wait_for_runs=False)
+
+
+def test_ai_conflicting_task_spellings_refuse_before_native_work(
+    native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main([*native_cli.argv, "private-conflicting-task-canary", "--json"]) == 2
+    native_cli.build.assert_not_called()
+    native_cli.runtime.plans.run_native_agent.assert_not_called()
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["code"] == "AGENT_PROVIDER_ERROR"
+    assert "private-conflicting-task-canary" not in captured.out + captured.err
+
+
 def test_ai_cleanup_does_not_mask_primary_failure(
     native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
 ) -> None:
     native_cli.runtime.plans.run_native_agent.side_effect = AgentProviderError("original failure")
     native_cli.runtime.shutdown.side_effect = RuntimeError("secondary cleanup")
     assert main(native_cli.argv) == 2
-    assert "original failure" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "AGENT_PROVIDER_ERROR" in captured.err
+    assert "original failure" not in captured.out + captured.err
+    assert "secondary cleanup" not in captured.out + captured.err
+    native_cli.runtime.shutdown.assert_called_once_with(wait_for_runs=False)
+
+
+@pytest.mark.parametrize(
+    "outcome,expected", [(FleetRunOutcome.SUCCESS, 2), (FleetRunOutcome.FAILED, 1)]
+)
+def test_ai_json_retains_owner_outcome_and_reports_cleanup_independently(
+    native_cli: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
+    outcome: FleetRunOutcome,
+    expected: int,
+) -> None:
+    import sqlite3
+
+    native_cli.detail.outcome = outcome
+    native_cli.detail.model_dump_json.return_value = json.dumps(
+        {
+            "fleet_run_id": "native-run",
+            "outcome": outcome.value,
+        }
+    )
+    native_cli.runtime.shutdown.side_effect = sqlite3.OperationalError(
+        "disk I/O error private-native-cleanup-canary"
+    )
+    assert main([*native_cli.argv, "--json"]) == expected
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["outcome"] == outcome.value
+    assert result["_cli"]["exit_code"] == expected
+    assert result["_cli"]["cleanup"] == {
+        "status": "UNVERIFIED",
+        "code": "RUNTIME_STORAGE_UNAVAILABLE",
+    }
+    assert "private-native-cleanup-canary" not in captured.out + captured.err
+    native_cli.runtime.shutdown.assert_called_once_with(wait_for_runs=False)
 
 
 def test_ai_missing_native_program_fails_before_application_state(
@@ -541,7 +599,7 @@ def test_ai_absent_default_catalog_does_not_infer_native_model_connection(
     index = argv.index("--config")
     del argv[index : index + 2]
     assert main(argv) == 2
-    assert "managed inference" in capsys.readouterr().err
+    assert "NATIVE_COMMAND_ERROR" in capsys.readouterr().err
     lookup.assert_called_once_with(agent or "codex", path=os.environ.get("PATH", ""))
     native_cli.build.assert_not_called()
 
@@ -557,7 +615,7 @@ def test_ai_isolated_profile_requires_native_backend_before_state(
 
     monkeypatch.setattr("oh_goon.cli_ai.shutil.which", selected_lookup)
     assert main([*native_cli.argv, "--profile", "isolated"]) == 2
-    assert "requires installed Bubblewrap" in capsys.readouterr().err
+    assert "AGENT_PROVIDER_ERROR" in capsys.readouterr().err
     native_cli.build.assert_not_called()
 
 
@@ -609,7 +667,7 @@ def test_native_task_character_limit_precedes_application_mutation(
         argv = native_cli.argv[:-2] + ["--prompt-file", str(task)]
     assert main(argv) == 2
     native_cli.build.assert_not_called()
-    assert "4000 authored characters" in capsys.readouterr().err
+    assert "AGENT_PROVIDER_ERROR" in capsys.readouterr().err
 
 
 def test_ai_interactive_json_conflict_fails_before_application_state(
@@ -1002,8 +1060,7 @@ def test_ai_always_emits_one_durable_handoff_reference_at_admission(
     elif state == "crash":
         native_cli.runtime.runs.wait_for_terminal.side_effect = RuntimeError("controller stopped")
     if state == "crash":
-        with pytest.raises(RuntimeError, match="controller stopped"):
-            main(native_cli.argv)
+        assert main(native_cli.argv) == 2
     else:
         assert (
             main(native_cli.argv)
@@ -1089,7 +1146,7 @@ def test_ai_unknown_prior_handoff_rejects_before_catalog_mutation_or_new_run(
     native_cli.runtime.runs.wait_for_terminal.assert_not_called()
     native_cli.runtime.runs.cancel.assert_not_called()
     captured = capsys.readouterr()
-    assert "Unknown fleet run: prior-run" in captured.err
+    assert "NATIVE_COMMAND_ERROR" in captured.err
     assert "Durable Run handoff argv:" not in captured.err
     assert not captured.out
 
@@ -1104,7 +1161,7 @@ def test_ai_oversize_prior_handoff_rejects_before_new_admission_or_catalog_mutat
     assert main([*native_cli.argv, "--handoff-from", "prior-run"]) == 2
     native_cli.runtime.plans.run_native_agent.assert_not_called()
     native_cli.runtime.locations.add.assert_not_called()
-    assert "65536 bytes" in capsys.readouterr().err
+    assert "NATIVE_COMMAND_ERROR" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
