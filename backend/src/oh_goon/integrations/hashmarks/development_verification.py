@@ -36,17 +36,27 @@ def nominate_changed_verification(
         # Hashmarks owns this derived index and revalidates it natively. CI does
         # not transport/cache this mutable database as verification authority.
         with CodeMap(workspace) as native:
-            with native.reads.session():
+
+            def nominate_workspace(
+                _scope: object,
+                *,
+                prefix: str = prefix,
+                selected_paths: tuple[str, ...] = selected_paths,
+            ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+                # Native observe may reconcile a contributor and recompute the
+                # whole operation. Retain only rows from its accepted attempt.
+                observed: list[dict[str, Any]] = []
+                checks: list[dict[str, Any]] = []
                 if not prefix:
                     for path in required:
                         nomination = native.verification.nomination(path)
                         if validate_verification_nomination(nomination).get("valid") is not True:
                             raise ValueError("Hashmarks rejected a required policy proof")
-                        required_checks.append({"nomination": nomination, "workspace_prefix": ""})
+                        checks.append({"nomination": nomination, "workspace_prefix": ""})
                 for path in selected_paths:
                     relative = path.removeprefix(prefix)
                     if not (root / path).is_file():
-                        observations.append(
+                        observed.append(
                             {
                                 "changed_path": path,
                                 "state": "UNAVAILABLE",
@@ -59,7 +69,7 @@ def nominate_changed_verification(
                     if validation.get("valid") is not True:
                         raise ValueError("Hashmarks rejected its changed-source nomination")
                     if nominated.get("available") is True:
-                        observations.append(
+                        observed.append(
                             {
                                 "changed_path": path,
                                 "state": "CHANGED_TEST",
@@ -93,7 +103,7 @@ def nominate_changed_verification(
                                 "workspace_prefix": prefix,
                             }
                         )
-                    observations.append(
+                    observed.append(
                         {
                             "changed_path": path,
                             "state": "LINKED" if nominations else "UNAVAILABLE",
@@ -105,6 +115,11 @@ def nominate_changed_verification(
                             "nominations": nominations,
                         }
                     )
+                return observed, checks
+
+            observed, checks = native.reads.observe(nominate_workspace)
+            observations.extend(observed)
+            required_checks.extend(checks)
     packet = {
         "schema": "oh-goon.hashmarks-development-nominations/v1",
         "producer_implementation_identity": implementation,

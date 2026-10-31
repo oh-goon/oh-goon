@@ -470,6 +470,64 @@ def test_supported_hashmarks_adapter_returns_real_source_qualified_links(
     )
 
 
+def test_supported_hashmarks_adapter_reconciles_stale_contributor_without_partial_rows(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "feature.py").write_text(
+        "def answer():\n    return 42\n", encoding="utf-8"
+    )
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    verifier = tests / "test_feature.py"
+    verifier.write_text(
+        "from feature import answer\ndef test_answer():\n    assert answer() == 42\n",
+        encoding="utf-8",
+    )
+    (tests / "test_other.py").write_text(
+        "def test_other():\n    assert True\n", encoding="utf-8"
+    )
+    (tests / "test_policy.py").write_text(
+        "def test_policy():\n    assert True\n", encoding="utf-8"
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\ntestpaths = ['tests']\n", encoding="utf-8"
+    )
+    changed = ("tests/test_other.py", "feature.py")
+    required = ("tests/test_policy.py",)
+    baseline = nominate_changed_verification(tmp_path, changed, required=required)
+    original = baseline["observations"][1]["nominations"]
+    before = next(
+        row["nomination"]["source_member_revision"]
+        for row in original
+        if row["nomination"]["verification_target"]["path"] == "tests/test_feature.py"
+    )
+    # The map is warm. A later nominated contributor now has different bytes,
+    # after required proof and the first changed-test row have been observed.
+    with verifier.open("a", encoding="utf-8") as stream:
+        stream.write("\n# Current verifier source.\n")
+    evidence = nominate_changed_verification(tmp_path, changed, required=required)
+    assert (
+        evidence["producer_implementation_identity"]
+        == baseline["producer_implementation_identity"]
+    )
+    assert evidence["owner_coverage"] == "not-claimed"
+    assert [row["changed_path"] for row in evidence["observations"]] == list(changed)
+    assert len(evidence["required_checks"]) == 1
+    assert (
+        evidence["required_checks"][0]["nomination"]["verification_target"]["path"]
+        == required[0]
+    )
+    observed = evidence["observations"][1]
+    assert observed["state"] == "LINKED"
+    assert observed["qualification"] == baseline["observations"][1]["qualification"]
+    refreshed = next(
+        row["nomination"]["source_member_revision"]
+        for row in observed["nominations"]
+        if row["nomination"]["verification_target"]["path"] == "tests/test_feature.py"
+    )
+    assert refreshed != before
+
+
 def test_generated_contracts_use_their_producer_owner_without_per_shard_impact_queries(
     repository: Path,
 ) -> None:
