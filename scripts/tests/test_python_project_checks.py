@@ -340,10 +340,11 @@ def test_native_tiny_projects_retain_failed_and_independent_passing_junit(
             f'[project]\nname="tiny-{name}"\nversion="0.1.0"\nrequires-python=">=3.12"\n'
             f'[dependency-groups]\ndev=["pytest=={pytest.__version__}"]\n'
         )
+        # Installed pytest does not guarantee uv's offline resolution metadata.
+        # Author the fixture lock natively; project execution below remains frozen.
         locked = run_command(
             "uv",
             "lock",
-            "--offline",
             "--project",
             str(project),
             timeout=30,
