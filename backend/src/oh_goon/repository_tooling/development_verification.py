@@ -324,15 +324,11 @@ def _retain_native_report(outcome: dict[str, Any], path: Path) -> dict[str, Any]
     return payload
 
 
-def execute_change(
-    root: Path, plan: ChangeVerificationPlan, *, mode: str, workers: int
-) -> dict[str, Any]:
-    require_current_plan(root, plan)
-    if mode == "merge" and plan.unverified:
+def require_merge_selection(root: Path, plan: ChangeVerificationPlan) -> None:
+    if plan.unverified:
         raise ValueError("SELECTION_UNVERIFIED: " + "; ".join(plan.unverified))
     if (
-        mode == "merge"
-        and plan.behavioral_status == "REQUIRED"
+        plan.behavioral_status == "REQUIRED"
         and not (plan.pytest or plan.frontend)
         and not all(
             is_generated_contract_path(path) or non_executable_documentation(root, path)
@@ -340,6 +336,14 @@ def execute_change(
         )
     ):
         raise ValueError("SELECTION_UNVERIFIED: executable changes have no behavioral proof")
+
+
+def execute_change(
+    root: Path, plan: ChangeVerificationPlan, *, mode: str, workers: int
+) -> dict[str, Any]:
+    require_current_plan(root, plan)
+    if mode == "merge":
+        require_merge_selection(root, plan)
     outcomes: list[dict[str, Any]] = []
     for label, command, cwd in _commands(root, plan):
         result = run_command(
@@ -506,6 +510,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.plan:
             _write_transport(args.plan, plan.model_dump(mode="json"), root)
+            if args.mode == "merge":
+                require_merge_selection(root, plan)
             if args.github_output:
                 with args.github_output.open("a", encoding="utf-8") as stream:
                     stream.write(f"frontend={'true' if 'frontend' in plan.static else 'false'}\n")

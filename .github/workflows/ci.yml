@@ -66,7 +66,7 @@ jobs:
           bash scripts/development_test_resources.sh \
             uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \
             --base "$BASE_SHA" --candidate "$GITHUB_SHA" --head "$REQUESTED_HEAD" \
-            --plan "$CONTROL_DIR/plan.json" --github-output "$GITHUB_OUTPUT"
+            --mode "$VERIFY_MODE" --plan "$CONTROL_DIR/plan.json" --github-output "$GITHUB_OUTPUT"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.selection.outputs.frontend == 'true'
         with:
