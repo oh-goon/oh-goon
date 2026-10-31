@@ -29,12 +29,13 @@ def default_shared_plan_root() -> Path:
 class SharedPlanFileStore(ExactFileStore):
     """Local user-owned plan.yml files, independent of repository contents and run-history SQLite."""
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | None = None, *, initialize: bool = True) -> None:
         super().__init__(
             root or default_shared_plan_root(),
             file_name="plan.yml",
             key_pattern=_PLAN_KEY,
             label="Shared Plan",
+            initialize=initialize,
         )
 
     def read(

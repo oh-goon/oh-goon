@@ -7,10 +7,12 @@ Compose Ruff formatting and lint checks, one type checker and pytest into a reus
 **Prerequisites:** A committed Python project and uv lock with the selected native commands available in its locked group. Native project configuration owns tool settings.
 
 ```sh
-oh-goon templates init python/quality --kind goon --output ./workflow
+oh-goon init --template python/quality --kind goon --output ./workflow --draft
 ```
 
-Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** Native command status plus the outputs/artifacts declared in `goon.yml`.
 

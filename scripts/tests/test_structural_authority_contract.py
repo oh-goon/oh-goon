@@ -69,12 +69,7 @@ def _minimal_repo(tmp_path: Path) -> Path:
         "from oh_goon.core.source_layout_policy import assert_canonical_source_layout\n\n"
         "def _certification_environment():\n"
         '    lock_root: Path = Path("/state/locks")\n'
-        '    return _backend_cli(["dev", "bootstrap-certification"], env={}), lock_root\n\n'
-        "def _run_plan(lock_root: Path):\n"
-        '    lock_path = lock_root / "app-certification.goon.lock"\n'
-        '    lock_command = ["lock", "plan.yml", "--output", str(lock_path)]\n'
-        '    run_command = ["plan", "run", "plan.yml", "--lock-file", str(lock_path)]\n'
-        "    return lock_command, run_command\n",
+        '    return _backend_cli(["dev", "bootstrap-certification"], env={}), lock_root\n',
         encoding="utf-8",
     )
     (root / "frontend" / "src" / "domain" / "api" / "ApiClient.ts").write_text(

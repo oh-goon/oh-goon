@@ -18,7 +18,12 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_agent_providers import agent_connection_from_args
 from oh_goon.cli_plan_definition_commands import _check, _diff
 from oh_goon.cli_plan_inputs import plan_inputs
-from oh_goon.cli_plan_run_readback import print_run_completion, run_plan_readback
+from oh_goon.cli_plan_run_readback import (
+    print_run_completion,
+    run_completion_facts,
+    run_plan_readback,
+)
+from oh_goon.cli_plan_summary import captured_workflow_summary
 from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
 from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import AgentRepairBudget, AgentRepairResult
@@ -55,6 +60,12 @@ class _AgentRunSelection(TypedDict, total=False):
 
 
 def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int | None:
+    if args.command == "runs":
+        return (
+            _export_artifact(runtime, args)
+            if args.runs_command == "export-artifact"
+            else run_plan_readback(runtime, args)
+        )
     if args.command != "plan":
         return None
     handlers: dict[str, PlanHandler] = {
@@ -205,12 +216,10 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         source_identity = (
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
+        expected_repository_instances = None
         if hasattr(args, "_run_configuration"):
+            expected_repository_instances = args._run_configuration.repository_instance_ids
             source_identity["repository"] = args._run_configuration.resolution_repository
-            if args._run_configuration.repository_instance_ids is not None:
-                source_identity["expected_repository_instance_ids"] = (
-                    args._run_configuration.repository_instance_ids
-                )
             source_identity["source_graph"] = args._source_graph
             source_identity["repository_goon"] = (
                 args._run_configuration.snapshot.selection.source.kind == "repository-goon"
@@ -218,6 +227,12 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             source_identity["external_artifacts"] = (
                 args._run_configuration.snapshot.external_artifacts()
             )
+            destination = sys.stderr if as_json else sys.stdout
+            for repository in args._run_configuration.repositories:
+                print(f"Selected target: {repository.path}", file=destination)
+            for line in captured_workflow_summary(args._source_graph):
+                print(line, file=destination)
+            destination.flush()
         if repair_budget is not None:
             review = getattr(args, "review_passes", None) is not None
             review_options: _AgentReviewRepairOptions = {}
@@ -244,6 +259,7 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 lock_path=args.lock_file,
                 extensions_path=args.extensions,
                 requested_priority=args.priority,
+                expected_repository_instance_ids=expected_repository_instances,
                 **review_options,
                 **source_identity,
             )
@@ -268,6 +284,7 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             agent_skill_root=args.agent_skill_root,
             allowed_agent_acceptance=tuple(args.allow_agent_acceptance or ()),
             **native_options,
+            expected_repository_instance_ids=expected_repository_instances,
         )
         plan_id = (
             admitted.target.plan.plan_id if isinstance(admitted.target, FleetPlanTarget) else None
@@ -313,7 +330,7 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         execution_terminal = None
         readback = None
         if admitted is not None:
-            readback = ["oh-goon", "plan", "handoff", admitted.fleet_run_id, "--json"]
+            readback = ["oh-goon", "runs", "handoff", admitted.fleet_run_id, "--json"]
             try:
                 observed = runtime.runs.cancel(admitted.fleet_run_id)
                 cancellation_requested = True
@@ -344,6 +361,7 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 else "Plan invocation interrupted."
             )
             if admitted is not None:
+                print(f"Fleet Run ID: {admitted.fleet_run_id}")
                 print(
                     "Cancellation request: "
                     + ("confirmed" if cancellation_requested else "unconfirmed")
@@ -379,14 +397,17 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     if as_json:
         print(
             json.dumps(
-                _run_result(
-                    fleet_run_id=admitted.fleet_run_id,
-                    plan_id=admitted.target.plan.plan_id
-                    if isinstance(admitted.target, FleetPlanTarget)
-                    else None,
-                    status=detail.run.status.value,
-                    outcome=detail.outcome.value,
-                ),
+                {
+                    **_run_result(
+                        fleet_run_id=admitted.fleet_run_id,
+                        plan_id=admitted.target.plan.plan_id
+                        if isinstance(admitted.target, FleetPlanTarget)
+                        else None,
+                        status=detail.run.status.value,
+                        outcome=detail.outcome.value,
+                    ),
+                    **run_completion_facts(detail),
+                },
                 sort_keys=True,
             )
         )
@@ -455,7 +476,7 @@ def _print_agent_repair_result(
         if campaign_projection is not None:
             print(f"Campaign result: {campaign_projection['result']}")
             if result.campaign_journal is not None and result.campaign_journal.intent is not None:
-                print(f"Inspect retained evidence: oh-goon plan campaign {result.repair_id} --json")
+                print(f"Inspect retained evidence: oh-goon runs campaign {result.repair_id} --json")
             else:
                 print(
                     "Preparation stopped before campaign intent was committed; no retained campaign is available."
@@ -668,7 +689,7 @@ def _wait_for_terminal_with_progress(
     last_heartbeat = started
     heartbeat_index = 0
     current_activity: str | None = None
-    _progress_heartbeat("[|] Certification working · 00:00:00 · waiting for first activity")
+    _progress_heartbeat("[|] Run working · 00:00:00 · waiting for first activity")
     live_sequence = 0
     activity_sequence = 0
     seen_steps: set[tuple[str, int]] = set()
@@ -706,7 +727,7 @@ def _wait_for_terminal_with_progress(
                 spinner = _PROGRESS_SPINNER[heartbeat_index % len(_PROGRESS_SPINNER)]
                 activity = current_activity or "waiting for first activity"
                 _progress_heartbeat(
-                    f"[{spinner}] Certification working · "
+                    f"[{spinner}] Run working · "
                     f"{_format_progress_elapsed(now - started)} · {activity}"
                 )
                 last_heartbeat = now
@@ -968,6 +989,9 @@ def _schedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 args._run_configuration.snapshot.external_artifacts()
             )
             source_identity["lock_path"] = args.lock_file
+            source_identity["expected_repository_instance_ids"] = (
+                args._run_configuration.repository_instance_ids
+            )
         definition = runtime.plans.schedule(
             args.plan,
             schedule_id=args.schedule_id,
@@ -1006,6 +1030,9 @@ def _reschedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 args._run_configuration.snapshot.external_artifacts()
             )
             source_identity["lock_path"] = args.lock_file
+            source_identity["expected_repository_instance_ids"] = (
+                args._run_configuration.repository_instance_ids
+            )
         definition = runtime.plans.reschedule(
             args.plan,
             schedule_id=args.schedule_id,

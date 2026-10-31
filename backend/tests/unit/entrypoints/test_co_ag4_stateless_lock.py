@@ -6,7 +6,6 @@ import pytest
 import yaml
 
 from oh_goon.cli import main
-from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.execution_lock_persistence import load_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -29,17 +28,14 @@ def workflow(tmp_path, monkeypatch):
     league = tmp_path / "league.yml"
     league.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(league.parent / "test-state.db"))
     selected = tmp_path / "run.yml"
     selected.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "catalog-plan", "name": "python/dependency-inventory"},
-                "target": {
-                    "repository_id": RepositoryIdentity.model_validate(
-                        {"path": repository}
-                    ).repository_id
-                },
+                "target": {"repository": str(repository)},
             }
         )
     )
@@ -57,7 +53,7 @@ def test_workflow_lock_matches_original_service_without_database(workflow, tmp_p
         None,
         None,
     ).lock(source, output=expected_path, external_artifacts=snapshot.external_artifacts())
-    assert main(["lock", str(workflow)]) == 0
+    assert main(["workflow", "prepare", str(workflow)]) == 0
     destination = snapshot.lock_path
     assert (
         capsys.readouterr().out
@@ -73,7 +69,7 @@ def test_invalid_source_and_input_do_not_write_or_create_database(workflow, caps
     payload = yaml.safe_load(workflow.read_text())
     payload["inputs"] = {"unknown": "secret-sentinel"}
     workflow.write_text(yaml.safe_dump(payload))
-    assert main(["lock", str(workflow)]) == 2
+    assert main(["workflow", "prepare", str(workflow)]) == 2
     output = capsys.readouterr().out
     assert "secret-sentinel" not in output
     assert not workflow.with_name("goon.lock").exists()
@@ -81,7 +77,7 @@ def test_invalid_source_and_input_do_not_write_or_create_database(workflow, caps
     payload["source"] = {"kind": "file-plan", "path": "plan.yml"}
     workflow.write_text(yaml.safe_dump(payload))
     workflow.with_name("plan.yml").write_text("version: 1\nsteps: invalid\n")
-    assert main(["lock", str(workflow)]) == 2
+    assert main(["workflow", "prepare", str(workflow)]) == 2
     assert not workflow.with_name("goon.lock").exists()
 
 
@@ -96,7 +92,7 @@ def test_original_lock_writer_is_called_once(workflow, monkeypatch):
         return original(resolver, plan_path, **kwargs)
 
     monkeypatch.setattr(cli_lock, "_generate_execution_lock", exact_original)
-    assert main(["lock", str(workflow)]) == 0
+    assert main(["workflow", "prepare", str(workflow)]) == 0
     snapshot = load_run_configuration(workflow)
     assert len(observed) == 1
     assert observed[0][0] == snapshot.source_path()
@@ -110,7 +106,7 @@ def test_atomic_writer_preserves_previous_lock_on_resolution_failure(workflow):
     payload = yaml.safe_load(workflow.read_text())
     payload["inputs"] = {"unknown": True}
     workflow.write_text(yaml.safe_dump(payload))
-    assert main(["lock", str(workflow)]) == 2
+    assert main(["workflow", "prepare", str(workflow)]) == 2
     assert destination.read_text() == "do-not-replace"
     assert not list(workflow.parent.glob(".goon.lock.*.tmp"))
 
@@ -118,7 +114,6 @@ def test_atomic_writer_preserves_previous_lock_on_resolution_failure(workflow):
 def test_managed_agent_lock_refuses_captured_repository_different_from_target(
     tmp_path, monkeypatch, capsys
 ):
-    from oh_goon.core.product_identity import repository_id
     from tests.factories.agent_review import agent_review_case
 
     _, plan, _, options = agent_review_case(tmp_path)
@@ -132,6 +127,7 @@ def test_managed_agent_lock_refuses_captured_repository_different_from_target(
     league = tmp_path / "league.yml"
     league.write_text(yaml.safe_dump({"version": 1, "folders": [str(selected)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(league.parent / "test-state.db"))
     providers = tmp_path / "providers.toml"
     providers.write_text(
         '[providers.test]\napi = "openai-chat-completions"\nbase_url = "http://127.0.0.1:12345"\n'
@@ -142,9 +138,9 @@ def test_managed_agent_lock_refuses_captured_repository_different_from_target(
     configuration.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": repository_id(selected)},
+                "target": {"repository": str(selected)},
                 "inputs": {"repo": "local:repo"},
                 "agent": {
                     "model_profile": "review",
@@ -155,6 +151,6 @@ def test_managed_agent_lock_refuses_captured_repository_different_from_target(
             }
         )
     )
-    assert main(["lock", str(configuration)]) == 2
+    assert main(["workflow", "prepare", str(configuration)]) == 2
     assert not configuration.with_name("goon.lock").exists()
     assert "Generated:" not in capsys.readouterr().out

@@ -8,6 +8,7 @@ import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
@@ -151,7 +152,103 @@ def publish_prepared_file(temporary: Path, target: Path) -> None:
             ) from exc
 
 
-def publish_prepared_directory(staging: Path, target: Path) -> None:
+@dataclass(frozen=True, slots=True)
+class PreparedDirectory:
+    """One private staging resource held by its creating native descriptors."""
+
+    path: Path
+    descriptor: int
+    require_current: Callable[[], None]
+
+    def write_text(self, relative: str, content: str) -> None:
+        from pathlib import PurePosixPath
+
+        parts = PurePosixPath(relative).parts
+        if (
+            not parts
+            or relative != PurePosixPath(relative).as_posix()
+            or any(part in {".", "..", "/"} for part in parts)
+        ):
+            raise ValueError("Staged authoring files require canonical relative paths")
+        self.require_current()
+        with ExitStack() as owned:
+            directory = self.descriptor
+            for part in parts[:-1]:
+                try:
+                    os.mkdir(part, mode=0o700, dir_fd=directory)
+                except FileExistsError:
+                    pass
+                directory = os.open(
+                    part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
+                )
+                owned.callback(os.close, directory)
+            descriptor = os.open(
+                parts[-1],
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=directory,
+            )
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        self.require_current()
+
+
+@contextmanager
+def prepared_sibling_directory(target: Path) -> Iterator[PreparedDirectory]:
+    """Create and clean only an exact private sibling through pinned ancestors."""
+    import secrets
+    import shutil
+
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        raise OSError("Safe authoring staging requires native directory-relative operations")
+    if not target.is_absolute() or ".." in target.parts:
+        raise ValueError("Authoring output requires an absolute canonical path")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    with ExitStack() as owned:
+        parent = os.open(target.anchor, flags)
+        owned.callback(os.close, parent)
+        lineage: list[tuple[int, str, int]] = []
+        for component in target.parent.parts[1:]:
+            child = os.open(component, flags, dir_fd=parent)
+            owned.callback(os.close, child)
+            lineage.append((parent, component, child))
+            parent = child
+        name = ".oh-goon-init-" + secrets.token_hex(16)
+        os.mkdir(name, mode=0o700, dir_fd=parent)
+        source = os.open(name, flags, dir_fd=parent)
+        owned.callback(os.close, source)
+        lineage.append((parent, name, source))
+
+        def require_current() -> None:
+            for ancestor, component, descriptor in lineage:
+                actual = os.stat(component, dir_fd=ancestor, follow_symlinks=False)
+                expected = os.fstat(descriptor)
+                if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
+                    raise OSError("Authoring staging directory changed before publication")
+
+        try:
+            require_current()
+            yield PreparedDirectory(target.parent / name, source, require_current)
+        finally:
+            try:
+                actual = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                expected = os.fstat(source)
+                if (actual.st_dev, actual.st_ino) == (expected.st_dev, expected.st_ino):
+                    shutil.rmtree(name, dir_fd=parent)
+
+
+def publish_prepared_directory(
+    staging: Path,
+    target: Path,
+    *,
+    exclusive: bool = False,
+    expected_staging_identity: tuple[int, int] | None = None,
+) -> None:
     """Publish one prepared directory without making immutable source modes construction authority.
 
     Moving a directory between parents requires owner write permission on the moved
@@ -161,6 +258,11 @@ def publish_prepared_directory(staging: Path, target: Path) -> None:
     exact prepared root mode before the target becomes durable.  Child modes and bytes
     are never changed.
     """
+    if exclusive:
+        _publish_prepared_directory_exclusively(
+            staging, target, expected_staging_identity=expected_staging_identity
+        )
+        return
     prepared_mode = stat.S_IMODE(staging.stat(follow_symlinks=False).st_mode)
     publish_mode = prepared_mode | stat.S_IWUSR
     if publish_mode != prepared_mode:
@@ -193,6 +295,101 @@ def publish_prepared_directory(staging: Path, target: Path) -> None:
         raise ExactPublicationDurabilityError(
             f"Published {target} but could not durably sync its restored directory mode: {exc}"
         ) from exc
+
+
+def _publish_prepared_directory_exclusively(
+    staging: Path, target: Path, *, expected_staging_identity: tuple[int, int] | None = None
+) -> None:
+    """Commit one complete sibling tree using native atomic no-replace rename."""
+    if sys.platform != "linux" or not hasattr(os, "O_NOFOLLOW"):
+        raise OSError("Atomic exclusive directory publication requires native renameat2")
+    if (
+        not target.is_absolute()
+        or ".." in target.parts
+        or staging.parent != target.parent
+        or staging.name == target.name
+    ):
+        raise ValueError("Exclusive directory publication requires contained sibling staging")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    with ExitStack() as owned:
+        parent = os.open(target.anchor, flags)
+        owned.callback(os.close, parent)
+        lineage: list[tuple[int, str, int]] = []
+        for component in target.parent.parts[1:]:
+            child = os.open(component, flags, dir_fd=parent)
+            owned.callback(os.close, child)
+            lineage.append((parent, component, child))
+            parent = child
+        source = os.open(staging.name, flags, dir_fd=parent)
+        owned.callback(os.close, source)
+        actual_source = os.fstat(source)
+        if (
+            expected_staging_identity is not None
+            and (actual_source.st_dev, actual_source.st_ino) != expected_staging_identity
+        ):
+            raise OSError("Owned authoring staging directory changed before publication")
+        lineage.append((parent, staging.name, source))
+
+        def require_current(*, published: bool = False) -> None:
+            for ancestor, name, child in lineage[:-1] if published else lineage:
+                actual = os.stat(name, dir_fd=ancestor, follow_symlinks=False)
+                expected = os.fstat(child)
+                if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
+                    raise OSError("Authoring output directory changed before publication")
+
+        _sync_prepared_directory_descriptor(source)
+        require_current()
+        _rename_directory_no_replace(parent, staging.name, target.name)
+        try:
+            actual = os.stat(target.name, dir_fd=parent, follow_symlinks=False)
+            expected = os.fstat(source)
+            if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
+                raise OSError("Published directory changed after its atomic commit")
+            _fsync_directory_descriptor(source)
+            _fsync_directory_descriptor(parent)
+            require_current(published=True)
+        except OSError as exc:
+            raise ExactPublicationDurabilityError(
+                f"Published {target} but could not confirm its durable directory authority: {exc}"
+            ) from exc
+
+
+def _rename_directory_no_replace(parent: int, source: str, target: str) -> None:
+    """Invoke the kernel's RENAME_NOREPLACE authority, without a racy fallback."""
+    import ctypes
+
+    native = ctypes.CDLL(None, use_errno=True)
+    rename = getattr(native, "renameat2", None)
+    if rename is None:
+        raise OSError(errno.ENOSYS, "Native renameat2 is unavailable")
+    rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+    rename.restype = ctypes.c_int
+    if rename(parent, os.fsencode(source), parent, os.fsencode(target), 1) != 0:
+        number = ctypes.get_errno()
+        raise OSError(number, os.strerror(number), target)
+
+
+def _sync_prepared_directory_descriptor(descriptor: int) -> None:
+    """Sync an authored tree without following mutable path aliases."""
+    with os.scandir(descriptor) as entries:
+        for entry in entries:
+            status = entry.stat(follow_symlinks=False)
+            if not stat.S_ISDIR(status.st_mode) and not stat.S_ISREG(status.st_mode):
+                raise OSError(
+                    "Authored directory publication requires regular files and directories"
+                )
+            flags = os.O_RDONLY | os.O_NOFOLLOW
+            if stat.S_ISDIR(status.st_mode):
+                flags |= os.O_DIRECTORY
+            child = os.open(entry.name, flags, dir_fd=descriptor)
+            try:
+                if stat.S_ISDIR(status.st_mode):
+                    _sync_prepared_directory_descriptor(child)
+                else:
+                    os.fsync(child)
+            finally:
+                os.close(child)
+    _fsync_directory_descriptor(descriptor)
 
 
 def sync_prepared_path(path: Path) -> None:
@@ -318,110 +515,3 @@ def _release_lock(stream: BinaryIO) -> None:
         msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
         return
     fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-
-
-def publish_new_text_tree(target: Path, files: dict[str, str], *, commit_last: str) -> None:
-    """Exclusively publish an authored tree through pinned native directories.
-
-    The final file is a completion marker. Partial failure retains the incomplete
-    output and never removes user data; only descriptor-owned temporaries are removed.
-    """
-    import secrets
-    from contextlib import ExitStack
-    from pathlib import PurePosixPath
-
-    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
-        raise OSError(
-            "Safe workflow initialization requires native directory-relative file operations"
-        )
-    if commit_last not in files:
-        raise ValueError("The authored tree requires its completion file")
-    for relative in files:
-        parsed = PurePosixPath(relative)
-        if (
-            parsed.is_absolute()
-            or str(parsed) != relative
-            or any(p in {".", ".."} for p in parsed.parts)
-        ):
-            raise ValueError("Authored tree files require canonical relative paths")
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    with ExitStack() as owned:
-        root = os.open(target.anchor, flags)
-        owned.callback(os.close, root)
-        lineage: list[tuple[int, str, int]] = []
-        created_directories: list[int] = []
-
-        def require_current() -> None:
-            for parent, name, child in lineage:
-                actual = os.stat(name, dir_fd=parent, follow_symlinks=False)
-                expected = os.fstat(child)
-                if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
-                    raise OSError("Authoring output directory changed before publication")
-
-        def open_directory(parent: int, name: str, *, exclusive: bool = False) -> int:
-            require_current()
-            created = False
-            if exclusive:
-                os.mkdir(name, dir_fd=parent)
-                _fsync_directory_descriptor(parent)
-                created = True
-            try:
-                child = os.open(name, flags, dir_fd=parent)
-            except FileNotFoundError:
-                os.mkdir(name, dir_fd=parent)
-                _fsync_directory_descriptor(parent)
-                created = True
-                child = os.open(name, flags, dir_fd=parent)
-            owned.callback(os.close, child)
-            lineage.append((parent, name, child))
-            if created:
-                created_directories.append(child)
-            return child
-
-        parent = root
-        for component in target.parts[1:-1]:
-            parent = open_directory(parent, component)
-        output = open_directory(parent, target.name, exclusive=True)
-        directories: dict[tuple[str, ...], int] = {(): output}
-        for relative in (*sorted(set(files) - {commit_last}), commit_last):
-            parts = PurePosixPath(relative).parts
-            for index in range(1, len(parts)):
-                prefix = parts[:index]
-                if prefix not in directories:
-                    directories[prefix] = open_directory(directories[prefix[:-1]], prefix[-1])
-            directory = directories[parts[:-1]]
-            require_current()
-            temporary = ".oh-goon-authoring-" + secrets.token_hex(16)
-            descriptor = os.open(
-                temporary,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=directory,
-            )
-            try:
-                with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-                    stream.write(files[relative])
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                require_current()
-                if relative == commit_last:
-                    # A durable marker must never outrun the companion directory
-                    # entries. Flush newly created descendants before ancestors.
-                    for created_directory in reversed(created_directories):
-                        _fsync_directory_descriptor(created_directory)
-                    _fsync_directory_descriptor(parent)
-                    require_current()
-                os.link(
-                    temporary,
-                    parts[-1],
-                    src_dir_fd=directory,
-                    dst_dir_fd=directory,
-                    follow_symlinks=False,
-                )
-                _fsync_directory_descriptor(directory)
-            finally:
-                try:
-                    os.unlink(temporary, dir_fd=directory)
-                except FileNotFoundError:
-                    pass
-        require_current()

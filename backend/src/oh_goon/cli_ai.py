@@ -409,7 +409,7 @@ def _run_selected(
 
 
 def _print_handoff_reference(fleet_run_id: str) -> None:
-    argv = ["oh-goon", "plan", "handoff", fleet_run_id, "--json"]
+    argv = ["oh-goon", "runs", "handoff", fleet_run_id, "--json"]
     print("Durable Run handoff argv: " + json.dumps(argv), file=sys.stderr)
 
 

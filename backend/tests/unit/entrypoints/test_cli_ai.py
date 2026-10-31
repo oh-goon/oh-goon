@@ -16,6 +16,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli import main
 from oh_goon.cli_parser import build_parser
 from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.game_tape import GameTapeSummary
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
 from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.git import GitService
@@ -59,7 +60,23 @@ def native_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespa
     detail = SimpleNamespace(
         run=SimpleNamespace(fleet_run_id="native-run", status=FleetRunStatus.COMPLETED),
         outcome=FleetRunOutcome.SUCCESS,
-        game_tape=SimpleNamespace(repositories=()),
+        game_tape=SimpleNamespace(
+            repositories=(),
+            why_not=None,
+            summary=GameTapeSummary(
+                repositories=0,
+                passed=0,
+                failed=0,
+                attention_required=0,
+                not_run=0,
+                planned_steps=0,
+                executed_steps=0,
+                passed_steps=0,
+                failed_steps=0,
+                skipped_steps=0,
+                not_run_steps=0,
+            ),
+        ),
         model_dump_json=Mock(return_value='{"fleet_run_id":"native-run"}'),
     )
     runtime = SimpleNamespace(
@@ -636,12 +653,11 @@ def test_native_plan_run_reuses_frozen_cli_selection_and_original_run_owner(
     monkeypatch.setattr("oh_goon.cli_ai.load_agent_providers", load)
     import yaml
 
-    from oh_goon.core.models.repository import RepositoryIdentity
-
     root = native_cli.workspace.parent
     league = root / "league.yml"
     league.write_text(yaml.safe_dump({"version": 1, "folders": [str(native_cli.workspace)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(league.parent / "test-state.db"))
     monkeypatch.setenv("OH_GOON_PROVIDERS_FILE", str(native_cli.config))
     skill = root / "skills/task"
     skill.mkdir(parents=True)
@@ -663,13 +679,9 @@ steps:
     config.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "repository-goon"},
-                "target": {
-                    "repository_id": RepositoryIdentity.model_validate(
-                        {"path": native_cli.workspace}
-                    ).repository_id
-                },
+                "target": {"repository": str(native_cli.workspace)},
                 "inputs": {"repo": "local:project", "skill": "local:skills/task"},
                 "agent": {
                     "implementation": "pi",
@@ -682,6 +694,8 @@ steps:
         )
     )
     argv = ["run", str(config), "--json"]
+    assert main(["workflow", "prepare", str(config)]) == 0
+    load.reset_mock()
     assert main(argv) == 0
     load.assert_called_once_with(native_cli.config)
     call = native_cli.runtime.plans.run.call_args.kwargs
@@ -713,24 +727,19 @@ steps:
 """)
     import yaml
 
-    from oh_goon.core.models.repository import RepositoryIdentity
-
     league = root / "league.yml"
     league.write_text(yaml.safe_dump({"version": 1, "folders": [str(native_cli.workspace)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(league.parent / "test-state.db"))
     monkeypatch.setenv("OH_GOON_PROVIDERS_FILE", str(native_cli.config))
     recipe.rename(native_cli.workspace / "goon.yml")
     config = root / "run.yml"
     config.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "repository-goon"},
-                "target": {
-                    "repository_id": RepositoryIdentity.model_validate(
-                        {"path": native_cli.workspace}
-                    ).repository_id
-                },
+                "target": {"repository": str(native_cli.workspace)},
                 "inputs": {"repo": "local:project", "skill": "local:skills/task"},
                 "agent": {
                     "implementation": "pi",
@@ -745,7 +754,7 @@ steps:
     return config
 
 
-def test_native_lock_captures_once_and_binds_selected_implementation(
+def test_native_prepare_captures_once_and_binds_selected_implementation(
     native_cli: SimpleNamespace,
     native_run_configuration: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -755,7 +764,7 @@ def test_native_lock_captures_once_and_binds_selected_implementation(
     capture = Mock(wraps=capture_agent_sources)
     monkeypatch.setattr("oh_goon.services.agent_authoring_sources.capture_agent_sources", capture)
     root = native_run_configuration.parent
-    argv = ["lock", str(native_run_configuration)]
+    argv = ["workflow", "prepare", str(native_run_configuration)]
     assert main(argv) == 0
     capture.assert_called_once()
     before = load_execution_lock(root / "goon.lock").digest
@@ -765,7 +774,7 @@ def test_native_lock_captures_once_and_binds_selected_implementation(
     native_cli.build.assert_not_called()
 
 
-@pytest.mark.parametrize("entrypoint", ("ai", "lock"))
+@pytest.mark.parametrize("entrypoint", ("ai", "prepare"))
 @pytest.mark.parametrize(
     "arguments",
     (
@@ -787,7 +796,11 @@ def test_pi_argument_refusal_precedes_application_capture_and_lock_effects(
 ) -> None:
     from oh_goon.services.agent_authoring_sources import capture_agent_sources
 
-    argv = native_cli.argv if entrypoint == "ai" else ["lock", str(native_run_configuration)]
+    argv = (
+        native_cli.argv
+        if entrypoint == "ai"
+        else ["workflow", "prepare", str(native_run_configuration)]
+    )
     assert main(argv) == 0
     lock = native_run_configuration.parent / "goon.lock"
     original_lock = lock.read_bytes() if lock.exists() else None
@@ -811,7 +824,7 @@ def test_pi_argument_refusal_precedes_application_capture_and_lock_effects(
     assert "unselected" not in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("entrypoint", ("ai", "lock"))
+@pytest.mark.parametrize("entrypoint", ("ai", "prepare"))
 def test_pi_public_model_thinking_and_tool_options_preserve_native_selection(
     native_cli: SimpleNamespace,
     native_run_configuration: Path,
@@ -825,7 +838,11 @@ def test_pi_public_model_thinking_and_tool_options_preserve_native_selection(
         {"arguments": arguments, "configuration_directory": str(public_config)}
     )
     native_cli.config.write_text(json.dumps(payload))
-    argv = native_cli.argv if entrypoint == "ai" else ["lock", str(native_run_configuration)]
+    argv = (
+        native_cli.argv
+        if entrypoint == "ai"
+        else ["workflow", "prepare", str(native_run_configuration)]
+    )
 
     assert main(argv) == 0
 
@@ -838,11 +855,78 @@ def test_pi_public_model_thinking_and_tool_options_preserve_native_selection(
         native_cli.build.assert_not_called()
 
 
+@pytest.mark.parametrize("valid_arguments", (True, False), ids=("native-options", "owned-session"))
+def test_pi_registered_preparation_validates_native_selection_before_target_effects(
+    native_cli: SimpleNamespace,
+    native_run_configuration: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    valid_arguments: bool,
+) -> None:
+    import yaml
+
+    from oh_goon.runtime.league_folders import LeagueFolderStore
+    from oh_goon.services.agent_authoring_sources import capture_agent_sources
+    from oh_goon.services.execution_lock_persistence import write_execution_lock
+    from oh_goon.services.run_configuration import (
+        load_run_configuration,
+        resolve_run_configuration_targets,
+    )
+
+    root = native_run_configuration.parent
+    league = root / "league.yml"
+    league.write_text(yaml.safe_dump({"version": 1, "folders": []}))
+    original_preferences = league.read_bytes()
+    database = root / "test-state.db"
+    lock = root / "goon.lock"
+    targets = resolve_run_configuration_targets(load_run_configuration(native_run_configuration))
+    assert len(targets) == 1 and not targets[0].registered
+    assert not database.exists() and not lock.exists()
+    arguments = (
+        ("--thinking", "low") if valid_arguments else ("--session", "PRIVATE_NATIVE_HISTORY")
+    )
+    payload = json.loads(native_cli.config.read_text())
+    payload["native_agents"]["pi"]["arguments"] = arguments
+    native_cli.config.write_text(json.dumps(payload))
+    load = Mock(wraps=load_agent_providers)
+    build_registration = Mock(wraps=ApplicationRuntime.build_registration_service)
+    capture = Mock(wraps=capture_agent_sources)
+    publish = Mock(wraps=write_execution_lock)
+    monkeypatch.setattr(cli_ai, "load_agent_providers", load)
+    monkeypatch.setattr(ApplicationRuntime, "build_registration_service", build_registration)
+    monkeypatch.setattr("oh_goon.services.agent_authoring_sources.capture_agent_sources", capture)
+    monkeypatch.setattr("oh_goon.services.execution_lock_persistence.write_execution_lock", publish)
+
+    assert main(
+        ["workflow", "prepare", str(native_run_configuration), "--register-target", "--json"]
+    ) == (0 if valid_arguments else 2)
+
+    load.assert_called_once_with(native_cli.config)
+    native_cli.build.assert_not_called()
+    native_cli.runtime.plans.run_native_agent.assert_not_called()
+    native_cli.runtime.locations.add.assert_not_called()
+    if valid_arguments:
+        build_registration.assert_called_once_with()
+        capture.assert_called_once()
+        publish.assert_called_once()
+        assert LeagueFolderStore(league).list() == (native_cli.workspace,)
+        assert database.exists()
+        assert load_execution_lock(lock).digest
+    else:
+        build_registration.assert_not_called()
+        capture.assert_not_called()
+        publish.assert_not_called()
+        assert league.read_bytes() == original_preferences
+        assert not database.exists() and not lock.exists()
+    output = capsys.readouterr()
+    assert "PRIVATE_NATIVE_HISTORY" not in output.out + output.err
+
+
 def test_native_workspace_flags_require_explicit_agent_before_app(
     native_cli: SimpleNamespace,
 ) -> None:
     with pytest.raises(SystemExit):
-        main(["lock", "goon.yml", "--native-workspace", str(native_cli.workspace)])
+        main(["workflow", "prepare", "goon.yml", "--native-workspace", str(native_cli.workspace)])
     native_cli.build.assert_not_called()
 
 
@@ -932,7 +1016,7 @@ def test_ai_always_emits_one_durable_handoff_reference_at_admission(
         if line.startswith("Durable Run handoff argv: ")
     ]
     assert len(references) == 1
-    assert json.loads(references[0]) == ["oh-goon", "plan", "handoff", "native-run", "--json"]
+    assert json.loads(references[0]) == ["oh-goon", "runs", "handoff", "native-run", "--json"]
 
 
 @pytest.mark.parametrize(

@@ -7,6 +7,7 @@ No other writer, digest policy, or authorization path is introduced here.
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -29,20 +30,84 @@ def run_lock_with_owner(
         lock = lock_owner(args.plan, inputs=plan_inputs(args), output=args.output)
     except (FleetDomainError, OSError, UnicodeError, ValueError) as exc:
         if hasattr(args, "_run_configuration"):
-            from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
+            from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
 
-            print_safe_plan_diagnostic(exc, as_json=False)
+            report = dict(safe_plan_diagnostic(exc))
+            registration = getattr(args, "_target_registration", None)
+            if registration is not None:
+                report["target_registration"] = registration
+            if getattr(args, "as_json", False):
+                print(json.dumps(report, ensure_ascii=False))
+            else:
+                from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
+
+                print_safe_plan_diagnostic(exc, as_json=False)
+                if registration is not None:
+                    print("Target registration retained: " + json.dumps(registration))
         else:
             print(str(exc))
         return 2
     destination = args.output or (args.plan.parent / "goon.lock")
+    if getattr(args, "as_json", False):
+        print(
+            json.dumps(
+                {
+                    "schema": "oh-goon.workflow-prepare/v1",
+                    "status": "prepared",
+                    "lock_path": str(destination),
+                    "execution_digest": lock.digest,
+                    "target_registration": getattr(args, "_target_registration", None),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
     print(f"Generated: {destination}")
     print(f"Execution digest: {lock.digest}")
+    registration = getattr(args, "_target_registration", None)
+    if registration is not None:
+        print("Target registration: " + json.dumps(registration))
     return 0
 
 
 def run_stateless_lock(args: argparse.Namespace) -> int:
     """Skip app DB/Fleet initialization, not the original atomic lock writer."""
+
+    def write_selected_lock(
+        plan: Path,
+        *,
+        inputs: dict[str, PlanInputValue] | None,
+        output: Path | None,
+    ) -> ExecutionLock:
+        # Keep selection failures inside the same bounded CLI presentation as
+        # publication failures, while permitting explicit early composition.
+        return prepare_stateless_lock(args)(plan, inputs=inputs, output=output)
+
+    return run_lock_with_owner(args, write_selected_lock)
+
+
+def generate_stateless_lock(
+    args: argparse.Namespace, *, lock_owner: Callable[..., ExecutionLock] | None = None
+) -> ExecutionLock:
+    """Compose the same original lock owner without CLI presentation."""
+    owner = lock_owner if lock_owner is not None else prepare_stateless_lock(args)
+    return owner(args.plan, inputs=plan_inputs(args), output=args.output)
+
+
+def prepare_stateless_lock(args: argparse.Namespace) -> Callable[..., ExecutionLock]:
+    """Resolve native selection once, before registration or lock publication."""
+    selected = bool(
+        args.agent_repository_root
+        or args.agent_skill_root
+        or args.allow_agent_acceptance
+        or args.native_agent
+    )
+    native, git = None, None
+    if args.native_agent is not None:
+        from oh_goon.cli_ai import native_plan_selection
+
+        native, _, git = native_plan_selection(args)
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(), git_service=git)
 
     def canonical_lock(
         plan: Path,
@@ -50,18 +115,14 @@ def run_stateless_lock(args: argparse.Namespace) -> int:
         inputs: dict[str, PlanInputValue] | None,
         output: Path | None,
     ) -> ExecutionLock:
-        selected = bool(
-            args.agent_repository_root
-            or args.agent_skill_root
-            or args.allow_agent_acceptance
-            or args.native_agent
-        )
-        native, git = None, None
-        if args.native_agent is not None:
-            from oh_goon.cli_ai import native_plan_selection
+        if hasattr(args, "_run_configuration") and not args._run_configuration.registered:
+            from oh_goon.core.errors import RunConfigurationInvalid
 
-            native, _, git = native_plan_selection(args)
-        resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(), git_service=git)
+            raise RunConfigurationInvalid(
+                "Execution-lock authoring requires the selected registered target",
+                diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+                fields=("target.repository",),
+            )
         if not selected:
             return _generate_execution_lock(
                 resolver,
@@ -147,4 +208,4 @@ def run_stateless_lock(args: argparse.Namespace) -> int:
         write_execution_lock(destination, lock)
         return lock
 
-    return run_lock_with_owner(args, canonical_lock)
+    return canonical_lock

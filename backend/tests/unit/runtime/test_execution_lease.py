@@ -1,3 +1,8 @@
+import sqlite3
+import subprocess
+import sys
+import tempfile
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -95,6 +100,53 @@ def test_scope_mutation_is_blocked_by_direct_execution_lease(tmp_path: Path) -> 
             state.add_location(tmp_path / "repos")
     finally:
         leases.finish_as_owner(lease, lambda _connection: None)
+
+
+def test_scope_registration_preserves_retained_dead_direct_ownership(tmp_path: Path) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    state = local_state(database)
+    original = tmp_path / "original"
+    original.mkdir()
+    assert state.add_location(original) == [original]
+
+    script = """\
+import sys
+from pathlib import Path
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.execution.sqlite_lease import SQLiteExecutionLeaseStore
+database = LocalDatabase(Path(sys.argv[1]))
+leases = SQLiteExecutionLeaseStore(database)
+leases.acquire_direct_with(
+    expected_durable_revision=database.durable_revision(), mutate=lambda connection: None
+)
+"""
+    with tempfile.TemporaryFile() as output:
+        completed = subprocess.run(
+            [sys.executable, "-c", script, str(database.path)],
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=output,
+            timeout=30,
+        )
+        output.seek(0)
+        assert completed.returncode == 0, output.read(8192).decode(errors="replace")
+
+    with database.transaction() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM execution_lease").fetchone()[0] == 1
+    revision = database.durable_revision()
+    preferences = database.path.with_name("league.yml").read_bytes()
+    with closing(sqlite3.connect(database.path)) as connection:
+        before = tuple(connection.iterdump())
+    selected = tmp_path / "selected"
+    selected.mkdir()
+
+    with pytest.raises(ExecutionBusy, match="Cannot change fleet scope"):
+        state.add_location(selected)
+
+    assert database.durable_revision() == revision
+    assert database.path.with_name("league.yml").read_bytes() == preferences
+    with closing(sqlite3.connect(database.path)) as connection:
+        assert tuple(connection.iterdump()) == before
 
 
 def test_dead_owner_pid_allows_immediate_lease_recovery(tmp_path: Path) -> None:

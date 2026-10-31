@@ -5,9 +5,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from oh_goon.application import ApplicationRuntime
 
-from oh_goon._application_foundation import RuntimeFoundation
+from oh_goon._application_foundation import RuntimeFoundation, _build_local_state_foundation
 from oh_goon.integrations.gitlab_ci_component import GitLabComponentFetcher
 from oh_goon.integrations.gitlab_ci_goon import GitLabCiGoonMigrator
+from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.dependency_observations import DependencyObservationStore
 from oh_goon.runtime.dependency_targets import DependencyTargetMaterializationStore
 from oh_goon.runtime.goon_templates import GoonTemplateStore
@@ -44,6 +45,12 @@ from oh_goon.services.shared_plan_schedules import SharedPlanScheduleService
 from oh_goon.services.shared_plans import SharedPlanService
 from oh_goon.services.system_health import SystemHealthService
 from oh_goon.services.target_selection import FleetTargetSelector
+
+
+def build_registration_service() -> LocationService:
+    """Compose explicit scope mutation without application recovery or workers."""
+    require_loaded_hashmarks_runtime()
+    return LocationService(_build_local_state_foundation(startup_purpose="workflow").state)
 
 
 def _build_fleet_services(
@@ -168,7 +175,11 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
         standard_process_isolation=foundation.standard_process_isolation,
         git_service=foundation.git_service,
     )
-    shared_plan_store = SharedPlanFileStore()
+    shared_plan_store = (
+        SharedPlanFileStore(initialize=False)
+        if foundation.startup_purpose == "observation"
+        else SharedPlanFileStore()
+    )
     shared_plan = SharedPlanService(shared_plan_store, league, plans, runs, plan_templates)
     shared_plan_schedules = SharedPlanScheduleService(shared_plan_store, league, plans, schedules)
     system_health = SystemHealthService(
@@ -212,7 +223,12 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
         goon=GoonService(league, plans, GitLabCiGoonMigrator(GitLabComponentFetcher())),
         shared_plan=shared_plan,
         shared_plan_schedules=shared_plan_schedules,
-        lineups=LeagueLineupService(LeagueLineupFileStore(), league),
+        lineups=LeagueLineupService(
+            LeagueLineupFileStore(initialize=False)
+            if foundation.startup_purpose == "observation"
+            else LeagueLineupFileStore(),
+            league,
+        ),
         scout=ScoutService(
             foundation.state.journal,
             database=foundation.database,
@@ -220,4 +236,5 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
         ),
         _lifecycle=foundation.lifecycle,
         _schedule_scheduler=schedule_scheduler,
+        _startup_purpose=foundation.startup_purpose,
     )

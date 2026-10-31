@@ -321,6 +321,7 @@ def test_application_background_work_cannot_restart_after_quiesce() -> None:
             self.starts += 1
 
     runtime = object.__new__(ApplicationRuntime)
+    object.__setattr__(runtime, "_startup_purpose", "application")
     object.__setattr__(runtime, "_lifecycle", RuntimeLifecycle())
     scheduler = SchedulerStub()
     object.__setattr__(runtime, "_schedule_scheduler", scheduler)

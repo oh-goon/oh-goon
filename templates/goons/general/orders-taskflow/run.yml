@@ -1,7 +1,7 @@
-version: 1
+version: 2
 source:
   kind: repository-goon
 target:
-  repository_id: REPOSITORY_ID
+  repository: REPOSITORY_PATH
 inputs:
   fixture: official

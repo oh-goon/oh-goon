@@ -7,10 +7,12 @@ Run the project’s packaging command and retain its distribution bundle and man
 **Prerequisites:** The selected locked group must supply `package-artifacts`; strict content-store publication must be configured.
 
 ```sh
-oh-goon templates init python/package-artifacts --kind plan --output ./workflow
+oh-goon init --template python/package-artifacts --kind plan --output ./workflow --draft
 ```
 
-The [python/package-artifacts Plan](../../../plans/python/package-artifacts/README.md) supplies the surrounding policy and ordered work. Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+The [python/package-artifacts Plan](../../../plans/python/package-artifacts/README.md) supplies the surrounding policy and ordered work. Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** `package-distributions.tar` uses content-store retention; `package-artifacts.json` is evidence.
 

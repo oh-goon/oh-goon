@@ -64,7 +64,7 @@ oh-goon lineup inspect backend
 
 The browser/API consumes the saved Lineup plus one explicit Shared Plan under
 the original reviewed-identity and freshness contract. Normal CLI execution
-uses one selected `run.yml` and registered repository ID; it does not turn a
+uses one selected `run.yml` and exact registered repository path; it does not turn a
 Lineup into an implicit fleet iterator or a second launch route.
 
 ## Sources of truth

@@ -55,7 +55,7 @@ make local-state-check
 make local-state-path
 ```
 
-For compatible state with fully settled ownership, `make local-state-reset` can explicitly clear source-checkout history. The built-release equivalent is `oh-goon local-state reset --yes` from that exact release. Reset refuses incompatible, corrupt, active or unresolved state. A permitted reset removes only the selected SQLite database and sidecars; repositories and project files remain, and saved League folders stay in `league.yml`. Restart through `make dev` or that same release's `oh-goon start` after the selected recovery completes.
+For compatible state with fully settled ownership, `make local-state-reset` can explicitly clear source-checkout history. The built-release equivalent is `oh-goon local-state reset --yes` from that exact release. Reset refuses incompatible, corrupt, active or unresolved state. A permitted reset removes only the selected SQLite database and sidecars; repositories and project files remain, and saved League folders stay in `league.yml`. Restart through `make dev` or that same release's `oh-goon app start` after the selected recovery completes.
 
 
 ## Reusable Shared Plans
@@ -69,20 +69,21 @@ never infers a fleet from an empty target or merges a target's repository Goon.
 ## Select and run a workflow
 
 ```bash
-oh-goon templates list --kind plan
-oh-goon templates init python/quality --kind plan --output ./workflow
-# Edit workflow/run.yml with the registered repository ID and desired inputs.
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
-oh-goon run ./workflow/run.yml --json
+oh-goon init --template python/quality --repository /absolute/path/to/project --no-input
+oh-goon run ./workflow --no-input
 ```
 
-The CLI waits for the original terminal outcome. Inspection/validation do not
-execute work or prove native availability. A valid lock freezes the selected
-identity; fresh admission still owns permissions and source freshness. Agent
-workflows additionally select their relevant groups in that same config; see
-[run configuration](development/TEMPLATE_INPUT_INSPECTION.md) and
+Initialization validates typed caller values, explicitly registers the selected
+exact Git root when needed, and publishes a v2 path-selected `run.yml` together
+with the first canonical `goon.lock`. Supply nondefault values with
+`--input NAME=VALUE`; the compiler owns conversion and constraints.
+
+The CLI waits for the original terminal outcome. Optional `workflow inspect`
+and `workflow validate` remain read-only by default. After changing the selected
+source or inputs, review them and use `workflow prepare ./workflow` before Run.
+Fresh admission still owns permissions, target-instance and source freshness.
+Agent/repair authoring uses explicit `init --draft`, then completion and prepare;
+see [run configuration](development/TEMPLATE_INPUT_INSPECTION.md) and
 [Agent Skills](AGENT_SKILLS.md).
 
 Internal APP/release and enrolled deployment flows use their original
@@ -95,9 +96,9 @@ After a `run run.yml --json` returns the `fleet_run_id`, query the
 existing journal/Game Tape owners without re-running the Plan:
 
 ```bash
-oh-goon plan status ENROLLED_RUN_ID --json
-oh-goon plan events ENROLLED_RUN_ID --after 0 --json
-oh-goon plan logs ENROLLED_RUN_ID --after 0 --json
+oh-goon runs show ENROLLED_RUN_ID --json
+oh-goon runs events ENROLLED_RUN_ID --after 0 --json
+oh-goon runs logs ENROLLED_RUN_ID --after 0 --json
 ```
 
 For the next call to `events` or `logs`, pass the original `next_sequence` as
@@ -111,19 +112,19 @@ Agents can follow the same enrolled `fleet_run_id` from RUN-1/RUN-2/RUN-3
 into the original archived Game Tape and its stable repository/Step identities:
 
 ```bash
-oh-goon plan tape ENROLLED_RUN_ID --json
-oh-goon plan steps ENROLLED_RUN_ID --json
-oh-goon plan outputs ENROLLED_RUN_ID --json
+oh-goon runs tape ENROLLED_RUN_ID --json
+oh-goon runs steps ENROLLED_RUN_ID --json
+oh-goon runs outputs ENROLLED_RUN_ID --json
 ```
 
 These views are derived exclusively from `FleetRunDetail.game_tape` through
 one `runtime.runs.get` read per request. Steps retain the original `why`,
 `failure`, `step_execution_id`, and `issue_focus` fields; outputs retain the
 original published output/artifact and stdout/stderr **hash/size evidence**.
-`plan outputs` does not retrieve raw log bytes; `plan logs` is transient and
+`runs outputs` does not retrieve raw log bytes; `runs logs` is transient and
 may be `UNAVAILABLE`. Nothing here replays a Run, grants admission, or certifies
-physical containment. JSON `plan tape` can be large; use `plan steps` or
-`plan outputs` for focused agent inspection. No new Hashmarks dependency.
+physical containment. JSON `runs tape` can be large; use `runs steps` or
+`runs outputs` for focused agent inspection. No new Hashmarks dependency.
 
 ## Resume a bounded journal event page (RUN-3)
 
@@ -131,7 +132,7 @@ The original journal owner can bound the durable events returned in one page.
 The Plan CLI defaults to 100 events, and `--limit` accepts 1 to 100:
 
 ```bash
-oh-goon plan events ENROLLED_RUN_ID --after 0 --limit 50 --json
+oh-goon runs events ENROLLED_RUN_ID --after 0 --limit 50 --json
 # When has_more is true, call again with --after <next_sequence>.
 ```
 

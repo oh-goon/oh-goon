@@ -323,8 +323,8 @@ def _write_certification_progress_relationship(
         f"    return runtime.runs.{run_method_name}('run-1', after=0)\n\n"
         "def render(runtime: ApplicationRuntime):\n"
         "    batch = _read_progress(runtime)\n"
-        "    print('Observed activity: Goon 1/1')\n"
-        "    print('Certification working')\n"
+        "    print('Native activity observed')\n"
+        "    print('Run active')\n"
         "    print('OH_GOON_PROGRESS_FD')\n"
         "    return batch\n",
     )

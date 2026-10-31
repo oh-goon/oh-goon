@@ -27,7 +27,7 @@ goons:
 """,
         inputs={"typechecker": "ty"},
     )
-    assert main(["config", "inspect", str(config), "--json"]) == 0
+    assert main(["workflow", "inspect", str(config), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     occurrences = report["occurrences"]
     assert [item["occurrence"] for item in occurrences] == [["first"], ["second"]]
@@ -39,7 +39,7 @@ goons:
 
 def test_one_captured_config_is_not_reinterpreted_during_report(tmp_path, monkeypatch):
     config = write_run_configuration(tmp_path, monkeypatch, inputs={"typechecker": "ty"})
-    args = build_parser().parse_args(["config", "inspect", str(config), "--json"])
+    args = build_parser().parse_args(["workflow", "inspect", str(config), "--json"])
     prepare_configuration(args)
     captured = args._run_configuration
     before = inspect_run_configuration(

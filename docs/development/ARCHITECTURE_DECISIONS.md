@@ -65,7 +65,7 @@ If recovery changes execution-relevant state, downstream freshness/result identi
 source/ref/path declarations. Native Git acquires each declared collection;
 `goon.lock` owns its exact resolved commit. Cache directories are replaceable
 materializations, not version selectors. Normal runs and repair recaptures use
-locked commits, including after a cache miss. Only explicit `lock --update-skills`
+locked commits, including after a cache miss. Only explicit `workflow prepare --refresh skills`
 refreshes moving selectors. INI and Gitlink registry modes are removed.
 
 The existing Agent source capture reads complete selected directories once,

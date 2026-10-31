@@ -276,7 +276,13 @@ def verify_run_resource_handoff(
     """Bind the entire restored packet to its actual native unit before application work."""
     captured = restore_run_resource_handoff(header)
     try:
-        if configuration.absolute() != captured.snapshot.path:
+        # The original loader admits either this exact file or its containing
+        # directory. Verify that same selection against the sealed capture;
+        # consulting the filesystem here would resolve the invocation again.
+        if configuration.absolute() not in {
+            captured.snapshot.path,
+            captured.snapshot.path.parent,
+        }:
             raise FleetPlanInvalid("Run resource handoff selects another configuration")
         evidence = verify_current_run_resource_scope(captured.scope, handoff_sha256=captured.sha256)
         _require_private_control_parent(captured.observation_path)

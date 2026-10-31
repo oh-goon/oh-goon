@@ -33,6 +33,7 @@ def test_public_application_entrypoint_passes_exact_deployment_provisioner(monke
         terminal=None,
         standard_process_isolation=None,
         git_service=None,
+        startup_purpose="application",
         run_resource_scope=None,
         run_resource_envelope=None,
     ):
@@ -43,6 +44,7 @@ def test_public_application_entrypoint_passes_exact_deployment_provisioner(monke
             run_resource_scope,
             run_resource_envelope,
         ) == (None, None, None, None, None)
+        assert startup_purpose == "application"
         observed.append((fleet_provisioner, standard_local))
         return built
 

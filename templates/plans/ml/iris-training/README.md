@@ -17,7 +17,7 @@ with native uv first. Use your actual development repository as the target:
 
 ```sh
 oh-goon league add-folder /absolute/path/to/your/project
-oh-goon templates init ml/iris-training --kind plan --output ./workflow --repository /absolute/path/to/your/project
+oh-goon init --template ml/iris-training --kind plan --output ./workflow --repository /absolute/path/to/your/project
 ```
 
 The initializer fills the target identity. Edit only caller choices in
@@ -32,12 +32,12 @@ inputs:
 ```
 
 ```sh
-oh-goon lock ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 
 Run waits for completion and prints the Run ID, outcome and artifact evidence.
-`config inspect` and `config validate` are optional diagnostics. The
+`workflow inspect` and `workflow validate` are optional diagnostics. The
 [source CLI setup](../../../../README.md#cli-first--no-frontend-setup) prepares
 the CLI without building the frontend.
 
@@ -52,14 +52,14 @@ returns exit 1. A failed training Step stops later ordinary Steps in a Plan.
 ## Retrieve and compare results
 
 Use the printed export commands or substitute the completed Run ID below.
-`plan outputs` reports the declared path, hash, size and retained reference.
+`runs outputs` reports the declared path, hash, size and retained reference.
 Export selects that Run's recorded artifact and verifies its retained bytes:
 
 ```sh
-oh-goon plan outputs RUN_ID --json
-oh-goon plan export-artifact RUN_ID --step ml-iris-train.iris-train --path ml-output/iris-training-metrics.json --output metrics-seed42.json
-oh-goon plan export-artifact RUN_ID --step ml-iris-train.iris-train --path ml-output/iris-model-parameters.json --output model-seed42.json
-oh-goon plan tape RUN_ID --json
+oh-goon runs outputs RUN_ID --json
+oh-goon runs export-artifact RUN_ID --step ml-iris-train.iris-train --path ml-output/iris-training-metrics.json --output metrics-seed42.json
+oh-goon runs export-artifact RUN_ID --step ml-iris-train.iris-train --path ml-output/iris-model-parameters.json --output model-seed42.json
+oh-goon runs tape RUN_ID --json
 ```
 
 Metrics contain actual accuracy, the minimum accuracy, seed, test-size
@@ -71,7 +71,7 @@ the command and captured project identity to the Run and artifact evidence.
 Change `inputs.random_seed` to `7`, relock and run the same configuration:
 
 ```sh
-oh-goon lock ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 

@@ -35,7 +35,7 @@ def test_typed_violations_keep_original_codes_without_value_echo(
     config = write_run_configuration(
         tmp_path, monkeypatch, source={"kind": "catalog-plan", "name": source}, inputs=values
     )
-    assert main(["config", "validate", str(config), "--json"]) == 2
+    assert main(["workflow", "validate", str(config), "--json"]) == 2
     raw = capsys.readouterr().out
     report = json.loads(raw)
     diagnostic = report["diagnostic"]
@@ -62,7 +62,7 @@ def test_external_error_never_echoes_untrusted_detail(tmp_path, monkeypatch, cap
         raise FleetPlanInvalid("PRIVATE_TOKEN_SENTINEL /private/native/config")
 
     monkeypatch.setattr(commands, "inspect_run_configuration", reject)
-    assert main(["config", "validate", str(config), "--json"]) == 2
+    assert main(["workflow", "validate", str(config), "--json"]) == 2
     raw = capsys.readouterr().out
     assert json.loads(raw)["code"] == "PLAN_RESOLUTION_REJECTED"
     assert "PRIVATE_TOKEN_SENTINEL" not in raw and "/private/native/config" not in raw
@@ -101,7 +101,7 @@ def test_native_inspection_does_not_read_private_native_state_or_launch(
 
     monkeypatch.setattr(Path, "open", public_source_only)
     monkeypatch.setattr(subprocess, "Popen", no_process)
-    assert main(["config", "inspect", str(config), "--json"]) == 0
+    assert main(["workflow", "inspect", str(config), "--json"]) == 0
     output = capsys.readouterr().out
     report = json.loads(output)
     assert report["proof"]["native_availability"] == "unknown"
@@ -143,7 +143,7 @@ steps:
         plan_content="version: 1\ninputs: [value]\ngoons:\n- import: general/parent\n  as: root\n",
         inputs={"value": "chosen-public-value"},
     )
-    assert main(["config", "validate", str(config), "--json"]) == 0
+    assert main(["workflow", "validate", str(config), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     entries = {entry["scope"]: entry for entry in report["configuration_evidence"]["entries"]}
     assert set(entries) == {None, "root", "root.leaf"}
@@ -180,7 +180,7 @@ def test_run_lock_refusals_explain_repair_before_runtime_without_private_values(
     import oh_goon.cli as cli
 
     config = write_run_configuration(tmp_path, monkeypatch)
-    assert main(["lock", str(config)]) == 0
+    assert main(["workflow", "prepare", str(config)]) == 0
     lock = config.with_name("goon.lock")
     original = lock.read_bytes()
     if change == "malformed":
@@ -224,7 +224,7 @@ def test_missing_lock_action_uses_original_lock_owner_without_creating_a_file(tm
         load_execution_lock(lock)
     action = safe_plan_diagnostic(rejected.value)["safe_next_action"]
     assert "goon.lock is missing" in action
-    assert "oh-goon lock run.yml" in action
+    assert "oh-goon workflow prepare run.yml" in action
     assert not lock.exists()
 
 
@@ -265,7 +265,7 @@ goons:
     )
     monkeypatch.setenv("PRIVATE_CHECKER_SELECTION", "PRIVATE_INVALID_VALUE")
     for command, code in (("inspect", 0), ("validate", 2)):
-        assert main(["config", command, str(config), "--json"]) == code
+        assert main(["workflow", command, str(config), "--json"]) == code
         output = capsys.readouterr().out
         report = json.loads(output)
         assert report["status"] == "contract-inspected"
@@ -273,7 +273,7 @@ goons:
         assert report["diagnostic"]["inputs"] == ["typechecker"]
         assert "PRIVATE_INVALID_VALUE" not in output
         assert report["proof"]["execution"] == "not-started"
-    assert main(["lock", str(config)]) == 2
+    assert main(["workflow", "prepare", str(config)]) == 2
     assert "PRIVATE_INVALID_VALUE" not in capsys.readouterr().out
     assert not config.with_name("goon.lock").exists()
 
@@ -296,9 +296,9 @@ goons:
     )
     (tmp_path / "repository" / "selected-checker.yml").write_text("checker: ty\n")
     monkeypatch.setenv("PRIVATE_UNUSED_CHECKER", "PRIVATE_INVALID_VALUE")
-    assert main(["config", "validate", str(config), "--json"]) == 0
+    assert main(["workflow", "validate", str(config), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "inputs-valid"
     assert report["diagnostic"] is None
-    assert main(["lock", str(config)]) == 0
+    assert main(["workflow", "prepare", str(config)]) == 0
     assert config.with_name("goon.lock").is_file()

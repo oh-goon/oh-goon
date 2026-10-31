@@ -46,8 +46,8 @@ def _write_progress_contract_fixture(root: Path, *, progress_protocol: str) -> N
                 "",
                 "def render(runtime: ApplicationRuntime):",
                 "    runtime.runs.observe_transient_output('run-1', after=0)",
-                'MILESTONE = "Observed activity: Goon"',
-                'HEARTBEAT = "Certification working"',
+                'MILESTONE = "Native activity observed"',
+                'HEARTBEAT = "Run active"',
                 f'PROGRESS_PROTOCOL = "{progress_protocol}"',
                 "",
             )

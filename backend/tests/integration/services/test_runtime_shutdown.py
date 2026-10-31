@@ -63,7 +63,7 @@ def test_observer_shutdown_preserves_foreign_run_and_owner_shutdown_cancels_its_
             observed = subprocess.run(
                 [
                     str(Path(sys.executable).with_name("oh-goon")),
-                    "plan",
+                    "runs",
                     "steps",
                     admitted.fleet_run_id,
                     "--json",

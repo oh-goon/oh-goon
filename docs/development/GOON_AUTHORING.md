@@ -89,8 +89,8 @@ steps:
 Use `path: .` for the Git repository root. Submodules and executable checkout filters are
 unsupported; acquisition refuses them before executable project effects.
 Native Git acquisition freezes the
-commit in the existing execution lock. `lock run.yml --update-applications`
-explicitly refreshes application pins; `--update-goons` and `--update-skills`
+commit in the existing execution lock. `workflow prepare run.yml --refresh applications`
+explicitly refreshes application pins; `--refresh goons` and `--refresh skills`
 retain their separate scopes. Selections sharing an origin/ref must agree on one
 commit; a partial refresh cannot silently advance another source kind.
 
@@ -99,7 +99,7 @@ resolved Command Step, retained project delivery and admission. App code runs
 from a verified private attempt copy, with native environment and outputs owned
 separately. Authoring source, acquisition cache and developer `.venv` remain
 outside writable execution state. A changed local source requires relocking;
-historical readback never reacquires it. Game Tape and `plan handoff --json`
+historical readback never reacquires it. Game Tape and `runs handoff --json`
 retain the captured source identity, selected uv mode and original outcome.
 
 The Run's target remains the actual registered repository whose effects were
@@ -574,14 +574,14 @@ locking and runs retain that pin, including after cache loss.
 Paths sharing one origin/ref keep the same captured commit even when new imports
 are added or reordered. A complete Plan selected from that same source retains
 its existing pin as well.
-`lock run.yml --update-goons` explicitly refreshes Goon/Plan source selectors.
-`--update-skills` remains separate. Inspection uses cached source only and
+`workflow prepare run.yml --refresh goons` explicitly refreshes Goon/Plan source selectors.
+`--refresh skills` remains separate. Inspection uses cached source only and
 reports unavailable source without fetching. Git acquisition does not execute
 project code or install dependencies. For a complete Git-hosted Plan and its
 local packages, use the explicit `git-plan` selection in the
 [run configuration guide](TEMPLATE_INPUT_INSPECTION.md).
 
-Put caller scalar values in the selected `run.yml` under `inputs`. `config validate`,
+Put caller scalar values in the selected `run.yml` under `inputs`. `workflow validate`,
 `lock` and `run` transport that one selection to the canonical Goon binder; there
 is no values-file overlay or input-flag precedence. Inputs do not alter package
 selection. A changed execution choice requires an explicitly refreshed lock.

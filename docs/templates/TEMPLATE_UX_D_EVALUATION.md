@@ -6,8 +6,8 @@ Fleet entrypoint, Enforcer fact owner, or certification authority.
 
 ## Current operator workflow
 
-Normal setup uses `templates init`, one `run.yml`, `config inspect`,
-`config validate`, `lock` and `run`. See the
+Normal setup uses `init`, one `run.yml`, `workflow inspect`,
+`workflow validate`, `lock` and `run`. See the
 [current configuration guide](../development/TEMPLATE_INPUT_INSPECTION.md).
 The no-op UX-C proposal service below is a source-authoring diagnostic; it
 never creates a second executable configuration route or grants effects.
@@ -72,7 +72,7 @@ meaning. Shorter configuration is not evidence of better human performance.
 | CAT-01/02/05/06/07/08, AT-01/18/19/26/27/36 | Canonical template stores, `template_ux_a_inventory`, template/example READMEs and census regressions | Every current package/example enumerated; source inspection does not prove an executed workload. |
 | CFG-01–11, CUT-01/02, AT-03–07/14/15/29/32 | Captured run selection, original compiler/binder/lock/Fleet and CLI regressions | Validation, frozen identity and fresh effect admission are distinct. |
 | AGT-01/03/04/05/06, UX-04–10 | Original Skill registry, agent provider/native owners, bounded repair and configuration projection | Configured, installed, authenticated, connected, contained and admitted remain distinct states. |
-| UX-01/02/03, AT-03/17 | Existing template authoring owner and `templates init` regressions | Destination refusal and complete publication do not authorize execution. |
+| UX-01/02/03, AT-03/17 | Existing template authoring owner and `init` regressions | Destination refusal and complete publication do not authorize execution. |
 | CUT-03/04, AT-06/07/15/16/31 | Original target freshness, supervisor, cancellation, Journal and Game Tape tests | Real native/external qualification must be run separately and remains unverified when unavailable. |
 | CAT-03/04, CUT-05 | Root/quickstart/configuration guides plus all shipped package and example READMEs | Copyable commands must match the implemented CLI; placeholders do not represent live services. |
 | AGT-02, AT-08–11 | Concrete project-owned Composite authoring | Custom reviewer generation needs its own compiler and publication proof; no runtime reviewer interpreter. |

@@ -110,13 +110,13 @@ class _OriginalRuns:
 
 
 def _invoke(runs, *tail):
-    args = build_parser().parse_args(["plan", *tail])
+    args = build_parser().parse_args(["runs", *tail])
     return run_plan_command(SimpleNamespace(runs=runs), args)
 
 
 def test_status_projects_existing_owner_outcome_and_identity(capsys):
     runs = _OriginalRuns()
-    assert _invoke(runs, "status", "run-x", "--json") == 0
+    assert _invoke(runs, "show", "run-x", "--json") == 0
     data = json.loads(capsys.readouterr().out)
     assert data == {
         "schema": "oh-goon.plan-run-status/v1",
@@ -131,7 +131,7 @@ def test_status_projects_existing_owner_outcome_and_identity(capsys):
 
 def test_status_text_keeps_same_projection_without_an_extra_read(capsys):
     runs = _OriginalRuns()
-    assert _invoke(runs, "status", "run-x") == 0
+    assert _invoke(runs, "show", "run-x") == 0
     assert "Progress: 2/2" in capsys.readouterr().out
     assert runs.calls == [("get", "run-x")]
 
@@ -220,7 +220,7 @@ def test_logs_text_explains_transient_retention(capsys):
 def test_unknown_id_returns_error_without_disclosing_false_no_effects(capsys):
     runs = _OriginalRuns()
     runs.reject = True
-    assert _invoke(runs, "status", "unknown", "--json") == 2
+    assert _invoke(runs, "show", "unknown", "--json") == 2
     data = json.loads(capsys.readouterr().out)
     assert data["status"] == "error" and data["fleet_run_id"] == "unknown"
     assert "no_effects" not in data
@@ -238,7 +238,7 @@ def test_invalid_cursor_rejected_by_cli_before_runtime(monkeypatch, command):
 def test_readback_never_starts_plan_or_executor(capsys):
     runs = _OriginalRuns()
     runtime = SimpleNamespace(runs=runs, plans=SimpleNamespace())
-    args = build_parser().parse_args(["plan", "status", "run-x", "--json"])
+    args = build_parser().parse_args(["runs", "show", "run-x", "--json"])
     assert run_plan_command(runtime, args) == 0
     assert json.loads(capsys.readouterr().out)["fleet_run_id"] == "run-x"
 
@@ -246,7 +246,7 @@ def test_readback_never_starts_plan_or_executor(capsys):
 def test_status_other_fleet_run_target_has_no_plan_but_reuses_owner(capsys):
     runs = _OriginalRuns()
     runs.non_plan_target = True
-    assert _invoke(runs, "status", "recipe-run", "--json") == 0
+    assert _invoke(runs, "show", "recipe-run", "--json") == 0
     value = json.loads(capsys.readouterr().out)
     assert value["plan_id"] is None
     assert value["fleet_run_id"] == "recipe-run"

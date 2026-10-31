@@ -233,7 +233,7 @@ def test_full_agent_run_id_resume_and_existing_evidence_views(capsys):
     assert accepted["status"] == "QUEUED" and accepted["outcome"] is None
     assert [c[0] for c in plans.calls] == ["preflight", "run"]
 
-    code, handoff = _invoke(runtime, capsys, ["plan", "handoff", run_id, "--json"])
+    code, handoff = _invoke(runtime, capsys, ["runs", "handoff", run_id, "--json"])
     assert code == 0
     assert handoff["fleet_run_id"] == run_id
     assert handoff["status"] == "FAILED"
@@ -241,19 +241,19 @@ def test_full_agent_run_id_resume_and_existing_evidence_views(capsys):
     assert handoff["issue_focus"] == [x.model_dump(mode="json") for x in runs.tape.issue_focus]
     assert handoff["why_not"] == runs.tape.why_not.model_dump(mode="json")
     views = handoff["readback"]
-    assert set(views) == {"status", "events", "tape", "steps", "outputs", "logs"}
+    assert set(views) == {"show", "events", "tape", "steps", "outputs", "logs"}
     assert views["logs"]["evidence_kind"] == "transient_live_output"
     assert views["logs"]["availability"] == "not_checked"
     assert runs.calls == [("get", run_id)]  # handoff must NOT probe transient logs
 
     for name, reference in views.items():
         argv = reference["argv"]
-        assert argv[:3] == ["oh-goon", "plan", name]
+        assert argv[:3] == ["oh-goon", "runs", name]
         assert argv[3] == run_id
         assert argv[-1] == "--json"
         code, response = _invoke(runtime, capsys, argv[1:])
         assert code == 0
-        if name == "status":
+        if name == "show":
             assert response["outcome"] == "FAILED"
         elif name == "events":
             assert response["next_sequence"] == 4 and response["has_more"] is True
@@ -293,7 +293,7 @@ def test_no_repair_policy_or_retry_permission_in_readback_references(capsys, sta
     run_id = "run-failure"
     runs = _CanonicalRuns(run_id, stage=stage)
     code, handoff = _invoke(
-        SimpleNamespace(runs=runs), capsys, ["plan", "handoff", run_id, "--json"]
+        SimpleNamespace(runs=runs), capsys, ["runs", "handoff", run_id, "--json"]
     )
     assert code == 0
     assert handoff["why_not"]["stage"] == stage
@@ -309,7 +309,7 @@ def test_no_repair_policy_or_retry_permission_in_readback_references(capsys, sta
 def test_argv_is_not_a_shell_command_even_with_shell_sensitive_run_identity(capsys):
     run_id = "run; echo SHOULD_NOT_EXECUTE"
     runs = _CanonicalRuns(run_id)
-    _, handoff = _invoke(SimpleNamespace(runs=runs), capsys, ["plan", "handoff", run_id, "--json"])
+    _, handoff = _invoke(SimpleNamespace(runs=runs), capsys, ["runs", "handoff", run_id, "--json"])
     for view in handoff["readback"].values():
         assert view["argv"][3] == run_id
         assert isinstance(view["argv"], list)
@@ -322,7 +322,7 @@ def test_unknown_run_does_not_offer_unverified_navigation(capsys):
     runs = _CanonicalRuns("unknown")
     runs.reject = True
     code, result = _invoke(
-        SimpleNamespace(runs=runs), capsys, ["plan", "handoff", "unknown", "--json"]
+        SimpleNamespace(runs=runs), capsys, ["runs", "handoff", "unknown", "--json"]
     )
     assert code == 2
     assert result["status"] == "error"

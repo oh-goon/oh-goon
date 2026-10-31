@@ -9,7 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from oh_goon.core.errors import LeaguePreferencesInvalid, StateConflict
-from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.database import LocalDatabase, default_database_path
 from oh_goon.runtime.durable_revision import read_durable_revision, require_durable_revision
 from oh_goon.runtime.exclusions import (
     delete_exclusion,
@@ -58,6 +58,17 @@ class LocalState:
         with self.database.transaction() as connection:
             return self.read_view_in(connection)
 
+    @staticmethod
+    def inspect_configuration_scope() -> tuple[tuple[Path, ...], frozenset[str]]:
+        """Read preferences and existing exclusions without creating a database."""
+        folders = LeagueFolderStore().list()
+        path = default_database_path().expanduser().absolute()
+        if not path.exists() and not path.is_symlink():
+            return folders, frozenset()
+        with LocalDatabase.observe_existing_for_inspection(path) as connection:
+            exclusions = frozenset(record["path"] for record in read_exclusions(connection))
+        return folders, exclusions
+
     def read_view_in(
         self,
         connection: sqlite3.Connection,
@@ -96,10 +107,16 @@ class LocalState:
                 raise
             return list(folders)
 
-    def add_location(self, path: Path) -> list[Path]:
+    def add_location(
+        self,
+        path: Path,
+        *,
+        validate: Callable[[tuple[Path, ...], frozenset[str]], None] | None = None,
+    ) -> list[Path]:
         resolved = path.expanduser().resolve()
         return self._commit_league_folders(
-            lambda folders: folders if resolved in folders else (*folders, resolved)
+            lambda folders: folders if resolved in folders else (*folders, resolved),
+            validate=validate,
         )
 
     def remove_location(self, path: Path, *, expected_revision: str) -> list[Path]:
@@ -114,6 +131,7 @@ class LocalState:
         change: Callable[[tuple[Path, ...]], tuple[Path, ...]],
         *,
         expected_revision: str | None = None,
+        validate: Callable[[tuple[Path, ...], frozenset[str]], None] | None = None,
     ) -> list[Path]:
         """Publish one League-folder preference change only with its SQLite projection."""
         previous_folders: tuple[Path, ...] = ()
@@ -123,6 +141,9 @@ class LocalState:
                 with self.database.transaction(write=True) as connection:
                     self._mutation_guard.require_idle(connection)
                     previous_folders = self._league_folders.list()
+                    exclusions = frozenset(record["path"] for record in read_exclusions(connection))
+                    if validate is not None:
+                        validate(previous_folders, exclusions)
                     if (
                         expected_revision is not None
                         and locations_revision(previous_folders) != expected_revision
@@ -137,6 +158,8 @@ class LocalState:
                     if folders != previous_folders:
                         self._league_folders.replace_locked(folders)
                         preference_published = True
+                    if validate is not None:
+                        validate(folders, exclusions)
             except BaseException as exc:
                 if not preference_published:
                     raise

@@ -78,7 +78,7 @@ def test_initial_admission_refusal_reopens_by_campaign_id_in_api_and_fresh_cli(
             ]
             assert client.get("/api/fleet/runs/campaigns/missing-campaign").status_code == 404
         cli = subprocess.run(
-            [sys.executable, "-m", "oh_goon", "plan", "campaign", result.repair_id, "--json"],
+            [sys.executable, "-m", "oh_goon", "runs", "campaign", result.repair_id, "--json"],
             check=True,
             capture_output=True,
             text=True,

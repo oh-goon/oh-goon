@@ -4,56 +4,95 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
-from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
+from oh_goon.core.errors import (
+    FleetDomainError,
+    FleetPlanInputRejected,
+    FleetPlanInvalid,
+    RunConfigurationInvalid,
+)
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
-from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.runtime.goon_templates import GoonTemplateStore
-from oh_goon.runtime.league_folders import LeagueFolderStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
-from oh_goon.services.repository_discovery import RepositoryDiscoveryService
+from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
+from oh_goon.services.locations import LocationService
 from oh_goon.services.run_configuration import (
     RunConfigurationSnapshot,
+    RunConfigurationTarget,
     capture_run_configuration_source,
     load_run_configuration,
+    register_run_configuration_target,
+    require_run_configuration_registration_target,
+    resolve_run_configuration_targets,
 )
 from oh_goon.services.run_configuration_inspection import inspect_run_configuration
 
 
+def require_run_repair_authorization(
+    snapshot: RunConfigurationSnapshot, *, authorized: bool
+) -> None:
+    """Reject invalid per-Run consent before source acquisition or a resource launch."""
+    if snapshot.selection.repair is None and authorized:
+        raise FleetPlanInvalid(
+            "--authorize-repair requires an explicit repair selection in run.yml"
+        )
+    if snapshot.selection.repair is not None and not authorized:
+        raise FleetPlanInvalid(
+            "Bounded repair needs fresh per-Run authorization: run run.yml --authorize-repair"
+        )
+
+
 def prepare_configuration(
-    args: argparse.Namespace, *, snapshot: RunConfigurationSnapshot | None = None
+    args: argparse.Namespace,
+    *,
+    target_root: Path | None = None,
+    locations: LocationService | None = None,
+    snapshot: RunConfigurationSnapshot | None = None,
+    targets: tuple[RunConfigurationTarget, ...] | None = None,
+    source_graph: FleetPlanSourceGraph | None = None,
 ) -> None:
     """Capture the selected file once, then transport its existing invocation facts."""
-    snapshot = snapshot if snapshot is not None else load_run_configuration(args.configuration)
-    locations = LeagueFolderStore().list()
-    discovery = RepositoryDiscoveryService()
-    requested = snapshot.selection.target.selected_ids()
-    repositories = discovery.explicit_configured_roots(locations, repository_ids=requested)
-    missing = set(requested) - {repository.repository_id for repository in repositories}
-    if missing:
-        discovered = (
-            RepositoryIdentity.model_validate({"path": path})
-            for path in discovery.git_roots(locations, require_pyproject=False)
+    snapshot = snapshot or load_run_configuration(args.configuration)
+    repair = snapshot.selection.repair
+    if args.command == "run":
+        require_run_repair_authorization(snapshot, authorized=args.authorize_repair)
+    targets = targets or resolve_run_configuration_targets(snapshot, target_root=target_root)
+    read_only = args.command == "workflow" and args.workflow_command in {"inspect", "validate"}
+    register = bool(getattr(args, "register_target", False))
+    if register:
+        for target in targets:
+            require_run_configuration_registration_target(target)
+    registered = all(target.registered for target in targets)
+    if not read_only and not registered and not register:
+        raise RunConfigurationInvalid(
+            "Every target must select an included registered repository; prepare with --register-target",
+            diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
+            fields=("target.repository",),
         )
-        repositories += tuple(
-            repository for repository in discovered if repository.repository_id in missing
-        )
+    # Roots and repair constraints are knowable before any source acquisition.
+    agent_repository_root, agent_skill_root = snapshot.validate_authoring_paths()
+    prepare = args.command == "lock" or (
+        args.command == "workflow" and args.workflow_command == "prepare"
+    )
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
     selected, graph = capture_run_configuration_source(
         snapshot,
-        repositories,
+        (),
         resolver,
-        acquire=args.command == "lock" or bool(getattr(args, "acquire", False)),
-        allow_network=args.command in {"lock", "run"} or bool(getattr(args, "acquire", False)),
+        acquire=prepare or bool(getattr(args, "acquire", False)),
+        allow_network=prepare or args.command == "run" or bool(getattr(args, "acquire", False)),
         update=bool(getattr(args, "update_goons", False)),
         update_applications=bool(getattr(args, "update_applications", False)),
+        targets=targets,
+        source_graph=source_graph,
     )
     args._run_configuration = selected
     agent = snapshot.selection.agent
-    repair = snapshot.selection.repair
     agent_source = graph.has_agent_source_contract()
     if snapshot.selection.resources is not None and (
         agent_source or isinstance(graph.root.compiled.execution, CicdExecutionPolicy)
@@ -72,17 +111,10 @@ def prepare_configuration(
             model_selected=agent is not None and agent.model_profile is not None,
         )
     args._source_graph = graph
+    args._configuration_targets = targets
     args._selected_inputs = selected.inputs
     args._caller_input_file_snapshot = snapshot
     args._caller_input_origins = dict.fromkeys(selected.inputs, "caller_file")
-    if repair is None and args.command == "run" and args.authorize_repair:
-        raise FleetPlanInvalid(
-            "--authorize-repair requires an explicit repair selection in run.yml"
-        )
-    if repair is not None and args.command == "run" and not args.authorize_repair:
-        raise FleetPlanInvalid(
-            "Bounded repair needs fresh per-Run authorization: run run.yml --authorize-repair"
-        )
     defaults: dict[str, Any] = {
         "plan": selected.plan_path,
         "plan_inputs": None,
@@ -98,8 +130,8 @@ def prepare_configuration(
         if isinstance(graph.root.compiled.execution, CicdExecutionPolicy)
         else None,
         "wait": True,
-        "agent_repository_root": snapshot.agent_repository_root(),
-        "agent_skill_root": snapshot.agent_skill_root(),
+        "agent_repository_root": agent_repository_root,
+        "agent_skill_root": agent_skill_root,
         "allow_agent_acceptance": [agent.acceptance] if agent is not None else [],
         "agent_model_profile": agent.model_profile if agent is not None else None,
         "agent_providers_file": None,
@@ -117,6 +149,62 @@ def prepare_configuration(
     }
     for name, value in defaults.items():
         setattr(args, name, value)
+    if register:
+        if registered:
+            receipts = [
+                {
+                    "path": str(target.repository.path),
+                    "repository_id": target.repository.repository_id,
+                    "status": "already-registered",
+                }
+                for target in targets
+            ]
+            args._target_registration = (
+                receipts[0] if len(receipts) == 1 else {"repositories": receipts}
+            )
+        else:
+            # Validate known contracts before opening runtime state or persisting
+            # registration. Environment-backed values remain with their owner.
+            report = inspect_run_configuration(selected, resolver, source_graph=graph)
+            issue = report["diagnostic"]
+            if issue is not None and issue["code"] != "EXTERNAL_INPUT_NOT_OBSERVED":
+                raise FleetPlanInputRejected(
+                    "The selected source/input contract is invalid",
+                    diagnostic_code=issue["code"],
+                    input_names=tuple(issue["inputs"]),
+                )
+            if locations is not None:
+                register_prepared_configuration_target(args, locations, target_root=target_root)
+
+
+def register_prepared_configuration_target(
+    args: argparse.Namespace,
+    locations: LocationService,
+    *,
+    target_root: Path | None = None,
+) -> None:
+    """Finish an explicitly requested registration after stateless validation."""
+    if not bool(getattr(args, "register_target", False)):
+        raise FleetPlanInvalid("Target registration requires explicit authorization")
+    selected = args._run_configuration
+    targets = args._configuration_targets
+    for target in targets:
+        require_run_configuration_registration_target(target)
+    receipts: list[dict[str, str]] = []
+    if len(targets) > 1:
+        # Keep each confirmed durable effect visible if a later member fails.
+        args._target_registration = {"repositories": receipts}
+    for target in targets:
+        receipt = register_run_configuration_target(
+            selected.snapshot, target, locations, targets=targets, target_root=target_root
+        )
+        receipts.append(receipt)
+        if len(targets) == 1:
+            args._target_registration = receipt
+    args._configuration_targets = tuple(replace(target, registered=True) for target in targets)
+    args._run_configuration = replace(
+        selected, registrations=tuple(True for _ in selected.repositories)
+    )
 
 
 def run_config_command(args: argparse.Namespace) -> int:
@@ -203,4 +291,4 @@ def run_config_command(args: argparse.Namespace) -> int:
         print("Proof:")
         for name, state in report["proof"].items():
             print(f"  {name}: {state}")
-    return 2 if args.config_command == "validate" and report["status"] != "inputs-valid" else 0
+    return 2 if args.workflow_command == "validate" and report["status"] != "inputs-valid" else 0

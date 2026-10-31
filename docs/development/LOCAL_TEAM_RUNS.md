@@ -55,14 +55,18 @@ The plan is resolved again when the user presses Run. A prior League scan is pre
 A foreground Team command does not rescan the whole League. The requested path is resolved against the saved League roots and bound to the same Git-root Team identity used by League discovery, then only that Team's root `goon.yml` is inspected. Incidental ancestor directory names never hide the Team; targeted lookup and League discovery must agree on Git-root semantics.
 
 Normal CLI execution supplies a `run.yml` whose source is
-`{kind: repository-goon}` and whose target is the registered repository ID.
+`{kind: repository-goon}` and whose target is the exact registered repository path.
 It does not infer execution scope from the current directory or a path alias.
 Read-only `team validate` may still inspect an explicit path or current directory.
 The resulting Run uses the canonical Git-root identity.
 
 ## Foreground interruption and local serialization
 
-The CLI prints the durable Fleet Run ID as soon as admission succeeds. `Ctrl+C` requests cancellation through the normal FleetRun lifecycle, waits for the durable terminal cancellation fact, and exits with code `130`; it does not abandon a private local worker or invent a second cancellation path.
+The CLI prints the durable Fleet Run ID as soon as admission succeeds. `Ctrl+C`
+requests cancellation through the normal FleetRun lifecycle and exits with code
+`130`. The interruption result reports the observed execution status and whether
+it is terminal; it does not establish physical cleanup. Use the returned
+`runs handoff` action to inspect durable cancellation and cleanup evidence.
 
 There is no hidden local queue. Local execution remains intentionally serialized. If another Fleet execution owns the lease, a second Team start fails clearly with `ExecutionBusy`. oh-goon does not silently queue a local Team run behind it. The user decides what should run next.
 

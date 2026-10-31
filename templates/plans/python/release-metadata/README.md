@@ -7,24 +7,24 @@ Calculate and expose release metadata through the project’s own command.
 **Prerequisites:** A committed Python project and uv lock. The locked group must also provide the project-owned `release-metadata` command; select the intended Git revision and channel.
 
 ```sh
-oh-goon templates init python/release-metadata --kind plan --output ./workflow
+oh-goon init --template python/release-metadata --kind plan --output ./workflow --draft
 ```
 
-Edit `workflow/run.yml` with your registered target and caller choices. Omitted options keep their Goon-owned defaults:
+This explicit draft is NOT_READY. Set `target.repository` to your exact registered repository path and fill the required caller choices in `workflow/run.yml`. Omitted options keep their Goon-owned defaults:
 
 ```yaml
-version: 1
+version: 2
 source: {kind: catalog-plan, name: python/release-metadata}
-target: {repository_id: REPOSITORY_ID}
+target: {repository: /absolute/path/to/project}
 inputs:
   release_channel: production
   revision: abc1234
 ```
 
 ```sh
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
+oh-goon workflow inspect ./workflow/run.yml
+oh-goon workflow validate ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 

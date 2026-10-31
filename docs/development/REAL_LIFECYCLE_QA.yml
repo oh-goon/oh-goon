@@ -30,6 +30,31 @@ lifecycles:
   - mode: mutation
     test: scripts/tests/test_init_hostile_clean_extraction.py::test_make_init_does_not_depend_on_release_static_or_source_cleanup
 
+- id: cli-workflow-first-use-and-effects
+  journey: exact-target-init -> initial-canonical-lock -> waited-native-Run -> fresh-process-readback -> relative-target-relocation
+  entrypoint: oh-goon init/workflow/run/runs/doctor
+  durable_observation: original Run and artifacts survive relocation; read operations preserve domain state and Run never registers or repairs authority
+  required_modes: [lifecycle, adversarial]
+  proofs:
+  - mode: lifecycle
+    test: backend/tests/integration/services/test_cli_workflow_lifecycle.py::test_two_commands_execute_native_python_then_preserve_recorded_run_after_relocation
+  - mode: adversarial
+    test: backend/tests/integration/services/test_cli_workflow_lifecycle.py::test_basic_readonly_commands_do_not_initialize_or_repair_state
+  - mode: adversarial
+    test: backend/tests/integration/services/test_cli_workflow_lifecycle.py::test_unprepared_git_source_never_acquires_from_readonly_or_run_flags
+  - mode: adversarial
+    test: backend/tests/integration/services/test_cli_workflow_lifecycle.py::test_retired_commands_and_v1_selection_refuse_before_state_or_execution
+  - mode: adversarial
+    test: backend/tests/integration/services/test_cli_workflow_lifecycle.py::test_run_readback_does_not_recover_interrupted_history_or_reconcile_scope
+  - mode: adversarial
+    test: backend/tests/integration/services/test_cli_workflow_lifecycle.py::test_runs_readback_refuses_unavailable_state_without_bootstrap
+  - mode: adversarial
+    test: backend/tests/integration/services/test_cli_workflow_lifecycle.py::test_registration_does_not_recover_history_to_bypass_original_idle_guard
+  - mode: adversarial
+    test: backend/tests/integration/services/test_cli_workflow_lifecycle.py::test_missing_run_lock_refuses_before_runtime_recovery_or_scope_reconciliation
+  - mode: adversarial
+    test: backend/tests/integration/services/test_cli_workflow_lifecycle.py::test_workflow_run_cannot_recover_previous_work_to_admit_its_selection
+
 - id: execution-durable-reload
   journey: API-admit -> execute -> terminalize -> destroy runtime graph -> reconstruct -> API-read
   entrypoint: POST /api/fleet/runs

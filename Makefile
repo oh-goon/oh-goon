@@ -139,7 +139,7 @@ help:
 	  '  make strict-local-runtime-acceptance Production-shaped strict Fleet runtime/cancel/restart acceptance' \
 	  '  make browser-targeted-certification Run the seven Gate D Chromium specs sequentially, one worker/process each' \
 	  '  make browser-required-certification Run the complete required browser suite after preflights' \
-	  '  make check            Broad development feedback with PASS/FAIL/BLOCKED summary' \
+	  '  make check            Relevant fast feedback with PASS/FAIL/BLOCKED summary' \
 	  '    normal make test runs native uv/.venv backend and npm frontend tests; host-only sampling requires explicit opt-in' \
 	  '  make local-state-check Inspect this checkout local-state schema without mutation' \
 	  '  make local-state-prelaunch-check Prove SQLite write/lock/storage semantics before app launch' \
@@ -155,7 +155,7 @@ help:
 	  '  make test-log         Show the latest saved make test output' \
 	  '  make certify-log      Show the latest saved make certify output' \
 	  '  make diagnostics-log  Show passive application diagnostic evidence' \
-	  '  make check            Broad development feedback; use docs/DEVELOPMENT.md for focused edits' \
+	  '  make check            Relevant fast feedback; see docs/DEVELOPMENT.md' \
 	  '  make build-release    Build validated locked release artifacts' \
 	  '  make assemble-release Assemble locked artifacts after caller-owned checks' \
 	  '  make release-check    Run the complete portable regression suite' \
@@ -384,7 +384,7 @@ frontend-lock:
 
 
 start:
-	cd backend && uv run --offline --frozen --no-sync oh-goon start
+	cd backend && uv run --offline --frozen --no-sync oh-goon app start
 
 local-state-check:
 	backend/.venv/bin/oh-goon-local-state check
@@ -618,6 +618,7 @@ test-real-lifecycle:
 		scripts/tests/test_run_logging.py::test_logged_runner_suppresses_spinner_frames_when_output_is_captured \
 		scripts/tests/test_run_logging.py::test_logged_runner_uses_one_live_spinner_line_on_a_real_terminal \
 		backend/tests/integration/api/test_real_lifecycle_golden.py \
+		backend/tests/integration/services/test_cli_workflow_lifecycle.py \
 		backend/tests/integration/api/test_api_recovery.py \
 		backend/tests/integration/api/test_api_run_lifecycle.py::test_execution_observations_api_projects_existing_run_game_tape_facts \
 		backend/tests/unit/runtime/test_executor_readmission.py::test_readmission_creates_new_intent_and_preserves_source_run \

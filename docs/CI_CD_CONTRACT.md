@@ -149,8 +149,9 @@ replace the separately required APP/native/browser/host qualification or the
 release owner's final source/artifact promotion checks. An older nightly SHA
 cannot qualify a newer release. Existing exact-candidate evidence may be reused
 only when the release owner already admits that reuse.
-Routine PR artifact assembly continues to wait for the seven-check dependency
-chain without repeating completed suites or claiming APP certification.
+Ordinary PRs use selected proof and its independent trusted-base `merge-gate`.
+Package smoke runs only for an admitted distribution-boundary change; routine
+updates do not assemble release artifacts or claim APP certification.
 
 ## Daily full regression
 
@@ -315,15 +316,11 @@ Machine-readable preview output is available with:
 uv run --locked --project backend oh-goon enforcer run /path/to/team --json
 ```
 
-Normal CLI setup selects one versioned `run.yml` and registered repository ID:
+Normal CLI setup selects one versioned `run.yml` and exact registered repository path:
 
 ```bash
-oh-goon templates init python/quality --kind plan --output ./workflow
-# Edit workflow/run.yml before continuing.
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
-oh-goon run ./workflow/run.yml
+oh-goon init --template python/quality --repository /absolute/path/to/project --no-input
+oh-goon run ./workflow --no-input
 ```
 
 The compiler and typed binder retain source/contract authority. `plan check`

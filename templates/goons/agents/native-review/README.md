@@ -10,10 +10,12 @@ completed reviews. A native completion event cannot substitute for that record.
 **Prerequisites:** Installed Pi/OpenCode/Codex, a compatible isolated managed profile, captured repository/Skill sources and an admitted acceptance profile.
 
 ```sh
-oh-goon templates init agents/native-review --kind goon --output ./workflow
+oh-goon init --template agents/native-review --kind goon --output ./workflow --draft
 ```
 
-Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Result:** A typed native review record. Findings do not establish verification success.
 

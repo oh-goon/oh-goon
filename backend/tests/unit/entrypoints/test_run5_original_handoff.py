@@ -78,7 +78,7 @@ class _RunOwner:
 
 
 def _invoke(owner, *args):
-    parsed = build_parser().parse_args(["plan", "handoff", "run-5", *args])
+    parsed = build_parser().parse_args(["runs", "handoff", "run-5", *args])
     return run_plan_command(SimpleNamespace(runs=owner), parsed)
 
 

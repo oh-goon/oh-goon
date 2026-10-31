@@ -54,6 +54,107 @@ do not turn this guide into a perpetual PASS list. Older ADR/checkpoint results
 describe their original source. Follow [documentation anti-drift](DOCUMENTATION_ANTI_DRIFT.md)
 when current and historical explanations disagree.
 
+## CLI workflow cutover qualification
+
+The original Fleet/Step lifecycle, compiler-owned typed inputs, canonical execution
+lock, registered Git/filesystem subjects, waited Run termination and historical
+Game Tape already exist. Qualify the new public workflow surface through those
+owners; an old usability issue does not justify another runner, registry, input
+language, lock writer or readiness state machine.
+
+The shared CLI A cutover uses one authored selection version and one public
+vocabulary: `init`, `workflow inspect|validate|prepare`, `run`, `runs` readback and
+basic `doctor`. Local application lifecycle commands belong under `app`.
+Advanced operations retain their distinct owners. Retired live authoring forms
+must refuse before effects; historical Run/Journal facts remain readable through
+their original durable authority.
+
+Treat the target path as a selector relative to the exact `run.yml` parent, not
+as authenticated identity. Resolve it once through the existing target/workspace
+owners and transport the resulting internal identity and instance fence. Exercise
+relative relocation, a changed working directory, exact Git roots, registered
+filesystem subjects, exclusions, replacement and symlink refusal. Source paths,
+effect-target paths and captured application paths retain separate policies.
+
+For initialization, stage the complete authored workflow and matching canonical
+lock before its publication point. Exercise preexisting/concurrent destinations,
+write/cancellation failures and registration committed before publication failure.
+Report partial durable effects accurately. Typed text and explicit null values
+must reach the compiler unchanged; zero/false/nullable/default/choice cases need
+native proof. JSON, non-TTY, EOF and `--no-input` cannot wait for required input.
+
+Default inspection/validation/basic diagnosis are read-only and network-free.
+Preparation may perform only its explicitly selected registration/acquisition and
+lock effects. Running never registers, refreshes moving refs, repairs authority
+or changes policy; exact pinned-commit reacquisition remains with the existing
+source owner. Native cancellation, observed cleanup uncertainty and original
+failure attribution must survive the vocabulary change.
+
+Optional whole-Run `resources` use the existing native envelope owner. Exercise
+v2 single and plural target selections through the sealed configuration handoff,
+the same resolved interpreter and original waited Run. Preserve caller limits
+and reject incompatible execution before work. Verify terminal accounting can
+append through the original database owner while `runs` remains observational.
+Protocol tests do not establish physical scope enforcement; unavailable native
+budget, cancellation and group-OOM cells remain unqualified.
+
+Initialization and explicit preparation registration compose only the original
+LocalState/LocationService authority. They must not recover interrupted Runs or
+reconcile unrelated scope merely to make registration possible. Exercise the
+original idle guard with valid interrupted history: registration refuses while
+preserving that history and the prior League projection.
+
+For native Agent preparation, validate the selected provider arguments before
+explicit target registration. Carry that same resolved native selection into
+the original lock owner after registration; do not reload provider defaults.
+Exercise invalid Pi task/session arguments with an unregistered Git target and
+a valid control, preserving target, source-capture and lock refusal boundaries.
+
+Run readback must use the original Journal/Game Tape projections under observed
+database authority. Normal application startup is effectful: League projection
+reconciliation and interrupted-Run recovery may write durable facts. Exercise a
+valid nonterminal recorded Run and stale League projection, and prove that a
+separate `runs` process preserves both. Observation must refuse absent or
+incompatible state without bootstrap, preserve native SQLite observer identity
+and revision checks, and close its resources without cancellation or settlement.
+Explicit artifact export retains its original destination/content-store effects.
+
+New workflow execution uses the same Fleet owners without startup recovery of
+earlier work or reconciliation of an existing scope projection. It must refuse
+unresolved incoming state through original admission guards. Exercise valid and
+stale source locks over retained nonterminal history; original Journal/Run/scope
+rows stay unchanged. Empty original-owner admission locks are coordination
+metadata, and normal application startup retains its recovery authority.
+
+Trace public and internal CLI callers, generated authoring, examples, CI, Shared
+Plans, Lineups, Schedules and frontend copy commands before retiring an old form.
+Preserve meaningful refusal and historical readback tests while migrating callers.
+Begin with the existing run-configuration entrypoint tests, then native first-use
+journeys and the applicable owner checks. Record observed outcomes in the CLI A
+issues and HUG-69; this guide is not an implementation-status or PASS registry.
+
+### CLI A caller retirement map
+
+This maps live callers to their retained owners. It does not replace native
+execution evidence or promise installed-wheel/platform qualification.
+
+| Caller surface | Cutover and retained authority |
+| --- | --- |
+| Installed `oh-goon` entrypoint and CLI dispatch | `init`, `workflow`, `run`, `runs`, `doctor`; local launch commands under `app`. Retired `config`, `lock`, `templates init` and Plan readback forms are parser refusals. Advanced `plan check/diff/schedule/reschedule`, `league`, `team`, `self` and operation commands keep distinct meanings. |
+| Installed `oh-goon-ai` | Retained explicit alias for the existing `ai` command, with the same native-agent owner; it is not a v1 selection reader or alternate executor. |
+| Internal certification/deployment callers | Retain `dev _lock-plan/_run-plan`, exact internal catalog admission and original enrollment transport. These are separate owner capabilities, not public selection compatibility. Make still cannot create a direct Plan execution path. |
+| Authored/generated CLI selections | One v2 schema with exclusive `target.repository` or `target.repositories` path selection in initialization, checked-in selections, template recipes and native fixtures. Exact sets retain every selected repository instance and do not invent a primary target. Plan/Goon, League, lock and result schema versions remain independent. |
+| Public scripts, Make, CI and frontend copy | Python CI uses `workflow prepare`, `run` and `runs`; built app launch uses `app start`. GitHub workflows still invoke existing Make owners. Container startup retains its direct server owner. No wrapper preserves retired commands. |
+| Shared Plans, Lineups and Schedules | Retain original source revision, repository ID/instance, reviewed selection and Schedule occurrence models. They do not parse CLI authoring selections or enlarge scope after a path selection. |
+| Current guides and package examples | Commands and v2 target paths follow the same cutover. Incomplete Agent/repair and editable package recipes explicitly select `--draft`; normal first use publishes its initial lock. |
+| Historical Run/Journal/Game Tape and recovery | Read original recorded resolved facts without parsing an old live `run.yml`. Preserve leases and incompatible databases; matching-runtime recovery remains explicit. |
+| Historical certification corpus | `docs/certification/` records questions and evidence for its original qualification epoch. It is not a live CLI recipe or a reason to retain an alias. |
+
+Use the parser refusal tests, run-configuration/target regressions and actual
+process lifecycle tests to verify this mapping. Static command searches are an
+inventory aid; they cannot prove execution, historical readability or absence
+of hidden effects on their own.
+
 ## Source, resume and worker authority qualification
 
 The existing source-layout owner supplies canonical authored-source identity;

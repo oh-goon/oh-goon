@@ -512,6 +512,20 @@ class SQLiteExecutionLeaseStore:
         suffix = f" {run}" if run else ""
         raise ExecutionBusy(f"Cannot change fleet scope while {owner} execution{suffix} is active")
 
+    def assert_scope_idle(self, connection: sqlite3.Connection) -> None:
+        """Scope edits never reclaim recorded execution ownership as a side effect."""
+        row = connection.execute(
+            "SELECT kind, fleet_run_id FROM execution_lease WHERE singleton = 1"
+        ).fetchone()
+        if row is None:
+            return
+        owner = str(row["kind"]).lower()
+        run = row["fleet_run_id"]
+        suffix = f" {run}" if run else ""
+        raise ExecutionBusy(
+            f"Cannot change fleet scope while {owner} execution{suffix} ownership is retained"
+        )
+
     def _insert_lease(self, connection: sqlite3.Connection, lease: ExecutionLease) -> None:
         row = self._active_lease_row(connection, remove_dead=True)
         if row is not None:

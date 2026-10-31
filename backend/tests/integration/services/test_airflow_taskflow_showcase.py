@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.product_identity import repository_id
 
 SHOWCASE = Path(__file__).resolve().parents[4] / "templates/goons/general/orders-taskflow"
 GIT_EXAMPLE = Path(__file__).resolve().parents[4] / "examples/airflow-taskflow-showcase"
@@ -162,8 +163,8 @@ def test_repository_showcase_executes_output_handoffs_and_reads_back_failures(
     cli("league", "add-folder", str(repository))
     workflow = tmp_path / "workflow"
     cli(
-        "templates",
         "init",
+        "--template",
         "general/orders-taskflow",
         "--kind",
         "goon",
@@ -173,8 +174,9 @@ def test_repository_showcase_executes_output_handoffs_and_reads_back_failures(
         str(repository),
     )
     selection = workflow / "run.yml"
+    initialized_lock = (workflow / "goon.lock").read_bytes()
     original_selection = yaml.safe_load(selection.read_text())
-    target = original_selection["target"]["repository_id"]
+    target = repository_id(repository)
     if git_selected:
         original_selection["source"] = yaml.safe_load((GIT_EXAMPLE / "run.yml").read_text())[
             "source"
@@ -192,7 +194,7 @@ def test_repository_showcase_executes_output_handoffs_and_reads_back_failures(
     ) -> dict[str, Any]:
         report: dict[str, Any] = json.loads(
             cli(
-                "plan",
+                "runs",
                 "export-artifact",
                 run_id,
                 "--step",
@@ -225,12 +227,12 @@ def test_repository_showcase_executes_output_handoffs_and_reads_back_failures(
     ):
         select(fixture)
         if git_selected and fixture == "official":
-            report = json.loads(cli("config", "inspect", str(selection), "--acquire", "--json"))
+            report = json.loads(cli("workflow", "inspect", str(selection), "--acquire", "--json"))
             assert report["status"] == "inputs-valid"
             assert report["source"]["git"]["commit"] == commit
             assert report["occurrences"][0]["source"]["installation"] == "not-established"
-            assert not (workflow / "goon.lock").exists()
-        cli("lock", str(selection))
+            assert (workflow / "goon.lock").read_bytes() == initialized_lock
+        cli("workflow", "prepare", str(selection))
         if git_selected:
             pins = yaml.safe_load((workflow / "goon.lock").read_text())["execution_sources"]
             assert [pin["commit"] for pin in pins] == [commit]
@@ -239,8 +241,8 @@ def test_repository_showcase_executes_output_handoffs_and_reads_back_failures(
         )
         assert receipt["status"] == "COMPLETED"
         run_id = receipt["fleet_run_id"]
-        tape = json.loads(cli("plan", "tape", run_id, "--json"))
-        outputs = json.loads(cli("plan", "outputs", run_id, "--json"))
+        tape = json.loads(cli("runs", "tape", run_id, "--json"))
+        outputs = json.loads(cli("runs", "outputs", run_id, "--json"))
         steps = tape["repositories"][0]["steps"]
         assert Path(tape["repositories"][0]["repository"]["path"]) == repository
         assert tape["execution"]["kind"] == "direct"
@@ -295,10 +297,10 @@ def test_repository_showcase_executes_output_handoffs_and_reads_back_failures(
     for run_id, expected_total, original_tape, original_outputs in history:
         # Later success and the current developer result cannot replace the
         # recorded selection, failed load or historical retained file bytes.
-        reopened = json.loads(cli("plan", "tape", run_id, "--json"))
+        reopened = json.loads(cli("runs", "tape", run_id, "--json"))
         for fact in ("status", "execution_reference", "configuration", "repositories"):
             assert reopened[fact] == original_tape[fact]
-        reopened_outputs = json.loads(cli("plan", "outputs", run_id, "--json"))
+        reopened_outputs = json.loads(cli("runs", "outputs", run_id, "--json"))
         assert reopened_outputs["repositories"] == original_outputs["repositories"]
         load_step = reopened["repositories"][0]["steps"][2]
         destination = tmp_path / f"historical-{run_id}.json"
@@ -315,11 +317,11 @@ def test_repository_showcase_executes_output_handoffs_and_reads_back_failures(
             assert len(payload) == artifact["byte_count"]
 
     select("unknown-fixture")
-    rejected = cli("lock", str(selection), expected_returncode=2)
+    rejected = cli("workflow", "prepare", str(selection), expected_returncode=2)
     assert "INVALID_INPUT_VALUE" in rejected and "fixture" in rejected
     assert developer_result.read_bytes() == direct_bytes
     select("official")
-    cli("lock", str(selection))
+    cli("workflow", "prepare", str(selection))
     if git_selected:
         changed = yaml.safe_load(selection.read_text())
         changed["source"]["plan"] = "examples/missing/plan.yml"

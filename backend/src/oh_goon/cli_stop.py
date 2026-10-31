@@ -32,11 +32,11 @@ def run_stop_command(args: argparse.Namespace) -> int | None:
         print("OH-GOON STOP REFUSED")
         print(f"Workspace: {workspace}")
         print(f"Reason: {exc}")
-        print("Inspect: oh-goon status")
+        print("Inspect: oh-goon app status")
         return 1
     print("OH-GOON STOP REQUESTED")
     print(f"Launch: {target.launch_id}")
     print("Owner: exact birth-proven process signaled through pidfd")
     print("Lifecycle: unchanged until the launch owner publishes terminal evidence")
-    print("Status: oh-goon status")
+    print("Status: oh-goon app status")
     return 0

@@ -56,8 +56,8 @@ def test_prepare_release_plan_is_the_only_release_orchestrator() -> None:
     body = _target_body("prepare-release")
     assert "$(CERTIFICATION_RUNNER) release" in body
     assert "OH_GOON_RELEASE_VERSION" not in body
-    assert "oh-goon plan run" not in body
-    assert "oh-goon lock" not in body
+    assert "oh-goon run" not in body
+    assert "oh-goon workflow prepare" not in body
     assert "repository_id(Path.cwd())" not in body
     assert "$(MAKE) " not in body
     for goon in EXPECTED_GOONS:

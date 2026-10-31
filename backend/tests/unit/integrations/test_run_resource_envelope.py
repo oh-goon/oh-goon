@@ -631,8 +631,8 @@ def test_native_description_binds_selection_only_tamper_of_the_complete_sealed_p
         pytest.skip("native Linux sealed execution descriptor required")
     configuration = tmp_path / "run.yml"
     configuration.write_text(
-        "version: 1\nsource: {kind: catalog-plan, name: python/test}\n"
-        "target: {repository_id: actual-subject}\nresources: {cpu_millis: 1000}\n"
+        "version: 2\nsource: {kind: catalog-plan, name: python/test}\n"
+        "target: {repository: ./actual-subject}\nresources: {cpu_millis: 1000}\n"
     )
     snapshot = load_run_configuration(configuration)
     selected = snapshot.selection.model_dump(mode="json")

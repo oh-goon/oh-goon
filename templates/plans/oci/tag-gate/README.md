@@ -7,15 +7,15 @@ Assert that an existing registry tag resolves to the required digest.
 **Prerequisites:** Read access to the selected registry/repository/tag. Supply `OCI_REGISTRY_USERNAME` and `OCI_REGISTRY_PASSWORD` through the declared host bindings. Configure the admitted strict executor first; see the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
 ```sh
-oh-goon templates init oci/tag-gate --kind plan --output ./workflow
+oh-goon init --template oci/tag-gate --kind plan --output ./workflow --draft
 ```
 
-Edit `workflow/run.yml` with your registered target and caller choices. Omitted options keep their Goon-owned defaults:
+This explicit draft is NOT_READY. Set `target.repository` to your exact registered repository path and fill the required caller choices in `workflow/run.yml`. Omitted options keep their Goon-owned defaults:
 
 ```yaml
-version: 1
+version: 2
 source: {kind: catalog-plan, name: oci/tag-gate}
-target: {repository_id: REPOSITORY_ID}
+target: {repository: /absolute/path/to/project}
 inputs:
   registry_hostname: registry.example.com
   repository: team/app
@@ -24,9 +24,9 @@ inputs:
 ```
 
 ```sh
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
+oh-goon workflow inspect ./workflow/run.yml
+oh-goon workflow validate ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 

@@ -37,7 +37,7 @@ def test_export_cli_transports_exact_selection_and_reports_verified_result(
         ApplicationRuntime, SimpleNamespace(runs=SimpleNamespace(export_artifact=export))
     )
     argv = [
-        "plan",
+        "runs",
         "export-artifact",
         "run-a",
         "--step",
@@ -83,7 +83,7 @@ def test_export_cli_refusal_has_nonzero_exit_and_no_success_receipt(capsys, exce
     )
     args = build_parser().parse_args(
         [
-            "plan",
+            "runs",
             "export-artifact",
             "run-a",
             "--step",
@@ -106,7 +106,7 @@ def test_export_cli_refusal_has_nonzero_exit_and_no_success_receipt(capsys, exce
 @pytest.mark.parametrize("missing", ["--step", "--path", "--output"])
 def test_export_cli_requires_complete_explicit_selection(missing):
     argv = [
-        "plan",
+        "runs",
         "export-artifact",
         "run-a",
         "--step",
@@ -146,7 +146,7 @@ def test_export_cli_reports_published_destination_separately_from_failed_cleanup
         SimpleNamespace(runs=SimpleNamespace(export_artifact=Mock(return_value=exported))),
     )
     argv = [
-        "plan",
+        "runs",
         "export-artifact",
         "run-a",
         "--step",
@@ -180,7 +180,7 @@ def test_export_cli_preserves_primary_error_and_displays_cleanup_notes(capsys, a
         SimpleNamespace(runs=SimpleNamespace(export_artifact=Mock(side_effect=primary))),
     )
     argv = [
-        "plan",
+        "runs",
         "export-artifact",
         "run-a",
         "--step",

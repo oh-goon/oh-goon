@@ -20,7 +20,7 @@ oh-goon ai --agent codex --config providers.json --profile company-responses --p
 Omitting `--agent` selects `codex`; an explicit `--agent` is preserved. `--profile`
 overrides the catalog's `default_native_profile`. Without either selection,
 the existing `isolated-managed` profile applies. Agent selection does not discover
-native authentication or start a model server. New native `templates init` selections also name Codex
+native authentication or start a model server. New native `init` selections also name Codex
 with the `isolated-managed` profile; existing `run.yml` selections stay explicit.
 Missing configuration fails before work.
 
@@ -77,22 +77,22 @@ that is already tracked. Review an export before sharing it, even after redactio
 After a session ends, use the same Oh-Goon state root and exact Run ID:
 
 ```sh
-oh-goon plan handoff FLEET_RUN_ID --json
-oh-goon plan outputs FLEET_RUN_ID --json
-oh-goon plan events FLEET_RUN_ID --after 0 --json
+oh-goon runs handoff FLEET_RUN_ID --json
+oh-goon runs outputs FLEET_RUN_ID --json
+oh-goon runs events FLEET_RUN_ID --after 0 --json
 oh-goon local-state diagnostics-path
 ```
 
 The first three commands read original durable Run/Game Tape facts, including
 recorded source/Step identities, verification outcomes and incomplete cleanup.
 The last prints the existing diagnostics path; read its bounded JSONL records
-for matching Run/repository/Step IDs. `plan logs` remains transient and may be
+for matching Run/repository/Step IDs. `runs logs` remains transient and may be
 unavailable after shutdown. A fresh agent session receives this recorded context
 as untrusted data and requires its own phase admission. Codex retains ownership
 of native context compaction and continuation; diagnostic readback neither
 compacts a session nor grants earlier write permissions.
 
-Every admitted native Run prints its durable `plan handoff` argv reference immediately,
+Every admitted native Run prints its durable `runs handoff` argv reference immediately,
 so success, failure, cancellation and an interrupted controller retain the same Run
 anchor. The existing journal records canonical Step status, exit, source admission
 and available native observations. Visible native final summaries are retained as

@@ -121,13 +121,13 @@ def test_native_cli_success_journal_and_game_tape_survive_restart(tmp_path, monk
     configuration.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "repository-goon"},
-                "target": {"repository_id": repository_id(repo)},
+                "target": {"repository": str(repo)},
             }
         )
     )
-    assert main(["lock", str(configuration)]) == 0
+    assert main(["workflow", "prepare", str(configuration)]) == 0
     capsys.readouterr()
     data = _cli(["run", str(configuration), "--json"], capsys)
     assert data["exit"] == 0
@@ -137,7 +137,7 @@ def test_native_cli_success_journal_and_game_tape_survive_restart(tmp_path, monk
     # Historical explanation must not reopen source or choose configuration again.
     source.write_text("not: [valid-yaml")
     assert _reopened_tape(run_id) == ("PASSED", "COMPLETED")
-    tape = _cli(["plan", "tape", run_id, "--json"], capsys)
+    tape = _cli(["runs", "tape", run_id, "--json"], capsys)
     assert tape["exit"] == 0
     assert tape["schema_name"] == "oh-goon.game-tape/v1"
     assert tape["journal_revision"] > 0
@@ -150,7 +150,7 @@ def test_native_cli_success_journal_and_game_tape_survive_restart(tmp_path, monk
         == tape["execution_reference"]["source"]["sha256"]
     )
     assert "private-history-canary" not in json.dumps(tape)
-    events = _cli(["plan", "events", run_id, "--json"], capsys)
+    events = _cli(["runs", "events", run_id, "--json"], capsys)
     assert events["exit"] == 0
 
 

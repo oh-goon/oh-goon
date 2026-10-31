@@ -32,12 +32,13 @@ def default_lineup_root() -> Path:
 class LeagueLineupFileStore(ExactFileStore):
     """Atomic local Team selections with exact-byte stale-write protection."""
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | None = None, *, initialize: bool = True) -> None:
         super().__init__(
             root or default_lineup_root(),
             file_name="lineup.yml",
             key_pattern=_LINEUP_KEY,
             label="League Lineup",
+            initialize=initialize,
         )
 
     def read(

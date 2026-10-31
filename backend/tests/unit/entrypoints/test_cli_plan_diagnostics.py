@@ -15,6 +15,7 @@ from oh_goon.core.models.fleet_plan import (
 )
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
 from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
+from oh_goon.core.models.game_tape import GameTapeSummary
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 
 
@@ -91,7 +92,23 @@ def test_plan_run_completed_attention_required_is_nonzero(monkeypatch, capsys):
     detail = SimpleNamespace(
         outcome=FleetRunOutcome.ATTENTION_REQUIRED,
         run=SimpleNamespace(status=FleetRunStatus.COMPLETED, fleet_run_id="run-attention"),
-        game_tape=SimpleNamespace(why_not=None, repositories=()),
+        game_tape=SimpleNamespace(
+            why_not=None,
+            repositories=(),
+            summary=GameTapeSummary(
+                repositories=0,
+                passed=0,
+                failed=0,
+                attention_required=0,
+                not_run=0,
+                planned_steps=0,
+                executed_steps=0,
+                passed_steps=0,
+                failed_steps=0,
+                skipped_steps=0,
+                not_run_steps=0,
+            ),
+        ),
     )
     admitted = SimpleNamespace(fleet_run_id="run-attention", target=None)
     runtime = SimpleNamespace(

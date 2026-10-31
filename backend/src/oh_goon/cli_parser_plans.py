@@ -40,26 +40,55 @@ def _artifact_seconds(value: str) -> float:
     return parsed
 
 
-def add_plan_commands(
+def add_workflow_commands(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    config = subparsers.add_parser("config", help="Inspect or validate one selected run.yml")
-    commands = config.add_subparsers(dest="config_command", required=True)
+    workflow = subparsers.add_parser(
+        "workflow", help="Inspect, validate or explicitly prepare one workflow"
+    )
+    commands = workflow.add_subparsers(dest="workflow_command", required=True)
     for name in ("inspect", "validate"):
         command = commands.add_parser(
-            name, help="Read the canonical configuration without execution"
+            name,
+            help="Read selected sources without execution; network only with --acquire",
+            description="Read selected source contracts and existing scope without initializing runtime state or writing the workflow. --acquire explicitly permits native Git acquisition into its owned cache.",
         )
         command.add_argument("configuration", type=Path)
         command.add_argument("--json", action="store_true", dest="as_json")
-        if name == "inspect":
-            command.add_argument(
-                "--acquire",
-                action="store_true",
-                help="Explicitly acquire selected Git source to inspect its contract without locking or execution",
-            )
+        command.add_argument(
+            "--acquire",
+            action="store_true",
+            help="Explicitly acquire selected Git source to inspect its contract without locking or execution",
+        )
+    prepare = commands.add_parser(
+        "prepare",
+        help="Acquire selected sources and write the lock; registration only with --register-target",
+        description="Acquire the explicitly selected sources and write goon.lock through its original owner. Existing pins stay fixed unless --refresh selects their kind. --register-target may persist only the exact selected repository.",
+    )
+    prepare.add_argument("configuration", type=Path)
+    prepare.add_argument("--json", action="store_true", dest="as_json")
+    prepare.add_argument("--no-input", action="store_true")
+    prepare.add_argument(
+        "--register-target",
+        action="store_true",
+        help="Explicitly register only the selected repository before preparation",
+    )
+    prepare.add_argument(
+        "--refresh",
+        action="append",
+        default=[],
+        choices=("goons", "applications", "skills"),
+        help="Explicitly refresh only the selected source pin kind; repeat to combine",
+    )
     run = subparsers.add_parser("run", help="Execute one locked run.yml through Fleet")
     run.add_argument("configuration", type=Path)
     run.add_argument("--json", action="store_true", dest="as_json")
+    run.add_argument("--no-input", action="store_true")
+    run.add_argument(
+        "--yes",
+        action="store_true",
+        help="Accept presentation only; grants no execution or repair authority",
+    )
     run.add_argument("--_resource-handoff", help=argparse.SUPPRESS)
     run.add_argument(
         "--fleet-run-id",
@@ -70,24 +99,18 @@ def add_plan_commands(
         action="store_true",
         help="Authorize this bounded repair Run using the selected explicit scope",
     )
-    lock = subparsers.add_parser(
-        "lock", help="Freeze one run.yml with the original execution-lock owner"
+    runs = subparsers.add_parser(
+        "runs", help="Read retained Run and Game Tape evidence by exact Run ID"
     )
-    lock.add_argument("configuration", type=Path)
-    lock.add_argument(
-        "--update-skills", action="store_true", help="Explicitly refresh declared Skill pins"
+    _add_run_readback_commands(runs.add_subparsers(dest="runs_command", required=True))
+
+
+def add_plan_commands(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    plan = subparsers.add_parser(
+        "plan", help="Compare authored sources or explicitly schedule work"
     )
-    lock.add_argument(
-        "--update-goons",
-        action="store_true",
-        help="Explicitly refresh declared Git Goon and Plan pins",
-    )
-    lock.add_argument(
-        "--update-applications",
-        action="store_true",
-        help="Explicitly refresh declared Git application source pins",
-    )
-    plan = subparsers.add_parser("plan", help="Inspect recorded Runs or compare authored sources")
     plan_commands = plan.add_subparsers(dest="plan_command", required=True)
     check = plan_commands.add_parser(
         "check", help="Statically check source packages without running work"
@@ -108,7 +131,6 @@ def add_plan_commands(
         command.add_argument("--schedule-id", required=True)
         command.add_argument("--name")
         command.add_argument("--interval-minutes", type=int, required=True)
-    _add_run_readback_commands(plan_commands)
 
 
 def _nonnegative_cursor(value: str) -> int:
@@ -136,7 +158,7 @@ def _add_run_readback_commands(
 ) -> None:
     """One exact Run identity; original Fleet owner supplies all projected facts."""
     status = plan_subparsers.add_parser(
-        "status", help="Read one durable Fleet Run projection by exact Run ID"
+        "show", help="Read one durable Fleet Run projection by exact Run ID"
     )
     status.add_argument("fleet_run_id")
     status.add_argument("--json", action="store_true", dest="as_json")

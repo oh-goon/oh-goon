@@ -12,5 +12,5 @@ or a dependency manager. It selects no managed runtime or dependency group.
 The application path is relative to the Git Plan's authoring root. When
 copying the recipe for another project, update that path and the exact wheel
 artifact name to match the project's native build output. Use the recorded
-Run and Step with `oh-goon plan export-artifact` to retrieve retained bytes
+Run and Step with `oh-goon runs export-artifact` to retrieve retained bytes
 after execution scratch is disposed.

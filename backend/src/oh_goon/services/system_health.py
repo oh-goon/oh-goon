@@ -27,8 +27,7 @@ class SystemHealthService:
     OPTIONAL: tuple[str, ...] = ()
 
     def inspect(self) -> SystemHealth:
-        tools = [self._inspect_tool(name, required=True) for name in self.REQUIRED]
-        tools.extend(self._inspect_tool(name, required=False) for name in self.OPTIONAL)
+        tools = self.inspect_tools()
         proof = self._runtime_safety.refresh()
         return SystemHealth(
             tools=tuple(tools),
@@ -36,11 +35,19 @@ class SystemHealthService:
             background_failures=tuple(self._background_failures()),
         )
 
-    def _inspect_tool(self, name: str, *, required: bool) -> ToolHealth:
+    @classmethod
+    def inspect_tools(cls) -> tuple[ToolHealth, ...]:
+        """Observe native CLI prerequisites without constructing application state."""
+        return tuple(cls._inspect_tool(name, required=True) for name in cls.REQUIRED) + tuple(
+            cls._inspect_tool(name, required=False) for name in cls.OPTIONAL
+        )
+
+    @classmethod
+    def _inspect_tool(cls, name: str, *, required: bool) -> ToolHealth:
         try:
             result = run_command(name, "--version")
         except OSError:
-            return self._missing(name, required=required)
+            return cls._missing(name, required=required)
         if result.returncode != 0:
             return BrokenToolHealth(
                 name=name,

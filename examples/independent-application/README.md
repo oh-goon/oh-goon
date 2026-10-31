@@ -24,10 +24,12 @@ its target identity. From the Oh-Goon source checkout:
 
 ```sh
 oh-goon league add-folder /absolute/path/to/your/application
-oh-goon templates init python/quality --kind plan --output ../application-workflow --repository /absolute/path/to/your/application
+oh-goon init --template python/quality --kind plan --output /absolute/path/to/application-workflow --repository /absolute/path/to/your/application
 cp examples/independent-application/plan.yml ../application-workflow/plan.yml
 cp -R examples/independent-application/goons ../application-workflow/goons
 ```
+
+Choose that absolute output path as the sibling `../application-workflow` used below; its parent must already exist.
 
 Keep the generated `target` in `../application-workflow/run.yml`; replace its
 `source` with `source: {kind: file-plan, path: ./plan.yml}` and remove any inputs
@@ -42,12 +44,12 @@ execution is unsupported. From `../application-workflow`, use the ordinary
 public commands:
 
 ```sh
-oh-goon config inspect ./run.yml
-oh-goon config validate ./run.yml
-oh-goon lock ./run.yml
+oh-goon workflow inspect ./run.yml
+oh-goon workflow validate ./run.yml
+oh-goon workflow prepare ./run.yml
 oh-goon run ./run.yml --json
-oh-goon plan tape RUN_ID --json
-oh-goon plan handoff RUN_ID --json
+oh-goon runs tape RUN_ID --json
+oh-goon runs handoff RUN_ID --json
 ```
 
 Application files run from a captured private attempt copy. Developer source and
@@ -66,10 +68,10 @@ application:
 ```
 
 Use an exact contained subdirectory when the project is below repository root.
-First run `oh-goon lock ./run.yml` to acquire its exact Git selection, then
+First run `oh-goon workflow prepare ./run.yml` to acquire its exact Git selection, then
 inspect, validate and run it. Inspection never silently fetches missing source.
 Ordinary lock/run retains the resolved commit after ref movement or cache loss;
-only `oh-goon lock ./run.yml --update-applications` deliberately refreshes it.
+only `oh-goon workflow prepare ./run.yml --refresh applications` deliberately refreshes it.
 Inspect the recorded application origin, path, commit and content identity in
 Game Tape's Technical Step details. This is an application source selection,
 not a Git Goon import: the application needs no catalog path or Goon files.

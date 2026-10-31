@@ -39,7 +39,7 @@ def _render_reuse_decision(*, workspace: Path, decision: LocalLaunchReuseDecisio
         if decision.launch_id is not None:
             print(f"Current launch: {decision.launch_id}")
         print(f"Reason: {decision.reason}")
-        print("Inspect: oh-goon status")
+        print("Inspect: oh-goon app status")
         return 2
     if decision.action is not LocalLaunchReuseAction.REUSE:
         return None
@@ -49,9 +49,9 @@ def _render_reuse_decision(*, workspace: Path, decision: LocalLaunchReuseDecisio
     print(f"Lifecycle:      {decision.status.lifecycle.value}")
     print("Reuse:          existing compatible live owner")
     if decision.status.lifecycle.value == "ready":
-        print("Open:           oh-goon open")
+        print("Open:           oh-goon app open")
     else:
-        print("Status:         oh-goon status")
+        print("Status:         oh-goon app status")
     return 0
 
 
@@ -101,7 +101,9 @@ def _load_league_folders(
     if not built_ui_available():
         print("The bundled oh-goon UI is not present in this source checkout/install.")
         print("For contributor development use: make dev")
-        print("For normal offline/local use install a built oh-goon release and run: oh-goon start")
+        print(
+            "For normal offline/local use install a built oh-goon release and run: oh-goon app start"
+        )
         return None
     folders = LeagueFolderStore()
     try:

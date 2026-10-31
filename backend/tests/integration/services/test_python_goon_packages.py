@@ -10,7 +10,6 @@ import pytest
 import yaml
 
 from oh_goon.cli import main
-from oh_goon.core.product_identity import repository_id
 from oh_goon.runtime.league_folders import LeagueFolderStore
 
 PROBE = """import argparse
@@ -125,19 +124,19 @@ build-backend = "uv_build"
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": repository_id(repository)},
+                "target": {"repository": str(repository)},
             }
         )
     )
 
     def run(expected: int = 0) -> list[dict[str, Any]]:
-        assert main(["lock", str(selection)]) == 0
+        assert main(["workflow", "prepare", str(selection)]) == 0
         capsys.readouterr()
         assert main(["run", str(selection), "--json"]) == expected
         receipt = json.loads(capsys.readouterr().out)
-        assert main(["plan", "outputs", receipt["fleet_run_id"], "--json"]) == 0
+        assert main(["runs", "outputs", receipt["fleet_run_id"], "--json"]) == 0
         return cast(
             list[dict[str, Any]], json.loads(capsys.readouterr().out)["repositories"][0]["steps"]
         )
@@ -165,7 +164,7 @@ build-backend = "uv_build"
         generated_output = package / working_directory / name
         generated_output.parent.mkdir(parents=True, exist_ok=True)
         generated_output.write_text("local generated output")
-    assert main(["lock", str(selection)]) == 0
+    assert main(["workflow", "prepare", str(selection)]) == 0
     capsys.readouterr()
     assert (workflow / "goon.lock").read_bytes() == locked_source
 

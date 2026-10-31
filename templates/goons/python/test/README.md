@@ -7,10 +7,12 @@ Run pytest with native project discovery and policy, and produce a JUnit report.
 **Prerequisites:** The selected locked group must supply pytest; native pytest configuration owns discovery and coverage policy.
 
 ```sh
-oh-goon templates init python/test --kind goon --output ./workflow
+oh-goon init --template python/test --kind goon --output ./workflow --draft
 ```
 
-Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** `junit.xml` in the selected project, retained as evidence.
 

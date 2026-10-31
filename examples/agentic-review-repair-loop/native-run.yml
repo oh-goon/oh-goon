@@ -1,6 +1,6 @@
-version: 1
+version: 2
 source: {kind: file-plan, path: native-plan.yml}
-target: {repository_id: REPOSITORY_ID}
+target: {repository: REPOSITORY_PATH}
 inputs:
   repo: local:my-project
   regression_command: scripts/regression

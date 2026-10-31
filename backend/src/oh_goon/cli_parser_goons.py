@@ -4,6 +4,54 @@ import argparse
 from pathlib import Path
 
 
+def add_init_command(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    init = subparsers.add_parser(
+        "init",
+        help="Register exact repositories if needed and write a prepared workflow and lock",
+        description="Create a workflow directory and first lock; may register only the supplied exact repositories. --draft writes incomplete authoring files without registration or preparation.",
+    )
+    init.set_defaults(template_command="init")
+    init.add_argument("--template", dest="key", required=True, metavar="CATEGORY/NAME")
+    init.add_argument("--kind", choices=("plan", "goon"), default="plan")
+    init.add_argument(
+        "--output",
+        type=Path,
+        default=Path("workflow"),
+        help="New workflow directory (default: workflow)",
+    )
+    init.add_argument(
+        "--repository",
+        action="append",
+        type=Path,
+        metavar="PATH",
+        help="Exact repository required for ready initialization; repeat for an exact target set",
+    )
+    init.add_argument(
+        "--draft",
+        action="store_true",
+        help="Explicitly author an incomplete draft without registration or preparation",
+    )
+    init.add_argument(
+        "--input", action="append", dest="input_values", default=[], metavar="NAME=VALUE"
+    )
+    init.add_argument(
+        "--input-null", action="append", dest="input_nulls", default=[], metavar="NAME"
+    )
+    init.add_argument(
+        "--no-input", action="store_true", help="Refuse missing values without prompting"
+    )
+    init.add_argument("--json", action="store_true", dest="as_json")
+    init.add_argument(
+        "--review",
+        action="append",
+        default=[],
+        metavar="ALIAS=SKILL",
+        help="Author an explicit ordered reviewer occurrence in a project-owned Composite Goon",
+    )
+
+
 def add_goon_commands(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
@@ -21,26 +69,6 @@ def add_goon_commands(
     )
     show.add_argument("key")
     show.add_argument("--kind", choices=("plan", "goon"), required=True)
-    init = template_commands.add_parser(
-        "init", help="Create a minimal workflow selecting a shipped Plan or Goon"
-    )
-    init.add_argument("key")
-    init.add_argument("--kind", choices=("plan", "goon"), required=True)
-    init.add_argument("--output", type=Path, required=True)
-    init.add_argument(
-        "--repository",
-        action="append",
-        type=Path,
-        metavar="PATH",
-        help="Select a registered League repository path; repeat for an exact target set",
-    )
-    init.add_argument(
-        "--review",
-        action="append",
-        default=[],
-        metavar="ALIAS=SKILL",
-        help="Author an explicit ordered reviewer occurrence in a project-owned Composite Goon",
-    )
     goon = subparsers.add_parser(
         "goon",
         help="Create or migrate executable Goon capabilities",

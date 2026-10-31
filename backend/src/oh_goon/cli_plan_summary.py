@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from itertools import islice
 
 from oh_goon.core.fleet_plan_tool_requirements import (
     step_execution_tool,
     step_execution_tool_names,
 )
 from oh_goon.core.models.fleet_plan import (
+    AgentPlanStep,
+    CompiledGoonImportStep,
     ResolvedAgentStep,
     ResolvedFleetPlan,
     ResolvedKubernetesRolloutVerifyStep,
@@ -40,6 +43,50 @@ from oh_goon.core.models.fleet_plan_step_primitives import (
     PlanStreamOutput,
 )
 from oh_goon.integrations.fleet_plan_containerfile_policy import oci_build_repository_policy_id
+from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph, FleetPlanSourceNode
+
+
+def captured_workflow_summary(graph: FleetPlanSourceGraph) -> tuple[str, ...]:
+    """Show bounded authored effects from the already captured graph; grant no authority."""
+    execution = graph.root.compiled.execution
+    lines = [
+        f"Selected source: {graph.root.compiled.name}",
+        "Execution purpose: "
+        + (execution.purpose.value if execution is not None else "selected execution default"),
+        "Declared effects (original admission still applies):",
+    ]
+
+    def steps(node: FleetPlanSourceNode) -> Iterable[str]:
+        for step in node.compiled.steps:
+            if isinstance(step, CompiledGoonImportStep):
+                yield from steps(graph.goon(node.path, step))
+                continue
+            effects = step.requested_effects if isinstance(step, AgentPlanStep) else None
+            capabilities = (
+                effects.capabilities if effects is not None else getattr(step, "capabilities", None)
+            )
+            network = (
+                capabilities.egress.mode if capabilities is not None else "owned by native Step"
+            )
+            workspace = getattr(step, "workspace", None)
+            repository = (
+                effects.repository_access
+                if effects is not None
+                else (
+                    "publish workspace"
+                    if workspace is not None and workspace.publish
+                    else "execution workspace"
+                )
+            )
+            yield f"  {step.step_id}: {step.kind}; network={network}; repository={repository}"
+
+    declared = iter(steps(graph.root))
+    lines.extend(islice(declared, 16))
+    if next(declared, None) is not None:
+        lines.append(
+            "  Additional declarations: use workflow inspect for the selected source contract."
+        )
+    return tuple(lines)
 
 
 def configuration_summary(configuration: PlanConfigurationEvidence | None) -> tuple[str, ...]:

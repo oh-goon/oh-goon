@@ -93,7 +93,7 @@ def _local_state_reset_command(inspection: LocalStateInspection, args: argparse.
         print(f"Deleted {len(deleted)} SQLite file(s).")
     else:
         print("No local database files existed; startup is already clean.")
-    print("Start again with the same path: make dev (source) or oh-goon start (built release)")
+    print("Start again with the same path: make dev (source) or oh-goon app start (built release)")
     return 0
 
 

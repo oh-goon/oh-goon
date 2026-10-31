@@ -54,9 +54,9 @@ Register your actual project repository and initialize by path:
 
 ```sh
 oh-goon league add-folder /absolute/path/to/your/project
-oh-goon templates init ml/iris-training --kind plan --output ./workflow --repository /absolute/path/to/your/project
+oh-goon init --template ml/iris-training --kind plan --output ./workflow --repository /absolute/path/to/your/project
 # Edit workflow/run.yml inputs if needed.
-oh-goon lock ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 

@@ -9,16 +9,16 @@ Run four ordered pinned agentsCookbook reviews, adjudication, proposal, scoped n
 Initialize a new workflow using the shipped Plan:
 
 ```sh
-oh-goon templates init agents/agentic-review-repair-loop --kind plan --output ./workflow \
+oh-goon init --template agents/agentic-review-repair-loop --kind plan --output ./workflow --draft \
   --repository /absolute/path/to/registered-repository
 ```
 
-The initializer includes the existing `.goonskills.yml` and local phase Skills, and fills the target identity and repository reference/root through League discovery. Edit `workflow/run.yml` using [the complete provider selection](run.yml): choose the configured `agent.model_profile`, executable check paths and bounded `repair` group. Do not copy provider endpoints, keys or native settings into this file. `.goonskills.yml` declares the cookbook source once; `goon.lock` owns the captured commit. The local adjudication/repair Skills are product fixtures, not a review catalog.
+The initializer includes the existing `.goonskills.yml` and local phase Skills, and records the target path and repository reference/root without registering it. Edit `workflow/run.yml` using [the complete provider selection](run.yml): choose the configured `agent.model_profile`, executable check paths and bounded `repair` group. Do not copy provider endpoints, keys or native settings into this file. `.goonskills.yml` declares the cookbook source once; `goon.lock` owns the captured commit. The local adjudication/repair Skills are product fixtures, not a review catalog.
 
 ```sh
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
+oh-goon workflow inspect ./workflow/run.yml
+oh-goon workflow validate ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml --authorize-repair
 ```
 
@@ -26,19 +26,19 @@ The [shipped Composite](../../templates/goons/agents/agentic-review-repair-loop/
 
 The `--authorize-repair` action grants fresh consent for this invocation; it is required on each effectful run and is never stored in `run.yml`. A checked-in selection grants no fresh write consent. Interrupted/expired runs do not silently resume writes. Lock/source/provider/Skill changes need explicit refreshed authority. Native checks own their result; a model’s test claim is not regression proof.
 
-Read the returned Run IDs with `oh-goon plan steps RUN_ID` and `oh-goon plan tape RUN_ID`. Earlier findings, failures and candidate identities remain in their original Runs. These outcomes do not grant APP certification.
+Read the returned Run IDs with `oh-goon runs steps RUN_ID` and `oh-goon runs tape RUN_ID`. Earlier findings, failures and candidate identities remain in their original Runs. These outcomes do not grant APP certification.
 
 To choose a different reviewer roster, initialize a fresh workflow with explicit ordered authoring choices:
 
 ```sh
-oh-goon templates init agents/agentic-review-repair-loop --kind plan --output ./custom-workflow \
+oh-goon init --template agents/agentic-review-repair-loop --kind plan --output ./custom-workflow --draft \
   --review authority=cookbook/single-source-of-truth-review \
   --review consumers=cookbook/canonical-consumer-contract-review
 ```
 
 This writes an ordinary project-owned Composite at `goons/agents/review-repair/`, a Plan selecting it and a `run.yml` selecting that contained Plan. The Composite owns the ordered `phase: review` imports and retains the canonical adjudicate/repair/regression/verification edges. Initialization includes the local phase fixtures and the existing cookbook registry when selected. Custom review Skill resources remain caller-owned. `.goonskills.yml` remains the sole Skill-source registry; no cookbook Skill bodies are generated.
 
-Edit the ordinary imports to replace, append or reorder reviews. Duplicate/missing aliases and invalid Skill references reject before publication. There is no runtime reviewer array or second scheduler. `run.yml` is published last as the completion marker; interrupted output without it is incomplete and is never overwritten or automatically removed.
+Edit the ordinary imports to replace, append or reorder reviews. Duplicate/missing aliases and invalid Skill references reject before publication. There is no runtime reviewer array or second scheduler. The entire draft is published exclusively as one directory. It remains NOT_READY without a canonical lock; complete its missing fields and prepare it explicitly.
 
 ## Native Codex service campaign
 
@@ -54,7 +54,7 @@ Set `inputs.goal` to the task’s actual scope and phase contract: reviews apply
 
 Keep the workflow and report outside the source checkout. The invocation's JSON
 result includes the controller stop reason and structured campaign view.
-`oh-goon plan campaign CAMPAIGN_OR_RUN_ID --json` reopens the committed intent,
+`oh-goon runs campaign CAMPAIGN_OR_RUN_ID --json` reopens the committed intent,
 linked Runs and controller decisions from the original Journal after restart.
 The campaign ID also works when initial admission was refused and no Run exists.
 The browser's campaign route uses the same durable read owner through

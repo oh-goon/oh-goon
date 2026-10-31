@@ -3345,7 +3345,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             first_run_id = detail["run"]["fleet_run_id"]
             assert detail["run"]["status"] == "COMPLETED"
             assert steps[-1]["exit_code"] == 1
-            assert cli_main(["plan", "handoff", first_run_id, "--json"]) == 0
+            assert cli_main(["runs", "handoff", first_run_id, "--json"]) == 0
             prior_handoff = json.loads(capsys.readouterr().out)
             assert prior_handoff["outcome"] == FleetRunOutcome.ATTENTION_REQUIRED.value
             expected_source = first_source
@@ -3375,7 +3375,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
             assert steps[0]["native_agent_observations"][0]["occurrence"] == native_occurrences[1]
             assert_source_edits(expected_source, {"eventlog/summary.py", "eventlog/__main__.py"})
             assert feature_verifier.read_bytes() == feature_verifier_bytes
-            assert cli_main(["plan", "handoff", first_run_id, "--json"]) == 0
+            assert cli_main(["runs", "handoff", first_run_id, "--json"]) == 0
             retained_handoff = json.loads(capsys.readouterr().out)
             for key in handoff_keys:
                 assert retained_handoff[key] == prior_handoff[key]

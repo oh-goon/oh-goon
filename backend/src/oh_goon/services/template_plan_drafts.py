@@ -1,21 +1,22 @@
 """Plan authoring through the canonical compiler and source graph.
 
-Drafts stay in memory. Explicit initialization publishes a new workflow;
-neither operation runs Plans, rereads caller selections or admits effects.
+Proposals stay in memory. Explicit initialization stages a new workflow and
+delegates registration/preparation to their original owners before publication.
+Neither operation executes a Plan or grants Run permission.
 """
 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
 import yaml
 
-from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.fleet_plan_composition import coerce_input
+from oh_goon.core.errors import FleetPlanInputRejected, FleetPlanInvalid, RunConfigurationInvalid
+from oh_goon.core.fleet_plan_composition import bind_inputs, coerce_input
 from oh_goon.core.models.fleet_plan import CompiledGoonImportStep
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.template_identity import template_classification, template_reference_allowed
@@ -26,6 +27,7 @@ from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_input_inspection import InputInspection, inspect_projected_inputs
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
 from oh_goon.services.template_plan_draft_comparison import compare_resolved_drafts
 
 AGENT_REVIEW_EXAMPLE = "agentic-review-repair-loop"
@@ -34,6 +36,38 @@ AGENT_REVIEW_COMPANION_PATHS = (
     "skills/adjudicate/SKILL.md",
     "skills/repair/SKILL.md",
 )
+
+
+def bind_initialization_inputs(
+    graph: FleetPlanSourceGraph,
+    supplied: Mapping[str, PlanInputValue],
+    *,
+    prompt: Callable[[InputInspection], PlanInputValue] | None = None,
+    allow_missing: bool = False,
+) -> dict[str, PlanInputValue]:
+    """Bind the compiler's public interface before initialization has effects."""
+    from oh_goon.services.fleet_plan_input_resolution import materialize_projected_inputs
+
+    compiled = materialize_projected_inputs(graph, graph.root.path)
+    values = dict(supplied)
+    try:
+        return bind_inputs(compiled, values, context="initialization")
+    except FleetPlanInputRejected as exc:
+        if exc.diagnostic_code != "MISSING_REQUIRED_INPUT":
+            raise
+        if allow_missing:
+            return {
+                definition.name: coerce_input(definition, values[definition.name], context="draft")
+                for definition in compiled.inputs
+                if definition.name in values
+            }
+        if prompt is None:
+            raise
+        missing = set(exc.input_names)
+    for item in inspect_projected_inputs(graph):
+        if item.definition.name in missing:
+            values[item.definition.name] = prompt(item)
+    return bind_inputs(compiled, values, context="initialization")
 
 
 def agent_review_companion_files(root: Path) -> dict[str, str]:
@@ -54,6 +88,13 @@ def agent_review_companion_files(root: Path) -> dict[str, str]:
     return files
 
 
+@dataclass(frozen=True, slots=True)
+class InitializedRunConfiguration:
+    path: Path
+    required_fields: tuple[str, ...]
+    execution_digest: str | None
+
+
 def initialize_run_configuration(
     key: str,
     output: Path,
@@ -62,23 +103,25 @@ def initialize_run_configuration(
     reviewers: Sequence[tuple[str, str]] = (),
     repository: Path | None = None,
     repositories: Sequence[Path] = (),
-) -> Path:
-    """Author one selection and necessary Plan intent; never admit effects."""
-    import tempfile
+    inputs: Mapping[str, PlanInputValue] | None = None,
+    prompt: Callable[[InputInspection], PlanInputValue] | None = None,
+    draft: bool = False,
+    prepare: Callable[[Path, FleetPlanSourceGraph, Path], str] | None = None,
+) -> InitializedRunConfiguration:
+    """Stage one authored workflow, then atomically publish its selected intent."""
+    import os
 
     from oh_goon.core.models.agent_providers import (
         DEFAULT_NATIVE_AGENT,
         DEFAULT_NATIVE_AGENT_PROFILE,
     )
     from oh_goon.core.models.fleet_plan import AgentPlanStep
-    from oh_goon.core.models.fleet_plan_composition import PlanInputType
-    from oh_goon.core.models.repository import RepositoryIdentity
     from oh_goon.core.template_identity import TemplateClassification
     from oh_goon.integrations.exact_file_write import (
-        prepared_text_file,
-        publish_new_text_tree,
-        replace_prepared_file,
+        prepared_sibling_directory,
+        publish_prepared_directory,
     )
+    from oh_goon.services.run_configuration import require_no_symlink_target_path
 
     if kind not in {"plan", "goon"}:
         raise FleetPlanInvalid("Template kind must be plan or goon")
@@ -90,40 +133,29 @@ def initialize_run_configuration(
             raise FleetPlanInvalid("Output cannot contain symlink components")
     if selected.exists():
         raise FleetPlanInvalid("Output already exists; choose a fresh destination")
+    if not selected.parent.is_dir():
+        raise FleetPlanInvalid("Output parent must be an existing directory")
+    if repository is not None and repositories:
+        raise FleetPlanInvalid("Select repository paths through one explicit target selection")
+    requested = (repository,) if repository is not None else tuple(repositories)
+    if not draft and not requested:
+        raise RunConfigurationInvalid(
+            "Initialization requires explicit repository paths",
+            diagnostic_code="CONFIG_SCHEMA_INVALID",
+            fields=("target.repository",),
+        )
+    if not draft and prepare is None:
+        raise FleetPlanInvalid("Ready initialization requires the original execution-lock owner")
     label = "Plan" if kind == "plan" else "Goon"
     if template_classification(key, kind=label) is TemplateClassification.INTERNAL_SELF_HOSTING:
         raise FleetPlanInvalid("Internal templates use their owning Make/certification command")
     if reviewers and key != "agents/agentic-review-repair-loop":
         raise FleetPlanInvalid("Reviewer authoring requires agents/agentic-review-repair-loop")
-    if repository is not None and repositories:
-        raise FleetPlanInvalid("Select repository paths through one explicit target selection")
-    requested = (repository,) if repository is not None else tuple(repositories)
-    targets: list[RepositoryIdentity] = []
-    target: RepositoryIdentity | None = None
-    if requested:
-        from oh_goon.runtime.league_folders import LeagueFolderStore
-        from oh_goon.services.repository_discovery import RepositoryDiscoveryService
-
-        locations = LeagueFolderStore().list()
-        discovery = RepositoryDiscoveryService()
-        for path in requested:
-            root = discovery.containing_git_root(locations, path)
-            if root is not None:
-                target = RepositoryIdentity.model_validate({"path": root})
-            else:
-                selected_path = RepositoryIdentity.model_validate({"path": path.expanduser()})
-                roots = discovery.explicit_configured_roots(
-                    locations, repository_ids=(selected_path.repository_id,)
-                )
-                target = roots[0] if len(roots) == 1 else None
-            if target is None:
-                raise FleetPlanInvalid(
-                    "--repository must select a registered League repository path. "
-                    "Register its directory with 'oh-goon league add-folder PATH', then retry."
-                )
-            if any(item.repository_id == target.repository_id for item in targets):
-                raise FleetPlanInvalid("--repository must select each repository exactly once")
-            targets.append(target)
+    targets = tuple(path.expanduser().absolute() for path in requested)
+    for path in targets:
+        require_no_symlink_target_path(path, allow_missing=draft)
+    if len(set(os.path.abspath(path) for path in targets)) != len(targets):
+        raise FleetPlanInvalid("--repository must select each repository exactly once")
     target = targets[0] if len(targets) == 1 else None
     goon_store = GoonTemplateStore()
     goons = _FrozenGoonSources(goon_store)
@@ -134,39 +166,46 @@ def initialize_run_configuration(
         files = _reviewer_workflow_files(goons, reviewers)
     elif kind == "goon":
         files["plan.yml"] = yaml.safe_dump({"goons": [key]}, sort_keys=False)
-    # Staging is generator-owned execution scratch, independent of the chosen
-    # output path. Publication pins native directories before its first write.
-    with tempfile.TemporaryDirectory(prefix="oh-goon-workflow-") as temporary:
-        staging = Path(temporary)
+    # Only this private, explicitly named scratch can remain after interruption.
+    # The final directory is exposed by one native exclusive rename.
+    with prepared_sibling_directory(selected) as prepared:
+        staging = prepared.path
+        written = set(files)
         for relative, content in files.items():
-            destination = staging / relative
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with prepared_text_file(destination, content) as prepared:
-                replace_prepared_file(prepared, destination)
+            prepared.write_text(relative, content)
+        prepared.require_current()
         graph = (
             resolver.analyze_source(staging / "plan.yml")
             if files
-            else resolver.analyze_source(
-                source.path, compiled_overrides={source.path: source.compiled}
-            )
+            else resolver.analyze_source(source.path, root_snapshot=source)
         )
+        prepared.require_current()
         interface = inspect_projected_inputs(graph)
         if len(targets) > 1 and graph.has_agent_source_contract():
             raise FleetPlanInvalid("Agent execution requires a single repository")
         payload: dict[str, Any] = {
-            "version": 1,
+            "version": 2,
             "source": {"kind": "file-plan", "path": "plan.yml"}
             if "plan.yml" in files
             else {"kind": "catalog-plan", "name": key},
-            "target": {"repository_ids": [item.repository_id for item in targets]}
-            if len(targets) > 1
-            else {"repository_id": target.repository_id if target else "REPOSITORY_ID"},
         }
-        required: dict[str, PlanInputValue] = {
-            item.definition.name: f"REQUIRED_{item.definition.name}"
+        missing: list[str] = []
+        if len(targets) > 1:
+            payload["target"] = {
+                "repositories": [
+                    Path(os.path.relpath(item, selected)).as_posix() for item in targets
+                ]
+            }
+        elif target is not None:
+            payload["target"] = {"repository": Path(os.path.relpath(target, selected)).as_posix()}
+        else:
+            missing.append("target.repository")
+        values = bind_initialization_inputs(graph, inputs or {}, prompt=prompt, allow_missing=draft)
+        missing.extend(
+            f"inputs.{item.definition.name}"
             for item in interface
-            if item.definition.required and item.definition.default is None
-        }
+            if item.definition.required and item.definition.name not in values
+        )
         agent_steps = [
             step
             for owner, identifier in graph.agent_step_sources()
@@ -189,7 +228,6 @@ def initialize_run_configuration(
                 companions.pop(".goonskills.yml")
             files.update(companions)
         if graph.has_agent_source_contract():
-            required.pop("acceptance", None)
             acceptance = next(
                 (
                     item.definition.default
@@ -201,42 +239,58 @@ def initialize_run_configuration(
             selection = (
                 {"implementation": DEFAULT_NATIVE_AGENT, "profile": DEFAULT_NATIVE_AGENT_PROFILE}
                 if any(step.harness == "native" for step in agent_steps)
-                else {"model_profile": "REQUIRED_MODEL_PROFILE"}
+                else {}
             )
             payload["agent"] = {
                 **selection,
-                "acceptance": acceptance or "REQUIRED_ACCEPTANCE",
-                "repository_root": str(target.path.parent) if target else "/approved/repositories",
                 "skill_root": ".",
             }
+            if not selection:
+                missing.append("agent.model_profile")
+            if acceptance is not None:
+                payload["agent"]["acceptance"] = acceptance
+            else:
+                missing.append("agent.acceptance")
             if target is not None:
-                for item in interface:
-                    if item.definition.input_type is PlanInputType.REPOSITORY_REFERENCE:
-                        required[item.definition.name] = coerce_input(
-                            item.definition,
-                            f"local:{target.path.name}",
-                            context="selected repository",
-                        )
-        if required:
-            payload["inputs"] = required
+                payload["agent"]["repository_root"] = str(target.parent)
+            else:
+                missing.append("agent.repository_root")
+        if values:
+            payload["inputs"] = values
         if "repair" in phases:
             payload["repair"] = {
                 "review_passes": 5,
-                "write_roots": ["REQUIRED_WRITE_ROOT"],
                 "timeout_seconds": 1800,
                 "step_timeout_seconds": 300,
             }
-        rendered = (
-            "# Replace any REQUIRED input values before locking.\n"
-            if targets
-            else "# Select the registered target and replace REQUIRED values before locking.\n"
-        )
-        rendered += (
-            f"# Selected {label} source SHA-256: {source.sha256} (provenance, not a lock).\n"
-        )
+            missing.append("repair.write_roots")
+        if missing and not draft:
+            raise RunConfigurationInvalid(
+                "The selected source needs explicit authoring fields before preparation",
+                diagnostic_code="CONFIG_SCHEMA_INVALID",
+                fields=tuple(missing),
+            )
+        rendered = f"# Selected {label} source SHA-256: {source.sha256} (provenance, not a lock).\n"
         files["run.yml"] = rendered + yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
-        publish_new_text_tree(selected, files, commit_last="run.yml")
-    return selected / "run.yml"
+        for relative, content in files.items():
+            if relative in written:
+                continue
+            prepared.write_text(relative, content)
+        prepared.require_current()
+        digest = (
+            prepare(staging / "run.yml", graph, selected)
+            if prepare is not None and not draft
+            else None
+        )
+        prepared.require_current()
+        status = os.fstat(prepared.descriptor)
+        publish_prepared_directory(
+            staging,
+            selected,
+            exclusive=True,
+            expected_staging_identity=(status.st_dev, status.st_ino),
+        )
+    return InitializedRunConfiguration(selected / "run.yml", tuple(missing), digest)
 
 
 def _reviewer_workflow_files(

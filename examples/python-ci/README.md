@@ -48,9 +48,9 @@ bash examples/python-ci/run.sh collect "$task_tool" "$task_job/state" "$task_job
 for SIGTERM. CI runs `collect` in its separate always-run/after-script phase so
 a failing Run still has inspectable results without hiding its failure.
 
-The adapter registers this actual application repository, obtains its ID from
-the public inventory, writes a `git-plan` selection for the exact commit and
-calls `lock` then waited `run`. It does not copy database IDs by hand, create an
+The adapter registers this actual application repository, verifies it in the
+public inventory, writes a path-selected v2 `git-plan` for the exact commit and
+calls `workflow prepare` then waited `run`. It does not copy database IDs by hand, create an
 empty target repository or implement another execution loop. State must be a
 new directory. Tool installation, state and caches stay outside the captured
 application; managed execution leaves the developer environment and checkout
@@ -92,8 +92,8 @@ their original commit.
 
 ## Collect and read the result
 
-On a terminal Run, `collect` uses public `plan status`, `plan tape`,
-`plan outputs` and `plan export-artifact` commands. The promoted directory
+On a terminal Run, `collect` uses public `runs show`, `runs tape`,
+`runs outputs` and `runs export-artifact` commands. The promoted directory
 contains:
 
 - `run.json`, `status.json`, `tape.json` and `outputs.json`: the original Run ID,

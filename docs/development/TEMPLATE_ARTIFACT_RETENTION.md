@@ -61,10 +61,10 @@ automatic retries keep their existing strict-only requirements.
 
 ### Export a recorded artifact
 
-Use the Run and Step printed by execution or `plan outputs`:
+Use the Run and Step printed by execution or `runs outputs`:
 
 ```sh
-oh-goon plan export-artifact RUN_ID --step STEP_ID \
+oh-goon runs export-artifact RUN_ID --step STEP_ID \
   --path ml-output/iris-training-metrics.json --output ./metrics.json
 ```
 
@@ -89,7 +89,7 @@ for each retained artifact shown in its bounded preview.
 Export remains available after execution scratch and caller source disappear,
 while the retained reference remains live. Missing, evidence-only, released or
 inconsistent content refuses; export never falls back to a current workspace.
-Default `plan outputs`, Game Tape and Run API reads describe collection-time evidence:
+Default `runs outputs`, Game Tape and Run API reads describe collection-time evidence:
 `PRESENT` means the file was collected, and a recorded retained reference does
 not prove that its bytes are still available. Export checks the live reference
 and bytes under the read lease. A printed completion export command is a selection hint,
@@ -108,9 +108,9 @@ cannot replace a primary export error or rewrite the historical Run outcome.
 Request bounded verification without exporting a user file:
 
 ```sh
-oh-goon plan outputs RUN_ID --observe-artifacts --json
-oh-goon plan tape RUN_ID --observe-artifacts --json
-oh-goon plan handoff RUN_ID --observe-artifacts --json
+oh-goon runs outputs RUN_ID --observe-artifacts --json
+oh-goon runs tape RUN_ID --observe-artifacts --json
+oh-goon runs handoff RUN_ID --observe-artifacts --json
 ```
 
 The existing Run-detail API accepts `observe_artifacts=true`. The browser's

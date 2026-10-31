@@ -196,7 +196,7 @@ def project_agent_campaign(
             "failure": detail.run.failure.model_dump(mode="json")
             if isinstance(detail.run, FailedFleetRun)
             else None,
-            "readback_argv": ["oh-goon", "plan", "handoff", run_id, "--json"],
+            "readback_argv": ["oh-goon", "runs", "handoff", run_id, "--json"],
             "selected_step_ids": selected,
             "selected_commands": [
                 {"step_id": step.step_id, "argv": list(getattr(step, "argv", ()))}

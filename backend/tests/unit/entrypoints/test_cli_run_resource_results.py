@@ -45,9 +45,9 @@ def result_runner(
     configuration.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": "actual-subject"},
+                "target": {"repository": "./actual-subject"},
                 "resources": expected.resources.model_dump(),
             }
         )

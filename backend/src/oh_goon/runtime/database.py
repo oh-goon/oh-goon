@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustGrant
 from uuid import uuid4
 
-from oh_goon.core.errors import DatabaseSchemaMismatch, JournalConflict
+from oh_goon.core.errors import DatabaseSchemaMismatch, JournalConflict, StateConflict
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.path_authority import ensure_private_directory
 from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_DELETE as SQLITE_JOURNAL_DELETE
@@ -223,7 +223,9 @@ def _database_path_observation(path: Path, admitted: DatabasePathIdentity | None
 class LocalDatabase:
     """One SQLite database and runtime-session identity for all durable local facts."""
 
-    def __init__(self, path: Path | None = None, *, journal_mode: str | None = None) -> None:
+    def __init__(
+        self, path: Path | None = None, *, journal_mode: str | None = None, read_only: bool = False
+    ) -> None:
         self.path = (path or default_database_path()).expanduser().resolve()
         self.session_id = f"session-{uuid4().hex}"
         self._path_identity: DatabasePathIdentity | None = None
@@ -234,6 +236,28 @@ class LocalDatabase:
         self._connection_scope = local()
         self._recovery_observer: Callable[[ExecutionRecoveryEvent], None] | None = None
         self.sqlite_diagnostics = SQLiteAccessDiagnostics()
+        self._read_only = read_only
+        self._initialized_new_state = False
+        if read_only:
+            # Capture existing native authority without schema initialization,
+            # journal-mode changes, permission repair or creating a missing DB.
+            with self.observe_existing_for_inspection(self.path) as connection:
+                observed_mode = str(connection.execute("PRAGMA journal_mode").fetchone()[0]).upper()
+                try:
+                    self.journal_mode = sqlite_journal_mode_for_path(
+                        self.path, requested=observed_mode
+                    )
+                except RuntimeError as exc:
+                    raise StateConflict(
+                        "Existing SQLite journal mode is unavailable for observation on this runtime/storage"
+                    ) from exc
+                self._schema_cookie = int(connection.execute("PRAGMA schema_version").fetchone()[0])
+                self._database_identity_cookie = int(
+                    connection.execute("PRAGMA application_id").fetchone()[0]
+                )
+                self._durable_revision_floor = read_durable_revision(connection)
+                self._path_identity = _capture_database_path_identity(self.path)
+            return
         # Resolve filesystem and journal authority under the SAME admission gate
         # used to initialize the original SQLite owner. Never recompute AUTO
         # after admission or switch engines/modes behind the runtime.
@@ -241,6 +265,38 @@ class LocalDatabase:
             self.journal_mode = sqlite_journal_mode_for_path(self.path, requested=journal_mode)
             self._initialize()
             self._path_identity = _capture_database_path_identity(self.path)
+
+    @property
+    def initialized_new_state(self) -> bool:
+        """Report only successful fresh-schema authoring by this exact DB instance."""
+        return self._initialized_new_state
+
+    @staticmethod
+    @contextmanager
+    def observe_existing_for_inspection(path: Path) -> Iterator[sqlite3.Connection]:
+        """Observe current domain facts without initialization or runtime admission."""
+        with sqlite_authority_gate(path, write=False):
+            admitted = _capture_database_path_identity(path)
+            connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5.0)
+            try:
+                configure_common_connection(path, connection)
+                connection.execute("PRAGMA query_only = ON")
+                connection.execute("BEGIN")
+                version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+                cookie = int(connection.execute("PRAGMA application_id").fetchone()[0])
+                if version != DATABASE_SCHEMA_VERSION or cookie == 0:
+                    raise DatabaseSchemaMismatch(
+                        "Configuration inspection requires current existing local state; "
+                        "inspect local-state compatibility before preparing this workflow"
+                    )
+                yield connection
+                current = _capture_database_path_identity(path)
+                if (admitted.device, admitted.inode) != (current.device, current.inode):
+                    raise DatabasePathIdentityLost(
+                        "Database replaced during configuration inspection"
+                    )
+            finally:
+                connection.close()
 
     def capture_append_context(
         self, connection: sqlite3.Connection
@@ -292,6 +348,8 @@ class LocalDatabase:
         database._connection_scope = local()
         database._recovery_observer = None
         database.sqlite_diagnostics = SQLiteAccessDiagnostics()
+        database._read_only = False
+        database._initialized_new_state = False
         database._require_path_identity()
         connection = database._open_connection_attempt(
             admitted=True, context="final resource observation append", recovered=False
@@ -636,6 +694,13 @@ class LocalDatabase:
         write: bool = False,
         track_revision: bool = True,
     ) -> Iterator[sqlite3.Connection]:
+        if self._read_only:
+            if write:
+                raise RuntimeError("Observation-only LocalDatabase cannot acquire write authority")
+            with self.admitted_observer_connection() as connection:
+                with self.admitted_observer_cut(connection, context="runtime readback"):
+                    yield connection
+            return
         connection, close_when_done = self._transaction_connection()
         context = "runtime transaction" if close_when_done else "scoped runtime transaction"
         self.sqlite_diagnostics.record(context, "transactions")
@@ -1458,3 +1523,4 @@ class LocalDatabase:
             connection.close()
         if os.name != "nt":
             self.path.chmod(0o600)
+        self._initialized_new_state = fresh_database

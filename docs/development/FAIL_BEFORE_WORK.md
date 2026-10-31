@@ -31,7 +31,7 @@ runtime-only failures remain runtime failures
 
 ### Read-only authoring before runtime
 
-`oh-goon config validate run.yml` compiles the Plan using the same canonical
+`oh-goon workflow validate run.yml` compiles the Plan using the same canonical
 `FleetPlanResolver` used for execution, without initializing the local
 application database, Run journal or executor. This is read-only authoring
 feedback and is **not** Enforcer admission, host preparation, physical LACE

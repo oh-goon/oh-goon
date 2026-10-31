@@ -95,17 +95,17 @@ def test_checked_in_example_completes_a_locked_fleet_run_and_durable_tape(
                 for team in scan["teams"]
                 if Path(team["repository"]["path"]) == repository
             )
-            selection["target"] = {"repository_id": target["repository_id"]}
+            selection["target"] = {"repository": target["path"]}
             configuration.write_text(yaml.safe_dump(selection, sort_keys=False))
             lock = workflow / "goon.lock"
             before = lock.read_bytes() if lock.exists() else None
-            inspected = json.loads(cli("config", "validate", str(configuration), "--json"))
+            inspected = json.loads(cli("workflow", "validate", str(configuration), "--json"))
             assert inspected["proof"]["provider"] == "not-applicable"
             assert (lock.read_bytes() if lock.exists() else None) == before
-            cli("lock", str(configuration))
+            cli("workflow", "prepare", str(configuration))
             result = json.loads(cli("run", str(configuration), "--json"))
             assert result["status"] == "COMPLETED" and result["outcome"] == "SUCCESS"
-            tape = json.loads(cli("plan", "tape", result["fleet_run_id"], "--json"))
+            tape = json.loads(cli("runs", "tape", result["fleet_run_id"], "--json"))
             assert tape["fleet_run_id"] == result["fleet_run_id"]
             assert tape["status"] == "PASSED"
             assert len(tape["repositories"]) == 1

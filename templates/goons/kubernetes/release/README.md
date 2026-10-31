@@ -7,10 +7,12 @@ Commit one immutable OCI digest reference to exactly one apps/v1 Deployment cont
 **Prerequisites:** A digest-qualified image, exact target and declared host token/CA bindings.
 
 ```sh
-oh-goon templates init kubernetes/release --kind goon --output ./workflow
+oh-goon init --template kubernetes/release --kind goon --output ./workflow --draft
 ```
 
-Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 This typed operation requires strict CI/CD execution. Add the explicit policy to the generated `workflow/plan.yml`:
 

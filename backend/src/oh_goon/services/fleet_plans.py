@@ -1886,9 +1886,19 @@ class FleetPlanService:
         )
 
     def repository_instance_ids_for_target(
-        self, target: FleetPlanTarget, *, repository_ids: set[str]
+        self,
+        target: FleetPlanTarget,
+        *,
+        repository_ids: set[str],
+        expected_repository_instance_ids: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """Snapshot current repository instances for one prepared Fleet Plan target."""
+        if expected_repository_instance_ids is not None:
+            return self._runs.repository_instance_ids_for_prepared_plan(
+                target,
+                repository_ids=repository_ids,
+                expected_repository_instance_ids=expected_repository_instance_ids,
+            )
         return self._runs.repository_instance_ids_for_prepared_plan(
             target, repository_ids=repository_ids
         )
@@ -1976,6 +1986,7 @@ class FleetPlanService:
         repository_goon: bool = False,
         source_graph: FleetPlanSourceGraph | None = None,
         repository: Path | None = None,
+        expected_repository_instance_ids: dict[str, str] | None = None,
     ) -> ScheduleDefinition:
         """Resolve once, then persist one Schedule target set for the exact Plan."""
         if repository is not None:
@@ -2004,12 +2015,20 @@ class FleetPlanService:
             if current is not None and current.repository_ids == tuple(sorted(repository_ids)):
                 target = with_retained_project_deliveries(target, current.target)
         transport = (
-            self.project_source_transport_for_target(target, repository_ids=repository_ids)
+            self.project_source_transport_for_target(
+                target,
+                repository_ids=repository_ids,
+                expected_repository_instance_ids=expected_repository_instance_ids,
+            )
             if package_sources
             else nullcontext(
                 (
                     target,
-                    self.repository_instance_ids_for_target(target, repository_ids=repository_ids),
+                    self.repository_instance_ids_for_target(
+                        target,
+                        repository_ids=repository_ids,
+                        expected_repository_instance_ids=expected_repository_instance_ids,
+                    ),
                 )
             )
         )
@@ -2042,6 +2061,7 @@ class FleetPlanService:
         repository_goon: bool = False,
         source_graph: FleetPlanSourceGraph | None = None,
         repository: Path | None = None,
+        expected_repository_instance_ids: dict[str, str] | None = None,
     ) -> ScheduleDefinition:
         """CAS an existing Schedule target set onto a newly resolved immutable Plan."""
         current = self._schedules.definition(schedule_id)
@@ -2066,12 +2086,20 @@ class FleetPlanService:
         if package_sources and current.repository_ids == tuple(sorted(repository_ids)):
             target = with_retained_project_deliveries(target, current.target)
         transport = (
-            self.project_source_transport_for_target(target, repository_ids=repository_ids)
+            self.project_source_transport_for_target(
+                target,
+                repository_ids=repository_ids,
+                expected_repository_instance_ids=expected_repository_instance_ids,
+            )
             if package_sources
             else nullcontext(
                 (
                     target,
-                    self.repository_instance_ids_for_target(target, repository_ids=repository_ids),
+                    self.repository_instance_ids_for_target(
+                        target,
+                        repository_ids=repository_ids,
+                        expected_repository_instance_ids=expected_repository_instance_ids,
+                    ),
                 )
             )
         )

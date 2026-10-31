@@ -110,13 +110,16 @@ def test_live_codex_executes_initialized_native_workflow_and_independent_verific
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
                 "agents/native-coding",
                 "--kind",
                 kind,
                 "--output",
                 str(workflow),
+                "--repository",
+                str(repository),
+                "--draft",
             ]
         )
         == 0
@@ -130,7 +133,7 @@ def test_live_codex_executes_initialized_native_workflow_and_independent_verific
     (skill / "SKILL.md").write_text(skill_text)
     selection = workflow / "run.yml"
     payload = yaml.safe_load(selection.read_text())
-    payload["target"]["repository_id"] = target["repository_id"]
+    payload["target"] = {"repository": target["path"]}
     payload["inputs"] = {
         "repo": "local:sample",
         "skill": "local:skills/repair",
@@ -146,13 +149,13 @@ def test_live_codex_executes_initialized_native_workflow_and_independent_verific
         "skill_root": ".",
     }
     selection.write_text(yaml.safe_dump(payload, sort_keys=False))
-    assert main(["config", "validate", str(selection), "--json"]) == 0
-    assert main(["lock", str(selection)]) == 0
+    assert main(["workflow", "validate", str(selection), "--json"]) == 0
+    assert main(["workflow", "prepare", str(selection)]) == 0
     capsys.readouterr()
     assert main(["run", str(selection), "--json"]) == 0
     receipt = json.loads(capsys.readouterr().out)
     assert receipt["status"] == "COMPLETED" and receipt["outcome"] == "SUCCESS"
-    assert main(["plan", "tape", receipt["fleet_run_id"], "--json"]) == 0
+    assert main(["runs", "tape", receipt["fleet_run_id"], "--json"]) == 0
     tape = json.loads(capsys.readouterr().out)
     steps = tape["repositories"][0]["steps"]
     assert tape["status"] == "PASSED"

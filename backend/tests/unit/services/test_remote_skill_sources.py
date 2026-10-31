@@ -283,20 +283,19 @@ def test_failed_refresh_preserves_lock_and_cleans_partial_checkout(tmp_path, mon
     _, path, remote, _, options = case(tmp_path, monkeypatch)
     # The CLI uses the shipped catalogue; keep the same authored Goon locally.
     path.write_text("goons:\n- import: agent/review\n  from: goons\n  with: {skill: team/review}\n")
-    from oh_goon.core.models.repository import RepositoryIdentity
-
     product = options["repository_root"] / "product"
     (product / ".git").mkdir()
     league = tmp_path / "league.yml"
     league.write_text(yaml.safe_dump({"version": 1, "folders": [str(product)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state.db"))
     selection = path.parent / "run.yml"
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {"repository_id": RepositoryIdentity(path=product).repository_id},
+                "target": {"repository": str(product)},
                 "inputs": {"repo": "local:product"},
                 "agent": {
                     "model_profile": "fixture",
@@ -307,14 +306,16 @@ def test_failed_refresh_preserves_lock_and_cleans_partial_checkout(tmp_path, mon
             }
         )
     )
-    flags = ["lock", str(selection)]
+    flags = ["workflow", "prepare", str(selection)]
     parser = build_parser()
     args = parser.parse_args(flags)
+    args.update_skills = False
     prepare_configuration(args)
     assert run_stateless_lock(args) == 0
     lock = (path.parent / "goon.lock").read_bytes()
     git(remote, "branch", "-m", "moved")
-    args = parser.parse_args(flags + ["--update-skills"])
+    args = parser.parse_args(flags + ["--refresh", "skills"])
+    args.update_skills = True
     prepare_configuration(args)
     assert run_stateless_lock(args) == 2
     assert (path.parent / "goon.lock").read_bytes() == lock

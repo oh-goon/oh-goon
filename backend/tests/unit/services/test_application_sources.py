@@ -533,9 +533,9 @@ def test_relative_git_application_retains_logical_provenance_after_reacquisition
     run_path.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": selection,
-                "target": {"repository_id": repository.repository_id},
+                "target": {"repository": str(target)},
             }
         )
     )

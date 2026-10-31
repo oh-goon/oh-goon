@@ -90,12 +90,12 @@ def test_wrong_run_enrollment_blocks_before_any_runtime_or_plan_read(
 @pytest.mark.parametrize(
     "args",
     [
-        ["serve"],
-        ["start"],
+        ["app", "serve"],
+        ["app", "start"],
         ["self", "certify", "--plan"],
-        ["config", "inspect", "missing.yml"],
-        ["config", "validate", "missing.yml"],
-        ["lock", "missing.yml"],
+        ["workflow", "inspect", "missing.yml"],
+        ["workflow", "validate", "missing.yml"],
+        ["workflow", "prepare", "missing.yml"],
     ],
 )
 def test_deployment_handoff_cannot_be_ignored_or_leak_to_other_commands(

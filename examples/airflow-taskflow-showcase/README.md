@@ -28,8 +28,10 @@ Register this real application repository and initialize by its path:
 
 ```bash
 oh-goon league add-folder "$PWD"
-oh-goon templates init general/orders-taskflow --kind goon --output ../orders-workflow --repository "$PWD"
+oh-goon init --template general/orders-taskflow --kind goon --output /absolute/path/to/orders-workflow --repository "$PWD"
 ```
+
+Choose that absolute output path as the sibling `../orders-workflow` used below; its parent must already exist.
 
 Keep the generated `target` and `inputs` in `../orders-workflow/run.yml`;
 replace only its `source` mapping with this explicit Git selection:
@@ -51,15 +53,16 @@ unselected. This directory's `run.yml` is a reference selection; initialization
 has already supplied your actual target identity.
 
 ```bash
-oh-goon lock ../orders-workflow/run.yml
-oh-goon run ../orders-workflow/run.yml
+cd ../orders-workflow
+oh-goon workflow prepare ./run.yml
+oh-goon run ./run.yml
 ```
 
-`config inspect ../orders-workflow/run.yml --acquire` is optional: it explicitly
+`workflow inspect ./run.yml --acquire` is optional: it explicitly
 acquires source and shows its input contract and selected commit without
 installing or executing application code. Locking records the exact commit in
-`../orders-workflow/goon.lock`; later Runs consume that pin. Editing `fixture`
-and locking again preserves the pin. Only `lock --update-goons` explicitly
+`goon.lock`; later Runs consume that pin. Editing `fixture`
+and locking again preserves the pin. Only `workflow prepare --refresh goons` explicitly
 refreshes Git source selection. `uv.lock` owns native Python dependency
 resolution; `goon.lock` additionally binds selected workflow source and caller
 inputs. Cached inspection without `--acquire` does not fetch missing source.
@@ -72,9 +75,9 @@ source checkout:
 
 ```bash
 mkdir -p ../orders-results
-oh-goon plan tape RUN_ID --json
-oh-goon plan outputs RUN_ID --json
-oh-goon plan export-artifact RUN_ID --step general-orders-taskflow.load --path .showcase/result.json --output ../orders-results/official.json
+oh-goon runs tape RUN_ID --json
+oh-goon runs outputs RUN_ID --json
+oh-goon runs export-artifact RUN_ID --step general-orders-taskflow.load --path .showcase/result.json --output ../orders-results/official.json
 ```
 
 The final JSON uses `retention: content_store`. Export verifies the recorded
@@ -92,7 +95,7 @@ later Run to recover its original `1236.70` bytes.
 
 With `fixture: invalid`, extraction passes, transformation fails with a native
 nonzero exit, and loading is skipped. `run` exits 1 and the Run requires
-attention. `plan steps FAILED_RUN_ID --json` exposes those three outcomes.
+attention. `runs steps FAILED_RUN_ID --json` exposes those three outcomes.
 Exporting `.showcase/result.json` for that failed Run is refused and creates no
 destination file, even if the developer checkout or a later Run has a successful
 result. DATA and TOTAL remain explicit Step output bindings; final retained

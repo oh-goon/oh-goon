@@ -31,12 +31,13 @@ class ExactFileStore(ABC):
         file_name: str,
         key_pattern: re.Pattern[str],
         label: str,
+        initialize: bool = True,
     ) -> None:
         self.root = root.expanduser().resolve()
         self._file_name = file_name
         self._key_pattern = key_pattern
         self._label = label
-        if self.root.exists():
+        if initialize and self.root.exists():
             ensure_private_directory(self.root)
 
     def path(self, key: str) -> Path:

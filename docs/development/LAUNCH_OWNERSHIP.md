@@ -20,7 +20,7 @@ make dev
 ### Built local release
 
 ```text
-oh-goon start
+oh-goon app start
   -> local-state prelaunch-check
   -> built-UI availability / League preference checks
   -> local access capability creation
@@ -88,7 +88,7 @@ The first runtime integration now exists, but it deliberately does **not** prete
 
 The backend lifespan records only `service.startup_complete`; it does not claim socket binding or readiness. `oh-goon-local-dev-launch observe-ready` then performs bounded HTTP observations against backend `/healthz` and the native Vite endpoint. Only successful HTTP responses can produce `service.bound`, `service.ready`, and finally `launch.ready`. Vite/npm and uvicorn still own their native runtime behavior; Oh-Goon observes rather than parses their logs.
 
-### Built `oh-goon start`
+### Built `oh-goon app start`
 
 `cli_start.py` creates the same structured launch identity/event stream, records the current process as the backend service root, propagates generation-bound launch context into the FastAPI lifespan, and still calls native `uvicorn.run(...)`. A small read-only readiness observer probes `/healthz`; configured host/port and `uvicorn.run` invocation are not accepted as readiness evidence.
 
@@ -108,7 +108,7 @@ Current-launch selection is now explicit rather than an ownership gap. The canon
 
 The binding carries the exact `launch_id`, owner generation, and resolved launch-intent identity. A new launch may replace an existing workspace binding only when the exact previously bound launch proves a terminal lifecycle from its durable owner-issued event stream. A missing/corrupt record, generation mismatch, intent mismatch, or any nonterminal lifecycle is a conflict and blocks replacement. This is intentionally conservative until process birth identity makes live-owner proof possible.
 
-`oh-goon status` is a presentation reader only. `oh-goon status --json` emits one `oh-goon.launch-status/v1` document built by a centralized safe whitelist. It does not serialize raw Launch Manifest/event bytes and does not expose launch commands or the local-access capability. Until process birth identity is added, nonterminal launches retain their last authoritative lifecycle while reporting `Freshness: stale` and `Owner proof: unavailable`; owner uncertainty is not rewritten into STOPPED/FAILED.
+`oh-goon app status` is a presentation reader only. `oh-goon app status --json` emits one `oh-goon.launch-status/v1` document built by a centralized safe whitelist. It does not serialize raw Launch Manifest/event bytes and does not expose launch commands or the local-access capability. Until process birth identity is added, nonterminal launches retain their last authoritative lifecycle while reporting `Freshness: stale` and `Owner proof: unavailable`; owner uncertainty is not rewritten into STOPPED/FAILED.
 
 ## 1267.0.39 — process birth identity
 
@@ -123,7 +123,7 @@ Owner process identity and service process identity are separate observations. C
 `make dev` records the actual `scripts/dev.sh` shell PID as launch owner before children start.
 Each `oh-goon-local-launch-exec` bridge separately records its own child birth identity before
 `exec`, and that identity deliberately survives transfer to uvicorn/npm because `exec` retains
-the process instance. Built `oh-goon start` records its current Python process as both launch
+the process instance. Built `oh-goon app start` records its current Python process as both launch
 owner and backend service process where appropriate.
 
 The event stream remains backward-readable: earlier `service.spawned` v1 records containing
@@ -148,18 +148,18 @@ A PID match alone is insufficient. A missing/malformed bound record, mismatched 
 PID, or unavailable owner birth proof is an explicit conflict and never authorizes a second
 owner. A terminal bound launch permits the normal binding owner to create the next launch.
 
-Both built `oh-goon start` and contributor `make dev` resolve this decision before unrelated
+Both built `oh-goon app start` and contributor `make dev` resolve this decision before unrelated
 startup work. A compatible rerun returns the existing launch without invoking uvicorn/npm/Vite
 or installing another cleanup owner. A conflicting rerun explains the current launch and
-points to `oh-goon status`. Token/UI/League-folder work and native child execution remain only
+points to `oh-goon app status`. Token/UI/League-folder work and native child execution remain only
 on the paths that actually need them. This phase deliberately does not infer source/config
 drift; that remains separate Launch Manifest work rather than being guessed from process state.
 
 ## 1267.0.42 — observed-endpoint navigation and private capability handoff
 
-`oh-goon open` is a thin presentation/action consumer of the exact current Launch Manifest. It resolves the canonical workspace binding and exact bound launch, revalidates binding identity, requires positive launch-owner birth proof, and opens only an authoritative ready UI service whose **observed** binding is loopback. Configured endpoint intent never supplies the browser host or port.
+`oh-goon app open` is a thin presentation/action consumer of the exact current Launch Manifest. It resolves the canonical workspace binding and exact bound launch, revalidates binding identity, requires positive launch-owner birth proof, and opens only an authoritative ready UI service whose **observed** binding is loopback. Configured endpoint intent never supplies the browser host or port.
 
-The browser bootstrap capability remains outside Launch Manifest. The launch owner publishes the exact token it actually exports to the backend into `LocalLaunchAccessStore`, an owner-private exact-launch/generation-bound store beneath application state. The store is not lifecycle truth, a launch registry, or discovery authority; `oh-goon open` cannot mint a replacement capability for an already-running launch. Public status, events, Launch Manifest serialization, and normal `open` output remain credential-free.
+The browser bootstrap capability remains outside Launch Manifest. The launch owner publishes the exact token it actually exports to the backend into `LocalLaunchAccessStore`, an owner-private exact-launch/generation-bound store beneath application state. The store is not lifecycle truth, a launch registry, or discovery authority; `oh-goon app open` cannot mint a replacement capability for an already-running launch. Public status, events, Launch Manifest serialization, and normal `open` output remain credential-free.
 
 Profile-to-navigation-service policy is explicit and small: built-local uses the backend UI endpoint; contributor-dev uses the frontend/Vite endpoint. Unsupported profiles fail closed instead of guessing which ready service is browser-facing. Browser invocation is delegated to the platform browser opener; Oh-Goon does not manage browser processes.
 
@@ -177,7 +177,7 @@ not consume it. There is no nested backend-then-frontend timeout. Every required
 service shares one absolute 30-second budget, and a required child exit races readiness so the
 first causal failure wins. HTTP probes are single observations; they do not own retry deadlines.
 
-Built `oh-goon start` now derives its `LaunchIntent` from `built_local_plan()` and uses the same
+Built `oh-goon app start` now derives its `LaunchIntent` from `built_local_plan()` and uses the same
 supervisor-owned readiness coordinator and readiness policy. The built server remains in-process
 because uvicorn owns its native server mechanics, but `cli_start.py` no longer implements a second
 HTTP polling/readiness algorithm. It creates a native `uvicorn.Server`; readiness timeout records

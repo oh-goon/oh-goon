@@ -25,7 +25,6 @@ from oh_goon.core.models.fleet_plan_evidence import (
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.core.product_identity import repository_id
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.runtime.league_folders import LeagueFolderStore
 from tests.integration.api.client import authenticated_api_client
@@ -141,14 +140,34 @@ def _configuration(
     capsys: pytest.CaptureFixture[str],
 ) -> Path:
     workflow = tmp_path / "workflow"
-    assert main(["templates", "init", key, "--kind", kind, "--output", str(workflow)]) == 0
+    input_flags = [
+        argument for name, value in inputs.items() for argument in ("--input", f"{name}={value}")
+    ]
+    assert (
+        main(
+            [
+                "init",
+                "--template",
+                key,
+                "--kind",
+                kind,
+                "--output",
+                str(workflow),
+                "--repository",
+                str(repository),
+                "--no-input",
+                *input_flags,
+            ]
+        )
+        == 0
+    )
     path = workflow / "run.yml"
     selection = yaml.safe_load(path.read_text())
-    selection["target"]["repository_id"] = repository_id(repository)
+    selection["target"] = {"repository": str(repository)}
     selection["inputs"] = inputs
     path.write_text(yaml.safe_dump(selection), encoding="utf-8")
-    assert main(["config", "validate", str(path), "--json"]) == 0
-    assert main(["lock", str(path)]) == 0
+    assert main(["workflow", "validate", str(path), "--json"]) == 0
+    assert main(["workflow", "prepare", str(path)]) == 0
     capsys.readouterr()
     return path
 
@@ -220,7 +239,7 @@ def test_iris_strict_plan_requires_deployment_before_training(
     selection = yaml.safe_load(configuration.read_text())
     selection["source"] = {"kind": "file-plan", "path": "plan.yml"}
     configuration.write_text(yaml.safe_dump(selection), encoding="utf-8")
-    assert main(["lock", str(configuration)]) == 0
+    assert main(["workflow", "prepare", str(configuration)]) == 0
     capsys.readouterr()
     assert main(["run", str(configuration), "--json"]) == 2
     assert not (repository / "ml-output").exists()
@@ -239,14 +258,27 @@ def test_iris_atomic_wrapper_accepts_retained_captured_project_before_execution(
     repository = _project(tmp_path, monkeypatch, IRIS_PROJECT, None)
     workflow = tmp_path / "workflow"
     assert (
-        main(["templates", "init", "ml/iris-train", "--kind", "goon", "--output", str(workflow)])
+        main(
+            [
+                "init",
+                "--template",
+                "ml/iris-train",
+                "--kind",
+                "goon",
+                "--output",
+                str(workflow),
+                "--repository",
+                str(repository),
+                "--no-input",
+            ]
+        )
         == 0
     )
     configuration = workflow / "run.yml"
     selection = yaml.safe_load(configuration.read_text())
-    selection["target"]["repository_id"] = repository_id(repository)
+    selection["target"] = {"repository": str(repository)}
     configuration.write_text(yaml.safe_dump(selection), encoding="utf-8")
-    assert main(["config", "validate", str(configuration), "--json"]) == 0
+    assert main(["workflow", "validate", str(configuration), "--json"]) == 0
     assert not (repository / "ml-output").exists()
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
@@ -286,8 +318,8 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
     workflow = tmp_path / "workflow"
     _cli(
         tmp_path,
-        "templates",
         "init",
+        "--template",
         "ml/iris-training",
         "--kind",
         "plan",
@@ -305,7 +337,7 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
         "max_iterations": 300,
     }
     configuration.write_text(yaml.safe_dump(selection), encoding="utf-8")
-    _cli(tmp_path, "lock", str(configuration))
+    _cli(tmp_path, "workflow", "prepare", str(configuration))
     first = json.loads(_cli(tmp_path, "run", str(configuration), "--json"))
     first_id = first["fleet_run_id"]
     assert first["status"] == "COMPLETED" and first["outcome"] == "SUCCESS"
@@ -313,8 +345,8 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
     # must use retained recorded bytes, rather than the target or attempt files.
     assert set(repository.parent.iterdir()) == target_parent_members
     assert not (repository / "ml-output").exists()
-    first_tape = json.loads(_cli(tmp_path, "plan", "tape", first_id, "--json"))
-    events = json.loads(_cli(tmp_path, "plan", "events", first_id, "--json"))
+    first_tape = json.loads(_cli(tmp_path, "runs", "tape", first_id, "--json"))
+    events = json.loads(_cli(tmp_path, "runs", "events", first_id, "--json"))
     admitted = next(event for event in events["events"] if event["event_type"] == "RUN_ADMITTED")
     assert admitted["target"]["plan"]["execution"]["purpose"] == "verification"
     assert admitted["execution"]["kind"] == first_tape["execution"]["kind"] == "direct"
@@ -332,7 +364,7 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
     def exported_training(
         run_id: str, label: str
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-        output = json.loads(_cli(tmp_path, "plan", "outputs", run_id, "--json"))
+        output = json.loads(_cli(tmp_path, "runs", "outputs", run_id, "--json"))
         steps = output["repositories"][0]["steps"]
         assert len(steps) == 1
         artifacts = {artifact["path"]: artifact for artifact in steps[0]["artifacts"]}
@@ -346,7 +378,7 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
             destination = tmp_path / f"{label}-{Path(path).name}"
             _cli(
                 tmp_path,
-                "plan",
+                "runs",
                 "export-artifact",
                 run_id,
                 "--step",
@@ -382,13 +414,13 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
     assert stale["execution"] == "not_started_by_diagnostic"
     assert (workflow / "goon.lock").read_bytes() == locked
     assert set(repository.parent.iterdir()) == target_parent_members
-    _cli(tmp_path, "lock", str(configuration))
+    _cli(tmp_path, "workflow", "prepare", str(configuration))
     assert (workflow / "goon.lock").read_bytes() != locked
     second = json.loads(_cli(tmp_path, "run", str(configuration), "--json"))
     second_id = second["fleet_run_id"]
     assert second_id != first_id
     assert second["status"] == "COMPLETED" and second["outcome"] == "SUCCESS"
-    second_tape = json.loads(_cli(tmp_path, "plan", "tape", second_id, "--json"))
+    second_tape = json.loads(_cli(tmp_path, "runs", "tape", second_id, "--json"))
     assert second["plan_id"] != first["plan_id"]
     assert (
         second_tape["repositories"][0]["steps"][0]["project_source"] == first_step["project_source"]
@@ -422,10 +454,10 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
     selection["source"] = {"kind": "file-plan", "path": "failure-plan.yml"}
     selection["inputs"] = {}
     configuration.write_text(yaml.safe_dump(selection), encoding="utf-8")
-    _cli(tmp_path, "lock", str(configuration))
+    _cli(tmp_path, "workflow", "prepare", str(configuration))
     failure = json.loads(_cli(tmp_path, "run", str(configuration), "--json", expected=1))
     assert failure["outcome"] == "ATTENTION_REQUIRED"
-    failed_tape = json.loads(_cli(tmp_path, "plan", "tape", failure["fleet_run_id"], "--json"))
+    failed_tape = json.loads(_cli(tmp_path, "runs", "tape", failure["fleet_run_id"], "--json"))
     failed_steps = failed_tape["repositories"][0]["steps"]
     assert len(failed_steps) == 2
     assert failed_steps[0]["status"] == "FAILED" and failed_steps[0]["exit_code"] == 1
@@ -435,7 +467,7 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
     assert (repository / "uv.lock").read_bytes() == native_lock
     assert not (repository / "ml-output").exists()
     for run_id, previous in ((first_id, first_outputs), (second_id, second_outputs)):
-        assert json.loads(_cli(tmp_path, "plan", "outputs", run_id, "--json")) == previous
+        assert json.loads(_cli(tmp_path, "runs", "outputs", run_id, "--json")) == previous
     reopened_metrics, reopened_model, _ = exported_training(first_id, "reopened")
     assert reopened_metrics == first_metrics
     assert reopened_model == first_model
@@ -456,10 +488,10 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
     )
     observed_paths = set(artifacts)
     for view in ("outputs", "tape", "handoff"):
-        default_view = json.loads(_cli(tmp_path, "plan", view, first_id, "--json"))
+        default_view = json.loads(_cli(tmp_path, "runs", view, first_id, "--json"))
         assert default_view["artifact_observation"] is None
         observed_view = json.loads(
-            _cli(tmp_path, "plan", view, first_id, *observation_flags, "--json")
+            _cli(tmp_path, "runs", view, first_id, *observation_flags, "--json")
         )
         batch = observed_view["artifact_observation"]
         assert batch["fleet_run_id"] == first_id
@@ -473,7 +505,7 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
             assert item["recorded_byte_count"] == original_artifact["byte_count"]
             assert item["reference_id"] == original_artifact["retained_object"]["reference_id"]
             assert item["staging_cleanup"] == "VERIFIED"
-    human = _cli(tmp_path, "plan", "outputs", first_id, *observation_flags)
+    human = _cli(tmp_path, "runs", "outputs", first_id, *observation_flags)
     assert "AVAILABLE" in human
     assert "VERIFIED" in human
     assert all(path in human for path in observed_paths)
@@ -524,7 +556,7 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
         )
         store.release_reference(selected_reference["reference_id"], owner_repository_id=owner_id)
         after_release = json.loads(
-            _cli(tmp_path, "plan", "outputs", first_id, *observation_flags, "--json")
+            _cli(tmp_path, "runs", "outputs", first_id, *observation_flags, "--json")
         )
         released_batch = after_release["artifact_observation"]
         released_observations = {item["path"]: item for item in released_batch["observations"]}
@@ -545,17 +577,17 @@ def test_iris_native_development_training_export_repeat_and_failure_through_fres
         unchanged_api = client.get(f"/api/fleet/runs/{first_id}")
         assert unchanged_api.status_code == 200
         assert unchanged_api.json() == api_original
-        human_unavailable = _cli(tmp_path, "plan", "outputs", first_id, *observation_flags)
+        human_unavailable = _cli(tmp_path, "runs", "outputs", first_id, *observation_flags)
         assert "UNAVAILABLE" in human_unavailable and "REFERENCE_UNAVAILABLE" in human_unavailable
         assert selected_path in human_unavailable
         assert after_release["repositories"] == first_outputs["repositories"]
-        assert json.loads(_cli(tmp_path, "plan", "outputs", first_id, "--json")) == first_outputs
-        original_status = json.loads(_cli(tmp_path, "plan", "status", first_id, "--json"))
+        assert json.loads(_cli(tmp_path, "runs", "outputs", first_id, "--json")) == first_outputs
+        original_status = json.loads(_cli(tmp_path, "runs", "show", first_id, "--json"))
         assert original_status["status"] == "COMPLETED" and original_status["outcome"] == "SUCCESS"
         refused = json.loads(
             _cli(
                 tmp_path,
-                "plan",
+                "runs",
                 "export-artifact",
                 first_id,
                 "--step",

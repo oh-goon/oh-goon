@@ -43,7 +43,7 @@ def run_open_command(
         print("OH-GOON OPEN UNAVAILABLE")
         print(f"Workspace: {workspace}")
         print(f"Reason: {exc}")
-        print("Inspect: oh-goon status")
+        print("Inspect: oh-goon app status")
         return 1
     if not opened:
         print("OH-GOON OPEN FAILED")

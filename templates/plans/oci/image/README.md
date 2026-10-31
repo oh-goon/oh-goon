@@ -7,23 +7,23 @@ Build one retained OCI archive through the typed isolated builder.
 **Prerequisites:** An admitted strict executor with Buildah and crun, a repository Containerfile with digest-pinned base images, the selected base-pull registry and configured retained workspace storage. The current local backend refuses strict Runs until independent native parent custody can be established; installing these tools alone does not qualify it. See the [execution contract](../../../../docs/CI_CD_CONTRACT.md).
 
 ```sh
-oh-goon templates init oci/image --kind plan --output ./workflow
+oh-goon init --template oci/image --kind plan --output ./workflow --draft
 ```
 
-Edit `workflow/run.yml` with your registered target and caller choices. Omitted options keep their Goon-owned defaults:
+This explicit draft is NOT_READY. Set `target.repository` to your exact registered repository path and fill the required caller choices in `workflow/run.yml`. Omitted options keep their Goon-owned defaults:
 
 ```yaml
-version: 1
+version: 2
 source: {kind: catalog-plan, name: oci/image}
-target: {repository_id: REPOSITORY_ID}
+target: {repository: /absolute/path/to/project}
 inputs:
   base_registry_hostname: registry.example.com
 ```
 
 ```sh
-oh-goon config inspect ./workflow/run.yml
-oh-goon config validate ./workflow/run.yml
-oh-goon lock ./workflow/run.yml
+oh-goon workflow inspect ./workflow/run.yml
+oh-goon workflow validate ./workflow/run.yml
+oh-goon workflow prepare ./workflow/run.yml
 oh-goon run ./workflow/run.yml
 ```
 

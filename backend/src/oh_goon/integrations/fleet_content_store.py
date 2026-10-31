@@ -17,6 +17,7 @@ from oh_goon.core.errors import (
 from oh_goon.core.operation_economics import OperationEconomicsReceipt, economics_receipt
 from oh_goon.core.path_authority import (
     RepositoryScopedPath,
+    canonical_path,
     ensure_private_directory,
 )
 from oh_goon.core.path_layouts import ContentStorePathLayout
@@ -134,10 +135,10 @@ def _emit_verified_tree_economics(
 class FleetContentStore:
     """Cross-run immutable store with durable references and race-safe read leases."""
 
-    def __init__(self, root: Path) -> None:
-        self.root = ensure_private_directory(root)
+    def __init__(self, root: Path, *, initialize: bool = True) -> None:
+        self.root = ensure_private_directory(root) if initialize else canonical_path(root)
         self._layout = ContentStorePathLayout.from_root(self.root)
-        for path in (
+        paths = (
             self._layout.objects("tree"),
             self._layout.objects("file"),
             self._layout.staging,
@@ -145,8 +146,10 @@ class FleetContentStore:
             self._layout.leases,
             self._layout.object_lifecycle / "tree",
             self._layout.object_lifecycle / "file",
-        ):
-            ensure_private_directory(path)
+        )
+        if initialize:
+            for path in paths:
+                ensure_private_directory(path)
         self._lock_path = self._layout.lock
 
     def put_tree(

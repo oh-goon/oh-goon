@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
+import sys
 from operator import setitem
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, NoReturn, cast
 
 import pytest
@@ -13,7 +15,6 @@ import yaml
 from oh_goon.cli import main
 from oh_goon.core.execution_lock_identity import LOCK_VERSION
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
-from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.services.execution_lock_persistence import load_execution_lock
 from oh_goon.services.run_configuration import RunConfigurationSnapshot
 
@@ -46,6 +47,26 @@ def agent_workflow(workflow):
     return workflow
 
 
+@pytest.mark.parametrize(
+    "selected_repair,flags", [(True, []), (True, ["--yes"]), (False, ["--authorize-repair"])]
+)
+def test_run_repair_consent_refuses_before_source_acquisition(
+    agent_workflow, monkeypatch, capsys, selected_repair, flags
+):
+    if not selected_repair:
+        payload = yaml.safe_load(agent_workflow.read_text())
+        del payload["repair"]
+        agent_workflow.write_text(yaml.safe_dump(payload))
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Repair consent mismatch reached source acquisition or runtime")
+
+    monkeypatch.setattr("oh_goon.cli_configuration.capture_run_configuration_source", forbidden)
+    monkeypatch.setattr("oh_goon.cli._build_application_runtime", forbidden)
+    assert main(["run", str(agent_workflow), "--json", *flags]) == 2
+    assert json.loads(capsys.readouterr().out)["execution"] == "not_started_by_diagnostic"
+
+
 @pytest.fixture
 def workflow(tmp_path, monkeypatch):
     repo = tmp_path / "repository"
@@ -54,18 +75,153 @@ def workflow(tmp_path, monkeypatch):
     preferences = tmp_path / "league.yml"
     preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(repo)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(preferences.parent / "application.sqlite"))
     output = tmp_path / "workflow"
+    output.mkdir()
+    selected = output / "run.yml"
+    selected.write_text(
+        yaml.safe_dump(
+            {
+                "version": 2,
+                "source": {"kind": "catalog-plan", "name": "python/quality"},
+                "target": {"repository": "../repository"},
+            }
+        )
+    )
+    return selected
+
+
+@pytest.fixture
+def typed_catalog(tmp_path, monkeypatch):
+    root = tmp_path / "templates"
+    package = root / "goons/general/typed"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# general/typed\n\nTyped public input fixture.\n")
+    (package / "goon.yml").write_text(
+        "inputs:\n  text: {type: string}\n  optional: {type: string, optional: true}\n"
+        "  count: {type: integer, min: 0, default: 1}\n"
+        "  enabled: {type: boolean, default: true}\nsteps:\n- run: python --version\n"
+    )
+    plan = root / "plans/general/typed"
+    plan.mkdir(parents=True)
+    (plan / "README.md").write_text("# general/typed\n\nTyped public input fixture.\n")
+    (plan / "plan.yml").write_text("goons:\n- general/typed\n")
+    monkeypatch.setattr(
+        "oh_goon.runtime.goon_templates.default_goon_templates_root", lambda: root / "goons"
+    )
+    monkeypatch.setattr(
+        "oh_goon.runtime.plan_templates.default_plan_templates_root", lambda: root / "plans"
+    )
+
+
+def test_public_init_keeps_literal_null_distinct_from_explicit_none(
+    typed_catalog, tmp_path, capsys
+):
+    output = tmp_path / "typed-workflow"
     assert (
-        main(["templates", "init", "--kind", "plan", "python/quality", "--output", str(output)])
+        main(
+            [
+                "init",
+                "--template",
+                "general/typed",
+                "--draft",
+                "--output",
+                str(output),
+                "--input",
+                "text=null",
+                "--input-null",
+                "optional",
+                "--input",
+                "count=0",
+                "--input",
+                "enabled=false",
+                "--json",
+            ]
+        )
         == 0
     )
-    selected = output / "run.yml"
-    data = yaml.safe_load(selected.read_text())
-    data["target"]["repository_id"] = RepositoryIdentity.model_validate(
-        {"path": repo}
-    ).repository_id
-    selected.write_text(yaml.safe_dump(data))
-    return selected
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "not_ready" and result["required_fields"] == ["target.repository"]
+    selected = yaml.safe_load((output / "run.yml").read_text())
+    assert selected["inputs"] == {"text": "null", "optional": None, "count": 0, "enabled": False}
+    assert not (output / "goon.lock").exists()
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        ["--input", "text=PRIVATE_FIRST", "--input", "text=PRIVATE_SECOND"],
+        ["--input", "text=PRIVATE_FIRST", "--input-null", "text"],
+    ],
+)
+def test_duplicate_init_values_refuse_before_publication(tmp_path, values, capsys):
+    output = tmp_path / "refused"
+    assert (
+        main(
+            [
+                "init",
+                "--template",
+                "python/quality",
+                "--draft",
+                "--output",
+                str(output),
+                "--json",
+                *values,
+            ]
+        )
+        == 2
+    )
+    captured = capsys.readouterr().out
+    assert json.loads(captured)["code"] == "DUPLICATE_INPUT"
+    assert "PRIVATE_" not in captured and not output.exists()
+
+
+@pytest.mark.parametrize(
+    "flags,tty,eof",
+    [
+        ([], False, False),
+        (["--json"], True, False),
+        (["--no-input"], True, False),
+        ([], True, True),
+    ],
+)
+def test_missing_init_values_never_wait_or_start_runtime(
+    workflow, typed_catalog, monkeypatch, capsys, flags, tty, eof
+):
+    def read(_limit):
+        if eof:
+            return ""
+        pytest.fail("Noninteractive initialization attempted to read stdin")
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Missing initialization values reached application startup")
+
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: tty, readline=read))
+    monkeypatch.setattr(
+        "oh_goon.application.ApplicationRuntime.build_registration_service", forbidden
+    )
+    output = workflow.parent.parent / "refused"
+    repository = workflow.parent.parent / "repository"
+    assert (
+        main(
+            [
+                "init",
+                "--template",
+                "general/typed",
+                "--repository",
+                str(repository),
+                "--output",
+                str(output),
+                *flags,
+            ]
+        )
+        == 2
+    )
+    captured = capsys.readouterr()
+    if "--json" in flags:
+        assert json.loads(captured.out)["code"] == "MISSING_REQUIRED_INPUT"
+    assert not output.exists()
+    assert not (workflow.parent.parent / "application.sqlite").exists()
 
 
 def test_generation_selects_catalog_without_copy_and_refuses_overwrite(workflow, capsys):
@@ -74,11 +230,12 @@ def test_generation_selects_catalog_without_copy_and_refuses_overwrite(workflow,
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
+                "python/quality",
                 "--kind",
                 "plan",
-                "python/quality",
+                "--draft",
                 "--output",
                 str(workflow.parent),
             ]
@@ -91,17 +248,23 @@ def test_generation_selects_catalog_without_copy_and_refuses_overwrite(workflow,
 @pytest.mark.parametrize("key", ["python/typecheck", "python/quality"])
 def test_goon_initialization_creates_only_plan_intent_and_shared_run_config(workflow, key, capsys):
     output = workflow.parent.parent / "selected-goon"
-    assert main(["templates", "init", key, "--kind", "goon", "--output", str(output)]) == 0
+    assert (
+        main(["init", "--template", key, "--kind", "goon", "--draft", "--output", str(output)]) == 0
+    )
     assert sorted(path.name for path in output.iterdir()) == ["plan.yml", "run.yml"]
     assert yaml.safe_load((output / "plan.yml").read_text()) == {"goons": [key]}
     config = output / "run.yml"
     selected = yaml.safe_load(config.read_text())
     assert selected["source"] == {"kind": "file-plan", "path": "plan.yml"}
-    assert "inputs" not in selected
+    assert selected["inputs"] == {
+        "project": ".",
+        "dependency_group": "dev",
+        "typechecker": "pyright",
+    }
     selected["target"] = yaml.safe_load(workflow.read_text())["target"]
     config.write_text(yaml.safe_dump(selected))
     capsys.readouterr()
-    assert main(["config", "validate", str(config), "--json"]) == 0
+    assert main(["workflow", "validate", str(config), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert [item["name"] for item in report["inputs"]] == [
         "project",
@@ -112,39 +275,37 @@ def test_goon_initialization_creates_only_plan_intent_and_shared_run_config(work
     assert not (output / "goon.lock").exists()
 
 
-def test_template_initialization_requires_an_explicit_kind(tmp_path):
+def test_template_initialization_defaults_to_the_plan_catalog(tmp_path):
     output = tmp_path / "workflow"
-    with pytest.raises(SystemExit) as refusal:
-        main(["templates", "init", "python/quality", "--output", str(output)])
-    assert refusal.value.code == 2
-    assert not output.exists()
+    assert main(["init", "--template", "python/quality", "--draft", "--output", str(output)]) == 0
+    selected = yaml.safe_load((output / "run.yml").read_text())
+    assert selected["source"] == {"kind": "catalog-plan", "name": "python/quality"}
+    assert not (output / "goon.lock").exists()
 
 
 @pytest.mark.parametrize("key", ["python/quality", "agents/agentic-review-repair-loop"])
 def test_initialization_selects_registered_repository_path_without_runtime(
     workflow, monkeypatch, capsys, key
 ):
-    import oh_goon.cli as cli
-
     monkeypatch.setattr(
-        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
+        "oh_goon.application.ApplicationRuntime.build_registration_service",
+        lambda **kw: pytest.fail("runtime started"),
     )
     repository = workflow.parent.parent / "repository"
-    nested = repository / "nested"
-    nested.mkdir()
     output = workflow.parent.parent / "selected"
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
                 key,
                 "--kind",
                 "plan",
+                *(["--draft"] if key.startswith("agents/") else []),
                 "--output",
                 str(output),
                 "--repository",
-                str(nested),
+                str(repository),
             ]
         )
         == 0
@@ -152,10 +313,12 @@ def test_initialization_selects_registered_repository_path_without_runtime(
     selected = yaml.safe_load((output / "run.yml").read_text())
     assert selected["target"] == yaml.safe_load(workflow.read_text())["target"]
     if key.startswith("agents/"):
-        assert selected["inputs"]["repo"] == "local:repository"
-        assert selected["agent"]["repository_root"] == str(repository.parent)
-        assert selected["agent"]["model_profile"] == "REQUIRED_MODEL_PROFILE"
-        assert selected["inputs"]["regression_command"] == "REQUIRED_regression_command"
+        assert "repo" not in selected.get("inputs", {})
+        assert "model_profile" not in selected.get("agent", {})
+        assert "regression_command" not in selected.get("inputs", {})
+        assert "REQUIRED_" not in (output / "run.yml").read_text()
+    else:
+        assert (output / "goon.lock").is_file()
     assert "REPOSITORY_ID" not in (output / "run.yml").read_text()
 
 
@@ -168,13 +331,14 @@ def test_initializer_never_uses_same_name_as_repository_lookup(tmp_path, monkeyp
     preferences = tmp_path / "league.yml"
     preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(tmp_path)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(preferences.parent / "application.sqlite"))
     monkeypatch.chdir(tmp_path)
     refused = tmp_path / "refused"
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
                 "python/quality",
                 "--kind",
                 "plan",
@@ -191,8 +355,8 @@ def test_initializer_never_uses_same_name_as_repository_lookup(tmp_path, monkeyp
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
                 "python/quality",
                 "--kind",
                 "plan",
@@ -205,21 +369,18 @@ def test_initializer_never_uses_same_name_as_repository_lookup(tmp_path, monkeyp
         == 0
     )
     selected = yaml.safe_load((output / "run.yml").read_text())
-    assert (
-        selected["target"]["repository_id"]
-        == RepositoryIdentity.model_validate({"path": folders[1]}).repository_id
-    )
+    assert (output / selected["target"]["repository"]).resolve() == folders[1]
 
 
-def test_initializer_refuses_unregistered_repository_before_publication(workflow, capsys):
+def test_initializer_refuses_missing_agent_selection_before_publication(workflow, capsys):
     outside = workflow.parent.parent / "unregistered"
     (outside / ".git").mkdir(parents=True)
     output = workflow.parent.parent / "refused"
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
                 "agents/agentic-review-repair-loop",
                 "--kind",
                 "plan",
@@ -232,7 +393,9 @@ def test_initializer_refuses_unregistered_repository_before_publication(workflow
         == 2
     )
     assert not output.exists()
-    assert "oh-goon league add-folder PATH" in capsys.readouterr().err
+    refusal = capsys.readouterr().out
+    assert "MISSING_REQUIRED_INPUT" in refusal
+    assert "Publication: not_published" in refusal
 
 
 @pytest.mark.parametrize("invalid_member", ("unregistered", "duplicate"))
@@ -246,12 +409,13 @@ def test_initializer_repeated_paths_refuse_incomplete_or_duplicate_targets(
     preferences = tmp_path / "league.yml"
     preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
     output = tmp_path / "workflow"
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
                 "python/quality",
                 "--kind",
                 "plan",
@@ -272,8 +436,6 @@ def test_initializer_repeated_paths_refuse_incomplete_or_duplicate_targets(
 def test_initializer_repeated_paths_select_an_exact_registered_target_set_without_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
-    import oh_goon.cli as cli
-
     applications = [tmp_path / "application-one", tmp_path / "application-two"]
     for application in applications:
         application.mkdir()
@@ -282,15 +444,17 @@ def test_initializer_repeated_paths_select_an_exact_registered_target_set_withou
         yaml.safe_dump({"version": 1, "folders": [str(root) for root in applications]})
     )
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
     monkeypatch.setattr(
-        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
+        "oh_goon.application.ApplicationRuntime.build_registration_service",
+        lambda **kw: pytest.fail("runtime started"),
     )
     output = tmp_path / "workflow"
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
                 "python/quality",
                 "--kind",
                 kind,
@@ -305,12 +469,190 @@ def test_initializer_repeated_paths_select_an_exact_registered_target_set_withou
         == 0
     )
     selected = yaml.safe_load((output / "run.yml").read_text())
-    assert selected["target"] == {
-        "repository_ids": [
-            RepositoryIdentity.model_validate({"path": root}).repository_id for root in applications
-        ]
+    assert selected["target"] == {"repositories": ["../application-one", "../application-two"]}
+    assert (output / "goon.lock").is_file()
+
+
+@pytest.fixture
+def fresh_initialization_targets(tmp_path, monkeypatch):
+    from oh_goon.engine.git import GitService
+
+    roots = (tmp_path / "application-one", tmp_path / "application-two")
+    for root in roots:
+        assert GitService().run("init", "--quiet", str(root)).returncode == 0
+    preferences = tmp_path / "league.yml"
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    output = tmp_path / "workflow"
+    arguments = [
+        "init",
+        "--template",
+        "python/quality",
+        "--output",
+        str(output),
+        "--repository",
+        str(roots[0]),
+        "--repository",
+        str(roots[1]),
+        "--no-input",
+        "--json",
+    ]
+    return roots, preferences, output, arguments
+
+
+@pytest.mark.parametrize("invalid", ("non-git", "input"))
+def test_plural_initialization_validates_all_known_contracts_before_registration(
+    fresh_initialization_targets, monkeypatch, capsys, invalid
+):
+    roots, preferences, output, arguments = fresh_initialization_targets
+    if invalid == "non-git":
+        (roots[1] / ".git").rename(roots[1] / "removed-git")
+    else:
+        arguments.extend(("--input", "typechecker=not-a-checker"))
+
+    def forbidden(**_kwargs):
+        pytest.fail("Known-invalid selection reached runtime or registration")
+
+    monkeypatch.setattr(
+        "oh_goon.application.ApplicationRuntime.build_registration_service", forbidden
+    )
+    assert main(arguments) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["publication"] == "not_published"
+    assert not preferences.exists()
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("draft", (False, True))
+def test_initializer_refuses_raw_symlink_before_parent_path_normalization(
+    fresh_initialization_targets, monkeypatch, capsys, draft
+):
+    roots, preferences, output, arguments = fresh_initialization_targets
+    foreign = output.parent / "outside/inner"
+    foreign.mkdir(parents=True)
+    alias = output.parent / "alias"
+    alias.symlink_to(foreign, target_is_directory=True)
+    arguments[arguments.index("--repository") + 1] = str(alias / ".." / roots[0].name)
+    if draft:
+        arguments.append("--draft")
+
+    def forbidden(**_kwargs):
+        pytest.fail("Unsafe target reached runtime or registration")
+
+    monkeypatch.setattr(
+        "oh_goon.application.ApplicationRuntime.build_registration_service", forbidden
+    )
+    assert main(arguments) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["code"] == "CONFIG_TARGET_UNAVAILABLE"
+    assert report["publication"] == "not_published"
+    assert not preferences.exists()
+    assert not output.exists()
+
+
+def test_plural_initialization_preserves_partial_registration_and_retry_converges(
+    fresh_initialization_targets, monkeypatch, capsys
+):
+    from oh_goon.runtime.league_folders import LeagueFolderStore
+    from oh_goon.services.locations import LocationService
+
+    roots, preferences, output, arguments = fresh_initialization_targets
+    original = LocationService.register_target
+
+    def register(service, path, **kwargs):
+        if path == roots[1]:
+            raise OSError("Selected second registration refused")
+        return original(service, path, **kwargs)
+
+    monkeypatch.setattr(LocationService, "register_target", register)
+    assert main(arguments) == 2
+    failed = json.loads(capsys.readouterr().out)
+    receipts = failed["target_registration"]["repositories"]
+    assert [(item["path"], item["status"]) for item in receipts] == [(str(roots[0]), "registered")]
+    assert failed["publication"] == "not_published"
+    assert LeagueFolderStore(preferences).list() == (roots[0],)
+    assert not output.exists()
+
+    monkeypatch.setattr(LocationService, "register_target", original)
+    assert main(arguments) == 0
+    completed = json.loads(capsys.readouterr().out)
+    assert completed["status"] == "ready"
+    assert [item["status"] for item in completed["target_registration"]["repositories"]] == [
+        "already-registered",
+        "registered",
+    ]
+    assert LeagueFolderStore(preferences).list() == roots
+    assert (output / "goon.lock").is_file()
+
+
+def test_plural_initialization_retains_all_registration_receipts_after_lock_failure(
+    fresh_initialization_targets, monkeypatch, capsys
+):
+    from oh_goon.runtime.league_folders import LeagueFolderStore
+
+    roots, preferences, output, arguments = fresh_initialization_targets
+
+    def fail_lock(_args):
+        raise OSError("Canonical lock publication refused")
+
+    monkeypatch.setattr("oh_goon.cli_lock.generate_stateless_lock", fail_lock)
+    assert main(arguments) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["publication"] == "not_published"
+    assert [item["path"] for item in report["target_registration"]["repositories"]] == [
+        str(root) for root in roots
+    ]
+    assert LeagueFolderStore(preferences).list() == roots
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("failure", ("identity", "storage"))
+def test_initializer_reports_classified_database_failure_without_disclosing_private_detail(
+    fresh_initialization_targets, monkeypatch, capsys, failure
+):
+    import sqlite3
+
+    from oh_goon.runtime.database import DatabasePathIdentityLost
+
+    _, preferences, output, arguments = fresh_initialization_targets
+    error = (
+        DatabasePathIdentityLost("PRIVATE_DATABASE_SENTINEL")
+        if failure == "identity"
+        else sqlite3.OperationalError("database or disk is full: PRIVATE_DATABASE_SENTINEL")
+    )
+
+    def fail_runtime(**_kwargs):
+        raise error
+
+    monkeypatch.setattr(
+        "oh_goon.application.ApplicationRuntime.build_registration_service", fail_runtime
+    )
+    assert main(arguments) == 2
+    text = capsys.readouterr().out
+    report = json.loads(text)
+    assert report["code"] == (
+        "RUNTIME_DATABASE_IDENTITY_LOST" if failure == "identity" else "RUNTIME_STORAGE_UNAVAILABLE"
+    )
+    assert report["publication"] == "not_published"
+    assert "PRIVATE_DATABASE_SENTINEL" not in text
+    assert not preferences.exists()
+    assert not output.exists()
+
+
+def test_plural_selection_reports_invalid_element_without_disclosing_value(workflow, capsys):
+    payload = yaml.safe_load(workflow.read_text())
+    payload["target"] = {
+        "repositories": ["../repository", {"PRIVATE_FIELD": "PRIVATE_TARGET_SENTINEL"}]
     }
-    assert not (output / "goon.lock").exists()
+    workflow.write_text(yaml.safe_dump(payload))
+    assert main(["workflow", "inspect", str(workflow), "--json"]) == 2
+    text = capsys.readouterr().out
+    report = json.loads(text)
+    assert report["code"] == "CONFIG_SCHEMA_INVALID"
+    assert "target.repositories.1" in report["fields"]
+    assert "PRIVATE_FIELD" not in text and "PRIVATE_TARGET_SENTINEL" not in text
 
 
 def test_plural_inspection_merges_exact_filesystem_and_discovered_git_roots_once(
@@ -328,6 +670,7 @@ def test_plural_inspection_merges_exact_filesystem_and_discovered_git_roots_once
         yaml.safe_dump({"version": 1, "folders": [str(application), str(git_root.parent)]})
     )
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
     monkeypatch.setattr(
         cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
     )
@@ -339,13 +682,9 @@ def test_plural_inspection_merges_exact_filesystem_and_discovered_git_roots_once
     roots = (application, git_root)
     path = tmp_path / "run.yml"
     payload: dict[str, Any] = {
-        "version": 1,
+        "version": 2,
         "source": {"kind": "file-plan", "path": "plan.yml"},
-        "target": {
-            "repository_ids": [
-                RepositoryIdentity.model_validate({"path": root}).repository_id for root in roots
-            ]
-        },
+        "target": {"repositories": [str(root) for root in roots]},
     }
     path.write_text(yaml.safe_dump(payload))
     analyzed: list[Path] = []
@@ -356,15 +695,15 @@ def test_plural_inspection_merges_exact_filesystem_and_discovered_git_roots_once
         return original(self, source, **kwargs)
 
     monkeypatch.setattr(FleetPlanResolver, "analyze_source", analyze)
-    assert main(["config", "validate", str(path), "--json"]) == 0
+    assert main(["workflow", "validate", str(path), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
-    assert [entry["repository_id"] for entry in report["target"]["repositories"]] == payload[
-        "target"
-    ]["repository_ids"]
+    assert [entry["path"] for entry in report["target"]["repositories"]] == [
+        str(root) for root in roots
+    ]
     assert analyzed == [tmp_path / "plan.yml"]
 
     git_root.rename(git_root.with_name("moved-project"))
-    assert main(["config", "validate", str(path), "--json"]) == 2
+    assert main(["workflow", "validate", str(path), "--json"]) == 2
     refusal = json.loads(capsys.readouterr().out)
     assert refusal["code"] == "CONFIG_TARGET_UNAVAILABLE"
     assert analyzed == [tmp_path / "plan.yml"]
@@ -386,6 +725,7 @@ def test_plural_run_refuses_a_replaced_member_before_any_application_step(
     )
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "runtime.sqlite"))
     package = tmp_path / "goons/general/check"
     package.mkdir(parents=True)
     (package / "README.md").write_text("# general/check\n")
@@ -395,18 +735,13 @@ def test_plural_run_refuses_a_replaced_member_before_any_application_step(
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {
-                    "repository_ids": [
-                        RepositoryIdentity.model_validate({"path": root}).repository_id
-                        for root in applications
-                    ]
-                },
+                "target": {"repositories": [str(root) for root in applications]},
             }
         )
     )
-    assert main(["lock", str(selection)]) == 0
+    assert main(["workflow", "prepare", str(selection)]) == 0
     assert main(["run", str(selection), "--json"]) == 0
     baseline = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert baseline["outcome"] == "SUCCESS"
@@ -441,8 +776,6 @@ def test_plural_run_refuses_a_replaced_member_before_any_application_step(
 def test_initialization_selects_registered_filesystem_root_without_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_form: str
 ) -> None:
-    import oh_goon.cli as cli
-
     repository = tmp_path / "plain application"
     repository.mkdir()
     requested = repository
@@ -453,15 +786,17 @@ def test_initialization_selects_registered_filesystem_root_without_runtime(
     preferences = tmp_path / "league.yml"
     preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(preferences.parent / "application.sqlite"))
     monkeypatch.setattr(
-        cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
+        "oh_goon.application.ApplicationRuntime.build_registration_service",
+        lambda **kw: pytest.fail("runtime started"),
     )
     output = tmp_path / "workflow"
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
                 "python/quality",
                 "--kind",
                 "plan",
@@ -474,14 +809,13 @@ def test_initialization_selects_registered_filesystem_root_without_runtime(
         == 0
     )
     selection = yaml.safe_load((output / "run.yml").read_text())
-    assert (
-        selection["target"]["repository_id"]
-        == RepositoryIdentity.model_validate({"path": repository}).repository_id
-    )
+    assert (output / selection["target"]["repository"]).resolve() == repository
     assert not (repository / ".git").exists()
 
 
-@pytest.mark.parametrize("command", [("config", "inspect"), ("config", "validate"), ("lock",)])
+@pytest.mark.parametrize(
+    "command", [("workflow", "inspect"), ("workflow", "validate"), ("workflow", "prepare")]
+)
 def test_configuration_selects_registered_filesystem_root_without_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: tuple[str, ...]
 ) -> None:
@@ -492,6 +826,7 @@ def test_configuration_selects_registered_filesystem_root_without_runtime(
     preferences = tmp_path / "league.yml"
     preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(preferences.parent / "application.sqlite"))
     monkeypatch.setattr(
         cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
     )
@@ -499,13 +834,9 @@ def test_configuration_selects_registered_filesystem_root_without_runtime(
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "catalog-plan", "name": "python/quality"},
-                "target": {
-                    "repository_id": RepositoryIdentity.model_validate(
-                        {"path": repository}
-                    ).repository_id
-                },
+                "target": {"repository": str(repository)},
             }
         )
     )
@@ -532,6 +863,7 @@ def test_filesystem_target_requires_its_exact_available_registration(
     preferences = tmp_path / "league.yml"
     preferences.write_text(yaml.safe_dump({"version": 1, "folders": folders}))
     monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    monkeypatch.setenv("OH_GOON_DB", str(preferences.parent / "application.sqlite"))
     monkeypatch.setattr(
         cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
     )
@@ -539,8 +871,8 @@ def test_filesystem_target_requires_its_exact_available_registration(
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
                 "python/quality",
                 "--kind",
                 "plan",
@@ -557,19 +889,20 @@ def test_filesystem_target_requires_its_exact_available_registration(
     selection.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "catalog-plan", "name": "python/quality"},
-                "target": {
-                    "repository_id": RepositoryIdentity.model_validate(
-                        {"path": repository}
-                    ).repository_id
-                },
+                "target": {"repository": str(repository)},
             }
         )
     )
     capsys.readouterr()
-    assert main(["config", "validate", str(selection), "--json"]) == 2
-    assert json.loads(capsys.readouterr().out)["code"] == "CONFIG_TARGET_UNAVAILABLE"
+    assert main(["workflow", "validate", str(selection), "--json"]) == 2
+    report = json.loads(capsys.readouterr().out)
+    if registration == "missing-root":
+        assert report["code"] == "CONFIG_TARGET_UNAVAILABLE"
+    else:
+        assert report["target"]["registration"] == "unavailable"
+        assert report["proof"]["admission"] == "not-started"
 
 
 def test_inspection_and_validation_use_the_same_owner_report_without_runtime(
@@ -581,9 +914,9 @@ def test_inspection_and_validation_use_the_same_owner_report_without_runtime(
         cli, "_build_application_runtime", lambda **kw: pytest.fail("runtime started")
     )
     capsys.readouterr()
-    assert main(["config", "inspect", str(workflow), "--json"]) == 0
+    assert main(["workflow", "inspect", str(workflow), "--json"]) == 0
     inspected = json.loads(capsys.readouterr().out)
-    assert main(["config", "validate", str(workflow), "--json"]) == 0
+    assert main(["workflow", "validate", str(workflow), "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == inspected
     assert inspected["proof"]["admission"] == "not-started"
     assert [entry["name"] for entry in inspected["inputs"]] == [
@@ -597,14 +930,14 @@ def test_inspection_and_validation_use_the_same_owner_report_without_runtime(
 
 
 def test_lock_binds_complete_selection_and_refresh_is_explicit(workflow, capsys):
-    assert main(["lock", str(workflow)]) == 0
+    assert main(["workflow", "prepare", str(workflow)]) == 0
     before = load_execution_lock(workflow.parent / "goon.lock")
     data = yaml.safe_load(workflow.read_text())
     data["inputs"] = {"typechecker": "ty"}
     workflow.write_text(yaml.safe_dump(data))
-    assert main(["config", "validate", str(workflow)]) == 0
+    assert main(["workflow", "validate", str(workflow)]) == 0
     assert load_execution_lock(workflow.parent / "goon.lock") == before
-    assert main(["lock", str(workflow)]) == 0
+    assert main(["workflow", "prepare", str(workflow)]) == 0
     assert load_execution_lock(workflow.parent / "goon.lock").digest != before.digest
 
 
@@ -614,7 +947,7 @@ def test_invalid_inputs_are_refused_without_echoing_values(workflow, values, cap
     data["inputs"] = values
     workflow.write_text(yaml.safe_dump(data))
     capsys.readouterr()
-    assert main(["config", "validate", str(workflow), "--json"]) == 2
+    assert main(["workflow", "validate", str(workflow), "--json"]) == 2
     output = capsys.readouterr().out
     assert "secret-sentinel" not in output
     assert not (workflow.parent / "goon.lock").exists()
@@ -643,20 +976,32 @@ def test_generator_refuses_symlink_destination(tmp_path, capsys):
     alias = tmp_path / "alias"
     alias.symlink_to(target, target_is_directory=True)
     assert (
-        main(["templates", "init", "--kind", "plan", "python/quality", "--output", str(alias)]) == 2
+        main(
+            [
+                "init",
+                "--template",
+                "python/quality",
+                "--kind",
+                "plan",
+                "--draft",
+                "--output",
+                str(alias),
+            ]
+        )
+        == 2
     )
     assert not list(target.iterdir())
 
 
-def test_initializer_prints_executable_lock_and_run_commands(workflow, capsys):
+def test_ready_initializer_prints_the_executable_waited_run_command(workflow, capsys):
     output = workflow.parent.parent / "workflow's literal $selection"
     repository = workflow.parent.parent / "repository"
     capsys.readouterr()
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
                 "python/quality",
                 "--kind",
                 "plan",
@@ -669,10 +1014,9 @@ def test_initializer_prints_executable_lock_and_run_commands(workflow, capsys):
         == 0
     )
     lines = capsys.readouterr().out.splitlines()
-    for label, command in (("Next: ", "lock"), ("Then: ", "run")):
-        rendered = next(line.removeprefix(label) for line in lines if line.startswith(label))
-        assert shlex.split(rendered) == ["oh-goon", command, str(output / "run.yml")]
-    assert any(line.startswith("Optional inspection: ") for line in lines)
+    rendered = next(line.removeprefix("Next: ") for line in lines if line.startswith("Next: "))
+    assert shlex.split(rendered) == ["oh-goon", "run", str(output)]
+    assert (output / "goon.lock").is_file()
     assert "target.repository_id" not in "\n".join(lines)
 
 
@@ -680,11 +1024,11 @@ def test_internal_templates_use_their_owner_command(tmp_path):
     assert (
         main(
             [
-                "templates",
                 "init",
+                "--template",
+                "oh-goon/app-certification",
                 "--kind",
                 "plan",
-                "oh-goon/app-certification",
                 "--output",
                 str(tmp_path / "new"),
             ]
@@ -712,7 +1056,7 @@ def test_arbitrary_valid_strings_and_source_defaults_are_not_disclosed(workflow,
     data["inputs"] = {"project": "private-project-sentinel", "typechecker": "ty"}
     workflow.write_text(yaml.safe_dump(data))
     capsys.readouterr()
-    assert main(["config", "inspect", str(workflow), "--json"]) == 0
+    assert main(["workflow", "inspect", str(workflow), "--json"]) == 0
     output = capsys.readouterr().out
     assert "private-project-sentinel" not in output
     assert "private-default-sentinel" not in output
@@ -765,7 +1109,7 @@ def test_inspection_refuses_agent_source_group_conflicts_without_acquisition(
         lambda *args, **kwargs: pytest.fail("inspection acquired Skill resources"),
     )
     capsys.readouterr()
-    assert main(["config", "validate", str(workflow), "--json"]) == 2
+    assert main(["workflow", "validate", str(workflow), "--json"]) == 2
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "rejected"
     assert report["execution"] == "not_started_by_diagnostic"
@@ -805,7 +1149,7 @@ def test_agent_inspection_shows_declared_steps_without_claiming_captured_executi
         lambda *args, **kwargs: pytest.fail("inspection acquired Skill resources"),
     )
     capsys.readouterr()
-    assert main(["config", "inspect", str(workflow), "--json"]) == 0
+    assert main(["workflow", "inspect", str(workflow), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "inputs-valid"
     assert len(report["steps"]) == 9
@@ -816,7 +1160,9 @@ def test_agent_inspection_shows_declared_steps_without_claiming_captured_executi
     assert all("task" not in step and "argv" not in step for step in report["steps"])
 
 
-@pytest.mark.parametrize("command", [["config", "inspect"], ["config", "validate"], ["lock"]])
+@pytest.mark.parametrize(
+    "command", [["workflow", "inspect"], ["workflow", "validate"], ["workflow", "prepare"]]
+)
 def test_each_configuration_command_analyzes_one_exact_source_graph(workflow, monkeypatch, command):
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
@@ -841,7 +1187,10 @@ def test_source_execution_policy_selects_the_original_runtime_profile(
 
     data = yaml.safe_load(workflow.read_text())
     data["source"]["name"] = plan
+    if strict:
+        data["inputs"] = {"base_registry_hostname": "registry.example"}
     workflow.write_text(yaml.safe_dump(data))
+    assert main(["workflow", "prepare", str(workflow)]) == 0
     observed = []
 
     def observe_runtime(**kwargs: Any) -> None:
@@ -851,19 +1200,23 @@ def test_source_execution_policy_selects_the_original_runtime_profile(
     monkeypatch.setattr(cli, "_execute_stateful_command", lambda runtime, args: 2)
     assert main(["run", str(workflow)]) == 2
     assert observed[0]["standard_local"] is (not strict)
+    assert observed[0]["startup_purpose"] == "workflow"
 
 
+@pytest.mark.parametrize("plural", [False, True])
 def test_budgeted_run_captures_installed_argv_before_source_or_runtime_work(
-    workflow: Path, monkeypatch: pytest.MonkeyPatch
+    workflow: Path, monkeypatch: pytest.MonkeyPatch, plural: bool
 ) -> None:
-    import sys
-
     import oh_goon.cli as cli
     import oh_goon.cli_run_resources as resources
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 
     selected = yaml.safe_load(workflow.read_text())
     selected["resources"] = {"cpu_millis": 1000, "memory_mib": 512}
+    if plural:
+        second = workflow.parent.parent / "second-repository"
+        (second / ".git").mkdir(parents=True)
+        selected["target"] = {"repositories": ["../repository", "../second-repository"]}
     workflow.write_text(yaml.safe_dump(selected))
     argv = ["run", str(workflow), "--json"]
     monkeypatch.setattr(sys, "argv", ["oh-goon", *argv])
@@ -894,6 +1247,40 @@ def test_budgeted_run_captures_installed_argv_before_source_or_runtime_work(
     assert snapshot.selection.resources is not None
     assert snapshot.selection.resources.cpu_millis == 1000
     assert snapshot.content == workflow.read_bytes()
+    assert snapshot.selection.version == 2
+    assert snapshot.selection.target.selected_paths() == (
+        ("../repository", "../second-repository") if plural else ("../repository",)
+    )
+    from oh_goon.services.run_configuration import (
+        decode_run_configuration_snapshot,
+        encode_run_configuration_snapshot,
+    )
+
+    restored = decode_run_configuration_snapshot(encode_run_configuration_snapshot(snapshot))
+    assert restored == snapshot
+
+
+def test_budgeted_run_invalid_repair_consent_refuses_before_native_launch(
+    workflow: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import oh_goon.cli as cli
+    import oh_goon.cli_configuration as configuration
+    import oh_goon.cli_run_resources as resources
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+
+    selected = yaml.safe_load(workflow.read_text())
+    selected["resources"] = {"cpu_millis": 1000}
+    workflow.write_text(yaml.safe_dump(selected))
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Invalid repair consent must refuse before native launch or source work")
+
+    monkeypatch.setattr(cli, "_build_application_runtime", forbidden)
+    monkeypatch.setattr(resources, "run_with_resource_envelope", forbidden)
+    monkeypatch.setattr(configuration, "resolve_run_configuration_targets", forbidden)
+    monkeypatch.setattr(FleetPlanResolver, "analyze_source", forbidden)
+    assert main(["run", str(workflow), "--authorize-repair", "--json"]) == 2
+    assert not (workflow.parent / "goon.lock").exists()
 
 
 def test_budget_unavailable_refuses_before_source_capture_or_runtime(
@@ -995,7 +1382,7 @@ def test_invalid_agent_or_repair_selection_refuses_before_native_probe(
         "_build_application_runtime",
         lambda **kw: pytest.fail("runtime before invalid selection"),
     )
-    assert main(["lock", str(workflow)]) == 2
+    assert main(["workflow", "prepare", str(workflow)]) == 2
     assert main(["run", str(workflow), *(["--authorize-repair"] if repair else [])]) == 2
 
 
@@ -1050,7 +1437,7 @@ def test_inspection_projects_authored_skill_references_and_unverified_pin_record
     monkeypatch.setattr(subprocess, "Popen", forbidden)
     monkeypatch.setattr(socket.socket, "connect", forbidden)
     capsys.readouterr()
-    assert main(["config", "inspect", str(agent_workflow), "--json"]) == 0
+    assert main(["workflow", "inspect", str(agent_workflow), "--json"]) == 0
     output = capsys.readouterr().out
     report = json.loads(output)
     assert report["skills"] == {
@@ -1081,7 +1468,7 @@ def test_inspection_projects_authored_skill_references_and_unverified_pin_record
     ):
         assert private not in output
     assert lock_path.read_bytes() == original
-    assert main(["config", "inspect", str(agent_workflow)]) == 0
+    assert main(["workflow", "inspect", str(agent_workflow)]) == 0
     human = capsys.readouterr().out
     assert "cookbook/single-source-of-truth-review" in human
     assert "lock-record-not-verified" in human and "a" * 40 in human
@@ -1108,7 +1495,7 @@ def test_private_symlink_lock_is_unavailable_without_reading_target(
         lambda *args, **kwargs: pytest.fail("inspection read an unsafe lock source"),
     )
     capsys.readouterr()
-    assert main(["config", "inspect", str(agent_workflow), "--json"]) == 0
+    assert main(["workflow", "inspect", str(agent_workflow), "--json"]) == 0
     output = capsys.readouterr().out
     report = json.loads(output)
     assert report["proof"]["lock"] == "unavailable"
@@ -1122,7 +1509,7 @@ def test_private_symlink_lock_is_unavailable_without_reading_target(
 def test_unreadable_or_unsupported_pin_record_is_not_readiness(agent_workflow, capsys, contents):
     agent_workflow.with_name("goon.lock").write_text(contents)
     capsys.readouterr()
-    assert main(["config", "inspect", str(agent_workflow), "--json"]) == 0
+    assert main(["workflow", "inspect", str(agent_workflow), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["skills"]["pin_status"] == "unavailable"
     assert report["skills"]["pins"] == []
@@ -1134,16 +1521,17 @@ def test_human_and_json_inspection_preserve_zero_numeric_constraint(workflow, ca
     data["source"]["name"] = "ml/iris-training"
     workflow.write_text(yaml.safe_dump(data))
     capsys.readouterr()
-    assert main(["config", "inspect", str(workflow), "--json"]) == 0
+    assert main(["workflow", "inspect", str(workflow), "--json"]) == 0
     report = json.loads(capsys.readouterr().out)
     seed = next(item for item in report["inputs"] if item["name"] == "random_seed")
     assert seed["contract"]["minimum"] == 0
-    assert main(["config", "inspect", str(workflow)]) == 0
+    assert main(["workflow", "inspect", str(workflow)]) == 0
     assert "'minimum': 0" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
-    "command", [("config", "inspect"), ("config", "validate"), ("lock",), ("run",)]
+    "command",
+    [("workflow", "inspect"), ("workflow", "validate"), ("workflow", "prepare"), ("run",)],
 )
 @pytest.mark.parametrize(
     ("harness", "effects", "include_selection"),

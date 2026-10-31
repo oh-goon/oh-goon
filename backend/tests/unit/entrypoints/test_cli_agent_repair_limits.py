@@ -6,7 +6,6 @@ import pytest
 import yaml
 
 from oh_goon.cli import main
-from oh_goon.core.models.repository import RepositoryIdentity
 
 
 @pytest.mark.parametrize(
@@ -58,13 +57,9 @@ def test_invalid_budget_or_write_scope_refused_before_runtime(tmp_path, monkeypa
     source.write_text(
         yaml.safe_dump(
             {
-                "version": 1,
+                "version": 2,
                 "source": {"kind": "file-plan", "path": "plan.yml"},
-                "target": {
-                    "repository_id": RepositoryIdentity.model_validate(
-                        {"path": repository}
-                    ).repository_id
-                },
+                "target": {"repository": str(repository)},
                 "agent": {
                     "implementation": "pi",
                     "profile": "isolated-managed",

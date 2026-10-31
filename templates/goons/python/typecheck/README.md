@@ -7,10 +7,12 @@ Run one explicitly selected type checker against its native project configuratio
 **Prerequisites:** The selected locked group must supply the selected Pyright or ty command; its native configuration owns analysis policy.
 
 ```sh
-oh-goon templates init python/typecheck --kind goon --output ./workflow
+oh-goon init --template python/typecheck --kind goon --output ./workflow --draft
 ```
 
-Set `target.repository_id` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
+This explicit draft is NOT_READY and has no lock. Complete `target.repository` and required inputs or Agent/repair fields, then prepare it. For a complete first run, use [normal initialization](../../../README.md).
+
+Set `target.repository` and caller choices in `workflow/run.yml`. [`goon.yml`](goon.yml) owns the input contract; omitted choices keep its defaults. Then [inspect, validate, lock and run](../../../README.md#first-local-python-run).
 
 **Expected outputs:** The selected checker’s actual exit result.
 

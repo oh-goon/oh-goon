@@ -46,6 +46,7 @@ from oh_goon.integrations.fleet_plan_compilation import (
     load_extension_catalog,
 )
 from oh_goon.integrations.fleet_plan_preview import preview_plan
+from oh_goon.integrations.fleet_plan_source_snapshot import FleetPlanSourceSnapshot
 from oh_goon.services.fleet_plan_compiled_resolution import resolve_compiled_steps
 from oh_goon.services.fleet_plan_input_inspection import (
     InputInspection,
@@ -98,6 +99,7 @@ class FleetPlanResolver:
         *,
         containment_root: Path | None = None,
         compiled_overrides: Mapping[Path, CompiledExecutionTemplate] | None = None,
+        root_snapshot: FleetPlanSourceSnapshot | None = None,
         root_expected_name: str | None = None,
         locked_sources: tuple[LockedExecutionSource, ...] | None = (),
         acquire_sources: bool = False,
@@ -114,6 +116,7 @@ class FleetPlanResolver:
             path,
             containment_root=root,
             compiled_overrides=compiled_overrides,
+            root_snapshot=root_snapshot,
             goon_templates=self.goon_templates,
             root_expected_name=root_expected_name,
             locked_sources=locked_sources,
@@ -1051,7 +1054,7 @@ class FleetPlanResolver:
         plan_root = source_graph.containment_root
         if repository is None and plan_path.name == "goon.yml":
             # Repository-owned CI/CD Goons are their own source boundary. This keeps
-            # `goon lock` and direct inspection repository-aware without teaching
+            # `workflow prepare` and direct inspection repository-aware without teaching
             # shared Plans to guess a target repository.
             repository = plan_path.parent
         compiled = materialize_projected_inputs(

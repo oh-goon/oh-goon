@@ -40,7 +40,7 @@ raise SystemExit(main(sys.argv[2:]))
 
 
 @pytest.mark.process
-@pytest.mark.parametrize("command", ["list", "show", "init"])
+@pytest.mark.parametrize("command", ["list", "show"])
 def test_template_cli_runs_without_unselected_run_execution(tmp_path: Path, command: str) -> None:
     control = tmp_path / "control"
     environment = {
@@ -55,14 +55,11 @@ def test_template_cli_runs_without_unselected_run_execution(tmp_path: Path, comm
     )
     outputs = []
     for mode in ("normal", "without-run-execution"):
-        destination = tmp_path / mode
         arguments = (
             ["templates", "list", "--json"]
             if command == "list"
             else ["templates", command, "python/quality", "--kind", "plan"]
         )
-        if command == "init":
-            arguments.extend(["--output", str(destination)])
         with (
             (tmp_path / f"{mode}.stdout").open("w+b") as output,
             (tmp_path / f"{mode}.stderr").open("w+b") as errors,
@@ -82,23 +79,38 @@ def test_template_cli_runs_without_unselected_run_execution(tmp_path: Path, comm
             stderr = errors.read(65_537)
         assert len(stdout) <= 1_048_576 and len(stderr) <= 65_536
         assert completed.returncode == 0, stderr.decode("utf-8", errors="replace")
-        if command == "init":
-            assert (destination / "run.yml").is_file()
-            outputs.append(
-                {
-                    path.relative_to(destination): path.read_bytes()
-                    for path in destination.rglob("*")
-                    if path.is_file()
-                }
-            )
-        else:
-            outputs.append(json.loads(stdout) if command == "list" else stdout)
+        outputs.append(json.loads(stdout) if command == "list" else stdout)
         assert not control.exists()
     assert outputs[0] == outputs[1]
 
 
 @pytest.mark.process
-@pytest.mark.parametrize("command", ["inspect", "lock"])
+def test_basic_doctor_observes_tools_with_corrupt_database_and_unavailable_execution(tmp_path):
+    database = tmp_path / "corrupt.sqlite"
+    database.write_bytes(b"invalid SQLite bytes")
+    environment = {
+        name: value for name, value in os.environ.items() if not name.startswith("OH_GOON_")
+    }
+    environment.update(OH_GOON_DB=str(database), OH_GOON_LEAGUE_FILE=str(tmp_path / "league.yml"))
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", _FRESH_CLI, "without-run-execution", "doctor", "--json"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert len(result.stdout) < 65_536
+    report = json.loads(result.stdout)
+    assert report["scope"] == "tools" and report["status"] == "ready"
+    assert {tool["name"] for tool in report["tools"] if tool["required"]} == {"git", "uv"}
+    assert database.read_bytes() == b"invalid SQLite bytes"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["corrupt.sqlite"]
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("command", ["inspect", "prepare"])
 def test_stateless_cli_runs_without_unselected_web_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
 ) -> None:
@@ -121,9 +133,9 @@ def test_stateless_cli_runs_without_unselected_web_server(
         XDG_STATE_HOME=str(control / "state"),
     )
     arguments = (
-        ("config", "inspect", str(selected), "--json")
+        ("workflow", "inspect", str(selected), "--json")
         if command == "inspect"
-        else ("lock", str(selected))
+        else ("workflow", "prepare", str(selected))
     )
 
     def invoke(mode: str) -> bytes:

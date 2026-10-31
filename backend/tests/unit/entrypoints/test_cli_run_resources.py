@@ -12,13 +12,19 @@ import pytest
 
 import oh_goon.cli_run_resources as resource_cli
 from oh_goon.cli_run_resources import (
+    CapturedRunResourceHandoff,
     PreparedRunResourceHandoff,
     ResolvedCliState,
     RunResourceSignalForwarder,
     prepare_run_resource_handoff,
     restore_run_resource_handoff,
+    verify_run_resource_handoff,
 )
-from oh_goon.core.errors import ExecutionAuthorityDivergence, RunConfigurationInvalid
+from oh_goon.core.errors import (
+    ExecutionAuthorityDivergence,
+    FleetPlanInvalid,
+    RunConfigurationInvalid,
+)
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunFailure
 from oh_goon.core.models.run_admission import fleet_repository_scope
@@ -40,8 +46,8 @@ def _invocation(
 ) -> tuple[RunConfigurationSnapshot, ResolvedCliState, ResolvedRunResourceScope]:
     configuration = tmp_path / "run.yml"
     configuration.write_text(
-        "version: 1\nsource: {kind: file-plan, path: plan.yml}\n"
-        "target: {repository_id: actual-subject}\n"
+        "version: 2\nsource: {kind: file-plan, path: plan.yml}\n"
+        "target: {repository: ./actual-subject}\n"
         "resources: {cpu_millis: 1000, memory_mib: 512, max_processes: 128}\n",
         encoding="utf-8",
     )
@@ -136,6 +142,40 @@ def test_handoff_rejects_oversized_header_before_touching_descriptors() -> None:
         restore_run_resource_handoff(" " * 2049)
 
 
+@pytest.mark.parametrize("selection", ("sibling-file", "other-directory", "traversal"))
+def test_handoff_refuses_another_selection_before_native_scope_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str
+) -> None:
+    snapshot, state, scope = _invocation(tmp_path)
+    acknowledgement_read, acknowledgement_write = os.pipe()
+    captured = CapturedRunResourceHandoff(
+        snapshot,
+        state,
+        scope,
+        tmp_path / "started.json",
+        "sha256:" + "a" * 64,
+        acknowledgement_read,
+    )
+    monkeypatch.setattr(resource_cli, "restore_run_resource_handoff", lambda header: captured)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("A different selection must refuse before native scope observation")
+
+    monkeypatch.setattr(resource_cli, "verify_current_run_resource_scope", forbidden)
+    selected = {
+        "sibling-file": snapshot.path.with_name("another.yml"),
+        "other-directory": snapshot.path.parent / "other",
+        "traversal": snapshot.path.parent / "child" / "..",
+    }[selection]
+    try:
+        with pytest.raises(FleetPlanInvalid, match="another configuration"):
+            verify_run_resource_handoff("sealed-header", selected)
+        with pytest.raises(OSError):
+            os.fstat(acknowledgement_read)
+    finally:
+        os.close(acknowledgement_write)
+
+
 def test_resolved_state_preserves_caller_paths_and_explicit_sqlite_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -214,14 +254,18 @@ def test_private_transport_cleanup_does_not_mask_original_result(
 
 @pytest.mark.skipif(not atomic_execution_bytes_supported(), reason="Linux sealed FD unavailable")
 @pytest.mark.parametrize("private_terminal", (True, False), ids=("publish", "private-parent-lost"))
+@pytest.mark.parametrize("selection", ("file", "directory"))
 def test_real_control_publication_and_ack_with_physical_scope_boundary_mocked(
     tmp_path: Path,
     private_terminal: bool,
+    selection: str,
 ) -> None:
     snapshot, state, scope = _invocation(tmp_path)
     repository = RepositoryIdentity.model_validate({"path": tmp_path / "subject"})
     repository.path.mkdir()
     journal = Journal(LocalDatabase(state.database, journal_mode="DELETE"))
+    # The sealed capture remains authoritative after the original YAML is gone.
+    snapshot.path.unlink()
     child = """
 import json, os, sys
 from pathlib import Path
@@ -305,7 +349,7 @@ else:
             "-c",
             child,
             prepared.header,
-            str(snapshot.path),
+            str(snapshot.path if selection == "file" else snapshot.path.parent),
             expected.model_dump_json(),
             str(private_terminal).lower(),
             termination_requested=acknowledge_started,
