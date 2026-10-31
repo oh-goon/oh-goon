@@ -67,6 +67,11 @@ consumers. It distinguishes supported reachability from interfaces that reject
 the selection. It is a source-level census, not evidence that every native
 protocol, process crash cut or installed host has been exercised.
 
+The [requirements baseline below](#native-harness-requirements-baseline) rechecks
+these owners at source `82900fce` on 2026-10-31. Its new portable fixture result
+is recorded separately; this source review does not rerun or relabel the earlier
+installed-harness observations.
+
 | Entry and selected workload | Traced route and boundary | Conclusion |
 | --- | --- | --- |
 | CLI ordinary Plan commands and builtin Agent Steps | [CLI Plan ingress](../../backend/src/oh_goon/cli_runtime_plans.py) → `FleetPlanService.run` → resolver/frozen source when selected → `start_prepared_plan` → original Fleet lifecycle → `FleetPlanRunner` → `FleetPlanRunExecutor` → shared Step sequence and typed dispatch. Agent source/delivery is mandatory; generic resolution without its original capture rejects. | **CLEAN**, within these call edges: the workload adapters share the admitted Run/Step/attempt chain. |
@@ -616,3 +621,253 @@ Synthetic model/HTTP fixtures establish protocol and lifecycle behavior within
 their tested scope. Installed-model tests are separate from privileged custody
 proofs; they do not establish every native implementation or optional feature. This document
 does not promote any test result into APP, native-host or release certification.
+
+### Native harness requirements baseline
+
+The [HUG-21 source census](https://linear.app/hugloss/issue/HUG-21/reconcile-current-baseline-compatibility-inventory-51-requirements-and)
+reviewed [product source `82900fcedac678671cb4896b082e472caba8cf4d`](https://github.com/oh-goon/oh-goon/commit/82900fcedac678671cb4896b082e472caba8cf4d)
+on **2026-10-31** against the
+[canonical full requirements](https://linear.app/hugloss/document/oh-goon-native-harness-interchangeability-and-compatibility-removal-2a497c31c54b),
+document `28808050-b6e6-4bcc-bd27-ab1c74887c6f`, updated
+2026-10-27 15:46:03 UTC. The crosswalk covers its 51 OWN/REG/SWAP/LIFE/SEC/EVI
+requirements, G-01–G-11, rollback rules, D01–D15 and **Harness T01–T44**,
+including SP-01–SP-08. Harness T42–T44 are not Pi persistence's separate
+numbered test namespace.
+
+**Implemented** is a current source finding. **A evidence** locates deterministic
+fixtures, sometimes with real supervised children; a named test is not an
+execution result. **Partial**, **missing qualification**, **unsupported** and
+**N/A to this change** retain different meanings. Only the exact portable corpus
+below is a fresh result. Existing dated installed observations retain
+their recorded implementation, mode and environment; they are not new B/C PASS
+results for this source. No installed Codex/Pi/OpenCode implementation, real
+account or personal native credential store was exercised by this census.
+
+This extends the existing owner map. The [compatibility inventory][census-registry]
+remains the sole adaptation/removal catalog; runtime selection and original
+result owners do not consume this prose. No new runtime, version database,
+support bit, scheduler or qualification gate is added.
+
+#### Requirements and actual owners
+
+| Requirement | Current owner / evidence | Disposition and limit |
+| --- | --- | --- |
+| OWN-01 | Native CLI/service adapters; passive harness contract | Implemented. Native session/reasoning/authentication stay native; no transcript migration. [Contract fixtures][census-contract] and [receiver][census-receiver]. |
+| OWN-02 | Fleet lifecycle, supplied command runner, shared Step settlement | Implemented. [Settlement fixtures][census-settlement] retain physical facts; [owned service execution][census-service-execution] cannot publish success without terminal/cleanup proof. |
+| OWN-03 | Native provider resolver; frozen `ResolvedNativeAgent` and `AgentHarnessInput` | Implemented selection/binding. [Selection fixtures][census-selection] and contract identity mutants; effective native configuration-generation drift remains unqualified. |
+| OWN-04 | Typed review/proposal acceptance; independent verification | Implemented. [Role acceptance][census-role] rejects false CLEAN after failed native exit and untyped CLEAN after zero exit. A claim is not verification. |
+| OWN-05 | Native claims, command supervisor, Journal, campaign policy, read projections | Implemented distinct facts. [Journal replay tests][census-journal] and [campaign evidence][census-campaign]; transport clients are not lifecycle duplicates. |
+| OWN-06 | Passive core contract and narrow native adapters | Implemented; LEAVE ALONE. [X0 counterexamples/mutants][census-x0] protect one execution chain without banning legitimate clients or read models. |
+| REG-01 | [Canonical compatibility inventory][census-registry] | Implemented classifications: two temporary adaptations, four versioned constraints, permanent mappings/policy, retired routes and unqualified modes. |
+| REG-02 | Existing temporary-adaptation records and current caller source | Partial maintenance record. Gates/reasons/invariants/tests are recorded; explicit live-caller fields are not. The live callers are `execute_native_agent_step` → `NativeAgentEventParser.finish`, and `execute_codex_service_run` → `service_arguments`; the batch parser helper is not a live caller. |
+| REG-03 | Behavioral removal conditions in the canonical records | Implemented maintenance rule. Neither removal condition has new installed replacement proof; retain both adaptations. |
+| REG-04 | Existing upgrade/subtraction review | Implemented review obligation; no vendor upgrade is selected by this census. No fresh upgrade qualification is claimed. |
+| REG-05 | Existing removal gates and retained negative tests | N/A to removal in this change: zero adaptations, production branches or tests are removed. A green fixture run cannot authorize removal. |
+| REG-06 | Existing compatibility document; runtime resolver remains executable authority | Implemented; LEAVE ALONE. This crosswalk is an evidence index, not another adaptation catalog, version selector or admission table. |
+| REG-07 | Mode/environment-specific requalification of affected entries | Implemented review obligation; current installed upgrade combinations remain NOT_RUN. |
+| REG-08 | Existing source-change/test-removal review and X0 proof | Implemented maintenance safeguards. This census retains all existing protective tests; it runs no test-disable experiment. |
+| REG-09 | Source-only maintenance through existing docs/check owners | Implemented. No mandatory runtime command, serialized registry or prose gate is introduced. |
+| REG-10 | OpenCode completed-text and Codex reserved-directory candidates | RETAIN both: native terminal replacement and absent/populated reserved-directory replacement gates remain unsatisfied. Permanent mappings are not temporary workarounds. |
+| SWAP-01 | `cli_ai.py`; native provider resolver | Implemented explicit/default profile selection. [CLI selection tests][census-cli] do not grant another harness on failure. |
+| SWAP-02 | Existing conformance matrix; declared harness capabilities | Implemented independent dimensions; declaration compatibility is not installed execution/security proof. See [mode limits][census-registry]. |
+| SWAP-03 | Resolver, compatibility checks, OpenCode protected-execution refusal | Implemented pre-effect refusal. [Selection][census-selection], [service execution][census-service-execution] and [OpenCode tests][census-opencode] cover selected negative boundaries. |
+| SWAP-04 | Frozen executable/profile/thread selection | Implemented binding; [Codex continuation tests][census-codex] reject wrong/replaced identities. Whole native package and effective configuration-generation drift remain unqualified. |
+| SWAP-05 | `--handoff-from`; original Run readback and fresh admission | Implemented bounded untrusted prior-Run data, not native transcript continuation. [CLI handoff tests][census-cli] and [handoff projection][census-handoff]. |
+| SWAP-06 | Native mode-specific capability refusal | Implemented honest asymmetry. OpenCode service submission and cross-harness native-session migration are unsupported, not missing fallback implementations. |
+| SWAP-07 | `runtime/agent_providers.py` public selection snapshot | Implemented native settings/auth ownership. Selection tests reject native overrides without reading credential stores or duplicating native model inventories. |
+| SWAP-08 | Original Fleet Runs and independent verifier | Existing real-child [three-harness fixture][census-native-run] re-captures source and reopens Journal. It is A-level protocol-fixture proof, not a combined installed-harness chain. |
+| LIFE-01 | Parser → original command/Step settlement → Journal | Implemented orthogonal claim/exit/cleanup/result facts. Settlement tests preserve observed exit beside rejected cleanup. |
+| LIFE-02 | `NativeAgentEventParser.finish`; receiver; typed acceptors | Implemented terminal/error precedence. [Event tests][census-events] and receiver failure/unsettled-claim tests protect acceptance. |
+| LIFE-03 | Shared command quiescence and native producer cleanup | Implemented outer boundary; native detached-feature breadth remains unqualified. [Command tests][census-command] and receiver cleanup-before-launch tests are scoped evidence. |
+| LIFE-04 | Service transport closure versus original owned-daemon cancellation | Implemented distinction. OpenCode transport closure does not terminate/adopt an external server; owned daemon cleanup stays with the command owner. |
+| LIFE-05 | Frozen selection and connection-local Codex identity | Partial qualification. Lost-response/restart refusal exists; arbitrary live generation replacement/revocation remains unqualified. |
+| LIFE-06 | Codex request/thread/profile/turn correlation | Implemented correlation; wrong-resume tests exist. Two-live-Run interference and every concurrency combination remain unqualified. |
+| LIFE-07 | Original cancellation, command supervision and Step/Journal evidence | Implemented with selected race coverage. Complete prompt/compaction/publication/cleanup race combinations are not all qualified. |
+| LIFE-08 | Original recovery and durable campaign decision publication | Selected real controller-death fixtures exist in [review/repair tests][census-repair]. Exhaustive per-mode physical crash cuts remain unqualified. |
+| LIFE-09 | Native-owned session operations; ephemeral Pi product mode | Implemented no transcript repair. Installed persistence probes characterize native behavior without enabling product resume. |
+| LIFE-10 | Codex connection-local continuation; fresh-Run handoff | Cross-Run native-session adoption is unsupported/unqualified. It is not a baseline requirement to implement another session manager. |
+| LIFE-11 | Native configuration/store noninterference | Current ownership/refusal boundary implemented. Upgrade-preserves-personal-data and model-disappearance matrix remains unqualified. |
+| LIFE-12 | Original lifecycle transitions and uncertainty handling | Implemented transition rules with partial coverage. Terminal/refusal rows have A fixtures; reload/history/model-loss and broader physical cuts retain explicit gaps. |
+| SEC-01 | Authoring source capture and selected native-home separation | Scoped implementation. [Source privacy tests][census-privacy] reject private source before bytes/Run effects; [native-home capability tests][census-capabilities] cover aliases. Ordinary CLI has no universal store-exclusion claim. |
+| SEC-02 | Selected Codex service effective capability/canary checks | Scoped implementation and fixtures. Profile IDs/configured booleans alone do not attest effective grants; installed/environment qualification remains separate. |
+| SEC-03 | Selected store canaries, native MCP exclusion and source guards | Partial. Historical installed direct/symlink/subprocess canaries do not complete hardlink/traversal/sibling-CWD/API/plugin/global-event store denial. |
+| SEC-04 | Private endpoint paths, original daemon process, native thread binding | Partial implementation; transport-peer attestation and post-readiness rebind qualification are missing. Codex has no expected-peer/SO_PEERCRED enforcement. OpenCode's client validates version/positive PID; historical installed probes compare metadata PID with the original process and physical execution identity, not the actual transport peer. It admits no model work. |
+| SEC-05 | Original phase re-admission; immutable native thread/profile | Implemented outer effect boundary. Native effective-grant/configuration mutation during a retained session remains unqualified. |
+| SEC-06 | Existing ordinary/privileged profiles and qualification markers | Implemented separation. Strict Agent execution is unsupported; whole-Run CLI budgets exclude Agent/repair. No new privileged startup prerequisite. |
+| SEC-07 | Frozen delivery, provider/context and native continuation owners | Implemented context delivery with fixture and historical scoped installed evidence. Current live-provider, cross-environment and credential-separation qualification is NOT_RUN. |
+| SEC-08 | Bounded, sanitized native metadata and visible output | Implemented limits/redaction, not a generic native metadata proxy. OpenCode readiness is capped at 64 KiB; Codex visible output excludes reasoning and redacts before clipping. |
+| EVI-01 | Existing A/B/C and mode/environment distinctions | Implemented documentation boundary. Recorded installed results retain their original dates and scopes. |
+| EVI-02 | Frozen selection, original receipts, Step/attempt identity and result accounting | Evidence owners implemented. Only the exact selected portable corpus below is a fresh result; installed suites and mere linked test names are not. |
+| EVI-03 | Native byte/observation bounds and durable omissions | Implemented; event/contract/settlement fixtures preserve limits and unknown output. Bounded text is not complete-stream or verification authority. |
+| EVI-04 | Original Run/Step/attempt and fresh source/occurrence binding | Implemented; contract mutants and real-child handoff retain separate identities and earlier failed verification. |
+| EVI-05 | Original Journal/Game Tape plus CLI/API projections | Implemented shared read owners; complete same-native-Run cross-surface comparison is partial. Current public readback is `runs outputs/events/handoff`; retired `plan` command spelling in the requirements is historical. |
+| EVI-06 | Safe version/capability/endpoint refusal | Implemented selected safe diagnostics; complete harness/mode/actionable-next-step diagnostic acceptance remains unqualified. |
+| EVI-07 | Existing subtraction policy and retained negative tests | Implemented maintenance obligation. No adaptation/test deletion occurs here, so replacement A+B evidence is N/A to this change. |
+
+#### Adversarial vectors
+
+| Harness vector | Current evidence / review target | Qualification boundary |
+| --- | --- | --- |
+| T01 | [Events][census-events]: `test_pi_settled_is_required_after_agent_end_and_tool_errors_can_recover`, compaction nonterminal cases | A fixtures; Pi `agent_end` alone is not completion. |
+| T02 | Events: failed assistant/aborted loop with native exit zero | A fixtures for error/aborted/length; no native success promotion. |
+| T03 | Events: reconciled OpenCode completed text only after EOF/zero exit | A fixtures; temporary adaptation retained. |
+| T04 | Events: incomplete text/tools, stale cycle, truncated/malformed stream | A fixtures; missing physical exit cannot complete. |
+| T05 | Events: recovered Codex diagnostic then terminal success | A fixtures; diagnostic is not terminal failure by itself. |
+| T06 | Events: completion cannot erase failed turn/process | A fixtures; earlier text cannot establish success. |
+| T07 | [Journal][census-journal]: duplicate lifecycle no-op and conflicting replay refusal | A publication proof; complete post-commit native-frame race remains partial. |
+| T08 | Events and [passive contract][census-contract] byte/UTF-8/observation/role bounds | A fixtures; omission remains explicit. |
+| T09 | [Selection][census-selection]: copied public snapshot; frozen inference choice | Partial A; full two-live-Run profile/generation-change proof missing. |
+| T10 | [Codex transport][census-codex]: lost response/restart refusal | Partial A; arbitrary stale callback after concurrent replacement unqualified. |
+| T11 | Codex selected thread/profile, invalid exchange, wrong resume identity | A transport coverage; cross-Run native adoption unsupported. |
+| T12 | Codex restart rejection | Active prompt/compaction/approval/tool reload matrix remains unqualified. |
+| T13 | [OpenCode transport][census-opencode]: client closes only its own transport | A; installed server-preservation case is historical/current B NOT_RUN. |
+| T14 | [Owned service execution][census-service-execution]: dead-before-readiness/interrupted-preflight cases | Available A cuts, not selected here; the current corpus instead runs version and missing-terminal/cleanup cases. Late readiness and peer replacement breadth remain partial. |
+| T15 | Codex lost-turn-response test | A uncertain-acceptance refusal; no blind replay after restart. |
+| T16 | Command cancellation-wins and selected service/Step cancellation cases | Existing A race cases are mapped, but command-race/service-cancellation tests were NOT_RUN in this corpus; only the selected settlement file ran. Complete phase qualification remains open. |
+| T17 | [Review/repair][census-repair]: controller death during admission/process/apply | Available real-process A cases; not selected in this census; full native crash matrix incomplete. |
+| T18 | Review/repair: controller death around final publication | Available A cases, not selected here; child history does not invent campaign convergence. |
+| T19 | Crash fixtures discard stdout/reopen Journal; readback does not recover work | Available A evidence; lost transient text stays unavailable. |
+| T20 | [Pi persistence probe][census-pi-probe] and its recorded disposition | Missing/empty/torn-tail behavior is characterized historically. Product exact-open/persistent Pi and broad model-loss qualification remain unsupported/unqualified. |
+| T21 | [Source privacy][census-privacy]; selected historical installed synthetic-store canaries | Partial. No current B run or universal direct/alias/hardlink/traversal/CWD claim. |
+| T22 | [Capability checks][census-capabilities] and native MCP exclusion tests | Partial A; installed configured-MCP case is separate. Generic API/plugin/global-event private-store matrix remains unqualified. |
+| T23 | Private socket paths, original daemon ownership, bounded readiness and historical OpenCode metadata-to-owner PID comparisons | Transport-peer attestation and post-readiness rebind proof are missing. The historical PID/physical-execution observations and private path do not establish that peer boundary. |
+| T24 | Events/selection: owned transport/task/session/config argument refusal | A fixtures, including Pi refusal before prompt/native-resource access. |
+| T25 | [Installed context][census-context] and CLI/service compaction suites | Scoped historical B; current installed, other-mode and cross-environment proof NOT_RUN. |
+| T26 | [Real-child handoff][census-native-run]; [CLI selection/handoff][census-cli] | A sequential chain. First fixture Run is ATTENTION_REQUIRED with failed independent verification; fully FAILED prior-Run handling is unit coverage, not an installed three-harness chain. |
+| T27 | CLI bounds/malformed/recursive handoff and [handoff omissions][census-handoff] | Partial A. Wrapping is explicitly untrusted/non-authorizing; a distinct malicious permission/success-instruction injection case was not identified. |
+| T28 | [Typed role acceptance][census-role] and protected real-apply campaign fixture | Available A source/scope/preimage/regression protections; installed campaign qualification remains separate. |
+| T29 | OpenCode `test_protected_work_is_unavailable_before_any_submission` | Unsupported execution with A negative proof before/after readiness. |
+| T30 | Owned service execution version refusal; existing registry | Constraint/review evidence exists; no installed upgrade experiment selected. |
+| T31 | Existing removal gates and negative tests | N/A to this documentation change; no deliberate test-disable experiment or adaptation removal is claimed. |
+| T32 | Backend installed-suite selection guards; original native outcome accounting | An all-skipped/empty installed invocation remains unqualified even if raw pytest exits zero; selection guards are not an installed-result gate. Current B/C NOT_RUN; this corpus has zero skipped/deselected/resumed cases. |
+| T33 | Original CLI readback, API/Game Tape projections and lifecycle tests | Component A evidence; complete same-native-Run comparison across all surfaces remains partial. |
+| T34 | [X0][census-x0], retired-input refusal and registry retirement records | Retained source/refusal evidence; no removal in this change, so replacement proof N/A. |
+| T35 | Frozen provider snapshot; command stream and service diagnostic invariance tests | The frozen-provider subset ran. Command-stream and service diagnostic-invariance cases are mapped existing A cases, NOT_RUN here; no universal formatting-invariance claim. |
+| T36 | Executable-byte verification; contract source/execution identity mutants | A fixtures. Entrypoint hashing does not seal an entire imported native package. |
+| T37 | [Broker history][census-broker]: provider-owned references across broker lifetimes | Partial A, same synthetic provider/configuration and three reference shapes; live Conversations API and different-credential separation NOT_RUN. |
+| T38 | Shared command cleanup and selected native feature exclusion | Partial A outer boundary; optional detached native subagent/extension lifetime qualification remains open (HUG-107). |
+| T39 | Parser bounds/latching, physical exit precedence and typed acceptance | Protocol-origin REVIEW TARGET (HUG-108); no installed tool/plugin root-frame spoof demonstration or vulnerability claim. |
+| T40 | Opt-in live coding evidence | C refresh/expiry/logout/persistence NOT_RUN (HUG-109); no credential-store inspection. |
+| T41 | Historical Linux installed checks | WSL2/container/non-Linux parity NOT_RUN (HUG-110); no new ordinary privileged prerequisite. |
+| T42 | Existing three-harness fixture is sequential | Actual overlapping mixed-harness resource/cancel/Journal noninterference remains unqualified (HUG-122). |
+| T43 | Wheel/package smoke and source-checkout native tests are distinct | Exact installed-wheel native-Agent Run NOT_QUALIFIED (HUG-123/HUG-96). |
+| T44 | Codex MCP snapshot tests; historical configured-MCP campaign case | Partial A. Threadless discovery may start native MCP processes before thread disable; it is not effect-free prework (HUG-124). Current installed case NOT_RUN. |
+
+#### Baseline gaps and follow-up ownership
+
+| Gap | Current classification | Existing next owner |
+| --- | --- | --- |
+| G-01 | Partial A mixed-harness chain; installed combined proof missing | HUG-8 / HUG-48; existing original Run fixture. |
+| G-02 | OpenCode service execution UNSUPPORTED; readiness retained | Existing OpenCode capability refusal; no fallback project. |
+| G-03 | Frozen selection implemented; effective generation/restart breadth unqualified | HUG-28; original resolver and service clients. |
+| G-04 | Selected boundaries/canaries exist; complete native-store matrix unqualified | HUG-38; existing native policy/capability owners. |
+| G-05 | Real account refresh/expiry/persistence C NOT_RUN | HUG-109; opt-in non-secret native facts only. |
+| G-06 | Selected command/controller crash cuts; broad physical matrix incomplete | HUG-30 / HUG-34 / HUG-107; original process and recovery owners. |
+| G-07 | Historical Linux scope only; other hosts/strict contexts not inherited | HUG-110; original profiles and separately selected qualification. |
+| G-08 | Canonical registry/removal gates exist; LEAVE ALONE | HUG-9 / HUG-49; maintenance review, not runtime governance. |
+| G-09 | Distinct version/readiness/profile/capability accepting owners; no demonstrated new divergence | LEAVE ALONE unless a reachable counterexample is established; T23 remains a qualification gap. |
+| G-10 | X0/refusal/retirement protection exists; no removal justified | HUG-49; preserve source and test-removal review. |
+| G-11 | Bounds, omissions and original results implemented; non-vacuity remains scoped | HUG-52; empty/skipped/diagnostic evidence cannot qualify installed execution. |
+
+| Addendum | Harness vector | Existing issue | Preserved scope |
+| --- | --- | --- | --- |
+| SP-01 | T37 | HUG-106 | Provider-owned history; partial same-synthetic-provider A, no real/different-credential isolation claim. |
+| SP-02 | T38 | HUG-107 | Detached resources; shared process-tree proof is not every native extension lifetime. |
+| SP-03 | T39 | HUG-108 | Protocol-origin review target; do not treat shape-valid root JSONL as origin attestation. |
+| SP-04 | T40 | HUG-109 | Optional real-account lifecycle C NOT_RUN; no private-store reads. |
+| SP-05 | T41 | HUG-110 | Host-specific installed qualification remains NOT_RUN outside recorded Linux scope. |
+| SP-06 | Harness T42 | HUG-122 | Mixed-harness overlapping Runs remain unqualified; sequential handoff is different. |
+| SP-07 | Harness T43 | HUG-123 / HUG-96 | Installed-wheel native-Agent Run parity remains NOT_QUALIFIED. |
+| SP-08 | Harness T44 | HUG-124 / HUG-38 | Native MCP discovery has possible startup effects before thread exclusion. |
+
+#### Rollback and acceptance crosswalk
+
+| Rollback rule | Disposition | Boundary |
+| --- | --- | --- |
+| RB-01 | Implemented no-fallback boundary | Unknown selections and unqualified Codex service versions refuse before corresponding model work; no universal CLI-version compatibility promise. |
+| RB-02 | Partial qualification | Frozen executable/profile checks and restart refusal exist; arbitrary live package/configuration upgrades remain unqualified. |
+| RB-03 | N/A to removal here | Both temporary adaptations and their negative tests are retained; no native data is rewritten. |
+| RB-04 | Implemented selected uncertainty boundaries | Lost acceptance is nonretryable; original cleanup/Journal evidence persists. Broader native crash combinations remain unqualified. |
+
+| Acceptance | Current evidence / disposition | Remaining limit |
+| --- | --- | --- |
+| D01 | Owner map and X0 evidence; no second authority identified by this bounded review | Source classification plus selected A proof; not universal absence proof. |
+| D02 | Canonical compatibility registry retained | Existing dispositions remain scoped; REG-02 explicit-caller record completeness is partial. |
+| D03 | No workaround deleted | N/A to this census; both behavioral removal gates remain open. |
+| D04 | No runtime/parser/alias/version database introduced | Documentation-only change; selected X0 negatives pass at the reviewed baseline. |
+| D05 | Exact baseline/corpus/provenance recorded below | Only 551 selected portable instances are a fresh PASS; installed B/C NOT_RUN. |
+| D06 | Native claim/process/Step/cleanup distinctions preserved | Selected A fixtures pass; no blanket installed terminal qualification. |
+| D07 | Frozen identity, replay refusal and selected crash cases mapped | Full live generation/reload/crash matrix remains partial. |
+| D08 | Scoped canaries and explicit unsupported-mode refusals | Universal native-store/tool/peer qualification not complete. |
+| D09 | Fresh separate-Run handoff; no transcript migration | Current real-child A case passes; installed combined chain remains unqualified. |
+| D10 | Original Journal/Game Tape/read projections | Component evidence exists; complete native cross-surface matrix remains partial. |
+| D11 | Protective tests retained | No deletion/disable experiment; replacement proof N/A to this change. |
+| D12 | Focused meaningful boundary checks; complete portfolios daily | Current root policy and merge marker include necessary affected process proof. The test-guide sentence saying the fast loop excludes all process/scale work is stale; HUG-93 owns that guidance gap. |
+| D13 | Behavioral source review/portable proof bound to 82900fce; documentation checks apply after this edit | The baseline result is not relabeled as installed or whole-final-source qualification. Final PR checks are reported in the PR. |
+| D14 | Unsupported/unqualified modes remain explicit | OpenCode service execution, cross-Run native adoption, persistent Pi product mode and unselected environments are not promoted. |
+| D15 | Zero adaptations removed; two retained | This census supplies the requirement/vector/risk map; existing follow-up issues retain unresolved qualification. |
+
+#### Fresh portable evidence and subtraction
+
+The original resume-safe batch runner executed the selected corpus once, with
+one worker under the existing native **two-CPU test budget**, 90-second batch
+limits and a 300-second suite limit. Native collection admitted **551 instances
+in 13 files**; all 551 completed and passed in 18 batches, with **zero skipped,
+deselected, resumed, missing, duplicate or extra instances**, in 60.0 seconds.
+No certification/installed/live-account suite was selected. These are fixture
+results, including one real Bubblewrap-supervised three-harness chain, not
+installed Codex/Pi/OpenCode or production resource-budget qualification.
+
+The complete selected files were [native events][census-events],
+[passive harness contract][census-contract], [Step settlement][census-settlement],
+[native selection][census-selection], [service capabilities][census-capabilities],
+[OpenCode transport][census-opencode], [private source refusal][census-privacy]
+and [X0 mutations/counterexamples][census-x0]. Additional exact selectors covered
+Codex selected-thread/profile, wrong-resume, lost-response/restart and one-snapshot
+MCP exclusion; unqualified service version and missing terminal/cleanup;
+three provider-history reference shapes; duplicate/conflicting Journal replay;
+and `test_cross_harness_handoff_keeps_separate_runs_and_original_verification`.
+Other mapped tests, including controller-death, installed and live-account
+cases, were not silently added to this result.
+
+The original report and membership receipt bind source
+`sha256:caff6c640ce8ad1c1ca8ae984ed1f211231b4aa3003e40c45b2d27224e666228`,
+test plan `sha256:c868c4e307929fdde1c641e06234905de21dc294805d6a55b1c8aec364f6649c`
+and selected membership
+`sha256:84f8173140451cd0ad2d6948a7f4bc34a0766898eef73b54b8fc681e2b3cb383`.
+Scope: Linux 7.0.0-38-generic, CPython 3.14.8, uv 0.13.3. The native report's
+effective outcomes and collection partition were read back through the existing
+verification-result owner. The source and test files were unchanged during
+execution; subsequent edits are this documentation census. No APP, installed-host,
+release, WSL2/container or representative performance qualification follows.
+
+**Subtraction result:** zero production adaptations, branches, fixtures or tests
+removed. Retain OpenCode's completed-text/physical-exit adaptation and Codex's
+reserved-directory mapping until their existing falsifiable removal gates are
+proved with the selected installed replacement. OpenCode service readiness,
+transport closure, Journal, typed acceptance, source/privacy checks and
+independent verification remain legitimate separate responsibilities.
+
+[census-registry]: AGENT_HARNESS_COMPATIBILITY.md
+[census-contract]: ../../backend/tests/unit/core/test_agent_harness_contract.py
+[census-events]: ../../backend/tests/unit/integrations/test_agent_native_execution.py
+[census-selection]: ../../backend/tests/unit/runtime/test_agent_native_providers.py
+[census-settlement]: ../../backend/tests/unit/integrations/test_fleet_step_settlement.py
+[census-receiver]: ../../backend/tests/dependency_complete/test_fleet_plan_native_steps.py
+[census-service-execution]: ../../backend/tests/dependency_complete/test_agent_codex_service_execution.py
+[census-codex]: ../../backend/tests/dependency_complete/test_agent_codex_service.py
+[census-opencode]: ../../backend/tests/dependency_complete/test_agent_opencode_service.py
+[census-capabilities]: ../../backend/tests/dependency_complete/test_agent_codex_service_capabilities.py
+[census-role]: ../../backend/tests/unit/integrations/test_agent_review_execution.py
+[census-journal]: ../../backend/tests/unit/runtime/test_journal.py
+[census-campaign]: ../../backend/tests/unit/runtime/test_agent_campaign_journal.py
+[census-command]: ../../backend/tests/unit/engine/test_commands.py
+[census-cli]: ../../backend/tests/unit/entrypoints/test_cli_ai.py
+[census-handoff]: ../../backend/tests/unit/entrypoints/test_run5_original_handoff.py
+[census-native-run]: ../../backend/tests/integration/services/test_native_agent_run.py
+[census-repair]: ../../backend/tests/integration/services/test_agent_review_repair_loop.py
+[census-privacy]: ../../backend/tests/integration/services/test_codex_service_run_source_privacy.py
+[census-context]: ../../backend/tests/integration/services/test_native_codex_context.py
+[census-pi-probe]: ../../backend/tests/integration/services/test_native_pi_session_protocol.py
+[census-broker]: ../../backend/tests/dependency_complete/test_agent_inference_broker.py
+[census-x0]: ../../scripts/tests/test_ag00_canonical_agent_architecture.py
