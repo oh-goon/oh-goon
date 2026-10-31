@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
+from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.errors import InvalidRequest
@@ -14,21 +16,21 @@ from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 
 
 class _Dump:
-    def __init__(self, value):
+    def __init__(self, value: dict[str, object]) -> None:
         self.value = value
 
-    def model_dump(self, *, mode):
+    def model_dump(self, *, mode: str) -> dict[str, object]:
         assert mode == "json"
         return self.value
 
 
 class _OriginalRuns:
-    def __init__(self):
-        self.calls = []
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, ...]] = []
         self.reject = False
         self.non_plan_target = False
 
-    def get(self, run_id):
+    def get(self, run_id: str) -> SimpleNamespace:
         self.calls.append(("get", run_id))
         if self.reject:
             raise InvalidRequest("unknown Fleet Run")
@@ -50,7 +52,7 @@ class _OriginalRuns:
             outcome=FleetRunOutcome.SUCCESS,
         )
 
-    def agent_campaign(self, run_id):
+    def agent_campaign(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("campaign", run_id))
         if self.reject:
             raise InvalidRequest("Selected Run is not part of a review-repair campaign")
@@ -73,7 +75,7 @@ class _OriginalRuns:
             "findings": [],
         }
 
-    def events(self, run_id, after, *, limit=None):
+    def events(self, run_id: str, after: int, *, limit: int | None = None) -> SimpleNamespace:
         self.calls.append(("events", run_id, after, limit))
         return SimpleNamespace(
             run=SimpleNamespace(fleet_run_id=run_id),
@@ -92,7 +94,7 @@ class _OriginalRuns:
             },
         )
 
-    def game_tape_live_output(self, run_id, *, after):
+    def game_tape_live_output(self, run_id: str, *, after: int) -> SimpleNamespace:
         self.calls.append(("live-output", run_id, after))
         return SimpleNamespace(
             fleet_run_id=run_id,
@@ -109,12 +111,14 @@ class _OriginalRuns:
         )
 
 
-def _invoke(runs, *tail):
+def _invoke(runs: _OriginalRuns, *tail: str) -> int | None:
     args = build_parser().parse_args(["runs", *tail])
-    return run_plan_command(SimpleNamespace(runs=runs), args)
+    return run_plan_command(cast(ApplicationRuntime, SimpleNamespace(runs=runs)), args)
 
 
-def test_status_projects_existing_owner_outcome_and_identity(capsys):
+def test_status_projects_existing_owner_outcome_and_identity(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     runs = _OriginalRuns()
     assert _invoke(runs, "show", "run-x", "--json") == 0
     data = json.loads(capsys.readouterr().out)
@@ -129,7 +133,9 @@ def test_status_projects_existing_owner_outcome_and_identity(capsys):
     assert runs.calls == [("get", "run-x")]
 
 
-def test_status_text_keeps_same_projection_without_an_extra_read(capsys):
+def test_status_text_keeps_same_projection_without_an_extra_read(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     runs = _OriginalRuns()
     assert _invoke(runs, "show", "run-x") == 0
     assert "Progress: 2/2" in capsys.readouterr().out
@@ -137,7 +143,9 @@ def test_status_text_keeps_same_projection_without_an_extra_read(capsys):
 
 
 @pytest.mark.parametrize("as_json", [False, True])
-def test_campaign_readback_preserves_original_result_and_interrupt_uncertainty(capsys, as_json):
+def test_campaign_readback_preserves_original_result_and_interrupt_uncertainty(
+    capsys: pytest.CaptureFixture[str], as_json: bool
+) -> None:
     runs = _OriginalRuns()
     assert _invoke(runs, "campaign", "linked-run", *(["--json"] if as_json else [])) == 0
     output = capsys.readouterr().out
@@ -151,14 +159,18 @@ def test_campaign_readback_preserves_original_result_and_interrupt_uncertainty(c
     assert runs.calls == [("campaign", "linked-run")]
 
 
-def test_campaign_readback_rejects_a_run_without_campaign_authority(capsys):
+def test_campaign_readback_rejects_a_run_without_campaign_authority(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     runs = _OriginalRuns()
     runs.reject = True
     assert _invoke(runs, "campaign", "ordinary-run", "--json") == 2
-    assert "not part of" in json.loads(capsys.readouterr().out)["message"]
+    assert json.loads(capsys.readouterr().out)["code"] == "INVALID_REQUEST"
 
 
-def test_campaign_invocation_output_preserves_cancelled_before_admission(capsys):
+def test_campaign_invocation_output_preserves_cancelled_before_admission(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from oh_goon.cli_runtime_plans import _print_agent_repair_result
     from oh_goon.core.models.agent_repair import (
         AgentRepairBudget,
@@ -188,7 +200,9 @@ def test_campaign_invocation_output_preserves_cancelled_before_admission(capsys)
     assert "Inspect retained evidence:" not in text
 
 
-def test_events_preserves_original_sequence_and_revision_without_recomputation(capsys):
+def test_events_preserves_original_sequence_and_revision_without_recomputation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     runs = _OriginalRuns()
     assert _invoke(runs, "events", "run-x", "--after", "6", "--json") == 0
     data = json.loads(capsys.readouterr().out)
@@ -196,28 +210,32 @@ def test_events_preserves_original_sequence_and_revision_without_recomputation(c
     assert runs.calls == [("events", "run-x", 6, 100)]
 
 
-def test_events_text_preserves_same_cursor(capsys):
+def test_events_text_preserves_same_cursor(capsys: pytest.CaptureFixture[str]) -> None:
     runs = _OriginalRuns()
     assert _invoke(runs, "events", "run-x") == 0
     assert "Next sequence: 7" in capsys.readouterr().out
     assert runs.calls == [("events", "run-x", 0, 100)]
 
 
-def test_logs_unavailable_is_not_falsely_presented_as_empty_durable_history(capsys):
+def test_logs_unavailable_is_not_falsely_presented_as_empty_durable_history(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     runs = _OriginalRuns()
-    assert _invoke(runs, "logs", "run-x", "--after", "9", "--json") == 0
+    assert _invoke(runs, "logs", "run-x", "--after", "9", "--json") == 3
     data = json.loads(capsys.readouterr().out)
     assert data["state"] == "UNAVAILABLE" and data["available"] is False
     assert runs.calls == [("live-output", "run-x", 9)]
 
 
-def test_logs_text_explains_transient_retention(capsys):
+def test_logs_text_explains_transient_retention(capsys: pytest.CaptureFixture[str]) -> None:
     runs = _OriginalRuns()
-    assert _invoke(runs, "logs", "run-x") == 0
+    assert _invoke(runs, "logs", "run-x") == 3
     assert "Transient output unavailable" in capsys.readouterr().out
 
 
-def test_unknown_id_returns_error_without_disclosing_false_no_effects(capsys):
+def test_unknown_id_returns_error_without_disclosing_false_no_effects(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     runs = _OriginalRuns()
     runs.reject = True
     assert _invoke(runs, "show", "unknown", "--json") == 2
@@ -227,7 +245,9 @@ def test_unknown_id_returns_error_without_disclosing_false_no_effects(capsys):
 
 
 @pytest.mark.parametrize("command", ["logs", "events"])
-def test_invalid_cursor_rejected_by_cli_before_runtime(monkeypatch, command):
+def test_invalid_cursor_rejected_by_cli_before_runtime(
+    monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
     runs = _OriginalRuns()
     with pytest.raises(SystemExit) as exc:
         _invoke(runs, command, "run-x", "--after", "-1")
@@ -235,15 +255,17 @@ def test_invalid_cursor_rejected_by_cli_before_runtime(monkeypatch, command):
     assert runs.calls == []
 
 
-def test_readback_never_starts_plan_or_executor(capsys):
+def test_readback_never_starts_plan_or_executor(capsys: pytest.CaptureFixture[str]) -> None:
     runs = _OriginalRuns()
     runtime = SimpleNamespace(runs=runs, plans=SimpleNamespace())
     args = build_parser().parse_args(["runs", "show", "run-x", "--json"])
-    assert run_plan_command(runtime, args) == 0
+    assert run_plan_command(cast(ApplicationRuntime, runtime), args) == 0
     assert json.loads(capsys.readouterr().out)["fleet_run_id"] == "run-x"
 
 
-def test_status_other_fleet_run_target_has_no_plan_but_reuses_owner(capsys):
+def test_status_other_fleet_run_target_has_no_plan_but_reuses_owner(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     runs = _OriginalRuns()
     runs.non_plan_target = True
     assert _invoke(runs, "show", "recipe-run", "--json") == 0
@@ -253,7 +275,7 @@ def test_status_other_fleet_run_target_has_no_plan_but_reuses_owner(capsys):
     assert runs.calls == [("get", "recipe-run")]
 
 
-def test_event_cursor_replay_is_exact_not_auto_advanced(capsys):
+def test_event_cursor_replay_is_exact_not_auto_advanced(capsys: pytest.CaptureFixture[str]) -> None:
     runs = _OriginalRuns()
     assert _invoke(runs, "events", "run-x", "--after", "7", "--json") == 0
     assert json.loads(capsys.readouterr().out)["next_sequence"] == 7

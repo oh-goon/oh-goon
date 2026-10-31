@@ -119,7 +119,7 @@ def test_service_prepare_refuses_invalid_setup_before_effects(
             ]
         )
     assert result_code == 2
-    result = json.loads(capsys.readouterr().err)
+    result = json.loads(capsys.readouterr().out)
     assert result["status"] == "rejected" and result["error"]
 
 
@@ -361,7 +361,7 @@ def test_connect_rejects_incompatible_flags_before_native_effects(
     with no_service_effects():
         code = main(["agent", "service", "connect", "--json", *extra])
     assert code == 2
-    assert json.loads(capsys.readouterr().err)["status"] == "rejected"
+    assert json.loads(capsys.readouterr().out)["status"] == "rejected"
 
 
 def test_connect_refusal_never_claims_success_or_closed_transport(
@@ -390,5 +390,47 @@ def test_connect_refusal_never_claims_success_or_closed_transport(
         == 2
     )
     output = capsys.readouterr()
-    assert output.out == ""
-    assert json.loads(output.err)["status"] == "rejected"
+    assert output.err == ""
+    assert json.loads(output.out)["status"] == "rejected"
+
+
+@pytest.mark.parametrize("operation", ["prepare", "connect"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_service_refusal_keeps_typed_facts_without_raw_exception_or_notes(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    operation: str,
+    as_json: bool,
+) -> None:
+    import oh_goon.cli_agent_services as services
+    from oh_goon.integrations.agent_codex_service import NativeCodexCleanupIncomplete
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        error = NativeCodexCleanupIncomplete("PRIVATE_SERVICE_EXCEPTION_CANARY")
+        error.add_note("PRIVATE_SERVICE_NOTE_CANARY")
+        raise error
+
+    monkeypatch.setattr(
+        services,
+        "_connection_metadata" if operation == "connect" else "prepare_native_service_setup",
+        refuse,
+    )
+    arguments = ["agent", "service", operation, "--agent", "codex", "--socket", "/public.sock"]
+    if operation == "prepare":
+        arguments.extend(["--executable", "/public/codex"])
+    if as_json:
+        arguments.append("--json")
+    assert main(arguments) == 2
+    output = capsys.readouterr()
+    assert "PRIVATE_SERVICE_EXCEPTION_CANARY" not in output.out + output.err
+    assert "PRIVATE_SERVICE_NOTE_CANARY" not in output.out + output.err
+    if as_json:
+        report = json.loads(output.out)
+        assert output.err == ""
+        assert report["code"] == "NATIVE_CODEX_CLEANUP_INCOMPLETE"
+        assert report["retryable"] is False and report["execution_admitted"] is False
+        assert report["operation"] == operation
+        assert "connection_closed" not in report and "transport_cleanup" not in report
+    else:
+        assert output.out == ""
+        assert "NATIVE_CODEX_CLEANUP_INCOMPLETE" in output.err

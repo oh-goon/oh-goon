@@ -369,12 +369,14 @@ class RunResourceSignalForwarder:
 
 @contextmanager
 def original_run_resource_signals() -> Iterator[RunResourceSignalForwarder]:
+    from oh_goon.cli_result import is_default_cli_sigterm
+
     if (
         threading.current_thread() is not threading.main_thread()
         or not hasattr(os, "pidfd_open")
         or not hasattr(signal, "pidfd_send_signal")
         or signal.getsignal(signal.SIGINT) is not signal.default_int_handler
-        or signal.getsignal(signal.SIGTERM) != signal.SIG_DFL
+        or not is_default_cli_sigterm(signal.getsignal(signal.SIGTERM))
     ):
         raise FleetPlanInvalid("Whole-Run resources require the original Linux CLI signal owner")
     # Establish host support before any resource-scoped child can start work.

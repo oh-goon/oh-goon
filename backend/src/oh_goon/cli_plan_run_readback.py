@@ -8,15 +8,20 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
+import sys
+import time
 from itertools import islice
 from pathlib import PurePosixPath
 from typing import Any
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_plan_summary import configuration_summary
-from oh_goon.core.errors import FleetDomainError
+from oh_goon.cli_result import CliTermination
+from oh_goon.core.errors import FleetDomainError, InvalidRequest, RunNotFound
 from oh_goon.core.models.game_tape import GameTape, GameTapeStepExecution
+from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
 from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import GameTapeStatus
 
 
@@ -215,6 +220,92 @@ def _status(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     return 0
 
 
+def _history(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
+    """Render the original admission-revision page without serializing executable plans."""
+    repository_id = getattr(args, "repository_id", None)
+    plan_id = getattr(args, "plan_id", None)
+    page = runtime.runs.history(
+        limit=args.limit,
+        before_revision=getattr(args, "before_revision", None),
+        repository_id=repository_id,
+        plan_id=plan_id,
+    )
+    items = []
+    for item in page.items:
+        run = item.run
+        target = run.target
+        items.append(
+            {
+                "admitted_revision": item.admitted_revision,
+                "fleet_run_id": run.fleet_run_id,
+                "plan_id": target.plan.plan_id if isinstance(target, FleetPlanTarget) else None,
+                "plan_name": target.plan.name if isinstance(target, FleetPlanTarget) else None,
+                "source": run.source.value,
+                "status": run.status.value,
+                "outcome": item.outcome.value,
+                "progress": run.progress.model_dump(mode="json"),
+                "targets": [repository.model_dump(mode="json") for repository in run.targets],
+                "accepted_at": run.accepted_at.isoformat(),
+                "failure_identity": item.failure_identity.model_dump(mode="json")
+                if item.failure_identity is not None
+                else None,
+            }
+        )
+    result = {
+        "schema": "oh-goon.run-history/v1",
+        "journal_revision": page.journal_revision,
+        "scope": {"repository_id": repository_id, "plan_id": plan_id},
+        "items": items,
+        "next_before_revision": page.next_before_revision,
+    }
+    if args.as_json:
+        _print_json(result)
+    else:
+        print(f"Run history: journal revision {page.journal_revision}")
+        if repository_id is not None or plan_id is not None:
+            print(f"Scope: repository {repository_id or 'all'}; Plan {plan_id or 'all'}")
+        for item, row in zip(page.items, items, strict=True):
+            print(
+                f"{row['fleet_run_id']} | {row['status']} / {row['outcome']} | "
+                f"{row['plan_name'] or row['source']} | admitted revision {row['admitted_revision']}"
+            )
+            if row["plan_id"] is not None:
+                print(f"  Plan ID: {row['plan_id']}")
+            print(
+                "  Repositories: "
+                + ", ".join(
+                    f"{repository.name} ({repository.repository_id})"
+                    for repository in item.run.targets[:8]
+                )
+            )
+            if len(item.run.targets) > 8:
+                print(f"  {len(item.run.targets) - 8} additional repositories omitted; use --json.")
+        if not items:
+            print("No Runs in the selected scope.")
+        if page.next_before_revision is not None:
+            print(f"Continue with --before-revision {page.next_before_revision}")
+    return 0
+
+
+def _select_last_run(runtime: ApplicationRuntime, args: argparse.Namespace) -> None:
+    """Resolve one explicitly scoped historical identity through its original owner."""
+    if not getattr(args, "last", False):
+        return
+    if getattr(args, "fleet_run_id", None):
+        raise InvalidRequest("Select an exact Run ID or --last, never both")
+    repository_id = getattr(args, "repository_id", None)
+    plan_id = getattr(args, "plan_id", None)
+    if not repository_id or not plan_id:
+        raise InvalidRequest(
+            "--last requires --repository-id and --plan-id in the selected state root; "
+            "use 'runs list' to select an exact Run or scope"
+        )
+    page = runtime.runs.history(limit=1, repository_id=repository_id, plan_id=plan_id)
+    if not page.items:
+        raise RunNotFound("No Run matches the exact repository and Plan scope in this state root")
+    args.fleet_run_id = page.items[0].run.fleet_run_id
+
+
 def _events(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     # Preserve original journal cursor and revision; no second pagination owner.
     batch = runtime.runs.events(args.fleet_run_id, after=args.after, limit=args.limit)
@@ -233,20 +324,70 @@ def _events(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 def _logs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     # Live output is transient (ACTIVE/SEALED/UNAVAILABLE), NOT durable journal
     # evidence. The control plane alone determines retention and its cursor.
+    follow = getattr(args, "follow", False)
     batch = runtime.runs.game_tape_live_output(args.fleet_run_id, after=args.after)
     if args.as_json:
         _print_json(batch.model_dump(mode="json"))
     else:
         print(f"Fleet Run ID: {batch.fleet_run_id}")
         print(f"Live output: {batch.state}")
-        for chunk in batch.chunks:
-            print(
-                f"[{chunk.sequence} {chunk.repository_id}/{chunk.step_id} "
-                f"{chunk.stream}] {chunk.text}"
-            )
-        print(f"Next sequence: {batch.next_sequence}")
+        _print_log_batch(batch)
+        if follow:
+            try:
+                while batch.state == "ACTIVE":
+                    time.sleep(0.2)
+                    previous = batch
+                    batch = runtime.runs.game_tape_live_output(
+                        args.fleet_run_id, after=batch.next_sequence
+                    )
+                    if batch.chunks or (
+                        batch.state,
+                        batch.next_sequence,
+                        batch.retained_from_sequence,
+                        batch.dropped_chunk_count,
+                    ) != (
+                        previous.state,
+                        previous.next_sequence,
+                        previous.retained_from_sequence,
+                        previous.dropped_chunk_count,
+                    ):
+                        _print_log_batch(batch)
+            except KeyboardInterrupt as exc:
+                print(
+                    "Stopped following transient output; this observer requested no Run cancellation.",
+                    file=sys.stderr,
+                )
+                return 143 if isinstance(exc, CliTermination) else 130
         if not batch.available:
             print("Transient output unavailable; consult durable Run events/Game Tape.")
+    return 3 if batch.state == "UNAVAILABLE" else 0
+
+
+def _print_log_batch(batch: GameTapeLiveOutputBatch) -> None:
+    for chunk in batch.chunks:
+        print(
+            f"[{chunk.sequence} {chunk.repository_id}/{chunk.step_id} {chunk.stream}] {chunk.text}"
+        )
+    dropped = getattr(batch, "dropped_chunk_count", 0)
+    retained_from = getattr(batch, "retained_from_sequence", 0)
+    print(
+        f"Next sequence: {batch.next_sequence} | retained from: {retained_from} | "
+        f"dropped chunks: {dropped} | state: {batch.state}"
+    )
+
+
+def _explain(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
+    """Explain one original read cut, preserving settlement and unknown evidence."""
+    detail = runtime.runs.get(args.fleet_run_id)
+    result = run_handoff_projection(detail)
+    result["schema"] = "oh-goon.run-explanation/v1"
+    if args.as_json:
+        _print_json(result)
+    else:
+        print(f"Fleet Run ID: {detail.run.fleet_run_id}")
+        print(f"Status: {detail.run.status.value} | Outcome: {detail.outcome.value}")
+        print(f"Game Tape status: {detail.game_tape.status.value}")
+        print_run_completion(detail)
     return 0
 
 
@@ -596,7 +737,9 @@ def _campaign(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
 
 
 _READ_COMMANDS = {
+    "list": _history,
     "show": _status,
+    "explain": _explain,
     "status": _status,
     "events": _events,
     "logs": _logs,
@@ -612,17 +755,39 @@ def run_plan_readback(runtime: ApplicationRuntime, args: argparse.Namespace) -> 
     """Dispatch presentation only; do not interpret Run truth or start work."""
     try:
         command = args.runs_command if args.command == "runs" else args.plan_command
+        if command == "logs" and getattr(args, "follow", False) and args.as_json:
+            raise InvalidRequest(
+                "--follow cannot be combined with --json; read bounded JSON snapshots with --after "
+                "and the original next_sequence cursor"
+            )
+        _select_last_run(runtime, args)
         return _READ_COMMANDS[command](runtime, args)
-    except FleetDomainError as exc:
+    except (FleetDomainError, OSError) as exc:
+        unavailable = isinstance(exc, (RunNotFound, OSError))
+        code = type(exc).code if isinstance(exc, FleetDomainError) else "RUN_READ_UNAVAILABLE"
+        message = (
+            "Requested Run evidence is unavailable in this state root."
+            if unavailable
+            else "The Run readback request was refused."
+        )
+        action = (
+            "Use runs list in the selected state root and select an exact Run ID, or both exact "
+            "--repository-id and --plan-id for --last. Preserve retained state; this read grants "
+            "no repair, cancellation or replay authority. For logs, read bounded JSON snapshots "
+            "with --after or use text --follow while the original owner is active."
+        )
         if args.as_json:
             _print_json(
                 {
                     "schema": "oh-goon.plan-run-read-error/v1",
-                    "fleet_run_id": args.fleet_run_id,
+                    "fleet_run_id": getattr(args, "fleet_run_id", None),
                     "status": "error",
-                    "message": str(exc),
+                    "code": code,
+                    "message": message,
+                    "safe_next_action": action,
                 }
             )
         else:
-            print(str(exc))
-        return 2
+            print(f"Run readback refused: {code}")
+            print(action)
+        return 3 if unavailable else 2

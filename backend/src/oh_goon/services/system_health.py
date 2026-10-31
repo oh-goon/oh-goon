@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from subprocess import TimeoutExpired
 
 from oh_goon.core.models.background import BackgroundFailure
 from oh_goon.core.models.tool_health import (
@@ -10,7 +11,11 @@ from oh_goon.core.models.tool_health import (
     ToolHealth,
 )
 from oh_goon.core.vocabulary import ToolStatus
-from oh_goon.engine.command import run_command
+from oh_goon.engine.command import (
+    CommandOutputLimitExceeded,
+    CommandSupervisionTerminated,
+    run_command,
+)
 from oh_goon.services.runtime_safety import RuntimeSafetyService
 
 
@@ -45,15 +50,47 @@ class SystemHealthService:
     @classmethod
     def _inspect_tool(cls, name: str, *, required: bool) -> ToolHealth:
         try:
-            result = run_command(name, "--version")
+            result = run_command(
+                name,
+                "--version",
+                timeout=5,
+                max_capture_bytes_per_stream=8192,
+                require_process_group_quiescence=True,
+                parent_death_signal=True,
+            )
         except OSError:
             return cls._missing(name, required=required)
+        except (TimeoutExpired, CommandOutputLimitExceeded) as exc:
+            return BrokenToolHealth(
+                name=name,
+                required=required,
+                status=ToolStatus.BROKEN,
+                detail=(
+                    "Native version probe exceeded its deadline"
+                    if isinstance(exc, TimeoutExpired)
+                    else "Native version probe exceeded its output limit"
+                ),
+            )
+        except CommandSupervisionTerminated:
+            return BrokenToolHealth(
+                name=name,
+                required=required,
+                status=ToolStatus.BROKEN,
+                detail="Native version probe settlement is UNPROVEN",
+            )
+        if not result.supervisor.final_process_group_quiescent:
+            return BrokenToolHealth(
+                name=name,
+                required=required,
+                status=ToolStatus.BROKEN,
+                detail="Native version probe settlement is UNPROVEN",
+            )
         if result.returncode != 0:
             return BrokenToolHealth(
                 name=name,
                 required=required,
                 status=ToolStatus.BROKEN,
-                detail=result.stderr or None,
+                detail="Native version probe returned a nonzero exit status",
             )
         return ReadyToolHealth(
             name=name, required=required, status=ToolStatus.READY, version=result.stdout

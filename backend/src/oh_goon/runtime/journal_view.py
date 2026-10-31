@@ -340,9 +340,14 @@ class JournalReadView:
         from_at: datetime | None = None,
         to_at: datetime | None = None,
         plan_query: str | None = None,
+        plan_id: str | None = None,
     ) -> FleetRunHistoryPage:
         if limit < 1 or limit > 100:
             raise InvalidRequest("Fleet run history limit must be between 1 and 100")
+        if before_revision is not None and before_revision < 1:
+            raise InvalidRequest("Fleet run history before_revision must be positive")
+        if plan_id is not None and not plan_id.strip():
+            raise InvalidRequest("Fleet run history plan_id must not be empty")
         _validate_history_range(from_at, to_at)
         normalized_plan = plan_query.strip().casefold() if plan_query else ""
         candidates = []
@@ -355,6 +360,10 @@ class JournalReadView:
             if status is not None and run.status is not status:
                 continue
             if source is not None and run.source is not source:
+                continue
+            if plan_id is not None and (
+                not isinstance(run.target, FleetPlanTarget) or run.target.plan.plan_id != plan_id
+            ):
                 continue
             if repository_id is not None and all(
                 target.repository_id != repository_id for target in run.targets

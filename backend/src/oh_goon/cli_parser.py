@@ -6,6 +6,7 @@ from pathlib import Path
 from oh_goon import __version__
 from oh_goon.cli_parser_goons import add_goon_commands, add_init_command
 from oh_goon.cli_parser_plans import add_plan_commands, add_workflow_commands
+from oh_goon.cli_result import CliArgumentParser, CliVersionAction
 from oh_goon.core import engine_policy_defaults as policy_defaults
 from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.capability_registry import capability_definitions
@@ -16,10 +17,10 @@ from oh_goon.repository_tooling import _self_certification_plan_units as self_ce
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser: argparse.ArgumentParser = CliArgumentParser(
         prog="oh-goon", description="oh-goon local fleet maintenance and strict CI/CD"
     )
-    parser.add_argument("--version", action="version", version=__version__)
+    parser.add_argument("--version", action=CliVersionAction, nargs=0, const=__version__)
     subparsers = parser.add_subparsers(dest="command")
 
     add_init_command(subparsers)
@@ -30,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument(
         "--runtime",
         action="store_true",
-        help="Explicitly initialize and inspect the original runtime health owner",
+        help="Observe existing runtime health without initializing, repairing or recovering state",
     )
     doctor.add_argument("--json", action="store_true", dest="as_json")
     _add_agent_commands(subparsers)
@@ -56,9 +57,10 @@ def _add_agent_commands(subparsers: argparse._SubParsersAction[argparse.Argument
         "agent", help="Agent data operations, model providers and native service preparation"
     )
     commands = agent.add_subparsers(dest="agent_command", required=True)
-    from oh_goon.cli_agent_providers import add_provider_commands
+    from oh_goon.cli_agent_providers import add_native_setup_command, add_provider_commands
 
     add_provider_commands(commands)
+    add_native_setup_command(commands)
     from oh_goon.cli_agent_services import add_service_commands
 
     add_service_commands(commands)

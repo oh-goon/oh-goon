@@ -153,19 +153,40 @@ def _event_page_limit(value: str) -> int:
     return parsed
 
 
+def _admission_revision(value: str) -> int:
+    parsed = _nonnegative_cursor(value)
+    if parsed == 0:
+        raise argparse.ArgumentTypeError("admission revision must be positive")
+    return parsed
+
+
 def _add_run_readback_commands(
     plan_subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    """One exact Run identity; original Fleet owner supplies all projected facts."""
+    """Original Fleet history and readback retain their exact identity authority."""
+    history = plan_subparsers.add_parser(
+        "list", help="Page original Run history in the selected state root"
+    )
+    history.set_defaults(fleet_run_id=None, last=False)
+    history.add_argument("--repository-id", help="Exact recorded repository identity")
+    history.add_argument("--plan-id", help="Exact recorded Plan identity")
+    history.add_argument("--before-revision", type=_admission_revision)
+    history.add_argument("--limit", type=_event_page_limit, default=20)
+    history.add_argument("--json", action="store_true", dest="as_json")
     status = plan_subparsers.add_parser(
         "show", help="Read one durable Fleet Run projection by exact Run ID"
     )
-    status.add_argument("fleet_run_id")
+    _add_run_selector(status)
     status.add_argument("--json", action="store_true", dest="as_json")
+    explain = plan_subparsers.add_parser(
+        "explain", help="Explain original Run/Step outcomes, uncertainty and safe next actions"
+    )
+    _add_run_selector(explain)
+    explain.add_argument("--json", action="store_true", dest="as_json")
     events = plan_subparsers.add_parser(
         "events", help="Read original journal events using the original sequence cursor"
     )
-    events.add_argument("fleet_run_id")
+    _add_run_selector(events)
     events.add_argument("--after", type=_nonnegative_cursor, default=0)
     events.add_argument(
         "--limit",
@@ -177,8 +198,13 @@ def _add_run_readback_commands(
     logs = plan_subparsers.add_parser(
         "logs", help="Read retained transient Game Tape output (not durable Run truth)"
     )
-    logs.add_argument("fleet_run_id")
+    _add_run_selector(logs)
     logs.add_argument("--after", type=_nonnegative_cursor, default=0)
+    logs.add_argument(
+        "--follow",
+        action="store_true",
+        help="Follow only while the original live-output owner is active",
+    )
     logs.add_argument("--json", action="store_true", dest="as_json")
     export = plan_subparsers.add_parser(
         "export-artifact", help="Export one declared retained file from a recorded Run"
@@ -201,9 +227,10 @@ def _add_run_readback_commands(
         ("campaign", "Inspect retained intent and results by campaign ID or linked Run ID"),
     ):
         viewer = plan_subparsers.add_parser(command, help=help_text)
-        viewer.add_argument(
-            "fleet_run_id", metavar="CAMPAIGN_OR_RUN_ID" if command == "campaign" else None
-        )
+        if command == "campaign":
+            viewer.add_argument("fleet_run_id", metavar="CAMPAIGN_OR_RUN_ID")
+        else:
+            _add_run_selector(viewer)
         viewer.add_argument("--json", action="store_true", dest="as_json")
         if command in {"outputs", "tape", "handoff"}:
             viewer.add_argument(
@@ -214,3 +241,15 @@ def _add_run_readback_commands(
             viewer.add_argument("--artifact-limit", type=_artifact_limit)
             viewer.add_argument("--artifact-byte-budget", type=_artifact_bytes)
             viewer.add_argument("--artifact-time-budget-seconds", type=_artifact_seconds)
+
+
+def _add_run_selector(parser: argparse.ArgumentParser) -> None:
+    selected = parser.add_mutually_exclusive_group(required=True)
+    selected.add_argument("fleet_run_id", nargs="?", help="Exact recorded Run identity")
+    selected.add_argument(
+        "--last",
+        action="store_true",
+        help="Last original admission within the exact --repository-id and --plan-id scope",
+    )
+    parser.add_argument("--repository-id", help="Exact recorded repository identity for --last")
+    parser.add_argument("--plan-id", help="Exact recorded Plan identity for --last")
