@@ -14,6 +14,12 @@ flat membership. It retains source/configuration/environment identity and exact
 results. A nomination does not establish whole-owner coverage, and bounded
 producer qualifiers remain visible.
 
+Each workspace nomination uses one native Hashmarks observation. A stale
+contributor is reconciled outside its read scope, then the whole workspace
+observation is recomputed. Partial observations and required-check rows from a
+failed attempt are discarded; repeated drift or unavailable evidence fails
+without weakening selection or requiring a manually warmed index.
+
 The same admission is available locally through `make check` or `make test`.
 Use a focused owner test while editing; these front doors do not run unrelated
 complete suites. `VERIFY_BASE=<commit> make check` selects an explicit comparison.
