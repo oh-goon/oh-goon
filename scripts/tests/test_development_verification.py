@@ -688,3 +688,120 @@ def test_owning_readme_uses_required_policy_proof_with_real_source_and_nominatio
         f"NO_QUALIFIED_VERIFIER:{relative}"
         in owner.admit_change(repository, base="HEAD", nominator=stale).unverified
     )
+
+
+@pytest.mark.parametrize(
+    "relative",
+    (
+        "docs/development/REAL_LIFECYCLE_QA.md",
+        "docs/development/REAL_LIFECYCLE_QA.yml",
+    ),
+)
+def test_qa_policy_change_admits_actual_required_producer_checks(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, relative: str
+) -> None:
+    monkeypatch.setattr(owner, "canonical_source_identity", canonical_source_identity)
+    selected = repository / relative
+    selected.parent.mkdir(parents=True)
+    selected.write_text("policy: original qualification guidance\n", encoding="utf-8")
+    expected = (
+        *VERIFICATION_POLICY_TESTS,
+        "scripts/tests/test_real_lifecycle_qa_contract.py",
+    )
+    for path in expected:
+        check = repository / path
+        check.parent.mkdir(parents=True, exist_ok=True)
+        check.write_text(
+            "def test_policy_contract():\n    assert True\n", encoding="utf-8"
+        )
+    owner._git(repository, "add", ".")
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "qualification policy fixture",
+    )
+    selected.write_text("policy: updated qualification guidance\n", encoding="utf-8")
+    plan = owner.admit_change(repository, base="HEAD")
+    assert plan.changed_paths == (relative,)
+    assert plan.behavioral_status == "REQUIRED"
+    assert plan.policy_status == "REVIEW_REQUIRED"
+    assert plan.obligations == (
+        "verification-policy protection",
+        "real-lifecycle QA protection",
+    )
+    assert set(plan.pytest) == set(expected)
+    assert not plan.unverified
+    assert plan.source_identity == canonical_source_identity(repository)
+    assert plan.evidence["owner_coverage"] == "not-claimed"
+    checks = plan.evidence["required_checks"]
+    assert len(checks) == len(expected)
+    for projection in checks:
+        nomination = projection["nomination"]
+        assert nomination["available"] is True
+        assert nomination["runner_evidence"] == "pytest"
+        assert nomination["source_member_revision"]
+        assert nomination["verification_target"]["path"] in expected
+
+    def missing_qa(
+        root: Path, paths: tuple[str, ...], *, required: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
+        evidence = nominate_changed_verification(root, paths, required=required)
+        evidence["required_checks"] = [
+            row
+            for row in evidence["required_checks"]
+            if row["nomination"]["verification_target"]["path"] != expected[-1]
+        ]
+        return evidence
+
+    incomplete = owner.admit_change(repository, base="HEAD", nominator=missing_qa)
+    assert "VERIFICATION_POLICY_PROTECTION_UNAVAILABLE" in incomplete.unverified
+
+
+@pytest.mark.parametrize(
+    ("relative", "reason"),
+    (
+        ("docs/ordinary.md", "NO_QUALIFIED_VERIFIER"),
+        ("docs/development/REAL_LIFECYCLE_QA.extra.yml", "NO_QUALIFIED_VERIFIER"),
+        ("backend/tests/factories/qa.py", "SHARED_FIXTURE_CONSUMER_SCOPE_UNVERIFIED"),
+    ),
+)
+def test_qa_policy_protection_does_not_qualify_other_unknown_scope(
+    repository: Path, relative: str, reason: str
+) -> None:
+    qa = repository / "docs/development/REAL_LIFECYCLE_QA.md"
+    qa.parent.mkdir(parents=True)
+    qa.write_text("Current qualification policy.\n", encoding="utf-8")
+    unknown = repository / relative
+    unknown.parent.mkdir(parents=True, exist_ok=True)
+    unknown.write_text(
+        "def qa_fixture():\n    return 42\n"
+        if unknown.suffix == ".py"
+        else "proof: unqualified\n"
+        if unknown.suffix == ".yml"
+        else "```sh\nprintf verify\n```\n",
+        encoding="utf-8",
+    )
+
+    def nominate(
+        _root: Path, paths: tuple[str, ...], *, required: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            if "/tests/factories/" not in row["changed_path"]:
+                row.update(state="UNAVAILABLE", nominations=[])
+        evidence["required_checks"] = [
+            {"nomination": {"available": True, "verification_target": {"path": path}}}
+            for path in required
+        ]
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+    assert "scripts/tests/test_real_lifecycle_qa_contract.py" in plan.pytest
+    assert f"{reason}:{relative}" in plan.unverified
