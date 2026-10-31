@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -49,6 +50,72 @@ def test_capture_survives_relocation_and_transports_no_live_path(
     assert plan.steps[0].project_source == captured.identity
     assert "orders_pipeline.operations" not in plan.model_dump_json()
     assert str(project) not in plan.model_dump_json(exclude={"step_sources"})
+
+
+@pytest.mark.process
+def test_captured_dataset_relocates_without_exposing_values_in_public_identity(
+    project: Path, tmp_path: Path
+) -> None:
+    dataset = Path("src/orders_pipeline/data/official.json")
+    canary = "private-dataset-canary-should-not-be-public-metadata"
+    (project / ".gitignore").write_text(dataset.as_posix() + "\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "init", "--quiet", "--template=", str(project)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(project), "check-ignore", "--quiet", "--", dataset.as_posix()],
+        check=True,
+        capture_output=True,
+    )
+    (project / dataset).write_text(json.dumps({canary: "10.25"}), encoding="utf-8")
+    resolver = FleetPlanResolver()
+    graph = resolver.analyze_source(project / "goon.yml")
+    original_plan = resolver.resolve_source_graph(graph)
+    captured = graph.projects()[0]
+    original_lock = build_execution_lock(original_plan)
+
+    (project / dataset).write_text(json.dumps({canary: "30.10"}), encoding="utf-8")
+    changed_graph = resolver.analyze_source(project / "goon.yml")
+    changed_plan = resolver.resolve_source_graph(changed_graph)
+    changed_capture = changed_graph.projects()[0]
+    changed_lock = build_execution_lock(changed_plan)
+    assert captured.identity.content_sha256 != changed_capture.identity.content_sha256
+    with pytest.raises(FleetPlanInvalid, match="stale"):
+        verify_execution_lock(changed_lock, original_lock)
+    for plan, lock in ((original_plan, original_lock), (changed_plan, changed_lock)):
+        assert canary not in plan.model_dump_json()
+        assert canary not in lock.model_dump_json()
+
+    # The real Orders operation consumes each frozen delivery in a fresh native
+    # process. This qualifies resource capture, not installed-CLI Run admission.
+    reader = (
+        "from pathlib import Path; import runpy, sys; "
+        "operations = runpy.run_path(sys.argv[1]); "
+        "print(operations['transform'](operations['extract'](Path(sys.argv[2]))))"
+    )
+    for index, (source, total) in enumerate(((captured, "10.25"), (changed_capture, "30.10"))):
+        destination = tmp_path / f"delivery-{index}"
+        materialize_python_goon_project(source.archive, source.identity, destination)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                reader,
+                str(destination / "src/orders_pipeline/operations.py"),
+                str(destination / dataset),
+            ],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.stdout == total + "\n"
+        assert result.stderr == ""
+    assert json.loads((project / dataset).read_text(encoding="utf-8")) == {canary: "30.10"}
 
 
 @pytest.mark.parametrize("imported", [False, True])
