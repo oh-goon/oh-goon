@@ -4,6 +4,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+# Native current and historical states: proc_pid_stat(5), Linux man-pages.
+# https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html
+_LINUX_PROCESS_STATES = frozenset("RSDZTtWXxKPI")
+
 
 @dataclass(frozen=True, slots=True)
 class ProcessBirthIdentity:
@@ -66,33 +70,12 @@ def observe_process_birth(
     try:
         boot_id = (proc_root / "sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
         stat = (proc_root / str(target_pid) / "stat").read_text(encoding="utf-8").strip()
-    except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
+    except (OSError, UnicodeError):
         return None
-    if not boot_id:
+    observed = _parse_process_stat(stat, pid=target_pid)
+    if not boot_id or observed is None:
         return None
-    # /proc/<pid>/stat field 2 is `(comm)` and may contain spaces/parentheses.
-    # The final ')' terminates comm; the remaining tokens start at field 3.
-    close = stat.rfind(")")
-    if close < 0 or close + 2 > len(stat):
-        return None
-    head = stat[:close]
-    open_paren = head.find("(")
-    if open_paren <= 0:
-        return None
-    try:
-        stat_pid = int(stat[:open_paren].strip())
-    except ValueError:
-        return None
-    tail = stat[close + 1 :].strip().split()
-    # starttime is field 22. tail[0] is field 3, therefore index 19.
-    if len(tail) <= 19:
-        return None
-    try:
-        start_ticks = int(tail[19])
-    except ValueError:
-        return None
-    if stat_pid != target_pid:
-        return None
+    _, start_ticks = observed
     try:
         return ProcessBirthIdentity(pid=target_pid, boot_id=boot_id, start_ticks=start_ticks)
     except ValueError:
@@ -115,6 +98,27 @@ def observe_process_liveness(pid: int, *, proc_root: Path = Path("/proc")) -> bo
     weaker platform fallback without confusing it with positive Linux evidence.
     """
 
+    try:
+        state = _read_process_state(pid, proc_root=proc_root)
+    except FileNotFoundError:
+        return False
+    return None if state is None else state not in {"Z", "X", "x"}
+
+
+def observe_process_state(pid: int, *, proc_root: Path = Path("/proc")) -> str | None:
+    """Read one valid native state; missing or unreadable views remain unknown.
+
+    Unlike the legacy liveness projection, None includes an absent stat record.
+    Callers requiring kernel absence must establish that through their OS owner.
+    A later birth observation cannot explain why an earlier stat read was absent.
+    """
+    try:
+        return _read_process_state(pid, proc_root=proc_root)
+    except FileNotFoundError:
+        return None
+
+
+def _read_process_state(pid: int, *, proc_root: Path) -> str | None:
     if pid <= 0:
         raise ValueError("process pid must be positive")
     if not proc_root.is_dir():
@@ -122,14 +126,34 @@ def observe_process_liveness(pid: int, *, proc_root: Path = Path("/proc")) -> bo
     try:
         stat = (proc_root / str(pid) / "stat").read_text(encoding="utf-8").strip()
     except FileNotFoundError:
-        return False
-    except (NotADirectoryError, PermissionError, OSError):
+        raise
+    except (OSError, UnicodeError):
         return None
-    close = stat.rfind(")")
-    if close < 0 or close + 2 > len(stat):
+    observed = _parse_process_stat(stat, pid=pid)
+    return None if observed is None else observed[0]
+
+
+def _parse_process_stat(record: str, *, pid: int) -> tuple[str, int] | None:
+    """Validate the shared native header before interpreting positional fields."""
+    # comm may itself contain parentheses. Its final ')' ends field 2; state
+    # must remain field 3 or another numeric field could masquerade as birth.
+    opening = record.find("(")
+    close = record.rfind(")")
+    if (
+        opening <= 0
+        or close < opening
+        or record[:opening] != f"{pid} "
+        or record[close + 1 : close + 2] != " "
+    ):
         return None
-    tail = stat[close + 1 :].strip().split()
-    if not tail:
+    fields = record[close + 1 :].split()
+    # starttime is field 22; fields[0] is field 3, therefore index 19.
+    if len(fields) <= 19 or fields[0] not in _LINUX_PROCESS_STATES:
         return None
-    state = tail[0]
-    return state not in {"Z", "X", "x"}
+    try:
+        start_ticks = int(fields[19])
+    except ValueError:
+        return None
+    if start_ticks < 0:
+        return None
+    return fields[0], start_ticks

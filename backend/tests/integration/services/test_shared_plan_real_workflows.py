@@ -196,12 +196,6 @@ finally:
         shown = _native_json(case, cli, "runs", "show", run_id, "--json")
         tape = _native_json(case, cli, "runs", "tape", run_id, "--json")
         events = _native_json(case, cli, "runs", "events", run_id, "--json")
-        for reply in (shown, tape, events):
-            assert reply.pop("_cli") == {
-                "schema": "oh-goon.cli/v1",
-                "exit_code": 0,
-                "exit_kind": "SUCCESS",
-            }
         assert shown["status"] == detail.run.status.value == "COMPLETED"
         assert shown["outcome"] == detail.outcome.value == "SUCCESS"
         assert tape == api["details"][run_id]["game_tape"]

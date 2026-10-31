@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, cast
+from typing import BinaryIO, Literal
 
 if sys.platform == "win32":
     import msvcrt
@@ -19,6 +19,11 @@ else:
 from oh_goon.core.errors import FleetContentReferenceUnavailable, FleetPlanInvalid
 from oh_goon.core.path_authority import ensure_private_directory
 from oh_goon.core.path_layouts import ContentStorePathLayout
+from oh_goon.core.process_birth import (
+    ProcessBirthIdentity,
+    observe_process_birth,
+    observe_process_liveness,
+)
 from oh_goon.integrations.exact_file_write import prepared_text_file, replace_prepared_file
 
 STAGE_OWNER_SCHEMA = "oh-goon.content-stage-owner/v1"
@@ -156,13 +161,19 @@ def prune_orphan_staging(layout: ContentStorePathLayout, lock_path: Path) -> Sta
                     or payload.get("stage_name") != stage_name
                 ):
                     raise ValueError("invalid stage owner record")
-                pid = int(cast(int | str | float, payload["pid"]))
+                if type(payload["pid"]) is not int or payload["pid"] <= 0:
+                    raise ValueError("invalid stage owner pid")
+                pid = payload["pid"]
                 identity = str(payload["process_identity"])
             except (KeyError, TypeError, ValueError):
                 refused.append(stage_name)
                 continue
-            if process_identity(pid) == identity:
+            state = _process_owner_state(pid, identity)
+            if state == "live":
                 live.append(stage_name)
+                continue
+            if state == "unknown":
+                refused.append(stage_name)
                 continue
             _remove_gc_stage(stage, stage_name=stage_name)
             owner_path.unlink(missing_ok=True)
@@ -174,16 +185,21 @@ def prune_orphan_staging(layout: ContentStorePathLayout, lock_path: Path) -> Sta
             try:
                 if payload is None or payload.get("schema") != STAGE_OWNER_SCHEMA:
                     raise ValueError("invalid stage owner record")
-                pid = int(cast(int | str | float, payload["pid"]))
+                if type(payload["pid"]) is not int or payload["pid"] <= 0:
+                    raise ValueError("invalid stage owner pid")
+                pid = payload["pid"]
                 identity = str(payload["process_identity"])
             except (KeyError, TypeError, ValueError):
                 refused.append(owner_path.name)
                 continue
-            if process_identity(pid) == identity:
+            state = _process_owner_state(pid, identity)
+            if state == "live":
                 live.append(owner_path.name)
-            else:
+            elif state == "dead":
                 owner_path.unlink(missing_ok=True)
                 removed.append(owner_path.name)
+            else:
+                refused.append(owner_path.name)
     return StagingPruneResult(tuple(sorted(removed)), tuple(sorted(live)), tuple(sorted(refused)))
 
 
@@ -289,7 +305,12 @@ def reconcile_leases(root: Path) -> set[str]:
                 f"Fleet content-store GC refused because lease metadata is unreadable: {path.name}"
             )
         object_id, identity, pid = _validated_lease_record(path, payload)
-        if process_identity(pid) != identity:
+        state = _process_owner_state(pid, identity)
+        if state == "unknown":
+            raise FleetPlanInvalid(
+                f"Fleet content-store GC refused because lease process identity is unverified: {path.name}"
+            )
+        if state == "dead":
             path.unlink(missing_ok=True)
             continue
         active.add(object_id)
@@ -392,7 +413,9 @@ def _validated_lease_record(path: Path, payload: dict[str, object]) -> tuple[str
     object_id = str(payload.get("object_id", ""))
     owner_repository_id = str(payload.get("owner_repository_id", ""))
     try:
-        pid = int(cast(int | str | float, payload["pid"]))
+        if type(payload["pid"]) is not int or payload["pid"] <= 0:
+            raise ValueError("invalid lease owner pid")
+        pid = payload["pid"]
         identity = str(payload["process_identity"])
     except (KeyError, TypeError, ValueError) as exc:
         raise FleetPlanInvalid(
@@ -439,15 +462,53 @@ def process_identity(pid: int) -> str | None:
     if sys.platform != "linux":
         return f"pid:{pid}" if pid == os.getpid() else None
     try:
-        stat_text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-        start_ticks = stat_text.rsplit(")", 1)[1].split()[19]
-        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
-    except (OSError, IndexError):
+        birth = observe_process_birth(pid)
+    except UnicodeError:
+        birth = None
+    if birth is None:
         # A same-process lease remains live in restricted runtimes that do not
         # expose procfs. Never extend that fallback to another process: without
         # a start-time identity, PID reuse cannot be distinguished safely.
         return f"pid:{pid}" if pid == os.getpid() else None
-    return f"{boot_id}:{start_ticks}"
+    return f"{birth.boot_id}:{birth.start_ticks}"
+
+
+def _process_owner_state(pid: int, identity: str) -> Literal["live", "dead", "unknown"]:
+    """Apply native birth/liveness evidence without treating unreadability as death.
+
+    Existing content metadata uses boot-id:start-ticks or a weak same-process
+    fallback. Preserve that codec; a weak recorded identity cannot prove PID reuse.
+    """
+    if pid <= 0:
+        return "unknown"
+    weak_identity = identity == f"pid:{pid}"
+    if identity.startswith("pid:") and not weak_identity:
+        return "unknown"
+    if not weak_identity:
+        try:
+            boot_id, start_ticks = identity.rsplit(":", 1)
+            expected = ProcessBirthIdentity(pid=pid, boot_id=boot_id, start_ticks=int(start_ticks))
+        except ValueError:
+            return "unknown"
+    try:
+        observed = observe_process_birth(pid)
+        if not weak_identity and observed is not None:
+            return "live" if observed == expected else "dead"
+        alive = observe_process_liveness(pid)
+    except UnicodeError:
+        return "unknown"
+    if alive is False:
+        # An absent proc entry may be an unavailable view rather than a dead
+        # creator. Native kernel absence is required before disposing its bytes.
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return "dead"
+        except OSError:
+            return "unknown"
+    if weak_identity and pid == os.getpid():
+        return "live"
+    return "unknown"
 
 
 def publish_json_record_locked(path: Path, payload: dict[str, object]) -> None:

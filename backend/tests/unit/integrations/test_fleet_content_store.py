@@ -785,7 +785,7 @@ def test_content_stage_cleanup_protects_live_creator(tmp_path: Path) -> None:
     remove_owned_stage(stage)
 
 
-def test_content_stage_cleanup_removes_only_proven_dead_creator(
+def test_content_stage_cleanup_refuses_unobservable_creator(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = FleetContentStore(tmp_path / "stage-dead-store")
@@ -793,14 +793,19 @@ def test_content_stage_cleanup_removes_only_proven_dead_creator(
     stage.mkdir()
     (stage / "partial").write_text("copying", encoding="utf-8")
     monkeypatch.setattr(
-        "oh_goon.integrations.fleet_content_store_lifecycle.process_identity",
+        "oh_goon.integrations.fleet_content_store_lifecycle.observe_process_birth",
+        lambda _pid: None,
+    )
+    monkeypatch.setattr(
+        "oh_goon.integrations.fleet_content_store_lifecycle.observe_process_liveness",
         lambda _pid: None,
     )
 
     result = store.prune_orphan_staging()
 
-    assert stage.name in result.removed
-    assert not stage.exists()
+    assert result.removed == ()
+    assert stage.name in result.refused
+    assert stage.exists()
 
 
 def test_content_stage_cleanup_refuses_unowned_stage(tmp_path: Path) -> None:

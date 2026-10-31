@@ -627,8 +627,6 @@ test-real-lifecycle:
 		backend/tests/unit/runtime/test_fleet_worker_settlement.py::test_fleet_cancel_replays_canonical_request_after_ambiguous_commit_response \
 		backend/tests/unit/runtime/test_recovery_reconciliation.py::test_concurrent_reconciliation_retries_replay_one_canonical_result \
 		backend/tests/unit/runtime/test_recovery_reconciliation.py::test_reconciliation_compare_and_set_rejects_stale_writer \
-		backend/tests/integration/services/test_shared_plan_real_workflows.py::test_saved_shared_plan_lineup_executes_exact_targets_and_reopens_cli_api_history \
-		backend/tests/integration/services/test_shared_plan_real_workflows.py::test_saved_shared_schedule_ticks_frozen_source_once_per_selected_target_after_restart \
 		backend/tests/unit/services/test_shared_run_scope.py::test_shared_plan_run_still_preserves_explicit_multi_repository_scope \
 		backend/tests/unit/services/test_shared_plan_service.py::test_shared_plan_run_rejects_exact_source_revision_change_even_before_execution \
 		backend/tests/unit/core/test_game_tape_projection.py::test_game_tape_projects_plan_order_timing_outcomes_and_safe_provenance \

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -476,25 +477,33 @@ def storage_census(environment: dict[str, str] | None = None) -> StorageCensus:
 
 
 def measure_storage(path: Path | None) -> StorageMeasurement | None:
-    if path is None or not os.path.lexists(path):
+    """Observe logical entry sizes, refusing an incomplete filesystem walk."""
+    if path is None:
         return None
-    entries = 0
-    bytes_ = 0
-    stack = [path]
-    while stack:
-        current = stack.pop()
-        try:
-            stat = current.lstat()
-        except OSError:
-            continue
-        entries += 1
-        bytes_ += stat.st_size
-        if current.is_symlink() or not current.is_dir():
-            continue
-        try:
-            stack.extend(current.iterdir())
-        except OSError:
-            continue
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    entries = 1
+    bytes_ = metadata.st_size
+    if not stat.S_ISDIR(metadata.st_mode):
+        return StorageMeasurement(entries=entries, bytes=bytes_)
+    directories = [os.scandir(path)]
+    try:
+        while directories:
+            try:
+                entry = next(directories[-1])
+            except StopIteration:
+                directories.pop().close()
+                continue
+            metadata = entry.stat(follow_symlinks=False)
+            entries += 1
+            bytes_ += metadata.st_size
+            if stat.S_ISDIR(metadata.st_mode):
+                directories.append(os.scandir(entry.path))
+    finally:
+        for directory in directories:
+            directory.close()
     return StorageMeasurement(entries=entries, bytes=bytes_)
 
 
@@ -504,10 +513,11 @@ def prune_generic_storage(environment: dict[str, str] | None = None) -> StorageP
     env = dict(os.environ if environment is None else environment)
     database_path = database_path_for_environment(env)
     layout = ApplicationStatePathLayout.from_database(database_path)
+    # A known active workspace must refuse maintenance before unrelated cleanup
+    # starts. The original reconciler owns the durable execution-idle fence.
+    workspaces = reconcile_idle_run_workspaces(database_path)
     run_log_results = prune_run_log_tree(_state_home(env) / "oh-goon" / "run-logs")
     removed_run_logs = sum(len(result.removed_files) for result in run_log_results)
-
-    workspaces = reconcile_idle_run_workspaces(database_path)
 
     removed_staging: tuple[str, ...] = ()
     refused_staging: tuple[str, ...] = ()
