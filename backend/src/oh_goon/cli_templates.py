@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from oh_goon.cli_result import CliTermination
 from oh_goon.core.errors import FleetDomainError, FleetPlanInputRejected
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.template_identity import template_usage
@@ -206,6 +207,12 @@ def _run_initialization(args: argparse.Namespace) -> int:
             exc if isinstance(exc, Exception) else InterruptedError("Initialization interrupted")
         )
         report = dict(safe_plan_diagnostic(diagnostic))
+        if isinstance(exc, KeyboardInterrupt):
+            report["status"] = "interrupted"
+            report["code"] = "CLI_INTERRUPTED"
+            report["safe_next_action"] = (
+                "Inspect published authoring and retained target-registration facts before retrying; interruption does not authorize repair or rollback of committed state."
+            )
         if storage_failure:
             report["code"] = (
                 "RUNTIME_DATABASE_IDENTITY_LOST" if identity_lost else "RUNTIME_STORAGE_UNAVAILABLE"
@@ -221,7 +228,15 @@ def _run_initialization(args: argparse.Namespace) -> int:
         suggest_draft = not args.draft and not committed and isinstance(exc, FleetDomainError)
         if suggest_draft:
             report["safe_next_action"] = str(report["safe_next_action"]) + " " + draft_action
-        report["publication"] = "committed_before_failure" if committed else "not_published"
+        report["publication"] = (
+            "visible_durability_unverified"
+            if isinstance(exc, ExactPublicationDurabilityError)
+            else "committed_before_failure"
+            if published
+            else "unverified_after_interruption"
+            if isinstance(exc, KeyboardInterrupt)
+            else "not_published"
+        )
         registration = getattr(lock_args, "_target_registration", None)
         if registration is not None:
             report["target_registration"] = registration
@@ -239,7 +254,11 @@ def _run_initialization(args: argparse.Namespace) -> int:
             print("Publication: " + str(report["publication"]))
             if registration is not None:
                 print("Target registration retained: " + json.dumps(registration))
-        return 130 if isinstance(exc, KeyboardInterrupt) else 2
+        return (
+            (143 if isinstance(exc, CliTermination) else 130)
+            if isinstance(exc, KeyboardInterrupt)
+            else 2
+        )
 
 
 def run_template_command(args: argparse.Namespace) -> int:
@@ -257,7 +276,9 @@ def run_template_command(args: argparse.Namespace) -> int:
             for item in factory().catalog().templates
         ]
     except (FleetDomainError, OSError, UnicodeError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
+        from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
+
+        print_safe_plan_diagnostic(exc, as_json=bool(getattr(args, "as_json", False)))
         return 2
     if args.as_json:
         print(json.dumps({"schema": "oh-goon.template-catalog/v1", "templates": entries}, indent=2))

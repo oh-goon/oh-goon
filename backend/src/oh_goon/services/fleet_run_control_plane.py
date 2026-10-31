@@ -1047,6 +1047,7 @@ class FleetRunControlPlane:
         from_at: datetime | None = None,
         to_at: datetime | None = None,
         plan_query: str | None = None,
+        plan_id: str | None = None,
     ) -> FleetRunHistoryPage:
         return self._journal.read_view().run_history(
             limit=limit,
@@ -1058,6 +1059,7 @@ class FleetRunControlPlane:
             from_at=from_at,
             to_at=to_at,
             plan_query=plan_query,
+            plan_id=plan_id,
         )
 
     def overview(self) -> FleetRunOverview:

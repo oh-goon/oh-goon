@@ -21,11 +21,12 @@ from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashm
 from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
-    VERIFICATION_POLICY_TESTS,
     is_generated_contract_path,
     is_verification_policy_path,
     non_executable_documentation,
     require_native_pytest_pass,
+    required_policy_obligations,
+    required_policy_tests,
     required_static_obligations,
 )
 
@@ -119,7 +120,7 @@ def admit_change(
     authored = tuple(path for path in executable if not is_generated_contract_path(path))
     static = cast(set[_STATIC], required_static_obligations(executable))
     policy_paths = tuple(path for path in authored if is_verification_policy_path(path))
-    required = VERIFICATION_POLICY_TESTS if policy_paths else ()
+    required = required_policy_tests(policy_paths)
     evidence = (
         nominator(root, authored, required=required)
         if required
@@ -229,7 +230,7 @@ def admit_change(
         evidence=evidence,
         behavioral_status="REQUIRED" if executable else "NOT_APPLICABLE",
         policy_status="REVIEW_REQUIRED" if policy_paths else "ORDINARY",
-        obligations=("verification-policy protection",) if policy_paths else (),
+        obligations=required_policy_obligations(policy_paths),
     )
 
 

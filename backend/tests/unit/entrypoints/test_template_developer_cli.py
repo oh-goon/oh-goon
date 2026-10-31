@@ -9,7 +9,9 @@ from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 
 
-def test_catalog_and_source_are_exact_and_do_not_start_runtime(monkeypatch, capsys):
+def test_catalog_and_source_are_exact_and_do_not_start_runtime(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     import oh_goon.cli as cli
 
     monkeypatch.setattr(
@@ -26,5 +28,10 @@ def test_catalog_and_source_are_exact_and_do_not_start_runtime(monkeypatch, caps
     for kind, store in (("plan", PlanTemplateStore()), ("goon", GoonTemplateStore())):
         assert main(["templates", "show", "python/quality", "--kind", kind]) == 0
         assert capsys.readouterr().out == store.source("python/quality").content
-    assert main(["templates", "show", "python/not-present", "--kind", "plan"]) == 2
-    assert not capsys.readouterr().out
+    canary = "private-template-canary"
+    missing = f"python/{canary}"
+    assert main(["templates", "show", missing, "--kind", "plan"]) == 2
+    output = capsys.readouterr()
+    assert canary not in output.out + output.err
+    assert output.err == ""
+    assert "PLAN_RESOLUTION_REJECTED" in output.out

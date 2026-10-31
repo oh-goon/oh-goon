@@ -24,6 +24,7 @@ from oh_goon.cli_plan_run_readback import (
     run_plan_readback,
 )
 from oh_goon.cli_plan_summary import captured_workflow_summary
+from oh_goon.cli_result import CliTermination
 from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
 from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import AgentRepairBudget, AgentRepairResult
@@ -40,6 +41,7 @@ from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail, FleetRunStat
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.projections.agent_campaign import project_agent_campaign
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
+from oh_goon.integrations.exact_file_write import ExactPublicationDurabilityError
 from oh_goon.services.fleet_plan_resolution_context import AgentConnectionSelection
 from oh_goon.services.run_configuration import NormalizedRunConfiguration
 
@@ -103,17 +105,34 @@ def _export_artifact(runtime: ApplicationRuntime, args: argparse.Namespace) -> i
             repository_id=args.repository_id,
         )
     except (FleetDomainError, OSError, ValueError) as exc:
-        notes = list(getattr(exc, "__notes__", ()))
+        notes = getattr(exc, "__notes__", ())
+        publication = (
+            "VISIBLE_DURABILITY_UNVERIFIED"
+            if isinstance(exc, ExactPublicationDurabilityError)
+            else "NOT_CONFIRMED"
+        )
+        message = "Artifact export failed. Inspect the recorded Run, declared artifact, repository scope and destination; preserve any reported publication or cleanup evidence before retrying."
         if args.as_json:
             print(
                 json.dumps(
-                    {"schema": schema, "status": "error", "message": str(exc), "notes": notes}
+                    {
+                        "schema": schema,
+                        "status": "error",
+                        "code": "ARTIFACT_EXPORT_FAILED",
+                        "safe_next_action": message,
+                        "diagnostic_note_count": len(notes),
+                        "diagnostic_notes": "withheld_private_exception_text",
+                        "publication": publication,
+                    }
                 )
             )
         else:
-            print(str(exc))
-            for note in notes:
-                print(note)
+            print(message)
+            print(f"Publication: {publication}")
+            if notes:
+                print(
+                    "Additional publication/cleanup diagnostic notes are present; their private text is withheld."
+                )
         return 2
     result = {
         "schema": schema,
@@ -127,7 +146,7 @@ def _export_artifact(runtime: ApplicationRuntime, args: argparse.Namespace) -> i
         "byte_count": exported.byte_count,
         "reference_id": exported.reference_id,
         "cleanup_status": exported.cleanup_status,
-        "cleanup_failure": exported.cleanup_failure,
+        "cleanup_failure": "STAGING_CLEANUP_FAILED" if exported.cleanup_failure else None,
     }
     if args.as_json:
         print(json.dumps(result, sort_keys=True))
@@ -136,7 +155,7 @@ def _export_artifact(runtime: ApplicationRuntime, args: argparse.Namespace) -> i
         print(f"Recorded artifact: {exported.step_id}: {exported.artifact_path}")
         print(f"Verified: {exported.byte_count} bytes; sha256:{exported.sha256}")
         if exported.cleanup_failure is not None:
-            print("Export completed; private staging cleanup failed: " + exported.cleanup_failure)
+            print("Export completed; private staging cleanup failed: STAGING_CLEANUP_FAILED")
     return 0
 
 
@@ -153,12 +172,8 @@ def _run_result(
     }
 
 
-class _CliRunTermination(KeyboardInterrupt):
-    """A caller's default SIGTERM requests the original waited Run cancellation."""
-
-
 def _request_cli_run_termination(_signum: int, _frame: FrameType | None) -> None:
-    raise _CliRunTermination
+    raise CliTermination
 
 
 @contextmanager
@@ -357,7 +372,7 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         else:
             print(
                 "Plan invocation interrupted by SIGTERM."
-                if isinstance(interruption, _CliRunTermination)
+                if isinstance(interruption, CliTermination)
                 else "Plan invocation interrupted."
             )
             if admitted is not None:
@@ -369,7 +384,7 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 print("Execution status: " + (execution_status or "unobserved"))
                 print("Cleanup evidence: inspect durable Run handoff.")
                 print("Durable Run handoff argv: " + json.dumps(readback))
-        return 143 if isinstance(interruption, _CliRunTermination) else 130
+        return 143 if isinstance(interruption, CliTermination) else 130
     except (FleetDomainError, ValueError) as exc:
         if hasattr(args, "_run_configuration"):
             from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic

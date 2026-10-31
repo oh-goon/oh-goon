@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -16,7 +17,7 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 def _without_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     import oh_goon.cli as cli
 
-    def reject_runtime(**kwargs):
+    def reject_runtime(**kwargs: object) -> None:
         pytest.fail("Read-only Plan diagnostics must not construct ApplicationRuntime")
 
     monkeypatch.setattr(cli, "_build_application_runtime", reject_runtime)
@@ -30,18 +31,27 @@ def _resolver() -> FleetPlanResolver:
     return FleetPlanResolver(goon_templates=GoonTemplateStore())
 
 
-def test_diff_matches_single_original_semantic_projection_without_database(monkeypatch, capsys):
+def test_diff_matches_single_original_semantic_projection_without_database(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _without_runtime(monkeypatch)
     before = _quality()
     after = PlanTemplateStore().source("python/dependency-inventory").path
     expected = _resolver().diff(before, after)
     assert main(["plan", "diff", str(before), str(after), "--json"]) == 0
     actual = json.loads(capsys.readouterr().out)
+    assert actual.pop("_cli") == {
+        "schema": "oh-goon.cli/v1",
+        "exit_code": 0,
+        "exit_kind": "SUCCESS",
+    }
     assert actual == json.loads(expected.model_dump_json())
     assert actual["before_plan_id"] != actual["after_plan_id"]
 
 
-def test_diff_rejects_invalid_plan_without_runtime_or_lock_write(monkeypatch, capsys, tmp_path):
+def test_diff_rejects_invalid_plan_without_runtime_or_lock_write(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     _without_runtime(monkeypatch)
     bad = tmp_path / "invalid.yml"
     bad.write_text("version: 1\ngoons:\n- missing/canonical-owner\n", encoding="utf-8")
@@ -52,24 +62,31 @@ def test_diff_rejects_invalid_plan_without_runtime_or_lock_write(monkeypatch, ca
     assert not (tmp_path / "goon.lock").exists()
 
 
-def test_original_service_delegates_semantic_diff_to_same_resolver():
+def test_original_service_delegates_semantic_diff_to_same_resolver() -> None:
     from oh_goon.services.fleet_plans import FleetPlanService
 
     resolver = _resolver()
-    service = FleetPlanService(resolver, None, None, None, None)
+    unused = cast(Any, None)
+    service = FleetPlanService(resolver, unused, unused, unused, unused)
     before = _quality()
     after = PlanTemplateStore().source("python/dependency-inventory").path
     assert service.diff(before, after) == resolver.diff(before, after)
 
 
 def test_check_matches_resolver_and_covers_invalid_contract_without_runtime(
-    monkeypatch, capsys, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     _without_runtime(monkeypatch)
     good = _quality()
     expected = _resolver().check(good)
     assert main(["plan", "check", str(good), "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == json.loads(expected.model_dump_json())
+    actual = json.loads(capsys.readouterr().out)
+    assert actual.pop("_cli") == {
+        "schema": "oh-goon.cli/v1",
+        "exit_code": 0,
+        "exit_kind": "SUCCESS",
+    }
+    assert actual == json.loads(expected.model_dump_json())
     bad = tmp_path / "invalid.yml"
     bad.write_text("version: 1\nsteps: unexpected\n", encoding="utf-8")
     assert main(["plan", "check", str(bad), "--json"]) == 2
@@ -79,8 +96,8 @@ def test_check_matches_resolver_and_covers_invalid_contract_without_runtime(
 
 
 def test_directory_check_maintains_original_syntax_only_semantics_without_runtime(
-    monkeypatch, capsys, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     _without_runtime(monkeypatch)
     (tmp_path / "valid.yml").write_text(
         "version: 1\ngoons:\n- python/quality\n",
