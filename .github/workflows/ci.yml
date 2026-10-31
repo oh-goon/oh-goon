@@ -42,9 +42,9 @@ jobs:
           version: "0.12.5"
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
-          cache-suffix: py312-dev-quality
-      - name: Materialize only the Python verification environment
-        run: uv sync --project backend --frozen --group dev --group quality
+          cache-suffix: py312-dev-quality-build
+      - name: Materialize only the Python verification and build environment
+        run: uv sync --project backend --frozen --group dev --group quality --group build
       - name: Prepare the native two-CPU check boundary
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted

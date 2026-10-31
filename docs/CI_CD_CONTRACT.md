@@ -64,8 +64,10 @@ name **draft-feedback** and means **FOCUSED / NOT_FULLY_VERIFIED**.
 
 Only needed toolchains are materialized with native committed locks. Python-only
 work does not install/build the frontend. Node/npm is prepared only for admitted
-frontend obligations. Native uv/npm download caches are distinct from PASS
-receipts; virtual environments, mutable databases and test outcomes are not
+frontend obligations. Python verification consumes the committed `dev`, `quality`
+and `build` groups, matching `make backend-install`; native wheel tests reuse
+that prepared interpreter and build backend. Native uv/npm download caches are
+distinct from PASS receipts; virtual environments, mutable databases and test outcomes are not
 shared as source-independent proof. Selected Python tests retain the original
 hosted native runtime view and its owned SDK-overlay cleanup through
 `ci_native_runtime.sh`; static/docs checks do not mount it. CPU budgets and
