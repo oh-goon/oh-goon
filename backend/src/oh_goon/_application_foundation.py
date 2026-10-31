@@ -3,11 +3,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
 
 from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.capability_registry import capability_definitions
 from oh_goon.core.models.diagnostic import DiagnosticEvent
+from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.ports.capability_runner import CapabilityRunner
 from oh_goon.engine.command import CommandTerminal
@@ -88,6 +92,8 @@ class RuntimeFoundation:
     standard_process_isolation: ProcessIsolationBackend | None = None
     git_service: GitService | None = None
     startup_purpose: RuntimeStartupPurpose = "application"
+    run_resource_scope: ResolvedRunResourceScope | None = None
+    run_resource_envelope: RunResourceEnvelopeEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +236,8 @@ def build_runtime_foundation(
     standard_process_isolation: ProcessIsolationBackend | None = None,
     git_service: GitService | None = None,
     startup_purpose: RuntimeStartupPurpose = "application",
+    run_resource_scope: ResolvedRunResourceScope | None = None,
+    run_resource_envelope: RunResourceEnvelopeEvidence | None = None,
 ) -> RuntimeFoundation:
     """Compose the selected local or strict Fleet execution profile.
 
@@ -247,6 +255,18 @@ def build_runtime_foundation(
         )
     if standard_local and fleet_provisioner is not None:
         raise TrustProtocolError("standard host execution cannot use deployment Fleet enrollment")
+    if (run_resource_scope is None) != (run_resource_envelope is None):
+        raise TrustProtocolError("Run resources require one complete observed native binding")
+    if run_resource_scope is not None:
+        from oh_goon.integrations.run_resource_envelope import verify_current_run_resource_scope
+
+        if not standard_local or run_resource_envelope is None:
+            raise TrustProtocolError("Run resources support ordinary local CLI execution only")
+        current = verify_current_run_resource_scope(
+            run_resource_scope, handoff_sha256=run_resource_envelope.handoff_sha256
+        )
+        if current != run_resource_envelope:
+            raise TrustProtocolError("Run resource scope changed before runtime construction")
     # Repository evidence has one required producer in every execution profile.
     # Reject an unavailable runtime before opening state or recovering effects.
     require_loaded_hashmarks_runtime()
@@ -368,4 +388,6 @@ def build_runtime_foundation(
         standard_process_isolation=standard_process_isolation,
         git_service=git,
         startup_purpose=startup_purpose,
+        run_resource_scope=run_resource_scope,
+        run_resource_envelope=run_resource_envelope,
     )

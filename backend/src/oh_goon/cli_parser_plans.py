@@ -89,6 +89,7 @@ def add_workflow_commands(
         action="store_true",
         help="Accept presentation only; grants no execution or repair authority",
     )
+    run.add_argument("--_resource-handoff", help=argparse.SUPPRESS)
     run.add_argument(
         "--fleet-run-id",
         help="Exact fresh Run identity enrolled by the original in-process deployment owner",

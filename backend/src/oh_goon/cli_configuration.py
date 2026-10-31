@@ -33,6 +33,20 @@ from oh_goon.services.run_configuration import (
 from oh_goon.services.run_configuration_inspection import inspect_run_configuration
 
 
+def require_run_repair_authorization(
+    snapshot: RunConfigurationSnapshot, *, authorized: bool
+) -> None:
+    """Reject invalid per-Run consent before source acquisition or a resource launch."""
+    if snapshot.selection.repair is None and authorized:
+        raise FleetPlanInvalid(
+            "--authorize-repair requires an explicit repair selection in run.yml"
+        )
+    if snapshot.selection.repair is not None and not authorized:
+        raise FleetPlanInvalid(
+            "Bounded repair needs fresh per-Run authorization: run run.yml --authorize-repair"
+        )
+
+
 def prepare_configuration(
     args: argparse.Namespace,
     *,
@@ -46,14 +60,7 @@ def prepare_configuration(
     snapshot = snapshot or load_run_configuration(args.configuration)
     repair = snapshot.selection.repair
     if args.command == "run":
-        if repair is None and args.authorize_repair:
-            raise FleetPlanInvalid(
-                "--authorize-repair requires an explicit repair selection in run.yml"
-            )
-        if repair is not None and not args.authorize_repair:
-            raise FleetPlanInvalid(
-                "Bounded repair needs fresh per-Run authorization: run run.yml --authorize-repair"
-            )
+        require_run_repair_authorization(snapshot, authorized=args.authorize_repair)
     targets = targets or resolve_run_configuration_targets(snapshot, target_root=target_root)
     read_only = args.command == "workflow" and args.workflow_command in {"inspect", "validate"}
     register = bool(getattr(args, "register_target", False))
@@ -87,6 +94,12 @@ def prepare_configuration(
     args._run_configuration = selected
     agent = snapshot.selection.agent
     agent_source = graph.has_agent_source_contract()
+    if snapshot.selection.resources is not None and (
+        agent_source or isinstance(graph.root.compiled.execution, CicdExecutionPolicy)
+    ):
+        raise FleetPlanInvalid(
+            "Whole-Run resources require ordinary local execution without Agent Steps"
+        )
     if len(selected.repositories) > 1 and agent_source:
         raise FleetPlanInvalid("Agent execution requires a single repository")
     if (agent is not None) != agent_source:

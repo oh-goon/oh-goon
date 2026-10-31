@@ -20,6 +20,7 @@ from oh_goon.core.models.run_launch import (
     ApplicationLaunchReceipt,
     UnmanagedApplicationLaunchReceipt,
 )
+from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
@@ -176,6 +177,9 @@ class DirectFleetExecutionAdmission(ImmutableModel):
 
     kind: Literal["direct"] = "direct"
     rerun_from_run_id: str | None = Field(default=None, min_length=1)
+    resource_envelope: RunResourceEnvelopeEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class StrictFleetExecutionAdmission(ImmutableModel):
@@ -245,6 +249,12 @@ def fleet_rerun_parent(execution: FleetExecutionAdmission) -> str | None:
 def _validate_execution_admission(
     target: OperationTarget | None, execution: FleetExecutionAdmission
 ) -> None:
+    if (
+        isinstance(execution, DirectFleetExecutionAdmission)
+        and execution.resource_envelope is not None
+        and not isinstance(target, FleetPlanTarget)
+    ):
+        raise ValueError("Whole-Run resources require original Fleet Plan execution")
     if _is_strict_cicd_target(target) != isinstance(execution, StrictFleetExecutionAdmission):
         raise ValueError(
             "Strict Fleet CI/CD targets require strict execution admission and other targets require direct admission"
@@ -318,6 +328,12 @@ def _validate_execution_admission_run(
 ) -> None:
     if execution.rerun_from_run_id == fleet_run_id:
         raise ValueError("Fleet rerun provenance cannot reference the same run")
+    if (
+        isinstance(execution, DirectFleetExecutionAdmission)
+        and execution.resource_envelope is not None
+        and execution.resource_envelope.fleet_run_id != fleet_run_id
+    ):
+        raise ValueError("Run resource envelope must belong to the same Fleet run")
     if isinstance(execution, StrictFleetExecutionAdmission):
         if execution.placement.executor_capacity.fleet_run_id != fleet_run_id:
             raise ValueError(

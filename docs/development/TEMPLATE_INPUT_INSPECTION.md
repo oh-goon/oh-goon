@@ -128,6 +128,59 @@ the evidence. A successful contract inspection does not establish installation
 or execution. Default inspection retains its no-network behavior and uses
 existing exact pins.
 
+## Limit a local Run
+
+For a trusted-local, waited CLI Run on Linux, add an optional budget to
+`run.yml`:
+
+```yaml
+resources:
+  cpu_millis: 2000
+  memory_mib: 2048
+  max_processes: 128
+```
+
+The example caps the aggregate at two CPUs of execution time, 2 GiB of memory
+and 128 native tasks. The memory limit disables swap for this Run. All selected
+repositories share that budget, including source acquisition, project setup
+and parallel Steps. Increasing repository concurrency does not multiply the
+budget. CPU quotas control available CPU time; they do not pin execution to
+particular cores. Native task accounting includes threads.
+
+The scope contains the executing CLI and its descendants. A bounded launcher
+outside it captures the invocation, streams output and records native
+settlement; it does not acquire sources or execute the workflow. Its overhead,
+the systemd user manager and other applications are outside this Run budget.
+
+Omit individual fields to inherit their available capacity. Omitting
+`resources` retains ordinary execution without adding a product default.
+An empty mapping is invalid. Accepted ranges are 100–64000 CPU milliseconds,
+64–262144 MiB and 16–4096 tasks.
+
+This selection requires the local systemd user manager and cgroup v2 with the
+requested controllers. Before acquiring executable sources or starting the
+runtime, the CLI starts the same invocation in one native scope and verifies
+its actual limits. Existing private caller limits must remain enforced; a
+scope migration that would abandon one refuses before application work. Follow
+the reported prerequisite or run in an explicitly selected compatible context.
+There is no uncapped fallback.
+
+The budget applies to `run`, which waits for completion. Background execution,
+Schedules, Agent/repair workflows and independently isolated strict, remote or
+deployment execution do not yet accept this selection. A Plan whose resolved
+execution mode is incompatible refuses before application effects. Locking
+and inspection remain their existing separate commands.
+
+To run it again, use the same `oh-goon run ./workflow/run.yml` command. History
+reruns refuse a budgeted Run until they can create and verify a fresh native
+envelope; they cannot silently repeat it without its limits.
+
+Run and Game Tape evidence retain the admitted native scope, requested limits
+and observed kernel ceilings. Final native accounting and cleanup are separate
+from the workload result. Unavailable accounting remains `INCOMPLETE`; it does
+not turn a failed workload into success or change a successful Run's recorded
+outcome. See [observability ownership](../OBSERVABILITY.md#resource-analytics).
+
 ## Source and value owners
 
 Choose exactly one source:

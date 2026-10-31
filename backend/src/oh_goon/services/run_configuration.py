@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import sqlite3
@@ -9,10 +10,10 @@ import stat
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import yaml
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 from yaml.tokens import AliasToken, AnchorToken, TagToken
 
 from oh_goon.core.errors import (
@@ -20,6 +21,7 @@ from oh_goon.core.errors import (
     FleetPlanSourceAcquisitionRequired,
     RunConfigurationInvalid,
 )
+from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.caller_input_file import CallerInputFileIdentity
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.models.git_sources import LockedExecutionSource
@@ -46,6 +48,16 @@ if TYPE_CHECKING:
     from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
     from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
     from oh_goon.services.locations import LocationService
+
+MAX_RUN_CONFIGURATION_BYTES = 65536
+MAX_RUN_CONFIGURATION_HANDOFF_BYTES = 256 * 1024
+
+
+class _RunConfigurationHandoff(ImmutableModel):
+    schema_version: Literal["run-configuration-snapshot/v1"] = "run-configuration-snapshot/v1"
+    selection: RunConfiguration
+    content_base64: str = Field(max_length=4 * ((MAX_RUN_CONFIGURATION_BYTES + 2) // 3))
+    identity: CallerInputFileIdentity
 
 
 class _RunYamlLoader(yaml.SafeLoader):
@@ -454,6 +466,44 @@ def require_run_configuration_registration_target(target: RunConfigurationTarget
             diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
             fields=("target.repository",),
         )
+
+
+def encode_run_configuration_snapshot(snapshot: RunConfigurationSnapshot) -> bytes:
+    """Serialize the original captured selection; this payload grants no execution authority."""
+    if (
+        len(snapshot.content) > MAX_RUN_CONFIGURATION_BYTES
+        or hashlib.sha256(snapshot.content).hexdigest() != snapshot.identity.sha256
+    ):
+        raise RunConfigurationInvalid("Captured run configuration bytes differ from their identity")
+    payload = (
+        _RunConfigurationHandoff(
+            selection=snapshot.selection,
+            content_base64=base64.b64encode(snapshot.content).decode("ascii"),
+            identity=snapshot.identity,
+        )
+        .model_dump_json(exclude_computed_fields=True)
+        .encode("utf-8")
+    )
+    if len(payload) > MAX_RUN_CONFIGURATION_HANDOFF_BYTES:
+        raise RunConfigurationInvalid("Captured run configuration handoff exceeds its bound")
+    return payload
+
+
+def decode_run_configuration_snapshot(payload: bytes) -> RunConfigurationSnapshot:
+    """Verify bounded transport without rereading or reinterpreting caller YAML."""
+    if len(payload) > MAX_RUN_CONFIGURATION_HANDOFF_BYTES:
+        raise RunConfigurationInvalid("Captured run configuration handoff exceeds its bound")
+    try:
+        captured = _RunConfigurationHandoff.model_validate_json(payload)
+        content = base64.b64decode(captured.content_base64, validate=True)
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        raise RunConfigurationInvalid("Captured run configuration handoff is invalid") from exc
+    if (
+        len(content) > MAX_RUN_CONFIGURATION_BYTES
+        or hashlib.sha256(content).hexdigest() != captured.identity.sha256
+    ):
+        raise RunConfigurationInvalid("Captured run configuration bytes differ from their identity")
+    return RunConfigurationSnapshot(captured.selection, content, captured.identity)
 
 
 def load_run_configuration(path: Path) -> RunConfigurationSnapshot:

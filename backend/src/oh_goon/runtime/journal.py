@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
+
+from pydantic import Field
 
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.errors import InvalidRunTransition, JournalConflict
@@ -17,6 +19,7 @@ from oh_goon.core.models.agent_repair import (
     AgentRepairResult,
     AgentRepairStopReason,
 )
+from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
@@ -32,6 +35,7 @@ from oh_goon.core.models.run import (
     FleetRunState,
 )
 from oh_goon.core.models.run_admission import (
+    DirectFleetExecutionAdmission,
     ExplicitRepositoryScope,
     FleetRepositoryScope,
     FleetRunAdmissionIntent,
@@ -45,8 +49,13 @@ from oh_goon.core.models.run_events import (
     RunCancelRequestedEvent,
     RunCompletedEvent,
     RunFailedEvent,
+    RunResourcesObservedEvent,
     RunStartedEvent,
     StorageMaintenanceRecordedEvent,
+)
+from oh_goon.core.models.run_resources import (
+    RunResourceEnvelopeEvidence,
+    RunResourceEnvelopeObservation,
 )
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
@@ -59,7 +68,7 @@ from oh_goon.core.vocabulary import (
     FleetRunTerminalIntent,
     OperationAction,
 )
-from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.database import ExistingDatabaseAppendContext, LocalDatabase
 from oh_goon.runtime.journal_admission_validation import (
     _require_valid_readmission,
     _require_valid_rerun,
@@ -82,6 +91,20 @@ from oh_goon.runtime.journal_view import JournalReadView
 
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_step_execution import StepLifecycleObserver
+
+
+class RunResourceObservationContext(ImmutableModel):
+    """Compact terminal child cut; never a substitute for original Run admission."""
+
+    schema_version: Literal["run-resource-observation/v1"] = "run-resource-observation/v1"
+    database: ExistingDatabaseAppendContext
+    expected: RunResourceEnvelopeEvidence
+    journal_revision: int = Field(ge=1)
+    journal_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    last_run_sequence: int = Field(ge=2)
+    terminal_status: Literal[
+        FleetRunStatus.COMPLETED, FleetRunStatus.CANCELLED, FleetRunStatus.FAILED
+    ]
 
 
 def _admitted_event(
@@ -694,6 +717,78 @@ class Journal:
             )
             project_fleet_run_detail([*events, candidate], view.operation)
             self._facts.append_run_event(connection, candidate)
+
+    def capture_run_resource_observation_context(
+        self, expected: RunResourceEnvelopeEvidence
+    ) -> RunResourceObservationContext:
+        """Capture the final verified child cut after its last runtime write."""
+        from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
+
+        with self._database.transaction() as connection:
+            view = self._facts.read_view(connection)
+            detail = view.required_run_detail(expected.fleet_run_id)
+            if (
+                not isinstance(detail.execution, DirectFleetExecutionAdmission)
+                or detail.execution.resource_envelope != expected
+            ):
+                raise InvalidRunTransition(
+                    "Native resource observation has no matching original admission"
+                )
+            if not detail.run.status.terminal:
+                raise InvalidRunTransition("Run resource context requires a terminal original Run")
+            if detail.resource_observation is not None:
+                raise InvalidRunTransition("Run resource observation is already recorded")
+            if RepositoryEffectAttemptStore(self._database).by_fleet_run_in(
+                connection, expected.fleet_run_id
+            ) or any(report.resource_settlement == "UNRESOLVED" for report in detail.operations):
+                raise InvalidRunTransition("Run resource context requires settled original effects")
+            events = view.run_events(expected.fleet_run_id).events
+            revision, fact_hash = self._facts.current_head(connection)
+            if revision != view.revision:
+                raise JournalConflict("Run resource context differs from its verified Journal cut")
+            return RunResourceObservationContext(
+                database=self._database.capture_append_context(connection),
+                expected=expected,
+                journal_revision=revision,
+                journal_hash=fact_hash,
+                last_run_sequence=events[-1].sequence,
+                terminal_status=cast(
+                    Literal[
+                        FleetRunStatus.COMPLETED, FleetRunStatus.CANCELLED, FleetRunStatus.FAILED
+                    ],
+                    detail.run.status,
+                ),
+            )
+
+    @staticmethod
+    def record_run_resource_observation_from_context(
+        context: RunResourceObservationContext,
+        observation: RunResourceEnvelopeObservation,
+    ) -> None:
+        """Append one final observation without runtime startup or global history reads."""
+        expected = context.expected
+        if (
+            observation.fleet_run_id != expected.fleet_run_id
+            or observation.unit_name != expected.unit_name
+            or observation.invocation_id != expected.invocation_id
+        ):
+            raise InvalidRunTransition(
+                "Native resource observation differs from original admission"
+            )
+        candidate = RunResourcesObservedEvent(
+            event_type=FleetRunEventType.RUN_RESOURCES_OBSERVED,
+            sequence=context.last_run_sequence + 1,
+            fleet_run_id=expected.fleet_run_id,
+            observation=observation,
+        )
+        with LocalDatabase.existing_append_transaction(context.database) as connection:
+            JournalFactStore.append_run_event_at_head(
+                connection,
+                candidate,
+                session_id=context.database.session_id,
+                expected_revision=context.journal_revision,
+                expected_hash=context.journal_hash,
+            )
 
     def commit_effect_reconciliation_in(
         self,

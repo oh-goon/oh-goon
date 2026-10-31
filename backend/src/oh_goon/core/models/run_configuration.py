@@ -11,6 +11,7 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.git_sources import GitSourceSelection
 from oh_goon.core.template_identity import canonical_template_key
 
@@ -147,6 +148,9 @@ class RunConfiguration(_SelectionModel):
     inputs: tuple[tuple[str, PlanInputValue], ...] = Field(default=(), max_length=64)
     agent: RunAgentSelection | None = None
     repair: RunRepairSelection | None = None
+    resources: CicdResourcePolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @field_validator("version", mode="before")
     @classmethod
@@ -180,6 +184,11 @@ class RunConfiguration(_SelectionModel):
         self.caller_inputs()
         if self.repair is not None and self.agent is None:
             raise ValueError("repair requires an explicit agent selection")
+        if self.resources is not None:
+            if all(value is None for value in self.resources.model_dump().values()):
+                raise ValueError("resources requires at least one numeric resource cap")
+            if self.agent is not None or self.repair is not None:
+                raise ValueError("whole-Run resources do not support Agent or repair execution")
         if len(self.target.selected_paths()) > 1 and (
             isinstance(self.source, RepositoryGoonSelection)
             or self.agent is not None

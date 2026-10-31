@@ -100,6 +100,8 @@ def _build_fleet_services(
         fleet_prework=foundation.fleet_prework,
         fleet_provisioner=foundation.fleet_provisioner,
         standard_local_fleet=standard,
+        run_resource_scope=foundation.run_resource_scope,
+        run_resource_envelope=foundation.run_resource_envelope,
     )
     execution = FleetRunExecution(
         lifecycle,

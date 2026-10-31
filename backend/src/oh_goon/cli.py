@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+import sys
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from oh_goon._application_foundation import RuntimeStartupPurpose
+    from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
     from oh_goon.engine.git import GitService
     from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
+    from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
     from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
 from oh_goon.application import ApplicationRuntime
@@ -153,10 +156,19 @@ def _build_application_runtime(
     startup_purpose: RuntimeStartupPurpose = "application",
     as_json: bool = False,
     readback_id: str | None = None,
+    run_resource_scope: ResolvedRunResourceScope | None = None,
+    run_resource_envelope: RunResourceEnvelopeEvidence | None = None,
 ) -> ApplicationRuntime | None:
     try:
         if startup_purpose == "observation":
             return ApplicationRuntime.build(startup_purpose="observation")
+        if run_resource_scope is not None or run_resource_envelope is not None:
+            return ApplicationRuntime.build(
+                standard_local=standard_local,
+                run_resource_scope=run_resource_scope,
+                run_resource_envelope=run_resource_envelope,
+                startup_purpose=startup_purpose,
+            )
         if fleet_provisioner is not None:
             return ApplicationRuntime.build(fleet_provisioner=fleet_provisioner)
         if startup_purpose == "workflow":
@@ -334,6 +346,8 @@ def main(
     if args.command is None:
         parser.print_help()
         return 0
+    resource_handoff = None
+    resource_evidence = None
     if fleet_provisioner is not None:
         from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 
@@ -390,11 +404,46 @@ def main(
         return _prepare_registered_workflow(args)
 
     if hasattr(args, "configuration"):
-        from oh_goon.cli_configuration import prepare_configuration
+        from oh_goon.cli_configuration import (
+            prepare_configuration,
+            require_run_repair_authorization,
+        )
         from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
+        from oh_goon.services.run_configuration import load_run_configuration
 
         try:
-            prepare_configuration(args)
+            if getattr(args, "_resource_handoff", None) is not None:
+                if fleet_provisioner is not None:
+                    raise FleetDomainError(
+                        "Deployment execution cannot restore a local resource handoff"
+                    )
+                from oh_goon.cli_run_resources import verify_run_resource_handoff
+
+                resource_handoff, resource_evidence = verify_run_resource_handoff(
+                    args._resource_handoff, args.configuration
+                )
+                resource_handoff.state.restore()
+                snapshot = resource_handoff.snapshot
+                args.fleet_run_id = resource_handoff.scope.fleet_run_id
+            else:
+                snapshot = load_run_configuration(args.configuration)
+            if snapshot.selection.resources is not None:
+                if args.command == "run" and resource_handoff is None:
+                    require_run_repair_authorization(snapshot, authorized=args.authorize_repair)
+                    if fleet_provisioner is not None:
+                        raise FleetDomainError(
+                            "Deployment execution cannot select local Run resources"
+                        )
+                    from oh_goon.cli_run_resources import run_with_resource_envelope
+
+                    return run_with_resource_envelope(
+                        args, snapshot, list(argv) if argv is not None else sys.argv[1:]
+                    )
+                if args.command not in {"run", "lock", "workflow"}:
+                    raise FleetDomainError(
+                        "Whole-Run resources require the ordinary waited run command"
+                    )
+            prepare_configuration(args, snapshot=snapshot)
         except (FleetDomainError, OSError, UnicodeError, ValueError) as exc:
             print_safe_plan_diagnostic(exc, as_json=bool(getattr(args, "as_json", False)))
             return 2
@@ -482,8 +531,6 @@ def main(
 
             selected, isolation, git = native_plan_selection(args)
         except (FleetDomainError, OSError, ValueError) as exc:
-            import sys
-
             print(str(exc), file=sys.stderr)
             return 2
         args._native_agent = selected
@@ -498,14 +545,30 @@ def main(
             startup_purpose="observation", as_json=args.as_json, readback_id=args.fleet_run_id
         )
     else:
-        runtime = _build_application_runtime(
-            fleet_provisioner=fleet_provisioner,
-            standard_local=standard_local,
-            startup_purpose=startup_purpose,
-        )
+        if resource_handoff is not None:
+            runtime = _build_application_runtime(
+                standard_local=standard_local,
+                run_resource_scope=resource_handoff.scope,
+                run_resource_envelope=resource_evidence,
+                startup_purpose=startup_purpose,
+            )
+        else:
+            runtime = _build_application_runtime(
+                fleet_provisioner=fleet_provisioner,
+                standard_local=standard_local,
+                startup_purpose=startup_purpose,
+            )
     if runtime is None:
         return 2
     result = _execute_stateful_command(runtime, args)
+    if resource_handoff is not None and resource_evidence is not None:
+        from oh_goon.cli_run_resources import publish_terminal_run_resource_context
+
+        try:
+            publish_terminal_run_resource_context(runtime, resource_handoff, resource_evidence)
+        except Exception:
+            print("RUN_RESOURCE_OBSERVATION_CONTEXT_INCOMPLETE", file=sys.stderr)
+            return result if result != 0 else 2
     if result >= 0:
         return result
     parser.print_help()

@@ -37,6 +37,7 @@ from oh_goon.core.models.run_admission import (
     StrictFleetExecutionAdmission,
 )
 from oh_goon.core.models.run_launch import ApplicationLaunchReceipt
+from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import (
     AgentStepDeliveryReference,
@@ -68,6 +69,7 @@ if TYPE_CHECKING:
     from oh_goon.core.ports.original_mount_intent import OriginalMountIntentDescriptor
     from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
     from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
+    from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
     from oh_goon.runtime.enforcer_lace_fleet_resource_owner import (
         OriginalFleetLocalLaceRecoveryOwner,
         OriginalFleetLocalLaceReservation,
@@ -111,6 +113,8 @@ class FleetRunLifecycle:
         fleet_provisioner: FleetPreworkProvisioner | None = None,
         require_compiled_fleet_contract: bool = False,
         standard_local_fleet: bool = False,
+        run_resource_scope: ResolvedRunResourceScope | None = None,
+        run_resource_envelope: RunResourceEnvelopeEvidence | None = None,
     ) -> None:
         self._database = database
         self._journal = journal
@@ -122,6 +126,12 @@ class FleetRunLifecycle:
         self._fleet_provisioner = fleet_provisioner
         self._require_compiled_fleet_contract = require_compiled_fleet_contract
         self._standard_local_fleet = standard_local_fleet
+        self._run_resource_scope = run_resource_scope
+        self._run_resource_envelope = run_resource_envelope
+        if (run_resource_scope is None) != (run_resource_envelope is None) or (
+            run_resource_scope is not None and not standard_local_fleet
+        ):
+            raise StateConflict("Run resources require one observed ordinary local CLI binding")
         if standard_local_fleet and (
             require_authenticated_fleet
             or require_compiled_fleet_contract
@@ -196,6 +206,7 @@ class FleetRunLifecycle:
         Final authorization remains in require_fleet_prework_available/admit.
         No native issuer observation, planning, journal, or reservation here.
         """
+        self._require_run_resource_envelope(run_id)
         if not self._require_authenticated_fleet:
             return
         if type(self._fleet_provisioner) is not FleetPreworkProvisioner:
@@ -207,6 +218,23 @@ class FleetRunLifecycle:
 
             raise TrustProtocolError("explicit Fleet Run identity required")
         self._fleet_provisioner.require_enrolled_identity(run_id)
+
+    def _require_run_resource_envelope(
+        self, run_id: str | None
+    ) -> RunResourceEnvelopeEvidence | None:
+        scope, expected = self._run_resource_scope, self._run_resource_envelope
+        if scope is None:
+            return None
+        if expected is None or run_id != scope.fleet_run_id or run_id != expected.fleet_run_id:
+            raise StateConflict("Native resource scope cannot admit another Run")
+        from oh_goon.integrations.run_resource_envelope import verify_current_run_resource_scope
+
+        if (
+            verify_current_run_resource_scope(scope, handoff_sha256=expected.handoff_sha256)
+            != expected
+        ):
+            raise StateConflict("Native resource scope changed after verified CLI startup")
+        return expected
 
     def require_fleet_prework_available(
         self,
@@ -479,7 +507,10 @@ class FleetRunLifecycle:
                 target=target,
                 capability=intent.definition.durable_snapshot(),
                 schedule_run_id=schedule_run_id,
-                execution=DirectFleetExecutionAdmission(rerun_from_run_id=None),
+                execution=DirectFleetExecutionAdmission(
+                    rerun_from_run_id=None,
+                    resource_envelope=self._require_run_resource_envelope(fleet_run_id),
+                ),
                 repository_admissions=repository_admissions,
                 application_launch=application_launch,
             )
@@ -578,7 +609,10 @@ class FleetRunLifecycle:
             source=source,
             target=intent.target,
             capability=intent.definition.durable_snapshot(),
-            execution=DirectFleetExecutionAdmission(rerun_from_run_id=rerun_from_run_id),
+            execution=DirectFleetExecutionAdmission(
+                rerun_from_run_id=rerun_from_run_id,
+                resource_envelope=self._require_run_resource_envelope(fleet_run_id),
+            ),
             repository_admissions=repository_admissions,
             application_launch=application_launch,
             schedule_run_id=schedule_run_id,
@@ -1434,8 +1468,15 @@ class FleetRunLifecycle:
 
     def activate(self, ticket: ExecutionTicket) -> ExecutionSession:
         """Materialize and validate the exact admitted Fleet owner."""
+        if self._run_resource_scope is not None:
+            self._require_run_resource_envelope(self._run_resource_scope.fleet_run_id)
         session = self._execution.activate(ticket)
-        session.require_fleet_run_id()
+        fleet_run_id = session.require_fleet_run_id()
+        if (
+            self._run_resource_scope is not None
+            and fleet_run_id != self._run_resource_scope.fleet_run_id
+        ):
+            raise StateConflict("Native resource scope cannot activate another Run")
         return session
 
     def execution_authority(

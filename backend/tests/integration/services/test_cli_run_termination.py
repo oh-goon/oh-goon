@@ -16,6 +16,9 @@ from typing import Any
 import pytest
 import yaml
 
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
+from tests.factories.run_resources import require_native_run_resource_context
+
 pytestmark = pytest.mark.skipif(
     not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"),
     reason="native Linux process-identity handles required",
@@ -23,9 +26,20 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.mark.parametrize("termination,expected_exit", [(signal.SIGINT, 130), (signal.SIGTERM, 143)])
+@pytest.mark.parametrize(
+    "budgeted",
+    (False, pytest.param(True, marks=pytest.mark.no_resume)),
+    ids=("inherited", "whole-run-budget"),
+)
 def test_waited_public_run_cancels_owned_process_and_reopens_terminal_evidence(
-    tmp_path: Path, termination: signal.Signals, expected_exit: int
+    tmp_path: Path,
+    termination: signal.Signals,
+    expected_exit: int,
+    budgeted: bool,
 ) -> None:
+    budget = CicdResourcePolicy(cpu_millis=2000, memory_mib=1024, max_processes=256)
+    if budgeted:
+        require_native_run_resource_context(budget)
     repository = tmp_path / "project"
     repository.mkdir()
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
@@ -107,7 +121,9 @@ def test_waited_public_run_cancels_owned_process_and_reopens_terminal_evidence(
     selection = workflow / "run.yml"
     selected = yaml.safe_load(selection.read_text())
     selected.pop("inputs", None)
-    selection.write_text(yaml.safe_dump(selected))
+    if budgeted:
+        selected["resources"] = budget.model_dump(exclude_none=True)
+    selection.write_text(yaml.safe_dump(selected, sort_keys=False))
     cli("workflow", "prepare", str(selection))
     child_handle: int | None = None
     with (tmp_path / "stdout").open("w+") as stdout, (tmp_path / "stderr").open("w+") as stderr:
@@ -136,6 +152,10 @@ def test_waited_public_run_cancels_owned_process_and_reopens_terminal_evidence(
             assert receipt["status"] == "interrupted"
             assert receipt["cancellation_requested"] is True
             assert receipt["cleanup"] == "not-established-by-interruption"
+            if budgeted:
+                assert receipt["resource_signal_status"] == "DELIVERED"
+                assert receipt["invocation_signal"] == termination
+                assert receipt["resource_observation"]["cleanup"] == "VERIFIED"
             run_id = receipt["fleet_run_id"]
             status = json.loads(cli("runs", "show", run_id, "--json"))
             steps = json.loads(cli("runs", "steps", run_id, "--json"))

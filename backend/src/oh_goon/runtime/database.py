@@ -13,6 +13,8 @@ from pathlib import Path
 from threading import RLock, local
 from typing import TYPE_CHECKING, Literal, Mapping, TypeVar, cast
 
+from pydantic import Field, field_validator
+
 if TYPE_CHECKING:
     from oh_goon.core.enforcer_lace_trust import (
         AdmittedRunContract,
@@ -22,7 +24,8 @@ if TYPE_CHECKING:
     from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustGrant
 from uuid import uuid4
 
-from oh_goon.core.errors import DatabaseSchemaMismatch, StateConflict
+from oh_goon.core.errors import DatabaseSchemaMismatch, JournalConflict, StateConflict
+from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.path_authority import ensure_private_directory
 from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_DELETE as SQLITE_JOURNAL_DELETE
 from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_WAL as SQLITE_JOURNAL_WAL
@@ -106,6 +109,35 @@ class DatabasePathIdentity:
     inode: int
     size: int
     filesystem: str | None
+
+
+class ExistingDatabaseAppendContext(ImmutableModel):
+    """One captured database cut for a noninitializing, single-use final append."""
+
+    path: Path
+    device: int = Field(ge=0)
+    inode: int = Field(ge=1)
+    filesystem: str | None = Field(default=None, max_length=128)
+    schema_version: int = Field(default=DATABASE_SCHEMA_VERSION, ge=1)
+    schema_cookie: int = Field(ge=1)
+    database_identity_cookie: int = Field(ge=1, le=DATABASE_IDENTITY_COOKIE_MAX)
+    journal_mode: Literal["DELETE", "WAL"]
+    durable_revision: int = Field(ge=0)
+    session_id: str = Field(min_length=1, max_length=160)
+
+    @field_validator("path")
+    @classmethod
+    def require_absolute_path(cls, value: Path) -> Path:
+        if not value.is_absolute() or ".." in value.parts:
+            raise ValueError("Existing database append requires its captured absolute path")
+        return value
+
+    @field_validator("schema_version")
+    @classmethod
+    def require_current_schema(cls, value: int) -> int:
+        if value != DATABASE_SCHEMA_VERSION:
+            raise ValueError("Existing database append context uses another schema")
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,6 +297,73 @@ class LocalDatabase:
                     )
             finally:
                 connection.close()
+
+    def capture_append_context(
+        self, connection: sqlite3.Connection
+    ) -> ExistingDatabaseAppendContext:
+        """Capture this admitted owner inside the caller's already verified cut."""
+        active = getattr(self._connection_scope, "active_cut", None)
+        if active is None or active[0] is not connection or not connection.in_transaction:
+            raise RuntimeError("Original LocalDatabase transaction required for append context")
+        identity = self._path_identity
+        if (
+            identity is None
+            or self._schema_cookie is None
+            or self._database_identity_cookie is None
+        ):
+            raise DatabasePathIdentityLost("Existing database append lacks original admission")
+        return ExistingDatabaseAppendContext(
+            path=self.path,
+            device=identity.device,
+            inode=identity.inode,
+            filesystem=identity.filesystem,
+            schema_cookie=self._schema_cookie,
+            database_identity_cookie=self._database_identity_cookie,
+            journal_mode=cast(Literal["DELETE", "WAL"], self.journal_mode),
+            durable_revision=read_durable_revision(connection),
+            session_id=self.session_id,
+        )
+
+    @classmethod
+    @contextmanager
+    def existing_append_transaction(
+        cls, expected: ExistingDatabaseAppendContext
+    ) -> Iterator[sqlite3.Connection]:
+        """Rebind one captured cut without initialization, repair or connection retries.
+
+        Only the original transaction owner opens and commits SQLite. The caller
+        must still compare its exact domain head before appending its final fact.
+        """
+        database = cls.__new__(cls)
+        database.path = expected.path
+        database.session_id = expected.session_id
+        database.journal_mode = expected.journal_mode
+        database._path_identity = DatabasePathIdentity(
+            expected.device, expected.inode, 0, expected.filesystem
+        )
+        database._schema_cookie = expected.schema_cookie
+        database._database_identity_cookie = expected.database_identity_cookie
+        database._durable_revision_floor = expected.durable_revision
+        database._durable_revision_lock = RLock()
+        database._connection_scope = local()
+        database._recovery_observer = None
+        database.sqlite_diagnostics = SQLiteAccessDiagnostics()
+        database._read_only = False
+        database._initialized_new_state = False
+        database._require_path_identity()
+        connection = database._open_connection_attempt(
+            admitted=True, context="final resource observation append", recovered=False
+        )
+        database._connection_scope.connection = connection
+        try:
+            with database.transaction(write=True) as cut:
+                if read_durable_revision(cut) != expected.durable_revision:
+                    raise JournalConflict("Database changed after Run resource context capture")
+                yield cut
+                database._require_path_identity()
+        finally:
+            database._connection_scope.connection = None
+            connection.close()
 
     @staticmethod
     @contextmanager

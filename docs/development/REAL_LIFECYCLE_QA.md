@@ -90,6 +90,14 @@ or changes policy; exact pinned-commit reacquisition remains with the existing
 source owner. Native cancellation, observed cleanup uncertainty and original
 failure attribution must survive the vocabulary change.
 
+Optional whole-Run `resources` use the existing native envelope owner. Exercise
+v2 single and plural target selections through the sealed configuration handoff,
+the same resolved interpreter and original waited Run. Preserve caller limits
+and reject incompatible execution before work. Verify terminal accounting can
+append through the original database owner while `runs` remains observational.
+Protocol tests do not establish physical scope enforcement; unavailable native
+budget, cancellation and group-OOM cells remain unqualified.
+
 Initialization and explicit preparation registration compose only the original
 LocalState/LocationService authority. They must not recover interrupted Runs or
 reconcile unrelated scope merely to make registration possible. Exercise the

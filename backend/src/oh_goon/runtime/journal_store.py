@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from oh_goon.core.errors import JournalConflict
 from oh_goon.core.models.agent_repair import AgentCampaignFact
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.reconciliation import (
@@ -41,6 +42,31 @@ class JournalFactStore:
             "SELECT revision FROM journal_entries ORDER BY revision DESC LIMIT 1"
         ).fetchone()
         return int(row["revision"]) if row is not None else 0
+
+    @staticmethod
+    def current_head(connection: sqlite3.Connection) -> tuple[int, str]:
+        """Read only the original chain head, without rebuilding any history."""
+        row = connection.execute(
+            "SELECT revision, fact_hash FROM journal_entries ORDER BY revision DESC LIMIT 1"
+        ).fetchone()
+        return (int(row["revision"]), str(row["fact_hash"])) if row else (0, GENESIS_HASH)
+
+    @staticmethod
+    def append_run_event_at_head(
+        connection: sqlite3.Connection,
+        event: FleetRunEvent,
+        *,
+        session_id: str,
+        expected_revision: int,
+        expected_hash: str,
+    ) -> None:
+        """Append one final event only at the child-verified exact chain head."""
+        JournalFactStore._append_encoded_in(
+            connection,
+            JournalFactCodec.encode_run_event(event),
+            session_id=session_id,
+            expected_head=(expected_revision, expected_hash),
+        )
 
     def entries_after(self, revision: int) -> tuple[int, tuple[JournalEntry, ...]]:
         """Return one consistent incremental Journal cut for rebuildable read projections."""
@@ -155,14 +181,25 @@ class JournalFactStore:
         self._append_encoded(connection, JournalFactCodec.encode_effect_acknowledgement(evidence))
 
     def _append_encoded(self, connection: sqlite3.Connection, encoded: EncodedJournalFact) -> None:
-        row = connection.execute(
-            "SELECT fact_hash FROM journal_entries ORDER BY revision DESC LIMIT 1"
-        ).fetchone()
-        previous_hash = str(row["fact_hash"]) if row is not None else GENESIS_HASH
+        self._append_encoded_in(connection, encoded, session_id=self._database.session_id)
+        self._read_cache.invalidate()
+
+    @staticmethod
+    def _append_encoded_in(
+        connection: sqlite3.Connection,
+        encoded: EncodedJournalFact,
+        *,
+        session_id: str,
+        expected_head: tuple[int, str] | None = None,
+    ) -> None:
+        head = JournalFactStore.current_head(connection)
+        if expected_head is not None and head != expected_head:
+            raise JournalConflict("Journal changed after Run resource context capture")
+        previous_hash = head[1]
         committed_at = utc_now().isoformat()
         fact_hash = JournalFactCodec.hash_fact(
             previous_hash=previous_hash,
-            session_id=self._database.session_id,
+            session_id=session_id,
             encoded=encoded,
             committed_at=committed_at,
         )
@@ -174,7 +211,7 @@ class JournalFactStore:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                self._database.session_id,
+                session_id,
                 encoded.kind.value,
                 encoded.report_json,
                 encoded.event_json,
@@ -184,7 +221,6 @@ class JournalFactStore:
                 fact_hash,
             ),
         )
-        self._read_cache.invalidate()
 
     def _cache_key(self, connection: sqlite3.Connection) -> JournalCacheKey:
         row = connection.execute(
