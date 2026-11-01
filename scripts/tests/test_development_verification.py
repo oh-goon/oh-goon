@@ -67,10 +67,14 @@ def test_executed_verification_logs_bounded_summary_but_retains_full_report(
         policy_status="ORDINARY",
     )
     owner._write_transport(plan_path, plan.model_dump(mode="json"), source)
-    receipt = {"members": [{"nodeid": "test_case", "secret_native_detail": "X" * 500_000}]}
+    receipt = {
+        "members": [{"nodeid": "test_case", "secret_native_detail": "X" * 500_000}],
+    }
     result = {
         "status": "CHECKS_PASSED",
-        "outcomes": [{"owner": "Native pytest", "returncode": 0, "native_report": receipt}],
+        "outcomes": [
+            {"owner": "Native pytest", "returncode": 0, "native_report": receipt},
+        ],
     }
     monkeypatch.setattr(owner, "execute_change", lambda *_args, **_kwargs: result)
     arguments = ["--root", str(source), "--execute", str(plan_path), "--mode", "merge"]
@@ -126,7 +130,9 @@ def test_failed_verification_summary_keeps_reason_and_complete_native_report(
         lambda *_args, **_kwargs: {
             "status": "FAIL",
             "reason": "selected pytest failed",
-            "outcomes": [{"owner": "Native pytest", "returncode": 17, "native_report": native}],
+            "outcomes": [
+                {"owner": "Native pytest", "returncode": 17, "native_report": native},
+            ],
         },
     )
     assert (
