@@ -41,11 +41,42 @@ of ordinary changes.
 A ready PR or merge group checks its effective checkout SHA against its actual
 base. The PR head is recorded separately where it differs. Native Git accounts
 for additions, deletions and both sides of renames; local feedback also includes
-untracked source. Unresolved required consumer scope remains `SELECTION_UNVERIFIED`;
-it never passes as an empty selection or silently launches the daily corpus. Governing
-instructions, workflow/result policy and selector changes require the named
+untracked source. Missing required consumer or verifier evidence remains
+`SELECTION_UNVERIFIED`; it never passes as an empty selection or silently launches
+the daily corpus. Governing instructions, workflow/result policy and selector
+changes require the named
 **verification-policy protection** obligation. Shared fixture or dependency
 uncertainty cannot be excused by that generic policy proof.
+
+Backend runtime dependency updates have a bounded admission path through the
+released Hashmarks lock-delta and consumer APIs. Before/after lock observations,
+selected distribution `METADATA`/`RECORD` from the native uv environment, and an
+explicit native file inventory of `backend/src` Python source support qualified
+consumer-to-verifier nominations. Every changed existing runtime component must
+have a positive chain to an executable verifier. Package names do not waive that
+requirement. The retained `consumer_scope` remains incomplete and its negative
+evidence is not admissible; these chains establish the selected positive
+relationships without claiming all consumers have been found.
+
+The existing native pytest collector resolves advisory dependency verifiers before
+plan admission, using the execution configuration and cadence. Evidence retains
+selected and deselected members and empty advisory targets; a support file with
+no collected tests cannot count as a component's required verifier. The original
+batch owner independently collects the admitted files for execution; the plan's
+file set and the exact native execution membership remain separately checked.
+
+Added, removed or forked components, changes to optional/group/build declarations,
+Python runtime requirements or uv source/workspace policy, and missing or
+mismatched metadata, stale or truncated required lock/metadata/consumer
+observations, or a component without a qualified chain remain unverified.
+The wider verifier search may remain incomplete or truncated: admission retains
+those qualifiers and uses only its exact positive source-to-verifier edges.
+It does not claim the verifier graph is exhaustive. Supported dependency updates
+also require the **Native package** obligation: `backend-lock-check`,
+`backend-python-capability-check` and
+`backend-package-build-check`. The existing trusted-base gate validates the
+retained `LINKED` evidence, meaningful execution and independently observed
+producer identity through the same proof contract.
 
 The named **bounded documentation-asset policy** covers newly added or currently
 modified images under `docs/assets/` up to 1 MiB. Hashmarks must observe the image
@@ -137,6 +168,28 @@ cancelled; main pushes execute only distinct installed-source/CLI smoke. The
 complete Python CI example is a daily reusable/manual workflow, not an additional
 complete journey on every ordinary update. Package/build smoke is admitted when
 its actual distribution boundary changes; ordinary docs do not assemble a release.
+
+PR verification starts on opening, a head update, reopening, and ready/draft
+transitions. Title and description edits do not start verification or replace the
+candidate's check suite. The `edited` trigger is intentionally absent: skipping
+every job after a metadata edit can leave a newer suite without the required
+`merge-gate` result. The gate validates the existing proof; it does not rerun tests.
+
+GitHub also reports a base-branch retarget as `edited`, so retargeting alone does
+not start verification. After changing the target branch, update the head branch
+or reopen the PR to obtain a fresh normal PR run before merging. A previous green
+head check is not proof for the new base; this contributor step is not automatic
+retarget enforcement. The fresh run retains the existing exact base/head/candidate
+validation. Up-to-date or merge-queue enforcement remains the protection policy
+described below.
+
+An **Expected — Waiting for status to be reported** check is missing reporting,
+not a running test. Inspect the current head's normal PR run and its exact
+`merge-gate` job before requesting more execution. A missing eligible run needs a
+fresh PR event; a failed proof needs its actual failure fixed. A manual
+`workflow_dispatch` replay is diagnostic and does not satisfy the required PR
+check. A gate-only retry of an older run cannot assume a proof artifact exists
+for the new run attempt; do not substitute a skipped or synthetic success.
 
 ### Effective protection and cutover
 

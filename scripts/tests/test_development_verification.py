@@ -11,9 +11,11 @@ import pytest
 
 from oh_goon.integrations.hashmarks.development_verification import (
     nominate_changed_verification,
+    observe_repository_assets,
 )
 from oh_goon.repository_tooling import development_verification as owner
 from oh_goon.engine.command import run_command
+from oh_goon.repository_tooling.pytest_member_selection import NativePytestCollection
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
     DOCUMENTATION_ASSET_OBLIGATION,
@@ -503,6 +505,41 @@ def test_source_change_stops_before_a_later_command_can_restore_old_bytes(
     assert calls == ["first"]
 
 
+def test_native_package_proof_delegates_lock_runtime_and_build_to_existing_owners(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = repository / "docs/package-proof.md"
+    document.parent.mkdir(parents=True)
+    document.write_text("Package verification policy.\n", encoding="utf-8")
+    plan = owner.admit_change(repository, base="HEAD").model_copy(
+        update={"static": ("package",)}
+    )
+    commands: list[tuple[str, ...]] = []
+    native_command = run_command
+
+    def command(*argv: str, **options: Any) -> Any:
+        if argv[0] == "git":
+            return native_command(*argv, **options)
+        assert options["cwd"] == repository
+        commands.append(argv)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(owner, "run_command", command)
+
+    result = owner.execute_change(repository, plan, mode="focused", workers=1)
+
+    assert result["status"] == "CHECKS_PASSED"
+    assert result["outcomes"] == [{"owner": "Native package", "returncode": 0}]
+    assert commands == [
+        (
+            "make",
+            "backend-lock-check",
+            "backend-python-capability-check",
+            "backend-package-build-check",
+        )
+    ]
+
+
 @pytest.mark.parametrize("outcome", ("missing", "duplicates", "extras", "resumed"))
 def test_required_membership_cannot_be_qualified_by_pytest_exit_zero(
     outcome: str,
@@ -906,3 +943,768 @@ def test_qa_policy_protection_does_not_qualify_other_unknown_scope(
     plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
     assert "scripts/tests/test_real_lifecycle_qa_contract.py" in plan.pytest
     assert f"{reason}:{relative}" in plan.unverified
+
+
+def _dependency_update(
+    repository: Path, packages: tuple[str, ...] = ("ordinary-library",)
+) -> tuple[str, bytes, str]:
+    backend = repository / "backend"
+    backend.mkdir(exist_ok=True)
+    manifest = (
+        '[project]\nname = "application"\nversion = "0"\nrequires-python = ">=3.12"\n'
+        "dependencies = " + json.dumps([name + "==1" for name in packages]) + "\n"
+    )
+    lock = (
+        'version = 1\nrevision = 1\n[[package]]\nname = "application"\nversion = "0"\n'
+        'source = { editable = "." }\ndependencies = ['
+        + ",".join("{ name = " + json.dumps(name) + " }" for name in packages)
+        + "]\n"
+        + "".join(
+            "[[package]]\nname = "
+            + json.dumps(name)
+            + '\nversion = "1"\nsource = { registry = "https://pypi.org/simple" }\n'
+            for name in packages
+        )
+    )
+    (backend / "pyproject.toml").write_text(manifest, encoding="utf-8")
+    (backend / "uv.lock").write_text(lock, encoding="utf-8")
+    owner._git(repository, "add", "backend/pyproject.toml", "backend/uv.lock")
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "dependency baseline",
+    )
+    base = owner._git(repository, "rev-parse", "HEAD").strip()
+    (backend / "pyproject.toml").write_text(
+        manifest.replace("==1", "==2"), encoding="utf-8"
+    )
+    (backend / "uv.lock").write_text(
+        lock.replace('version = "1"', 'version = "2"'), encoding="utf-8"
+    )
+    return base, lock.encode("utf-8"), manifest
+
+
+def _dependency_evidence(
+    paths: tuple[str, ...],
+    *,
+    required: tuple[str, ...],
+    dependency_base: dict[str, Any] | None,
+    packages: tuple[str, ...] = ("ordinary-library",),
+) -> dict[str, Any]:
+    evidence = _evidence(paths)
+    evidence["required_checks"] = [
+        {
+            "nomination": {
+                "available": True,
+                "runner_evidence": "pytest",
+                "verification_target": {"path": path},
+            }
+        }
+        for path in required
+    ]
+    if dependency_base is None:
+        return evidence
+    before_identity, after_identity = "before-observation", "after-observation"
+    binding = {"repository_identity": "candidate-repository", "generation": 1}
+    metadata: list[dict[str, Any]] = []
+    chains: list[dict[str, Any]] = []
+    components: list[dict[str, Any]] = []
+    selections: list[dict[str, Any]] = []
+    transitions: list[dict[str, Any]] = []
+    for index, package in enumerate(packages):
+        node, old_node, component = (
+            f"node-{index}",
+            f"old-node-{index}",
+            f"component-{index}",
+        )
+        source = f"backend/src/oh_goon/dependency_user_{index}.py"
+        target = f"backend/tests/unit/integrations/test_dependency_user_{index}.py"
+        consumer = {
+            "source_path": source,
+            "source_member": {
+                "path": source,
+                "state": "known-present",
+                "member_revision": "a" * 64,
+            },
+            "distribution_state": "resolved-unique",
+            "distribution_nodes": [node],
+            "import_claim_authority": "source-observed-static-import",
+        }
+        projected = {
+            "workspace_prefix": "",
+            "relationship": "direct-reference",
+            "nomination": {
+                "available": True,
+                "runner_evidence": "pytest",
+                "source_member_revision": "c" * 64,
+                "verification_target": {"path": target},
+            },
+        }
+        ownership = {
+            "stale": False,
+            "edit_candidates": [source],
+            "verification_owners": [
+                {
+                    "path": target,
+                    "covers_edit_candidates": [source],
+                    "coverage_evidence": "direct-reference",
+                }
+            ],
+            "verification_qualification": {
+                "completeness": "incomplete",
+                "truncation": "truncated",
+                "qualified_identity_ambiguous": True,
+                "verifier_identity_ambiguous": True,
+                "search_bound_reasons": ["indirect-symbol-limit"],
+            },
+        }
+        chains.append(
+            {
+                "node_id": node,
+                "source_path": source,
+                "consumer": consumer,
+                "ownership": ownership,
+                "nomination": projected,
+            }
+        )
+        components.append(
+            {"component_id": component, "name": package, "ecosystem": "pypi"}
+        )
+        selections.append({"node_id": node, "component_id": component, "version": "2"})
+        transitions.append(
+            {
+                "component_id": component,
+                "added": [{"node_id": node}],
+                "removed": [{"node_id": old_node}],
+                "changed": [],
+            }
+        )
+        metadata.append(
+            {
+                "node_id": node,
+                "component_id": component,
+                "name": package,
+                "version": "2",
+                "discovery": "importlib.metadata.distributions",
+                "distribution_root": "/native/environment/site-packages",
+                "metadata_path": f"/native/environment/{package}.dist-info/METADATA",
+                "record_path": f"/native/environment/{package}.dist-info/RECORD",
+                "metadata_member_revision": "d" * 64,
+                "record_member_revision": "e" * 64,
+            }
+        )
+    nodes = [row["node_id"] for row in selections]
+    source_paths = [chain["source_path"] for chain in chains]
+    packet = {
+        "observation_identity": after_identity,
+        "repository_binding": binding,
+        "selected_node_ids": nodes,
+        "source_scope": {
+            "paths": source_paths,
+            "members": [chain["consumer"]["source_member"] for chain in chains],
+            "unavailable": [],
+            "completeness": "complete",
+        },
+        "consumers": [chain["consumer"] for chain in chains],
+        "truncation": "complete",
+    }
+    bundle = {
+        "schema": "oh-goon.changed-dependency-consumers/v1",
+        "lock_path": "backend/uv.lock",
+        "base_revision": dependency_base["base_revision"],
+        "before_member_revision": "f" * 64,
+        "before_observation": {"observation_identity": before_identity},
+        "before_assessment": {"source_scope": {"source_equivalence": "mismatch"}},
+        "after_observation": {
+            "observation_identity": after_identity,
+            "repository_binding": binding,
+            "selections": selections,
+            "components": components,
+        },
+        "after_assessment": {
+            "source_scope": {
+                "availability": "available",
+                "freshness": "current",
+                "source_equivalence": "proven",
+            }
+        },
+        "delta": {
+            "comparability": "comparable",
+            "before_observation_identity": before_identity,
+            "after_observation_identity": after_identity,
+            "selections_added": nodes.copy(),
+            "selections_removed": [f"old-node-{index}" for index in range(len(nodes))],
+            "selections_changed": [],
+            "components_added": [],
+            "components_removed": [],
+            "components_changed": [],
+            "component_selection_transitions": transitions,
+        },
+        "changed_node_ids": nodes,
+        "metadata": metadata,
+        "environment": {
+            "python_executable": "/native/environment/bin/python",
+            "python_prefix": "/native/environment",
+            "python_version": "3.12",
+            "producer_implementation_identity": evidence[
+                "producer_implementation_identity"
+            ],
+            "metadata_discovery": "importlib.metadata.distributions",
+        },
+        "consumer_packets": [packet],
+        "consumer_scope": {
+            "paths": source_paths,
+            "completeness": "incomplete",
+            "negative_evidence": "not-admissible",
+            "reasons": ["explicit-source-scope"],
+        },
+        "source_selection": {
+            "owner": "hashmarks.files.iter_files",
+            "prefix": "backend/src",
+            "suffix": ".py",
+            "scope": "explicit-backend-runtime-python-sources",
+            "consumer_completeness": "not-claimed",
+        },
+        "truncation": "complete",
+        "chains": chains,
+    }
+    evidence["dependency_changes"] = bundle
+    for row in evidence["observations"]:
+        if row["changed_path"] == "backend/uv.lock":
+            row.update(
+                dependency_chain=chains,
+                edit_candidates=source_paths,
+                nominations=[chain["nomination"] for chain in chains],
+            )
+        elif row["changed_path"] == "backend/pyproject.toml":
+            row.update(state="UNAVAILABLE", nominations=[])
+    return evidence
+
+
+def _synthetic_dependency_collection(
+    paths: tuple[Path, ...], calls: list[tuple[str, ...]], **options: Any
+) -> NativePytestCollection:
+    invocation = options["invocation"]
+    assert invocation.qualified
+    assert invocation.config_file == invocation.cwd / "backend/pyproject.toml"
+    assert options["marker"] == "not certification and not slow and not daily"
+    files = tuple(path.relative_to(invocation.cwd).as_posix() for path in paths)
+    calls.append(files)
+    return NativePytestCollection(
+        tuple({"file": file, "selector": file + "::test_behavior"} for file in files),
+        (),
+    )
+
+
+@pytest.fixture
+def dependency_collection(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    calls: list[tuple[str, ...]] = []
+
+    def collect(paths: tuple[Path, ...], **options: Any) -> NativePytestCollection:
+        return _synthetic_dependency_collection(paths, calls, **options)
+
+    monkeypatch.setattr(owner, "collect_native_pytest", collect)
+    monkeypatch.setattr(
+        owner, "require_current_dependency_environment", lambda _bundle: None
+    )
+    monkeypatch.setattr(
+        owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
+    )
+    return calls
+
+
+@pytest.mark.parametrize("package", ("ordinary-library", "hashmarks"))
+def test_dependency_admission_preserves_incomplete_scope_and_native_base_provenance(
+    repository: Path, dependency_collection: list[tuple[str, ...]], package: str
+) -> None:
+    base, before_lock, _manifest = _dependency_update(repository, (package,))
+    captured: list[dict[str, Any]] = []
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        captured.append(options["dependency_base"])
+        return _dependency_evidence(paths, packages=(package,), **options)
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+
+    assert not plan.unverified
+    assert captured == [
+        {"lock": before_lock, "base_revision": base, "lock_path": "backend/uv.lock"}
+    ]
+    assert len(dependency_collection) == 1
+    assert set(VERIFICATION_POLICY_TESTS) <= set(plan.pytest)
+    assert "backend/tests/unit/integrations/test_dependency_user_0.py" in plan.pytest
+    bundle = plan.evidence["dependency_changes"]
+    assert bundle["consumer_scope"]["completeness"] == "incomplete"
+    assert bundle["consumer_scope"]["negative_evidence"] == "not-admissible"
+    assert (
+        bundle["before_assessment"]["source_scope"]["source_equivalence"] == "mismatch"
+    )
+    assert (
+        bundle["chains"][0]["ownership"]["verification_qualification"]["truncation"]
+        == "truncated"
+    )
+    lock = next(
+        row
+        for row in plan.evidence["observations"]
+        if row["changed_path"] == "backend/uv.lock"
+    )
+    assert lock["edit_candidates"] == ["backend/src/oh_goon/dependency_user_0.py"]
+    assert (
+        plan.evidence["dependency_admission"]["authority"] == "oh-goon-execution-policy"
+    )
+    assert (
+        "complete impact is not claimed"
+        in plan.evidence["dependency_admission"]["rationale"]
+    )
+    owner.require_current_plan(repository, plan)
+
+
+def test_dependency_collection_preserves_admitted_asset_policy_with_advisory_nominations(
+    repository: Path, dependency_collection: list[tuple[str, ...]]
+) -> None:
+    base, before_lock, _manifest = _dependency_update(repository)
+    path = "docs/assets/evidence.bin"
+    asset = repository / path
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"\x89PNG\r\n\x1a\n")
+    (repository / "docs/guide.md").write_text(
+        "![Evidence](assets/evidence.bin)\n", encoding="utf-8"
+    )
+    assets = observe_repository_assets(repository, (path,))
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        assert options.pop("asset_paths") == (path,)
+        assert options["dependency_base"]["lock"] == before_lock
+        evidence = _dependency_evidence(paths, **options)
+        evidence["asset_evidence"] = assets
+        return evidence
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+
+    assert not plan.unverified
+    assert plan.behavioral_status == "REQUIRED"
+    assert DOCUMENTATION_ASSET_OBLIGATION in plan.obligations
+    assert len(dependency_collection) == 1
+    assert plan.evidence["asset_evidence"] == assets
+    raw_asset = next(
+        row for row in plan.evidence["observations"] if row["changed_path"] == path
+    )
+    assert raw_asset["state"] == "LINKED"
+    assert raw_asset["nominations"]
+    assert all(
+        row["nomination"]["verification_target"]["path"] not in plan.pytest
+        for row in raw_asset["nominations"]
+    )
+    owner.require_merge_selection(repository, plan)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "stale-lock",
+        "unknown-equivalence",
+        "foreign-base",
+        "foreign-consumers",
+        "truncated-consumers",
+        "source-unavailable",
+        "missing-metadata",
+        "foreign-producer",
+        "unknown-consumer",
+        "ambiguous-consumer",
+        "stale-verifier",
+        "unrelated-verifier",
+        "missing-nomination",
+        "changed-component",
+        "empty-change",
+    ),
+)
+def test_dependency_admission_refuses_unqualified_evidence_before_native_collection(
+    repository: Path, dependency_collection: list[tuple[str, ...]], fault: str
+) -> None:
+    base, _lock, _manifest = _dependency_update(repository)
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        evidence = _dependency_evidence(paths, **options)
+        bundle = evidence["dependency_changes"]
+        chain = bundle["chains"][0]
+        if fault == "stale-lock":
+            bundle["after_assessment"]["source_scope"]["freshness"] = "stale"
+        elif fault == "unknown-equivalence":
+            bundle["after_assessment"]["source_scope"]["source_equivalence"] = "unknown"
+        elif fault == "foreign-base":
+            bundle["base_revision"] = "0" * 40
+        elif fault == "foreign-consumers":
+            bundle["consumer_packets"][0]["repository_binding"] = {
+                "repository_identity": "other",
+                "generation": 1,
+            }
+        elif fault == "truncated-consumers":
+            bundle["consumer_packets"][0]["truncation"] = "truncated"
+        elif fault == "source-unavailable":
+            bundle["consumer_packets"][0]["source_scope"]["unavailable"] = [
+                chain["source_path"]
+            ]
+        elif fault == "missing-metadata":
+            bundle["metadata"] = []
+        elif fault == "foreign-producer":
+            bundle["environment"]["producer_implementation_identity"] = (
+                "sha256:" + "0" * 64
+            )
+        elif fault == "unknown-consumer":
+            chain["consumer"]["distribution_state"] = "unknown"
+        elif fault == "ambiguous-consumer":
+            chain["consumer"]["distribution_state"] = "resolved-ambiguous"
+            chain["consumer"]["distribution_nodes"].append("another-node")
+        elif fault == "stale-verifier":
+            chain["ownership"]["stale"] = True
+        elif fault == "unrelated-verifier":
+            chain["ownership"]["verification_owners"][0]["covers_edit_candidates"] = [
+                "different.py"
+            ]
+        elif fault == "missing-nomination":
+            next(
+                row
+                for row in evidence["observations"]
+                if row["changed_path"] == "backend/uv.lock"
+            )["nominations"] = []
+        elif fault == "changed-component":
+            bundle["delta"]["components_changed"] = ["component-0"]
+        else:
+            bundle["changed_node_ids"] = []
+        return evidence
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+
+    assert "DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED" in plan.unverified
+    assert dependency_collection == []
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    (
+        "requires-python",
+        "dynamic",
+        "optional-dependencies",
+        "dependency-groups",
+        "build-system",
+        "uv-context",
+        "hatch",
+        "setuptools",
+        "manifest-only",
+        "frontend-lock",
+    ),
+)
+def test_runtime_dependency_policy_does_not_admit_other_dependency_context_changes(
+    repository: Path, dependency_collection: list[tuple[str, ...]], unsupported: str
+) -> None:
+    base, before_lock, _manifest = _dependency_update(repository)
+    manifest = repository / "backend/pyproject.toml"
+    text = manifest.read_text()
+    if unsupported == "requires-python":
+        text = text.replace(">=3.12", ">=3.13")
+    elif unsupported == "dynamic":
+        text += 'dynamic = ["version"]\n'
+    elif unsupported == "optional-dependencies":
+        text += '\n[project.optional-dependencies]\nextra = ["extra-library"]\n'
+    elif unsupported == "dependency-groups":
+        text += '\n[dependency-groups]\ndev = ["pytest"]\n'
+    elif unsupported == "build-system":
+        text += '\n[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n'
+    elif unsupported == "uv-context":
+        text += "\n[tool.uv]\ndefault-groups = []\n"
+    elif unsupported == "hatch":
+        text += '\n[tool.hatch.build.targets.wheel]\npackages = ["other/src"]\n'
+    elif unsupported == "setuptools":
+        text += '\n[tool.setuptools.packages.find]\nwhere = ["other/src"]\n'
+    elif unsupported == "manifest-only":
+        (repository / "backend/uv.lock").write_bytes(before_lock)
+    else:
+        frontend = repository / "frontend"
+        frontend.mkdir()
+        (frontend / "package-lock.json").write_text("{}\n")
+    manifest.write_text(text)
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        return _dependency_evidence(
+            paths,
+            dependency_base=options.get("dependency_base"),
+            required=options.get("required", ()),
+        )
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+
+    assert "DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED" in plan.unverified
+    assert dependency_collection == []
+
+
+def _add_dependency_target(evidence: dict[str, Any], target: str) -> None:
+    bundle = evidence["dependency_changes"]
+    chain = copy.deepcopy(bundle["chains"][0])
+    chain["nomination"]["nomination"]["verification_target"]["path"] = target
+    chain["ownership"]["verification_owners"][0]["path"] = target
+    bundle["chains"].append(chain)
+    lock = next(
+        row
+        for row in evidence["observations"]
+        if row["changed_path"] == "backend/uv.lock"
+    )
+    lock["nominations"].append(chain["nomination"])
+
+
+@pytest.mark.parametrize("cadence", ("empty", "daily"))
+def test_dependency_collection_preserves_raw_nominations_and_distinguishes_empty_from_deselected(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dependency_collection: list[tuple[str, ...]],
+    cadence: str,
+) -> None:
+    base, _lock, _manifest = _dependency_update(repository)
+    advisory = "backend/tests/factories/dependency_support.py"
+
+    def without_advisory(
+        paths: tuple[Path, ...], **options: Any
+    ) -> NativePytestCollection:
+        result = _synthetic_dependency_collection(
+            paths, dependency_collection, **options
+        )
+        omitted = tuple(row for row in result.selected if row["file"] == advisory)
+        return NativePytestCollection(
+            tuple(row for row in result.selected if row["file"] != advisory),
+            omitted if cadence == "daily" else (),
+        )
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        evidence = _dependency_evidence(paths, **options)
+        _add_dependency_target(evidence, advisory)
+        return evidence
+
+    monkeypatch.setattr(owner, "collect_native_pytest", without_advisory)
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+
+    assert not plan.unverified
+    assert len(dependency_collection) == 1
+    assert advisory not in plan.pytest
+    admission = plan.evidence["dependency_admission"]
+    assert admission["targets_without_selected_members"] == [advisory]
+    assert admission["empty_advisory_targets"] == (
+        [advisory] if cadence == "empty" else []
+    )
+    assert bool(admission["collection"]["deselected"]) == (cadence == "daily")
+    assert any(
+        chain["nomination"]["nomination"]["verification_target"]["path"] == advisory
+        for chain in plan.evidence["dependency_changes"]["chains"]
+    )
+
+
+def test_one_collected_dependency_chain_cannot_qualify_another_unselected_changed_node(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dependency_collection: list[tuple[str, ...]],
+) -> None:
+    packages = ("first-library", "second-library")
+    base, _lock, _manifest = _dependency_update(repository, packages)
+    unselected = "backend/tests/unit/integrations/test_dependency_user_1.py"
+
+    def native_selection(
+        paths: tuple[Path, ...], **options: Any
+    ) -> NativePytestCollection:
+        result = _synthetic_dependency_collection(
+            paths, dependency_collection, **options
+        )
+        return NativePytestCollection(
+            tuple(row for row in result.selected if row["file"] != unselected),
+            tuple(row for row in result.selected if row["file"] == unselected),
+        )
+
+    monkeypatch.setattr(owner, "collect_native_pytest", native_selection)
+    plan = owner.admit_change(
+        repository,
+        base=base,
+        nominator=lambda _root, paths, **options: _dependency_evidence(
+            paths, packages=packages, **options
+        ),
+    )
+
+    assert len(dependency_collection) == 1
+    assert "DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED" in plan.unverified
+    assert unselected not in plan.pytest
+    assert plan.evidence["dependency_admission"]["empty_advisory_targets"] == []
+
+
+@pytest.mark.parametrize("missing", ("policy", "changed-test"))
+def test_dependency_native_selection_cannot_drop_required_policy_or_changed_test(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dependency_collection: list[tuple[str, ...]],
+    missing: str,
+) -> None:
+    base, _lock, _manifest = _dependency_update(repository)
+    target = VERIFICATION_POLICY_TESTS[0]
+    if missing == "changed-test":
+        target = "backend/tests/unit/integrations/test_changed.py"
+        changed = repository / target
+        changed.parent.mkdir(parents=True)
+        changed.write_text("def test_changed():\n    assert True\n")
+
+    def native_selection(
+        paths: tuple[Path, ...], **options: Any
+    ) -> NativePytestCollection:
+        result = _synthetic_dependency_collection(
+            paths, dependency_collection, **options
+        )
+        return NativePytestCollection(
+            tuple(row for row in result.selected if row["file"] != target), ()
+        )
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        evidence = _dependency_evidence(paths, **options)
+        if missing == "changed-test":
+            row = next(
+                row for row in evidence["observations"] if row["changed_path"] == target
+            )
+            row["state"] = "CHANGED_TEST"
+            row["nominations"] = [
+                {
+                    "workspace_prefix": "",
+                    "nomination": {
+                        "available": True,
+                        "runner_evidence": "pytest",
+                        "verification_target": {"path": target},
+                    },
+                }
+            ]
+        return evidence
+
+    monkeypatch.setattr(owner, "collect_native_pytest", native_selection)
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+
+    reason = (
+        "VERIFICATION_POLICY_PROTECTION_UNAVAILABLE"
+        if missing == "policy"
+        else f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{target}"
+    )
+    assert reason in plan.unverified
+
+
+def test_retained_dependency_proof_cannot_omit_a_node_still_present_in_native_delta(
+    repository: Path, dependency_collection: list[tuple[str, ...]]
+) -> None:
+    packages = ("first-library", "second-library")
+    base, _lock, _manifest = _dependency_update(repository, packages)
+    plan = owner.admit_change(
+        repository,
+        base=base,
+        nominator=lambda _root, paths, **options: _dependency_evidence(
+            paths, packages=packages, **options
+        ),
+    )
+    assert not plan.unverified
+    altered = copy.deepcopy(plan.evidence)
+    bundle = altered["dependency_changes"]
+    bundle["changed_node_ids"] = ["node-0"]
+    bundle["metadata"] = bundle["metadata"][:1]
+    bundle["chains"] = bundle["chains"][:1]
+    for row in altered["observations"]:
+        if row["changed_path"] == "backend/uv.lock":
+            row["dependency_chain"] = bundle["chains"]
+            row["nominations"] = row["nominations"][:1]
+    for packet in bundle["consumer_packets"]:
+        packet["selected_node_ids"] = ["node-0"]
+    altered["dependency_admission"]["changed_node_ids"] = ["node-0"]
+
+    with pytest.raises(ValueError, match="Bounded dependency proof changed"):
+        owner.require_current_plan(
+            repository, plan.model_copy(update={"evidence": altered})
+        )
+
+
+@pytest.mark.parametrize("retain_annotation", (True, False))
+def test_dependency_metadata_drift_refuses_execution_before_any_native_owner(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dependency_collection: list[tuple[str, ...]],
+    retain_annotation: bool,
+) -> None:
+    base, _lock, _manifest = _dependency_update(repository)
+    plan = owner.admit_change(
+        repository,
+        base=base,
+        nominator=lambda _root, paths, **options: _dependency_evidence(
+            paths, **options
+        ),
+    )
+    assert not plan.unverified
+    if not retain_annotation:
+        evidence = copy.deepcopy(plan.evidence)
+        evidence.pop("dependency_admission")
+        plan = plan.model_copy(update={"evidence": evidence})
+
+    def drift(_bundle: dict[str, Any]) -> None:
+        raise ValueError("Installed dependency metadata changed")
+
+    def forbidden(*_args: Any) -> list[Any]:
+        raise AssertionError("metadata must be current before command planning")
+
+    monkeypatch.setattr(owner, "require_current_dependency_environment", drift)
+    monkeypatch.setattr(owner, "_commands", forbidden)
+    with pytest.raises(ValueError, match="metadata changed"):
+        owner.execute_change(repository, plan, mode="merge", workers=1)
+
+
+def test_dependency_policy_does_not_weaken_unrelated_source_owner_selection(
+    repository: Path, dependency_collection: list[tuple[str, ...]]
+) -> None:
+    base, _lock, _manifest = _dependency_update(repository)
+    (repository / "behavior.py").write_text("value = 1\n")
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        evidence = _dependency_evidence(paths, **options)
+        next(
+            row
+            for row in evidence["observations"]
+            if row["changed_path"] == "behavior.py"
+        )["edit_candidates"] = ["another.py"]
+        return evidence
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+    assert "PRODUCER_SELECTED_ANOTHER_OWNER:behavior.py" in plan.unverified
+    assert dependency_collection == []
+
+
+def test_native_base_lock_transport_never_relabels_normalized_newlines_as_original_bytes(
+    repository: Path,
+) -> None:
+    _dependency_update(repository)
+    lock = repository / "backend/uv.lock"
+    lock.write_bytes(b"version = 1\r\nrevision = 1\r\n")
+    owner._git(repository, "-c", "core.autocrlf=false", "add", "backend/uv.lock")
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "CRLF historical lock",
+    )
+    base = owner._git(repository, "rev-parse", "HEAD").strip()
+    lock.write_bytes(b"version = 1\nrevision = 2\n")
+
+    def forbidden(*_args: Any, **_options: Any) -> dict[str, Any]:
+        raise AssertionError("lossy base lock bytes cannot reach producer evidence")
+
+    with pytest.raises(ValueError, match="exact source bytes"):
+        owner.admit_change(repository, base=base, nominator=forbidden)
