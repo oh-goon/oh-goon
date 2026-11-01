@@ -16,10 +16,25 @@ from pydantic import ConfigDict, Field
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.engine.command import run_command
 from oh_goon.integrations.exact_file_write import publish_text_file
+from oh_goon.integrations.hashmarks.dependencies import captured_lock_revision
+from oh_goon.integrations.hashmarks.dependency_verification import (
+    observe_hashmarks_dependency_change,
+)
 from oh_goon.integrations.hashmarks.development_verification import nominate_changed_verification
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.integrations.native_uv_lock import compare_native_uv_dependency_artifacts
+from oh_goon.repository_tooling.development_dependency_policy import (
+    HASHMARKS_DEPENDENCY_OBLIGATION,
+    HASHMARKS_DEPENDENCY_PATHS,
+    admit_hashmarks_upgrade,
+    dependency_intent_changed,
+    hashmarks_upgrade_intent,
+)
 from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
-from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
+from oh_goon.repository_tooling.release.package_slim import (
+    canonical_source_files,
+    canonical_source_identity,
+)
 from oh_goon.repository_tooling.verification_gate_control import (
     DOCUMENTATION_ASSET_OBLIGATION,
     admitted_documentation_assets,
@@ -107,6 +122,91 @@ def capture_change(
     return base_sha, head, tuple(sorted(paths))
 
 
+def _admit_dependency_change(
+    root: Path, base: str, paths: tuple[str, ...], evidence: dict[str, Any]
+) -> tuple[list[str], tuple[str, ...]]:
+    """Apply the one bounded dependency policy without weakening unknown changes."""
+    unverified = []
+    if "frontend/package-lock.json" in paths:
+        unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
+    if "backend/pyproject.toml" not in paths:
+        if "backend/uv.lock" in paths:
+            unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
+        return unverified, ()
+    previous_manifest = _git(root, "show", f"{base}:backend/pyproject.toml")
+    previous = tomllib.loads(previous_manifest)
+    with (root / "backend/pyproject.toml").open("r", encoding="utf-8") as stream:
+        manifest = stream.read(4 * 1024 * 1024 + 1)
+    if len(manifest) > 4 * 1024 * 1024:
+        raise ValueError("Dependency declaration exceeds its transport bound")
+    current = tomllib.loads(manifest)
+    if "backend/uv.lock" not in paths and not dependency_intent_changed(previous, current):
+        return unverified, ()
+    intent = hashmarks_upgrade_intent(previous, current)
+    if intent is None or not set(HASHMARKS_DEPENDENCY_PATHS) <= set(paths):
+        unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
+        return unverified, ()
+    dependency: dict[str, Any] = {"policy": HASHMARKS_DEPENDENCY_OBLIGATION, "admitted": False}
+    evidence["dependency_evidence"] = dependency
+    try:
+        before_lock = _git(root, "show", f"{base}:backend/uv.lock").encode("utf-8")
+        with (root / "backend/uv.lock").open("rb") as stream:
+            after_lock = stream.read(4 * 1024 * 1024 + 1)
+        if len(after_lock) > 4 * 1024 * 1024:
+            raise ValueError("Dependency lock exceeds its transport bound")
+        native_remainder = compare_native_uv_dependency_artifacts(
+            before_manifest=previous_manifest.encode("utf-8"),
+            before_lock=before_lock,
+            after_manifest=manifest.encode("utf-8"),
+            after_lock=after_lock,
+            excluded_packages=("hashmarks",),
+        )
+        dependency["native_artifact_comparison"] = native_remainder
+        source_root = root.resolve()
+        source_paths = tuple(
+            sorted(
+                relative
+                for path in canonical_source_files(source_root)
+                if (relative := path.relative_to(source_root).as_posix()).startswith(
+                    "backend/src/oh_goon/integrations/hashmarks/"
+                )
+                and path.suffix == ".py"
+            )
+        )
+        dependency["source_inventory"] = {
+            "authority": "canonical-public-source-inventory",
+            "paths": source_paths,
+        }
+        native = observe_hashmarks_dependency_change(root, before_lock=before_lock)
+        dependency["native"] = native
+        observed_inputs = native["after_observation"]["repository_inputs"]
+        if (
+            len(observed_inputs) != 1
+            or observed_inputs[0]["path"] != "backend/uv.lock"
+            or observed_inputs[0]["claimed_member_revision"] != captured_lock_revision(after_lock)
+            or native["before_source"]["member_revision"] != captured_lock_revision(before_lock)
+        ):
+            raise ValueError("Dependency observers did not capture the same lock inputs")
+        observations = admit_hashmarks_upgrade(
+            native,
+            intent,
+            producer_implementation_identity=str(evidence["producer_implementation_identity"]),
+            source_paths=source_paths,
+            native_remainder=native_remainder,
+        )
+    except (OSError, ValueError) as exc:
+        dependency["reason"] = str(exc)
+        unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
+        return unverified, ()
+    evidence["observations"] = [
+        row
+        for row in evidence.get("observations", [])
+        if row.get("changed_path") not in HASHMARKS_DEPENDENCY_PATHS
+    ] + observations
+    dependency["admitted"] = True
+    return unverified, (HASHMARKS_DEPENDENCY_OBLIGATION,)
+
+
 def admit_change(
     root: Path,
     *,
@@ -135,24 +235,9 @@ def admit_change(
     static = cast(set[_STATIC], required_static_obligations(executable))
     pytest: set[str] = set()
     frontend: set[str] = set()
-    unverified: list[str] = []
-    if any(path in {"backend/uv.lock", "frontend/package-lock.json"} for path in executable):
-        unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
-    if "backend/pyproject.toml" in executable:
-        previous = tomllib.loads(_git(root, "show", f"{base_sha}:backend/pyproject.toml"))
-        with (root / "backend/pyproject.toml").open("r", encoding="utf-8") as stream:
-            manifest = stream.read(4 * 1024 * 1024 + 1)
-        if len(manifest) > 4 * 1024 * 1024:
-            raise ValueError("Dependency declaration exceeds its transport bound")
-        current = tomllib.loads(manifest)
-        project_fields = ("dependencies", "optional-dependencies", "requires-python")
-        if any(
-            previous.get("project", {}).get(key) != current.get("project", {}).get(key)
-            for key in project_fields
-        ) or any(
-            previous.get(key) != current.get(key) for key in ("dependency-groups", "build-system")
-        ):
-            unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
+    unverified, dependency_obligations = _admit_dependency_change(
+        root, base_sha, executable, evidence
+    )
     observations = evidence.get("observations", [])
     policy_proofs = [
         projected
@@ -238,7 +323,8 @@ def admit_change(
         behavioral_status="REQUIRED" if executable else "NOT_APPLICABLE",
         policy_status="REVIEW_REQUIRED" if policy_paths else "ORDINARY",
         obligations=required_policy_obligations(policy_paths)
-        + ((DOCUMENTATION_ASSET_OBLIGATION,) if accepted_assets else ()),
+        + ((DOCUMENTATION_ASSET_OBLIGATION,) if accepted_assets else ())
+        + dependency_obligations,
     )
 
 
@@ -299,7 +385,9 @@ def _commands(root: Path, plan: ChangeVerificationPlan) -> list[tuple[str, tuple
     if "generated" in plan.static:
         commands.append(("Generated contracts", ("make", "check-generated"), root))
     if "package" in plan.static:
-        commands.append(("Native package", ("make", "backend-package-build-check"), root))
+        commands.append(
+            ("Native package", ("make", "backend-lock-check", "backend-package-build-check"), root)
+        )
     if "frontend" in plan.static:
         for script in ("typecheck", "lint", "architecture", "i18n:check"):
             commands.append((f"Frontend {script}", ("npm", "run", script), root / "frontend"))

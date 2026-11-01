@@ -4,9 +4,63 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+
+if TYPE_CHECKING:
+    from hashmarks import CodeMap
+
+
+def nominate_source_verification(
+    native: CodeMap, relative: str, *, workspace_prefix: str = ""
+) -> dict[str, Any]:
+    """Project the same native source-to-test relations for changed or dependent source."""
+    from hashmarks.operation_contract import validate_operation_response
+    from hashmarks.verification_nomination_validation import validate_verification_nomination
+
+    nominated = native.verification.nomination(relative)
+    if validate_verification_nomination(nominated).get("valid") is not True:
+        raise ValueError("Hashmarks rejected its changed-source nomination")
+    if nominated.get("available") is True:
+        return {
+            "changed_path": workspace_prefix + relative,
+            "state": "CHANGED_TEST",
+            "nominations": [{"nomination": nominated, "workspace_prefix": workspace_prefix}],
+        }
+    ownership = cast(
+        dict[str, Any],
+        native.tasks.verification_ownership_graph(
+            f"Verify {relative}", limit=20, candidate_limit=16
+        ),
+    )
+    validate_operation_response("verification_ownership", ownership)
+    nominations: list[dict[str, Any]] = []
+    for row in ownership.get("verification_owners", []):
+        if relative not in row.get("covers_edit_candidates", []) or row.get(
+            "coverage_evidence"
+        ) not in {"direct-reference", "bounded-indirect-reference"}:
+            continue
+        nomination = native.verification.nomination(row["path"])
+        if validate_verification_nomination(nomination).get("valid") is not True:
+            raise ValueError("Hashmarks rejected its linked verifier nomination")
+        nominations.append(
+            {
+                "nomination": nomination,
+                "relationship": row["coverage_evidence"],
+                "workspace_prefix": workspace_prefix,
+            }
+        )
+    return {
+        "changed_path": workspace_prefix + relative,
+        "state": "LINKED" if nominations else "UNAVAILABLE",
+        "edit_candidates": [
+            workspace_prefix + value for value in ownership.get("edit_candidates", [])
+        ],
+        "stale": ownership.get("stale"),
+        "qualification": ownership.get("verification_qualification", {}),
+        "nominations": nominations,
+    }
 
 
 def nominate_changed_verification(
@@ -81,56 +135,8 @@ def nominate_changed_verification(
                             }
                         )
                         continue
-                    nominated = native.verification.nomination(relative)
-                    validation = validate_verification_nomination(nominated)
-                    if validation.get("valid") is not True:
-                        raise ValueError("Hashmarks rejected its changed-source nomination")
-                    if nominated.get("available") is True:
-                        observed.append(
-                            {
-                                "changed_path": path,
-                                "state": "CHANGED_TEST",
-                                "nominations": [
-                                    {"nomination": nominated, "workspace_prefix": prefix}
-                                ],
-                            }
-                        )
-                        continue
-                    ownership = cast(
-                        dict[str, Any],
-                        native.tasks.verification_ownership_graph(
-                            f"Verify {relative}", limit=20, candidate_limit=16
-                        ),
-                    )
-                    validate_operation_response("verification_ownership", ownership)
-                    nominations: list[dict[str, Any]] = []
-                    for row in ownership.get("verification_owners", []):
-                        if relative not in row.get("covers_edit_candidates", []) or row.get(
-                            "coverage_evidence"
-                        ) not in {"direct-reference", "bounded-indirect-reference"}:
-                            continue
-                        nomination = native.verification.nomination(row["path"])
-                        validation = validate_verification_nomination(nomination)
-                        if validation.get("valid") is not True:
-                            raise ValueError("Hashmarks rejected its linked verifier nomination")
-                        nominations.append(
-                            {
-                                "nomination": nomination,
-                                "relationship": row["coverage_evidence"],
-                                "workspace_prefix": prefix,
-                            }
-                        )
                     observed.append(
-                        {
-                            "changed_path": path,
-                            "state": "LINKED" if nominations else "UNAVAILABLE",
-                            "edit_candidates": [
-                                prefix + value for value in ownership.get("edit_candidates", [])
-                            ],
-                            "stale": ownership.get("stale"),
-                            "qualification": ownership.get("verification_qualification", {}),
-                            "nominations": nominations,
-                        }
+                        nominate_source_verification(native, relative, workspace_prefix=prefix)
                     )
                 return observed, checks, assets
 

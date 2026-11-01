@@ -26,6 +26,18 @@ class LockedInventoryAssessment:
     packages: frozenset[str] | None = None
 
 
+def captured_lock_revision(lock: bytes) -> str:
+    """Bind captured lock bytes using the native file identity domain."""
+    from hashmarks import hash_file
+
+    if len(lock) > _MAX_LOCK_BYTES:
+        raise ValueError("uv.lock exceeds the dependency evidence byte budget")
+    with tempfile.TemporaryDirectory(prefix="oh-goon-captured-lock-") as directory:
+        captured = Path(directory) / "captured.lock"
+        captured.write_bytes(lock)
+        return hash_file(captured).hash
+
+
 def _assessment(assessment: Mapping[str, Any]) -> DependencyEvidenceAssessment:
     """Translate producer-qualified facts without deriving repository semantics."""
     source = assessment["source_scope"]
@@ -41,7 +53,7 @@ def _assessment(assessment: Mapping[str, Any]) -> DependencyEvidenceAssessment:
 
 
 def observe_locked_dependencies(repository: Path) -> DependencyObservationSnapshot:
-    from hashmarks import CodeMap, hash_file
+    from hashmarks import CodeMap
     from hashmarks.adapters.uv_dependency import uv_lock_dependency_observation
 
     try:
@@ -64,13 +76,10 @@ def observe_locked_dependencies(repository: Path) -> DependencyObservationSnapsh
                     lock = stream.read(_MAX_LOCK_BYTES + 1)
                 if len(lock) > _MAX_LOCK_BYTES:
                     raise ValueError("uv.lock exceeds the dependency evidence byte budget")
-                captured = state / "captured.lock"
-                captured.write_bytes(lock)
-                revision = hash_file(captured).hash
+                revision = captured_lock_revision(lock)
                 adapter = uv_lock_dependency_observation(
                     lock=lock, repository_inputs=[{"path": "uv.lock", "member_revision": revision}]
                 )
-                captured.unlink()
                 observation = cast(dict[str, Any], native.dependencies.observe(adapter))
                 assessment = _assessment(native.dependencies.assessment(observation))
         selections = {row["node_id"]: row for row in observation["selections"]}
