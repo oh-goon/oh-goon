@@ -82,6 +82,10 @@ The [Game Tape](docs/development/GAME_TAPE.md) is the main investigation
 view over those original facts. It is a projection of execution evidence,
 not a second result store.
 
+![OH-Goon Game Tape showing a successful multi-repository Plan, a selected Step, and its durable Step inspector evidence](docs/assets/game-tape-investigation.png)
+
+This is an actual source-frontend capture using non-sensitive repository fixture data. [Capture provenance](docs/assets/game-tape-investigation.md) records the exact source, route, browser and image digest.
+
 ## Related projects and ownership
 
 OH-Goon participates in a deliberately separated toolchain. Each project
