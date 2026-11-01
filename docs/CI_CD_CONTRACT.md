@@ -69,6 +69,21 @@ owners and changed tests without meaningful execution. Absence of reviewed base
 controls is **CUTOVER_UNVERIFIED**. Draft feedback has the distinct nonrequired
 name **draft-feedback** and means **FOCUSED / NOT_FULLY_VERIFIED**.
 
+The trusted controller independently observes the candidate's Hashmarks producer
+from its committed native dependency lock. After validating the proof and source,
+native uv prepares a fresh dependency-only environment: frozen lock, no project or
+workspace installation, no source builds, and the trusted interpreter explicitly
+selected. The existing public-lock policy rejects local dependency sources first.
+Native workspace discovery must resolve to that exact backend project before
+materialization; an enclosing workspace cannot substitute another lock.
+The controller reads distribution metadata and calls the trusted Hashmarks public
+artifact-identity API over the contained installed package; it never starts the
+candidate interpreter or imports those package bytes. Missing, ambiguous, escaped,
+oversized or mismatched producer evidence remains unverified. The candidate source
+is checked again after this observation. This permits a normally locked producer
+upgrade without confusing the base controller's older runtime with the candidate's
+producer or granting a version-mismatch exception.
+
 Only needed toolchains are materialized with native committed locks. Python-only
 work does not install/build the frontend. Node/npm is prepared only for admitted
 frontend obligations. Python verification consumes the committed `dev`, `quality`

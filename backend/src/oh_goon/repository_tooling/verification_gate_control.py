@@ -9,8 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import runpy
+import subprocess
+import sys
+import sysconfig
+import tempfile
 from collections.abc import Mapping, Sequence
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -375,6 +381,141 @@ def _read(path: Path) -> dict[str, Any]:
     return value
 
 
+def _candidate_producer_identity(root: Path) -> str:
+    """Observe the candidate's native locked package using only trusted code.
+
+    uv owns dependency selection and artifact verification. Its fresh dependency-only
+    environment is inspected as data; neither candidate Python nor project build hooks
+    run. Hashmarks retains ownership of the implementation identity algorithm.
+    """
+    from oh_goon.engine.command import run_command
+    from oh_goon.integrations.hashmarks.runtime_contract import (
+        native_producer_implementation_identity,
+    )
+    from oh_goon.repository_tooling._dependency_lock_portability import (
+        backend_lock_portability_issues,
+    )
+
+    project = root.resolve(strict=True) / "backend"
+    if project.is_symlink() or not project.is_dir():
+        raise ValueError("Candidate native dependency project is unavailable or escaped")
+    for name in ("pyproject.toml", "uv.lock"):
+        path = project / name
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 8 * 1024 * 1024:
+            raise ValueError("Candidate native dependency inputs are unavailable or oversized")
+    if backend_lock_portability_issues(project / "uv.lock"):
+        raise ValueError("Candidate native dependency sources are not publishable")
+    with tempfile.TemporaryDirectory(prefix="oh-goon-merge-producer-") as temporary:
+        environment = Path(temporary).resolve() / "environment"
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith(("UV_", "PYTHON")) and key != "VIRTUAL_ENV"
+        }
+        for key in ("UV_CACHE_DIR", "UV_OFFLINE"):
+            if key in os.environ:
+                env[key] = os.environ[key]
+        env["UV_PROJECT_ENVIRONMENT"] = str(environment)
+        workspace = run_command(
+            "uv",
+            "workspace",
+            "dir",
+            "--project",
+            str(project),
+            "--no-config",
+            "--offline",
+            "--no-python-downloads",
+            cwd=Path(temporary),
+            env=env,
+            timeout=20,
+            max_capture_bytes_per_stream=4096,
+            require_process_group_quiescence=True,
+            parent_death_signal=True,
+        )
+        if (
+            workspace.returncode
+            or workspace.stdout_truncated
+            or workspace.stdout.rstrip("\r\n") != str(project)
+        ):
+            raise ValueError("Candidate native workspace does not own the inspected backend lock")
+        observed = run_command(
+            "uv",
+            "sync",
+            "--project",
+            str(project),
+            "--frozen",
+            "--no-default-groups",
+            "--no-install-project",
+            "--no-install-workspace",
+            "--no-build",
+            "--no-config",
+            "--no-python-downloads",
+            "--python",
+            sys.executable,
+            "--link-mode",
+            "copy",
+            cwd=Path(temporary),
+            env=env,
+            timeout=120,
+            max_capture_bytes_per_stream=1024 * 1024,
+            require_process_group_quiescence=True,
+            parent_death_signal=True,
+        )
+        if observed.returncode or observed.stdout_truncated:
+            raise ValueError("Independent native dependency materialization is incomplete")
+        site = Path(
+            sysconfig.get_path(
+                "purelib", vars={"base": str(environment), "platbase": str(environment)}
+            )
+        )
+        if not site.is_dir() or site.resolve() != site or not site.is_relative_to(environment):
+            raise ValueError("Candidate native dependency environment is unavailable or escaped")
+        for entry in site.iterdir():
+            if entry.is_symlink() or entry.name.endswith(".egg-info"):
+                raise ValueError("Candidate native dependency metadata origin is unverified")
+            if entry.name.endswith(".dist-info"):
+                for name in ("METADATA", "RECORD"):
+                    path = entry / name
+                    if (
+                        path.is_symlink()
+                        or not path.is_file()
+                        or not 0 < path.stat().st_size <= 8 * 1024 * 1024
+                    ):
+                        raise ValueError(
+                            "Candidate native dependency metadata is unbounded or unsafe"
+                        )
+        producers = [
+            distribution
+            for distribution in metadata.distributions(path=[str(site)])
+            if distribution.metadata.get("Name", "").lower() == "hashmarks"
+        ]
+        if len(producers) != 1:
+            raise ValueError("Candidate native Hashmarks distribution is missing or ambiguous")
+        producer = producers[0]
+        package = Path(str(producer.locate_file("hashmarks")))
+        if (
+            package != site / "hashmarks"
+            or not package.is_dir()
+            or package.resolve() != package
+            or not (package / "__init__.py").is_file()
+            or not any(str(path) == "hashmarks/__init__.py" for path in producer.files or ())
+        ):
+            raise ValueError("Candidate native Hashmarks package origin is unverified")
+        total = 0
+        for count, member in enumerate(package.rglob("*"), start=1):
+            if count > 20_000:
+                raise ValueError("Candidate native Hashmarks package exceeds its inspection bound")
+            if member.is_symlink() or not (member.is_file() or member.is_dir()):
+                raise ValueError("Candidate native Hashmarks package contains an unsafe member")
+            if member.is_file():
+                total += member.stat().st_size
+                if total > 64 * 1024 * 1024:
+                    raise ValueError(
+                        "Candidate native Hashmarks package exceeds its inspection bound"
+                    )
+        return native_producer_implementation_identity(package_root=package)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, required=True)
@@ -394,19 +535,19 @@ def main() -> int:
         # materialized environment. Candidate source is inspected as data.
         from oh_goon.engine import command as command_owner
         from oh_goon.integrations.hashmarks import runtime_contract as runtime_owner
+        from oh_goon.repository_tooling import _dependency_lock_portability as lock_owner
         from oh_goon.repository_tooling.release import package_slim as identity_owner
 
         trusted = args.trusted_root.resolve(strict=True)
         if Path(__file__).resolve().parents[4] != trusted:
             raise ValueError("Controller source differs from the trusted checkout")
-        for module in (command_owner, runtime_owner, identity_owner):
+        for module in (command_owner, runtime_owner, lock_owner, identity_owner):
             filename = module.__file__
             if filename is None or not Path(filename).resolve().is_relative_to(
                 trusted / "backend/src"
             ):
                 raise ValueError("Controller imported an owner outside its trusted checkout")
         run_command = command_owner.run_command
-        require_loaded_hashmarks_runtime = runtime_owner.require_loaded_hashmarks_runtime
         canonical_source_identity = identity_owner.canonical_source_identity
 
         def git(root: Path, *arguments: str) -> str:
@@ -451,9 +592,6 @@ def main() -> int:
         ]
         if plan.get("source_identity") != canonical_source_identity(args.root):
             raise ValueError("Candidate contents differ from selected proof")
-        producer = plan.get("evidence", {}).get("producer_implementation_identity")
-        if producer is not None and producer != require_loaded_hashmarks_runtime():
-            raise ValueError("Producer implementation differs from trusted admission")
         validate_merge_proof(
             plan,
             _read(args.result),
@@ -463,7 +601,21 @@ def main() -> int:
             control_base=args.control_base,
             root=args.root,
         )
-    except (ValueError, OSError, KeyError, TypeError) as exc:
+        producer = plan.get("evidence", {}).get("producer_implementation_identity")
+        if producer is not None and producer != _candidate_producer_identity(args.root):
+            raise ValueError("Producer implementation differs from trusted admission")
+        if (
+            git(args.root, "rev-parse", "HEAD").strip() != args.candidate
+            or git(trusted, "rev-parse", "HEAD").strip() != args.base
+            or git(trusted, "status", "--porcelain", "--untracked-files=normal").strip()
+        ):
+            raise ValueError("Independent checkouts changed during trusted producer admission")
+        if (
+            plan.get("source_identity") != canonical_source_identity(args.root)
+            or git(args.root, "status", "--porcelain", "--untracked-files=normal").strip()
+        ):
+            raise ValueError("Candidate contents changed during trusted producer admission")
+    except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as exc:
         print(f"MERGE UNVERIFIED: {exc}")
         return 1
     print(

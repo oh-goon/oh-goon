@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 import copy
+import json
+import shutil
+import sys
+import sysconfig
+from collections.abc import Callable
+from importlib import metadata
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from oh_goon.engine import command as command_owner
+from oh_goon.integrations.hashmarks import runtime_contract
+from oh_goon.repository_tooling import _dependency_lock_portability as lock_owner
+from oh_goon.repository_tooling import verification_gate_control as gate
+from oh_goon.repository_tooling.release import package_slim
 from oh_goon.repository_tooling.verification_gate_control import (
     REAL_LIFECYCLE_QA_PATHS,
     REAL_LIFECYCLE_QA_TEST,
@@ -544,3 +556,598 @@ def test_legitimate_daily_deferral_is_not_failed_selected_membership() -> None:
     collection["discovered"].append("tests/daily.py::test_full_corpus")
     collection["deselected"].append("tests/daily.py::test_full_corpus")
     _validate(plan, result)
+
+
+def _candidate_gate_root(tmp_path: Path) -> Path:
+    root = tmp_path / "candidate"
+    backend = root / "backend"
+    backend.mkdir(parents=True)
+    (backend / "pyproject.toml").write_text(
+        '[project]\nname = "oh-goon"\nversion = "0.0.0"\n'
+        '[build-system]\nrequires = []\nbuild-backend = "hatch_build"\n'
+        'backend-path = ["."]\n',
+        encoding="utf-8",
+    )
+    (backend / "uv.lock").write_text(
+        'version = 1\n[[package]]\nname = "oh-goon"\nversion = "0.0.0"\n'
+        'source = { editable = "." }\n[[package]]\nname = "hashmarks"\n'
+        'version = "0.32.1"\nsource = { url = '
+        '"https://github.com/Hugloss/Hashmarks/releases/download/v0.32.1/'
+        'hashmarks-0.32.1-py3-none-any.whl" }\n',
+        encoding="utf-8",
+    )
+    return root
+
+
+def _candidate_distribution(environment: Path, source: str) -> tuple[Path, Path]:
+    site = Path(
+        sysconfig.get_path(
+            "purelib", vars={"base": str(environment), "platbase": str(environment)}
+        )
+    )
+    package = site / "hashmarks"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(source, encoding="utf-8")
+    (package / "implementation.py").write_text("VALUE = 1\n", encoding="utf-8")
+    metadata = site / "hashmarks-0.32.1.dist-info"
+    metadata.mkdir()
+    (metadata / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: hashmarks\nVersion: 0.32.1\n", encoding="utf-8"
+    )
+    (metadata / "RECORD").write_text(
+        "hashmarks/__init__.py,,\nhashmarks/implementation.py,,\n"
+        "hashmarks-0.32.1.dist-info/METADATA,,\n"
+        "hashmarks-0.32.1.dist-info/RECORD,,\n",
+        encoding="utf-8",
+    )
+    return package, metadata
+
+
+def _stub_candidate_materialization(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    source: str = '__version__ = "0.32.1"\n',
+    alter: Callable[[Path, Path], None] | None = None,
+    result: command_owner.CommandResult | None = None,
+) -> list[dict[str, Any]]:
+    observations: list[dict[str, Any]] = []
+
+    def run(*argv: str, **options: Any) -> command_owner.CommandResult:
+        if argv[:3] == ("uv", "workspace", "dir"):
+            return command_owner.CommandResult(
+                0, argv[argv.index("--project") + 1] + "\n", ""
+            )
+        assert argv[:2] == ("uv", "sync")
+        environment = Path(options["env"]["UV_PROJECT_ENVIRONMENT"])
+        package, metadata = _candidate_distribution(environment, source)
+        observations.append(
+            {
+                "argv": argv,
+                "options": options,
+                "environment": environment,
+                "package": package,
+                "identity": runtime_contract.native_producer_implementation_identity(
+                    package
+                ),
+            }
+        )
+        if alter is not None:
+            alter(package, metadata)
+        return result or command_owner.CommandResult(0, "", "")
+
+    monkeypatch.setattr(command_owner, "run_command", run)
+    return observations
+
+
+def test_candidate_producer_is_native_locked_data_without_candidate_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    marker = tmp_path / "candidate-executed"
+    bomb = (
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('executed')\n"
+        "raise RuntimeError('candidate code must remain data')\n"
+    )
+    (root / "backend/hatch_build.py").write_text(bomb, encoding="utf-8")
+    candidate_package = root / "backend/src/oh_goon"
+    candidate_package.mkdir(parents=True)
+    (candidate_package / "__init__.py").write_text(bomb, encoding="utf-8")
+    for key, value in {
+        "PYTHONPATH": str(root / "backend/src"),
+        "PYTHONHOME": str(root),
+        "VIRTUAL_ENV": str(root / "backend/.venv"),
+        "UV_PROJECT_ENVIRONMENT": str(root / "backend/.venv"),
+        "UV_PROJECT": str(root / "wrong-project"),
+        "UV_PYTHON": str(root / "untrusted-python"),
+        "UV_NO_BUILD": "false",
+        "UV_NO_SYNC": "true",
+        "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+    }.items():
+        monkeypatch.setenv(key, value)
+    observations = _stub_candidate_materialization(monkeypatch, source=bomb)
+
+    identity = gate._candidate_producer_identity(root)
+
+    assert len(observations) == 1
+    observation = observations[0]
+    assert identity == observation["identity"]
+    assert identity != runtime_contract.require_loaded_hashmarks_runtime()
+    argv = observation["argv"]
+    assert argv[:2] == ("uv", "sync")
+    assert {
+        "--frozen",
+        "--no-default-groups",
+        "--no-install-project",
+        "--no-install-workspace",
+        "--no-build",
+        "--no-config",
+        "--no-python-downloads",
+    } <= set(argv)
+    assert argv[argv.index("--project") + 1] == str(root / "backend")
+    assert argv[argv.index("--python") + 1] == sys.executable
+    assert argv[argv.index("--link-mode") + 1] == "copy"
+    environment = observation["environment"]
+    assert not environment.is_relative_to(root)
+    assert not environment.exists()
+    child_environment = observation["options"]["env"]
+    assert child_environment["UV_PROJECT_ENVIRONMENT"] == str(environment)
+    assert child_environment["UV_CACHE_DIR"] == str(tmp_path / "uv-cache")
+    for key in (
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "VIRTUAL_ENV",
+        "UV_PROJECT",
+        "UV_PYTHON",
+        "UV_NO_BUILD",
+        "UV_NO_SYNC",
+    ):
+        assert key not in child_environment
+    assert not marker.exists()
+    assert not (root / "backend/.venv").exists()
+
+
+@pytest.mark.process
+def test_native_candidate_producer_probe_never_executes_candidate_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout = Path(__file__).resolve().parents[2]
+    root = tmp_path / "candidate"
+    backend = root / "backend"
+    backend.mkdir(parents=True)
+    for name in ("pyproject.toml", "uv.lock"):
+        shutil.copyfile(checkout / "backend" / name, backend / name)
+    original_lock = (backend / "uv.lock").read_bytes()
+    marker = tmp_path / "candidate-executed"
+    bomb = (
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('executed')\n"
+        "raise RuntimeError('candidate project code must remain data')\n"
+    )
+    (backend / "hatch_build.py").write_text(bomb, encoding="utf-8")
+    candidate_package = backend / "src/oh_goon"
+    candidate_package.mkdir(parents=True)
+    (candidate_package / "__init__.py").write_text(bomb, encoding="utf-8")
+    monkeypatch.setenv("UV_OFFLINE", "1")
+
+    identity = gate._candidate_producer_identity(root)
+
+    assert identity == runtime_contract.require_loaded_hashmarks_runtime()
+    assert not marker.exists()
+    assert (backend / "uv.lock").read_bytes() == original_lock
+    assert not (backend / ".venv").exists()
+
+
+@pytest.mark.process
+def test_native_candidate_parent_workspace_cannot_select_another_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout = Path(__file__).resolve().parents[2]
+    root = tmp_path / "candidate"
+    backend = root / "backend"
+    backend.mkdir(parents=True)
+    for name in ("pyproject.toml", "uv.lock"):
+        shutil.copyfile(checkout / "backend" / name, backend / name)
+    original_lock = (backend / "uv.lock").read_bytes()
+    (root / "pyproject.toml").write_text(
+        '[tool.uv.workspace]\nmembers = ["backend"]\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    native_run = command_owner.run_command
+    commands: list[tuple[str, ...]] = []
+
+    def observe(*argv: str, **options: Any) -> command_owner.CommandResult:
+        commands.append(argv)
+        return native_run(*argv, **options)
+
+    monkeypatch.setattr(command_owner, "run_command", observe)
+
+    with pytest.raises(ValueError, match="inspected backend lock"):
+        gate._candidate_producer_identity(root)
+
+    assert len(commands) == 1
+    assert commands[0][:3] == ("uv", "workspace", "dir")
+    assert (backend / "uv.lock").read_bytes() == original_lock
+    assert not (root / "uv.lock").exists()
+    assert not (backend / ".venv").exists()
+
+
+@pytest.mark.parametrize("fault", ("missing", "mismatch", "truncated", "failure"))
+def test_candidate_workspace_scope_must_be_complete_before_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    observations: list[dict[str, Any]] = []
+
+    def workspace(*argv: str, **options: Any) -> command_owner.CommandResult:
+        assert argv[:3] == ("uv", "workspace", "dir")
+        observations.append({"argv": argv, "options": options})
+        output = str(root / "backend") + "\n"
+        if fault == "missing":
+            output = ""
+        elif fault == "mismatch":
+            output = str(root) + "\n"
+        return command_owner.CommandResult(
+            17 if fault == "failure" else 0,
+            output,
+            "",
+            stdout_truncated=fault == "truncated",
+        )
+
+    monkeypatch.setattr(command_owner, "run_command", workspace)
+
+    with pytest.raises(ValueError, match="inspected backend lock"):
+        gate._candidate_producer_identity(root)
+
+    assert len(observations) == 1
+    argv = observations[0]["argv"]
+    assert {"--no-config", "--offline", "--no-python-downloads"} <= set(argv)
+    assert argv[argv.index("--project") + 1] == str(root / "backend")
+    options = observations[0]["options"]
+    assert not Path(options["env"]["UV_PROJECT_ENVIRONMENT"]).exists()
+    assert not options["cwd"].exists()
+
+
+def test_candidate_producer_identity_binds_bytes_even_when_version_is_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    first = _stub_candidate_materialization(
+        monkeypatch, source='__version__ = "0.32.1"\nVALUE = "first"\n'
+    )
+    first_identity = gate._candidate_producer_identity(root)
+    second = _stub_candidate_materialization(
+        monkeypatch, source='__version__ = "0.32.1"\nVALUE = "second"\n'
+    )
+    second_identity = gate._candidate_producer_identity(root)
+
+    assert first_identity == first[0]["identity"]
+    assert second_identity == second[0]["identity"]
+    assert first_identity != second_identity
+    assert first[0]["environment"] != second[0]["environment"]
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "missing",
+        "duplicate",
+        "missing-package",
+        "package-symlink",
+        "member-symlink",
+        "metadata-symlink",
+    ),
+)
+def test_candidate_producer_rejects_unbound_materialized_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+
+    def alter(package: Path, metadata: Path) -> None:
+        if fault == "missing":
+            shutil.rmtree(metadata)
+        elif fault == "duplicate":
+            shutil.copytree(metadata, metadata.with_name("hashmarks-0.99.0.dist-info"))
+        elif fault == "missing-package":
+            shutil.rmtree(package)
+        elif fault == "package-symlink":
+            outside = tmp_path / "outside-package"
+            package.rename(outside)
+            package.symlink_to(outside, target_is_directory=True)
+        elif fault == "member-symlink":
+            outside = tmp_path / "outside-implementation.py"
+            member = package / "implementation.py"
+            member.rename(outside)
+            member.symlink_to(outside)
+        else:
+            outside = tmp_path / "outside-metadata"
+            metadata.rename(outside)
+            metadata.symlink_to(outside, target_is_directory=True)
+
+    observations = _stub_candidate_materialization(monkeypatch, alter=alter)
+
+    with pytest.raises((OSError, ValueError)):
+        gate._candidate_producer_identity(root)
+
+    assert len(observations) == 1
+    assert not observations[0]["environment"].exists()
+
+
+@pytest.mark.parametrize("name", ("METADATA", "RECORD"))
+@pytest.mark.parametrize("fault", ("missing", "directory", "symlink", "oversized"))
+def test_candidate_distribution_metadata_is_safe_before_importlib_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, fault: str
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+
+    def alter(_package: Path, metadata: Path) -> None:
+        path = metadata / name
+        if fault == "oversized":
+            with path.open("r+b") as stream:
+                stream.truncate(8 * 1024 * 1024 + 1)
+        elif fault == "symlink":
+            outside = tmp_path / "outside-distribution-metadata"
+            path.rename(outside)
+            path.symlink_to(outside)
+        else:
+            path.unlink()
+            if fault == "directory":
+                path.mkdir()
+
+    def unexpected_metadata_read(**_options: Any) -> None:
+        pytest.fail("Unsafe distribution metadata reached importlib inspection")
+
+    observations = _stub_candidate_materialization(monkeypatch, alter=alter)
+    monkeypatch.setattr(metadata, "distributions", unexpected_metadata_read)
+
+    with pytest.raises(ValueError):
+        gate._candidate_producer_identity(root)
+
+    assert len(observations) == 1
+    assert not observations[0]["environment"].exists()
+
+
+def test_candidate_producer_rejects_non_native_egg_metadata_before_inspection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+
+    def alter(_package: Path, metadata: Path) -> None:
+        legacy = metadata.with_name("hashmarks.egg-info")
+        legacy.mkdir()
+        shutil.copyfile(metadata / "METADATA", legacy / "PKG-INFO")
+
+    def unexpected_metadata_read(**_options: Any) -> None:
+        pytest.fail("Non-native distribution metadata reached importlib inspection")
+
+    observations = _stub_candidate_materialization(monkeypatch, alter=alter)
+    monkeypatch.setattr(metadata, "distributions", unexpected_metadata_read)
+
+    with pytest.raises(ValueError):
+        gate._candidate_producer_identity(root)
+
+    assert len(observations) == 1
+    assert not observations[0]["environment"].exists()
+
+
+@pytest.mark.parametrize("fault", ("failure", "truncated"))
+def test_candidate_producer_never_falls_back_after_native_materialization_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    result = command_owner.CommandResult(
+        17 if fault == "failure" else 0,
+        "partial native observation",
+        "native failed" if fault == "failure" else "",
+        stdout_truncated=fault == "truncated",
+    )
+    observations = _stub_candidate_materialization(monkeypatch, result=result)
+
+    with pytest.raises(ValueError):
+        gate._candidate_producer_identity(root)
+
+    assert len(observations) == 1
+    assert not observations[0]["environment"].exists()
+
+
+def test_candidate_producer_timeout_is_terminal_and_removes_partial_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    environments: list[Path] = []
+
+    def timeout(*argv: str, **options: Any) -> command_owner.CommandResult:
+        if argv[:3] == ("uv", "workspace", "dir"):
+            return command_owner.CommandResult(0, str(root / "backend") + "\n", "")
+        assert argv[:2] == ("uv", "sync")
+        environment = Path(options["env"]["UV_PROJECT_ENVIRONMENT"])
+        environment.mkdir(parents=True)
+        (environment / "partial-install").write_text("incomplete", encoding="utf-8")
+        environments.append(environment)
+        raise command_owner.CommandTimeoutExpired(
+            argv,
+            options["timeout"],
+            supervisor=command_owner.CommandSupervisorReceipt(),
+        )
+
+    monkeypatch.setattr(command_owner, "run_command", timeout)
+
+    with pytest.raises(command_owner.CommandTimeoutExpired):
+        gate._candidate_producer_identity(root)
+
+    assert len(environments) == 1
+    assert not environments[0].exists()
+
+
+@pytest.mark.parametrize(
+    "relative", ("backend", "backend/pyproject.toml", "backend/uv.lock")
+)
+def test_candidate_dependency_input_symlink_rejected_before_native_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    path = root / relative
+    outside = tmp_path / "outside-input"
+    directory = path.is_dir()
+    path.rename(outside)
+    path.symlink_to(outside, target_is_directory=directory)
+    observations = _stub_candidate_materialization(monkeypatch)
+
+    with pytest.raises(ValueError):
+        gate._candidate_producer_identity(root)
+
+    assert observations == []
+
+
+@pytest.mark.parametrize(
+    "local_source",
+    ('{ path = "../candidate.whl" }', '{ editable = "../hashmarks" }'),
+)
+def test_candidate_producer_rejects_local_dependency_before_native_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, local_source: str
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    (root / "backend/uv.lock").write_text(
+        'version = 1\n[[package]]\nname = "hashmarks"\nversion = "0.32.1"\n'
+        f"source = {local_source}\n",
+        encoding="utf-8",
+    )
+    observations = _stub_candidate_materialization(monkeypatch)
+
+    with pytest.raises(ValueError):
+        gate._candidate_producer_identity(root)
+
+    assert observations == []
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "none",
+        "identity-mismatch",
+        "invalid-plan",
+        "unverified-plan",
+        "native-timeout",
+        "before-source-change",
+        "after-source-change",
+        "after-dirty-tree",
+        "candidate-head-changed",
+        "base-head-changed",
+        "base-dirty-after",
+    ),
+)
+def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fault: str,
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    trusted = tmp_path / "trusted"
+    trusted_sources = trusted / "backend/src/oh_goon"
+    trusted_sources.mkdir(parents=True)
+    monkeypatch.setattr(
+        gate,
+        "__file__",
+        str(trusted_sources / "repository_tooling/verification_gate_control.py"),
+    )
+    for module, relative in (
+        (command_owner, "engine/command.py"),
+        (runtime_contract, "integrations/hashmarks/runtime_contract.py"),
+        (lock_owner, "repository_tooling/_dependency_lock_portability.py"),
+        (package_slim, "repository_tooling/release/package_slim.py"),
+    ):
+        monkeypatch.setattr(module, "__file__", str(trusted_sources / relative))
+    plan, result = _proof()
+    plan["requested_head"] = "c" * 40
+    if fault == "invalid-plan":
+        plan["schema_version"] = "unrecognized-plan/v1"
+    elif fault == "unverified-plan":
+        plan["unverified"] = ["changed source has unresolved scope"]
+    result["plan"] = copy.deepcopy(plan)
+    plan_file, result_file = tmp_path / "plan.json", tmp_path / "result.json"
+    plan_file.write_text(json.dumps(plan), encoding="utf-8")
+    result_file.write_text(json.dumps(result), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "oh-goon-verify-gate",
+            "--plan",
+            str(plan_file),
+            "--result",
+            str(result_file),
+            "--candidate",
+            plan["candidate"],
+            "--base",
+            plan["base"],
+            "--control-base",
+            plan["base"],
+            "--head",
+            plan["requested_head"],
+            "--root",
+            str(root),
+            "--trusted-root",
+            str(trusted),
+        ],
+    )
+    observed: list[Path] = []
+
+    def producer(candidate: Path) -> str:
+        observed.append(candidate)
+        if fault == "native-timeout":
+            raise command_owner.CommandTimeoutExpired(
+                ("uv", "sync"), 120, supervisor=command_owner.CommandSupervisorReceipt()
+            )
+        return "sha256:" + ("d" if fault == "identity-mismatch" else "b") * 64
+
+    def source_identity(candidate: Path) -> str:
+        assert candidate == root
+        if fault == "before-source-change" or (
+            fault == "after-source-change" and observed
+        ):
+            return "sha256:" + "e" * 64
+        return str(plan["source_identity"])
+
+    def git(*argv: str, **_options: Any) -> command_owner.CommandResult:
+        assert argv[:2] == ("git", "-C")
+        directory, arguments = Path(argv[2]), argv[3:]
+        if arguments == ("rev-parse", "HEAD"):
+            output = plan["base"] if directory == trusted else plan["candidate"]
+            if observed and (
+                (directory == root and fault == "candidate-head-changed")
+                or (directory == trusted and fault == "base-head-changed")
+            ):
+                output = "f" * 40
+        elif arguments[0] == "status":
+            output = (
+                "?? introduced-after-probe\n"
+                if observed
+                and (
+                    (directory == root and fault == "after-dirty-tree")
+                    or (directory == trusted and fault == "base-dirty-after")
+                )
+                else ""
+            )
+        elif arguments[0] == "merge-base":
+            output = ""
+        else:
+            assert arguments[0] == "diff"
+            output = "\0".join(plan["changed_paths"]) + "\0"
+        return command_owner.CommandResult(0, output, "")
+
+    monkeypatch.setattr(gate, "_candidate_producer_identity", producer)
+    monkeypatch.setattr(package_slim, "canonical_source_identity", source_identity)
+    monkeypatch.setattr(command_owner, "run_command", git)
+
+    status = gate.main()
+
+    assert status == (0 if fault == "none" else 1)
+    assert observed == (
+        []
+        if fault in {"before-source-change", "invalid-plan", "unverified-plan"}
+        else [root]
+    )
+    output = capsys.readouterr().out
+    assert ("MERGE_VERIFIED:" in output) == (fault == "none")
+    assert ("MERGE UNVERIFIED:" in output) == (fault != "none")
