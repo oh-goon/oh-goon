@@ -40,6 +40,126 @@ def test_private_json_transport_publishes_and_reopens_real_files(
     assert list(scratch.iterdir()) == [target]
 
 
+@pytest.mark.parametrize("with_report", [False, True])
+def test_executed_verification_logs_bounded_summary_but_retains_full_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    with_report: bool,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    control = tmp_path / "private-control"
+    control.mkdir(mode=0o700)
+    plan_path = control / "plan.json"
+    report_path = control / "result.json"
+    plan = owner.ChangeVerificationPlan(
+        base="a" * 40,
+        candidate="b" * 40,
+        source_identity="sha256:" + "c" * 64,
+        changed_paths=("backend/src/module.py",),
+        static=("python",),
+        pytest=("backend/tests/unit/test_module.py",),
+        frontend=(),
+        unverified=(),
+        evidence={},
+        behavioral_status="REQUIRED",
+        policy_status="ORDINARY",
+    )
+    owner._write_transport(plan_path, plan.model_dump(mode="json"), source)
+    receipt = {
+        "members": [{"nodeid": "test_case", "secret_native_detail": "X" * 500_000}],
+    }
+    result = {
+        "status": "CHECKS_PASSED",
+        "outcomes": [
+            {"owner": "Native pytest", "returncode": 0, "native_report": receipt},
+        ],
+    }
+    monkeypatch.setattr(owner, "execute_change", lambda *_args, **_kwargs: result)
+    arguments = ["--root", str(source), "--execute", str(plan_path), "--mode", "merge"]
+    if with_report:
+        arguments.extend(["--report", str(report_path)])
+    assert owner.main(arguments) == 0
+    stdout = json.loads(capsys.readouterr().out)
+    if with_report:
+        assert len(json.dumps(stdout)) < 500
+        assert stdout == {
+            "status": "MERGE_PROOF_READY",
+            "candidate": plan.candidate,
+            "outcomes": [{"owner": "Native pytest", "returncode": 0}],
+        }
+        persisted = owner._read_json(report_path)
+        assert persisted["outcomes"][0]["native_report"] == receipt
+        assert persisted["plan"] == plan.model_dump(mode="json")
+        assert persisted["status"] == "MERGE_PROOF_READY"
+    else:
+        assert not report_path.exists()
+        assert stdout["outcomes"][0]["native_report"] == receipt
+
+
+def test_failed_verification_summary_keeps_reason_and_complete_native_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    control = tmp_path / "private-control"
+    control.mkdir(mode=0o700)
+    plan = owner.ChangeVerificationPlan(
+        base="a" * 40,
+        candidate="b" * 40,
+        source_identity="sha256:" + "c" * 64,
+        changed_paths=("backend/src/module.py",),
+        static=("python",),
+        pytest=("backend/tests/unit/test_module.py",),
+        frontend=(),
+        unverified=(),
+        evidence={},
+        behavioral_status="REQUIRED",
+        policy_status="ORDINARY",
+    )
+    plan_path = control / "plan.json"
+    report_path = control / "result.json"
+    owner._write_transport(plan_path, plan.model_dump(mode="json"), source)
+    native = {"sensitive_receipt": "SECRET" * 5000}
+    monkeypatch.setattr(
+        owner,
+        "execute_change",
+        lambda *_args, **_kwargs: {
+            "status": "FAIL",
+            "reason": "selected pytest failed",
+            "outcomes": [
+                {"owner": "Native pytest", "returncode": 17, "native_report": native},
+            ],
+        },
+    )
+    assert (
+        owner.main(
+            [
+                "--root",
+                str(source),
+                "--execute",
+                str(plan_path),
+                "--mode",
+                "merge",
+                "--report",
+                str(report_path),
+            ]
+        )
+        == 1
+    )
+    output = json.loads(capsys.readouterr().out)
+    assert output == {
+        "status": "FAIL",
+        "candidate": plan.candidate,
+        "outcomes": [{"owner": "Native pytest", "returncode": 17}],
+        "reason": "selected pytest failed",
+    }
+    assert owner._read_json(report_path)["outcomes"][0]["native_report"] == native
+
+
 @pytest.mark.parametrize("mode", ["focused", "merge"])
 def test_plan_cli_publishes_after_actual_source_admission(
     tmp_path: Path, mode: str

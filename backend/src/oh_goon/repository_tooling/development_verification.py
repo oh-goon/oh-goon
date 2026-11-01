@@ -912,7 +912,23 @@ def main(argv: list[str] | None = None) -> int:
                 )
         if args.report:
             _write_transport(args.report, payload, root)
-        print(json.dumps(payload, sort_keys=True))
+            # The report file is the complete machine-readable proof. Printing
+            # it again can stream megabytes of native pytest receipts into the
+            # hosted log and make the CI transport slower than the tests.
+            # Keep the historical complete stdout contract without --report.
+            summary: dict[str, Any] = {
+                "status": payload["status"],
+                "candidate": plan.candidate,
+                "outcomes": [
+                    {"owner": row["owner"], "returncode": row["returncode"]}
+                    for row in result["outcomes"]
+                ],
+            }
+            if "reason" in result:
+                summary["reason"] = result["reason"]
+            print(json.dumps(summary, sort_keys=True))
+        else:
+            print(json.dumps(payload, sort_keys=True))
         return (
             0 if payload["status"] in {"MERGE_PROOF_READY", "FOCUSED / NOT_FULLY_VERIFIED"} else 1
         )
