@@ -167,6 +167,14 @@ jobs:
           printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
       - name: Materialize committed backend locks
         run: uv sync --project backend --frozen --group dev --group quality --group build
+      - name: Restore native mypy analysis for the complete backend quality owner
+        if: matrix.target == 'check-backend-quality'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: backend/.mypy_cache
+          key: mypy-v1-${{ runner.os }}-${{ runner.arch }}-py${{ env.UV_PYTHON }}-${{ hashFiles('backend/uv.lock', 'backend/pyproject.toml') }}-${{ needs.campaign.outputs.sha }}
+          restore-keys: |
+            mypy-v1-${{ runner.os }}-${{ runner.arch }}-py${{ env.UV_PYTHON }}-${{ hashFiles('backend/uv.lock', 'backend/pyproject.toml') }}-
       - name: Materialize frontend consumers
         if: matrix.target == 'frontend-check' || matrix.target == 'check-generated' || matrix.target == 'check-tooling-tests' || matrix.target == 'release-locks-check'
         run: make frontend-install

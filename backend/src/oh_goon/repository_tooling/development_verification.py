@@ -515,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
                 require_merge_selection(root, plan)
             if args.github_output:
                 with args.github_output.open("a", encoding="utf-8") as stream:
+                    stream.write(f"python={'true' if 'python' in plan.static else 'false'}\n")
                     stream.write(f"frontend={'true' if 'frontend' in plan.static else 'false'}\n")
                     stream.write(f"pytest={'true' if plan.pytest else 'false'}\n")
             return 0

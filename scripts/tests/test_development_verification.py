@@ -64,6 +64,7 @@ def test_plan_cli_publishes_after_actual_source_admission(
     scratch = tmp_path / "control"
     scratch.mkdir(mode=0o700)
     target = scratch / "plan.json"
+    outputs = scratch / "outputs"
     assert (
         owner.main(
             [
@@ -75,6 +76,8 @@ def test_plan_cli_publishes_after_actual_source_admission(
                 mode,
                 "--plan",
                 str(target),
+                "--github-output",
+                str(outputs),
             ]
         )
         == 0
@@ -83,6 +86,10 @@ def test_plan_cli_publishes_after_actual_source_admission(
     assert plan.changed_paths == ("docs/explanation.md",)
     assert plan.source_identity == canonical_source_identity(source)
     assert plan.behavioral_status == "NOT_APPLICABLE"
+    assert (
+        outputs.read_text(encoding="utf-8")
+        == "python=false\nfrontend=false\npytest=false\n"
+    )
     assert (
         json.loads(target.read_text())["candidate"]
         == owner._git(source, "rev-parse", "HEAD").strip()
@@ -311,7 +318,8 @@ def test_plan_cli_rejects_ineligible_merge_before_capability_outputs(
     else:
         assert result == 0
         assert outputs.read_text(encoding="utf-8") == (
-            previous + f"frontend=false\npytest={'true' if plan.pytest else 'false'}\n"
+            previous
+            + f"python=true\nfrontend=false\npytest={'true' if plan.pytest else 'false'}\n"
         )
 
 
@@ -351,6 +359,7 @@ def test_merge_plan_cli_keeps_qualified_behavior_and_generated_contract_paths(
         == 0
     )
     assert outputs.read_text(encoding="utf-8") == (
+        f"python={'true' if relative == 'behavior.py' else 'false'}\n"
         f"frontend={'true' if 'frontend' in plan.static else 'false'}\n"
         f"pytest={'true' if plan.pytest else 'false'}\n"
     )
