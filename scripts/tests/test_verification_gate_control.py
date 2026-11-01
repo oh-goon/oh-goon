@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -10,9 +11,61 @@ from oh_goon.repository_tooling.verification_gate_control import (
     REAL_LIFECYCLE_QA_TEST,
     VERIFICATION_POLICY_TESTS,
     is_verification_policy_path,
+    non_executable_documentation,
     required_static_obligations,
     validate_merge_proof,
 )
+
+
+def _documentation_png(
+    *, width: int = 1600, height: int = 1000, payload: bytes = b""
+) -> bytes:
+    ihdr = (
+        width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
+    )
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + (13).to_bytes(4, "big")
+        + b"IHDR"
+        + ihdr
+        + b"\x00\x00\x00\x00"
+        + payload
+        + b"\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+
+def test_exact_game_tape_png_is_bounded_non_executable_documentation(
+    tmp_path: Path,
+) -> None:
+    asset = tmp_path / "docs/assets/game-tape-investigation.png"
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(_documentation_png())
+
+    assert non_executable_documentation(
+        tmp_path, "docs/assets/game-tape-investigation.png"
+    )
+
+    other = tmp_path / "docs/assets/other.png"
+    other.write_bytes(asset.read_bytes())
+    assert not non_executable_documentation(tmp_path, "docs/assets/other.png")
+
+
+def test_game_tape_png_refuses_malformed_or_oversized_bytes(tmp_path: Path) -> None:
+    asset = tmp_path / "docs/assets/game-tape-investigation.png"
+    asset.parent.mkdir(parents=True)
+    refused = (
+        b"",
+        b"not a png",
+        _documentation_png(width=0),
+        _documentation_png(height=4097),
+        _documentation_png() + b"trailing bytes",
+        _documentation_png(payload=b"x" * (2 * 1024 * 1024)),
+    )
+    for content in refused:
+        asset.write_bytes(content)
+        assert not non_executable_documentation(
+            tmp_path, "docs/assets/game-tape-investigation.png"
+        )
 
 
 def _proof() -> tuple[dict[str, Any], dict[str, Any]]:
