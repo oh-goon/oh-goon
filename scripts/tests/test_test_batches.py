@@ -184,6 +184,81 @@ def test_resource_pressure_classifier_is_narrow() -> None:
     assert not _resource_pressure_failure(124, "Resource temporarily unavailable")
 
 
+def test_fail_fast_consumes_completed_failure_before_replenishing_successful_worker(
+    tmp_path: Path,
+) -> None:
+    from argparse import Namespace
+    from concurrent.futures import Future, ThreadPoolExecutor
+    from types import SimpleNamespace
+    from typing import cast
+    from unittest.mock import Mock
+
+    from oh_goon.repository_tooling import pytest_batch_orchestration as owner
+    from oh_goon.repository_tooling import test_batches as batches
+
+    success: owner._BatchFuture = Future()
+    failure: owner._BatchFuture = Future()
+    success.set_result((0, "passed\n", 0.1, ()))
+    failure.set_result((1, "AssertionError: controlled failure\n", 0.1, ()))
+    queued = Batch(index=3, total=3, members=("test_queued.py",))
+    state = owner._BatchRunState(
+        unscheduled=[queued],
+        selected_batches=0,
+        suite_started=time.monotonic(),
+        deadline=None,
+        pending={
+            success: Batch(index=1, total=3, members=("test_passed.py",)),
+            failure: Batch(index=2, total=3, members=("test_failed.py",)),
+        },
+        attempts={1: 1, 2: 1},
+    )
+    args = Namespace(
+        fail_fast=True,
+        environment_retries=0,
+        marker=None,
+        show_output=False,
+        batch_timeout=10,
+        no_timeout_bisection=False,
+    )
+    plan = SimpleNamespace(
+        coverage_session=None,
+        resume_context=SimpleNamespace(
+            receipt_directory=tmp_path, suite_identity="sha256:suite"
+        ),
+        execution_plan_identity="sha256:plan",
+        run_identity="sha256:run",
+        invocation=None,
+    )
+    callbacks = owner.BatchCallbacks(
+        run_batch=batches._run,
+        progress_refresh=lambda _message: None,
+        progress_clear=lambda: None,
+        bounded_failure_output=batches._bounded_failure_output,
+        resource_pressure_failure=batches._resource_pressure_failure,
+        suite_budget_stop=batches._suite_budget_stop,
+    )
+    pool = Mock(spec=ThreadPoolExecutor)
+
+    completed = owner._consume_done_futures(
+        args,
+        cast(owner._BatchPlan, plan),
+        state,
+        cast(ThreadPoolExecutor, pool),
+        {success, failure},
+        callbacks,
+    )
+
+    assert completed == 2
+    pool.submit.assert_not_called()
+    assert state.unscheduled == [queued]
+    assert not state.pending
+    assert state.failures == 1
+    assert state.fail_fast_triggered
+    assert state.cancellation_requested.is_set()
+    assert not state.suite_timed_out
+    assert [report["returncode"] for report in state.batch_reports] == [0, 1]
+
+
 def test_timeout_bisection_recovers_multi_member_batch_without_weakening_leaf_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

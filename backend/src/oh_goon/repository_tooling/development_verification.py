@@ -428,6 +428,7 @@ def execute_change(
                 "--pytest-config",
                 "backend/pyproject.toml",
                 "--qualified",
+                "--fail-fast",
                 "--show-output",
                 "--granularity",
                 "tests",

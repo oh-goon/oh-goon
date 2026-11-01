@@ -536,14 +536,8 @@ def test_fast_semantic_batch_lanes_persist_exact_resume_receipts() -> None:
     assert "--resume --resume-key" not in complete_tooling
 
 
-def test_runtime_liveness_and_tool_lookup_are_owned_not_textual() -> None:
+def test_tool_lookup_and_process_cleanup_keep_existing_owners() -> None:
     workspaces = (ROOT / "backend/src/oh_goon/runtime/workspaces.py").read_text(
-        encoding="utf-8"
-    )
-    lease = (
-        ROOT / "backend/src/oh_goon/runtime/execution/lease_environment.py"
-    ).read_text(encoding="utf-8")
-    process_birth = (ROOT / "backend/src/oh_goon/core/process_birth.py").read_text(
         encoding="utf-8"
     )
     process_tests = (ROOT / "scripts/tests/test_test_batches_process.py").read_text(
@@ -551,8 +545,6 @@ def test_runtime_liveness_and_tool_lookup_are_owned_not_textual() -> None:
     )
 
     assert '"PATH": os.environ.get("PATH", os.defpath)' in workspaces
-    assert "observe_process_liveness(pid)" in lease
-    assert 'state not in {"Z", "X", "x"}' in process_birth
     assert (
         "test_long_lived_batch_runner_cleans_completed_pytest_background_groups"
         in process_tests
@@ -561,6 +553,47 @@ def test_runtime_liveness_and_tool_lookup_are_owned_not_textual() -> None:
         "test_repeated_batch_commands_leave_no_reader_threads_or_fd_growth"
         in process_tests
     )
+
+
+@pytest.mark.parametrize(
+    ("state", "probe_error", "alive"),
+    (
+        ("S", None, True),
+        ("Z", None, False),
+        ("X", None, False),
+        ("x", None, False),
+        (None, None, True),
+        (None, PermissionError, True),
+        (None, OSError, True),
+        (None, ProcessLookupError, False),
+    ),
+)
+def test_runtime_liveness_preserves_observed_state_and_os_uncertainty(
+    state: str | None,
+    probe_error: type[OSError] | None,
+    alive: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.runtime.execution import lease_environment as authority
+
+    observations: list[int] = []
+    probes: list[tuple[int, int]] = []
+
+    def observe(pid: int) -> str | None:
+        observations.append(pid)
+        return state
+
+    def probe(pid: int, signal: int) -> None:
+        probes.append((pid, signal))
+        if probe_error is not None:
+            raise probe_error("controlled native process observation")
+
+    monkeypatch.setattr(authority, "observe_process_state", observe)
+    monkeypatch.setattr(os, "kill", probe)
+
+    assert authority.SystemLeaseEnvironment().process_alive(41) is alive
+    assert observations == [41]
+    assert probes == ([(41, 0)] if state is None else [])
 
 
 def test_preexec_usage_is_confined_to_single_threaded_opensandbox_chroot_boundary() -> (

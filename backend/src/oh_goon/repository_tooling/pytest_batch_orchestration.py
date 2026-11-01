@@ -60,6 +60,9 @@ from oh_goon.runtime.recovery_evidence import (
 
 
 class MembershipReceiptProjection(Protocol):
+    @property
+    def attempted(self) -> tuple[str, ...]: ...
+
     def as_dict(self) -> dict[str, object]: ...
 
 
@@ -169,6 +172,7 @@ class _BatchRunState:
     failures: int = 0
     deselected_batches: int = 0
     suite_timed_out: bool = False
+    fail_fast_triggered: bool = False
     batch_reports: list[BatchExecutionReport] = field(default_factory=list)
     recovery_events: list[ExecutionRecoveryEvent] = field(default_factory=list)
     refinement_history: RefinementHistory = field(default_factory=RefinementHistory)
@@ -265,6 +269,7 @@ def _execution_authority(
         scheduled_members=tuple(member for batch in scheduled for member in batch.members),
         reused_members=tuple(sorted(reusable)),
         resource_budget=resource_budget.execution_policy(),
+        fail_fast=args.fail_fast,
     )
     run_identity = execution_run_identity(
         suite_identity=resume_context.suite_identity,
@@ -366,6 +371,7 @@ def _print_batch_plan(args: argparse.Namespace, plan: _BatchPlan) -> None:
         f"suite-timeout={args.suite_timeout if args.suite_timeout is not None else 'none'} | "
         f"environment-retries={args.environment_retries} | "
         f"timeout-bisection={'off' if args.no_timeout_bisection else 'on'} | "
+        f"fail-fast={'on' if args.fail_fast else 'off'} | "
         f"resume={'on' if args.resume else 'off'}",
         flush=True,
     )
@@ -461,6 +467,8 @@ def _submit_next(
 
 
 def _wait_timeout(state: _BatchRunState) -> float:
+    if state.fail_fast_triggered:
+        return 0.25
     if state.deadline is None:
         return 5.0
     remaining = state.deadline - time.monotonic()
@@ -530,7 +538,9 @@ def _retry_resource_pressure(
     callbacks: BatchCallbacks,
 ) -> bool:
     if not (
-        callbacks.resource_pressure_failure(rc, output) and attempt <= args.environment_retries
+        not state.cancellation_requested.is_set()
+        and callbacks.resource_pressure_failure(rc, output)
+        and attempt <= args.environment_retries
     ):
         return False
     callbacks.progress_clear()
@@ -593,6 +603,9 @@ def _consume_future(
         )
         print(output, end="" if output.endswith("\n") else "\n", flush=True)
     state.failures += int(rc != 0)
+    if rc != 0 and args.fail_fast and not state.suite_timed_out:
+        state.fail_fast_triggered = True
+        state.cancellation_requested.set()
     return False
 
 
@@ -616,8 +629,12 @@ def _consume_done_futures(
             coverage=plan.coverage_session is not None,
         )
         completed += int(not retried)
-        if not state.suite_timed_out:
-            _submit_next(pool, args, plan, state, callbacks)
+    # Observe every completed result before replenishing work: a successful
+    # sibling must not launch another batch ahead of an already completed failure.
+    if not state.suite_timed_out:
+        for _ in done:
+            if not _submit_next(pool, args, plan, state, callbacks):
+                break
     return completed
 
 
@@ -643,7 +660,8 @@ def _run_batch_executor(
                 )
                 completed += _consume_done_futures(args, plan, state, pool, done, callbacks)
                 if (
-                    state.deadline is not None
+                    not state.fail_fast_triggered
+                    and state.deadline is not None
                     and time.monotonic() >= state.deadline
                     and state.unscheduled
                 ):
@@ -667,7 +685,13 @@ def _apply_terminal_failures(
             f"deselected by marker={args.marker!r}",
             flush=True,
         )
-    if state.suite_timed_out or state.unscheduled:
+    if state.fail_fast_triggered:
+        print(
+            f"=== PYTEST FAIL-FAST STOP === reason=first_failure "
+            f"queued-batches={len(state.unscheduled)}",
+            flush=True,
+        )
+    elif state.suite_timed_out or state.unscheduled:
         state.suite_timed_out = True
         state.failures += 1
         print(
@@ -750,13 +774,22 @@ def _execution_report(
         "suite_timeout_seconds": args.suite_timeout,
         "timeout_bisection": not args.no_timeout_bisection,
         "environment_retries": args.environment_retries,
+        "fail_fast": args.fail_fast,
+        "fail_fast_triggered": state.fail_fast_triggered,
+        "stop_reason": (
+            "first_failure"
+            if state.fail_fast_triggered
+            else "suite_timeout"
+            if state.suite_timed_out
+            else None
+        ),
         "suite_timed_out": state.suite_timed_out,
         "duration_ms": int(duration * 1000),
         "timing_comparable": not bool(plan.reusable_members),
         "resume_enabled": args.resume,
         "resume_key": args.resume_key if args.resume else None,
         "reused_member_count": len(plan.reusable_members),
-        "executed_member_count": len(plan.selected_members) - len(plan.reusable_members),
+        "executed_member_count": len(receipt.attempted),
         "source_identity": plan.resume_context.source_identity,
         "test_plan_identity": plan.resume_context.test_plan_identity,
         "toolchain_identity": plan.resume_context.toolchain_identity,
@@ -868,7 +901,7 @@ def run_batch_cli(
         invocation = resolve_pytest_invocation(
             qualified=args.qualified,
             pytest_config=args.pytest_config,
-            pytest_args=tuple(args.pytest_arg),
+            pytest_args=(*args.pytest_arg, *(("--maxfail=1",) if args.fail_fast else ())),
             resume_environment=tuple(args.resume_env),
         )
     except (OSError, RuntimeError, ValueError) as exc:

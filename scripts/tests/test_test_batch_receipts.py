@@ -336,6 +336,41 @@ def test_resume_context_changes_with_correctness_inputs_but_not_batch_grouping(
     assert first.suite_identity != changed.suite_identity
 
 
+def test_execution_identity_binds_global_fail_fast_with_identical_native_options(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.pytest_process_environment import (
+        resolve_pytest_invocation,
+    )
+    from oh_goon.repository_tooling.test_batch_receipts import execution_plan_identity
+
+    config = tmp_path / "pyproject.toml"
+    config.write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    invocation = resolve_pytest_invocation(
+        pytest_config=config, pytest_args=("--maxfail=1",)
+    )
+    # Native per-process stopping can be selected without global cancellation.
+    # Identical correctness context must still retain distinct execution policy.
+    suite_identity = invocation.correctness_context()
+
+    def identity(*, fail_fast: bool) -> str:
+        return execution_plan_identity(
+            suite_identity=suite_identity,
+            batch_size=8,
+            batch_timeout=10,
+            timeout_bisection=False,
+            workers=2,
+            suite_timeout=60,
+            environment_retries=0,
+            selected_batch=None,
+            scheduled_members=("test_first.py", "test_second.py"),
+            reused_members=(),
+            fail_fast=fail_fast,
+        )
+
+    assert identity(fail_fast=True) != identity(fail_fast=False)
+
+
 def test_resume_context_manifest_is_atomic_and_auditable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
