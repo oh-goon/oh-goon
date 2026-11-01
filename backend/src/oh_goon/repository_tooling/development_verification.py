@@ -521,7 +521,8 @@ def admit_change(
                 and policy_proofs
                 and row.get("stale") is not True
             ):
-                row = row.copy()\n                row.update(state="POLICY_OBLIGATION", nominations=policy_proofs)
+                row = row.copy()
+                row.update(state="POLICY_OBLIGATION", nominations=policy_proofs)
             else:
                 unverified.append(f"NO_QUALIFIED_VERIFIER:{path}")
                 continue
