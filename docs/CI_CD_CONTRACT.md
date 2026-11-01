@@ -80,6 +80,16 @@ hosted native runtime view and its owned SDK-overlay cleanup through
 `ci_native_runtime.sh`; static/docs checks do not mount it. CPU budgets and
 process cleanup retain their existing native owners.
 
+When the admitted plan requires Python static checks, hosted PR verification may
+restore native mypy analysis from `backend/.mypy_cache`. Cache keys bind the
+runner OS/architecture, selected Python version, committed backend lock and
+configuration, and effective candidate SHA; restoration from another source
+requires the same toolchain/configuration prefix. Native mypy always runs on the
+current checkout and owns incremental invalidation. A cache hit cannot establish
+PASS or skip a check, and a miss runs the same checker without prior analysis.
+This disposable cache is excluded from source identity and never enters the
+trusted-base merge controller as evidence.
+
 PR, merge-group and main-health concurrency are separate. Superseded PR work is
 cancelled; main pushes execute only distinct installed-source/CLI smoke. The
 complete Python CI example is a daily reusable/manual workflow, not an additional
@@ -192,6 +202,13 @@ PASS in this campaign. The marker is `not certification`: both `slow` exhaustive
 variants and expensive ordinary `daily` journeys remain included. Dependency
 downloads may use native uv/npm caches; environments and project code are
 materialized for the current checkout.
+
+The complete `check-backend-quality` owner also restores and publishes native
+mypy analysis under the same partition, using the campaign's frozen SHA. The
+daily run on the default branch supplies reusable analysis for later PRs;
+GitHub's merge-ref cache scope limits a PR's own uploads to its reruns. Daily and
+release quality checks still invoke the complete native checker on the frozen
+source, and every other campaign owner retains its original execution.
 
 The portable environment is explicitly **Ubuntu 26.04, Python 3.12, Node
 24.19.0 and uv 0.12.5**, with two CPUs per native test scope. This campaign does

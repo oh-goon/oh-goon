@@ -67,6 +67,14 @@ jobs:
             uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \
             --base "$BASE_SHA" --candidate "$GITHUB_SHA" --head "$REQUESTED_HEAD" \
             --mode "$VERIFY_MODE" --plan "$CONTROL_DIR/plan.json" --github-output "$GITHUB_OUTPUT"
+      - name: Restore native mypy analysis
+        if: steps.selection.outputs.python == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: backend/.mypy_cache
+          key: mypy-v1-${{ runner.os }}-${{ runner.arch }}-py${{ env.UV_PYTHON }}-${{ hashFiles('backend/uv.lock', 'backend/pyproject.toml') }}-${{ github.sha }}
+          restore-keys: |
+            mypy-v1-${{ runner.os }}-${{ runner.arch }}-py${{ env.UV_PYTHON }}-${{ hashFiles('backend/uv.lock', 'backend/pyproject.toml') }}-
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.selection.outputs.frontend == 'true'
         with:
