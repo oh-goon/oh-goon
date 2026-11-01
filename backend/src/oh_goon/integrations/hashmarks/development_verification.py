@@ -3,14 +3,138 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
+from oh_goon.integrations.hashmarks.dependencies import (
+    observe_changed_dependency_consumers,
+    revalidate_changed_dependency_consumers,
+)
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+
+if TYPE_CHECKING:
+    from hashmarks import CodeMap
+
+
+def _linked_verification(
+    native: CodeMap, relative: str, prefix: str
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    from hashmarks.operation_contract import validate_operation_response
+    from hashmarks.verification_nomination_validation import validate_verification_nomination
+
+    ownership = cast(
+        dict[str, Any],
+        native.tasks.verification_ownership_graph(
+            f"Verify {relative}", limit=20, candidate_limit=16
+        ),
+    )
+    validate_operation_response("verification_ownership", ownership)
+    nominations: list[dict[str, Any]] = []
+    for row in ownership.get("verification_owners", []):
+        if relative not in row.get("covers_edit_candidates", []) or row.get(
+            "coverage_evidence"
+        ) not in {"direct-reference", "bounded-indirect-reference"}:
+            continue
+        nomination = native.verification.nomination(row["path"])
+        if validate_verification_nomination(nomination).get("valid") is not True:
+            raise ValueError("Hashmarks rejected its linked verifier nomination")
+        nominations.append(
+            {
+                "nomination": nomination,
+                "relationship": row["coverage_evidence"],
+                "workspace_prefix": prefix,
+            }
+        )
+    return ownership, nominations
+
+
+def _dependency_verification(
+    native: CodeMap, root: Path, base: Mapping[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    # This is an explicit runtime source bound, not a second import resolver or
+    # an assertion that all possible distribution consumers have been found.
+    sources: list[str] = []
+    for item in native.files.iter_files(prefix="backend/src"):
+        if item.rel.endswith(".py") and item.visibility.value != "deny":
+            sources.append(item.rel)
+            if len(sources) > 4096:
+                raise ValueError("Dependency source inventory exceeds its transport bound")
+    evidence = observe_changed_dependency_consumers(
+        native,
+        root=root,
+        lock_path=base["lock_path"],
+        before_lock=base["lock"],
+        base_revision=base["base_revision"],
+        source_paths=tuple(sorted(sources)),
+    )
+    evidence["source_selection"] = {
+        "owner": "hashmarks.files.iter_files",
+        "prefix": "backend/src",
+        "suffix": ".py",
+        "scope": "explicit-backend-runtime-python-sources",
+        "consumer_completeness": "not-claimed",
+    }
+    graphs: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+    chains: list[dict[str, Any]] = []
+    nominations: dict[str, dict[str, Any]] = {}
+    chain_keys: set[tuple[str, str, str]] = set()
+    for packet in evidence["consumer_packets"]:
+        for consumer in packet["consumers"]:
+            if consumer.get("distribution_state") != "resolved-unique":
+                continue
+            source = consumer["source_path"]
+            if source not in graphs:
+                graphs[source] = _linked_verification(native, source, "")
+            ownership, projected_nominations = graphs[source]
+            for node_id in consumer["distribution_nodes"]:
+                if node_id not in evidence["changed_node_ids"]:
+                    continue
+                for projected in projected_nominations:
+                    if projected["nomination"].get("available") is not True:
+                        continue
+                    key = json.dumps(projected, sort_keys=True)
+                    chain_key = node_id, source, key
+                    if chain_key in chain_keys:
+                        continue
+                    chain_keys.add(chain_key)
+                    nominations[key] = projected
+                    chains.append(
+                        {
+                            "node_id": node_id,
+                            "source_path": source,
+                            "consumer": consumer,
+                            "ownership": ownership,
+                            "nomination": projected,
+                        }
+                    )
+    evidence["chains"] = chains
+    observation = {
+        "changed_path": base["lock_path"],
+        "state": "LINKED" if chains else "UNAVAILABLE",
+        "dependency_chain": chains,
+        # Preserve the graph's actual source owners. The lock is connected by
+        # its native dependency delta and metadata, never an invented graph edge.
+        "edit_candidates": sorted(
+            {
+                path
+                for ownership, _nominations in graphs.values()
+                for path in ownership.get("edit_candidates", [])
+            }
+        ),
+        "stale": any(ownership.get("stale") is True for ownership, _ in graphs.values()),
+        "qualification": {"consumer_scope": evidence["consumer_scope"]},
+        "nominations": list(nominations.values()),
+    }
+    return evidence, observation
 
 
 def nominate_changed_verification(
-    root: Path, paths: tuple[str, ...], *, required: tuple[str, ...] = ()
+    root: Path,
+    paths: tuple[str, ...],
+    *,
+    required: tuple[str, ...] = (),
+    dependency_base: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Keep producer relations and qualifications; never turn them into owner coverage.
 
@@ -18,12 +142,12 @@ def nominate_changed_verification(
     consumer applies cadence later; Hashmarks retains repository relevance.
     """
     from hashmarks import CodeMap
-    from hashmarks.operation_contract import validate_operation_response
     from hashmarks.verification_nomination_validation import validate_verification_nomination
 
     implementation = require_loaded_hashmarks_runtime()
     observations: list[dict[str, Any]] = []
     required_checks: list[dict[str, Any]] = []
+    dependency_changes: dict[str, Any] | None = None
     # The frontend's native package/tsconfig authority is its project root.
     # All other paths retain the repository map, including cross-owner Python refs.
     for prefix in ("", "frontend/"):
@@ -42,11 +166,12 @@ def nominate_changed_verification(
                 *,
                 prefix: str = prefix,
                 selected_paths: tuple[str, ...] = selected_paths,
-            ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any] | None]:
                 # Native observe may reconcile a contributor and recompute the
                 # whole operation. Retain only rows from its accepted attempt.
                 observed: list[dict[str, Any]] = []
                 checks: list[dict[str, Any]] = []
+                dependencies: dict[str, Any] | None = None
                 if not prefix:
                     for path in required:
                         nomination = native.verification.nomination(path)
@@ -64,6 +189,20 @@ def nominate_changed_verification(
                             }
                         )
                         continue
+                    if not prefix and dependency_base and path == dependency_base["lock_path"]:
+                        try:
+                            dependencies, observation = _dependency_verification(
+                                native, root, dependency_base
+                            )
+                        except (OSError, ValueError) as exc:
+                            dependencies = {"unavailable": str(exc)}
+                            observation = {
+                                "changed_path": path,
+                                "state": "UNAVAILABLE",
+                                "reason": "dependency-evidence-unavailable",
+                            }
+                        observed.append(observation)
+                        continue
                     nominated = native.verification.nomination(relative)
                     validation = validate_verification_nomination(nominated)
                     if validation.get("valid") is not True:
@@ -79,30 +218,7 @@ def nominate_changed_verification(
                             }
                         )
                         continue
-                    ownership = cast(
-                        dict[str, Any],
-                        native.tasks.verification_ownership_graph(
-                            f"Verify {relative}", limit=20, candidate_limit=16
-                        ),
-                    )
-                    validate_operation_response("verification_ownership", ownership)
-                    nominations: list[dict[str, Any]] = []
-                    for row in ownership.get("verification_owners", []):
-                        if relative not in row.get("covers_edit_candidates", []) or row.get(
-                            "coverage_evidence"
-                        ) not in {"direct-reference", "bounded-indirect-reference"}:
-                            continue
-                        nomination = native.verification.nomination(row["path"])
-                        validation = validate_verification_nomination(nomination)
-                        if validation.get("valid") is not True:
-                            raise ValueError("Hashmarks rejected its linked verifier nomination")
-                        nominations.append(
-                            {
-                                "nomination": nomination,
-                                "relationship": row["coverage_evidence"],
-                                "workspace_prefix": prefix,
-                            }
-                        )
+                    ownership, nominations = _linked_verification(native, relative, prefix)
                     observed.append(
                         {
                             "changed_path": path,
@@ -115,18 +231,26 @@ def nominate_changed_verification(
                             "nominations": nominations,
                         }
                     )
-                return observed, checks
+                if dependencies and "after_observation" in dependencies:
+                    dependencies["after_assessment"] = revalidate_changed_dependency_consumers(
+                        native, dependencies, root=root
+                    )
+                return observed, checks, dependencies
 
-            observed, checks = native.reads.observe(nominate_workspace)
+            observed, checks, dependencies = native.reads.observe(nominate_workspace)
             observations.extend(observed)
             required_checks.extend(checks)
-    packet = {
+            if dependencies is not None:
+                dependency_changes = dependencies
+    packet: dict[str, Any] = {
         "schema": "oh-goon.hashmarks-development-nominations/v1",
         "producer_implementation_identity": implementation,
         "observations": observations,
         "required_checks": required_checks,
         "owner_coverage": "not-claimed",
     }
+    if dependency_changes is not None:
+        packet["dependency_changes"] = dependency_changes
     if len(json.dumps(packet).encode("utf-8")) > 4 * 1024 * 1024:
         raise ValueError("Hashmarks development evidence exceeds the bounded transport")
     return packet

@@ -1,0 +1,314 @@
+from __future__ import annotations
+
+from collections.abc import Iterator
+from importlib import metadata
+from pathlib import Path
+from shutil import copytree
+from typing import Any
+
+import pytest
+from hashmarks import CodeMap
+
+from oh_goon.integrations.hashmarks.dependencies import (
+    observe_changed_dependency_consumers,
+    require_current_dependency_environment,
+    revalidate_changed_dependency_consumers,
+)
+from oh_goon.integrations.hashmarks.development_verification import nominate_changed_verification
+
+_LOCK_PATH = "backend/uv.lock"
+_SOURCE_PATH = "backend/src/app/feature.py"
+
+
+def _lock(version: str) -> bytes:
+    return (
+        'version=1\nrevision=1\n[[package]]\nname="fixture-app"\nversion="1"\n'
+        'source={editable="."}\ndependencies=[{name="sample-distribution"}]\n'
+        f'[[package]]\nname="sample-distribution"\nversion="{version}"\n'
+        'source={registry="https://pypi.org/simple"}\n'
+    ).encode()
+
+
+@pytest.fixture
+def distribution_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    root = tmp_path / "repository"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    files = {
+        "backend/pyproject.toml": (
+            '[project]\nname="fixture-app"\nversion="1"\n'
+            '[tool.setuptools.package-dir]\n""="src"\n'
+            '[tool.pytest.ini_options]\ntestpaths=["tests"]\n'
+        ),
+        "backend/src/app/__init__.py": "",
+        _SOURCE_PATH: (
+            "from different_import.api import answer\ndef selected():\n    return answer()\n"
+        ),
+        "backend/tests/test_feature.py": (
+            "from app.feature import selected\ndef test_selected():\n    assert selected() == 42\n"
+        ),
+    }
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    (root / _LOCK_PATH).write_bytes(_lock("2.0"))
+    info = tmp_path / "installed" / "sample_distribution-2.0.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: sample-distribution\nVersion: 2.0\n"
+    )
+    (info / "RECORD").write_text(
+        "different_import/__init__.py,,\ndifferent_import/api.py,,\n"
+        f"{info.name}/METADATA,,\n{info.name}/RECORD,,\n"
+    )
+    package = info.parent / "different_import"
+    package.mkdir()
+    (package / "__init__.py").write_text("raise AssertionError('package code must not execute')\n")
+    original = metadata.distributions
+
+    def discover(*, name: str) -> Iterator[metadata.Distribution]:
+        if name == "sample-distribution":
+            yield metadata.Distribution.at(info)
+        else:
+            yield from original(name=name)
+
+    monkeypatch.setattr(metadata, "distributions", discover)
+    return root, info
+
+
+def _observe(
+    native: CodeMap, root: Path, paths: tuple[str, ...] = (_SOURCE_PATH,)
+) -> dict[str, Any]:
+    return native.reads.observe(
+        lambda _scope: observe_changed_dependency_consumers(
+            native,
+            root=root,
+            lock_path=_LOCK_PATH,
+            before_lock=_lock("1.0"),
+            base_revision="a" * 40,
+            source_paths=paths,
+        )
+    )
+
+
+def test_native_metadata_joins_distribution_and_different_import_name(
+    distribution_repository: tuple[Path, Path], tmp_path: Path
+) -> None:
+    root, info = distribution_repository
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        result = _observe(native, root)
+        assert (
+            revalidate_changed_dependency_consumers(native, result, root=root)
+            == result["after_assessment"]
+        )
+    assert result["before_assessment"]["source_scope"]["source_equivalence"] == "mismatch"
+    assert result["after_assessment"]["source_scope"]["source_equivalence"] == "proven"
+    assert result["delta"]["selections_added"] == result["changed_node_ids"]
+    assert (
+        result["delta"]["component_selection_transitions"][0]["component_id"]
+        == "sample-distribution"
+    )
+    assert result["metadata"][0]["metadata_path"] == str(info / "METADATA")
+    consumer = result["consumer_packets"][0]["consumers"][0]
+    assert consumer["source_path"] == _SOURCE_PATH
+    assert consumer["import_target"] == "different_import.api.answer"
+    assert consumer["distribution_state"] == "resolved-unique"
+    assert consumer["distribution_nodes"] == result["changed_node_ids"]
+    assert consumer["ownership_completeness"] == "incomplete"
+    assert result["consumer_scope"]["completeness"] == "incomplete"
+    assert result["consumer_scope"]["negative_evidence"] == "not-admissible"
+
+
+def test_dependency_nominations_keep_actual_source_owner_after_reopen(
+    distribution_repository: tuple[Path, Path],
+) -> None:
+    root, _info = distribution_repository
+    base = {"lock": _lock("1.0"), "base_revision": "a" * 40, "lock_path": _LOCK_PATH}
+    cold = nominate_changed_verification(root, (_LOCK_PATH,), dependency_base=base)
+    reopened = nominate_changed_verification(root, (_LOCK_PATH,), dependency_base=base)
+    for packet in (cold, reopened):
+        observation = packet["observations"][0]
+        assert observation["state"] == "LINKED", packet.get("dependency_changes")
+        assert observation["edit_candidates"] == [_SOURCE_PATH]
+        assert observation["nominations"][0]["nomination"]["verification_target"] == {
+            "path": "backend/tests/test_feature.py",
+            "test_symbol": None,
+        }
+        chain = packet["dependency_changes"]["chains"][0]
+        assert chain["source_path"] == _SOURCE_PATH
+        assert _LOCK_PATH not in chain["ownership"]["edit_candidates"]
+        assert packet["dependency_changes"]["consumer_scope"]["completeness"] == "incomplete"
+    assert reopened == cold
+
+
+def test_source_scope_is_chunked_without_losing_native_members(
+    distribution_repository: tuple[Path, Path], tmp_path: Path
+) -> None:
+    root, _info = distribution_repository
+    paths = tuple(f"backend/src/consumer_{index}.py" for index in range(65))
+    for relative in paths:
+        (root / relative).write_text("import different_import.api\n")
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        result = _observe(native, root, paths)
+    packets = result["consumer_packets"]
+    assert [len(packet["source_scope"]["paths"]) for packet in packets] == [64, 1]
+    assert {row["source_path"] for packet in packets for row in packet["consumers"]} == set(paths)
+    assert all(packet["source_scope"]["completeness"] == "complete" for packet in packets)
+    assert result["consumer_scope"]["paths"] == list(paths)
+    assert result["consumer_scope"]["completeness"] == "incomplete"
+
+
+@pytest.mark.parametrize("failure", ["missing-record", "version-mismatch", "oversized", "symlink"])
+def test_distribution_metadata_failure_remains_unavailable(
+    distribution_repository: tuple[Path, Path], tmp_path: Path, failure: str
+) -> None:
+    root, info = distribution_repository
+    if failure == "missing-record":
+        (info / "RECORD").unlink()
+    elif failure == "version-mismatch":
+        (info / "METADATA").write_text("Name: sample-distribution\nVersion: 9.0\n")
+    elif failure == "oversized":
+        with (info / "RECORD").open("r+b") as stream:
+            stream.truncate(4 * 1024 * 1024 + 1)
+    else:
+        (info / "RECORD").rename(info / "original")
+        (info / "RECORD").symlink_to(info / "original")
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        with pytest.raises((ValueError, OSError)):
+            _observe(native, root)
+
+
+def test_duplicate_installed_distribution_is_not_silently_selected(
+    distribution_repository: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, info = distribution_repository
+    monkeypatch.setattr(
+        metadata, "distributions", lambda **_kwargs: iter([metadata.Distribution.at(info)] * 2)
+    )
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        with pytest.raises(ValueError, match="one installed distribution"):
+            _observe(native, root)
+
+
+def test_record_cannot_redirect_capture_to_another_distribution_metadata_pair(
+    distribution_repository: tuple[Path, Path], tmp_path: Path
+) -> None:
+    root, info = distribution_repository
+    other = info.parent / "other-2.0.dist-info"
+    other.mkdir()
+    (other / "METADATA").write_bytes((info / "METADATA").read_bytes())
+    (other / "RECORD").write_text(
+        f"different_import/api.py,,\n{other.name}/METADATA,,\n{other.name}/RECORD,,\n"
+    )
+    (info / "RECORD").write_bytes((other / "RECORD").read_bytes())
+    (info / "METADATA").write_text("Name: sample-distribution\nVersion: 1.0\n")
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        with pytest.raises(ValueError, match="redirects metadata origin"):
+            _observe(native, root)
+
+
+def test_new_dependency_component_has_no_replacement_evidence(
+    distribution_repository: tuple[Path, Path], tmp_path: Path
+) -> None:
+    root, _info = distribution_repository
+    path = root / _LOCK_PATH
+    path.write_bytes(
+        path.read_bytes()
+        + b'[[package]]\nname="another-distribution"\nversion="1"\n'
+        + b'source={registry="https://pypi.org/simple"}\n'
+    )
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        with pytest.raises(ValueError, match="not an existing selection replacement"):
+            _observe(native, root)
+
+
+def test_retained_external_metadata_is_rechecked_before_execution(
+    distribution_repository: tuple[Path, Path], tmp_path: Path
+) -> None:
+    root, info = distribution_repository
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        result = _observe(native, root)
+    require_current_dependency_environment(result)
+    (info / "RECORD").write_text((info / "RECORD").read_text().replace("api.py", "new.py"))
+    with pytest.raises(ValueError, match="metadata changed"):
+        require_current_dependency_environment(result)
+
+
+def test_metadata_drift_during_consumers_does_not_publish_old_ownership(
+    distribution_repository: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, info = distribution_repository
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        original = native.dependencies.consumers
+
+        def observe_then_change(*args: Any, **kwargs: Any) -> dict[str, object]:
+            packet = original(*args, **kwargs)
+            path = info / "RECORD"
+            path.write_text(path.read_text().replace("api.py", "new.py"))
+            return packet
+
+        monkeypatch.setattr(native.dependencies, "consumers", observe_then_change)
+        with pytest.raises(ValueError, match="metadata changed"):
+            _observe(native, root)
+
+
+def test_earlier_chunk_source_cannot_drift_during_a_later_chunk(
+    distribution_repository: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _info = distribution_repository
+    paths = tuple(f"backend/src/consumer_{index}.py" for index in range(65))
+    for relative in paths:
+        (root / relative).write_text("import different_import.api\n")
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        original = native.dependencies.consumers
+
+        def observe_then_change(*args: Any, **kwargs: Any) -> dict[str, object]:
+            packet = original(*args, **kwargs)
+            if len(kwargs["source_paths"]) == 1:
+                (root / paths[0]).write_text("import unrelated_module\n")
+            return packet
+
+        monkeypatch.setattr(native.dependencies, "consumers", observe_then_change)
+        with pytest.raises(ValueError, match="consumer source changed"):
+            _observe(native, root, paths)
+
+
+def test_retained_lock_and_foreign_workspace_are_rejected(
+    distribution_repository: tuple[Path, Path], tmp_path: Path
+) -> None:
+    root, _info = distribution_repository
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        result = _observe(native, root)
+        with pytest.raises(ValueError, match="another repository"):
+            revalidate_changed_dependency_consumers(native, result, root=tmp_path)
+        (root / _LOCK_PATH).write_bytes(_lock("3.0"))
+        with pytest.raises(ValueError, match="lock changed"):
+            revalidate_changed_dependency_consumers(native, result, root=root)
+
+
+def test_identical_lock_does_not_transfer_a_current_observation_to_another_repository(
+    distribution_repository: tuple[Path, Path], tmp_path: Path
+) -> None:
+    root, _info = distribution_repository
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        result = _observe(native, root)
+    other = tmp_path / "other-repository"
+    copytree(root, other)
+    with CodeMap(other, state_dir=tmp_path / "other-index") as native:
+        with pytest.raises(ValueError, match="repository binding mismatch"):
+            native.reads.observe(
+                lambda _scope: revalidate_changed_dependency_consumers(native, result, root=other)
+            )
+
+
+def test_unavailable_source_and_native_truncation_cannot_be_closed(
+    distribution_repository: tuple[Path, Path], tmp_path: Path
+) -> None:
+    root, _info = distribution_repository
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        with pytest.raises(ValueError, match="source members are unavailable"):
+            _observe(native, root, ("backend/src/missing.py",))
+    (root / _SOURCE_PATH).write_text("import different_import.api\n" * 1001)
+    with CodeMap(root, state_dir=tmp_path / "second-index") as native:
+        with pytest.raises(ValueError, match="truncated"):
+            _observe(native, root)

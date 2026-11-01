@@ -41,11 +41,42 @@ of ordinary changes.
 A ready PR or merge group checks its effective checkout SHA against its actual
 base. The PR head is recorded separately where it differs. Native Git accounts
 for additions, deletions and both sides of renames; local feedback also includes
-untracked source. Unknown consumer scope remains `SELECTION_UNVERIFIED`; it never
-passes as an empty selection or silently launches the daily corpus. Governing
-instructions, workflow/result policy and selector changes require the named
+untracked source. Missing required consumer or verifier evidence remains
+`SELECTION_UNVERIFIED`; it never passes as an empty selection or silently launches
+the daily corpus. Governing instructions, workflow/result policy and selector
+changes require the named
 **verification-policy protection** obligation. Shared fixture or dependency
 uncertainty cannot be excused by that generic policy proof.
+
+Backend runtime dependency updates have a bounded admission path through the
+released Hashmarks lock-delta and consumer APIs. Before/after lock observations,
+selected distribution `METADATA`/`RECORD` from the native uv environment, and an
+explicit native file inventory of `backend/src` Python source support qualified
+consumer-to-verifier nominations. Every changed existing runtime component must
+have a positive chain to an executable verifier. Package names do not waive that
+requirement. The retained `consumer_scope` remains incomplete and its negative
+evidence is not admissible; these chains establish the selected positive
+relationships without claiming all consumers have been found.
+
+The existing native pytest collector resolves advisory dependency verifiers before
+plan admission, using the execution configuration and cadence. Evidence retains
+selected and deselected members and empty advisory targets; a support file with
+no collected tests cannot count as a component's required verifier. The original
+batch owner independently collects the admitted files for execution; the plan's
+file set and the exact native execution membership remain separately checked.
+
+Added, removed or forked components, changes to optional/group/build declarations,
+Python runtime requirements or uv source/workspace policy, and missing or
+mismatched metadata, stale or truncated required lock/metadata/consumer
+observations, or a component without a qualified chain remain unverified.
+The wider verifier search may remain incomplete or truncated: admission retains
+those qualifiers and uses only its exact positive source-to-verifier edges.
+It does not claim the verifier graph is exhaustive. Supported dependency updates
+also require the **Native package** obligation: `backend-lock-check`,
+`backend-python-capability-check` and
+`backend-package-build-check`. The existing trusted-base gate validates the
+retained `LINKED` evidence, meaningful execution and independently observed
+producer identity through the same proof contract.
 
 `REAL_LIFECYCLE_QA.md` and `REAL_LIFECYCLE_QA.yml` govern qualification.
 Changing either requires the named **real-lifecycle QA protection** obligation:
