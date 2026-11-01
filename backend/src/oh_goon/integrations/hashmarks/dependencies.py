@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import stat
+import sys
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
+from importlib import metadata as distribution_metadata
+from itertools import islice
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from oh_goon.core.dependency_identity import normalize_package_name
 from oh_goon.core.models.fleet_observation import (
@@ -17,7 +22,14 @@ from oh_goon.core.models.fleet_observation import (
 )
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 
+if TYPE_CHECKING:
+    from hashmarks import CodeMap
+
 _MAX_LOCK_BYTES = 8 * 1024 * 1024
+_MAX_DISTRIBUTION_ARTIFACT_BYTES = 4 * 1024 * 1024
+_MAX_DISTRIBUTION_METADATA_BYTES = 8 * 1024 * 1024
+_MAX_DISTRIBUTION_ROOT_ENTRIES = 8192
+_CONSUMER_CHUNK_SIZE = 64
 
 
 @dataclass(frozen=True)
@@ -152,3 +164,373 @@ def assess_locked_dependencies(
                 return LockedInventoryAssessment(_assessment(assessment), packages)
     except (OSError, RuntimeError, ValueError) as exc:
         return LockedInventoryAssessment(DependencyEvidenceAssessment(reason=str(exc)))
+
+
+def _captured_member_revision(data: bytes) -> str:
+    """Use the producer's byte identity without reinterpreting its hash format."""
+    from hashmarks import hash_file
+
+    with tempfile.TemporaryDirectory(prefix="oh-goon-dependency-member-") as directory:
+        captured = Path(directory) / "captured"
+        captured.write_bytes(data)
+        return hash_file(captured).hash
+
+
+def _bounded_regular_bytes(path: Path, *, limit: int) -> bytes:
+    if path.resolve(strict=True) != path or not stat.S_ISREG(path.lstat().st_mode):
+        raise ValueError(f"dependency artifact is not a contained regular file: {path}")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(path, flags), "rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened.st_mode) or opened.st_size > limit:
+            raise ValueError(f"dependency artifact exceeds its regular-file byte budget: {path}")
+        data = stream.read(limit + 1)
+        if len(data) > limit or _artifact_stat(os.fstat(stream.fileno())) != _artifact_stat(opened):
+            raise ValueError(f"dependency artifact changed or exceeded its byte budget: {path}")
+    if _artifact_stat(path.stat()) != _artifact_stat(opened) or path.resolve(strict=True) != path:
+        raise ValueError(f"dependency artifact changed during observation: {path}")
+    return data
+
+
+def _artifact_stat(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _current_lock_bytes(native: CodeMap, root: Path, lock_path: str) -> bytes:
+    from hashmarks.paths import normalize_relative_path
+
+    if root.resolve() != native.workspace:
+        raise ValueError("dependency evidence belongs to another repository workspace")
+    if normalize_relative_path(lock_path, allow_root=False) != lock_path:
+        raise ValueError("dependency lock path must be canonical and repository-relative")
+    admitted = native.files.visible_file(lock_path)
+    if admitted is None or admitted.visibility.value != "source":
+        raise ValueError("dependency lock is not an admitted readable source file")
+    return _bounded_regular_bytes(root.resolve() / lock_path, limit=_MAX_LOCK_BYTES)
+
+
+def _dependency_environment() -> dict[str, Any]:
+    return {
+        "python_executable": sys.executable,
+        "python_prefix": sys.prefix,
+        "python_version": sys.version,
+        "producer_implementation_identity": require_loaded_hashmarks_runtime(),
+        "metadata_discovery": "importlib.metadata.distributions",
+    }
+
+
+def _preflight_distribution_root(root: Path) -> None:
+    """Bound the public Distribution.files owner's inputs before it reads RECORD.
+
+    Distribution.locate_file supplies the native installation root. Its public
+    file inventory reads RECORD internally, so preflight metadata containers in
+    that root without guessing a selected distribution's directory spelling.
+    """
+    if root.resolve(strict=True) != root or not root.is_dir():
+        raise ValueError("installed distribution root is not a canonical directory")
+    with os.scandir(root) as entries:
+        for position, entry in enumerate(entries):
+            if position >= _MAX_DISTRIBUTION_ROOT_ENTRIES:
+                raise ValueError("installed distribution discovery exceeds its entry budget")
+            if entry.name.endswith(".egg-info"):
+                raise ValueError("legacy installed distribution metadata is unsupported")
+            if not entry.name.endswith(".dist-info"):
+                continue
+            directory = Path(entry.path)
+            if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                raise ValueError("installed distribution metadata directory is not regular")
+            for name in ("METADATA", "RECORD"):
+                path = directory / name
+                info = path.lstat()
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or info.st_size > _MAX_DISTRIBUTION_ARTIFACT_BYTES
+                ):
+                    raise ValueError("installed distribution metadata exceeds its file budget")
+
+
+@dataclass(frozen=True)
+class _DistributionCapture:
+    provenance: dict[str, Any]
+    metadata: bytes
+    record: bytes
+
+    def adapter_input(self) -> dict[str, Any]:
+        return {
+            "node_id": self.provenance["node_id"],
+            "metadata": self.metadata,
+            "record": self.record,
+        }
+
+
+def _capture_distribution(selection: Mapping[str, Any]) -> _DistributionCapture:
+    name = normalize_package_name(selection["name"])
+    distributions = list(islice(distribution_metadata.distributions(name=name), 2))
+    if len(distributions) != 1:
+        raise ValueError(f"dependency requires one installed distribution: {name}")
+    distribution = distributions[0]
+    root = Path(str(distribution.locate_file("")))
+    _preflight_distribution_root(root)
+    files = distribution.files
+    if files is None:
+        raise ValueError(f"installed distribution has no native file inventory: {name}")
+    paths: dict[str, Path] = {}
+    for member in files:
+        if len(member.parts) != 2 or not member.parts[0].endswith(".dist-info"):
+            continue
+        if member.name not in {"METADATA", "RECORD"}:
+            continue
+        path = Path(str(distribution.locate_file(member)))
+        if member.name in paths or path != root / str(member):
+            raise ValueError("installed distribution metadata origin is ambiguous")
+        paths[member.name] = path
+    if set(paths) != {"METADATA", "RECORD"} or paths["METADATA"].parent != paths["RECORD"].parent:
+        raise ValueError(f"installed distribution requires one METADATA and RECORD pair: {name}")
+    metadata = _bounded_regular_bytes(paths["METADATA"], limit=_MAX_DISTRIBUTION_ARTIFACT_BYTES)
+    record = _bounded_regular_bytes(paths["RECORD"], limit=_MAX_DISTRIBUTION_ARTIFACT_BYTES)
+    for field, raw in (("METADATA", metadata), ("RECORD", record)):
+        # RECORD is a declaration and can list a different distribution's files.
+        # Confirm that the native discovery owner supplies these exact inputs;
+        # read_text performs universal newline translation, but no parsing here.
+        text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        if distribution.read_text(field) != text:
+            raise ValueError("installed distribution file inventory redirects metadata origin")
+    return _DistributionCapture(
+        provenance={
+            "node_id": selection["node_id"],
+            "component_id": selection["component_id"],
+            "name": name,
+            "version": selection["version"],
+            "discovery": "importlib.metadata.distributions",
+            "distribution_root": str(root),
+            "metadata_path": str(paths["METADATA"]),
+            "record_path": str(paths["RECORD"]),
+            "metadata_member_revision": _captured_member_revision(metadata),
+            "record_member_revision": _captured_member_revision(record),
+        },
+        metadata=metadata,
+        record=record,
+    )
+
+
+def _capture_distributions(selections: list[Mapping[str, Any]]) -> list[_DistributionCapture]:
+    captures = []
+    total = 0
+    for selection in selections:
+        capture = _capture_distribution(selection)
+        total += len(capture.metadata) + len(capture.record)
+        if total > _MAX_DISTRIBUTION_METADATA_BYTES:
+            raise ValueError("installed dependency metadata exceeds its aggregate byte budget")
+        captures.append(capture)
+    return captures
+
+
+def _changed_current_selections(
+    after: Mapping[str, Any], delta: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    if delta.get("comparability") != "comparable" or any(
+        delta.get(key)
+        for key in (
+            "components_added",
+            "components_removed",
+            "components_changed",
+            "selections_changed",
+        )
+    ):
+        raise ValueError("dependency delta is not an existing selection replacement")
+    transitions = delta["component_selection_transitions"]
+    if not 1 <= len(transitions) <= _CONSUMER_CHUNK_SIZE:
+        raise ValueError("dependency delta requires 1 to 64 unambiguous selection replacements")
+    components = {row["component_id"]: row for row in after["components"]}
+    selections = {row["node_id"]: row for row in after["selections"]}
+    added: set[str] = set()
+    removed: set[str] = set()
+    result = []
+    for transition in transitions:
+        component = components[transition["component_id"]]
+        if (
+            component["ecosystem"] != "pypi"
+            or len(transition["added"]) != 1
+            or len(transition["removed"]) != 1
+            or transition["changed"]
+            or sum(
+                selection["component_id"] == component["component_id"]
+                for selection in selections.values()
+            )
+            != 1
+        ):
+            raise ValueError("dependency replacement has unsupported or ambiguous selection scope")
+        node = transition["added"][0]["node_id"]
+        added.add(node)
+        removed.add(transition["removed"][0]["node_id"])
+        result.append({**selections[node], "name": component["name"]})
+    if added != set(delta["selections_added"]) or removed != set(delta["selections_removed"]):
+        raise ValueError("dependency delta contains unaccounted selection changes")
+    for side, nodes in (("added", added), ("removed", removed)):
+        if any(row[0] not in nodes for row in delta[f"inventory_{side}"]) or any(
+            not nodes.intersection(row[:2]) for row in delta[f"relationships_{side}"]
+        ):
+            raise ValueError(
+                "dependency delta contains unrelated inventory or relationship changes"
+            )
+    return sorted(result, key=lambda row: row["node_id"])
+
+
+def _require_current_dependency_assessment(
+    native: CodeMap, observation: Mapping[str, Any]
+) -> dict[str, Any]:
+    # The supported query boundary checks repository/generation correspondence
+    # independently of the exact-input assessment. An empty batch needs no graph
+    # traversal and does not promote Git-free global freshness from unknown.
+    native.dependencies.queries(observation, ())
+    assessment = cast(dict[str, Any], native.dependencies.assessment(observation))
+    source = assessment["source_scope"]
+    if (
+        source["availability"] != "available"
+        or source["freshness"] != "current"
+        or source["source_equivalence"] != "proven"
+    ):
+        raise ValueError("current dependency lock binding is unavailable, stale, or foreign")
+    return assessment
+
+
+def require_current_dependency_environment(evidence: Mapping[str, Any]) -> None:
+    """Recheck retained external inputs without rebuilding repository evidence."""
+    if evidence["environment"] != _dependency_environment():
+        raise ValueError("dependency observation environment changed")
+    captures = _capture_distributions(evidence["metadata"])
+    if [capture.provenance for capture in captures] != evidence["metadata"]:
+        raise ValueError("installed dependency metadata changed after observation")
+
+
+def revalidate_changed_dependency_consumers(
+    native: CodeMap, evidence: Mapping[str, Any], *, root: Path
+) -> dict[str, Any]:
+    """Recheck the same lock and external metadata after verifier composition."""
+    lock = _current_lock_bytes(native, root, evidence["lock_path"])
+    if _captured_member_revision(lock) != evidence["after_member_revision"]:
+        raise ValueError("dependency lock changed after observation")
+    require_current_dependency_environment(evidence)
+    for packet in evidence["consumer_packets"]:
+        for member in packet["source_scope"]["members"]:
+            current = native.source.observe(member["path"], max_bytes=1_048_576)
+            if current["member"] != member:
+                raise ValueError("dependency consumer source changed after observation")
+    return _require_current_dependency_assessment(native, evidence["after_observation"])
+
+
+def observe_changed_dependency_consumers(
+    native: CodeMap,
+    *,
+    root: Path,
+    lock_path: str,
+    before_lock: bytes,
+    base_revision: str,
+    source_paths: tuple[str, ...],
+) -> dict[str, Any]:
+    """Compose released native evidence within the caller's accepted read attempt.
+
+    The base lock is explicitly historical Git input. Observing its claim in the
+    current workspace retains the mismatch instead of relabeling it current.
+    Installed metadata supplies positive namespace evidence, never consumer
+    closure, runtime loadability, or execution admission.
+    """
+    from hashmarks.adapters.uv_dependency import uv_lock_dependency_observation
+    from hashmarks.paths import normalize_relative_path
+
+    if (
+        not base_revision
+        or not isinstance(before_lock, bytes)
+        or len(before_lock) > _MAX_LOCK_BYTES
+    ):
+        raise ValueError("dependency base requires a revision and bounded historical lock bytes")
+    if (
+        not source_paths
+        or len(set(source_paths)) != len(source_paths)
+        or any(normalize_relative_path(path, allow_root=False) != path for path in source_paths)
+    ):
+        raise ValueError("dependency consumers require unique canonical explicit source paths")
+    environment = _dependency_environment()
+    lock = _current_lock_bytes(native, root, lock_path)
+    before_revision = _captured_member_revision(before_lock)
+    after_revision = _captured_member_revision(lock)
+    before = cast(
+        dict[str, Any],
+        native.dependencies.observe(
+            uv_lock_dependency_observation(
+                lock=before_lock,
+                repository_inputs=[{"path": lock_path, "member_revision": before_revision}],
+            )
+        ),
+    )
+    after = cast(
+        dict[str, Any],
+        native.dependencies.observe(
+            uv_lock_dependency_observation(
+                lock=lock,
+                repository_inputs=[{"path": lock_path, "member_revision": after_revision}],
+            )
+        ),
+    )
+    _require_current_dependency_assessment(native, after)
+    selections = _changed_current_selections(after, native.dependencies.delta(before, after))
+    captures = _capture_distributions(list(selections))
+    after = cast(
+        dict[str, Any],
+        native.dependencies.observe(
+            uv_lock_dependency_observation(
+                lock=lock,
+                repository_inputs=[{"path": lock_path, "member_revision": after_revision}],
+                distribution_metadata=[capture.adapter_input() for capture in captures],
+            )
+        ),
+    )
+    changed_nodes = [selection["node_id"] for selection in selections]
+    packets = []
+    for offset in range(0, len(source_paths), _CONSUMER_CHUNK_SIZE):
+        packet = native.dependencies.consumers(
+            after,
+            source_paths=source_paths[offset : offset + _CONSUMER_CHUNK_SIZE],
+            node_ids=changed_nodes,
+            limit=1000,
+        )
+        scope = cast(Mapping[str, Any], packet["source_scope"])
+        if (
+            packet["truncation"] != "complete"
+            or scope["completeness"] != "complete"
+            or scope["unavailable"]
+        ):
+            raise ValueError("dependency consumers are truncated or source members are unavailable")
+        packets.append(packet)
+    result = {
+        "schema": "oh-goon.changed-dependency-consumers/v1",
+        "lock_path": lock_path,
+        "base_revision": base_revision,
+        "before_member_revision": before_revision,
+        "after_member_revision": after_revision,
+        "before_observation": before,
+        "before_assessment": native.dependencies.assessment(before),
+        "after_observation": after,
+        "after_assessment": _require_current_dependency_assessment(native, after),
+        "delta": native.dependencies.delta(before, after),
+        "changed_node_ids": changed_nodes,
+        "metadata": [capture.provenance for capture in captures],
+        "environment": environment,
+        "consumer_packets": packets,
+        "consumer_scope": {
+            "paths": list(source_paths),
+            "completeness": "incomplete",
+            "negative_evidence": "not-admissible",
+            "reasons": ["explicit-source-scope", "native-consumer-scope-incomplete"],
+        },
+        "truncation": "complete",
+    }
+    result["after_assessment"] = revalidate_changed_dependency_consumers(native, result, root=root)
+    return result
