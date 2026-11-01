@@ -203,6 +203,40 @@ justified bounded fallback. Policy protection is a named execution-policy
 obligation, not a Hashmarks-inferred relationship. See the
 [CI contract](../CI_CD_CONTRACT.md#repository-checks-on-github).
 
+Backend runtime dependency changes use the released producer's public lock
+before/after delta and dependency-consumer evidence. The adapter supplies selected
+distribution `METADATA` and `RECORD` from the native uv environment; package-name
+similarity does not establish import ownership. Consumer queries use an explicit
+inventory of admitted `backend/src` Python files from `native.files`. Hashmarks
+owns the module correspondence, import observations, qualified verifier graph and
+nominations; Oh-Goon retains those facts and applies the existing execution
+admission. Verifier graphs keep their actual source edit candidates; the changed
+lock is connected by retained dependency evidence. This does not introduce another
+resolver or impact graph.
+
+Pytest-domain file nominations remain advisory until the existing native collector
+establishes executable members under the admitted configuration and cadence. The
+development owner preserves native selected/deselected members and empty advisory
+targets alongside the raw producer evidence. Empty support-file nominations cannot
+replace a component's required chain to a collected verifier. The execution batch
+owner independently collects the admitted files and accounts for exact native
+execution membership; the trusted-base gate also checks the plan's file set.
+
+Every changed existing runtime component must have a positive qualified
+consumer-to-verifier chain. The aggregate `consumer_scope` stays incomplete with
+`negative_evidence = "not-admissible"`: a selected chain does not prove complete
+consumer coverage, runtime import closure or repository-wide absence. Unsupported
+component additions, removals or forks, dependency-policy changes, unavailable or
+mismatched metadata, stale/truncated required delta or consumer observations and
+missing chains remain unverified. A verifier graph's aggregate search may be
+incomplete, truncated or ambiguous while an individual native edge positively
+identifies its covered source. Admission retains the raw graph qualifications and
+uses only those exact positive edges; it does not upgrade the graph to complete.
+The CI contract names the additional native lock, Python capability
+and package-build obligations. These nominations retain repository-evidence-only
+authority and enter the existing trusted-base proof protocol; they grant no
+execution authority or producer-identity exception.
+
 Documentation images use the same boundary. Hashmarks' native
 `verification.changed_set` projection supplies source-bound content kind, byte
 count, media signature, LFS pointer state and observed consumers. Oh-Goon retains
