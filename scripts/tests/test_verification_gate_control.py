@@ -68,19 +68,26 @@ def test_game_tape_png_refuses_malformed_or_oversized_bytes(tmp_path: Path) -> N
         )
 
 
-def _proof() -> tuple[dict[str, Any], dict[str, Any]]:
+def _proof(
+    *,
+    source: str = "source.py",
+    test_file: str = "tests/test_source.py",
+    additional_tests: tuple[str, ...] = (),
+) -> tuple[dict[str, Any], dict[str, Any]]:
     identity = "sha256:" + "a" * 64
+    test_files = [test_file, *additional_tests]
+    nodes = [f"{path}::test_result" for path in test_files]
     plan = {
         "schema_version": "oh-goon.development-verification/v1",
         "candidate": "a" * 40,
         "base": "b" * 40,
-        "changed_paths": ["source.py", "tests/test_source.py"],
+        "changed_paths": [source, test_file],
         "source_identity": identity,
         "policy_status": "ORDINARY",
         "unverified": [],
         "behavioral_status": "REQUIRED",
         "static": ["python", "architecture"],
-        "pytest": ["tests/test_source.py"],
+        "pytest": test_files,
         "frontend": [],
         "evidence": {
             "producer_implementation_identity": "sha256:" + "b" * 64,
@@ -93,14 +100,14 @@ def _proof() -> tuple[dict[str, Any], dict[str, Any]]:
                         {
                             "nomination": {
                                 "available": True,
-                                "verification_target": {"path": "tests/test_source.py"},
+                                "verification_target": {"path": test_file},
                             }
                         }
                     ],
                 }
                 for state, path in (
-                    ("LINKED", "source.py"),
-                    ("CHANGED_TEST", "tests/test_source.py"),
+                    ("LINKED", source),
+                    ("CHANGED_TEST", test_file),
                 )
             ],
         },
@@ -116,25 +123,26 @@ def _proof() -> tuple[dict[str, Any], dict[str, Any]]:
                     "status": "PASS",
                     "source_identity": identity,
                     "native_collection": {
-                        "discovered": ["tests/test_source.py::test_result"],
+                        "discovered": list(nodes),
                         "deselected": [],
                     },
                     "membership_receipt": {
-                        "selected": ["tests/test_source.py::test_result"],
-                        "passed": ["tests/test_source.py::test_result"],
+                        "selected": list(nodes),
+                        "passed": list(nodes),
                         "terminal_success": True,
                         "effective_pytest_outcomes": [
                             {
-                                "member": "tests/test_source.py::test_result",
+                                "member": node,
                                 "status": "PASSED",
                                 "attempt_identity": "attempt-1",
                                 "pytest_outcomes": [
                                     {
-                                        "nodeid": "tests/test_source.py::test_result",
+                                        "nodeid": node,
                                         "outcome": "PASSED",
                                     }
                                 ],
                             }
+                            for node in nodes
                         ],
                     },
                 },
@@ -163,6 +171,91 @@ def _validate(
 
 def test_exact_fast_proof_does_not_claim_daily_full() -> None:
     _validate(*_proof())
+
+
+def test_test_named_production_owner_qualifies_through_executed_consumer() -> None:
+    plan, result = _proof(
+        source="backend/src/oh_goon/repository_tooling/test_batch_receipts.py",
+        test_file="scripts/tests/test_test_batch_receipts.py",
+        additional_tests=VERIFICATION_POLICY_TESTS,
+    )
+    plan.update(
+        policy_status="REVIEW_REQUIRED",
+        obligations=["verification-policy protection"],
+    )
+    result["plan"] = copy.deepcopy(plan)
+
+    def validate() -> None:
+        validate_merge_proof(
+            plan,
+            result,
+            candidate=plan["candidate"],
+            base=plan["base"],
+            changed_paths=plan["changed_paths"],
+            control_base=plan["base"],
+        )
+
+    validate()
+    nomination = plan["evidence"]["observations"][0]["nominations"][0]["nomination"]
+    nomination["verification_target"]["path"] = "scripts/tests/test_unexecuted.py"
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError, match="no executed qualified consumer proof"):
+        validate()
+
+
+@pytest.mark.parametrize(
+    ("changed_test", "state"),
+    (
+        ("backend/tests/unit/runtime/test_source.py", "LINKED"),
+        ("backend/tests/integration/engine/test_source.py", "LINKED"),
+        ("backend/tests/dependency_complete/test_source.py", "LINKED"),
+        ("backend/tests/native/test_source.py", "LINKED"),
+        ("scripts/tests/test_source.py", "LINKED"),
+        ("tests/integration/test_source.py", "LINKED"),
+        ("templates/goons/general/orders-taskflow/tests/test_source.py", "LINKED"),
+        ("templates/goons/ml/iris-train/tests/test_source.py", "LINKED"),
+        (
+            "template-certification/fixtures/python/standard/tests/test_source.py",
+            "LINKED",
+        ),
+        (
+            "template-certification/fixtures/advanced/isolated-dataflow/tests/test_source.py",
+            "LINKED",
+        ),
+        ("backend/tests/unit/runtime/source_test.py", "LINKED"),
+        ("test/test_source.py", "LINKED"),
+        ("verification/behavior_cases.py", "CHANGED_TEST"),
+    ),
+)
+def test_changed_test_requires_own_execution_despite_linked_passes(
+    changed_test: str, state: str
+) -> None:
+    plan, result = _proof(test_file=changed_test)
+    plan["evidence"]["observations"][1]["state"] = state
+    result["plan"] = copy.deepcopy(plan)
+
+    def validate() -> None:
+        validate_merge_proof(
+            plan,
+            result,
+            candidate=plan["candidate"],
+            base=plan["base"],
+            changed_paths=plan["changed_paths"],
+            control_base=None,
+        )
+
+    validate()
+    other_plan, result = _proof(test_file="tests/test_other.py")
+    plan["pytest"] = other_plan["pytest"]
+    for observation in plan["evidence"]["observations"]:
+        observation["nominations"][0]["nomination"]["verification_target"]["path"] = (
+            "tests/test_other.py"
+        )
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(
+        ValueError, match="Changed tests have no meaningful execution proof"
+    ):
+        validate()
 
 
 @pytest.mark.parametrize("fault", ("omitted", "extra"))
