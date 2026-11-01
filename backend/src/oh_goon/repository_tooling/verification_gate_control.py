@@ -30,10 +30,8 @@ REAL_LIFECYCLE_QA_PATHS = (
 )
 REAL_LIFECYCLE_QA_TEST = "scripts/tests/test_real_lifecycle_qa_contract.py"
 
-PUBLIC_GAME_TAPE_ASSET_PATH = "docs/assets/game-tape-investigation.png"
-_MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES = 2 * 1024 * 1024
-_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-_PNG_IEND = b"\x00\x00\x00\x00IEND\xaeB`\x82"
+_MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES = 1024 * 1024
+DOCUMENTATION_ASSET_OBLIGATION = "bounded documentation-asset policy"
 
 
 def is_verification_policy_path(path: str) -> bool:
@@ -91,42 +89,135 @@ def required_policy_obligations(paths: Sequence[str]) -> tuple[str, ...]:
     )
 
 
-def _bounded_public_documentation_asset(root: Path, path: str) -> bool:
-    if path != PUBLIC_GAME_TAPE_ASSET_PATH:
-        return False
-    try:
-        with (root / path).open("rb") as stream:
-            content = stream.read(_MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES + 1)
-    except OSError:
-        return False
-    if (
-        len(content) < 45
-        or len(content) > _MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES
-        or not content.startswith(_PNG_SIGNATURE)
-        or content[8:12] != (13).to_bytes(4, "big")
-        or content[12:16] != b"IHDR"
-        or not content.endswith(_PNG_IEND)
-    ):
-        return False
-    width = int.from_bytes(content[16:20], "big")
-    height = int.from_bytes(content[20:24], "big")
-    bit_depth, color_type, compression, filter_method, interlace = content[24:29]
-    return (
-        0 < width <= 4096
-        and 0 < height <= 4096
-        and bit_depth in {1, 2, 4, 8, 16}
-        and color_type in {0, 2, 3, 4, 6}
-        and compression == 0
-        and filter_method == 0
-        and interlace in {0, 1}
+def documentation_asset_candidates(paths: Sequence[str]) -> tuple[str, ...]:
+    """Name this repository's declared documentation-asset authoring surface."""
+    return tuple(
+        path
+        for path in paths
+        if path.startswith("docs/assets/") and not is_verification_policy_path(path)
     )
+
+
+def _documentation_asset_consumer(consumer: object) -> bool:
+    if not isinstance(consumer, Mapping):
+        return False
+    domains = consumer.get("domains")
+    member = consumer.get("source_member")
+    return (
+        isinstance(domains, list)
+        and "doc" in domains
+        and all(domain in {"doc", "architecture"} for domain in domains)
+        and consumer.get("qualification") == "syntax-qualified"
+        and consumer.get("relation_kind") in {"markdown-inline-image", "markdown-inline-link"}
+        and _present_asset_member(member)
+        and isinstance(member, Mapping)
+        and member.get("path") == consumer.get("path")
+    )
+
+
+def _present_asset_member(member: object) -> bool:
+    return (
+        isinstance(member, Mapping)
+        and member.get("state") == "known-present"
+        and isinstance(member.get("member_revision"), str)
+        and bool(member.get("member_revision"))
+    )
+
+
+def _bounded_documentation_asset(path: str, asset: Mapping[str, Any]) -> bool:
+    """Apply project policy without promoting bounded observations to absence.
+
+    The producer's global consumer scope deliberately remains unknown. We accept
+    this declared asset surface with positive documentation uses and no observed
+    conflicting or unqualified use; this is not repository-negative evidence.
+    """
+    content = asset.get("content", {})
+    scope = asset.get("consumer_scope", {})
+    consumers = asset.get("consumers")
+    if not isinstance(content, Mapping) or not isinstance(scope, Mapping):
+        return False
+    member = content.get("source_member", {})
+    supporting = asset.get("supporting_source_members")
+    size = content.get("byte_count")
+    media = content.get("media_type")
+    return (
+        asset.get("schema") == "hashmarks.repository-asset.v1"
+        and asset.get("path_domains") == ["doc"]
+        and content.get("schema") == "hashmarks.source-content.v1"
+        and content.get("state") == "observed"
+        and content.get("kind") == "binary"
+        and type(size) is int
+        and 0 < size <= _MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES
+        and isinstance(media, str)
+        and media.startswith("image/")
+        and content.get("media_type_basis") == "signature-only"
+        and content.get("integrity") == "not-validated"
+        and content.get("lfs") is None
+        and isinstance(member, Mapping)
+        and member.get("path") == path
+        and _present_asset_member(member)
+        and isinstance(supporting, list)
+        and member in supporting
+        and all(_present_asset_member(value) for value in supporting)
+        and scope.get("completeness") == "unknown"
+        and scope.get("source_coverage") == "complete"
+        and scope.get("truncated") is False
+        and scope.get("negative_evidence_admissible") is False
+        and isinstance(consumers, list)
+        and bool(consumers)
+        and all(_documentation_asset_consumer(consumer) for consumer in consumers)
+    )
+
+
+def admitted_documentation_assets(
+    paths: Sequence[str], evidence: Mapping[str, Any]
+) -> dict[str, Mapping[str, Any]]:
+    """Project only the unchanged producer asset facts accepted by local policy."""
+    packet = evidence.get("asset_evidence")
+    if not isinstance(packet, Mapping):
+        return {}
+    # Repository-wide freshness and verifier truncation are separate from the
+    # asset's source-read scope. Unknown global freshness is retained; the caller
+    # binds the exact candidate before/after admission and the gate reobserves it.
+    if packet.get("schema") != "hashmarks.changed-set-verification.v1" or packet.get(
+        "freshness"
+    ) not in {"current", "unknown"}:
+        return {}
+    candidates = set(documentation_asset_candidates(paths))
+    changes = packet.get("changes")
+    if not isinstance(changes, list):
+        return {}
+    accepted: dict[str, Mapping[str, Any]] = {}
+    for change in changes:
+        if not isinstance(change, Mapping):
+            continue
+        path, asset = change.get("path"), change.get("asset")
+        if isinstance(path, str) and path in candidates and isinstance(asset, Mapping):
+            if path in accepted:
+                raise ValueError("Producer asset evidence duplicates a changed path")
+            if _bounded_documentation_asset(path, asset):
+                accepted[path] = asset
+    return accepted
+
+
+def _independent_documentation_assets(
+    root: Path, paths: Sequence[str], evidence: Mapping[str, Any]
+) -> set[str]:
+    from oh_goon.integrations.hashmarks.development_verification import observe_repository_assets
+
+    accepted = admitted_documentation_assets(paths, evidence)
+    if not accepted:
+        return set()
+    observed = observe_repository_assets(root, tuple(sorted(accepted)))
+    trusted = admitted_documentation_assets(paths, {"asset_evidence": observed})
+    if accepted != trusted:
+        raise ValueError("Documentation asset evidence differs from trusted source observation")
+    return set(accepted)
 
 
 def non_executable_documentation(root: Path, path: str) -> bool:
     if is_verification_policy_path(path):
         return False
-    if _bounded_public_documentation_asset(root, path):
-        return True
     markdown = Path(path).suffix == ".md" and (
         path.startswith("docs/") or path in {"README.md", "CONTRIBUTING.md"}
     )
@@ -282,6 +373,13 @@ def validate_merge_proof(
         for path in changed_paths
         if root is not None and non_executable_documentation(root, path)
     }
+    evidence = plan.get("evidence", {})
+    if not isinstance(evidence, Mapping):
+        raise ValueError("Producer evidence has an invalid shape")
+    assets = _independent_documentation_assets(root, changed_paths, evidence) if root else set()
+    if assets and DOCUMENTATION_ASSET_OBLIGATION not in plan.get("obligations", []):
+        raise ValueError("Bounded documentation-asset policy was not explicitly admitted")
+    plain_docs.update(assets)
     contract_only = any(map(is_generated_contract_path, changed_paths)) and all(
         is_generated_contract_path(path) or path in plain_docs for path in changed_paths
     )
@@ -292,15 +390,10 @@ def validate_merge_proof(
                 raise ValueError("Executable inputs cannot claim behavioral NOT_APPLICABLE")
     if behavior_required and not (plan.get("pytest") or plan.get("frontend")) and not contract_only:
         raise ValueError("Executable changes have no behavioral proof")
-    evidence = plan.get("evidence", {})
-    if (
-        behavior_required
-        and not contract_only
-        and (
-            not isinstance(evidence, Mapping)
-            or not evidence.get("producer_implementation_identity")
-            or evidence.get("owner_coverage") != "not-claimed"
-        )
+    if (assets or (behavior_required and not contract_only)) and (
+        not isinstance(evidence, Mapping)
+        or not evidence.get("producer_implementation_identity")
+        or evidence.get("owner_coverage") != "not-claimed"
     ):
         raise ValueError("Required producer evidence is missing or overclaimed")
     outcomes = result.get("outcomes")
@@ -577,6 +670,7 @@ def main() -> int:
         # This branch runs only from the immutable base's separately
         # materialized environment. Candidate source is inspected as data.
         from oh_goon.engine import command as command_owner
+        from oh_goon.integrations.hashmarks import development_verification as asset_owner
         from oh_goon.integrations.hashmarks import runtime_contract as runtime_owner
         from oh_goon.repository_tooling import _dependency_lock_portability as lock_owner
         from oh_goon.repository_tooling.release import package_slim as identity_owner
@@ -584,7 +678,7 @@ def main() -> int:
         trusted = args.trusted_root.resolve(strict=True)
         if Path(__file__).resolve().parents[4] != trusted:
             raise ValueError("Controller source differs from the trusted checkout")
-        for module in (command_owner, runtime_owner, lock_owner, identity_owner):
+        for module in (command_owner, asset_owner, runtime_owner, lock_owner, identity_owner):
             filename = module.__file__
             if filename is None or not Path(filename).resolve().is_relative_to(
                 trusted / "backend/src"

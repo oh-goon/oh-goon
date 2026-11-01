@@ -41,11 +41,28 @@ of ordinary changes.
 A ready PR or merge group checks its effective checkout SHA against its actual
 base. The PR head is recorded separately where it differs. Native Git accounts
 for additions, deletions and both sides of renames; local feedback also includes
-untracked source. Unknown consumer scope remains `SELECTION_UNVERIFIED`; it never
-passes as an empty selection or silently launches the daily corpus. Governing
+untracked source. Unresolved required consumer scope remains `SELECTION_UNVERIFIED`;
+it never passes as an empty selection or silently launches the daily corpus. Governing
 instructions, workflow/result policy and selector changes require the named
 **verification-policy protection** obligation. Shared fixture or dependency
 uncertainty cannot be excused by that generic policy proof.
+
+The named **bounded documentation-asset policy** covers newly added or currently
+modified images under `docs/assets/` up to 1 MiB. Hashmarks must observe the image
+bytes, a media signature and positive syntax-qualified Markdown consumers. All
+observed consumers must qualify as documentation uses; product, test, build and
+unqualified references block this policy. Incomplete or truncated asset source
+observations, absent bytes and unhydrated LFS pointers also block it. There is no
+special filename or extension-based exemption. Architecture checks still run.
+
+The bounded policy retains the producer's global consumer scope as `unknown` and
+does not claim no behavioral consumer exists. Signature evidence does not validate
+image integrity or visual authenticity. The trusted base controller independently
+reobserves the exact asset and supporting sources with its installed Hashmarks,
+inside the existing candidate identity checks, and compares the retained evidence.
+Git renames still include the absent old path; its unresolved base-side consumer
+scope remains unverified. See the
+[Hashmarks boundary](development/HASHMARKS_EXECUTION_LAYER.md#relevant-development-admission).
 
 `REAL_LIFECYCLE_QA.md` and `REAL_LIFECYCLE_QA.yml` govern qualification.
 Changing either requires the named **real-lifecycle QA protection** obligation:
