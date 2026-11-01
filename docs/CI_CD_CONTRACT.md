@@ -78,6 +78,23 @@ also require the **Native package** obligation: `backend-lock-check`,
 retained `LINKED` evidence, meaningful execution and independently observed
 producer identity through the same proof contract.
 
+The named **bounded documentation-asset policy** covers newly added or currently
+modified images under `docs/assets/` up to 1 MiB. Hashmarks must observe the image
+bytes, a media signature and positive syntax-qualified Markdown consumers. All
+observed consumers must qualify as documentation uses; product, test, build and
+unqualified references block this policy. Incomplete or truncated asset source
+observations, absent bytes and unhydrated LFS pointers also block it. There is no
+special filename or extension-based exemption. Architecture checks still run.
+
+The bounded policy retains the producer's global consumer scope as `unknown` and
+does not claim no behavioral consumer exists. Signature evidence does not validate
+image integrity or visual authenticity. The trusted base controller independently
+reobserves the exact asset and supporting sources with its installed Hashmarks,
+inside the existing candidate identity checks, and compares the retained evidence.
+Git renames still include the absent old path; its unresolved base-side consumer
+scope remains unverified. See the
+[Hashmarks boundary](development/HASHMARKS_EXECUTION_LAYER.md#relevant-development-admission).
+
 `REAL_LIFECYCLE_QA.md` and `REAL_LIFECYCLE_QA.yml` govern qualification.
 Changing either requires the named **real-lifecycle QA protection** obligation:
 its existing ledger/Make contract test in addition to the two verification-policy

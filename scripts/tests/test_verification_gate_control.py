@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import base64
 import json
 import shutil
 import sys
@@ -13,11 +14,13 @@ from typing import Any
 import pytest
 
 from oh_goon.engine import command as command_owner
+from oh_goon.integrations.hashmarks import development_verification as asset_owner
 from oh_goon.integrations.hashmarks import runtime_contract
 from oh_goon.repository_tooling import _dependency_lock_portability as lock_owner
 from oh_goon.repository_tooling import verification_gate_control as gate
 from oh_goon.repository_tooling.release import package_slim
 from oh_goon.repository_tooling.verification_gate_control import (
+    DOCUMENTATION_ASSET_OBLIGATION,
     REAL_LIFECYCLE_QA_PATHS,
     REAL_LIFECYCLE_QA_TEST,
     VERIFICATION_POLICY_TESTS,
@@ -28,55 +31,203 @@ from oh_goon.repository_tooling.verification_gate_control import (
 )
 
 
-def _documentation_png(
-    *, width: int = 1600, height: int = 1000, payload: bytes = b""
-) -> bytes:
-    ihdr = (
-        width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
-    )
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + (13).to_bytes(4, "big")
-        + b"IHDR"
-        + ihdr
-        + b"\x00\x00\x00\x00"
-        + payload
-        + b"\x00\x00\x00\x00IEND\xaeB`\x82"
+_IMAGE_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1XkAAAAASUVORK5CYII="
+)
+
+
+def _write_documentation_asset(root: Path, path: str) -> None:
+    asset = root / path
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(_IMAGE_BYTES)
+    (root / "docs/guide.md").write_text(
+        f"![Overview]({Path(path).relative_to('docs')})\n", encoding="utf-8"
     )
 
 
-def test_exact_game_tape_png_is_bounded_non_executable_documentation(
-    tmp_path: Path,
+def _asset_proof(root: Path, path: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    evidence = asset_owner.nominate_changed_verification(
+        root, (path,), asset_paths=(path,)
+    )
+    plan = {
+        "schema_version": "oh-goon.development-verification/v1",
+        "candidate": "a" * 40,
+        "base": "b" * 40,
+        "changed_paths": [path],
+        "source_identity": package_slim.canonical_source_identity(root),
+        "policy_status": "ORDINARY",
+        "unverified": [],
+        "behavioral_status": "NOT_APPLICABLE",
+        "static": ["architecture"],
+        "pytest": [],
+        "frontend": [],
+        "evidence": evidence,
+        "obligations": [DOCUMENTATION_ASSET_OBLIGATION],
+    }
+    return plan, {
+        "plan": copy.deepcopy(plan),
+        "status": "MERGE_PROOF_READY",
+        "outcomes": [{"owner": "Architecture", "returncode": 0}],
+    }
+
+
+def _validate_asset(root: Path, plan: dict[str, Any], result: dict[str, Any]) -> None:
+    validate_merge_proof(
+        plan,
+        result,
+        candidate=plan["candidate"],
+        base=plan["base"],
+        changed_paths=plan["changed_paths"],
+        control_base=plan["base"],
+        root=root,
+    )
+
+
+@pytest.mark.parametrize(
+    "path", ("docs/assets/overview.png", "docs/assets/guide/figure.bin")
+)
+def test_native_asset_policy_is_independent_of_filename_and_suffix(
+    tmp_path: Path, path: str
 ) -> None:
-    asset = tmp_path / "docs/assets/game-tape-investigation.png"
-    asset.parent.mkdir(parents=True)
-    asset.write_bytes(_documentation_png())
+    _write_documentation_asset(tmp_path, path)
+    plan, result = _asset_proof(tmp_path, path)
 
-    assert non_executable_documentation(
-        tmp_path, "docs/assets/game-tape-investigation.png"
-    )
+    _validate_asset(tmp_path, plan, result)
 
-    other = tmp_path / "docs/assets/other.png"
-    other.write_bytes(asset.read_bytes())
-    assert not non_executable_documentation(tmp_path, "docs/assets/other.png")
+    asset = gate.admitted_documentation_assets((path,), plan["evidence"])[path]
+    assert asset["content"]["media_type"] == "image/png"
+    assert asset["content"]["integrity"] == "not-validated"
+    assert asset["consumer_scope"]["completeness"] == "unknown"
+    assert asset["consumer_scope"]["negative_evidence_admissible"] is False
+    assert not non_executable_documentation(tmp_path, path)
 
 
-def test_game_tape_png_refuses_malformed_or_oversized_bytes(tmp_path: Path) -> None:
-    asset = tmp_path / "docs/assets/game-tape-investigation.png"
-    asset.parent.mkdir(parents=True)
-    refused = (
-        b"",
-        b"not a png",
-        _documentation_png(width=0),
-        _documentation_png(height=4097),
-        _documentation_png() + b"trailing bytes",
-        _documentation_png(payload=b"x" * (2 * 1024 * 1024)),
-    )
-    for content in refused:
-        asset.write_bytes(content)
-        assert not non_executable_documentation(
-            tmp_path, "docs/assets/game-tape-investigation.png"
+@pytest.mark.parametrize(
+    ("consumer", "content"),
+    (
+        (
+            "backend/src/asset_reader.py",
+            'from pathlib import Path\nblob = Path("docs/assets/overview.png").read_bytes()\n',
+        ),
+        (
+            "tests/test_image.py",
+            'from pathlib import Path\nblob = Path("docs/assets/overview.png").read_bytes()\n',
+        ),
+        ("Makefile", "publish:\n\tcp docs/assets/overview.png output.png\n"),
+        ("docs/notes.md", "The overview.png file is mentioned without a link.\n"),
+    ),
+)
+def test_observed_product_test_build_and_unqualified_uses_refuse_asset_policy(
+    tmp_path: Path, consumer: str, content: str
+) -> None:
+    path = "docs/assets/overview.png"
+    _write_documentation_asset(tmp_path, path)
+    destination = tmp_path / consumer
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(content, encoding="utf-8")
+    plan, result = _asset_proof(tmp_path, path)
+
+    assert gate.admitted_documentation_assets((path,), plan["evidence"]) == {}
+    with pytest.raises(ValueError, match="NOT_APPLICABLE"):
+        _validate_asset(tmp_path, plan, result)
+
+
+@pytest.mark.parametrize(
+    "content",
+    (
+        b"not an image",
+        b"version https://git-lfs.github.com/spec/v1\noid sha256:"
+        + b"a" * 64
+        + b"\nsize 123\n",
+        _IMAGE_BYTES + b"x" * 1_048_576,
+    ),
+    ids=("text-with-image-suffix", "lfs-pointer", "producer-read-bound"),
+)
+def test_unobserved_image_bytes_cannot_receive_documentation_policy(
+    tmp_path: Path, content: bytes
+) -> None:
+    path = "docs/assets/overview.png"
+    _write_documentation_asset(tmp_path, path)
+    (tmp_path / path).write_bytes(content)
+    plan, result = _asset_proof(tmp_path, path)
+
+    assert gate.admitted_documentation_assets((path,), plan["evidence"]) == {}
+    with pytest.raises(ValueError, match="NOT_APPLICABLE"):
+        _validate_asset(tmp_path, plan, result)
+
+
+@pytest.mark.parametrize(
+    "fault", ("stale", "source-gap", "truncated", "absent-member", "no-use")
+)
+def test_uncertain_or_stale_asset_observations_do_not_admit_policy(
+    tmp_path: Path, fault: str
+) -> None:
+    path = "docs/assets/overview.png"
+    _write_documentation_asset(tmp_path, path)
+    plan, _result = _asset_proof(tmp_path, path)
+    packet = plan["evidence"]["asset_evidence"]
+    asset = packet["changes"][0]["asset"]
+    if fault == "stale":
+        packet["freshness"] = "stale"
+    elif fault == "source-gap":
+        asset["consumer_scope"]["source_coverage"] = "incomplete"
+    elif fault == "truncated":
+        asset["consumer_scope"]["truncated"] = True
+    elif fault == "absent-member":
+        asset["supporting_source_members"][-1]["state"] = "known-absent"
+    else:
+        asset["consumers"] = []
+
+    assert gate.admitted_documentation_assets((path,), plan["evidence"]) == {}
+
+
+@pytest.mark.parametrize(
+    "fault", ("content", "supporting-source", "missing-obligation")
+)
+def test_trusted_asset_observation_refuses_candidate_evidence_tampering(
+    tmp_path: Path, fault: str
+) -> None:
+    path = "docs/assets/overview.png"
+    _write_documentation_asset(tmp_path, path)
+    plan, result = _asset_proof(tmp_path, path)
+    asset = plan["evidence"]["asset_evidence"]["changes"][0]["asset"]
+    if fault == "content":
+        asset["content"]["byte_count"] += 1
+    elif fault == "supporting-source":
+        asset["supporting_source_members"][-1]["member_revision"] = "f" * 64
+    else:
+        plan["obligations"] = []
+    result["plan"] = copy.deepcopy(plan)
+
+    with pytest.raises(
+        ValueError, match="trusted source observation|explicitly admitted"
+    ):
+        _validate_asset(tmp_path, plan, result)
+
+
+@pytest.mark.parametrize(
+    "fault", ("image-replaced", "new-runtime-reader", "changed-document")
+)
+def test_trusted_asset_reobservation_detects_candidate_source_drift(
+    tmp_path: Path, fault: str
+) -> None:
+    path = "docs/assets/overview.png"
+    _write_documentation_asset(tmp_path, path)
+    plan, result = _asset_proof(tmp_path, path)
+    if fault == "image-replaced":
+        (tmp_path / path).write_bytes(b"not image bytes")
+    elif fault == "new-runtime-reader":
+        reader = tmp_path / "backend/src/asset_reader.py"
+        reader.parent.mkdir(parents=True)
+        reader.write_text(
+            'from pathlib import Path\nblob = Path("docs/assets/overview.png").read_bytes()\n',
+            encoding="utf-8",
         )
+    else:
+        (tmp_path / "docs/guide.md").write_text("Image removed.\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="trusted source observation"):
+        _validate_asset(tmp_path, plan, result)
 
 
 def _proof(
@@ -1179,6 +1330,7 @@ def test_candidate_producer_rejects_local_dependency_before_native_materializati
         "candidate-head-changed",
         "base-head-changed",
         "base-dirty-after",
+        "foreign-asset-owner",
     ),
 )
 def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observation(
@@ -1198,10 +1350,13 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
     )
     for module, relative in (
         (command_owner, "engine/command.py"),
+        (asset_owner, "integrations/hashmarks/development_verification.py"),
         (runtime_contract, "integrations/hashmarks/runtime_contract.py"),
         (lock_owner, "repository_tooling/_dependency_lock_portability.py"),
         (package_slim, "repository_tooling/release/package_slim.py"),
     ):
+        if module is asset_owner and fault == "foreign-asset-owner":
+            continue
         monkeypatch.setattr(module, "__file__", str(trusted_sources / relative))
     plan, result = _proof()
     plan["requested_head"] = "c" * 40
@@ -1290,7 +1445,13 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
     assert status == (0 if fault == "none" else 1)
     assert observed == (
         []
-        if fault in {"before-source-change", "invalid-plan", "unverified-plan"}
+        if fault
+        in {
+            "before-source-change",
+            "invalid-plan",
+            "unverified-plan",
+            "foreign-asset-owner",
+        }
         else [root]
     )
     output = capsys.readouterr().out

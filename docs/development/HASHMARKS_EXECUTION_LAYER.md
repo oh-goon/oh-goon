@@ -217,3 +217,31 @@ The CI contract names the additional native lock, Python capability
 and package-build obligations. These nominations retain repository-evidence-only
 authority and enter the existing trusted-base proof protocol; they grant no
 execution authority or producer-identity exception.
+
+Documentation images use the same boundary. Hashmarks' native
+`verification.changed_set` projection supplies source-bound content kind, byte
+count, media signature, LFS pointer state and observed consumers. Oh-Goon retains
+those facts unchanged and applies the named **bounded documentation-asset policy**
+to additions and current modifications under `docs/assets/`: observed binary image
+bytes up to 1 MiB, at least one syntax-qualified Markdown image or link consumer,
+and no observed product, test, build or unqualified consumer. Every supporting
+member must be present with a current observed revision. Incomplete source reads,
+candidate or byte bounds, unresolved pointers and absent bytes cannot qualify.
+
+This policy does not establish repository-wide absence of consumers. The producer's
+global consumer scope remains `unknown` and negative evidence remains inadmissible;
+its source coverage and truncation describe the bounded observed candidates.
+Packet-level verifier truncation and repository-wide freshness remain separate
+qualifications. Oh-Goon binds admission to the captured candidate before and after
+the native read, and the immutable base controller independently reobserves the
+asset and supporting sources using its own installed, trusted Hashmarks. Candidate
+evidence must equal that observation; no candidate parser or validator is imported.
+Both observations first reconcile discovery once through Hashmarks' native index
+owner, so a cached map cannot omit a newly added indexed reader.
+
+A media signature is not an image integrity, dimensions, rendering or authenticity
+check. There is no local PNG parser or filename exception. Git/LFS materialization
+owns acquisition: an LFS pointer identifies expected object metadata, while
+hydrated image bytes are required for this policy. Deleted assets and the absent
+side of a Git rename still require separate base-side evidence and remain
+`SELECTION_UNVERIFIED` when no qualified verifier covers them.

@@ -26,6 +26,9 @@ from oh_goon.repository_tooling.pytest_member_selection import collect_native_py
 from oh_goon.repository_tooling.pytest_process_environment import resolve_pytest_invocation
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
+    DOCUMENTATION_ASSET_OBLIGATION,
+    admitted_documentation_assets,
+    documentation_asset_candidates,
     is_generated_contract_path,
     is_verification_policy_path,
     non_executable_documentation,
@@ -387,6 +390,7 @@ def _collect_dependency_proof(
     evidence: dict[str, Any],
     pytest: set[str],
     required: tuple[str, ...],
+    accepted_assets: set[str],
 ) -> tuple[set[str], list[str]]:
     invocation = replace(
         resolve_pytest_invocation(qualified=True, pytest_config=root / "backend/pyproject.toml"),
@@ -409,6 +413,8 @@ def _collect_dependency_proof(
     if not set(required) <= selected:
         missing.append("VERIFICATION_POLICY_PROTECTION_UNAVAILABLE")
     for row in evidence.get("observations", []):
+        if row.get("changed_path") in accepted_assets:
+            continue
         if row.get("state") == "CHANGED_TEST" and row["changed_path"] not in selected:
             missing.append(f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{row['changed_path']}")
         if row.get("state") == "LINKED":
@@ -438,7 +444,6 @@ def admit_change(
     before = canonical_source_identity(root)
     executable = tuple(path for path in changed if not non_executable_documentation(root, path))
     authored = tuple(path for path in executable if not is_generated_contract_path(path))
-    static = cast(set[_STATIC], required_static_obligations(executable))
     policy_paths = tuple(path for path in authored if is_verification_policy_path(path))
     required = required_policy_tests(policy_paths)
     dependency_intent, unsupported_dependency_intent = _backend_dependency_intent(
@@ -453,7 +458,13 @@ def admit_change(
             "base_revision": base_sha,
             "lock_path": "backend/uv.lock",
         }
-    evidence = nominator(root, authored, **nomination_arguments) if authored else {}
+    assets = documentation_asset_candidates(authored)
+    if assets:
+        nomination_arguments["asset_paths"] = assets
+    evidence = nominator(root, authored, **nomination_arguments) if authored or required else {}
+    accepted_assets = admitted_documentation_assets(authored, evidence)
+    executable = tuple(path for path in executable if path not in accepted_assets)
+    static = cast(set[_STATIC], required_static_obligations(executable))
     pytest: set[str] = set()
     frontend: set[str] = set()
     unverified: list[str] = []
@@ -501,6 +512,8 @@ def admit_change(
         path = str(row.get("changed_path", ""))
         if path not in authored:
             raise ValueError("Producer observation is outside the admitted change set")
+        if path in accepted_assets:
+            continue
         if row.get("state") not in {"LINKED", "CHANGED_TEST"} or row.get("stale") is True:
             if (
                 path in policy_paths
@@ -549,7 +562,9 @@ def admit_change(
         if not admitted:
             unverified.append(f"NO_EXECUTABLE_VERIFIER:{path}")
     if dependency_qualified and not unverified:
-        pytest, unavailable = _collect_dependency_proof(root, evidence, pytest, required)
+        pytest, unavailable = _collect_dependency_proof(
+            root, evidence, pytest, required, set(accepted_assets)
+        )
         unverified.extend(unavailable)
         if not _bounded_dependency_scope(evidence, base_sha, selected_files=pytest):
             unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
@@ -571,7 +586,8 @@ def admit_change(
         evidence=evidence,
         behavioral_status="REQUIRED" if executable else "NOT_APPLICABLE",
         policy_status="REVIEW_REQUIRED" if policy_paths else "ORDINARY",
-        obligations=required_policy_obligations(policy_paths),
+        obligations=required_policy_obligations(policy_paths)
+        + ((DOCUMENTATION_ASSET_OBLIGATION,) if accepted_assets else ()),
     )
 
 
@@ -690,11 +706,14 @@ def _retain_native_report(outcome: dict[str, Any], path: Path) -> dict[str, Any]
 def require_merge_selection(root: Path, plan: ChangeVerificationPlan) -> None:
     if plan.unverified:
         raise ValueError("SELECTION_UNVERIFIED: " + "; ".join(plan.unverified))
+    assets = admitted_documentation_assets(plan.changed_paths, plan.evidence)
     if (
         plan.behavioral_status == "REQUIRED"
         and not (plan.pytest or plan.frontend)
         and not all(
-            is_generated_contract_path(path) or non_executable_documentation(root, path)
+            is_generated_contract_path(path)
+            or non_executable_documentation(root, path)
+            or path in assets
             for path in plan.changed_paths
         )
     ):
