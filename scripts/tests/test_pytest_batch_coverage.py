@@ -351,7 +351,9 @@ def test_partial_pass_receipts_without_native_data_cannot_recover_coverage(
             suite_budget_stop=batches._suite_budget_stop,
         )
         retried = orchestration._consume_future(
-            Namespace(environment_retries=2, marker=None, show_output=False),
+            Namespace(
+                environment_retries=2, marker=None, show_output=False, fail_fast=False
+            ),
             state,
             future,
             batch,

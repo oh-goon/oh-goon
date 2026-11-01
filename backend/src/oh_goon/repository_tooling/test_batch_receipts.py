@@ -208,6 +208,7 @@ def execution_plan_identity(
     scheduled_members: tuple[str, ...],
     reused_members: tuple[str, ...],
     resource_budget: dict[str, object] | None = None,
+    fail_fast: bool = False,
 ) -> str:
     """Bind actual execution/performance provenance separately from correctness."""
 
@@ -220,6 +221,7 @@ def execution_plan_identity(
         "workers": workers,
         "suite_timeout": suite_timeout,
         "environment_retries": environment_retries,
+        "fail_fast": fail_fast,
         "selected_batch": selected_batch,
         "scheduled_members": list(scheduled_members),
         "reused_members": list(reused_members),

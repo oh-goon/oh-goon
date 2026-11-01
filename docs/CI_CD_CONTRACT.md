@@ -14,6 +14,16 @@ flat membership. It retains source/configuration/environment identity and exact
 results. A nomination does not establish whole-owner coverage, and bounded
 producer qualifiers remain visible.
 
+Development verification and explicit hosted focused feedback select the native
+batch owner's `--fail-fast` policy. Each pytest process receives `--maxfail=1`;
+after a terminal batch failure, the same owner stops queued work and cancels active
+process groups through its existing cleanup boundary. Concurrent failures can
+already be in flight. The original selection stays in the receipt, with actual
+attempted/completed members and missing proof retained. An intentional first-failure
+stop is reported separately from a timeout and cannot qualify a merge. Successful
+runs still execute the complete admitted selection. Daily/release callers retain
+the comprehensive default, including independent failure reporting.
+
 Each workspace nomination uses one native Hashmarks observation. A stale
 contributor is reconciled outside its read scope, then the whole workspace
 observation is recomputed. Partial observations and required-check rows from a

@@ -64,7 +64,7 @@ jobs:
           test -n "$NEXT_CHECK"
           bash scripts/development_test_resources.sh \
             uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
-            --qualified --focused --next-check "$NEXT_CHECK" --show-output \
+            --qualified --focused --fail-fast --next-check "$NEXT_CHECK" --show-output \
             --granularity tests --workers 1 --batch-size 64 \
             --batch-timeout 180 --suite-timeout 600 --marker 'not certification and not slow' \
             -- "$TEST_SELECTION"

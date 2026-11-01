@@ -592,7 +592,10 @@ def test_standalone_project_nominations_never_use_the_backend_interpreter(
     )
 
 
-def test_execution_uses_original_native_batch_membership_without_full_targets() -> None:
+@pytest.mark.parametrize("mode", ["focused", "merge"])
+def test_execution_uses_original_native_batch_membership_without_full_targets(
+    mode: str,
+) -> None:
     root = owner.ROOT
     head = owner._git(root, "rev-parse", "HEAD").strip()
     plan = owner.ChangeVerificationPlan(
@@ -608,9 +611,13 @@ def test_execution_uses_original_native_batch_membership_without_full_targets() 
         behavioral_status="REQUIRED",
         policy_status="ORDINARY",
     )
-    result = owner.execute_change(root, plan, mode="merge", workers=1)
+    result = owner.execute_change(root, plan, mode=mode, workers=1)
     assert result["status"] == "CHECKS_PASSED"
-    receipt = result["outcomes"][0]["native_report"]["membership_receipt"]
+    native = result["outcomes"][0]["native_report"]
+    assert native["fail_fast"] is True
+    assert native["fail_fast_triggered"] is False
+    assert native["stop_reason"] is None
+    receipt = native["membership_receipt"]
     assert receipt["selected"] == receipt["passed"]
     assert not receipt["non_passed"]
 

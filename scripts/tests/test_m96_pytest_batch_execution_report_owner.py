@@ -70,6 +70,7 @@ def test_execution_report_projection_follows_schema_owner_mutation(
         suite_timeout=20,
         no_timeout_bisection=False,
         environment_retries=1,
+        fail_fast=False,
         resume=False,
         resume_key="unused",
     )
@@ -91,10 +92,12 @@ def test_execution_report_projection_follows_schema_owner_mutation(
     state = SimpleNamespace(
         failures=0,
         suite_timed_out=False,
+        fail_fast_triggered=False,
         batch_reports=[],
     )
     receipt = SimpleNamespace(
-        as_dict=lambda: _report_payload(_schema())["membership_receipt"]
+        attempted=("a.py",),
+        as_dict=lambda: _report_payload(_schema())["membership_receipt"],
     )
 
     payload = pytest_batch_orchestration._execution_report(
