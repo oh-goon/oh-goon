@@ -16,6 +16,7 @@ from oh_goon.repository_tooling import development_verification as owner
 from oh_goon.engine.command import run_command
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
+    DOCUMENTATION_ASSET_OBLIGATION,
     VERIFICATION_POLICY_TESTS,
 )
 
@@ -195,6 +196,82 @@ def test_prose_only_plan_does_not_start_intelligence_or_unrelated_toolchains(
     assert plan.behavioral_status == "NOT_APPLICABLE"
     assert plan.static == ("architecture",)
     assert not plan.pytest and not plan.frontend and not plan.unverified
+
+
+@pytest.mark.parametrize("operation", ("addition", "modification"))
+def test_native_documentation_asset_admission_retains_explicit_bounded_policy(
+    repository: Path, operation: str
+) -> None:
+    path = "docs/assets/independent-evidence.bin"
+    asset = repository / path
+    asset.parent.mkdir(parents=True)
+    # Hashmarks establishes a media signature; image integrity is not this policy.
+    asset.write_bytes(b"\x89PNG\r\n\x1a\n")
+    (repository / "docs/guide.md").write_text(
+        "![Evidence](assets/independent-evidence.bin)\n", encoding="utf-8"
+    )
+    if operation == "modification":
+        owner._git(repository, "add", "docs")
+        owner._git(
+            repository,
+            "-c",
+            "user.name=Verifier",
+            "-c",
+            "user.email=verifier@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "asset fixture",
+        )
+        asset.write_bytes(asset.read_bytes() + b"\x00")
+
+    plan = owner.admit_change(repository, base="HEAD")
+
+    owner.require_merge_selection(repository, plan)
+    assert plan.behavioral_status == "NOT_APPLICABLE"
+    assert plan.static == ("architecture",)
+    assert plan.obligations == (DOCUMENTATION_ASSET_OBLIGATION,)
+    assert not plan.unverified and not plan.pytest and not plan.frontend
+    observed = plan.evidence["asset_evidence"]["changes"][0]["asset"]
+    assert observed["content"]["media_type"] == "image/png"
+    assert observed["content"]["integrity"] == "not-validated"
+    assert observed["consumer_scope"]["completeness"] == "unknown"
+    assert observed["consumer_scope"]["negative_evidence_admissible"] is False
+
+
+def test_documentation_asset_rename_retains_unavailable_base_side_scope(
+    repository: Path,
+) -> None:
+    old, new = "docs/assets/before.png", "docs/assets/after.png"
+    asset = repository / old
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"\x89PNG\r\n\x1a\n")
+    document = repository / "docs/guide.md"
+    document.write_text("![Evidence](assets/before.png)\n", encoding="utf-8")
+    owner._git(repository, "add", "docs")
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "asset fixture",
+    )
+    owner._git(repository, "mv", old, new)
+    document.write_text("![Evidence](assets/after.png)\n", encoding="utf-8")
+
+    plan = owner.admit_change(repository, base="HEAD")
+
+    assert old in plan.changed_paths and new in plan.changed_paths
+    assert plan.behavioral_status == "REQUIRED"
+    assert f"NO_QUALIFIED_VERIFIER:{old}" in plan.unverified
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
 
 
 def test_admission_retains_direct_and_indirect_proofs_without_coverage_upgrade(

@@ -21,6 +21,9 @@ from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashm
 from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
+    DOCUMENTATION_ASSET_OBLIGATION,
+    admitted_documentation_assets,
+    documentation_asset_candidates,
     is_generated_contract_path,
     is_verification_policy_path,
     non_executable_documentation,
@@ -118,16 +121,18 @@ def admit_change(
     before = canonical_source_identity(root)
     executable = tuple(path for path in changed if not non_executable_documentation(root, path))
     authored = tuple(path for path in executable if not is_generated_contract_path(path))
-    static = cast(set[_STATIC], required_static_obligations(executable))
     policy_paths = tuple(path for path in authored if is_verification_policy_path(path))
     required = required_policy_tests(policy_paths)
-    evidence = (
-        nominator(root, authored, required=required)
-        if required
-        else nominator(root, authored)
-        if authored
-        else {}
-    )
+    options: dict[str, Any] = {}
+    if required:
+        options["required"] = required
+    assets = documentation_asset_candidates(authored)
+    if assets:
+        options["asset_paths"] = assets
+    evidence = nominator(root, authored, **options) if authored or required else {}
+    accepted_assets = admitted_documentation_assets(authored, evidence)
+    executable = tuple(path for path in executable if path not in accepted_assets)
+    static = cast(set[_STATIC], required_static_obligations(executable))
     pytest: set[str] = set()
     frontend: set[str] = set()
     unverified: list[str] = []
@@ -170,6 +175,8 @@ def admit_change(
         path = str(row.get("changed_path", ""))
         if path not in authored:
             raise ValueError("Producer observation is outside the admitted change set")
+        if path in accepted_assets:
+            continue
         if row.get("state") not in {"LINKED", "CHANGED_TEST"} or row.get("stale") is True:
             if (
                 path in policy_paths
@@ -230,7 +237,8 @@ def admit_change(
         evidence=evidence,
         behavioral_status="REQUIRED" if executable else "NOT_APPLICABLE",
         policy_status="REVIEW_REQUIRED" if policy_paths else "ORDINARY",
-        obligations=required_policy_obligations(policy_paths),
+        obligations=required_policy_obligations(policy_paths)
+        + ((DOCUMENTATION_ASSET_OBLIGATION,) if accepted_assets else ()),
     )
 
 
@@ -328,11 +336,14 @@ def _retain_native_report(outcome: dict[str, Any], path: Path) -> dict[str, Any]
 def require_merge_selection(root: Path, plan: ChangeVerificationPlan) -> None:
     if plan.unverified:
         raise ValueError("SELECTION_UNVERIFIED: " + "; ".join(plan.unverified))
+    assets = admitted_documentation_assets(plan.changed_paths, plan.evidence)
     if (
         plan.behavioral_status == "REQUIRED"
         and not (plan.pytest or plan.frontend)
         and not all(
-            is_generated_contract_path(path) or non_executable_documentation(root, path)
+            is_generated_contract_path(path)
+            or non_executable_documentation(root, path)
+            or path in assets
             for path in plan.changed_paths
         )
     ):
