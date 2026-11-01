@@ -373,11 +373,16 @@ def validate_merge_proof(
         for observation in plan.get("evidence", {}).get("observations", [])
         if observation.get("state") == "CHANGED_TEST"
     }
+    # Production owners can also use test_*.py names. Keep the independent
+    # filename safeguard within test directories, including nested projects.
     changed_tests.update(
         path
         for path in changed_paths
-        if Path(path).name.startswith("test_")
-        and path.endswith(".py")
+        if (
+            path.endswith(".py")
+            and any(part in {"test", "tests"} for part in Path(path).parts[:-1])
+            and (Path(path).name.startswith("test_") or path.endswith("_test.py"))
+        )
         or any(
             path.endswith(suffix) for suffix in (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
         )
