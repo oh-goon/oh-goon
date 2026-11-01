@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from typing import Protocol
 
 from oh_goon.repository_tooling.architecture._hashmarks_verification_boundary_contract import (
     check_hashmarks_verification_boundary_contract,
@@ -76,7 +76,14 @@ from oh_goon.repository_tooling.architecture.x0_single_execution_contract import
     check_x0_single_execution_path,
 )
 
-ArchitectureCheck = Callable[[], list[Violation]]
+
+class ArchitectureCheck(Protocol):
+    @property
+    def __name__(self) -> str: ...
+
+    def __call__(self) -> list[Violation]: ...
+
+
 CHECKS: tuple[ArchitectureCheck, ...] = (
     check_backend_boundaries,
     check_goon_static_admission_contract,

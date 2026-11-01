@@ -153,7 +153,7 @@ def admit_change(
             previous.get(key) != current.get(key) for key in ("dependency-groups", "build-system")
         ):
             unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
-    observations = evidence.get("observations", [])
+    observations: list[dict[str, Any]] = evidence.get("observations", [])
     policy_proofs = [
         projected
         for projected in evidence.get("required_checks", [])
@@ -184,7 +184,8 @@ def admit_change(
                 and policy_proofs
                 and row.get("stale") is not True
             ):
-                row = {**row, "state": "POLICY_OBLIGATION", "nominations": policy_proofs}
+                row = row.copy()
+                row.update(state="POLICY_OBLIGATION", nominations=policy_proofs)
             else:
                 unverified.append(f"NO_QUALIFIED_VERIFIER:{path}")
                 continue

@@ -140,6 +140,70 @@ def test_init_has_no_storage_admission_before_native_uv_and_doctor_is_separate()
     assert "$(DEPENDENCY_POLICY)" in (ROOT / "Makefile").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("ty_exit", (0, 17))
+def test_optional_ty_check_uses_native_locked_checker_and_propagates_failure(
+    tmp_path: Path, ty_exit: int
+) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    shutil.copyfile(
+        ROOT / "scripts/development_test_resources.sh",
+        scripts / "development_test_resources.sh",
+    )
+    calls = tmp_path / "calls.jsonl"
+    uv = tools / "uv"
+    uv.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "with Path(os.environ['OH_GOON_TEST_TY_CALLS']).open('a') as stream:\n"
+        "    stream.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')\n"
+        "sys.exit(int(os.environ['OH_GOON_TEST_TY_EXIT']))\n",
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    environment = dict(os.environ)
+    for name in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
+        environment.pop(name, None)
+    environment.update(
+        PATH=f"{tools}{os.pathsep}{environment.get('PATH', os.defpath)}",
+        OH_GOON_TEST_TY_CALLS=str(calls),
+        OH_GOON_TEST_TY_EXIT=str(ty_exit),
+        OH_GOON_TEST_CPUS="0",
+    )
+    result = subprocess.run(
+        ["make", "--no-print-directory", "-f", str(ROOT / "Makefile"), "ty-check"],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert [json.loads(line) for line in calls.read_text().splitlines()] == [
+        {
+            "argv": [
+                "run",
+                "--offline",
+                "--frozen",
+                "--no-sync",
+                "--group",
+                "quality",
+                "ty",
+                "check",
+            ],
+            "cwd": str(backend),
+        }
+    ]
+    assert result.returncode == (2 if ty_exit else 0), result.stdout + result.stderr
+    if ty_exit:
+        assert "17" in result.stderr
+
+
 @pytest.mark.parametrize("mypy_exit", (0, 17))
 def test_backend_gate_checks_configured_package_types_before_running_tests(
     tmp_path: Path, mypy_exit: int

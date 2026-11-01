@@ -75,6 +75,7 @@ help:
 	  '' \
 	  'Owner checks (non-canonical workflow):' \
 	  '  make backend-check    Backend lint, format, types and behavior tests' \
+	  '  make ty-check         Optional fast native backend type check; strict mypy remains required' \
 	  '  make ruff-repair      Apply Ruff safe autofixes, then canonical Python formatting' \
 	  '  make frontend-functional-certification  Current functional gate: typecheck, architecture, i18n, unit tests, build' \
 	  '  make frontend-check   Strict later-release frontend gate: adds lint, coverage/quality checks' \
@@ -423,6 +424,10 @@ format-check:
 
 typecheck:
 	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --group quality --project backend mypy --config-file backend/pyproject.toml scripts/tests tests/integration
+
+.PHONY: ty-check
+ty-check:
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv run --offline --frozen --no-sync --group quality ty check
 
 
 repository-understanding-exam:

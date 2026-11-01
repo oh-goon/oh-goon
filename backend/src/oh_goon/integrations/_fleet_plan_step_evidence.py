@@ -15,6 +15,7 @@ from oh_goon.core.models.fleet_observation import FleetObservationEvidence
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
     ResolvedAgentStep,
+    ResolvedCommandStep,
     ResolvedExtensionStep,
     ResolvedGitStep,
     ResolvedKubernetesRolloutVerifyStep,
@@ -187,7 +188,7 @@ def canonical_argv(step: ResolvedPlanStep, outcome: StepOutcome) -> tuple[str, .
         return outcome.argv
     if isinstance(step, ResolvedGitStep):
         return ("git", *step.argv)
-    if hasattr(step, "argv"):
+    if isinstance(step, ResolvedCommandStep):
         return tuple(step.argv)
     if isinstance(step, ResolvedExtensionStep):
         return (step.command, *step.args)

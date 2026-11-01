@@ -6,7 +6,7 @@ import os
 import stat
 import sys
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +27,7 @@ else:
 
 
 @contextmanager
-def exact_file_write_lock(target: Path) -> Iterator[None]:
+def exact_file_write_lock(target: Path) -> Generator[None, None, None]:
     """Serialize cooperating writers for one exact local target path."""
     lock_root = _exact_file_lock_root()
     identity = hashlib.sha256(str(target).encode("utf-8")).hexdigest()
@@ -196,7 +196,7 @@ class PreparedDirectory:
 
 
 @contextmanager
-def prepared_sibling_directory(target: Path) -> Iterator[PreparedDirectory]:
+def prepared_sibling_directory(target: Path) -> Generator[PreparedDirectory, None, None]:
     """Create and clean only an exact private sibling through pinned ancestors."""
     import secrets
     import shutil
@@ -478,7 +478,9 @@ def _fsync_directory_descriptor(descriptor: int) -> None:
 
 
 @contextmanager
-def prepared_text_file(target: Path, content: str, *, newline: str | None = None) -> Iterator[Path]:
+def prepared_text_file(
+    target: Path, content: str, *, newline: str | None = None
+) -> Generator[Path, None, None]:
     """Prepare and fsync replacement bytes beside target; caller decides whether to commit them."""
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{target.name}.", suffix=".tmp", dir=target.parent

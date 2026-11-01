@@ -139,46 +139,46 @@ class ProcessStartingEvent(_FleetRunEventBase):
 
 
 # These immutable Pydantic variants intentionally retain payload inheritance and
-# isinstance ancestry while replacing the concrete wire discriminator. Mypy treats
-# fields as ordinary mutable attributes and cannot express that schema refinement.
+# isinstance ancestry while replacing the concrete wire discriminator. The narrow
+# checker exceptions preserve that existing schema choice despite Literal invariance.
 class ProcessStartedEvent(ProcessStartingEvent):
-    event_type: Literal[FleetRunEventType.PROCESS_STARTED]  # type: ignore[assignment]
+    event_type: Literal[FleetRunEventType.PROCESS_STARTED]  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
     pid: int = Field(ge=1)
     process_identity: str | None = Field(default=None, min_length=1)
 
 
 class TerminationRequestedEvent(ProcessStartedEvent):
-    event_type: Literal[FleetRunEventType.TERMINATION_REQUESTED]  # type: ignore[assignment]
+    event_type: Literal[FleetRunEventType.TERMINATION_REQUESTED]  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
     reason: str = Field(min_length=1)
 
 
 class ProcessStateUnknownEvent(ProcessStartedEvent):
-    event_type: Literal[FleetRunEventType.PROCESS_STATE_UNKNOWN]  # type: ignore[assignment]
+    event_type: Literal[FleetRunEventType.PROCESS_STATE_UNKNOWN]  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
     reason: str = Field(min_length=1)
 
 
 class OutputFinalizedEvent(ProcessStartingEvent):
-    event_type: Literal[FleetRunEventType.OUTPUT_FINALIZED]  # type: ignore[assignment]
+    event_type: Literal[FleetRunEventType.OUTPUT_FINALIZED]  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
     output_count: int = Field(ge=1)
 
 
 class OutputAbandonedEvent(ProcessStartingEvent):
-    event_type: Literal[FleetRunEventType.OUTPUT_ABANDONED]  # type: ignore[assignment]
+    event_type: Literal[FleetRunEventType.OUTPUT_ABANDONED]  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
     reason: str = Field(min_length=1)
 
 
 class OutputQuarantinedEvent(ProcessStartingEvent):
-    event_type: Literal[FleetRunEventType.OUTPUT_QUARANTINED]  # type: ignore[assignment]
+    event_type: Literal[FleetRunEventType.OUTPUT_QUARANTINED]  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
     reason: str = Field(min_length=1)
 
 
 class ProcessExitedEvent(ProcessStartedEvent):
-    event_type: Literal[FleetRunEventType.PROCESS_EXITED]  # type: ignore[assignment]
+    event_type: Literal[FleetRunEventType.PROCESS_EXITED]  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
     returncode: int
 
 
 class DescendantsQuiescentEvent(ProcessStartedEvent):
-    event_type: Literal[FleetRunEventType.DESCENDANTS_QUIESCENT]  # type: ignore[assignment]
+    event_type: Literal[FleetRunEventType.DESCENDANTS_QUIESCENT]  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
 
 
 class _StepTerminalEventBase(_FleetRunEventBase):

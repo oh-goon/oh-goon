@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -77,7 +77,7 @@ class LeagueFolderStore:
         return resolved
 
     @contextmanager
-    def write_lock(self) -> Iterator[None]:
+    def write_lock(self) -> Generator[None, None, None]:
         """Serialize cooperating preference writers for this exact league.yml."""
         with exact_file_write_lock(self.path):
             yield

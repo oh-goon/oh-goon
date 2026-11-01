@@ -7,7 +7,7 @@ import signal
 import stat
 import sys
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -1202,7 +1202,9 @@ def _require_original_cgroup(cgroup: Path, identity: tuple[int, int]) -> None:
 
 
 @contextmanager
-def _bound_cgroup_directory(cgroup: Path, expected_identity: tuple[int, int]) -> Iterator[int]:
+def _bound_cgroup_directory(
+    cgroup: Path, expected_identity: tuple[int, int]
+) -> Generator[int, None, None]:
     """Open one native object, never reinterpret path lookup as durable identity.
 
     This is a local owner fence, NOT a verified LACE writer absence proof.
@@ -1438,7 +1440,7 @@ def _process_identity(pid: int) -> str | None:
 
 
 @contextmanager
-def _resource_lock(path: Path) -> Iterator[None]:
+def _resource_lock(path: Path) -> Generator[None, None, None]:
     import fcntl
     import stat
 

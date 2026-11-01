@@ -7,10 +7,11 @@ import shutil
 import sqlite3
 import stat
 import tempfile
+from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterator, TypedDict, cast
+from typing import Callable, TypedDict, cast
 
 from oh_goon.core.errors import (
     CandidateCheckpointNotFound,
@@ -137,7 +138,7 @@ class RepositoryWorkspaceAuthority:
 
     @staticmethod
     @contextmanager
-    def pin_repository_subject(repository: Path) -> Iterator[Callable[[], None]]:
+    def pin_repository_subject(repository: Path) -> Generator[Callable[[], None], None, None]:
         """Hold native root/Git handles across authorized edits without freezing directory ctime.
 
         Directory entries may change during an apply. Open handles prevent inode reuse
@@ -834,7 +835,7 @@ class RepositoryWorkspaceAuthority:
         return descriptor
 
     @contextmanager
-    def _locked_worktree_receipt(self, workspace_id: str) -> Iterator[None]:
+    def _locked_worktree_receipt(self, workspace_id: str) -> Generator[None, None, None]:
         """Fail before reconciliation if a live Git effect still holds the receipt.
 
         The original registration owner holds flock from *before* its first Git

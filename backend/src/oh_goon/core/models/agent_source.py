@@ -13,7 +13,7 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid
@@ -33,7 +33,7 @@ _PREWORK_PACKET_SCHEMA = "oh-goon.agent-step-prework-delivery/v1"
 def _exact_dict(value: object, keys: set[str], label: str) -> dict[str, Any]:
     if type(value) is not dict or set(value) != keys:
         raise FleetPlanInvalid(f"AG-02B2A {label} has an invalid transport schema")
-    return value
+    return cast(dict[str, Any], value)
 
 
 def _unique_json_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:

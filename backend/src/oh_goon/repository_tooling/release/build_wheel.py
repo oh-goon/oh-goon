@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -31,7 +31,7 @@ CATALOG_ARCHIVE_SHA256_ENV = "OH_GOON_RELEASE_CATALOG_ARCHIVE_SHA256"
 
 
 @contextmanager
-def staged_template_catalogs(root: Path) -> Iterator[Path]:
+def staged_template_catalogs(root: Path) -> Generator[Path]:
     """Capture authored catalog membership through the execution source owner."""
 
     if source_transport_artifact_issues(root):
