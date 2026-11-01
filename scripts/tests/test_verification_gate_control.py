@@ -237,6 +237,7 @@ def test_executable_change_cannot_claim_behavioral_na() -> None:
 @pytest.mark.parametrize(
     "path",
     (
+        "README.md",
         "AGENTS.md",
         "docs/CI_CD_CONTRACT.md",
         "docs/development/TEST_QUALITY.md",
@@ -277,6 +278,7 @@ def test_policy_ingresses_cannot_self_approve_as_ordinary(path: str) -> None:
 @pytest.mark.parametrize(
     "path",
     (
+        "README.md",
         "backend/README.md",
         "backend/src/oh_goon/README.md",
         "scripts/README.md",

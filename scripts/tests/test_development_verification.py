@@ -44,9 +44,10 @@ def test_plan_cli_publishes_after_actual_source_admission(
     source = tmp_path / "source"
     source.mkdir()
     owner._git(source, "init", "-q")
-    readme = source / "README.md"
+    readme = source / "docs/explanation.md"
+    readme.parent.mkdir()
     readme.write_text("Original explanation.\n", encoding="utf-8")
-    owner._git(source, "add", "README.md")
+    owner._git(source, "add", "docs/explanation.md")
     owner._git(
         source,
         "-c",
@@ -79,7 +80,7 @@ def test_plan_cli_publishes_after_actual_source_admission(
         == 0
     )
     plan = owner.ChangeVerificationPlan.model_validate_json(target.read_bytes())
-    assert plan.changed_paths == ("README.md",)
+    assert plan.changed_paths == ("docs/explanation.md",)
     assert plan.source_identity == canonical_source_identity(source)
     assert plan.behavioral_status == "NOT_APPLICABLE"
     assert (
@@ -174,7 +175,9 @@ def test_effective_candidate_refuses_local_source_drift(repository: Path) -> Non
 def test_prose_only_plan_does_not_start_intelligence_or_unrelated_toolchains(
     repository: Path,
 ) -> None:
-    (repository / "README.md").write_text("Changed explanation.\n", encoding="utf-8")
+    document = repository / "docs/ordinary.md"
+    document.parent.mkdir(parents=True)
+    document.write_text("Changed explanation.\n", encoding="utf-8")
 
     def forbidden(_root: Path, _paths: tuple[str, ...]) -> dict[str, Any]:
         raise AssertionError(
@@ -356,7 +359,9 @@ def test_merge_plan_cli_keeps_qualified_behavior_and_generated_contract_paths(
 def test_source_change_invalidates_admitted_plan_before_work(
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repository / "README.md").write_text("Changed.\n", encoding="utf-8")
+    document = repository / "docs/identity.md"
+    document.parent.mkdir(parents=True)
+    document.write_text("Changed.\n", encoding="utf-8")
     plan = owner.admit_change(repository, base="HEAD")
     owner.require_current_plan(repository, plan)
     monkeypatch.setattr(
@@ -369,7 +374,9 @@ def test_source_change_invalidates_admitted_plan_before_work(
 def test_source_change_stops_before_a_later_command_can_restore_old_bytes(
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repository / "README.md").write_text("Changed explanation.\n", encoding="utf-8")
+    document = repository / "docs/source-change.md"
+    document.parent.mkdir(parents=True)
+    document.write_text("Changed explanation.\n", encoding="utf-8")
     plan = owner.admit_change(repository, base="HEAD")
     state = {"identity": plan.source_identity, "mutate": False}
     calls: list[str] = []
@@ -602,6 +609,7 @@ def test_execution_uses_original_native_batch_membership_without_full_targets() 
 @pytest.mark.parametrize(
     ("relative", "expected_static"),
     (
+        ("README.md", {"architecture"}),
         ("backend/README.md", {"architecture", "python"}),
         ("backend/src/oh_goon/README.md", {"architecture", "python"}),
         ("scripts/README.md", {"architecture"}),

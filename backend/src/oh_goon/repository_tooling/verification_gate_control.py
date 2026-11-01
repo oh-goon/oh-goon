@@ -33,6 +33,7 @@ def is_verification_policy_path(path: str) -> bool:
         or Path(path).name == "AGENTS.md"
         or path
         in {
+            "README.md",
             "Makefile",
             "backend/pyproject.toml",
             ".pre-commit-config.yaml",
