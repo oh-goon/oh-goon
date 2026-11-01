@@ -106,7 +106,7 @@ def test_native_skill_and_repository_review_persists_real_evidence(
             (
                 sys.executable,
                 "-m",
-                "oh_goon.integrations.hashmarks.agent_tools",
+                "oh_goon.integrations.hashmarks",
                 "--tool",
                 "task_evidence",
                 "--capture-identity",

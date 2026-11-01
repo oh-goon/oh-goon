@@ -16,8 +16,10 @@ from pydantic import ConfigDict, Field
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.engine.command import run_command
 from oh_goon.integrations.exact_file_write import publish_text_file
-from oh_goon.integrations.hashmarks.development_verification import nominate_changed_verification
-from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.integrations.hashmarks import (
+    nominate_changed_verification,
+    require_loaded_hashmarks_runtime,
+)
 from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (

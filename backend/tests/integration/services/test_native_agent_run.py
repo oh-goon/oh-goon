@@ -157,7 +157,7 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
         sys.executable,
         "-I",
         "-m",
-        "oh_goon.integrations.hashmarks.agent_tools",
+        "oh_goon.integrations.hashmarks",
         "--root",
         str(capture),
         "--state-directory",

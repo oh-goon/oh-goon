@@ -3124,7 +3124,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                 if (
                     item_type == "command_execution"
                     and item.get("exit_code") == 0
-                    and "oh_goon.integrations.hashmarks.agent_tools" in item.get("command", "")
+                    and "oh_goon.integrations.hashmarks" in item.get("command", "")
                 ):
                     list_followup_in_command = False
                     search_followup_in_command = False
@@ -3203,9 +3203,7 @@ def test_legacy_live_chatgpt_coding_uses_original_run(
                 if item_type == "command_execution":
                     command = item.get("command", "")
                     output = item.get("aggregated_output", "")
-                    fact["hashmarks_command"] = int(
-                        "oh_goon.integrations.hashmarks.agent_tools" in command
-                    )
+                    fact["hashmarks_command"] = int("oh_goon.integrations.hashmarks" in command)
                     fact["exact_hashmarks_list"] = int(
                         payload["repository_tools"]["list"] in command
                     )

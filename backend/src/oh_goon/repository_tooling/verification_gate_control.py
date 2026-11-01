@@ -17,6 +17,7 @@ import sysconfig
 import tempfile
 from collections.abc import Mapping, Sequence
 from importlib import metadata
+from inspect import getsourcefile
 from pathlib import Path
 from typing import Any
 
@@ -203,7 +204,7 @@ def admitted_documentation_assets(
 def _independent_documentation_assets(
     root: Path, paths: Sequence[str], evidence: Mapping[str, Any]
 ) -> set[str]:
-    from oh_goon.integrations.hashmarks.development_verification import observe_repository_assets
+    from oh_goon.integrations.hashmarks import observe_repository_assets
 
     accepted = admitted_documentation_assets(paths, evidence)
     if not accepted:
@@ -525,7 +526,7 @@ def _candidate_producer_identity(root: Path) -> str:
     run. Hashmarks retains ownership of the implementation identity algorithm.
     """
     from oh_goon.engine.command import run_command
-    from oh_goon.integrations.hashmarks.runtime_contract import (
+    from oh_goon.integrations.hashmarks import (
         native_producer_implementation_identity,
     )
     from oh_goon.repository_tooling._dependency_lock_portability import (
@@ -652,6 +653,24 @@ def _candidate_producer_identity(root: Path) -> str:
         return native_producer_implementation_identity(package_root=package)
 
 
+def _require_trusted_hashmarks_api(trusted: Path) -> None:
+    """Bind public composition and the actual imported implementations to base."""
+    from oh_goon.integrations import hashmarks as repository_evidence
+    from oh_goon.integrations.hashmarks import (
+        native_producer_implementation_identity,
+        observe_repository_assets,
+    )
+
+    for owner in (
+        repository_evidence,
+        observe_repository_assets,
+        native_producer_implementation_identity,
+    ):
+        filename = getsourcefile(owner)
+        if filename is None or not Path(filename).resolve().is_relative_to(trusted / "backend/src"):
+            raise ValueError("Controller imported a Hashmarks owner outside its trusted checkout")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, required=True)
@@ -670,15 +689,14 @@ def main() -> int:
         # This branch runs only from the immutable base's separately
         # materialized environment. Candidate source is inspected as data.
         from oh_goon.engine import command as command_owner
-        from oh_goon.integrations.hashmarks import development_verification as asset_owner
-        from oh_goon.integrations.hashmarks import runtime_contract as runtime_owner
         from oh_goon.repository_tooling import _dependency_lock_portability as lock_owner
         from oh_goon.repository_tooling.release import package_slim as identity_owner
 
         trusted = args.trusted_root.resolve(strict=True)
         if Path(__file__).resolve().parents[4] != trusted:
             raise ValueError("Controller source differs from the trusted checkout")
-        for module in (command_owner, asset_owner, runtime_owner, lock_owner, identity_owner):
+        _require_trusted_hashmarks_api(trusted)
+        for module in (command_owner, lock_owner, identity_owner):
             filename = module.__file__
             if filename is None or not Path(filename).resolve().is_relative_to(
                 trusted / "backend/src"

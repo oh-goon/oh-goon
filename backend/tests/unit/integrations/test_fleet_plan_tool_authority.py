@@ -248,7 +248,7 @@ def test_native_evidence_retains_actual_invocation_and_launcher_bytes(
             "run",
         )
         if stage == "relay"
-        else (launcher, "-m", "oh_goon.integrations.hashmarks.agent_tools", "task_evidence")
+        else (launcher, "-m", "oh_goon.integrations.hashmarks", "task_evidence")
     )
     runtime = RuntimeAuthorityReceipt(
         executable_path=launcher,
@@ -299,7 +299,7 @@ def test_native_evidence_retains_actual_invocation_and_launcher_bytes(
     "argv",
     (
         (),
-        ("/launch/python3.13", "-m", "oh_goon.integrations.hashmarks.agent_tools"),
+        ("/launch/python3.13", "-m", "oh_goon.integrations.hashmarks"),
         ("/launch/bwrap", "--bind", "/runtime", "/runtime", "/launch/python3.13", "-m", "relay"),
     ),
 )

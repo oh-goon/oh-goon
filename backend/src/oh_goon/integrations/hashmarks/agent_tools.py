@@ -228,7 +228,7 @@ def prompt_observation(
         raise FleetPlanInvalid("Native repository evidence presentation exceeds the prompt budget")
 
 
-def main() -> int:
+def agent_evidence_main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--tool", choices=("task_evidence", "search_text", "list_paths"), required=True
@@ -262,7 +262,3 @@ def main() -> int:
         return 65
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

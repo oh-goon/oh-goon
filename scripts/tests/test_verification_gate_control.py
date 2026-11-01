@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import copy
 import base64
+import copy
 import json
 import shutil
 import sys
@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from oh_goon.engine import command as command_owner
+from oh_goon.integrations import hashmarks as public_evidence
 from oh_goon.integrations.hashmarks import development_verification as asset_owner
 from oh_goon.integrations.hashmarks import runtime_contract
 from oh_goon.repository_tooling import _dependency_lock_portability as lock_owner
@@ -29,7 +30,6 @@ from oh_goon.repository_tooling.verification_gate_control import (
     required_static_obligations,
     validate_merge_proof,
 )
-
 
 _IMAGE_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1XkAAAAASUVORK5CYII="
@@ -1350,14 +1350,24 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
     )
     for module, relative in (
         (command_owner, "engine/command.py"),
-        (asset_owner, "integrations/hashmarks/development_verification.py"),
-        (runtime_contract, "integrations/hashmarks/runtime_contract.py"),
         (lock_owner, "repository_tooling/_dependency_lock_portability.py"),
         (package_slim, "repository_tooling/release/package_slim.py"),
     ):
-        if module is asset_owner and fault == "foreign-asset-owner":
-            continue
         monkeypatch.setattr(module, "__file__", str(trusted_sources / relative))
+
+    def source_file(owner: object) -> str:
+        if owner is public_evidence:
+            relative = "integrations/hashmarks/__init__.py"
+        elif owner is public_evidence.observe_repository_assets:
+            if fault == "foreign-asset-owner":
+                return str(tmp_path / "candidate-owned-observer.py")
+            relative = "integrations/hashmarks/development_verification.py"
+        else:
+            assert owner is public_evidence.native_producer_implementation_identity
+            relative = "integrations/hashmarks/runtime_contract.py"
+        return str(trusted_sources / relative)
+
+    monkeypatch.setattr(gate, "getsourcefile", source_file)
     plan, result = _proof()
     plan["requested_head"] = "c" * 40
     if fault == "invalid-plan":
@@ -1457,3 +1467,23 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
     output = capsys.readouterr().out
     assert ("MERGE_VERIFIED:" in output) == (fault == "none")
     assert ("MERGE UNVERIFIED:" in output) == (fault != "none")
+
+
+@pytest.mark.parametrize(
+    "capability",
+    ("observe_repository_assets", "native_producer_implementation_identity"),
+)
+def test_trusted_public_api_binds_actual_function_origin(
+    monkeypatch: pytest.MonkeyPatch, capability: str
+) -> None:
+    root = Path(__file__).resolve().parents[2]
+    gate._require_trusted_hashmarks_api(root)
+
+    def foreign_owner(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("foreign implementation must never execute")
+
+    monkeypatch.setattr(public_evidence, capability, foreign_owner)
+    with pytest.raises(
+        ValueError, match="Hashmarks owner outside its trusted checkout"
+    ):
+        gate._require_trusted_hashmarks_api(root)

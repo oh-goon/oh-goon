@@ -47,7 +47,7 @@ def source_snapshot_identity(
 def _identify_source(
     root: Path, exclusions: tuple[str, ...], cancel_requested: Cancel
 ) -> SnapshotIdentity:
-    from oh_goon.integrations.hashmarks.identity import identify_path
+    from oh_goon.integrations.hashmarks import identify_path
 
     identity = identify_path(
         root,

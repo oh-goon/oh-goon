@@ -20,9 +20,25 @@ A thin Oh-Goon adapter consumes required Hashmarks evidence. Runtime startup ver
 
 Hashmarks is selected as an ordinary released Python dependency by `backend/pyproject.toml`; native `uv.lock` owns the exact selected artifact and `backend/.venv` owns materialization. Oh-Goon does not vendor, reacquire, repackage, or privately inject a Hashmarks release.
 
-`oh_goon.integrations.hashmarks` is the single Python integration boundary. Hashmarks evidence is validated through supported producer/consumer contracts and bound to the producer implementation identity reported by the actually loaded Hashmarks runtime. The source tree does not carry a copied "current Hashmarks version/commit/tree/wheel" authority.
+`oh_goon.integrations.hashmarks` is the single public Python integration API.
+Its `__all__` derives from one explicit capability export table. Production
+consumers import those names from the package root; private integration modules
+are internal implementation owners. Exports resolve lazily to the original
+callable or class, preserving its implementation identity and source origin.
+Importing the API or selecting a capability does not load the producer or observe
+a repository. Architecture checks reject direct producer imports, private
+integration imports, undeclared exports and qualified module-attribute bypasses.
+
+Hashmarks evidence is validated through supported producer/consumer contracts and bound to the producer implementation identity reported by the actually loaded Hashmarks runtime. The source tree does not carry a copied "current Hashmarks version/commit/tree/wheel" authority.
 
 The producer supplies exact flat verification membership and repository/evidence provenance; `execution_layout=external` keeps physical grouping, workers, isolation and recovery exclusively Oh-Goon-owned. Artifact identity remains caller/admission provenance when supplied, while producer compatibility is determined by the loaded implementation identity.
+
+The retired command-bearing verification adapter is not part of this API.
+Hashmarks verification selection enters through its native flat membership
+contract; producer `argv`, working-directory and execution-policy fields cannot
+grant execution authority. Oh-Goon's producer-neutral described-work model and
+assignment authority retain their own checkpoint, source-generation and custody
+checks independently of Hashmarks.
 
 Hashmarks standalone CLI/MCP installation is a separate external host concern owned by Hashmarks and the host application. The Oh-Goon backend consumes the Python API through native uv materialization and never launches the standalone CLI as a second dependency path.
 
@@ -126,6 +142,8 @@ Built-in Agent repository discovery/search uses named CodeMap owners over the or
 captured bytes. Each local tool session owns one disposable materialization/index;
 source observations retain native bounds and revisions. Index preparation runs inside
 the original supervised tool process, under its timeout and cancellation budget.
+The existing tool runs as `python -m oh_goon.integrations.hashmarks`; this public
+package entrypoint invokes the same original tool implementation.
 Every model-backed Agent request starts with Hashmarks task evidence over that
 captured repository, including provider review, adjudication and proposal. The
 producer owns relevance, ambiguity, verification nominations, source observations
@@ -164,7 +182,8 @@ yet replace every architecture guard: authored shell text does not establish
 native expansion or effective environment, and bounded source syntax does not
 establish complete alias closure or runtime call targets. Existing exact syntax
 guards and policy lists remain Oh-Goon repository policy until equivalent producer
-facts pass the same negative-boundary tests. Qualification grading and SECRET
+facts pass the same negative-boundary tests. The public API migration does not
+claim that these remaining source analyzers have been removed. Qualification grading and SECRET
 answer truth remain outside repository retrieval.
 
 Detailed producer implementation provenance is unavailable until a supported

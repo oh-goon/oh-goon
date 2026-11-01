@@ -270,7 +270,7 @@ def run_native_setup_command(args: argparse.Namespace) -> int:
         require_native_agent_compatibility(selected)
         assert selected.definition.executable is not None
         executable = Path(selected.definition.executable)
-        from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+        from oh_goon.integrations.hashmarks import require_loaded_hashmarks_runtime
 
         require_loaded_hashmarks_runtime()
         _require_setup_catalog_separation(home, requested_path, path)

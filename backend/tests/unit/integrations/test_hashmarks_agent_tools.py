@@ -9,8 +9,8 @@ from hashmarks import CodeMap
 from hashmarks.evidence_presentation import present_repository_evidence
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.integrations.hashmarks.agent_tools import (
-    main,
+from oh_goon.integrations.hashmarks import (
+    agent_evidence_main,
     prompt_observation,
     repository_observation,
     task_evidence_prompt,
@@ -32,7 +32,7 @@ def test_query_file_transport_delivers_private_task_without_argv_text(tmp_path: 
         sys.executable,
         "-I",
         "-m",
-        "oh_goon.integrations.hashmarks.agent_tools",
+        "oh_goon.integrations.hashmarks",
         "--root",
         str(captured),
         "--query-file",
@@ -85,7 +85,7 @@ def test_invalid_query_file_is_rejected_before_index_work(
             "frozen",
         ],
     )
-    assert main() == 65
+    assert agent_evidence_main() == 65
     assert "unavailable" in capsys.readouterr().out
     assert not (tmp_path / "evidence-state").exists()
 
