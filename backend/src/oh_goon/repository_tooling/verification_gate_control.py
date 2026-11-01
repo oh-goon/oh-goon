@@ -24,6 +24,11 @@ REAL_LIFECYCLE_QA_PATHS = (
 )
 REAL_LIFECYCLE_QA_TEST = "scripts/tests/test_real_lifecycle_qa_contract.py"
 
+PUBLIC_GAME_TAPE_ASSET_PATH = "docs/assets/game-tape-investigation.png"
+_MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES = 2 * 1024 * 1024
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_PNG_IEND = b"\x00\x00\x00\x00IEND\xaeB`\x82"
+
 
 def is_verification_policy_path(path: str) -> bool:
     """The existing contributor, verification and result-authority boundaries."""
@@ -80,9 +85,42 @@ def required_policy_obligations(paths: Sequence[str]) -> tuple[str, ...]:
     )
 
 
+def _bounded_public_documentation_asset(root: Path, path: str) -> bool:
+    if path != PUBLIC_GAME_TAPE_ASSET_PATH:
+        return False
+    try:
+        with (root / path).open("rb") as stream:
+            content = stream.read(_MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES + 1)
+    except OSError:
+        return False
+    if (
+        len(content) < 45
+        or len(content) > _MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES
+        or not content.startswith(_PNG_SIGNATURE)
+        or content[8:12] != (13).to_bytes(4, "big")
+        or content[12:16] != b"IHDR"
+        or not content.endswith(_PNG_IEND)
+    ):
+        return False
+    width = int.from_bytes(content[16:20], "big")
+    height = int.from_bytes(content[20:24], "big")
+    bit_depth, color_type, compression, filter_method, interlace = content[24:29]
+    return (
+        0 < width <= 4096
+        and 0 < height <= 4096
+        and bit_depth in {1, 2, 4, 8, 16}
+        and color_type in {0, 2, 3, 4, 6}
+        and compression == 0
+        and filter_method == 0
+        and interlace in {0, 1}
+    )
+
+
 def non_executable_documentation(root: Path, path: str) -> bool:
     if is_verification_policy_path(path):
         return False
+    if _bounded_public_documentation_asset(root, path):
+        return True
     markdown = Path(path).suffix == ".md" and (
         path.startswith("docs/") or path in {"README.md", "CONTRIBUTING.md"}
     )
