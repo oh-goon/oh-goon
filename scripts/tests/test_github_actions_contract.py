@@ -624,20 +624,23 @@ def test_relevant_events_keep_merge_candidates_and_main_health_distinct() -> Non
     assert set(events["push"]) == {"branches"}
     assert events["push"]["branches"] == ["main"]
     assert "schedule" not in events and "pull_request_target" not in events
-    assert "ready_for_review" in events["pull_request"]["types"]
-    assert "edited" in events["pull_request"]["types"]
-    assert "github.event_name" in workflow["concurrency"]["group"]
-    assert "github.event.pull_request.number" in workflow["concurrency"]["group"]
+    # Metadata edits must not create a newer suite with skipped required jobs.
+    assert set(events["pull_request"]["types"]) == {
+        "opened",
+        "synchronize",
+        "reopened",
+        "ready_for_review",
+        "converted_to_draft",
+    }
+    assert workflow["concurrency"]["group"] == (
+        "relevant-${{ github.event_name }}-"
+        "${{ github.event.pull_request.number || github.ref }}"
+    )
     assert workflow["concurrency"]["cancel-in-progress"] is True
 
     proof = workflow["jobs"]["verify"]
-    assert proof["if"] == (
-        "github.event_name != 'push' && "
-        "(github.event.action != 'edited' || github.event.changes.base != null)"
-    )
-    assert "github.event.changes.base" in workflow["concurrency"]["group"]
-    assert "'metadata' || 'candidate'" in workflow["concurrency"]["group"]
-    assert "edit-not-applicable" in _merge_aggregate()["name"]
+    assert proof["if"] == "github.event_name != 'push'"
+    assert _merge_aggregate()["if"] == "always() && github.event_name != 'push'"
     assert "github.event.pull_request.base.sha" in proof["env"]["BASE_SHA"]
     assert "github.event.merge_group.base_sha" in proof["env"]["BASE_SHA"]
     assert "github.event.pull_request.head.sha" in proof["env"]["REQUESTED_HEAD"]

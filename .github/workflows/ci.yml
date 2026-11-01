@@ -2,7 +2,7 @@ name: Relevant verification
 
 "on":
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   merge_group:
   push:
     branches: [main]
@@ -17,13 +17,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: relevant-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'edited' && !github.event.changes.base && 'metadata' || 'candidate' }}
+  group: relevant-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
     name: selected-proof
-    if: github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base != null)
+    if: github.event_name != 'push'
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     env:
@@ -125,8 +125,8 @@ jobs:
           same admitted merge policy. Timing remains PROVISIONAL until measured.
           EOF
   merge-gate:
-    name: ${{ github.event_name == 'push' && 'merge-not-applicable' || github.event.action == 'edited' && !github.event.changes.base && 'edit-not-applicable' || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}
-    if: always() && github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base != null)
+    name: ${{ github.event_name == 'push' && 'merge-not-applicable' || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}
+    if: always() && github.event_name != 'push'
     needs: verify
     runs-on: ubuntu-26.04
     timeout-minutes: 5
