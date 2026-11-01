@@ -42,6 +42,13 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
     ]
     ((preparation_index, preparation),) = preparations
     assert isinstance(preparation, str)
+    assert job["env"]["OH_GOON_TEST_CPUS"] == "${{ vars.OH_GOON_TEST_CPUS || '0' }}"
+    preparation_steps = [
+        step for step in job["steps"]
+        if step.get("run") == preparation
+    ]
+    assert len(preparation_steps) == 1
+    assert preparation_steps[0]["if"] == "env.OH_GOON_TEST_CPUS != '0'"
     effect_indices = [
         index
         for index, command in enumerate(runs)
@@ -49,10 +56,6 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
         & set(shlex.split(command, comments=True))
     ]
     assert effect_indices and all(preparation_index < index for index in effect_indices)
-    for scope in [job, *job["steps"]]:
-        assert scope.get("env", {}).get("OH_GOON_TEST_CPUS") not in ("0", 0)
-    for command in runs:
-        assert "OH_GOON_TEST_CPUS=0" not in shlex.split(command, comments=True)
     return preparation
 
 
@@ -114,6 +117,7 @@ def test_native_cpu_preparation_proves_user_bus_before_make_without_opting_out(
                 "GITHUB_ENV": str(exported),
                 "PREPARATION_EVENTS": str(events),
                 "MANAGER_STATUS": str(manager_status),
+                "OH_GOON_TEST_CPUS": "2",
             },
             capture_output=True,
             text=True,

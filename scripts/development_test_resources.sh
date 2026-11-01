@@ -139,7 +139,7 @@ oh_goon_test_resources_main() {
     shift
     child=1
   else
-    cpus=$(oh_goon_test_resolved_cpus "${OH_GOON_TEST_CPUS-2}") || return 2
+    cpus=$(oh_goon_test_resolved_cpus "${OH_GOON_TEST_CPUS-0}") || return 2
     if [[ ${1-} == -- ]]; then
       shift
     fi
@@ -150,7 +150,7 @@ oh_goon_test_resources_main() {
   fi
   export OH_GOON_TEST_CPUS=$cpus
   if ((cpus == 0)); then
-    printf 'Test CPU budget: disabled explicitly (OH_GOON_TEST_CPUS=0)\n' >&2
+    printf 'Test CPU budget: no configured limit (OH_GOON_TEST_CPUS=0)\n' >&2
     exec "$@"
   fi
   if ! oh_goon_test_is_linux; then

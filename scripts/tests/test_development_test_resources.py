@@ -87,7 +87,7 @@ def _run(
     tmp_path: Path,
     cgroup: tuple[Path, Path],
     *arguments: str,
-    cpus: str | None = None,
+    cpus: str | None = "2",
     path: Path | None = None,
     setup: str = "",
 ) -> subprocess.CompletedProcess[str]:
@@ -126,8 +126,9 @@ def test_invalid_cpu_budget_fails_before_native_scope_or_workload(
     assert not marker.exists()
 
 
-def test_explicit_zero_preserves_command_io_directory_environment_and_exit_without_dependencies(
-    tmp_path: Path,
+@pytest.mark.parametrize("cpus", [None, "0", "0000"])
+def test_unconfigured_or_zero_preserves_command_io_directory_environment_and_exit_without_dependencies(
+    tmp_path: Path, cpus: str | None
 ) -> None:
     result = subprocess.run(
         [
@@ -141,7 +142,7 @@ def test_explicit_zero_preserves_command_io_directory_environment_and_exit_witho
             "literal $() argument with spaces",
         ],
         cwd=tmp_path,
-        env=_environment("0000", tmp_path / "no-tools"),
+        env=_environment(cpus, tmp_path / "no-tools"),
         input="input payload\n",
         capture_output=True,
         text=True,
@@ -153,11 +154,11 @@ def test_explicit_zero_preserves_command_io_directory_environment_and_exit_witho
         result.stdout == f"0|{tmp_path}|literal $() argument with spaces|input payload"
     )
     assert "workload-error" in result.stderr
-    assert "disabled explicitly" in result.stderr
+    assert "no configured limit" in result.stderr
 
 
 @pytest.mark.parametrize(
-    "cpus,resolved", [(None, "2"), ("0004", "4"), ("4096", "4096")]
+    "cpus,resolved", [("2", "2"), ("0004", "4"), ("4096", "4096")]
 )
 def test_native_scope_receives_resolved_budget_and_exact_command_arguments(
     tmp_path: Path, cgroup: tuple[Path, Path], cpus: str | None, resolved: str
