@@ -1,5 +1,7 @@
 # oh-goon 🧹
 
+[![Relevant verification](https://github.com/oh-goon/oh-goon/actions/workflows/ci.yml/badge.svg)](https://github.com/oh-goon/oh-goon/actions/workflows/ci.yml)
+
 > Old hacky code, gone. If it doesn't validate, it doesn't run.
 
 Oh Goon is a general-purpose workflow and Agent execution engine for repository maintenance, CI/CD, and explicitly bounded agentic work. It is built for stability engineers who need to run the same declared work across one repository or a fleet and inspect what happened.
@@ -17,6 +19,85 @@ the workload explicitly selects it; optional high-security qualification is
 separate from ordinary development.
 
 Execution is deliberately linear. Oh Goon does not turn Plans into DAGs, infer missing intent, merge repository pipelines into Shared Runs, or treat an earlier preview as permission to execute.
+
+
+## Execution model at a glance
+
+Every accepted workflow follows one execution lifecycle:
+
+```text
+declared Plan / Goon
+        ↓
+resolve exact source and target
+        ↓
+admit immutable execution
+        ↓
+run ordered Steps under supervision
+        ↓
+record Journal + Game Tape evidence
+        ↓
+verify, recover, or quarantine uncertainty
+```
+
+The same lifecycle is used for repository CI/CD, explicitly selected
+multi-repository work and bounded agent review/repair campaigns. Preview and
+inspection are read-only; they never become execution authority. Failed or
+interrupted effects remain visible as durable outcomes instead of becoming
+implicit retries.
+
+The main engineering boundaries are:
+
+- **One execution path.** Repository and Shared Run inputs resolve to the same admission, executor, Journal, recovery and Game Tape owners.
+- **Durable evidence.** Linked Runs retain source, candidate, Step, attempt and terminal-outcome identity.
+- **Bounded agent work.** Native coding agents keep their own reasoning and tool behavior while Oh-Goon controls declared repositories, write roots, deadlines, review passes and verification.
+- **Fail-closed recovery.** Ambiguous external outcomes are quarantined for evidence-based reconciliation rather than replayed blindly.
+- **Focused verification.** Edit and merge feedback can select relevant real checks without redefining the complete release owner.
+
+## Recorded qualification examples
+
+These are scoped observations from specific merged changes, not blanket
+performance or release claims.
+
+- A native Codex review-repair campaign completed all six linked Runs: four reviews, adjudication, proposal/application, native regression, four fresh `CLEAN` reviews and final native verification ([PR #34](https://github.com/oh-goon/oh-goon/pull/34)).
+- Hosted CI retained exact 10,705-member and 554-member selections with zero omissions, duplicates or extras while observed job time changed from 21m29s to 12m38s and 31m29s to 19m11s respectively ([PR #88](https://github.com/oh-goon/oh-goon/pull/88)).
+- One ready-candidate merge proof executed 231/231 admitted native pytest instances with zero missing, duplicate, extra or non-passing members and emitted `MERGE_VERIFIED` in 285 seconds. That single run is functional evidence, not a latency distribution ([PR #97](https://github.com/oh-goon/oh-goon/pull/97)).
+
+
+## What a completed run retains
+
+A Run is more than a command exit code. Its durable evidence lets an
+operator or another tool inspect what was admitted, what actually ran and
+whether later recovery or verification is authoritative.
+
+| Evidence | What it answers |
+| --- | --- |
+| Source and target identity | Which repository bytes, selection and declared workflow were admitted? |
+| Resolved Plan, Goon and Step structure | What ordered work was authorized before effects began? |
+| Step attempts and supervision | Which native commands or agents ran, under which limits, and how did they terminate? |
+| Logs, outputs and observations | What did each Step produce without turning logs into execution authority? |
+| Terminal outcome and recovery state | Is the Run complete, failed, cancelled, uncertain or waiting for evidence-based reconciliation? |
+| Linked campaign evidence | For bounded review/repair, which reviews, findings, adjudication, candidate transitions, regression and final verification belong together? |
+
+The [Game Tape](docs/development/GAME_TAPE.md) is the main investigation
+view over those original facts. It is a projection of execution evidence,
+not a second result store.
+
+## Related projects and ownership
+
+OH-Goon participates in a deliberately separated toolchain. Each project
+owns one kind of authority instead of copying the others' implementation.
+
+| Project | Owns | Does not own |
+| --- | --- | --- |
+| [Hashmarks](https://github.com/Hugloss/Hashmarks) | Local repository facts, identity, relationships, freshness, impact and verification evidence | Edits, command execution, retries or workflow policy |
+| **OH-Goon** | Declared workflow admission, supervised execution, durable Run/Game Tape evidence, recovery and bounded agent campaigns | Reusable review methodology or benchmark verdicts |
+| [Agents Cookbook](https://github.com/Hugloss/agentsCookbook) | Portable review and investigation skills, thin agent roles and optional flows | Host execution, permissions, sessions or persistence |
+| [EvalShot](https://github.com/Hugloss/EvalShot) | Frozen evaluation suites, runtime adapters, independent oracles, scoring and reports | The product behavior or execution runtime under evaluation |
+
+Hashmarks is a required OH-Goon dependency for repository identity and
+evidence. Agents Cookbook and EvalShot remain separately usable projects;
+OH-Goon integrates with them without creating a second skill catalog or
+evaluation authority.
 
 ## Test this checkout
 
