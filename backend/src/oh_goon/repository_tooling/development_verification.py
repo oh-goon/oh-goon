@@ -921,7 +921,7 @@ def main(argv: list[str] | None = None) -> int:
                 "candidate": plan.candidate,
                 "outcomes": [
                     {"owner": row["owner"], "returncode": row["returncode"]}
-                    for row in outcomes
+                    for row in result["outcomes"]
                 ],
             }
             if "reason" in result:
