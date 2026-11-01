@@ -169,6 +169,28 @@ complete Python CI example is a daily reusable/manual workflow, not an additiona
 complete journey on every ordinary update. Package/build smoke is admitted when
 its actual distribution boundary changes; ordinary docs do not assemble a release.
 
+PR verification starts on opening, a head update, reopening, and ready/draft
+transitions. Title and description edits do not start verification or replace the
+candidate's check suite. The `edited` trigger is intentionally absent: skipping
+every job after a metadata edit can leave a newer suite without the required
+`merge-gate` result. The gate validates the existing proof; it does not rerun tests.
+
+GitHub also reports a base-branch retarget as `edited`, so retargeting alone does
+not start verification. After changing the target branch, update the head branch
+or reopen the PR to obtain a fresh normal PR run before merging. A previous green
+head check is not proof for the new base; this contributor step is not automatic
+retarget enforcement. The fresh run retains the existing exact base/head/candidate
+validation. Up-to-date or merge-queue enforcement remains the protection policy
+described below.
+
+An **Expected — Waiting for status to be reported** check is missing reporting,
+not a running test. Inspect the current head's normal PR run and its exact
+`merge-gate` job before requesting more execution. A missing eligible run needs a
+fresh PR event; a failed proof needs its actual failure fixed. A manual
+`workflow_dispatch` replay is diagnostic and does not satisfy the required PR
+check. A gate-only retry of an older run cannot assume a proof artifact exists
+for the new run attempt; do not substitute a skipped or synthetic success.
+
 ### Effective protection and cutover
 
 Install reviewed base controls and establish daily coverage first. Exercise the
