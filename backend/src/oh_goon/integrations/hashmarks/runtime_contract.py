@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,10 +17,15 @@ def _hashmarks_version() -> str:
     return str(__version__)
 
 
-def native_producer_implementation_identity() -> str:
+def native_producer_implementation_identity(package_root: Path | None = None) -> str:
+    """Observe loaded or explicitly selected package bytes through the native owner.
+
+    An explicit package root is inspected as data; its modules are not imported.
+    This does not replace the authority of the currently loaded runtime.
+    """
     from hashmarks import native_producer_implementation_identity as native_owner
 
-    return native_owner()
+    return native_owner() if package_root is None else native_owner(package_root=package_root)
 
 
 def loaded_hashmarks_version() -> str:

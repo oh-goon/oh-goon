@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("hashmarks")
+from hashmarks import native_producer_implementation_identity as native_identity
 from hashmarks.verification_selection import (
     VerificationSelectionEnvelopeState,
     downstream_consumption_contract,
@@ -104,3 +105,51 @@ def test_historical_same_version_runtime_cannot_self_authorize_as_current_main(
         match="producer-implementation-identity-not-expected",
     ):
         _load(tmp_path)
+
+
+def test_explicit_package_identity_observes_same_version_bytes_without_execution(
+    tmp_path: Path,
+) -> None:
+    original = tmp_path / "original" / "hashmarks"
+    changed = tmp_path / "changed" / "hashmarks"
+    initializer = (
+        '__version__ = "fixture-version"\n'
+        "from pathlib import Path\n"
+        'Path(__file__).with_name("initializer-executed").write_text("unexpected")\n'
+        'raise RuntimeError("artifact initializer must not execute")\n'
+    )
+    for package in (original, changed):
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text(initializer, encoding="utf-8")
+    implementation = original / "observer.py"
+    implementation.write_text("def observe():\n    return 1\n", encoding="utf-8")
+    (changed / "observer.py").write_text("def observe():\n    return 2\n", encoding="utf-8")
+
+    before = runtime_contract.native_producer_implementation_identity(package_root=original)
+    other = runtime_contract.native_producer_implementation_identity(package_root=changed)
+    assert before == native_identity(package_root=original)
+    assert other == native_identity(package_root=changed)
+    assert before != other
+
+    implementation.write_text("def observe():\n    return 2\n", encoding="utf-8")
+    assert runtime_contract.native_producer_implementation_identity(package_root=original) == other
+    for package in (original, changed):
+        assert (package / "__init__.py").read_text(encoding="utf-8") == initializer
+        assert not (package / "initializer-executed").exists()
+
+
+def test_explicit_package_identity_does_not_authorize_the_loaded_runtime(tmp_path: Path) -> None:
+    loaded = runtime_contract.require_loaded_hashmarks_runtime()
+    package = tmp_path / "hashmarks"
+    package.mkdir()
+    (package / "__init__.py").write_text("__version__ = 'fixture-version'\n", encoding="utf-8")
+    observed = runtime_contract.native_producer_implementation_identity(package_root=package)
+
+    assert observed != loaded
+    assert runtime_contract.native_producer_implementation_identity() == loaded
+    assert (
+        runtime_contract.require_loaded_hashmarks_runtime(expected_implementation_identity=loaded)
+        == loaded
+    )
+    with pytest.raises(runtime_contract.HashmarksRuntimeContractError, match="does not match"):
+        runtime_contract.require_loaded_hashmarks_runtime(expected_implementation_identity=observed)
