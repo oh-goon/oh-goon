@@ -198,7 +198,8 @@ def test_optional_ty_check_uses_pinned_offline_tool_cache_and_propagates_failure
             "cwd": str(backend),
         }
     ]
-    assert "TY_REQUIREMENT = ty==0.0.95" in (ROOT / "Makefile").read_text(encoding="utf-8")
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert "TY_REQUIREMENT = ty==0.0.95" in makefile
     assert result.returncode == (2 if ty_exit else 0), result.stdout + result.stderr
     if ty_exit:
         assert "17" in result.stderr
