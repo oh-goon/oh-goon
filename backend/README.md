@@ -28,14 +28,15 @@ The backend check includes mypy's strict `oh_goon` package selection from
 `pyproject.toml` before behavior tests. Edited test files receive separately
 selected typing checks.
 
-For fast feedback on the same package, run `make -C .. ty-check` after the normal
-locked environment sync. This optional command uses the quality group's locked
-Astral ty version and its native configuration in `pyproject.toml`. It reports
-errors directly and does not replace the required strict mypy check. ty currently
-has no equivalent to mypy's `no-untyped-call` protection; replacing that gate
-requires an explicit decision about this remaining policy difference. ty ignores
-mypy suppression comments, so the few intentional overrides have their own
-narrow, documented ty exceptions.
+For fast feedback on the same package, run `make -C .. ty-acquire` once to
+materialize the pinned optional Astral ty tool in uv's tool cache, then run
+`make -C .. ty-check`. The check is offline and uses ty's native configuration
+in `pyproject.toml`; normal backend sync and the committed project lock remain
+unchanged. It reports errors directly and does not replace the required strict
+mypy check. ty currently has no equivalent to mypy's `no-untyped-call`
+protection; replacing that gate requires an explicit decision about this remaining
+policy difference. ty ignores mypy suppression comments, so the few intentional
+overrides have their own narrow, documented ty exceptions.
 
 Supported Make validation gates, including `backend-check`, `test-integration`,
 profiling, coverage and certification, share the default two-CPU native Linux

@@ -141,7 +141,7 @@ def test_init_has_no_storage_admission_before_native_uv_and_doctor_is_separate()
 
 
 @pytest.mark.parametrize("ty_exit", (0, 17))
-def test_optional_ty_check_uses_native_locked_checker_and_propagates_failure(
+def test_optional_ty_check_uses_pinned_offline_tool_cache_and_propagates_failure(
     tmp_path: Path, ty_exit: int
 ) -> None:
     tools = tmp_path / "tools"
@@ -187,18 +187,18 @@ def test_optional_ty_check_uses_native_locked_checker_and_propagates_failure(
     assert [json.loads(line) for line in calls.read_text().splitlines()] == [
         {
             "argv": [
+                "tool",
                 "run",
                 "--offline",
-                "--frozen",
-                "--no-sync",
-                "--group",
-                "quality",
+                "--from",
+                "ty==0.0.95",
                 "ty",
                 "check",
             ],
             "cwd": str(backend),
         }
     ]
+    assert "TY_REQUIREMENT = ty==0.0.95" in (ROOT / "Makefile").read_text(encoding="utf-8")
     assert result.returncode == (2 if ty_exit else 0), result.stdout + result.stderr
     if ty_exit:
         assert "17" in result.stderr

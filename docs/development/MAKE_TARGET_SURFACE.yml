@@ -102,6 +102,7 @@ noncanonical_make_target_classes:
   - theme-contrast
   - tooling-check
   - typecheck
+  - ty-acquire
   - ty-check
   - verify-local
   - verify-p0

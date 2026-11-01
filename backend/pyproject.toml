@@ -22,7 +22,6 @@ dev = [
 quality = [
   "mypy>=1.17",
   "ruff>=0.12",
-  "ty>=0.0.95",
   "types-PyYAML>=6.0.12",
 ]
 build = [
