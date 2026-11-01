@@ -81,16 +81,24 @@ def required_policy_obligations(paths: Sequence[str]) -> tuple[str, ...]:
 
 
 def non_executable_documentation(root: Path, path: str) -> bool:
-    if Path(path).suffix != ".md" or is_verification_policy_path(path):
+    if is_verification_policy_path(path):
         return False
-    if not (path.startswith("docs/") or path in {"README.md", "CONTRIBUTING.md"}):
+    markdown = Path(path).suffix == ".md" and (
+        path.startswith("docs/") or path in {"README.md", "CONTRIBUTING.md"}
+    )
+    if path != "LICENSE" and not markdown:
         return False
     try:
         with (root / path).open("r", encoding="utf-8") as stream:
             content = stream.read(1024 * 1024 + 1)
     except OSError:
         return False
-    return len(content) <= 1024 * 1024 and "```" not in content and "~~~" not in content
+    return (
+        len(content) <= 1024 * 1024
+        and "\x00" not in content
+        and "```" not in content
+        and "~~~" not in content
+    )
 
 
 def is_generated_contract_path(path: str) -> bool:
