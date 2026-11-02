@@ -20,9 +20,9 @@ from oh_goon.engine.command import run_command
 from oh_goon.integrations.exact_file_write import publish_text_file
 from oh_goon.integrations.hashmarks import (
     nominate_changed_verification,
+    require_current_dependency_environment,
     require_loaded_hashmarks_runtime,
 )
-from oh_goon.integrations.hashmarks.dependencies import require_current_dependency_environment
 from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
 from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
 from oh_goon.repository_tooling.pytest_process_environment import resolve_pytest_invocation
