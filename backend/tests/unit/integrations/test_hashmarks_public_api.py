@@ -20,9 +20,7 @@ def test_public_package_and_module_entrypoint_share_one_supervised_tool() -> Non
 
 def test_removed_legacy_translation_paths_stay_absent() -> None:
     root = Path(__file__).resolve().parents[4]
-    assert not (
-        root / "backend/src/oh_goon/integrations/hashmarks/work_translation.py"
-    ).exists()
+    assert not (root / "backend/src/oh_goon/integrations/hashmarks/work_translation.py").exists()
     assert not (
         root / "backend/tests/unit/integrations/test_hashmarks_work_translation.py"
     ).exists()
