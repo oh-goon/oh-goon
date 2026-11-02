@@ -167,10 +167,9 @@ def nominate_changed_verification(
         # Hashmarks owns this derived index and revalidates it natively. CI does
         # not transport/cache this mutable database as verification authority.
         with CodeMap(workspace) as native:
-            if not prefix and asset_paths:
-                # Reconcile discovery once, including newly added consumers.
-                # Member rereads alone cannot discover a new indexed source.
-                native.index.sync()
+            # Reconcile source and test discovery before obtaining ownership evidence.
+            # Member rereads alone cannot discover newly added verifier files.
+            native.index.sync()
 
             def nominate_workspace(
                 _scope: object,
