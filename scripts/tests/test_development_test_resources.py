@@ -157,7 +157,7 @@ def test_unconfigured_or_zero_preserves_io_and_exit(
     assert "no configured limit" in result.stderr
 
 
-@pytest.mark.parametrize("cpus,resolved", [("2", "2"), ("0004", "4"), ("4096", "4096")]
+@pytest.mark.parametrize("cpus,resolved", [("2", "2"), ("0004", "4"), ("4096", "4096")])
 def test_native_scope_receives_resolved_budget_and_exact_command_arguments(
     tmp_path: Path, cgroup: tuple[Path, Path], cpus: str | None, resolved: str
 ) -> None:
