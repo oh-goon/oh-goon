@@ -229,7 +229,7 @@ def test_unproven_cgroup_path_does_not_supply_other_process_limits(
     budget = resolve_pytest_resource_budget(
         8, environ={}, proc_root=proc, cgroup_root=cgroup
     )
-    assert budget.worker_ceiling == 2
+    assert budget.worker_ceiling == 8
     assert budget.cgroups == ()
     assert budget.cgroup_cpu_capacity is None
     assert budget.cgroup_observation_status == (
