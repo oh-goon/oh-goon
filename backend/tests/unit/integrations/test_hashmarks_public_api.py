@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,16 @@ def test_public_package_and_module_entrypoint_share_one_supervised_tool() -> Non
     assert hashmarks_entrypoint.agent_evidence_main is public_hashmarks.agent_evidence_main
     assert callable(public_hashmarks.require_loaded_hashmarks_runtime)
     assert "agent_evidence_main" in public_hashmarks.__all__
+
+
+def test_removed_legacy_translation_paths_stay_absent() -> None:
+    root = Path(__file__).resolve().parents[4]
+    assert not (
+        root / "backend/src/oh_goon/integrations/hashmarks/work_translation.py"
+    ).exists()
+    assert not (
+        root / "backend/tests/unit/integrations/test_hashmarks_work_translation.py"
+    ).exists()
 
 
 @pytest.mark.process
