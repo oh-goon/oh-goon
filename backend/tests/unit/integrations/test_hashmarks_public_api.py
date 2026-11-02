@@ -7,6 +7,15 @@ import sys
 
 import pytest
 
+from oh_goon.integrations import hashmarks as public_hashmarks
+from oh_goon.integrations.hashmarks import __main__ as hashmarks_entrypoint
+
+
+def test_public_package_and_module_entrypoint_share_one_supervised_tool() -> None:
+    assert hashmarks_entrypoint.agent_evidence_main is public_hashmarks.agent_evidence_main
+    assert callable(public_hashmarks.require_loaded_hashmarks_runtime)
+    assert "agent_evidence_main" in public_hashmarks.__all__
+
 
 @pytest.mark.process
 def test_public_api_exports_original_objects_without_loading_the_producer() -> None:
