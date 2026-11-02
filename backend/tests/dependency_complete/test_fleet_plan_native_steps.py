@@ -314,7 +314,7 @@ def test_native_helpers_ignore_repository_controlled_python_package(
 def test_native_process_failure_and_unsettled_or_invalid_claims_cannot_report_success(
     tmp_path: Path, model_transport: list[dict[str, Any]], mode: str, expected: int
 ) -> None:
-    repository, _, step, runtime = _case(tmp_path, mode=mode)
+    repository, _, step, runtime = _case(tmp_path, mode=mode, timeout_seconds=20.0)
     outcome = execute_direct_step(repository, step, runtime, step_order=1)
     assert outcome.returncode == expected, outcome.stderr
     assert outcome.supervisor is not None and outcome.supervisor.final_process_group_quiescent
