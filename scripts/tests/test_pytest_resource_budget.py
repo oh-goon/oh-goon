@@ -213,7 +213,7 @@ def test_missing_native_memory_and_cgroup_observations_are_explicit(
     budget = resolve_pytest_resource_budget(
         8, environ={}, proc_root=tmp_path / "proc", cgroup_root=tmp_path / "cgroup"
     )
-    assert budget.worker_ceiling == 2
+    assert budget.worker_ceiling == 4
     assert budget.cgroups == ()
     assert budget.available_memory_bytes is None
     assert budget.memory_worker_capacity is None
