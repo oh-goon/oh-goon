@@ -63,7 +63,7 @@ def test_invalid_cpu_configuration_fails_before_native_collection(
 
 
 def test_cpu_configuration_defaults_and_explicit_limits() -> None:
-    assert configured_cpu_budget({}) == 2
+    assert configured_cpu_budget({}) == 0
     assert configured_cpu_budget({"OH_GOON_TEST_CPUS": "0"}) == 0
     assert configured_cpu_budget({"OH_GOON_TEST_CPUS": "4096"}) == 4096
 
@@ -79,9 +79,13 @@ def test_disabled_configured_ceiling_still_respects_native_affinity(
     disabled = resolve_pytest_resource_budget(
         8, environ={"OH_GOON_TEST_CPUS": "0"}, proc_root=proc, cgroup_root=cgroup
     )
-    assert default.worker_ceiling == 2
+    assert default.worker_ceiling == 3
     assert disabled.worker_ceiling == 3
     assert disabled.affinity_cpu_count == 3
+    limited = resolve_pytest_resource_budget(
+        8, environ={"OH_GOON_TEST_CPUS": "2"}, proc_root=proc, cgroup_root=cgroup
+    )
+    assert limited.worker_ceiling == 2
     assert (
         disabled.report(effective_workers=3)["native_cgroup_cpu_quota_observed"]
         is False
@@ -209,7 +213,7 @@ def test_missing_native_memory_and_cgroup_observations_are_explicit(
     budget = resolve_pytest_resource_budget(
         8, environ={}, proc_root=tmp_path / "proc", cgroup_root=tmp_path / "cgroup"
     )
-    assert budget.worker_ceiling == 2
+    assert budget.worker_ceiling == 4
     assert budget.cgroups == ()
     assert budget.available_memory_bytes is None
     assert budget.memory_worker_capacity is None
@@ -225,7 +229,7 @@ def test_unproven_cgroup_path_does_not_supply_other_process_limits(
     budget = resolve_pytest_resource_budget(
         8, environ={}, proc_root=proc, cgroup_root=cgroup
     )
-    assert budget.worker_ceiling == 2
+    assert budget.worker_ceiling == 8
     assert budget.cgroups == ()
     assert budget.cgroup_cpu_capacity is None
     assert budget.cgroup_observation_status == (

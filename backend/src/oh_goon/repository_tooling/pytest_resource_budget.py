@@ -37,7 +37,7 @@ def _nonnegative_integer(value: str | None) -> int | None:
 
 
 def configured_cpu_budget(environ: Mapping[str, str]) -> int:
-    value = _nonnegative_integer(environ.get("OH_GOON_TEST_CPUS", "2"))
+    value = _nonnegative_integer(environ.get("OH_GOON_TEST_CPUS", "0"))
     if value is None or value > 4096:
         raise ValueError("OH_GOON_TEST_CPUS must be an integer between 0 and 4096")
     return value

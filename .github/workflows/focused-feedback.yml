@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 15
     env:
       UV_PYTHON: "3.12"
+      OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -44,7 +45,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Prepare native test CPU control
+      - name: Prepare optional native test CPU control
+        if: env.OH_GOON_TEST_CPUS != '0'
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
           runner_uid=$(id -u)
