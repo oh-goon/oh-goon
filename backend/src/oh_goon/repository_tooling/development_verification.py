@@ -641,6 +641,7 @@ def _commands(root: Path, plan: ChangeVerificationPlan) -> list[tuple[str, tuple
                         "ruff",
                         "format",
                         "--check",
+                        "--diff",
                         "backend/src",
                         "backend/tests",
                         "scripts",
