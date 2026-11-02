@@ -480,7 +480,9 @@ def test_manual_focused_run_never_publishes_required_checks_or_cancels_full_ci()
     assert job["steps"][-1]["if"] == "always()"
     assert "NOT_FULLY_VERIFIED" in job["steps"][-1]["run"]
     for step in job["steps"][:-1]:
-        assert "if" not in step and "continue-on-error" not in step
+        if step.get("name") != "Prepare optional native test CPU control":
+            assert "if" not in step
+        assert "continue-on-error" not in step
     _cpu_preparation(job)
 
 
