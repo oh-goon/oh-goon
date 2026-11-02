@@ -511,14 +511,10 @@ def admit_change(
     # The usual Hashmarks fail-closed ownership requirement remains in force
     # for every other changed file.
     migration_verifiers = {
-        "backend/src/oh_goon/integrations/hashmarks/__init__.py":
-            "backend/tests/unit/integrations/test_hashmarks_public_api.py",
-        "backend/src/oh_goon/integrations/hashmarks/__main__.py":
-            "backend/tests/unit/integrations/test_hashmarks_public_api.py",
-        "backend/src/oh_goon/integrations/hashmarks/work_translation.py":
-            "backend/tests/unit/integrations/test_hashmarks_public_api.py",
-        "backend/tests/unit/integrations/test_hashmarks_work_translation.py":
-            "backend/tests/unit/integrations/test_hashmarks_public_api.py",
+        "backend/src/oh_goon/integrations/hashmarks/__init__.py": "backend/tests/unit/integrations/test_hashmarks_public_api.py",
+        "backend/src/oh_goon/integrations/hashmarks/__main__.py": "backend/tests/unit/integrations/test_hashmarks_public_api.py",
+        "backend/src/oh_goon/integrations/hashmarks/work_translation.py": "backend/tests/unit/integrations/test_hashmarks_public_api.py",
+        "backend/tests/unit/integrations/test_hashmarks_work_translation.py": "backend/tests/unit/integrations/test_hashmarks_public_api.py",
     }
     migration_proofs: list[dict[str, str]] = []
     observed_paths = {row.get("changed_path") for row in observations}
@@ -546,7 +542,11 @@ def admit_change(
                 else:
                     pytest.add(verifier)
                     migration_proofs.append(
-                        {"changed_path": path, "verifier": verifier, "authority": "oh-goon-explicit-migration-policy"}
+                        {
+                            "changed_path": path,
+                            "verifier": verifier,
+                            "authority": "oh-goon-explicit-migration-policy",
+                        }
                     )
                 continue
             else:
