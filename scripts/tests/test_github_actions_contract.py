@@ -42,9 +42,7 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
     ]
     ((preparation_index, preparation),) = preparations
     assert isinstance(preparation, str)
-    assert job["env"]["OH_GOON_TEST_CPUS"] == (
-        "${{ vars.OH_GOON_TEST_CPUS || '0' }}"
-    )
+    assert job["env"]["OH_GOON_TEST_CPUS"] == "${{ vars.OH_GOON_TEST_CPUS || '0' }}"
     preparation_steps = [step for step in job["steps"] if step.get("run") == preparation]
     assert len(preparation_steps) == 1
     assert preparation_steps[0]["if"] == "env.OH_GOON_TEST_CPUS != '0'"
