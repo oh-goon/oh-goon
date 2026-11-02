@@ -127,9 +127,8 @@ def test_invalid_cpu_budget_fails_before_native_scope_or_workload(
 
 
 @pytest.mark.parametrize("cpus", [None, "0", "0000"])
-def test_unconfigured_or_zero_preserves_command_io_directory_environment_and_exit_without_dependencies(
-    tmp_path: Path,
-    cpus: str | None,
+def test_unconfigured_or_zero_preserves_io_and_exit(
+    tmp_path: Path, cpus: str | None
 ) -> None:
     result = subprocess.run(
         [
