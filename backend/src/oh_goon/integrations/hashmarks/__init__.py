@@ -146,9 +146,10 @@ def __getattr__(name: str) -> object:
     module = _EXPORTS.get(name)
     if module is None:
         raise AttributeError(f"{__name__!r} has no public capability {name!r}")
-    value = getattr(import_module(f"{__name__}.{module}"), name)
-    globals()[name] = value
-    return value
+    # Resolve the implementation on every access. Caching the object in globals()
+    # would silently retain a stale callable after runtime replacement or a test
+    # patch, bypassing the active identity check at critical call sites.
+    return getattr(import_module(f"{__name__}.{module}"), name)
 
 
 def __dir__() -> list[str]:
