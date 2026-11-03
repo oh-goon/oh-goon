@@ -184,6 +184,10 @@ def test_optional_ty_check_uses_pinned_offline_tool_cache_and_propagates_failure
         text=True,
         timeout=10,
     )
+    assert calls.is_file(), (
+        f"ty-check did not invoke the pinned uv tool runner: "
+        f"exit={result.returncode}; stdout={result.stdout!r}; stderr={result.stderr!r}"
+    )
     assert [json.loads(line) for line in calls.read_text().splitlines()] == [
         {
             "argv": [
