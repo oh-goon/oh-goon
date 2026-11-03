@@ -146,10 +146,11 @@ def test_stateful_cli_turns_schema_mismatch_into_actionable_startup_error(
 
     assert main(["doctor", "--runtime"]) == 2
     output = capsys.readouterr().out
-    assert "Local oh-goon database schema mismatch" in output
+    assert "Runtime diagnosis blocked: STATE_SCHEMA_INCOMPATIBLE" in output
     assert str(path) in output
-    assert "Source checkout: make local-state-reset" in output
-    assert "Built release:   oh-goon local-state reset --yes" in output
+    assert "Preserve existing state and its SQLite sidecars" in output
+    assert "matching original runtime" in output
+    assert path.exists()
 
 
 def test_contract45_journal_refuses_at_schema_boundary_without_decoding_or_mutation(
@@ -181,9 +182,9 @@ def test_contract45_journal_refuses_at_schema_boundary_without_decoding_or_mutat
     monkeypatch.setattr(JournalFactCodec, "decode", unexpected_decode)
     assert main(["doctor", "--runtime"]) == 2
     output = capsys.readouterr().out
-    assert f"found 89; expected {DATABASE_SCHEMA_VERSION}" in output
+    assert "Runtime diagnosis blocked: STATE_SCHEMA_INCOMPATIBLE" in output
     assert "matching original runtime" in output
-    assert "A fresh state path does not settle an original unresolved writer" in output
+    assert "doctor does not initialize, repair or recover state" in output
     assert "JournalCorruption" not in output
     assert path.read_bytes() == before
 
@@ -246,7 +247,7 @@ def test_incompatible_journal_refuses_before_codec_or_ddl_without_mutation(
         LocalDatabase(path, journal_mode="WAL")
     assert main(["doctor", "--runtime"]) == 2
     output = capsys.readouterr().out
-    assert f"found {legacy_schema}; expected {DATABASE_SCHEMA_VERSION}" in output
+    assert "Runtime diagnosis blocked: STATE_SCHEMA_INCOMPATIBLE" in output
     assert "matching original runtime" in output and "JournalCorruption" not in output
     assert path.read_bytes() == before
     assert not any(
