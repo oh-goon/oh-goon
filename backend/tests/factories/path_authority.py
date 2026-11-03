@@ -65,11 +65,6 @@ def test_path_authority_for_plan(plan: ResolvedFleetPlan) -> StrictHostPathAutho
     )
 
 
-# The helper is imported by test harnesses; it is not a pytest test case.
-# Keep pytest from collecting its typed Plan parameter as a fixture.
-setattr(test_path_authority_for_plan, "__test__", False)
-
-
 # Release-critical P0 tests that directly compose stores/fixtures consume the same exact
 # host-tool authority admitted by the APP backend-p0 Goon. Plan-execution harnesses do
 # not reuse this broad fixture: they derive their exact toolchain from the resolved Plan.
