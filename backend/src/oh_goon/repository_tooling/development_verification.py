@@ -27,8 +27,14 @@ from oh_goon.repository_tooling.pytest_process_environment import resolve_pytest
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
     DOCUMENTATION_ASSET_OBLIGATION,
+    DOCUMENTATION_PROOF_OBLIGATION,
+    DOCUMENTATION_PROOF_TEST,
+    HASHMARKS_UPGRADE_OBLIGATION,
+    HASHMARKS_UPGRADE_TESTS,
     admitted_documentation_assets,
     documentation_asset_candidates,
+    documentation_proof_paths,
+    hashmarks_upgrade_intent,
     is_generated_contract_path,
     is_verification_policy_path,
     non_executable_documentation,
@@ -138,10 +144,12 @@ def capture_change(
     return base_sha, head, tuple(sorted(paths))
 
 
-def _backend_dependency_intent(root: Path, base: str, paths: tuple[str, ...]) -> tuple[bool, bool]:
+def _backend_dependency_intent(
+    root: Path, base: str, paths: tuple[str, ...]
+) -> tuple[bool, bool, bool]:
     """Classify authored intent without deciding native dependency compatibility."""
     if "backend/pyproject.toml" not in paths:
-        return False, False
+        return False, False, False
     previous = tomllib.loads(_git(root, "show", f"{base}:backend/pyproject.toml"))
     with (root / "backend/pyproject.toml").open("r", encoding="utf-8") as stream:
         manifest = stream.read(4 * 1024 * 1024 + 1)
@@ -163,7 +171,7 @@ def _backend_dependency_intent(root: Path, base: str, paths: tuple[str, ...]) ->
             for key in ("uv", "hatch", "setuptools")
         )
     )
-    return runtime_changed or unsupported, unsupported
+    return runtime_changed or unsupported, unsupported, hashmarks_upgrade_intent(previous, current)
 
 
 def _dependency_chain_qualified(
@@ -446,13 +454,13 @@ def admit_change(
     authored = tuple(path for path in executable if not is_generated_contract_path(path))
     policy_paths = tuple(path for path in authored if is_verification_policy_path(path))
     required = required_policy_tests(policy_paths)
-    dependency_intent, unsupported_dependency_intent = _backend_dependency_intent(
-        root, base_sha, executable
+    dependency_intent, unsupported_dependency_intent, hashmarks_upgrade = (
+        _backend_dependency_intent(root, base_sha, executable)
     )
     nomination_arguments: dict[str, Any] = {}
     if required:
         nomination_arguments["required"] = required
-    if "backend/uv.lock" in executable:
+    if "backend/uv.lock" in executable and not hashmarks_upgrade:
         nomination_arguments["dependency_base"] = {
             "lock": _base_lock_bytes(root, base_sha),
             "base_revision": base_sha,
@@ -462,19 +470,36 @@ def admit_change(
     if assets:
         nomination_arguments["asset_paths"] = assets
     evidence = nominator(root, authored, **nomination_arguments) if authored or required else {}
+    documents = documentation_proof_paths(changed)
+    if documents:
+        evidence["documentation_policy"] = {
+            "authority": "oh-goon-execution-policy",
+            "paths": list(documents),
+            "coverage": "not-claimed",
+        }
+    if hashmarks_upgrade:
+        evidence["hashmarks_upgrade"] = {
+            "authority": "oh-goon-execution-policy",
+            "scope": "mandatory-hashmarks-upgrade",
+            "consumer_coverage": "not-claimed",
+        }
     accepted_assets = admitted_documentation_assets(authored, evidence)
     executable = tuple(path for path in executable if path not in accepted_assets)
     static = cast(set[_STATIC], required_static_obligations(executable))
-    pytest: set[str] = set()
+    pytest: set[str] = {DOCUMENTATION_PROOF_TEST} if documents else set()
+    if hashmarks_upgrade:
+        pytest.update(HASHMARKS_UPGRADE_TESTS)
     frontend: set[str] = set()
     unverified: list[str] = []
     dependency_qualified = (
         "backend/uv.lock" in executable
+        and not hashmarks_upgrade
         and not unsupported_dependency_intent
         and _bounded_dependency_scope(evidence, base_sha)
     )
     if (
-        (dependency_intent or "backend/uv.lock" in executable) and not dependency_qualified
+        (dependency_intent or "backend/uv.lock" in executable)
+        and not (dependency_qualified or hashmarks_upgrade)
     ) or "frontend/package-lock.json" in executable:
         unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
     if dependency_qualified:
@@ -505,14 +530,15 @@ def admit_change(
             unverified.append("VERIFICATION_POLICY_PROTECTION_UNAVAILABLE")
         pytest.update(str(path) for path in qualified_policy_paths if path in required)
     observed_paths = {row.get("changed_path") for row in observations}
+    upgrade_paths = {"backend/pyproject.toml", "backend/uv.lock"} if hashmarks_upgrade else set()
     for path in authored:
-        if path not in observed_paths:
+        if path not in observed_paths and path not in upgrade_paths:
             unverified.append(f"NO_PRODUCER_OBSERVATION:{path}")
     for row in observations:
         path = str(row.get("changed_path", ""))
         if path not in authored:
             raise ValueError("Producer observation is outside the admitted change set")
-        if path in accepted_assets:
+        if path in accepted_assets or path in upgrade_paths:
             continue
         if row.get("state") not in {"LINKED", "CHANGED_TEST"} or row.get("stale") is True:
             if (
@@ -587,7 +613,9 @@ def admit_change(
         behavioral_status="REQUIRED" if executable else "NOT_APPLICABLE",
         policy_status="REVIEW_REQUIRED" if policy_paths else "ORDINARY",
         obligations=required_policy_obligations(policy_paths)
-        + ((DOCUMENTATION_ASSET_OBLIGATION,) if accepted_assets else ()),
+        + ((DOCUMENTATION_ASSET_OBLIGATION,) if accepted_assets else ())
+        + ((DOCUMENTATION_PROOF_OBLIGATION,) if documents else ())
+        + ((HASHMARKS_UPGRADE_OBLIGATION,) if hashmarks_upgrade else ()),
     )
 
 
@@ -597,12 +625,14 @@ def require_current_plan(root: Path, plan: ChangeVerificationPlan) -> None:
     _git(root, "cat-file", "-e", plan.base + "^{commit}")
     if canonical_source_identity(root) != plan.source_identity:
         raise ValueError("Verification source changed after admission")
-    if plan.evidence and plan.evidence.get("producer_implementation_identity") != (
-        require_loaded_hashmarks_runtime()
-    ):
+    if "producer_implementation_identity" in plan.evidence and plan.evidence.get(
+        "producer_implementation_identity"
+    ) != (require_loaded_hashmarks_runtime()):
         raise ValueError("Loaded Hashmarks implementation changed after admission")
     if plan.evidence.get("dependency_admission") or (
-        "backend/uv.lock" in plan.changed_paths and not plan.unverified
+        "backend/uv.lock" in plan.changed_paths
+        and not plan.unverified
+        and not plan.evidence.get("hashmarks_upgrade")
     ):
         if not _bounded_dependency_scope(
             plan.evidence,
