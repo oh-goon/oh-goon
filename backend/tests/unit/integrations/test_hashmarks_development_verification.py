@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from shutil import copytree
+from typing import Any, cast
 
 import pytest
+from hashmarks import CodeMap
 
 from oh_goon.integrations.hashmarks.development_verification import (
     nominate_changed_verification,
@@ -113,4 +115,51 @@ def test_nested_manifest_change_rebinds_verifier_to_current_source_root(
     )
     assert after[alternate]["qualification"]["authority"] == (
         "bounded-index-evidence-not-verification-execution"
+    )
+
+
+def test_public_nominations_keep_native_bounded_verifiers_and_residual_qualifications(
+    nested_repository: Path,
+) -> None:
+    source = "backend/src/sample/feature.py"
+    for suffix in ("secondary", "additional"):
+        (nested_repository / f"backend/tests/test_feature_{suffix}.py").write_text(
+            f"from sample.feature import answer\ndef test_{suffix}():\n    assert answer() == 42\n",
+            encoding="utf-8",
+        )
+    with CodeMap(nested_repository) as native:
+        native_primary = native.tasks.verification_ownership_graph(
+            f"Verify {source}", limit=20, candidate_limit=1
+        )
+        native_candidates = native.tasks.verification_relevance(
+            f"Verify {source}", limit=20, candidate_limit=16
+        )
+        native_graph = native.tasks.verification_ownership_graph(
+            f"Verify {source}", limit=20, candidate_limit=2
+        )
+    native_owners = cast(list[dict[str, Any]], native_graph["verification_owners"])
+    assert len(native_owners) == 2
+    primary = cast(list[dict[str, Any]], native_primary["verification_owners"])[0]
+    first_reference = native_candidates["candidates"][0]
+    assert {primary["path"], first_reference["path"]} <= {row["path"] for row in native_owners}
+    for row in native_owners:
+        assert row["covers_edit_candidates"] == [source]
+        assert row["coverage_evidence"] in {"direct-reference", "bounded-indirect-reference"}
+    qualification = cast(dict[str, Any], native_graph["verification_qualification"])
+    assert qualification["candidate_count"] > len(native_owners)
+
+    packet = nominate_changed_verification(nested_repository, (source,))
+
+    linked = packet["observations"][0]
+    assert linked["state"] == "LINKED"
+    assert linked["edit_candidates"] == native_graph["edit_candidates"]
+    assert linked["qualification"] == qualification
+    assert packet["owner_coverage"] == "not-claimed"
+    assert len(linked["nominations"]) == 2
+    assert [
+        (row["nomination"]["verification_target"]["path"], row["relationship"])
+        for row in linked["nominations"]
+    ] == [(row["path"], row["coverage_evidence"]) for row in native_owners]
+    assert all(
+        row["nomination"]["execution_authority"] == "external" for row in linked["nominations"]
     )

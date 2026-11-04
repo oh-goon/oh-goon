@@ -26,7 +26,12 @@ def _linked_verification(
     ownership = cast(
         dict[str, Any],
         native.tasks.verification_ownership_graph(
-            f"Verify {relative}", limit=20, candidate_limit=16
+            # The producer retains its canonical selection and first ranked
+            # reference within this pair. Keep its source authority and residual
+            # bounds; complete unrelated verification remains daily.
+            f"Verify {relative}",
+            limit=20,
+            candidate_limit=2,
         ),
     )
     validate_operation_response("verification_ownership", ownership)

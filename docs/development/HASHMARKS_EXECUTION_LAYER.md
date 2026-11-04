@@ -194,7 +194,12 @@ authoritative.
 
 The development check owner consumes supported Hashmarks verifier nominations
 for the captured Git change set. Direct and bounded indirect source-qualified
-links remain distinct from owner-completeness or negative evidence. One native
+links remain distinct from owner-completeness or negative evidence. The supported
+producer request bounds its selected and source-reference candidates with
+`candidate_limit=2`, rather than expanding every disclosed alternative into a
+whole-file test run. Hashmarks
+retains selection authority and its original ambiguity/truncation qualifications.
+Required policy proofs and changed-test nominations remain explicit. One native
 map/read session serves the supplied paths; producer bounds and source-member
 provenance remain in the bounded selection artifact. Oh-Goon applies accepted
 fast/daily cadence and native result admission; it does not infer another impact
