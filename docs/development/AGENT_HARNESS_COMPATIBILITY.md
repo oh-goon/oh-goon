@@ -129,6 +129,23 @@ implementation; they do not erase their invariants.
 | Obsolete implementation, already withdrawn | The [native-store contract](../AGENT_PROVIDERS.md#native-owned-authentication-and-configuration) rejects the former protected credential-file mount route. [Native tests][native-tests] and [resolver tests][resolver-tests] check refusal before native state/source access. Do not retain aliases or restore the removed refresh helper as compatibility. |
 | Obsolete OpenCode CLI fixture, removed | The configured-MCP fixture selected the retired `configuration_directory` route and failed before admission. Disposition: **removed** both immediate/delayed MCP variants and obsolete configuration-byte assertions; [read-only review][cli-readonly-tests] now uses the current disposable managed bootstrap. Fixture removal changed no native execution path and restored no native configuration mount. |
 
+Codex sign-in source disposition (2026-11-04): **simplify** the existing
+[canonical source owner](../../backend/src/oh_goon/repository_tooling/release/package_slim.py)
+to treat genuinely empty workspace-root `.agents`, `.aws` and `.codex` directories
+as operational scaffolding, without following symlinks. Codex 0.164.0 exposes
+absent or empty entries as read-only empty directories inside its tool namespace;
+their names must not exempt content or symlinks from ordinary source rejection.
+The existing `test_installed_codex_enforces_the_selected_native_tool_boundary` in
+the [native Run tests][native-run-tests] requires equal host/tool source identity
+and unchanged host entries alongside private-canary/alias, read-only evidence,
+Hashmarks follow-up and loopback denials. [Source-owner regressions](../../scripts/tests/test_package_slim.py)
+retain populated, file, symlink and unknown-directory rejection. On 2026-11-04,
+the installed test **passed** with Codex 0.164.0 on Linux; separate native probes
+also preserved populated/unknown rejection and symlink startup refusal. This
+selected model-free proof supplies
+no model-quality, general private-store or other-OS qualification, and does not
+replace independent project verification through the original `--verify` owner.
+
 For the Codex 0.164.0 direct Unix-socket mode, **retain** the existing protocol,
 native policy and reserved-directory adaptation. Linux socket admission now rejects
 paths above 107 filesystem-encoded bytes before owned private state or native work;
