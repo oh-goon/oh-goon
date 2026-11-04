@@ -10,6 +10,8 @@ import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +21,8 @@ def _native_commands(target: str, *overrides: str) -> list[list[str]]:
     environment = os.environ.copy()
     for name in (
         "BACKEND_CHECK_TEST_ROOTS",
+        "BACKEND_CHECK_TEST_WORKERS",
+        "INTEGRATION_TEST_WORKERS",
         "CHECK_PYTEST_MARKER",
         "TOOLING_COMPLETE_TEST_MARKER",
         "MAKEFLAGS",
@@ -155,17 +159,19 @@ def test_ordinary_backend_gate_measures_correctness_without_coverage_targets() -
     assert not any("check" in argv and "--area" in argv for argv in commands)
 
 
-def test_backend_gate_preserves_explicit_roots_and_caller_marker() -> None:
+@pytest.mark.parametrize("workers", (1, 3))
+def test_backend_gate_preserves_explicit_roots_and_caller_marker(workers: int) -> None:
     tests = _batch_options(
         _native_commands(
             "backend-check",
             "BACKEND_CHECK_TEST_ROOTS=tests/unit tests/dependency_complete",
             "CHECK_PYTEST_MARKER=not certification",
+            f"BACKEND_CHECK_TEST_WORKERS={workers}",
         )
     )
     (test,) = tests
     assert test.paths == [Path("tests/unit"), Path("tests/dependency_complete")]
     assert test.marker == "not certification"
-    assert test.workers == 1
+    assert test.workers == workers
     assert test.granularity == "tests"
     assert test.batch_size == 64 and test.batch_timeout == 180

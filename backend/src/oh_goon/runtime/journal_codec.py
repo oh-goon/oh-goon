@@ -135,7 +135,7 @@ class JournalFactCodec:
         return hashlib.sha256(payload).hexdigest()
 
     @staticmethod
-    def decode(
+    def verify(
         *,
         revision: int,
         session_id: str,
@@ -147,7 +147,8 @@ class JournalFactCodec:
         previous_hash: str,
         fact_hash: str,
         expected_previous_hash: str,
-    ) -> JournalEntry:
+    ) -> JournalFactKind:
+        """Verify encoded payload integrity before decoding or reusing its typed fact."""
         if previous_hash != expected_previous_hash:
             raise JournalCorruption(f"Journal hash chain is broken before revision {revision}")
         try:
@@ -177,6 +178,34 @@ class JournalFactCodec:
             raise JournalCorruption(
                 f"Journal fact shape does not match kind at revision {revision}"
             )
+        return fact_kind
+
+    @staticmethod
+    def decode(
+        *,
+        revision: int,
+        session_id: str,
+        kind: str,
+        report_json: str | None,
+        event_json: str | None,
+        effect_json: str | None,
+        committed_at: str,
+        previous_hash: str,
+        fact_hash: str,
+        expected_previous_hash: str,
+    ) -> JournalEntry:
+        fact_kind = JournalFactCodec.verify(
+            revision=revision,
+            session_id=session_id,
+            kind=kind,
+            report_json=report_json,
+            event_json=event_json,
+            effect_json=effect_json,
+            committed_at=committed_at,
+            previous_hash=previous_hash,
+            fact_hash=fact_hash,
+            expected_previous_hash=expected_previous_hash,
+        )
         try:
             if fact_kind is JournalFactKind.CAMPAIGN:
                 if report_json is not None or event_json is not None or effect_json is None:
@@ -185,12 +214,12 @@ class JournalFactCodec:
                     revision, session_id, _CAMPAIGN_ADAPTER.validate_json(effect_json)
                 )
             report = (
-                OperationReport.model_validate(json.loads(report_json))
+                OperationReport.model_validate_json(report_json)
                 if report_json is not None
                 else None
             )
             event = (
-                _FLEET_RUN_EVENT_ADAPTER.validate_python(json.loads(event_json))
+                _FLEET_RUN_EVENT_ADAPTER.validate_json(event_json)
                 if event_json is not None
                 else None
             )
@@ -200,11 +229,10 @@ class JournalFactCodec:
                 | None
             ) = None
             if effect_json is not None:
-                payload = json.loads(effect_json)
                 if fact_kind is JournalFactKind.EFFECT_RECONCILIATION:
-                    effect = _EFFECT_RECONCILIATION_ADAPTER.validate_python(payload)
+                    effect = _EFFECT_RECONCILIATION_ADAPTER.validate_json(effect_json)
                 elif fact_kind is JournalFactKind.EFFECT_ACKNOWLEDGEMENT:
-                    effect = _EFFECT_ACKNOWLEDGEMENT_ADAPTER.validate_python(payload)
+                    effect = _EFFECT_ACKNOWLEDGEMENT_ADAPTER.validate_json(effect_json)
         except (json.JSONDecodeError, ValueError) as exc:
             raise JournalCorruption(f"Journal payload is invalid at revision {revision}") from exc
         if (

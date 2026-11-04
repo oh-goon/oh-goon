@@ -1,9 +1,10 @@
 """RUN-8A: real Fleet SQLite lifecycle and agent readback, no native claims.
 
-Operation INIT is used because the Plan source-snapshot authority depends on the
-external Hashmarks wheel, unavailable on this host. The test is deliberately NOT
-Plan admission proof or physical LACE certification. Do not substitute an
-invented filesystem digest or software custody permit.
+Operation INIT covers durable non-Plan readback through the original Journal
+and control plane. Hashmarks remains required at application startup; this
+directly composed fixture claims neither Plan admission nor physical LACE
+certification. Transient output may be unavailable after restart without
+rewriting durable terminal facts.
 """
 
 from __future__ import annotations
@@ -49,14 +50,14 @@ class _ResultOperation:
         )
 
 
-def _read(runtime, capsys, *argv: str) -> dict:
+def _read(runtime, capsys, *argv: str, exit_code: int = 0) -> dict:
     parsed = build_parser().parse_args(("runs", *argv, "--json"))
-    assert run_plan_command(runtime, parsed) == 0
+    assert run_plan_command(runtime, parsed) == exit_code
     return json.loads(capsys.readouterr().out)
 
 
 @pytest.mark.parametrize("failed", [False, True])
-def test_original_fleet_sqlite_terminal_handoff_restarts_without_hashmarks(
+def test_original_fleet_sqlite_terminal_handoff_survives_restart_and_unavailable_logs(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     failed: bool,
@@ -97,10 +98,13 @@ def test_original_fleet_sqlite_terminal_handoff_restarts_without_hashmarks(
     tape = _read(runtime, capsys, "tape", run_id)
     steps = _read(runtime, capsys, "steps", run_id)
     outputs = _read(runtime, capsys, "outputs", run_id)
-    logs = _read(runtime, capsys, "logs", run_id, "--after", "0")
+    logs = _read(runtime, capsys, "logs", run_id, "--after", "0", exit_code=3)
     assert all(
         data["fleet_run_id"] == run_id for data in (status, handoff, tape, steps, outputs, logs)
     )
+    assert logs["state"] == "UNAVAILABLE"
+    assert logs["available"] is False
+    assert logs["chunks"] == []
     assert handoff["outcome"] == detail.outcome.value
     assert (handoff["outcome"] == "SUCCESS") is (not failed)
     assert handoff["readback"]

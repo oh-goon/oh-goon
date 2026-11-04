@@ -136,26 +136,27 @@ def test_inspection_accepts_current_database(tmp_path, monkeypatch) -> None:
     assert inspection.found_schema_version == DATABASE_SCHEMA_VERSION
 
 
-def test_stateful_cli_turns_schema_mismatch_into_actionable_startup_error(
+def test_runtime_doctor_reports_incompatible_state_without_resetting_it(
     tmp_path, monkeypatch, capsys
 ) -> None:
     path = tmp_path / "state.db"
     _set_database(monkeypatch, path)
     with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute(f"PRAGMA user_version = {DATABASE_SCHEMA_VERSION - 1}")
+    before = path.read_bytes()
 
-    assert main(["doctor", "--runtime"]) == 2
-    output = capsys.readouterr().out
-    assert "Runtime diagnosis blocked: STATE_SCHEMA_INCOMPATIBLE" in output
-    assert str(path) in output
-    assert "Preserve existing state and its SQLite sidecars" in output
-    assert "matching original runtime" in output
-    assert path.exists()
+    assert main(["doctor", "--runtime", "--json"]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["scope"] == "runtime" and report["status"] == "blocked"
+    assert report["code"] == "STATE_SCHEMA_INCOMPATIBLE"
+    assert report["paths"]["database"] == str(path)
+    assert path.read_bytes() == before
 
 
 def test_contract45_journal_refuses_at_schema_boundary_without_decoding_or_mutation(
     tmp_path, monkeypatch, capsys
 ) -> None:
+    from oh_goon.core.errors import DatabaseSchemaMismatch
     from oh_goon.runtime.journal_codec import JournalFactCodec
 
     path = tmp_path / "historical.db"
@@ -180,12 +181,14 @@ def test_contract45_journal_refuses_at_schema_boundary_without_decoding_or_mutat
         pytest.fail("incompatible storage must refuse before Journal payload decoding")
 
     monkeypatch.setattr(JournalFactCodec, "decode", unexpected_decode)
-    assert main(["doctor", "--runtime"]) == 2
-    output = capsys.readouterr().out
-    assert "Runtime diagnosis blocked: STATE_SCHEMA_INCOMPATIBLE" in output
-    assert "matching original runtime" in output
-    assert "doctor does not initialize, repair or recover state" in output
-    assert "JournalCorruption" not in output
+    with pytest.raises(
+        DatabaseSchemaMismatch, match=f"found 89; expected {DATABASE_SCHEMA_VERSION}"
+    ):
+        LocalDatabase(path, journal_mode="DELETE")
+    assert main(["doctor", "--runtime", "--json"]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "blocked" and report["code"] == "STATE_SCHEMA_INCOMPATIBLE"
+    assert report["paths"]["database"] == str(path)
     assert path.read_bytes() == before
 
 
@@ -243,12 +246,14 @@ def test_incompatible_journal_refuses_before_codec_or_ddl_without_mutation(
 
     monkeypatch.setattr(JournalFactCodec, "decode", unexpected_decode)
     monkeypatch.setattr(sqlite3, "connect", traced_connect)
-    with pytest.raises(DatabaseSchemaMismatch):
+    with pytest.raises(
+        DatabaseSchemaMismatch, match=f"found {legacy_schema}; expected {DATABASE_SCHEMA_VERSION}"
+    ):
         LocalDatabase(path, journal_mode="WAL")
-    assert main(["doctor", "--runtime"]) == 2
-    output = capsys.readouterr().out
-    assert "Runtime diagnosis blocked: STATE_SCHEMA_INCOMPATIBLE" in output
-    assert "matching original runtime" in output and "JournalCorruption" not in output
+    assert main(["doctor", "--runtime", "--json"]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "blocked" and report["code"] == "STATE_SCHEMA_INCOMPATIBLE"
+    assert report["paths"]["database"] == str(path)
     assert path.read_bytes() == before
     assert not any(
         sql.lstrip().upper().startswith(("CREATE ", "ALTER ", "DROP ", "BEGIN IMMEDIATE"))

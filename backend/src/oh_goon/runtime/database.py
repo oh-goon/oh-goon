@@ -417,6 +417,9 @@ class LocalDatabase:
         with sqlite_authority_gate(self.path, write=True):
             self._require_path_identity()
             connection = self._connect_with_context("explicit offline SQLite backup")
+            staged: Path | None = None
+            descriptor: int | None = None
+            primary_error: BaseException | None = None
             try:
                 self._require_durable_connection_policy(connection)
                 connection.execute("BEGIN")
@@ -435,10 +438,19 @@ class LocalDatabase:
                     raise FileExistsError(
                         f"backup destination already exists or aliases state: {target}"
                     )
-                staged = target_dir / f".{target.name}.{uuid4().hex}.snapshot-tmp"
+                candidate = target_dir / f".{target.name}.{uuid4().hex}.snapshot-tmp"
+                for suffix in ("", "-journal", "-wal", "-shm"):
+                    path = candidate.with_name(candidate.name + suffix)
+                    try:
+                        path.lstat()
+                    except FileNotFoundError:
+                        continue
+                    raise FileExistsError(f"backup staging path already exists: {path}")
+                # Only the admitted absent names in this private directory belong
+                # to this attempt's cleanup; a nonce collision grants no ownership.
+                staged = candidate
                 published_identity: tuple[int, int] | None = None
                 receipt: LocalStateBackupReceipt | None = None
-                descriptor: int | None = None
                 try:
                     connection.execute("VACUUM INTO ?", (str(staged),))
                     # The existing read-only inspector is the canonical SQLite
@@ -506,14 +518,30 @@ class LocalDatabase:
                                 "inspect offline candidate, never use as runtime authority"
                             ) from cleanup_error
                     raise
-                finally:
+            except BaseException as operation_error:
+                primary_error = operation_error
+                raise
+            finally:
+                try:
                     try:
-                        staged.unlink(missing_ok=True)
+                        connection.close()
+                        if staged is not None:
+                            # SQLite may leave its rollback journal after a full
+                            # filesystem aborts VACUUM INTO. Release SQLite first,
+                            # then remove only this unique private staging name
+                            # and its exact native sidecars.
+                            try:
+                                staged.unlink(missing_ok=True)
+                            finally:
+                                for suffix in ("-journal", "-wal", "-shm"):
+                                    staged.with_name(staged.name + suffix).unlink(missing_ok=True)
                     finally:
                         if descriptor is not None:
                             os.close(descriptor)
-            finally:
-                connection.close()
+                except BaseException as cleanup_error:
+                    if primary_error is None:
+                        raise
+                    primary_error.add_note(f"Backup staging cleanup failed: {cleanup_error!r}")
         assert receipt is not None
         return receipt
 
