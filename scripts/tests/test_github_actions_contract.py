@@ -56,7 +56,9 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
             " || matrix.target == 'check-tooling-tests'"
             " || matrix.target == 'test-cross-owner-integration'"
         )
-    elif "inputs.native_resources" in job["env"].get("OH_GOON_NATIVE_QUALIFICATION_PROFILE", ""):
+    elif "inputs.native_resources" in job["env"].get(
+        "OH_GOON_NATIVE_QUALIFICATION_PROFILE", ""
+    ):
         expected_condition += " || inputs.native_resources"
     assert preparation_steps[0]["if"] == expected_condition
     all_runs = [step["run"] for step in job["steps"] if "run" in step]
@@ -67,7 +69,9 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
         & set(shlex.split(command, comments=True))
     ]
     actual_preparation_index = all_runs.index(preparation)
-    assert effect_indices and all(actual_preparation_index < index for index in effect_indices)
+    assert effect_indices and all(
+        actual_preparation_index < index for index in effect_indices
+    )
     return preparation
 
 
@@ -80,9 +84,7 @@ def test_collection_resolves_manager_context_without_preparing_unneeded_capabili
     assert bash is not None
     steps = _workflow()["jobs"]["verify"]["steps"]
     resolution = next(
-        step
-        for step in steps
-        if "OH_GOON_CI_RUNNER_UID=" in step.get("run", "")
+        step for step in steps if "OH_GOON_CI_RUNNER_UID=" in step.get("run", "")
     )
     commands = tmp_path / "commands"
     commands.mkdir()
@@ -104,7 +106,16 @@ def test_collection_resolves_manager_context_without_preparing_unneeded_capabili
         environment["XDG_RUNTIME_DIR"] = str(tmp_path / "selected-runtime")
         environment["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/selected/native-bus"
     result = subprocess.run(
-        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", resolution["run"]],
+        [
+            bash,
+            "--noprofile",
+            "--norc",
+            "-e",
+            "-o",
+            "pipefail",
+            "-c",
+            resolution["run"],
+        ],
         cwd=tmp_path,
         env=environment,
         capture_output=True,
@@ -126,7 +137,9 @@ def test_collection_resolves_manager_context_without_preparing_unneeded_capabili
     )
 
 
-def test_native_host_setup_uses_only_admitted_capability_without_new_required_checks() -> None:
+def test_native_host_setup_uses_only_admitted_capability_without_new_required_checks() -> (
+    None
+):
     workflow = _workflow()
     assert set(workflow["jobs"]) == {"verify", "merge-gate", "main-health"}
     job = workflow["jobs"]["verify"]
@@ -143,7 +156,9 @@ def test_native_host_setup_uses_only_admitted_capability_without_new_required_ch
     assert job["env"]["OH_GOON_REQUIRE_NATIVE_RUN_RESOURCES"] == "1"
     assert job["env"]["OH_GOON_REQUIRE_NATIVE_ISOLATION"] == "1"
     steps = job["steps"]
-    assert next(index for index, step in enumerate(steps) if step.get("id") == "selection") < steps.index(preparation)
+    assert next(
+        index for index, step in enumerate(steps) if step.get("id") == "selection"
+    ) < steps.index(preparation)
 
 
 @pytest.mark.process
