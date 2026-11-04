@@ -16,7 +16,9 @@ from oh_goon.repository_tooling import _native_test_worker as owner
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/ci_native_runtime.sh"
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux native runtime owner")
+pytestmark = pytest.mark.skipif(
+    sys.platform != "linux", reason="Linux native runtime owner"
+)
 
 
 def _environment(profile: str | None, **selected: str) -> dict[str, str]:
@@ -94,7 +96,10 @@ def test_receiver_refuses_manager_environment_drift_before_acknowledgement_or_wo
         lock_sha256=owner._digest(ROOT / "backend/uv.lock"),
         caller_source_revision=None,
     )
-    packet, acknowledgement = tmp_path / "authority.json", tmp_path / "acknowledged.json"
+    packet, acknowledgement = (
+        tmp_path / "authority.json",
+        tmp_path / "acknowledged.json",
+    )
     packet.write_text(authority.model_dump_json())
     packet.chmod(0o600)
     marker = tmp_path / "command-ran"
@@ -209,7 +214,9 @@ def test_configured_cpu_ceiling_is_inherited_or_refused_without_work(
         if row["controls"].get("cpu.max", "max").split()[0] != "max"
     ]
     bounded = any(int(quota) <= int(period) for quota, period in shared_cpu_limits)
-    assert result.returncode == (0 if bounded else 3), result.stderr.decode(errors="replace")
+    assert result.returncode == (0 if bounded else 3), result.stderr.decode(
+        errors="replace"
+    )
     assert marker.exists() is bounded
 
 
@@ -245,7 +252,11 @@ def test_preexisting_unit_name_is_not_owned_by_a_failed_new_worker(
         )
         try:
             deadline = time.monotonic() + 10
-            while not ready.exists() and foreign.poll() is None and time.monotonic() < deadline:
+            while (
+                not ready.exists()
+                and foreign.poll() is None
+                and time.monotonic() < deadline
+            ):
                 time.sleep(0.02)
             assert ready.exists()
             observed = subprocess.run(
@@ -324,7 +335,11 @@ def test_cancelled_worker_closes_its_scope_and_a_detached_child(tmp_path: Path) 
         )
         try:
             deadline = time.monotonic() + 15
-            while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+            while (
+                not ready.exists()
+                and process.poll() is None
+                and time.monotonic() < deadline
+            ):
                 time.sleep(0.02)
             assert ready.exists(), "Native worker never reached its original command"
             child_handle = os.pidfd_open(json.loads(ready.read_text())["pid"])
