@@ -255,7 +255,8 @@ def resolve_native_agent(
         raise AgentProviderError("Select a supported native agent: opencode, pi or codex")
     if profile_name is None:
         profile_name = config.default_native_profile or DEFAULT_NATIVE_AGENT_PROFILE
-    name = cast(NativeAgentName, agent)
+    # mypy requires the cast after membership validation; ty narrows it.
+    name = cast(NativeAgentName, agent)  # ty: ignore[redundant-cast]
     profile = config.native_profiles.get(profile_name)
     if profile is None:
         if profile_name == "local":

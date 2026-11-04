@@ -565,10 +565,9 @@ def execute_codex_service_run(
     physical = results[0]
     if not isinstance(physical, (CommandResult, CommandCancelledError)):
         if isinstance(physical, BaseException):
-            if hasattr(physical, "stdout"):
-                physical.stdout = ""
-            if hasattr(physical, "stderr"):
-                physical.stderr = ""
+            for stream in ("stdout", "stderr"):
+                if hasattr(physical, stream):
+                    setattr(physical, stream, "")
             raise physical
         raise FleetPlanInvalid("Codex service process evidence is missing")
     if not physical.supervisor.final_process_group_quiescent:

@@ -20,9 +20,25 @@ A thin Oh-Goon adapter consumes required Hashmarks evidence. Runtime startup ver
 
 Hashmarks is selected as an ordinary released Python dependency by `backend/pyproject.toml`; native `uv.lock` owns the exact selected artifact and `backend/.venv` owns materialization. Oh-Goon does not vendor, reacquire, repackage, or privately inject a Hashmarks release.
 
-`oh_goon.integrations.hashmarks` is the single Python integration boundary. Hashmarks evidence is validated through supported producer/consumer contracts and bound to the producer implementation identity reported by the actually loaded Hashmarks runtime. The source tree does not carry a copied "current Hashmarks version/commit/tree/wheel" authority.
+`oh_goon.integrations.hashmarks` is the single public Python integration API.
+Its `__all__` derives from one explicit capability export table. Production
+consumers import those names from the package root; private integration modules
+are internal implementation owners. Exports resolve lazily to the original
+callable or class, preserving its implementation identity and source origin.
+Importing the API or selecting a capability does not load the producer or observe
+a repository. Architecture checks reject direct producer imports, private
+integration imports, undeclared exports and qualified module-attribute bypasses.
+
+Hashmarks evidence is validated through supported producer/consumer contracts and bound to the producer implementation identity reported by the actually loaded Hashmarks runtime. The source tree does not carry a copied "current Hashmarks version/commit/tree/wheel" authority.
 
 The producer supplies exact flat verification membership and repository/evidence provenance; `execution_layout=external` keeps physical grouping, workers, isolation and recovery exclusively Oh-Goon-owned. Artifact identity remains caller/admission provenance when supplied, while producer compatibility is determined by the loaded implementation identity.
+
+The retired command-bearing verification adapter is not part of this API.
+Hashmarks verification selection enters through its native flat membership
+contract; producer `argv`, working-directory and execution-policy fields cannot
+grant execution authority. Oh-Goon's producer-neutral described-work model and
+assignment authority retain their own checkpoint, source-generation and custody
+checks independently of Hashmarks.
 
 Hashmarks standalone CLI/MCP installation is a separate external host concern owned by Hashmarks and the host application. The Oh-Goon backend consumes the Python API through native uv materialization and never launches the standalone CLI as a second dependency path.
 
@@ -126,6 +142,8 @@ Built-in Agent repository discovery/search uses named CodeMap owners over the or
 captured bytes. Each local tool session owns one disposable materialization/index;
 source observations retain native bounds and revisions. Index preparation runs inside
 the original supervised tool process, under its timeout and cancellation budget.
+The existing tool runs as `python -m oh_goon.integrations.hashmarks`; this public
+package entrypoint invokes the same original tool implementation.
 Every model-backed Agent request starts with Hashmarks task evidence over that
 captured repository, including provider review, adjudication and proposal. The
 producer owns relevance, ambiguity, verification nominations, source observations
@@ -164,7 +182,8 @@ yet replace every architecture guard: authored shell text does not establish
 native expansion or effective environment, and bounded source syntax does not
 establish complete alias closure or runtime call targets. Existing exact syntax
 guards and policy lists remain Oh-Goon repository policy until equivalent producer
-facts pass the same negative-boundary tests. Qualification grading and SECRET
+facts pass the same negative-boundary tests. The public API migration does not
+claim that these remaining source analyzers have been removed. Qualification grading and SECRET
 answer truth remain outside repository retrieval.
 
 Detailed producer implementation provenance is unavailable until a supported
@@ -175,7 +194,12 @@ authoritative.
 
 The development check owner consumes supported Hashmarks verifier nominations
 for the captured Git change set. Direct and bounded indirect source-qualified
-links remain distinct from owner-completeness or negative evidence. One native
+links remain distinct from owner-completeness or negative evidence. The supported
+producer request bounds its selected and source-reference candidates with
+`candidate_limit=2`, rather than expanding every disclosed alternative into a
+whole-file test run. Hashmarks
+retains selection authority and its original ambiguity/truncation qualifications.
+Required policy proofs and changed-test nominations remain explicit. One native
 map/read session serves the supplied paths; producer bounds and source-member
 provenance remain in the bounded selection artifact. Oh-Goon applies accepted
 fast/daily cadence and native result admission; it does not infer another impact
@@ -183,6 +207,12 @@ graph. Missing consumer proof stays SELECTION_UNVERIFIED or uses a specifically
 justified bounded fallback. Policy protection is a named execution-policy
 obligation, not a Hashmarks-inferred relationship. See the
 [CI contract](../CI_CD_CONTRACT.md#repository-checks-on-github).
+
+Native readiness and task preparation happen before the composite read scope.
+Dependency observation captures its bounded source inventory once, reconciles
+those exact contributors through native scoped index preparation, and reuses
+the captured paths. The read constructs fresh observations after preparation;
+stale packets are not repaired or relabeled as current.
 
 Backend runtime dependency changes use the released producer's public lock
 before/after delta and dependency-consumer evidence. The adapter supplies selected
@@ -206,8 +236,14 @@ execution membership; the trusted-base gate also checks the plan's file set.
 Every changed existing runtime component must have a positive qualified
 consumer-to-verifier chain. The aggregate `consumer_scope` stays incomplete with
 `negative_evidence = "not-admissible"`: a selected chain does not prove complete
-consumer coverage, runtime import closure or repository-wide absence. Unsupported
-component additions, removals or forks, dependency-policy changes, unavailable or
+consumer coverage, runtime import closure or repository-wide absence. A single
+existing replacement may introduce up to 32 unique required selections when native
+path evidence and unconditional runtime edges bind each selection directly to the
+upgraded, imported parent, itself required by an unconditional application-root
+edge. The chain retains both selection identities and the
+parent's qualified source/verifier evidence; it does not invent direct imports of
+the introduced package. Other component additions, removals or forks,
+dependency-policy changes, unavailable or
 mismatched metadata, stale/truncated required delta or consumer observations and
 missing chains remain unverified. A verifier graph's aggregate search may be
 incomplete, truncated or ambiguous while an individual native edge positively
@@ -217,6 +253,14 @@ The CI contract names the additional native lock, Python capability
 and package-build obligations. These nominations retain repository-evidence-only
 authority and enter the existing trusted-base proof protocol; they grant no
 execution authority or producer-identity exception.
+
+The trusted controller independently observes dependency admission while its
+existing candidate-locked native environment is alive. Only immutable base
+admission code runs there; candidate repository source is evidence input. The
+loaded producer must match the admitted identity, and the fresh chains must point
+to actually executed verifier files. Fresh installation metadata and native
+observation identities remain separately proven rather than being relabeled as
+the candidate process's earlier observations.
 
 Documentation images use the same boundary. Hashmarks' native
 `verification.changed_set` projection supplies source-bound content kind, byte

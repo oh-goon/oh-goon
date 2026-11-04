@@ -40,8 +40,8 @@ def _artifact_seconds(value: str) -> float:
     return parsed
 
 
-def add_workflow_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def add_workflow_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     workflow = subparsers.add_parser(
         "workflow", help="Inspect, validate or explicitly prepare one workflow"
@@ -105,8 +105,8 @@ def add_workflow_commands(
     _add_run_readback_commands(runs.add_subparsers(dest="runs_command", required=True))
 
 
-def add_plan_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def add_plan_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     plan = subparsers.add_parser(
         "plan", help="Compare authored sources or explicitly schedule work"
@@ -160,8 +160,8 @@ def _admission_revision(value: str) -> int:
     return parsed
 
 
-def _add_run_readback_commands(
-    plan_subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_run_readback_commands[_Parser: argparse.ArgumentParser](
+    plan_subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     """Original Fleet history and readback retain their exact identity authority."""
     history = plan_subparsers.add_parser(

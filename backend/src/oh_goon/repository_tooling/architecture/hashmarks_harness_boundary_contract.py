@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import ast
+import copy
 from functools import lru_cache
+from importlib.util import resolve_name
 from pathlib import Path
 
-from oh_goon.repository_tooling.architecture.common import Violation, python_ast
+from oh_goon.repository_tooling.architecture.common import (
+    PythonSemanticFacts,
+    Violation,
+    python_ast,
+    python_semantic_facts,
+    python_source_snapshot,
+)
 from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT, ROOT
 
 AGENTS = ROOT / "AGENTS.md"
@@ -29,6 +37,21 @@ _HASHMARKS_EXECUTION_IMPORT_PREFIXES = (
     "hashmarks.execution",
     "hashmarks.harness",
 )
+_PUBLIC_HASHMARKS_API = "oh_goon.integrations.hashmarks"
+
+
+def _import_from_module(path: Path, node: ast.ImportFrom, package_root: Path) -> str:
+    module = node.module or ""
+    if not node.level:
+        return module
+    try:
+        package = path.resolve().parent.relative_to(package_root.resolve().parent).parts
+    except ValueError:
+        return ""
+    if node.level > len(package):
+        return ""
+    parent = package[: len(package) - node.level + 1]
+    return ".".join((*parent, module)) if module else ".".join(parent)
 
 
 def _imports(
@@ -40,21 +63,154 @@ def _imports(
         if isinstance(node, ast.Import):
             result.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if node.level:
-                root = (package_root or BACKEND_PACKAGE_ROOT).resolve()
-                try:
-                    package = path.resolve().parent.relative_to(root.parent).parts
-                except ValueError:
-                    continue
-                if node.level > len(package):
-                    continue
-                parent = package[: len(package) - node.level + 1]
-                module = ".".join((*parent, module)) if module else ".".join(parent)
+            module = _import_from_module(path, node, package_root or BACKEND_PACKAGE_ROOT)
             if module:
                 result.add(module)
                 result.update(f"{module}.{alias.name}" for alias in node.names if alias.name != "*")
     return result
+
+
+def _import_facts(path: Path, tree: ast.Module, package_root: Path) -> PythonSemanticFacts:
+    # Qualify relative spelling on a copy. Other architecture policies may reuse
+    # the admitted tree; their syntax and scope observations must not be changed.
+    qualified = copy.deepcopy(tree)
+    for node in ast.walk(qualified):
+        if isinstance(node, ast.ImportFrom) and node.level:
+            node.module = _import_from_module(path, node, package_root) or None
+            node.level = 0
+    return python_semantic_facts(
+        path,
+        imported_only=True,
+        tree=qualified,
+        builtin_names=("__import__",),
+        bind_callable_inputs=False,
+    )
+
+
+def _call_argument(call: ast.Call, position: int, keyword: str) -> ast.expr | None:
+    if len(call.args) > position:
+        return call.args[position]
+    return next((item.value for item in call.keywords if item.arg == keyword), None)
+
+
+def _literal_import_name(call: ast.Call, *, relative: bool) -> str | None:
+    name = _call_argument(call, 0, "name")
+    if not isinstance(name, ast.Constant) or not isinstance(name.value, str):
+        return None
+    if not relative or not name.value.startswith("."):
+        return name.value
+    package = _call_argument(call, 1, "package")
+    if not isinstance(package, ast.Constant) or not isinstance(package.value, str):
+        return None
+    try:
+        return resolve_name(name.value, package.value)
+    except (ImportError, ValueError):
+        return None
+
+
+def _literal_fromlist(call: ast.Call) -> tuple[str, ...]:
+    selectors = _call_argument(call, 3, "fromlist")
+    if not isinstance(selectors, (ast.List, ast.Tuple)):
+        return ()
+    return tuple(
+        item.value
+        for item in selectors.elts
+        if isinstance(item, ast.Constant) and isinstance(item.value, str)
+    )
+
+
+def _literal_dynamic_imports(facts: PythonSemanticFacts) -> set[str]:
+    # Only literal selectors on scope-qualified native import functions are
+    # admitted here. Runtime reflection and supplied callable inputs are not.
+    result: set[str] = set()
+    for target, call in facts.calls:
+        if target not in {"importlib.import_module", "builtins.__import__"}:
+            continue
+        name = _literal_import_name(call, relative=target == "importlib.import_module")
+        if name is None:
+            continue
+        result.add(name)
+        if target == "builtins.__import__":
+            result.update(f"{name}.{selector}" for selector in _literal_fromlist(call))
+    return result
+
+
+def _assigned_expression(tree: ast.Module, name: str) -> ast.expr | None:
+    values = [
+        node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+    ]
+    return values[0] if len(values) == 1 else None
+
+
+def _public_exports(package_root: Path) -> frozenset[str]:
+    path = package_root / "integrations/hashmarks/__init__.py"
+    if not path.is_file():
+        return frozenset()
+    tree = python_ast(path)
+    expression = _assigned_expression(tree, "__all__")
+    if (
+        isinstance(expression, ast.Call)
+        and isinstance(expression.func, ast.Name)
+        and expression.func.id == "tuple"
+        and len(expression.args) == 1
+        and isinstance(expression.args[0], ast.Name)
+    ):
+        expression = _assigned_expression(tree, expression.args[0].id)
+    values: tuple[ast.expr | None, ...]
+    if isinstance(expression, ast.Dict):
+        values = tuple(expression.keys)
+    elif isinstance(expression, (ast.Tuple, ast.List)):
+        values = tuple(expression.elts)
+    else:
+        return frozenset()
+    names = [
+        value.value
+        for value in values
+        if isinstance(value, ast.Constant) and isinstance(value.value, str)
+    ]
+    if len(names) != len(values) or not all(
+        name.isidentifier() and not name.startswith("_") for name in names
+    ):
+        return frozenset()
+    return frozenset(names) if len(set(names)) == len(names) else frozenset()
+
+
+def _may_reference_hashmarks(tree: ast.Module, imports: set[str]) -> bool:
+    if any("hashmarks" in module.split(".") for module in imports):
+        return True
+    return any(
+        (isinstance(node, ast.Attribute) and node.attr == "hashmarks")
+        or (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and "hashmarks" in node.value.split(".")
+        )
+        for node in ast.walk(tree)
+    )
+
+
+def _private_api_violations(
+    path: Path, names: set[str], exports: frozenset[str], *, wildcard: bool
+) -> list[Violation]:
+    private = sorted(
+        name
+        for name in names
+        if name.startswith(_PUBLIC_HASHMARKS_API + ".")
+        and name[len(_PUBLIC_HASHMARKS_API) + 1 :].split(".", 1)[0] not in exports
+    )
+    if not private and not wildcard:
+        return []
+    return [
+        Violation(
+            path,
+            "Hashmarks consumers must use declared public API capabilities; private submodules, "
+            "unknown exports and wildcard imports are not supported: "
+            + ", ".join((*private, *(("*",) if wildcard else ()))),
+        )
+    ]
 
 
 def _is_hashmarks_integration(path: Path, *, package_root: Path | None = None) -> bool:
@@ -120,12 +276,33 @@ def _package_boundary_violations_cached(
 ) -> tuple[Violation, ...]:
     package_root = Path(package_root_text)
     violations: list[Violation] = []
+    exports = _public_exports(package_root)
     for relative, _size, _mtime_ns, _ctime_ns in state:
         path = package_root / relative
-        path_imports = _imports(path, package_root=package_root)
-        if _is_hashmarks_integration(path, package_root=package_root):
+        tree = python_ast(path)
+        path_imports = _imports(path, tree=tree, package_root=package_root)
+        inside = _is_hashmarks_integration(path, package_root=package_root)
+        if inside or _may_reference_hashmarks(tree, path_imports):
+            facts = _import_facts(path, tree, package_root)
+            path_imports.update(_literal_dynamic_imports(facts))
+        else:
+            continue
+        if inside:
             violations.extend(_hashmarks_integration_violations(path, path_imports))
             continue
+        violations.extend(
+            _private_api_violations(
+                path,
+                path_imports | set(facts.references),
+                exports,
+                wildcard=any(
+                    isinstance(node, ast.ImportFrom)
+                    and _import_from_module(path, node, package_root) == _PUBLIC_HASHMARKS_API
+                    and any(alias.name == "*" for alias in node.names)
+                    for node in ast.walk(tree)
+                ),
+            )
+        )
         direct_hashmarks = sorted(
             module
             for module in path_imports
@@ -172,6 +349,13 @@ def _hashmarks_integration_owner_violations(package_root: Path) -> list[Violatio
             Violation(
                 package_init,
                 "Hashmarks integration boundary must remain an explicit Python package",
+            )
+        )
+    elif not _public_exports(package_root):
+        violations.append(
+            Violation(
+                package_init,
+                "Hashmarks public API must declare a nonempty, explicit __all__ capability census",
             )
         )
 
@@ -337,13 +521,14 @@ def check_hashmarks_harness_boundary_contract() -> list[Violation]:
     """Keep Hashmarks API consumption behind one structural integration boundary."""
 
     violations: list[Violation] = []
-    for check in (
-        _boundary_documentation_violations,
-        _presentation_boundary_violations,
-        _contract_identity_violations,
-        _validation_authority_violations,
-    ):
-        violations.extend(check())
-    violations.extend(_hashmarks_integration_owner_violations(BACKEND_PACKAGE_ROOT))
-    violations.extend(_package_boundary_violations(BACKEND_PACKAGE_ROOT))
+    with python_source_snapshot():
+        for check in (
+            _boundary_documentation_violations,
+            _presentation_boundary_violations,
+            _contract_identity_violations,
+            _validation_authority_violations,
+        ):
+            violations.extend(check())
+        violations.extend(_hashmarks_integration_owner_violations(BACKEND_PACKAGE_ROOT))
+        violations.extend(_package_boundary_violations(BACKEND_PACKAGE_ROOT))
     return violations

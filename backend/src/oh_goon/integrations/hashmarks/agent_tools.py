@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +27,9 @@ class PreparedAgentEvidence:
 
 
 @contextmanager
-def prepare_agent_evidence(handoff: FrozenAgentStepHandoff) -> Iterator[PreparedAgentEvidence]:
+def prepare_agent_evidence(
+    handoff: FrozenAgentStepHandoff,
+) -> Generator[PreparedAgentEvidence, None, None]:
     """Materialize captured bytes; the supervised tool owns native index work."""
     handoff.verify()
     with tempfile.TemporaryDirectory(prefix="oh-goon-agent-evidence-") as directory:
@@ -228,7 +230,7 @@ def prompt_observation(
         raise FleetPlanInvalid("Native repository evidence presentation exceeds the prompt budget")
 
 
-def main() -> int:
+def agent_evidence_main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--tool", choices=("task_evidence", "search_text", "list_paths"), required=True
@@ -262,7 +264,3 @@ def main() -> int:
         return 65
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

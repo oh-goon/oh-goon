@@ -326,6 +326,12 @@ def test_admission_uses_detached_native_projection_and_one_loaded_identity(
         "isolated_process",
         "worker_hint",
         "physical_shards",
+        "argv",
+        "working_directory",
+        "network_authority",
+        "secret_grants",
+        "publish_authority",
+        "timeout_seconds",
     ],
 )
 def test_future_hashmarks_execution_policy_fields_cannot_gain_authority(

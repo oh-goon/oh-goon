@@ -4,8 +4,8 @@ import argparse
 from pathlib import Path
 
 
-def add_init_command(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def add_init_command[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     init = subparsers.add_parser(
         "init",
@@ -52,8 +52,8 @@ def add_init_command(
     )
 
 
-def add_goon_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def add_goon_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     templates = subparsers.add_parser(
         "templates", help="Browse shipped Plans and Goons without runtime setup"

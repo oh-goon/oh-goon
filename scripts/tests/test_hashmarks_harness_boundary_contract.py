@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 import pytest
@@ -19,9 +20,12 @@ def _configure_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     integration = package / "integrations" / "hashmarks"
     integration.mkdir(parents=True, exist_ok=True)
-    (integration / "__init__.py").write_text("", encoding="utf-8")
+    (integration / "__init__.py").write_text(
+        "from .consumer import observe\n__all__ = ('observe',)\n", encoding="utf-8"
+    )
     (integration / "consumer.py").write_text(
-        "from hashmarks import __version__\n", encoding="utf-8"
+        "from hashmarks import __version__\ndef observe(): return __version__\n",
+        encoding="utf-8",
     )
     return package
 
@@ -131,6 +135,193 @@ def test_hashmarks_integration_filename_is_semantically_irrelevant(
             "from hashmarks import CodeMap\n", encoding="utf-8"
         )
     assert contract.check_hashmarks_harness_boundary_contract() == []
+
+
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "from oh_goon.integrations.hashmarks.consumer import observe",
+        "import oh_goon.integrations.hashmarks.consumer as owner",
+        "from .integrations.hashmarks.consumer import observe as expose",
+        "from oh_goon.integrations.hashmarks import consumer",
+        "from oh_goon.integrations.hashmarks import missing_capability",
+        "from oh_goon.integrations.hashmarks import *",
+        "import oh_goon.integrations.hashmarks as evidence\nowner = evidence.consumer",
+        "from .integrations import hashmarks as evidence\nowner = evidence.consumer",
+        "import oh_goon as product\nowner = product.integrations.hashmarks.consumer",
+        "from importlib import import_module as load\nload('oh_goon.integrations.hashmarks.consumer')",
+        "import importlib\nimportlib.import_module('.consumer', 'oh_goon.integrations.hashmarks')",
+        "import importlib\nimportlib.import_module(name='oh_goon.integrations.hashmarks.consumer')",
+        "import importlib\nimportlib.import_module(name='.consumer', package='oh_goon.integrations.hashmarks')",
+        "__import__('oh_goon.integrations.hashmarks.consumer')",
+        "__import__(name='oh_goon.integrations.hashmarks.consumer')",
+        "__import__('oh_goon.integrations.hashmarks', fromlist=['consumer'])",
+        "__import__('oh_goon.integrations.hashmarks', fromlist=('missing_capability',))",
+        "__import__('oh_goon.integrations.hashmarks', fromlist=['*'])",
+        "__import__('oh_goon.integrations.hashmarks', {}, {}, ('consumer',))",
+        "from builtins import __import__ as load\nload('oh_goon.integrations.hashmarks.consumer')",
+        "load = __import__\nload('oh_goon.integrations.hashmarks.consumer')",
+        "def local(__import__):\n    return __import__('local')\n"
+        "__import__('oh_goon.integrations.hashmarks.consumer')",
+        "class Local:\n    __import__ = None\n"
+        "    def method(self):\n        return __import__('oh_goon.integrations.hashmarks.consumer')",
+    ),
+)
+def test_consumers_cannot_bypass_public_capability_census(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statement: str
+) -> None:
+    package = _configure_package(tmp_path, monkeypatch)
+    owner = package / "owner.py"
+    owner.write_text(statement + "\n", encoding="utf-8")
+
+    assert any(
+        row.path == owner and "declared public API capabilities" in row.message
+        for row in contract.check_hashmarks_harness_boundary_contract()
+    )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "from importlib import import_module as load\nload('hashmarks.codemap')",
+        "import importlib\nimportlib.import_module('hashmarks')",
+        "import importlib\nimportlib.import_module(name='hashmarks')",
+        "__import__('hashmarks')",
+        "__import__(name='hashmarks')",
+        "from hashmarks import CodeMap\nCodeMap = None",
+        "from .integrations.hashmarks.consumer import observe\nobserve = None",
+    ),
+)
+def test_dynamic_or_rebound_imports_do_not_change_boundary_ownership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statement: str
+) -> None:
+    package = _configure_package(tmp_path, monkeypatch)
+    owner = package / "owner.py"
+    owner.write_text(statement + "\n", encoding="utf-8")
+    assert any(
+        row.path == owner
+        for row in contract.check_hashmarks_harness_boundary_contract()
+    )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "from oh_goon.integrations.hashmarks import observe as selected\nselected()",
+        "from .integrations.hashmarks import observe\nobserve()",
+        "from .integrations import hashmarks as evidence\nevidence.observe()",
+        "import oh_goon.integrations.hashmarks as evidence\nevidence.observe()",
+        "import oh_goon.integrations.hashmarks as evidence\n"
+        "def local(evidence):\n    return evidence.consumer",
+        "__import__('oh_goon.integrations.hashmarks', fromlist=['observe'])",
+        "from local_loader import __import__\n__import__('oh_goon.integrations.hashmarks.consumer')",
+        "from local_loader import load\n__import__ = load\n__import__('hashmarks')",
+        "__import__ = None\n__import__('hashmarks')",
+        "def __import__(name):\n    return name\n__import__('hashmarks')",
+        "def local(__import__):\n    return __import__('hashmarks')",
+        "[__import__('hashmarks') for __import__ in custom_loaders]",
+    ),
+)
+def test_declared_public_capabilities_and_shadowed_local_objects_remain_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statement: str
+) -> None:
+    package = _configure_package(tmp_path, monkeypatch)
+    (package / "owner.py").write_text(statement + "\n", encoding="utf-8")
+    assert contract.check_hashmarks_harness_boundary_contract() == []
+
+
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "def local(loader=__import__):\n    return loader('hashmarks')\nlocal(custom)",
+        "def local(loader=__import__):\n    alias = loader\n"
+        "    return alias('hashmarks')\nlocal(custom)",
+        "def local(__import__=__import__):\n    return __import__('hashmarks')\nlocal(custom)",
+        "def local(loader):\n    return loader('hashmarks')\n"
+        "local(__import__)\nlocal(custom)",
+        "import importlib\ndef local(loader=importlib.import_module):\n"
+        "    return loader('hashmarks')\nlocal(custom)",
+        "import importlib\ndef local(loader):\n    return loader('hashmarks')\n"
+        "local(importlib.import_module)\nlocal(custom)",
+    ),
+)
+def test_supplied_callable_inputs_do_not_become_unconditional_native_imports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statement: str
+) -> None:
+    package = _configure_package(tmp_path, monkeypatch)
+    (package / "owner.py").write_text(statement + "\n", encoding="utf-8")
+    assert contract.check_hashmarks_harness_boundary_contract() == []
+
+
+def test_guard_binding_options_leave_other_semantic_consumers_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.architecture.common import (
+        python_ast,
+        python_semantic_facts,
+        python_source_snapshot,
+    )
+
+    package = _configure_package(tmp_path, monkeypatch)
+    owner = package / "owner.py"
+    owner.write_text(
+        "from importlib import import_module\n"
+        "def local(loader=import_module):\n    return loader('hashmarks')\n"
+        "__import__('unrelated')\n",
+        encoding="utf-8",
+    )
+    with python_source_snapshot():
+        before = python_semantic_facts(owner, imported_only=True)
+        guarded = contract._import_facts(owner, python_ast(owner), package)
+        after = python_semantic_facts(owner, imported_only=True)
+
+    assert [name for name, _call in before.calls] == ["importlib.import_module"]
+    assert [name for name, _call in guarded.calls] == ["builtins.__import__"]
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    ("", "__all__ = ()", "__all__ = ('observe', 'observe')", "__all__ = (123,)"),
+)
+def test_public_boundary_requires_a_nonempty_unambiguous_census(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declaration: str
+) -> None:
+    package = _configure_package(tmp_path, monkeypatch)
+    init = package / "integrations/hashmarks/__init__.py"
+    init.write_text(
+        "from .consumer import observe\n" + declaration + "\n", encoding="utf-8"
+    )
+    assert any(
+        row.path == init and "__all__ capability census" in row.message
+        for row in contract.check_hashmarks_harness_boundary_contract()
+    )
+
+
+def test_relative_import_qualification_does_not_mutate_shared_architecture_syntax(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.architecture.common import (
+        python_ast,
+        python_source_snapshot,
+    )
+
+    package = _configure_package(tmp_path, monkeypatch)
+    owner = package / "owner.py"
+    owner.write_text(
+        "from .integrations import hashmarks as evidence\nevidence.consumer.observe()\n",
+        encoding="utf-8",
+    )
+    with python_source_snapshot():
+        tree = python_ast(owner)
+        original = ast.dump(tree, include_attributes=True)
+        assert contract._package_boundary_violations(package)
+        assert python_ast(owner) is tree
+        assert ast.dump(tree, include_attributes=True) == original
+        assert contract._imports(owner, tree=tree, package_root=package) == {
+            "oh_goon.integrations",
+            "oh_goon.integrations.hashmarks",
+        }
 
 
 def test_hashmarks_prefix_outside_explicit_package_has_no_privilege(

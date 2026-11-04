@@ -22,7 +22,7 @@ from oh_goon.engine.runner import EngineRunner
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
 from oh_goon.integrations.fleet_plans import FleetPlanRunner
-from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.integrations.hashmarks import require_loaded_hashmarks_runtime
 from oh_goon.integrations.migration import MigrationRunner
 from oh_goon.integrations.recipes import UvRecipeRunner
 from oh_goon.runtime._executor_configuration import (

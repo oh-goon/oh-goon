@@ -108,8 +108,10 @@ for catalog, subject, content, workspace, admission, and physical custody identi
   timeout/retry/resume/recovery, verification-result authority, execution
   provenance, Repository Understanding qualification, certificates, and Game Tape.
 
-Consume supported Hashmarks Python APIs only through
-`backend/src/oh_goon/integrations/hashmarks/`. Select its released dependency
+Consume supported Hashmarks Python APIs only through the explicit public
+`oh_goon.integrations.hashmarks` exports. Its `__all__` is the capability census;
+private integration modules and direct producer imports stay inside that package.
+Select its released dependency
 with `backend/pyproject.toml` and native `uv.lock`; do not vendor, reacquire,
 repackage, or maintain a parallel release/commit/wheel identity. Bind evidence
 compatibility to the implementation identity reported by the loaded runtime.
@@ -254,6 +256,13 @@ once daily; do not duplicate them locally before submitting a PR. A necessary
 slow security/isolation/durability proof or defect reproducer is a named narrow
 exception, never automatic full-owner expansion. Unknown protection scope stays
 `SELECTION_UNVERIFIED` or uses a justified bounded fallback.
+
+Blocking checks must protect a named current contract or reproducible defect
+through its existing owner. Prefer the smallest meaningful proof and remove
+redundant prerequisites. Blanket prose rules or missing selector nominations
+must not create extra merge prerequisites when an existing bounded proof route
+applies. Use ordinary review for this principle; do not add another checklist,
+approval step, gate or classification framework to enforce it.
 
 Constrained agent/tool sessions follow [Tool-session qualification](docs/development/TOOL_SESSION_QUALIFICATION.md): start known-large pytest surfaces in the existing resume-safe batch runner; already bounded owner files may run directly.
 For chat resets, use the [session continuation guide](docs/development/CHATGPT_ITERATION.md) to recover the current task and evidence through existing owners.

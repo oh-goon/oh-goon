@@ -30,6 +30,7 @@ _MAX_DISTRIBUTION_ARTIFACT_BYTES = 4 * 1024 * 1024
 _MAX_DISTRIBUTION_METADATA_BYTES = 8 * 1024 * 1024
 _MAX_DISTRIBUTION_ROOT_ENTRIES = 8192
 _CONSUMER_CHUNK_SIZE = 64
+_MAX_REQUIRED_DEPENDENCY_INTRODUCTIONS = 32
 
 
 @dataclass(frozen=True)
@@ -338,7 +339,6 @@ def _changed_current_selections(
     if delta.get("comparability") != "comparable" or any(
         delta.get(key)
         for key in (
-            "components_added",
             "components_removed",
             "components_changed",
             "selections_changed",
@@ -371,6 +371,34 @@ def _changed_current_selections(
         added.add(node)
         removed.add(transition["removed"][0]["node_id"])
         result.append({**selections[node], "name": component["name"]})
+    introduced_components = delta.get("components_added", [])
+    if introduced_components:
+        if (
+            len(transitions) != 1
+            or not 1 <= len(introduced_components) <= _MAX_REQUIRED_DEPENDENCY_INTRODUCTIONS
+        ):
+            raise ValueError(
+                "required dependency introductions require one bounded parent replacement"
+            )
+        parent = next(iter(added))
+        if selections[parent].get("marker") or selections[parent].get("contexts") != ["lock"]:
+            raise ValueError("required dependency parent must be unconditional in the lock context")
+        _required_parent_edge(after, parent)
+        for component_id in introduced_components:
+            component = components[component_id]
+            candidates = [row for row in selections.values() if row["component_id"] == component_id]
+            if component["ecosystem"] != "pypi" or len(candidates) != 1:
+                raise ValueError(
+                    "required dependency introduction selection is ambiguous or unsupported"
+                )
+            child = candidates[0]
+            if child.get("marker") or child.get("contexts") != ["lock"]:
+                raise ValueError(
+                    "required dependency introduction must be unconditional in the lock context"
+                )
+            _required_introduction_edge(after, parent, child["node_id"])
+            added.add(child["node_id"])
+            result.append({**child, "name": component["name"]})
     if added != set(delta["selections_added"]) or removed != set(delta["selections_removed"]):
         raise ValueError("dependency delta contains unaccounted selection changes")
     for side, nodes in (("added", added), ("removed", removed)):
@@ -381,6 +409,140 @@ def _changed_current_selections(
                 "dependency delta contains unrelated inventory or relationship changes"
             )
     return sorted(result, key=lambda row: row["node_id"])
+
+
+def _required_parent_edge(observation: Mapping[str, Any], parent: str) -> None:
+    roots = {row["node_id"] for row in observation["roots"]}
+    required = [
+        row
+        for row in observation["relationships"]
+        if row.get("source") in roots
+        and row.get("target") == parent
+        and all(
+            row.get(key) == expected
+            for key, expected in {
+                "kind": "dependency",
+                "context": "lock",
+                "marker": "",
+                "effective_scope": "",
+            }.items()
+        )
+    ]
+    if len(required) != 1:
+        raise ValueError("required dependency parent needs one unconditional runtime root edge")
+
+
+def _required_introduction_edge(
+    observation: Mapping[str, Any], parent: str, child: str
+) -> dict[str, Any]:
+    roots = {row["node_id"] for row in observation["roots"]}
+    if (
+        parent in roots
+        or child in roots
+        or not any(
+            row["node_id"] == child and row["context"] == "lock" for row in observation["inventory"]
+        )
+    ):
+        raise ValueError("required dependency introduction must join external inventory selections")
+    edges = [row for row in observation["relationships"] if row["target"] == child]
+    if len(edges) != 1 or any(
+        edges[0].get(key) != expected
+        for key, expected in {
+            "source": parent,
+            "kind": "dependency",
+            "context": "lock",
+            "marker": "",
+            "effective_scope": "",
+        }.items()
+    ):
+        raise ValueError(
+            "dependency delta is not an existing selection replacement or required introduction"
+        )
+    return cast(dict[str, Any], edges[0])
+
+
+def _introduction_requests(parent: str, nodes: list[str]) -> list[dict[str, Any]]:
+    return [
+        {
+            "operation": "paths",
+            "node_id": parent,
+            "target_id": child,
+            "context": "lock",
+            "max_depth": 1,
+            "max_results": 2,
+            "max_visits": 64,
+        }
+        for child in nodes
+    ]
+
+
+def validate_required_dependency_introductions(evidence: Mapping[str, Any]) -> dict[str, str]:
+    """Check this consumer policy's retained bindings, not producer graph semantics."""
+    introduction = evidence.get("dependency_introductions")
+    if introduction is None:
+        if evidence["delta"].get("components_added"):
+            raise ValueError("required dependency introduction evidence is missing")
+        return {}
+    if not isinstance(introduction, Mapping):
+        raise ValueError("required dependency introduction evidence must be a mapping")
+    after, delta = evidence["after_observation"], evidence["delta"]
+    selections = _changed_current_selections(after, delta)
+    transitions = delta["component_selection_transitions"]
+    if len(transitions) != 1 or not delta.get("components_added"):
+        raise ValueError("required dependency introduction parent is unavailable")
+    parent = transitions[0]["added"][0]["node_id"]
+    components = set(delta["components_added"])
+    nodes = sorted(row["node_id"] for row in selections if row["component_id"] in components)
+    if introduction.get("parent_node_id") != parent or introduction.get("node_ids") != nodes:
+        raise ValueError("required dependency introduction endpoints differ from the native delta")
+    requests = _introduction_requests(parent, nodes)
+    retained_requests = introduction.get("requests")
+    queries = introduction.get("queries", {})
+    if not isinstance(queries, Mapping):
+        raise ValueError("required dependency introduction queries must be a mapping")
+    results = queries.get("results", [])
+    if (
+        retained_requests != requests
+        or not isinstance(retained_requests, list)
+        or any(
+            not isinstance(request, Mapping)
+            or any(
+                type(request.get(key)) is not int
+                for key in ("max_depth", "max_results", "max_visits")
+            )
+            for request in retained_requests
+        )
+        or introduction.get("edges")
+        != [_required_introduction_edge(after, parent, child) for child in nodes]
+        or queries.get("observation_identity") != after.get("observation_identity")
+        or queries.get("schema") != "hashmarks.dependency-query-batch.v1"
+        or queries.get("authority") != "qualified-external-observation"
+        or not isinstance(results, list)
+        or len(results) != len(nodes)
+    ):
+        raise ValueError("required dependency introduction queries differ from admitted inputs")
+    for child, result in zip(nodes, results, strict=True):
+        if not isinstance(result, Mapping) or not isinstance(result.get("bounds"), Mapping):
+            raise ValueError("required dependency introduction path result is unavailable")
+        bounds = result.get("bounds", {})
+        visited = bounds.get("visited")
+        if (
+            result.get("schema") != "hashmarks.dependency-query-result.v1"
+            or result.get("operation") != "paths"
+            or result.get("context") != "lock"
+            or result.get("result") != [[parent, child]]
+            or result.get("completeness") != "complete"
+            or result.get("omissions") != []
+            or result.get("authority") != "qualified-external-observation"
+            or any(
+                type(bounds.get(key)) is not int or bounds.get(key) != requests[0][key]
+                for key in ("max_depth", "max_results", "max_visits")
+            )
+            or type(visited) is not int
+            or not 0 < visited <= 64
+        ):
+            raise ValueError("required dependency introduction path is incomplete or unsupported")
+    return dict.fromkeys(nodes, parent)
 
 
 def _require_current_dependency_assessment(
@@ -509,7 +671,7 @@ def observe_changed_dependency_consumers(
         ):
             raise ValueError("dependency consumers are truncated or source members are unavailable")
         packets.append(packet)
-    result = {
+    result: dict[str, Any] = {
         "schema": "oh-goon.changed-dependency-consumers/v1",
         "lock_path": lock_path,
         "base_revision": base_revision,
@@ -532,5 +694,23 @@ def observe_changed_dependency_consumers(
         },
         "truncation": "complete",
     }
+    delta = cast(dict[str, Any], result["delta"])
+    if delta["components_added"]:
+        parent = delta["component_selection_transitions"][0]["added"][0]["node_id"]
+        introduced = set(delta["components_added"])
+        nodes = sorted(
+            selection["node_id"]
+            for selection in selections
+            if selection["component_id"] in introduced
+        )
+        requests = _introduction_requests(parent, nodes)
+        result["dependency_introductions"] = {
+            "parent_node_id": parent,
+            "node_ids": nodes,
+            "requests": requests,
+            "queries": native.dependencies.queries(after, requests),
+            "edges": [_required_introduction_edge(after, parent, child) for child in nodes],
+        }
+        validate_required_dependency_introductions(result)
     result["after_assessment"] = revalidate_changed_dependency_consumers(native, result, root=root)
     return result

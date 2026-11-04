@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from oh_goon.repository_tooling.generation.api_schema_generation import (
     openapi_digest,
@@ -292,7 +292,7 @@ def _type_lines(operation: ApiOperation) -> list[str]:
     return lines
 
 
-def _runtime_lines() -> list[str]:
+def _runtime_lines() -> Sequence[str]:
     return """export type OperationCall<Name extends OperationName> = operationTypes[Name]["call"];
 export type OperationResponse<Name extends OperationName> = operationTypes[Name]["response"];
 

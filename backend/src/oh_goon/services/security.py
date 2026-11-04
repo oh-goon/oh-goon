@@ -66,6 +66,10 @@ class SecurityService:
                 row.fixed.update(finding.fixed_versions)
                 row.summary = row.summary or finding.summary
                 row.repositories[entry.repository.repository_id] = entry.repository
+
+        def repository_name(item: RepositoryIdentity) -> str:
+            return item.name.casefold()
+
         findings = [
             FleetSecurityFinding(
                 advisory_id=advisory,
@@ -73,9 +77,7 @@ class SecurityService:
                 aliases=tuple(sorted(row.aliases)),
                 fixed_versions=tuple(sorted(row.fixed)),
                 summary=row.summary,
-                repositories=tuple(
-                    sorted(row.repositories.values(), key=lambda item: item.name.casefold())
-                ),
+                repositories=tuple(sorted(row.repositories.values(), key=repository_name)),
             )
             for (advisory, package), row in grouped.items()
         ]

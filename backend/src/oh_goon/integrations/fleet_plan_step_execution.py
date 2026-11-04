@@ -8,11 +8,11 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypedDict, Unpack
+from typing import Any, Literal, Protocol, TypedDict, Unpack, cast
 
 from oh_goon.core.agent_model_selection import (
     LocalModelReviewDecision,
@@ -135,7 +135,7 @@ from oh_goon.integrations.fleet_plan_step_output_observation import (
     observed_native_visible_claim,
     observed_step_diagnostic,
 )
-from oh_goon.integrations.hashmarks.agent_tools import (
+from oh_goon.integrations.hashmarks import (
     PreparedAgentEvidence,
     prepare_agent_evidence,
     prompt_observation,
@@ -560,7 +560,7 @@ def _execute_typed_step(
                         sys.executable,
                         "-I",
                         "-m",
-                        "oh_goon.integrations.hashmarks.agent_tools",
+                        "oh_goon.integrations.hashmarks",
                         "--tool",
                         "task_evidence",
                         "--capture-identity",
@@ -1682,7 +1682,7 @@ def prepare_frozen_readonly_skill_search(
     ] = "search_text",
     selected_path: str | None = None,
     workspace: PreparedAgentEvidence | None = None,
-) -> Iterator[tuple[Path, ResolvedCommandStep]]:
+) -> Generator[tuple[Path, ResolvedCommandStep], None, None]:
     """Prepare one fixed read-only tool Step from original Resolver-captured bytes.
 
     This is PREWORK: it does not grant permission to execute. Only the original
@@ -1792,7 +1792,7 @@ def prepare_frozen_readonly_skill_search(
             raise FleetPlanInvalid("Agent evidence workspace belongs to a different capture")
         root = prepared.root
         argv = (
-            ("head", "-c", "2048", "--", selected_path)
+            ("head", "-c", "2048", "--", cast(str, selected_path))
             if tool_kind == "read_file"
             else ("rg", "--files", "--hidden", "--no-ignore", "--", "skill")
             if tool_kind == "list_skill_paths"
@@ -1800,7 +1800,7 @@ def prepare_frozen_readonly_skill_search(
                 sys.executable,
                 "-I",
                 "-m",
-                "oh_goon.integrations.hashmarks.agent_tools",
+                "oh_goon.integrations.hashmarks",
                 "--tool",
                 tool_kind,
                 "--capture-identity",
@@ -1823,7 +1823,7 @@ def prepare_delivered_readonly_skill_search(
     *,
     expected_handoff_identity: str,
     expected_step_id: str,
-) -> Iterator[tuple[Path, ResolvedCommandStep]]:
+) -> Generator[tuple[Path, ResolvedCommandStep], None, None]:
     """Consume original AG-02 immutable bytes at the existing Step preparation cut.
 
     Decoding and Step-identity matching is transport verification, **not** admission.

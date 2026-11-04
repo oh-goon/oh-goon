@@ -21,6 +21,7 @@ from oh_goon.core.agent_harness_contract import (
     AgentHarnessInput,
     AgentHarnessIntent,
     AgentHarnessSelection,
+    HarnessCapability,
     decode_agent_harness_submission,
     prepare_agent_harness_input,
 )
@@ -70,7 +71,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     native_runtime_read_only_mounts,
 )
 from oh_goon.integrations.fleet_plan_secret_redaction import redact_host_secret_text
-from oh_goon.integrations.hashmarks.agent_tools import PreparedAgentEvidence, task_evidence_prompt
+from oh_goon.integrations.hashmarks import PreparedAgentEvidence, task_evidence_prompt
 
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, _StepProcess
@@ -212,18 +213,20 @@ def prepare_native_step_input(
         ):
             raise FleetPlanInvalid("Native backend configuration differs from resolved Run intent")
     verify_native_agent_executable(selected)
-    capabilities = tuple(
-        sorted(
-            {"frozen_source", "hashmarks_evidence", "observations", step.workload.role, "terminal"}
-        )
-    )
+    capabilities: set[HarnessCapability] = {
+        "frozen_source",
+        "hashmarks_evidence",
+        "observations",
+        step.workload.role,
+        "terminal",
+    }
     prepared = prepare_agent_harness_input(
         packet,
         expected_handoff_identity=step.handoff_identity,
         selection=AgentHarnessSelection(
             harness="native",
             implementation_identity=f"{selected.agent}:sha256:{selected.executable_sha256}",
-            capabilities=capabilities,  # type: ignore[arg-type]
+            capabilities=tuple(sorted(capabilities)),
         ),
         execution=AgentHarnessIntent(
             execution_identity=runtime.execution_identity,
@@ -364,7 +367,7 @@ def _prompt(
         sys.executable,
         "-I",
         "-m",
-        "oh_goon.integrations.hashmarks.agent_tools",
+        "oh_goon.integrations.hashmarks",
         "--root",
         str(materialized.root),
         "--state-directory",
@@ -504,7 +507,7 @@ def execute_native_agent_step(
         sys.executable,
         "-I",
         "-m",
-        "oh_goon.integrations.hashmarks.agent_tools",
+        "oh_goon.integrations.hashmarks",
         "--root",
         str(materialized.root),
         "--state-directory",

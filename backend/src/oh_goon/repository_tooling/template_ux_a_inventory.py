@@ -8,8 +8,9 @@ import re
 import subprocess
 from collections import Counter
 from pathlib import Path
-from typing import TypedDict
+from typing import TypedDict, cast
 
+from oh_goon.core.models.fleet_plan import PlanStepCapabilities
 from oh_goon.core.template_identity import template_classification, template_usage
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
@@ -142,7 +143,9 @@ def collect(root: Path) -> CatalogInventory:
                     "step_capabilities": [
                         {
                             "id": step.step_id,
-                            "capabilities": step.capabilities.model_dump(mode="json"),
+                            "capabilities": cast(
+                                PlanStepCapabilities, step.capabilities
+                            ).model_dump(mode="json"),
                         }
                         for step in compiled.steps
                         if hasattr(step, "capabilities")

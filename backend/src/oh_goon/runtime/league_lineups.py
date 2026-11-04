@@ -131,13 +131,13 @@ class LeagueLineupFileStore(ExactFileStore):
         return FleetPlanInvalid(f"League Lineup must be a regular file: {key}/lineup.yml")
 
     @staticmethod
-    def _changed_stale(_key: str) -> Exception:
+    def _changed_stale(key: str) -> Exception:
         return LeagueLineupStale(
             "League Lineup changed before save; reload the current Lineup revision"
         )
 
     @staticmethod
-    def _removed_stale(_key: str) -> Exception:
+    def _removed_stale(key: str) -> Exception:
         return LeagueLineupStale("League Lineup was removed before save; reload the Lineup catalog")
 
 

@@ -449,6 +449,142 @@ def test_codex_recovered_diagnostic_preserves_successful_terminal_result() -> No
     assert any(item.kind == "tool" for item in result.observations)
 
 
+@pytest.mark.parametrize("agent", ["codex", "pi"])
+def test_native_terminal_claim_cannot_authorize_later_assistant_output(
+    agent: NativeAgentName,
+) -> None:
+    if agent == "codex":
+        start: dict[str, object] = {"type": "turn.started"}
+        prior: dict[str, object] = {
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "prior claim"},
+        }
+        later: dict[str, object] = {
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "later claim"},
+        }
+        terminal: dict[str, object] = {"type": "turn.completed"}
+    else:
+        start = {"type": "agent_start"}
+        prior = {
+            "type": "message_end",
+            "message": {"role": "assistant", "content": "prior claim", "stopReason": "stop"},
+        }
+        later = {
+            "type": "message_end",
+            "message": {"role": "assistant", "content": "later claim", "stopReason": "stop"},
+        }
+        terminal = {"type": "agent_settled", "aborted": False}
+
+    completed = events(start, prior, terminal, terminal)
+    baseline = parse_native_agent_events(agent, completed, returncode=0)
+    assert baseline.settled and not baseline.failed and baseline.final_text == "prior claim"
+
+    output = completed + events(later)
+    unsettled = parse_native_agent_events(agent, output, returncode=0)
+    assert not unsettled.settled and not unsettled.failed
+    assert unsettled.final_text == "later claim"
+
+    completed_later = parse_native_agent_events(
+        agent, output + events(terminal, terminal), returncode=0
+    )
+    assert completed_later.settled and not completed_later.failed
+    assert completed_later.final_text == "later claim"
+
+
+@pytest.mark.parametrize(
+    "agent,activity",
+    [
+        ("codex", {"type": "item.started", "item": {"type": "command_execution"}}),
+        ("codex", {"type": "item.updated", "item": {"type": "agent_message"}}),
+        ("codex", {"type": "item.completed", "item": {"type": "command_execution"}}),
+        ("codex", {"type": "item.completed", "item": {"type": "mcp_tool_call"}}),
+        ("codex", {"type": "item.completed", "item": {"type": "file_change"}}),
+        ("codex", {"type": "error", "message": "recoverable diagnostic"}),
+        ("pi", {"type": "message_start", "message": {"role": "assistant"}}),
+        ("pi", {"type": "message_update", "message": {"role": "assistant"}}),
+        ("pi", {"type": "turn_start"}),
+        ("pi", {"type": "turn_end"}),
+        ("pi", {"type": "agent_end"}),
+        ("pi", {"type": "tool_execution_start", "toolCallId": "call"}),
+        ("pi", {"type": "tool_execution_end", "toolCallId": "call", "isError": False}),
+        ("pi", {"type": "compaction_start"}),
+        ("pi", {"type": "compaction_end"}),
+        ("pi", {"type": "auto_retry_start"}),
+        ("pi", {"type": "auto_retry_end"}),
+    ],
+)
+def test_native_terminal_claim_cannot_authorize_later_activity(
+    agent: NativeAgentName, activity: dict[str, object]
+) -> None:
+    terminal: dict[str, object] = (
+        {"type": "turn.completed"}
+        if agent == "codex"
+        else {"type": "agent_settled", "aborted": False}
+    )
+    claim: dict[str, object] = (
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "prior claim"}}
+        if agent == "codex"
+        else {
+            "type": "message_end",
+            "message": {"role": "assistant", "content": "prior claim", "stopReason": "stop"},
+        }
+    )
+    completed = events(claim, terminal)
+    baseline = parse_native_agent_events(agent, completed, returncode=0)
+    assert baseline.settled and baseline.final_text == "prior claim"
+    output = completed + events(activity)
+    unsettled = parse_native_agent_events(agent, output, returncode=0)
+    assert not unsettled.settled and unsettled.final_text == ""
+    # A later terminal frame supplies a native claim, without reviving the
+    # previous cycle's role payload for the typed acceptance owner.
+    completed_later = parse_native_agent_events(agent, output + events(terminal), returncode=0)
+    assert completed_later.settled and completed_later.final_text == ""
+
+
+@pytest.mark.parametrize("stop_reason", ["error", "aborted", "length"])
+def test_pi_late_failed_assistant_cannot_borrow_earlier_settlement(stop_reason: str) -> None:
+    output = events(
+        {"type": "agent_start"},
+        {
+            "type": "message_end",
+            "message": {"role": "assistant", "content": "prior claim", "stopReason": "stop"},
+        },
+        {"type": "agent_settled", "aborted": False},
+        {
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": "failed later claim",
+                "stopReason": stop_reason,
+            },
+        },
+    )
+    result = parse_native_agent_events("pi", output, returncode=0)
+    assert not result.settled and result.failed
+    assert result.final_text == "failed later claim"
+
+    # A native retry may recover before settlement; only the current assistant
+    # result and the actual terminal event establish that recovered claim.
+    recovered = parse_native_agent_events(
+        "pi",
+        output
+        + events(
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": "recovered claim",
+                    "stopReason": "stop",
+                },
+            },
+            {"type": "agent_settled", "aborted": False},
+        ),
+        returncode=0,
+    )
+    assert recovered.settled and not recovered.failed and recovered.final_text == "recovered claim"
+
+
 @pytest.mark.parametrize("returncode", [0, 7])
 def test_codex_command_status_claims_remain_distinct_from_turn_and_process_outcome(
     returncode: int,

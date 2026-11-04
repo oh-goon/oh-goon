@@ -6,10 +6,12 @@ import json
 import os
 import secrets
 import stat
+from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
-PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_FAMILY = "oh-goon.pytest-batch-execution"
-PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_VERSION = 1
+PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_FAMILY: str = "oh-goon.pytest-batch-execution"
+PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_VERSION: int = 1
 
 
 def execution_report_schema() -> str:
@@ -20,6 +22,29 @@ def execution_report_schema() -> str:
     if not isinstance(version, int) or isinstance(version, bool) or version <= 0:
         raise RuntimeError("pytest batch execution-report schema version owner is invalid")
     return f"{family}/v{version}"
+
+
+def verification_report(payload: dict[str, object]) -> dict[str, object]:
+    """Transport final native proof without duplicating its local attempt journal.
+
+    The complete run-local receipt remains at membership_receipt_path. Selected
+    membership, effective outcomes and failure categories retain their original
+    values; this projection never turns a completed skip into a passing member.
+    """
+    membership = cast(Mapping[str, object], payload["membership_receipt"])
+    return {
+        **{
+            key: value
+            for key, value in payload.items()
+            if key not in {"membership_receipt", "batches"}
+        },
+        "report_projection": "verification",
+        "membership_receipt": {
+            key: value
+            for key, value in membership.items()
+            if key not in {"attempt_records", "retry_bisection_lineage", "attempted", "completed"}
+        },
+    }
 
 
 def write_execution_report(path: Path, payload: dict[str, object]) -> None:

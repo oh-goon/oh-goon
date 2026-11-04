@@ -18,19 +18,30 @@ from pydantic import ConfigDict, Field
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.engine.command import run_command
 from oh_goon.integrations.exact_file_write import publish_text_file
-from oh_goon.integrations.hashmarks.dependencies import require_current_dependency_environment
-from oh_goon.integrations.hashmarks.development_verification import nominate_changed_verification
-from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.integrations.hashmarks import (
+    nominate_changed_verification,
+    require_current_dependency_environment,
+    require_loaded_hashmarks_runtime,
+    validate_required_dependency_introductions,
+)
 from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
 from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
 from oh_goon.repository_tooling.pytest_process_environment import resolve_pytest_invocation
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
     DOCUMENTATION_ASSET_OBLIGATION,
+    DOCUMENTATION_PROOF_OBLIGATION,
+    DOCUMENTATION_PROOF_TEST,
+    HASHMARKS_UPGRADE_OBLIGATION,
+    HASHMARKS_UPGRADE_TESTS,
     admitted_documentation_assets,
+    behavioral_pytest_targets,
     documentation_asset_candidates,
+    documentation_proof_paths,
+    hashmarks_upgrade_intent,
     is_generated_contract_path,
     is_verification_policy_path,
+    native_changed_paths,
     non_executable_documentation,
     require_native_pytest_pass,
     required_policy_obligations,
@@ -52,6 +63,7 @@ class ChangeVerificationPlan(ImmutableModel):
     requested_head: str | None = None
     source_identity: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     changed_paths: tuple[str, ...]
+    removed_paths: tuple[str, ...] = ()
     static: tuple[_STATIC, ...]
     pytest: tuple[str, ...]
     frontend: tuple[str, ...]
@@ -106,7 +118,7 @@ def _base_lock_bytes(root: Path, base: str) -> bytes:
 
 def capture_change(
     root: Path, base: str, candidate: str | None
-) -> tuple[str, str, tuple[str, ...]]:
+) -> tuple[str, str, tuple[str, ...], tuple[str, ...]]:
     base_sha = _git(root, "rev-parse", "--verify", f"{base}^{{commit}}").strip()
     head = _git(root, "rev-parse", "--verify", "HEAD^{commit}").strip()
     if (
@@ -115,17 +127,10 @@ def capture_change(
     ):
         raise ValueError("Effective checkout differs from the requested candidate")
     arguments = (base_sha, head) if candidate is not None else (base_sha,)
-    tokens = _git(root, "diff", "--name-status", "-z", "--find-renames", *arguments).split("\0")
-    paths: set[str] = set()
-    cursor = 0
-    while cursor < len(tokens) and tokens[cursor]:
-        status = tokens[cursor]
-        count = 2 if status[0] in {"R", "C"} else 1
-        selected = tokens[cursor + 1 : cursor + 1 + count]
-        if len(selected) != count or any(not path for path in selected):
-            raise ValueError("Git returned incomplete changed-path evidence")
-        paths.update(selected)
-        cursor += count + 1
+    changed, removed = native_changed_paths(
+        _git(root, "diff", "--name-status", "-z", "--find-renames", *arguments)
+    )
+    paths = set(changed)
     untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
     dirty = _git(root, "diff", "--name-only", "HEAD").strip()
     if candidate is not None and (dirty or any(untracked)):
@@ -135,13 +140,15 @@ def capture_change(
     for path in paths:
         if Path(path).is_absolute() or ".." in Path(path).parts or "\n" in path:
             raise ValueError("Git comparison contains an unsafe path")
-    return base_sha, head, tuple(sorted(paths))
+    return base_sha, head, tuple(sorted(paths)), removed
 
 
-def _backend_dependency_intent(root: Path, base: str, paths: tuple[str, ...]) -> tuple[bool, bool]:
+def _backend_dependency_intent(
+    root: Path, base: str, paths: tuple[str, ...]
+) -> tuple[bool, bool, bool]:
     """Classify authored intent without deciding native dependency compatibility."""
     if "backend/pyproject.toml" not in paths:
-        return False, False
+        return False, False, False
     previous = tomllib.loads(_git(root, "show", f"{base}:backend/pyproject.toml"))
     with (root / "backend/pyproject.toml").open("r", encoding="utf-8") as stream:
         manifest = stream.read(4 * 1024 * 1024 + 1)
@@ -163,11 +170,14 @@ def _backend_dependency_intent(root: Path, base: str, paths: tuple[str, ...]) ->
             for key in ("uv", "hatch", "setuptools")
         )
     )
-    return runtime_changed or unsupported, unsupported
+    return runtime_changed or unsupported, unsupported, hashmarks_upgrade_intent(previous, current)
 
 
 def _dependency_chain_qualified(
-    chain: Mapping[str, Any], packets: list[dict[str, Any]], nominations: list[dict[str, Any]]
+    chain: Mapping[str, Any],
+    packets: list[dict[str, Any]],
+    nominations: list[dict[str, Any]],
+    introduced: Mapping[str, str],
 ) -> bool:
     source = chain.get("source_path")
     consumer = chain.get("consumer")
@@ -178,13 +188,21 @@ def _dependency_chain_qualified(
     assert isinstance(consumer, Mapping)
     assert isinstance(ownership, Mapping)
     assert isinstance(projected, Mapping)
+    node = chain.get("node_id")
+    consumer_node = introduced.get(node, node) if isinstance(node, str) else None
+    if (
+        not isinstance(node, str)
+        or (node in introduced and chain.get("consumer_node_id") != consumer_node)
+        or (node not in introduced and "consumer_node_id" in chain)
+    ):
+        return False
     nomination = projected.get("nomination", {})
     if (
         not isinstance(source, str)
         or not source.startswith("backend/src/")
         or consumer.get("source_path") != source
         or consumer.get("distribution_state") != "resolved-unique"
-        or consumer.get("distribution_nodes") != [chain.get("node_id")]
+        or consumer.get("distribution_nodes") != [consumer_node]
         or consumer.get("import_claim_authority") != "source-observed-static-import"
         or not consumer.get("source_member")
         or ownership.get("stale") is True
@@ -287,15 +305,19 @@ def _bounded_dependency_scope(
     ):
         return False
     transitions = delta.get("component_selection_transitions", [])
+    try:
+        introduced = validate_required_dependency_introductions(bundle)
+    except (ValueError, TypeError, KeyError):
+        return False
+    replaced_nodes = set(nodes) - introduced.keys()
     if (
         set(delta.get("selections_added", [])) != set(nodes)
         or len(delta.get("selections_added", [])) != len(nodes)
         or delta.get("selections_changed")
-        or delta.get("components_added")
         or delta.get("components_removed")
         or delta.get("components_changed")
         or not isinstance(transitions, list)
-        or len(transitions) != len(nodes)
+        or len(transitions) != len(replaced_nodes)
         or any(
             not isinstance(transition, Mapping)
             or len(transition.get("added", [])) != 1
@@ -307,7 +329,7 @@ def _bounded_dependency_scope(
         return False
     added = {transition["added"][0]["node_id"] for transition in transitions}
     removed = {transition["removed"][0]["node_id"] for transition in transitions}
-    if added != set(nodes) or removed != set(delta.get("selections_removed", [])):
+    if added != replaced_nodes or removed != set(delta.get("selections_removed", [])):
         return False
     selections = {row["node_id"]: row for row in after.get("selections", [])}
     components = {row["component_id"]: row for row in after.get("components", [])}
@@ -319,7 +341,8 @@ def _bounded_dependency_scope(
             or selection.get("version") != row["version"]
             or component.get("name") != row["name"]
             or component.get("ecosystem") != "pypi"
-            or not any(
+            or row["node_id"] not in introduced
+            and not any(
                 transition.get("component_id") == row["component_id"]
                 and transition["added"][0]["node_id"] == row["node_id"]
                 for transition in transitions
@@ -376,7 +399,9 @@ def _bounded_dependency_scope(
     ):
         return False
     nominations = lock_rows[0].get("nominations", [])
-    if not all(_dependency_chain_qualified(chain, packets, nominations) for chain in chains):
+    if not all(
+        _dependency_chain_qualified(chain, packets, nominations, introduced) for chain in chains
+    ):
         return False
     return selected_files is None or {
         chain["node_id"]
@@ -385,12 +410,12 @@ def _bounded_dependency_scope(
     } == set(nodes)
 
 
-def _collect_dependency_proof(
+def _collect_pytest_proof(
     root: Path,
     evidence: dict[str, Any],
     pytest: set[str],
     required: tuple[str, ...],
-    accepted_assets: set[str],
+    excluded_paths: set[str],
 ) -> tuple[set[str], list[str]]:
     invocation = replace(
         resolve_pytest_invocation(qualified=True, pytest_config=root / "backend/pyproject.toml"),
@@ -400,20 +425,38 @@ def _collect_dependency_proof(
     collection = collect_native_pytest(
         tuple(root / path for path in sorted(pytest)), marker=_MERGE_MARKER, invocation=invocation
     )
-    selected = {row["file"] for row in collection.selected}
-    if not selected <= pytest:
-        raise ValueError("Native dependency proof collection escaped the admitted test files")
-    admission = evidence["dependency_admission"]
+    selected_files = {row["file"] for row in collection.selected}
+    if not selected_files <= {target.split("::", 1)[0] for target in pytest}:
+        raise ValueError("Native pytest collection escaped the admitted test files")
+
+    def collected_targets(rows: tuple[dict[str, str], ...]) -> set[str]:
+        return {
+            target
+            for target in pytest
+            if any(
+                target == row["file"]
+                or target == row["selector"]
+                or row["selector"].startswith(target + "[")
+                for row in rows
+            )
+        }
+
+    selected = collected_targets(collection.selected)
+    admission = (
+        evidence["dependency_admission"]
+        if "dependency_admission" in evidence
+        else evidence.setdefault("pytest_admission", {})
+    )
     admission["collection"] = collection.payload()
     admission["collection_context"] = invocation.correctness_context()
-    deselected = {row["file"] for row in collection.deselected}
+    deselected = collected_targets(collection.deselected)
     admission["empty_advisory_targets"] = sorted(pytest - selected - deselected)
     admission["targets_without_selected_members"] = sorted(pytest - selected)
     missing: list[str] = []
     if not set(required) <= selected:
         missing.append("VERIFICATION_POLICY_PROTECTION_UNAVAILABLE")
     for row in evidence.get("observations", []):
-        if row.get("changed_path") in accepted_assets:
+        if row.get("changed_path") in excluded_paths:
             continue
         if row.get("state") == "CHANGED_TEST" and row["changed_path"] not in selected:
             missing.append(f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{row['changed_path']}")
@@ -438,7 +481,8 @@ def admit_change(
     requested_head: str | None = None,
     nominator: Callable[..., dict[str, Any]] = nominate_changed_verification,
 ) -> ChangeVerificationPlan:
-    base_sha, head, changed = capture_change(root, base, candidate)
+    base_sha, head, changed, removed = capture_change(root, base, candidate)
+    removed_paths = set(removed)
     if requested_head is not None:
         _git(root, "merge-base", "--is-ancestor", requested_head, head)
     before = canonical_source_identity(root)
@@ -446,13 +490,13 @@ def admit_change(
     authored = tuple(path for path in executable if not is_generated_contract_path(path))
     policy_paths = tuple(path for path in authored if is_verification_policy_path(path))
     required = required_policy_tests(policy_paths)
-    dependency_intent, unsupported_dependency_intent = _backend_dependency_intent(
-        root, base_sha, executable
+    dependency_intent, unsupported_dependency_intent, hashmarks_upgrade = (
+        _backend_dependency_intent(root, base_sha, executable)
     )
     nomination_arguments: dict[str, Any] = {}
     if required:
         nomination_arguments["required"] = required
-    if "backend/uv.lock" in executable:
+    if "backend/uv.lock" in executable and not hashmarks_upgrade:
         nomination_arguments["dependency_base"] = {
             "lock": _base_lock_bytes(root, base_sha),
             "base_revision": base_sha,
@@ -462,19 +506,36 @@ def admit_change(
     if assets:
         nomination_arguments["asset_paths"] = assets
     evidence = nominator(root, authored, **nomination_arguments) if authored or required else {}
+    documents = documentation_proof_paths(changed)
+    if documents:
+        evidence["documentation_policy"] = {
+            "authority": "oh-goon-execution-policy",
+            "paths": list(documents),
+            "coverage": "not-claimed",
+        }
+    if hashmarks_upgrade:
+        evidence["hashmarks_upgrade"] = {
+            "authority": "oh-goon-execution-policy",
+            "scope": "mandatory-hashmarks-upgrade",
+            "consumer_coverage": "not-claimed",
+        }
     accepted_assets = admitted_documentation_assets(authored, evidence)
     executable = tuple(path for path in executable if path not in accepted_assets)
     static = cast(set[_STATIC], required_static_obligations(executable))
-    pytest: set[str] = set()
+    pytest: set[str] = {DOCUMENTATION_PROOF_TEST} if documents else set()
+    if hashmarks_upgrade:
+        pytest.update(HASHMARKS_UPGRADE_TESTS)
     frontend: set[str] = set()
     unverified: list[str] = []
     dependency_qualified = (
         "backend/uv.lock" in executable
+        and not hashmarks_upgrade
         and not unsupported_dependency_intent
         and _bounded_dependency_scope(evidence, base_sha)
     )
     if (
-        (dependency_intent or "backend/uv.lock" in executable) and not dependency_qualified
+        (dependency_intent or "backend/uv.lock" in executable)
+        and not (dependency_qualified or hashmarks_upgrade)
     ) or "frontend/package-lock.json" in executable:
         unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
     if dependency_qualified:
@@ -484,13 +545,14 @@ def admit_change(
             "changed_node_ids": evidence["dependency_changes"]["changed_node_ids"],
             "consumer_scope": evidence["dependency_changes"]["consumer_scope"],
             "rationale": (
-                "Each changed current dependency selection has a current resolved-unique "
-                "source consumer and a qualified verifier. Native lock, runtime and package "
+                "Each changed current dependency selection has a qualified source-consumer "
+                "verifier chain, directly or through a retained complete native required "
+                "dependency path to its imported parent. Native lock, runtime and package "
                 "checks are required. Unobserved consumers and bounded verifier searches "
                 "remain outside this positive proof; complete impact is not claimed."
             ),
         }
-    observations = evidence.get("observations", [])
+    observations: list[dict[str, Any]] = evidence.get("observations", [])
     policy_proofs = [
         projected
         for projected in evidence.get("required_checks", [])
@@ -505,14 +567,17 @@ def admit_change(
             unverified.append("VERIFICATION_POLICY_PROTECTION_UNAVAILABLE")
         pytest.update(str(path) for path in qualified_policy_paths if path in required)
     observed_paths = {row.get("changed_path") for row in observations}
+    upgrade_paths = {"backend/pyproject.toml", "backend/uv.lock"} if hashmarks_upgrade else set()
     for path in authored:
-        if path not in observed_paths:
+        if path not in removed_paths and path not in observed_paths and path not in upgrade_paths:
             unverified.append(f"NO_PRODUCER_OBSERVATION:{path}")
     for row in observations:
         path = str(row.get("changed_path", ""))
         if path not in authored:
             raise ValueError("Producer observation is outside the admitted change set")
-        if path in accepted_assets:
+        # Git identifies removed members; they cannot supply execution proof.
+        # Keep any producer absence observation without claiming no consumers.
+        if path in removed_paths or path in accepted_assets or path in upgrade_paths:
             continue
         if row.get("state") not in {"LINKED", "CHANGED_TEST"} or row.get("stale") is True:
             if (
@@ -521,7 +586,8 @@ def admit_change(
                 and policy_proofs
                 and row.get("stale") is not True
             ):
-                row = {**row, "state": "POLICY_OBLIGATION", "nominations": policy_proofs}
+                row = row.copy()
+                row.update(state="POLICY_OBLIGATION", nominations=policy_proofs)
             else:
                 unverified.append(f"NO_QUALIFIED_VERIFIER:{path}")
                 continue
@@ -561,11 +627,12 @@ def admit_change(
             admitted += 1
         if not admitted:
             unverified.append(f"NO_EXECUTABLE_VERIFIER:{path}")
-    if dependency_qualified and not unverified:
-        pytest, unavailable = _collect_dependency_proof(
-            root, evidence, pytest, required, set(accepted_assets)
+    if pytest and not unverified:
+        pytest, unavailable = _collect_pytest_proof(
+            root, evidence, pytest, required, set(accepted_assets) | removed_paths | upgrade_paths
         )
         unverified.extend(unavailable)
+    if dependency_qualified and "collection" in evidence["dependency_admission"]:
         if not _bounded_dependency_scope(evidence, base_sha, selected_files=pytest):
             unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
         require_current_dependency_environment(evidence["dependency_changes"])
@@ -579,6 +646,7 @@ def admit_change(
         requested_head=requested_head,
         source_identity=before,
         changed_paths=changed,
+        removed_paths=removed,
         static=tuple(sorted(static)),
         pytest=tuple(sorted(pytest)),
         frontend=tuple(sorted(frontend)),
@@ -587,7 +655,9 @@ def admit_change(
         behavioral_status="REQUIRED" if executable else "NOT_APPLICABLE",
         policy_status="REVIEW_REQUIRED" if policy_paths else "ORDINARY",
         obligations=required_policy_obligations(policy_paths)
-        + ((DOCUMENTATION_ASSET_OBLIGATION,) if accepted_assets else ()),
+        + ((DOCUMENTATION_ASSET_OBLIGATION,) if accepted_assets else ())
+        + ((DOCUMENTATION_PROOF_OBLIGATION,) if documents else ())
+        + ((HASHMARKS_UPGRADE_OBLIGATION,) if hashmarks_upgrade else ()),
     )
 
 
@@ -597,12 +667,14 @@ def require_current_plan(root: Path, plan: ChangeVerificationPlan) -> None:
     _git(root, "cat-file", "-e", plan.base + "^{commit}")
     if canonical_source_identity(root) != plan.source_identity:
         raise ValueError("Verification source changed after admission")
-    if plan.evidence and plan.evidence.get("producer_implementation_identity") != (
-        require_loaded_hashmarks_runtime()
-    ):
+    if "producer_implementation_identity" in plan.evidence and plan.evidence.get(
+        "producer_implementation_identity"
+    ) != (require_loaded_hashmarks_runtime()):
         raise ValueError("Loaded Hashmarks implementation changed after admission")
     if plan.evidence.get("dependency_admission") or (
-        "backend/uv.lock" in plan.changed_paths and not plan.unverified
+        "backend/uv.lock" in plan.changed_paths
+        and not plan.unverified
+        and not plan.evidence.get("hashmarks_upgrade")
     ):
         if not _bounded_dependency_scope(
             plan.evidence,
@@ -708,9 +780,15 @@ def require_merge_selection(root: Path, plan: ChangeVerificationPlan) -> None:
     if plan.unverified:
         raise ValueError("SELECTION_UNVERIFIED: " + "; ".join(plan.unverified))
     assets = admitted_documentation_assets(plan.changed_paths, plan.evidence)
+    current_paths = (
+        {path for path in plan.changed_paths if not non_executable_documentation(root, path)}
+        - set(plan.removed_paths)
+        - set(assets)
+    )
+    behavioral_pytest = behavioral_pytest_targets(plan.pytest, plan.evidence, current_paths)
     if (
         plan.behavioral_status == "REQUIRED"
-        and not (plan.pytest or plan.frontend)
+        and not (behavioral_pytest or plan.frontend)
         and not all(
             is_generated_contract_path(path)
             or non_executable_documentation(root, path)
@@ -824,6 +902,8 @@ def execute_change(
                 _MERGE_MARKER,
                 "--report-path",
                 str(report),
+                "--report-projection",
+                "verification",
                 *plan.pytest,
                 cwd=root,
                 timeout=None,

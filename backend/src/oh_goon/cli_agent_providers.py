@@ -110,8 +110,8 @@ def _print_provider_refusal(args: argparse.Namespace, error: Exception, *, nativ
         print(action, file=sys.stderr)
 
 
-def add_native_setup_command(
-    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+def add_native_setup_command[_Parser: argparse.ArgumentParser](
+    commands: argparse._SubParsersAction[_Parser],
 ) -> None:
     setup = commands.add_parser(
         "setup", help="Configure one installed native agent; observe its version without model work"
@@ -270,7 +270,7 @@ def run_native_setup_command(args: argparse.Namespace) -> int:
         require_native_agent_compatibility(selected)
         assert selected.definition.executable is not None
         executable = Path(selected.definition.executable)
-        from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+        from oh_goon.integrations.hashmarks import require_loaded_hashmarks_runtime
 
         require_loaded_hashmarks_runtime()
         _require_setup_catalog_separation(home, requested_path, path)
@@ -357,7 +357,9 @@ def agent_connection_from_args(args: argparse.Namespace) -> AgentConnection:
     )
 
 
-def add_provider_commands(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_provider_commands[_Parser: argparse.ArgumentParser](
+    commands: argparse._SubParsersAction[_Parser],
+) -> None:
     providers = commands.add_parser(
         "providers", help="Configure external model provider connections"
     )

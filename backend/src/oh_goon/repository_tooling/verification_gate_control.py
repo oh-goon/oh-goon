@@ -15,8 +15,10 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import tomllib
 from collections.abc import Mapping, Sequence
 from importlib import metadata
+from inspect import getsourcefile
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,15 @@ REAL_LIFECYCLE_QA_TEST = "scripts/tests/test_real_lifecycle_qa_contract.py"
 
 _MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES = 1024 * 1024
 DOCUMENTATION_ASSET_OBLIGATION = "bounded documentation-asset policy"
+DOCUMENTATION_PROOF_TEST = "scripts/tests/test_documentation_authority_contract.py"
+DOCUMENTATION_PROOF_OBLIGATION = "bounded documentation proof"
+HASHMARKS_UPGRADE_TESTS = (
+    "backend/tests/unit/entrypoints/test_application_hashmarks_requirement.py",
+    "backend/tests/unit/integrations/test_hashmarks_same_version_rebase.py",
+    "backend/tests/unit/integrations/test_hashmarks_downstream_interoperability.py::test_native_collection_handoff_preserves_exact_selectors_and_missing_revision_claims",
+    "scripts/tests/test_dependency_minimization.py::test_hashmarks_upgrade_is_normal_uv_dependency_without_oh_goon_release_client",
+)
+HASHMARKS_UPGRADE_OBLIGATION = "mandatory Hashmarks upgrade proof"
 
 
 def is_verification_policy_path(path: str) -> bool:
@@ -203,7 +214,7 @@ def admitted_documentation_assets(
 def _independent_documentation_assets(
     root: Path, paths: Sequence[str], evidence: Mapping[str, Any]
 ) -> set[str]:
-    from oh_goon.integrations.hashmarks.development_verification import observe_repository_assets
+    from oh_goon.integrations.hashmarks import observe_repository_assets
 
     accepted = admitted_documentation_assets(paths, evidence)
     if not accepted:
@@ -215,25 +226,169 @@ def _independent_documentation_assets(
     return set(accepted)
 
 
-def non_executable_documentation(root: Path, path: str) -> bool:
-    if is_verification_policy_path(path):
-        return False
-    markdown = Path(path).suffix == ".md" and (
-        path.startswith("docs/") or path in {"README.md", "CONTRIBUTING.md"}
+def non_executable_documentation(_root: Path, path: str) -> bool:
+    return path == "LICENSE" or bool(documentation_proof_paths((path,)))
+
+
+def documentation_proof_paths(paths: Sequence[str]) -> tuple[str, ...]:
+    """The existing authored-doc owner; machine inputs keep their own proof."""
+    return tuple(
+        path
+        for path in paths
+        if not is_verification_policy_path(path)
+        and (
+            path == "CONTRIBUTING.md"
+            or (
+                path.startswith("docs/")
+                and not path.startswith("docs/certification/")
+                and Path(path).suffix == ".md"
+            )
+        )
     )
-    if path != "LICENSE" and not markdown:
-        return False
-    try:
-        with (root / path).open("r", encoding="utf-8") as stream:
-            content = stream.read(1024 * 1024 + 1)
-    except OSError:
-        return False
+
+
+def hashmarks_upgrade_intent(before: Mapping[str, Any], after: Mapping[str, Any]) -> bool:
+    """Compare native TOML intent without resolving versions or lock contents."""
+    previous = _without_hashmarks_requirement(before)
+    current = _without_hashmarks_requirement(after)
     return (
-        len(content) <= 1024 * 1024
-        and "\x00" not in content
-        and "```" not in content
-        and "~~~" not in content
+        previous is not None
+        and current is not None
+        and previous[1] != current[1]
+        and previous[0] == current[0]
     )
+
+
+def _without_hashmarks_requirement(
+    document: Mapping[str, Any],
+) -> tuple[dict[str, Any], str] | None:
+    project = document.get("project")
+    if not isinstance(project, Mapping):
+        return None
+    dependencies = project.get("dependencies")
+    if not isinstance(dependencies, list):
+        return None
+    selected = [
+        (index, value)
+        for index, value in enumerate(dependencies)
+        if isinstance(value, str) and value.startswith("hashmarks @ ")
+    ]
+    if len(selected) != 1:
+        return None
+    index, requirement = selected[0]
+    remainder = dict(document)
+    remainder["project"] = {
+        **project,
+        "dependencies": dependencies[:index] + dependencies[index + 1 :],
+    }
+    return remainder, requirement
+
+
+def _independent_hashmarks_upgrade(
+    root: Path | None,
+    base: str,
+    paths: Sequence[str],
+    evidence: Mapping[str, Any],
+    *,
+    observed_hashmarks_upgrade: bool | None = None,
+) -> bool:
+    if "hashmarks_upgrade" not in evidence:
+        return False
+    claimed = evidence["hashmarks_upgrade"]
+    if claimed != {
+        "authority": "oh-goon-execution-policy",
+        "scope": "mandatory-hashmarks-upgrade",
+        "consumer_coverage": "not-claimed",
+    }:
+        raise ValueError("Hashmarks upgrade policy is invalid or overclaimed")
+    if root is None or "backend/pyproject.toml" not in paths:
+        raise ValueError("Hashmarks upgrade requires candidate and native base intent")
+    if observed_hashmarks_upgrade is None:
+        from oh_goon.engine.command import run_command
+
+        observed = run_command(
+            "git",
+            "-C",
+            str(root),
+            "show",
+            "--no-ext-diff",
+            "--no-textconv",
+            f"{base}:backend/pyproject.toml",
+            cwd=root,
+            timeout=20,
+            max_capture_bytes_per_stream=8 * 1024 * 1024,
+            require_process_group_quiescence=True,
+            parent_death_signal=True,
+        )
+        if observed.returncode or observed.stdout_truncated:
+            raise ValueError("Native base Hashmarks intent is unavailable")
+        before = tomllib.loads(observed.stdout)
+        after = tomllib.loads((root / "backend/pyproject.toml").read_text(encoding="utf-8"))
+        observed_hashmarks_upgrade = hashmarks_upgrade_intent(before, after)
+    if not observed_hashmarks_upgrade:
+        raise ValueError("Hashmarks upgrade changes unrelated dependency or project intent")
+    return True
+
+
+def _require_documentation_proof(
+    paths: Sequence[str], plan: Mapping[str, Any], evidence: Mapping[str, Any]
+) -> set[str]:
+    documentation = documentation_proof_paths(paths)
+    expected = {
+        "authority": "oh-goon-execution-policy",
+        "paths": list(documentation),
+        "coverage": "not-claimed",
+    }
+    if documentation:
+        if (
+            evidence.get("documentation_policy") != expected
+            or DOCUMENTATION_PROOF_OBLIGATION not in plan.get("obligations", [])
+            or DOCUMENTATION_PROOF_TEST not in plan.get("pytest", [])
+        ):
+            raise ValueError("Bounded documentation proof was omitted or overclaimed")
+    elif "documentation_policy" in evidence:
+        raise ValueError("Documentation proof names another authoring surface")
+    return set(documentation)
+
+
+def behavioral_pytest_targets(
+    pytest: Sequence[str], evidence: Mapping[str, Any], current_paths: set[str]
+) -> set[str]:
+    """Retain an automatic doc check's independently nominated behavioral role."""
+    targets = set(pytest)
+    if "documentation_policy" not in evidence:
+        return targets
+    for observation in evidence.get("observations", []):
+        if (
+            observation.get("changed_path") not in current_paths
+            or observation.get("state") not in {"LINKED", "CHANGED_TEST"}
+            or observation.get("stale") is True
+        ):
+            continue
+        for projected in observation.get("nominations", []):
+            nomination = projected.get("nomination", {})
+            target = projected.get("workspace_prefix", "") + nomination.get(
+                "verification_target", {}
+            ).get("path", "")
+            if (
+                nomination.get("available") is True
+                and target.split("::", 1)[0] == DOCUMENTATION_PROOF_TEST
+            ):
+                return targets
+    return {target for target in targets if target.split("::", 1)[0] != DOCUMENTATION_PROOF_TEST}
+
+
+def _require_hashmarks_smoke_membership(native: Mapping[str, Any]) -> None:
+    passed = native.get("membership_receipt", {}).get("passed", [])
+    for selector in HASHMARKS_UPGRADE_TESTS:
+        if "::" not in selector:
+            satisfied = any(member.split("::", 1)[0] == selector for member in passed)
+        else:
+            satisfied = any(
+                member == selector or member.startswith(selector + "[") for member in passed
+            )
+        if not satisfied:
+            raise ValueError("Mandatory Hashmarks smoke has no native execution proof")
 
 
 def is_generated_contract_path(path: str) -> bool:
@@ -333,6 +488,25 @@ def require_native_pytest_pass(
     return {node.split("::", 1)[0] for node in selected}
 
 
+def native_changed_paths(name_status: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Project changed and removed members from one native Git diff observation."""
+    tokens = name_status.split("\0")
+    changed: set[str] = set()
+    removed: set[str] = set()
+    cursor = 0
+    while cursor < len(tokens) and tokens[cursor]:
+        status = tokens[cursor]
+        count = 2 if status[0] in {"R", "C"} else 1
+        paths = tokens[cursor + 1 : cursor + 1 + count]
+        if len(paths) != count or any(not path for path in paths):
+            raise ValueError("Git returned incomplete changed-path evidence")
+        changed.update(paths)
+        if status[0] in {"D", "R"}:
+            removed.add(paths[0])
+        cursor += count + 1
+    return tuple(sorted(changed)), tuple(sorted(removed))
+
+
 def validate_merge_proof(
     plan: Mapping[str, Any],
     result: Mapping[str, Any],
@@ -342,6 +516,8 @@ def validate_merge_proof(
     changed_paths: Sequence[str],
     control_base: str | None,
     root: Path | None = None,
+    removed_paths: Sequence[str] = (),
+    observed_hashmarks_upgrade: bool | None = None,
 ) -> None:
     if plan.get("schema_version") != "oh-goon.development-verification/v1":
         raise ValueError("Verification plan schema is unsupported")
@@ -368,14 +544,34 @@ def validate_merge_proof(
         or not set(policy_tests) <= set(plan.get("pytest", []))
     ):
         raise ValueError("Required independent verification-policy protection was omitted")
-    plain_docs = {
-        path
-        for path in changed_paths
-        if root is not None and non_executable_documentation(root, path)
-    }
     evidence = plan.get("evidence", {})
     if not isinstance(evidence, Mapping):
         raise ValueError("Producer evidence has an invalid shape")
+    documentation = _require_documentation_proof(changed_paths, plan, evidence)
+    plain_docs = documentation | ({"LICENSE"} if "LICENSE" in changed_paths else set())
+    hashmarks_upgrade = _independent_hashmarks_upgrade(
+        root,
+        base,
+        changed_paths,
+        evidence,
+        observed_hashmarks_upgrade=observed_hashmarks_upgrade,
+    )
+    if hashmarks_upgrade and (
+        HASHMARKS_UPGRADE_OBLIGATION not in plan.get("obligations", [])
+        or not set(HASHMARKS_UPGRADE_TESTS) <= set(plan.get("pytest", []))
+        or not {"python", "package"} <= set(plan.get("static", []))
+    ):
+        raise ValueError("Mandatory Hashmarks upgrade proof was omitted")
+    recorded_removals = plan.get("removed_paths", [])
+    if (
+        not isinstance(recorded_removals, list)
+        or any(not isinstance(path, str) for path in recorded_removals)
+        or len(recorded_removals) != len(set(recorded_removals))
+        or sorted(recorded_removals) != sorted(removed_paths)
+        or not set(removed_paths) <= set(changed_paths)
+    ):
+        raise ValueError("Removed membership differs from independent native Git evidence")
+    removed = set(removed_paths)
     assets = _independent_documentation_assets(root, changed_paths, evidence) if root else set()
     if assets and DOCUMENTATION_ASSET_OBLIGATION not in plan.get("obligations", []):
         raise ValueError("Bounded documentation-asset policy was not explicitly admitted")
@@ -388,7 +584,10 @@ def validate_merge_proof(
         for path in changed_paths:
             if path not in plain_docs:
                 raise ValueError("Executable inputs cannot claim behavioral NOT_APPLICABLE")
-    if behavior_required and not (plan.get("pytest") or plan.get("frontend")) and not contract_only:
+    behavioral_pytest = behavioral_pytest_targets(
+        plan.get("pytest", []), evidence, set(changed_paths) - plain_docs - removed
+    )
+    if behavior_required and not (behavioral_pytest or plan.get("frontend")) and not contract_only:
         raise ValueError("Executable changes have no behavioral proof")
     if (assets or (behavior_required and not contract_only)) and (
         not isinstance(evidence, Mapping)
@@ -456,6 +655,10 @@ def validate_merge_proof(
         pytest_files = require_native_pytest_pass(
             row.get("native_report", {}), expected_source=plan.get("source_identity")
         )
+        if documentation and DOCUMENTATION_PROOF_TEST not in pytest_files:
+            raise ValueError("Bounded documentation check has no native execution proof")
+        if hashmarks_upgrade:
+            _require_hashmarks_smoke_membership(row.get("native_report", {}))
         if policy_change and not set(policy_tests) <= pytest_files:
             raise ValueError("Required verification-policy tests have no execution proof")
         if pytest_files != {path.split("::", 1)[0] for path in plan.get("pytest", [])}:
@@ -480,11 +683,17 @@ def validate_merge_proof(
             path.endswith(suffix) for suffix in (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
         )
     )
-    if not changed_tests <= executed_files:
+    if not changed_tests - removed <= executed_files:
         raise ValueError("Changed tests have no meaningful execution proof")
     observations = {row.get("changed_path"): row for row in evidence.get("observations", [])}
     for source in changed_paths:
+        # An absent member cannot execute. Git proves only its removal, never
+        # absence of remaining consumers; surviving sources retain their proof.
+        if source in removed:
+            continue
         if is_generated_contract_path(source):
+            continue
+        if hashmarks_upgrade and source in {"backend/pyproject.toml", "backend/uv.lock"}:
             continue
         if is_verification_policy_path(source) and not source.endswith(".py"):
             continue
@@ -517,15 +726,211 @@ def _read(path: Path) -> dict[str, Any]:
     return value
 
 
-def _candidate_producer_identity(root: Path) -> str:
+def _observe_dependency_candidate(
+    root: Path,
+    *,
+    base: str,
+    selected_files: Sequence[str],
+    source_identity: str,
+    producer_identity: str,
+) -> dict[str, Any]:
+    """Establish fresh dependency proof under immutable base admission code."""
+    from oh_goon.integrations.hashmarks import (
+        nominate_changed_verification,
+        require_current_dependency_environment,
+        require_loaded_hashmarks_runtime,
+    )
+    from oh_goon.repository_tooling import development_verification as admission_owner
+    from oh_goon.repository_tooling.release import package_slim as source_owner
+
+    trusted_source = Path(__file__).resolve().parents[1]
+    for owner in (
+        admission_owner,
+        source_owner,
+    ):
+        if owner.__file__ is None or not Path(owner.__file__).resolve().is_relative_to(
+            trusted_source
+        ):
+            raise ValueError("Dependency observer imported code outside its trusted source")
+    for capability in (
+        nominate_changed_verification,
+        require_current_dependency_environment,
+        require_loaded_hashmarks_runtime,
+    ):
+        filename = getsourcefile(capability)
+        if filename is None or not Path(filename).resolve().is_relative_to(trusted_source):
+            raise ValueError("Dependency observer imported code outside its trusted source")
+    if source_owner.canonical_source_identity(root) != source_identity:
+        raise ValueError("Candidate changed before independent dependency observation")
+    require_loaded_hashmarks_runtime(expected_implementation_identity=producer_identity)
+    evidence = nominate_changed_verification(
+        root,
+        ("backend/uv.lock",),
+        dependency_base={
+            "lock": admission_owner._base_lock_bytes(root, base),
+            "base_revision": base,
+            "lock_path": "backend/uv.lock",
+        },
+    )
+    if evidence.get("producer_implementation_identity") != producer_identity or not (
+        admission_owner._bounded_dependency_scope(
+            evidence, base, selected_files=set(selected_files)
+        )
+    ):
+        raise ValueError("Independent dependency chains do not reach executed verifiers")
+    bundle = evidence["dependency_changes"]
+    require_current_dependency_environment(bundle)
+    if source_owner.canonical_source_identity(root) != source_identity:
+        raise ValueError("Candidate changed during independent dependency observation")
+    return {
+        "source_identity": source_identity,
+        "producer_implementation_identity": producer_identity,
+        "base": base,
+        "changed_node_ids": bundle["changed_node_ids"],
+        "before_observation_identity": bundle["before_observation"]["observation_identity"],
+        "after_observation_identity": bundle["after_observation"]["observation_identity"],
+        "metadata": [
+            {
+                key: row[key]
+                for key in (
+                    "node_id",
+                    "metadata_member_revision",
+                    "record_member_revision",
+                )
+            }
+            for row in bundle["metadata"]
+        ],
+        "executed_verifier_files": sorted(set(selected_files)),
+    }
+
+
+def _trusted_dependency_probe(
+    root: Path,
+    *,
+    trusted_root: Path,
+    environment: Path,
+    env: Mapping[str, str],
+    plan: Mapping[str, Any],
+    producer_identity: str,
+) -> dict[str, Any]:
+    """Run base code with the already materialized, candidate-locked producer."""
+    from oh_goon.engine.command import run_command
+
+    request = {
+        "trusted_root": str(trusted_root.resolve(strict=True)),
+        "environment": str(environment.resolve(strict=True)),
+        "root": str(root.resolve(strict=True)),
+        "base": plan["base"],
+        "selected_files": plan["pytest"],
+        "source_identity": plan["source_identity"],
+        "producer_identity": producer_identity,
+    }
+    encoded = json.dumps(request).encode("utf-8")
+    if len(encoded) > 1024 * 1024:
+        raise ValueError("Independent dependency request exceeds its transport bound")
+    # The only source path added is the separately checked-out immutable base.
+    # -I excludes the candidate cwd and ambient Python path configuration. Native
+    # dependency site semantics remain owned by the selected Python environment.
+    bootstrap = (
+        "import contextlib,json,sys\n"
+        "from pathlib import Path\n"
+        "raw=sys.stdin.buffer.read(1048577)\n"
+        "if len(raw)>1048576: raise ValueError('dependency request exceeds bound')\n"
+        "request=json.loads(raw)\n"
+        "trusted=Path(request['trusted_root']).resolve(strict=True)\n"
+        "if Path(sys.prefix).resolve()!=Path(request['environment']): "
+        "raise ValueError('dependency environment mismatch')\n"
+        "sys.path.insert(0,str(trusted/'backend/src'))\n"
+        "from oh_goon.repository_tooling import verification_gate_control as owner\n"
+        "expected=trusted/'backend/src/oh_goon/repository_tooling/verification_gate_control.py'\n"
+        "if Path(owner.__file__).resolve()!=expected: "
+        "raise ValueError('dependency observer origin mismatch')\n"
+        "with contextlib.redirect_stdout(sys.stderr):\n"
+        " receipt=owner._observe_dependency_candidate(Path(request['root']),"
+        "base=request['base'],selected_files=request['selected_files'],"
+        "source_identity=request['source_identity'],"
+        "producer_identity=request['producer_identity'])\n"
+        "print(json.dumps(receipt,sort_keys=True,allow_nan=False))\n"
+    )
+    observed = run_command(
+        str(environment / "bin/python"),
+        "-I",
+        "-c",
+        bootstrap,
+        cwd=environment.parent,
+        env=dict(env),
+        input_data=encoded,
+        timeout=180,
+        max_capture_bytes_per_stream=256 * 1024,
+        require_process_group_quiescence=True,
+        parent_death_signal=True,
+    )
+    if (
+        observed.returncode
+        or observed.stdout_truncated
+        or observed.supervisor is None
+        or observed.supervisor.final_process_group_quiescent is not True
+    ):
+        raise ValueError("Independent dependency observation did not complete")
+    try:
+        receipt = json.loads(observed.stdout)
+    except (ValueError, RecursionError) as exc:
+        raise ValueError(
+            "Independent dependency observation is not a single bounded reply"
+        ) from exc
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("source_identity") != request["source_identity"]
+        or receipt.get("producer_implementation_identity") != producer_identity
+        or receipt.get("base") != request["base"]
+        or receipt.get("executed_verifier_files") != sorted(set(plan["pytest"]))
+        or not receipt.get("changed_node_ids")
+        or not receipt.get("metadata")
+        or not receipt.get("before_observation_identity")
+        or not receipt.get("after_observation_identity")
+    ):
+        raise ValueError("Independent dependency observation differs from admitted authority")
+    nodes, captured = receipt["changed_node_ids"], receipt["metadata"]
+    if (
+        not isinstance(nodes, list)
+        or not 1 <= len(nodes) <= 64
+        or any(not isinstance(node, str) or not node for node in nodes)
+        or len(nodes) != len(set(nodes))
+        or not isinstance(captured, list)
+        or len(captured) != len(nodes)
+        or any(
+            not isinstance(row, Mapping)
+            or any(
+                not isinstance(row.get(key), str) or not row[key]
+                for key in ("node_id", "metadata_member_revision", "record_member_revision")
+            )
+            for row in captured
+        )
+        or {row["node_id"] for row in captured} != set(nodes)
+        or not isinstance(receipt["before_observation_identity"], str)
+        or not isinstance(receipt["after_observation_identity"], str)
+        or receipt["before_observation_identity"] == receipt["after_observation_identity"]
+    ):
+        raise ValueError("Independent dependency observation has inconsistent member bindings")
+    return receipt
+
+
+def _candidate_producer_identity(
+    root: Path,
+    *,
+    dependency_plan: Mapping[str, Any] | None = None,
+    trusted_root: Path | None = None,
+    dependency_receipt: dict[str, Any] | None = None,
+) -> str:
     """Observe the candidate's native locked package using only trusted code.
 
     uv owns dependency selection and artifact verification. Its fresh dependency-only
-    environment is inspected as data; neither candidate Python nor project build hooks
-    run. Hashmarks retains ownership of the implementation identity algorithm.
+    environment supplies the selected producer. Candidate project code and build
+    hooks do not run. Dependency admission runs immutable base code there only
+    when requested. Hashmarks owns the implementation identity algorithm.
     """
     from oh_goon.engine.command import run_command
-    from oh_goon.integrations.hashmarks.runtime_contract import (
+    from oh_goon.integrations.hashmarks import (
         native_producer_implementation_identity,
     )
     from oh_goon.repository_tooling._dependency_lock_portability import (
@@ -649,7 +1054,44 @@ def _candidate_producer_identity(root: Path) -> str:
                     raise ValueError(
                         "Candidate native Hashmarks package exceeds its inspection bound"
                     )
-        return native_producer_implementation_identity(package_root=package)
+        identity = native_producer_implementation_identity(package_root=package)
+        if dependency_plan is not None:
+            if trusted_root is None or dependency_receipt is None:
+                raise ValueError("Independent dependency observation requires trusted authority")
+            if (
+                dependency_plan.get("evidence", {}).get("producer_implementation_identity")
+                != identity
+            ):
+                raise ValueError("Producer implementation differs from trusted admission")
+            dependency_receipt.update(
+                _trusted_dependency_probe(
+                    root,
+                    trusted_root=trusted_root,
+                    environment=environment,
+                    env=env,
+                    plan=dependency_plan,
+                    producer_identity=identity,
+                )
+            )
+        return identity
+
+
+def _require_trusted_hashmarks_api(trusted: Path) -> None:
+    """Bind public composition and the actual imported implementations to base."""
+    from oh_goon.integrations import hashmarks as repository_evidence
+    from oh_goon.integrations.hashmarks import (
+        native_producer_implementation_identity,
+        observe_repository_assets,
+    )
+
+    for owner in (
+        repository_evidence,
+        observe_repository_assets,
+        native_producer_implementation_identity,
+    ):
+        filename = getsourcefile(owner)
+        if filename is None or not Path(filename).resolve().is_relative_to(trusted / "backend/src"):
+            raise ValueError("Controller imported a Hashmarks owner outside its trusted checkout")
 
 
 def main() -> int:
@@ -670,15 +1112,20 @@ def main() -> int:
         # This branch runs only from the immutable base's separately
         # materialized environment. Candidate source is inspected as data.
         from oh_goon.engine import command as command_owner
-        from oh_goon.integrations.hashmarks import development_verification as asset_owner
-        from oh_goon.integrations.hashmarks import runtime_contract as runtime_owner
         from oh_goon.repository_tooling import _dependency_lock_portability as lock_owner
+        from oh_goon.repository_tooling import development_verification as admission_owner
         from oh_goon.repository_tooling.release import package_slim as identity_owner
 
         trusted = args.trusted_root.resolve(strict=True)
         if Path(__file__).resolve().parents[4] != trusted:
             raise ValueError("Controller source differs from the trusted checkout")
-        for module in (command_owner, asset_owner, runtime_owner, lock_owner, identity_owner):
+        _require_trusted_hashmarks_api(trusted)
+        for module in (
+            command_owner,
+            admission_owner,
+            lock_owner,
+            identity_owner,
+        ):
             filename = module.__file__
             if filename is None or not Path(filename).resolve().is_relative_to(
                 trusted / "backend/src"
@@ -714,33 +1161,51 @@ def main() -> int:
         if args.head is None or plan.get("requested_head") != args.head:
             raise ValueError("Independent requested head differs from selected proof")
         git(args.root, "merge-base", "--is-ancestor", args.head, args.candidate)
-        changed_paths = [
-            path
-            for path in git(
+        changed_paths, removed_paths = native_changed_paths(
+            git(
                 args.root,
                 "diff",
-                "--name-only",
-                "--no-renames",
+                "--name-status",
+                "--find-renames",
                 "-z",
                 args.base,
                 args.candidate,
-            ).split("\0")
-            if path
-        ]
+            )
+        )
         if plan.get("source_identity") != canonical_source_identity(args.root):
             raise ValueError("Candidate contents differ from selected proof")
+        dependency_intent, unsupported_intent, hashmarks_upgrade_intent = (
+            admission_owner._backend_dependency_intent(args.root, args.base, tuple(changed_paths))
+        )
+        if unsupported_intent or (dependency_intent and "backend/uv.lock" not in changed_paths):
+            raise ValueError("Dependency declarations lack an admitted native lock scope")
         validate_merge_proof(
             plan,
             _read(args.result),
             candidate=args.candidate,
             base=args.base,
             changed_paths=changed_paths,
+            removed_paths=removed_paths,
             control_base=args.control_base,
             root=args.root,
+            observed_hashmarks_upgrade=hashmarks_upgrade_intent,
         )
         producer = plan.get("evidence", {}).get("producer_implementation_identity")
-        if producer is not None and producer != _candidate_producer_identity(args.root):
-            raise ValueError("Producer implementation differs from trusted admission")
+        dependency_receipt: dict[str, Any] = {}
+        if producer is not None:
+            observed_producer = (
+                _candidate_producer_identity(
+                    args.root,
+                    dependency_plan=plan,
+                    trusted_root=trusted,
+                    dependency_receipt=dependency_receipt,
+                )
+                if "backend/uv.lock" in changed_paths
+                and "hashmarks_upgrade" not in plan.get("evidence", {})
+                else _candidate_producer_identity(args.root)
+            )
+            if producer != observed_producer:
+                raise ValueError("Producer implementation differs from trusted admission")
         if (
             git(args.root, "rev-parse", "HEAD").strip() != args.candidate
             or git(trusted, "rev-parse", "HEAD").strip() != args.base
@@ -755,6 +1220,8 @@ def main() -> int:
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as exc:
         print(f"MERGE UNVERIFIED: {exc}")
         return 1
+    if dependency_receipt:
+        print("DEPENDENCY_REOBSERVED: " + json.dumps(dependency_receipt, sort_keys=True))
     print(
         "MERGE_VERIFIED: exact candidate and all admitted obligations satisfied; daily full is separate"
     )

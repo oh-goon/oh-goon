@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import TypeVar
 
-from oh_goon.integrations.hashmarks.verification_selection import (
+from oh_goon.integrations.hashmarks import (
     VerifiedHashmarksVerificationSelection,
 )
 from oh_goon.repository_tooling._hashmarks_verification_execution_primitives import (
