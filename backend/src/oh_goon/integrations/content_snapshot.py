@@ -285,7 +285,7 @@ def snapshot_host_path(
 def snapshot_identity(path: Path, *, cancel_requested: Cancel = None) -> SnapshotIdentity:
     """Return canonical Hashmarks content identity plus Oh-Goon inventory evidence."""
 
-    from oh_goon.integrations.hashmarks.identity import identify_path
+    from oh_goon.integrations.hashmarks import identify_path
 
     identity = identify_path(path, cancel_requested=cancel_requested)
     return SnapshotIdentity(identity.sha256, identity.byte_count, identity.entry_count)
@@ -300,7 +300,7 @@ def snapshot_identity_with_direct_children(
 ) -> tuple[SnapshotIdentity, dict[str, SnapshotIdentity]]:
     """Strongly verify a Hashmarks Merkle tree and reuse cached direct-child nodes."""
 
-    from oh_goon.integrations.hashmarks.identity import identify_tree_and_children
+    from oh_goon.integrations.hashmarks import identify_tree_and_children
 
     result = identify_tree_and_children(
         path,

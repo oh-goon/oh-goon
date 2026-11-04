@@ -42,6 +42,10 @@ def _linked_verification(
             "coverage_evidence"
         ) not in {"direct-reference", "bounded-indirect-reference"}:
             continue
+        # Shared factory/helper modules are source dependencies, not test targets.
+        # Never execute them as direct pytest selections on a test_* symbol.
+        if str(row["path"]).startswith("backend/tests/factories/"):
+            continue
         nomination = native.verification.nomination(row["path"])
         if validate_verification_nomination(nomination).get("valid") is not True:
             raise ValueError("Hashmarks rejected its linked verifier nomination")

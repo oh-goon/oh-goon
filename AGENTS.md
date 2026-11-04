@@ -108,8 +108,10 @@ for catalog, subject, content, workspace, admission, and physical custody identi
   timeout/retry/resume/recovery, verification-result authority, execution
   provenance, Repository Understanding qualification, certificates, and Game Tape.
 
-Consume supported Hashmarks Python APIs only through
-`backend/src/oh_goon/integrations/hashmarks/`. Select its released dependency
+Consume supported Hashmarks Python APIs only through the explicit public
+`oh_goon.integrations.hashmarks` exports. Its `__all__` is the capability census;
+private integration modules and direct producer imports stay inside that package.
+Select its released dependency
 with `backend/pyproject.toml` and native `uv.lock`; do not vendor, reacquire,
 repackage, or maintain a parallel release/commit/wheel identity. Bind evidence
 compatibility to the implementation identity reported by the loaded runtime.

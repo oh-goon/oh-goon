@@ -246,7 +246,14 @@ def _scope_aliases(
     return aliases, imported
 
 
-def python_semantic_facts(path: Path, *, imported_only: bool = False) -> PythonSemanticFacts:
+def python_semantic_facts(
+    path: Path,
+    *,
+    imported_only: bool = False,
+    tree: ast.Module | None = None,
+    builtin_names: tuple[str, ...] = (),
+    bind_callable_inputs: bool = True,
+) -> PythonSemanticFacts:
     """Project Python semantics without granting comments/private spellings authority.
 
     ``imported_only`` requires a static import binding, including unambiguous
@@ -254,10 +261,14 @@ def python_semantic_facts(path: Path, *, imported_only: bool = False) -> PythonS
     shadow inherited imports. Dynamic imports and arbitrary data flow are not
     inferred. A direct module-local helper call may transport an imported
     argument across one edge; recursive/multihop argument flow is not inferred.
-    Callers selecting this mode must define their supported APIs.
+    Callers selecting this mode must define their supported APIs. Explicit
+    ``builtin_names`` receive the same scope-shadowing rules as imports.
+    ``bind_callable_inputs=False`` leaves callable parameters unqualified,
+    without specializing them from defaults or module-local helper arguments.
     """
 
-    tree = python_ast(path)
+    tree = python_ast(path) if tree is None else tree
+    builtin_bindings: dict[str, str | None] = {name: f"builtins.{name}" for name in builtin_names}
     calls: list[tuple[str, ast.Call]] = []
     references: set[str] = set()
     imports: set[str] = set()
@@ -277,6 +288,8 @@ def python_semantic_facts(path: Path, *, imported_only: bool = False) -> PythonS
         parameters = [*positional, *arguments.kwonlyargs]
         parameters.extend(arg for arg in (arguments.vararg, arguments.kwarg) if arg is not None)
         bindings.update((arg.arg, None) for arg in parameters)
+        if not bind_callable_inputs:
+            return bindings
         defaults = [
             *zip(
                 positional[len(positional) - len(arguments.defaults) :],
@@ -295,12 +308,12 @@ def python_semantic_facts(path: Path, *, imported_only: bool = False) -> PythonS
         return bindings
 
     function_inputs: dict[ast.FunctionDef | ast.AsyncFunctionDef, dict[str, str]] = {}
-    if imported_only:
+    if imported_only and bind_callable_inputs:
         # Native modules may be explicitly passed to a module-local helper
         # (for example cli_start's imported uvicorn delegate). Follow only one
         # direct call edge from imports/defaults, never speculative caller
         # state or recursive argument data flow.
-        module_aliases, _imports = _scope_aliases(tree.body, {}, imported_only=True)
+        module_aliases, _imports = _scope_aliases(tree.body, builtin_bindings, imported_only=True)
         definitions = {
             node.name: node
             for node in tree.body
@@ -454,7 +467,7 @@ def python_semantic_facts(path: Path, *, imported_only: bool = False) -> PythonS
                             class_enclosing=nested_bindings if imported_only else None,
                         )
 
-    inspect_scope(tree.body, {})
+    inspect_scope(tree.body, builtin_bindings)
     return PythonSemanticFacts(
         calls=tuple(calls),
         references=frozenset(references),

@@ -18,6 +18,7 @@ import tempfile
 import tomllib
 from collections.abc import Mapping, Sequence
 from importlib import metadata
+from inspect import getsourcefile
 from pathlib import Path
 from typing import Any
 
@@ -213,7 +214,7 @@ def admitted_documentation_assets(
 def _independent_documentation_assets(
     root: Path, paths: Sequence[str], evidence: Mapping[str, Any]
 ) -> set[str]:
-    from oh_goon.integrations.hashmarks.development_verification import observe_repository_assets
+    from oh_goon.integrations.hashmarks import observe_repository_assets
 
     accepted = admitted_documentation_assets(paths, evidence)
     if not accepted:
@@ -734,17 +735,16 @@ def _observe_dependency_candidate(
     producer_identity: str,
 ) -> dict[str, Any]:
     """Establish fresh dependency proof under immutable base admission code."""
-    from oh_goon.integrations.hashmarks import dependencies as dependency_owner
-    from oh_goon.integrations.hashmarks import development_verification as nomination_owner
-    from oh_goon.integrations.hashmarks import runtime_contract as runtime_owner
+    from oh_goon.integrations.hashmarks import (
+        nominate_changed_verification,
+        require_current_dependency_environment,
+        require_loaded_hashmarks_runtime,
+    )
     from oh_goon.repository_tooling import development_verification as admission_owner
     from oh_goon.repository_tooling.release import package_slim as source_owner
 
     trusted_source = Path(__file__).resolve().parents[1]
     for owner in (
-        dependency_owner,
-        nomination_owner,
-        runtime_owner,
         admission_owner,
         source_owner,
     ):
@@ -752,12 +752,18 @@ def _observe_dependency_candidate(
             trusted_source
         ):
             raise ValueError("Dependency observer imported code outside its trusted source")
+    for capability in (
+        nominate_changed_verification,
+        require_current_dependency_environment,
+        require_loaded_hashmarks_runtime,
+    ):
+        filename = getsourcefile(capability)
+        if filename is None or not Path(filename).resolve().is_relative_to(trusted_source):
+            raise ValueError("Dependency observer imported code outside its trusted source")
     if source_owner.canonical_source_identity(root) != source_identity:
         raise ValueError("Candidate changed before independent dependency observation")
-    runtime_owner.require_loaded_hashmarks_runtime(
-        expected_implementation_identity=producer_identity
-    )
-    evidence = nomination_owner.nominate_changed_verification(
+    require_loaded_hashmarks_runtime(expected_implementation_identity=producer_identity)
+    evidence = nominate_changed_verification(
         root,
         ("backend/uv.lock",),
         dependency_base={
@@ -773,7 +779,7 @@ def _observe_dependency_candidate(
     ):
         raise ValueError("Independent dependency chains do not reach executed verifiers")
     bundle = evidence["dependency_changes"]
-    dependency_owner.require_current_dependency_environment(bundle)
+    require_current_dependency_environment(bundle)
     if source_owner.canonical_source_identity(root) != source_identity:
         raise ValueError("Candidate changed during independent dependency observation")
     return {
@@ -924,7 +930,7 @@ def _candidate_producer_identity(
     when requested. Hashmarks owns the implementation identity algorithm.
     """
     from oh_goon.engine.command import run_command
-    from oh_goon.integrations.hashmarks.runtime_contract import (
+    from oh_goon.integrations.hashmarks import (
         native_producer_implementation_identity,
     )
     from oh_goon.repository_tooling._dependency_lock_portability import (
@@ -1070,6 +1076,24 @@ def _candidate_producer_identity(
         return identity
 
 
+def _require_trusted_hashmarks_api(trusted: Path) -> None:
+    """Bind public composition and the actual imported implementations to base."""
+    from oh_goon.integrations import hashmarks as repository_evidence
+    from oh_goon.integrations.hashmarks import (
+        native_producer_implementation_identity,
+        observe_repository_assets,
+    )
+
+    for owner in (
+        repository_evidence,
+        observe_repository_assets,
+        native_producer_implementation_identity,
+    ):
+        filename = getsourcefile(owner)
+        if filename is None or not Path(filename).resolve().is_relative_to(trusted / "backend/src"):
+            raise ValueError("Controller imported a Hashmarks owner outside its trusted checkout")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, required=True)
@@ -1088,8 +1112,6 @@ def main() -> int:
         # This branch runs only from the immutable base's separately
         # materialized environment. Candidate source is inspected as data.
         from oh_goon.engine import command as command_owner
-        from oh_goon.integrations.hashmarks import development_verification as asset_owner
-        from oh_goon.integrations.hashmarks import runtime_contract as runtime_owner
         from oh_goon.repository_tooling import _dependency_lock_portability as lock_owner
         from oh_goon.repository_tooling import development_verification as admission_owner
         from oh_goon.repository_tooling.release import package_slim as identity_owner
@@ -1097,10 +1119,9 @@ def main() -> int:
         trusted = args.trusted_root.resolve(strict=True)
         if Path(__file__).resolve().parents[4] != trusted:
             raise ValueError("Controller source differs from the trusted checkout")
+        _require_trusted_hashmarks_api(trusted)
         for module in (
             command_owner,
-            asset_owner,
-            runtime_owner,
             admission_owner,
             lock_owner,
             identity_owner,

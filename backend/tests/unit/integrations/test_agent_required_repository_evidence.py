@@ -172,7 +172,7 @@ def test_hashmarks_failure_stops_every_model_harness_before_dispatch(
             sys.executable,
             "-I",
             "-m",
-            "oh_goon.integrations.hashmarks.agent_tools",
+            "oh_goon.integrations.hashmarks",
         )
         assert args[args.index("--tool") + 1] == "task_evidence"
         roots.append(kwargs["cwd"])
@@ -220,7 +220,7 @@ def test_initial_evidence_precedes_every_reasoning_turn_without_reducing_scope(
             sys.executable,
             "-I",
             "-m",
-            "oh_goon.integrations.hashmarks.agent_tools",
+            "oh_goon.integrations.hashmarks",
         ):
             observations.append((args[args.index("--tool") + 1], kwargs["cwd"]))
             result = _native_reply(args, kwargs)
@@ -412,7 +412,7 @@ def test_cancellation_after_initial_observation_prevents_model_disclosure(
             sys.executable,
             "-I",
             "-m",
-            "oh_goon.integrations.hashmarks.agent_tools",
+            "oh_goon.integrations.hashmarks",
         )
         cancelled = True
         return CommandResult(

@@ -17,7 +17,7 @@ from oh_goon.core.models.fleet_observation import (
 )
 from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
 from oh_goon.core.models.target import FleetPlanTarget
-from oh_goon.integrations.hashmarks.dependencies import (
+from oh_goon.integrations.hashmarks import (
     LockedInventoryAssessment,
     assess_locked_dependencies,
 )

@@ -10,7 +10,7 @@ import sys
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
-from oh_goon.integrations.hashmarks.verification_selection import (
+from oh_goon.integrations.hashmarks import (
     load_hashmarks_verification_selection,
 )
 from oh_goon.repository_tooling.hashmarks_verification_execution import (

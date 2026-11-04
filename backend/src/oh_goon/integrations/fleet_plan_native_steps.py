@@ -71,7 +71,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     native_runtime_read_only_mounts,
 )
 from oh_goon.integrations.fleet_plan_secret_redaction import redact_host_secret_text
-from oh_goon.integrations.hashmarks.agent_tools import PreparedAgentEvidence, task_evidence_prompt
+from oh_goon.integrations.hashmarks import PreparedAgentEvidence, task_evidence_prompt
 
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, _StepProcess
@@ -367,7 +367,7 @@ def _prompt(
         sys.executable,
         "-I",
         "-m",
-        "oh_goon.integrations.hashmarks.agent_tools",
+        "oh_goon.integrations.hashmarks",
         "--root",
         str(materialized.root),
         "--state-directory",
@@ -507,7 +507,7 @@ def execute_native_agent_step(
         sys.executable,
         "-I",
         "-m",
-        "oh_goon.integrations.hashmarks.agent_tools",
+        "oh_goon.integrations.hashmarks",
         "--root",
         str(materialized.root),
         "--state-directory",

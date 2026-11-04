@@ -135,7 +135,7 @@ from oh_goon.integrations.fleet_plan_step_output_observation import (
     observed_native_visible_claim,
     observed_step_diagnostic,
 )
-from oh_goon.integrations.hashmarks.agent_tools import (
+from oh_goon.integrations.hashmarks import (
     PreparedAgentEvidence,
     prepare_agent_evidence,
     prompt_observation,
@@ -560,7 +560,7 @@ def _execute_typed_step(
                         sys.executable,
                         "-I",
                         "-m",
-                        "oh_goon.integrations.hashmarks.agent_tools",
+                        "oh_goon.integrations.hashmarks",
                         "--tool",
                         "task_evidence",
                         "--capture-identity",
@@ -1800,7 +1800,7 @@ def prepare_frozen_readonly_skill_search(
                 sys.executable,
                 "-I",
                 "-m",
-                "oh_goon.integrations.hashmarks.agent_tools",
+                "oh_goon.integrations.hashmarks",
                 "--tool",
                 tool_kind,
                 "--capture-identity",

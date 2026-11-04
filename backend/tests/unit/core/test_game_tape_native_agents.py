@@ -214,7 +214,7 @@ def test_retained_native_invocation_is_not_reconstructed_from_current_selection(
 @pytest.mark.parametrize(
     "argv",
     (
-        ("/launch/python3.13", "-m", "oh_goon.integrations.hashmarks.agent_tools"),
+        ("/launch/python3.13", "-m", "oh_goon.integrations.hashmarks"),
         (
             "/launch/python3.13",
             "-m",

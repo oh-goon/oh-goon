@@ -4,7 +4,7 @@ from pathlib import Path
 
 from oh_goon.core.models.fleet_plan_observation_steps import ResolvedDependencyInventoryStep
 from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome
-from oh_goon.integrations.hashmarks.dependencies import observe_locked_dependencies
+from oh_goon.integrations.hashmarks import observe_locked_dependencies
 
 
 def execute_dependency_inventory(

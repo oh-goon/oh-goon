@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 from oh_goon._application_foundation import RuntimeFoundation, _build_local_state_foundation
 from oh_goon.integrations.gitlab_ci_component import GitLabComponentFetcher
 from oh_goon.integrations.gitlab_ci_goon import GitLabCiGoonMigrator
-from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.integrations.hashmarks import require_loaded_hashmarks_runtime
 from oh_goon.runtime.dependency_observations import DependencyObservationStore
 from oh_goon.runtime.dependency_targets import DependencyTargetMaterializationStore
 from oh_goon.runtime.goon_templates import GoonTemplateStore

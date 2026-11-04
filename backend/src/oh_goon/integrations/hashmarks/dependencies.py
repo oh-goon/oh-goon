@@ -694,9 +694,10 @@ def observe_changed_dependency_consumers(
         },
         "truncation": "complete",
     }
-    if result["delta"]["components_added"]:
-        parent = result["delta"]["component_selection_transitions"][0]["added"][0]["node_id"]
-        introduced = set(result["delta"]["components_added"])
+    delta = cast(dict[str, Any], result["delta"])
+    if delta["components_added"]:
+        parent = delta["component_selection_transitions"][0]["added"][0]["node_id"]
+        introduced = set(delta["components_added"])
         nodes = sorted(
             selection["node_id"]
             for selection in selections

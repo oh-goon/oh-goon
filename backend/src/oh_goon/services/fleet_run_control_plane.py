@@ -806,7 +806,7 @@ class FleetRunControlPlane:
         )
         detail = self._journal.read_view().required_run_detail(fleet_run_id)
         try:
-            from oh_goon.integrations.hashmarks.runtime_contract import (
+            from oh_goon.integrations.hashmarks import (
                 loaded_hashmarks_producer_provenance,
             )
 
