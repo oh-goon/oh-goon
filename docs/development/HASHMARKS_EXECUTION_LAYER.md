@@ -206,8 +206,14 @@ execution membership; the trusted-base gate also checks the plan's file set.
 Every changed existing runtime component must have a positive qualified
 consumer-to-verifier chain. The aggregate `consumer_scope` stays incomplete with
 `negative_evidence = "not-admissible"`: a selected chain does not prove complete
-consumer coverage, runtime import closure or repository-wide absence. Unsupported
-component additions, removals or forks, dependency-policy changes, unavailable or
+consumer coverage, runtime import closure or repository-wide absence. A single
+existing replacement may introduce up to 32 unique required selections when native
+path evidence and unconditional runtime edges bind each selection directly to the
+upgraded, imported parent, itself required by an unconditional application-root
+edge. The chain retains both selection identities and the
+parent's qualified source/verifier evidence; it does not invent direct imports of
+the introduced package. Other component additions, removals or forks,
+dependency-policy changes, unavailable or
 mismatched metadata, stale/truncated required delta or consumer observations and
 missing chains remain unverified. A verifier graph's aggregate search may be
 incomplete, truncated or ambiguous while an individual native edge positively
@@ -217,6 +223,14 @@ The CI contract names the additional native lock, Python capability
 and package-build obligations. These nominations retain repository-evidence-only
 authority and enter the existing trusted-base proof protocol; they grant no
 execution authority or producer-identity exception.
+
+The trusted controller independently observes dependency admission while its
+existing candidate-locked native environment is alive. Only immutable base
+admission code runs there; candidate repository source is evidence input. The
+loaded producer must match the admitted identity, and the fresh chains must point
+to actually executed verifier files. Fresh installation metadata and native
+observation identities remain separately proven rather than being relabeled as
+the candidate process's earlier observations.
 
 Documentation images use the same boundary. Hashmarks' native
 `verification.changed_set` projection supplies source-bound content kind, byte
