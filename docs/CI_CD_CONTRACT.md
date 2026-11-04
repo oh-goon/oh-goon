@@ -41,7 +41,12 @@ of ordinary changes.
 A ready PR or merge group checks its effective checkout SHA against its actual
 base. The PR head is recorded separately where it differs. Native Git accounts
 for additions, deletions and both sides of renames; local feedback also includes
-untracked source. Missing required consumer or verifier evidence remains
+untracked source. The same observation retains removed members separately;
+the independent controller derives that membership again from its own Git diff.
+Removed source and tests cannot supply execution receipts. Their removal does
+not claim that no consumers remain: surviving changed sources and tests still
+require their ordinary qualified behavioral proof and applicable static checks.
+Missing required consumer or verifier evidence remains
 `SELECTION_UNVERIFIED`; it never passes as an empty selection or silently launches
 the daily corpus. Governing instructions, workflow/result policy and selector
 changes require the named
@@ -125,12 +130,20 @@ receipts. Invocations without `--report` retain their full JSON stdout for
 existing direct consumers. Neither output mode changes selected checks, their
 result authority or independent validation.
 
+The merge route requests the native batch owner's compact verification report:
+exact selected/passed membership, effective pytest outcomes, source identity and
+native collection remain in the proof. Repeated attempt history, batch commands
+and output captures stay in the existing detailed local receipts rather than
+being copied into the bounded merge transport. Daily and diagnostic callers keep
+the full report by default. Projection never turns a skipped or failed member
+into a pass.
+
 The candidate job emits **MERGE_PROOF_READY** only after its selected checks.
 The required **merge-gate** separately checks out the immutable base controller,
 inspects the candidate as data, and validates the bounded same-run proof artifact.
 It never executes or imports candidate code. Missing, skipped, failed, cancelled,
 stale or mismatched proof cannot qualify. The base control also rejects missing
-owners and changed tests without meaningful execution. Absence of reviewed base
+owners and surviving changed tests without meaningful execution. Absence of reviewed base
 controls is **CUTOVER_UNVERIFIED**. Draft feedback has the distinct nonrequired
 name **draft-feedback** and means **FOCUSED / NOT_FULLY_VERIFIED**.
 

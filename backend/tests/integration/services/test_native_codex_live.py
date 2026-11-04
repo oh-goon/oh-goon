@@ -26,7 +26,44 @@ from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.integrations.agent_native_execution import (
     parse_native_agent_events,
 )
+from oh_goon.integrations.fleet_plan_step_execution import prepare_frozen_readonly_skill_search
+from oh_goon.integrations.hashmarks import agent_tools
+from oh_goon.integrations.hashmarks.__main__ import main as repository_tool_main
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from tests.integration.test_agent01a_frozen_local_search import case as frozen_search_case
+
+
+def test_repository_list_tool_receives_frozen_source_and_capture_without_a_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    handoff, repository, _skill = frozen_search_case(
+        tmp_path,
+        harness="local-model-tools",
+        effects="requested_effects:\n  recipients: [ollama_local]\n  model: fixture-model\n",
+    )
+    captured = (repository / "code.txt").read_bytes()
+    (repository / "code.txt").write_text("changed after capture\n")
+    calls: list[str] = []
+
+    def observe(root: Path, **options: Any) -> dict[str, Any]:
+        assert (root / "repo/code.txt").read_bytes() == captured
+        assert options["tool"] == "list_paths"
+        assert options["query"] is None
+        assert options["capture_identity"] == handoff.source.repository.content_identity
+        calls.append(options["capture_identity"])
+        return {"capture_identity": options["capture_identity"], "paths": ["repo/code.txt"]}
+
+    monkeypatch.setattr(agent_tools, "repository_observation", observe)
+    with prepare_frozen_readonly_skill_search(handoff, tool_kind="list_paths") as (root, tool):
+        assert tool.argv[:4] == (sys.executable, "-I", "-m", "oh_goon.integrations.hashmarks")
+        with monkeypatch.context() as selected:
+            selected.chdir(root)
+            selected.setattr(sys, "argv", list(tool.argv[3:]))
+            assert repository_tool_main() == 0
+        assert json.loads(capsys.readouterr().out)["paths"] == ["repo/code.txt"]
+    assert calls == [handoff.source.repository.content_identity]
+    assert not root.exists()
+
 
 _BROKEN_SOURCE = """def merge_ranges(ranges):
     result = []

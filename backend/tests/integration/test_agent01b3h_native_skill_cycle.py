@@ -8,8 +8,11 @@ UNQUALIFIED, not a fixture PASS or a reason to create another execution path.
 
 from __future__ import annotations
 
+import json
 import sys
 import uuid
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -17,17 +20,50 @@ import oh_goon.integrations.fleet_plan_step_execution as step_execution
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.product_identity import repository_id
+from oh_goon.integrations.hashmarks import agent_tools
+from oh_goon.integrations.hashmarks.__main__ import main as repository_tool_main
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from tests.integration.test_agent01a_frozen_local_search import case as frozen_search_case
 from tests.integration.test_agent01b3c_native_model_review import (
     _native_agent_source,  # imported pytest fixture checks real Hashmarks and real Ollama
     actual_model,  # noqa: F401 - shared native-model fixture
 )
 
-pytestmark = pytest.mark.certification
+
+def test_frozen_skill_search_transports_query_and_capture_through_public_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    query = "--literal [needle]"
+    handoff, repository, skill = frozen_search_case(tmp_path, task="search:" + query)
+    captured = (repository / "code.txt").read_bytes()
+    (repository / "code.txt").write_text("changed after capture\n")
+    (skill / "guide.txt").write_text("changed after capture\n")
+    calls: list[str] = []
+
+    def observe(root: Path, **options: Any) -> dict[str, Any]:
+        assert (root / "repo/code.txt").read_bytes() == captured
+        assert (root / "skill/guide.txt").read_text() == "search is fixed-string\n"
+        assert options["tool"] == "search_text"
+        assert options["query"] == query
+        assert options["capture_identity"] == handoff.source.repository.content_identity
+        calls.append(options["capture_identity"])
+        return {"capture_identity": options["capture_identity"], "query": options["query"]}
+
+    monkeypatch.setattr(agent_tools, "repository_observation", observe)
+    with step_execution.prepare_frozen_readonly_skill_search(handoff) as (root, tool):
+        assert tool.argv[:4] == (sys.executable, "-I", "-m", "oh_goon.integrations.hashmarks")
+        with monkeypatch.context() as selected:
+            selected.chdir(root)
+            selected.setattr(sys, "argv", list(tool.argv[3:]))
+            assert repository_tool_main() == 0
+        assert json.loads(capsys.readouterr().out)["query"] == query
+    assert calls == [handoff.source.repository.content_identity]
+    assert not root.exists()
 
 
+@pytest.mark.certification
 def test_native_skill_and_repository_review_persists_real_evidence(
     actual_model,  # noqa: F811 - pytest fixture injection
     tmp_path,
@@ -105,6 +141,7 @@ def test_native_skill_and_repository_review_persists_real_evidence(
         assert launched_tools == [
             (
                 sys.executable,
+                "-I",
                 "-m",
                 "oh_goon.integrations.hashmarks",
                 "--tool",
