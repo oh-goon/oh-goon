@@ -234,6 +234,11 @@ cannot be acquired, the command still runs with bounded console sanitization and
 an explicit persistent-log-unavailable warning. Logging does not install or repair
 the environment and cannot change a failing command into success.
 
+`HOME` is optional. An explicit `RUN_LOG_DIR` (or `OH_GOON_RUN_LOG_DIR` for
+direct wrapper calls) or `XDG_STATE_HOME` selects persistence without it. With
+no selected root, logging warns and preserves bounded console output and the
+command's exit status. The wrapper leaves `HOME` unset in the child.
+
 Persistent local diagnostics use owned private directories (0700) and files
 (0600), acquired through native no-follow directory handles. Existing shared or
 symlinked locations are refused rather than silently changing permissions. To

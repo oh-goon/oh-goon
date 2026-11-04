@@ -62,6 +62,74 @@ def test_logged_runner_streams_persists_latest_and_preserves_exit(
     assert retained[0].read_bytes() == latest.read_bytes()
 
 
+@pytest.mark.parametrize("selection", ["explicit", "xdg"])
+@pytest.mark.parametrize("returncode", [0, 7])
+def test_logged_runner_without_home_uses_the_selected_log_root(
+    tmp_path: Path, selection: str, returncode: int
+) -> None:
+    if os.name == "nt":
+        pytest.skip("run logging is POSIX shell tooling")
+    env = logging_host_env(tmp_path)
+    env.pop("HOME", None)
+    env.pop("OH_GOON_RUN_LOG_DIR", None)
+    env.pop("XDG_STATE_HOME", None)
+    log_root = tmp_path / "selected-state"
+    env["OH_GOON_RUN_LOG_DIR" if selection == "explicit" else "XDG_STATE_HOME"] = str(
+        log_root
+    )
+    result = subprocess.run(
+        (
+            "bash",
+            str(RUNNER),
+            "test",
+            sys.executable,
+            "-c",
+            "import os; assert 'HOME' not in os.environ; "
+            f"print('owned-child-output'); raise SystemExit({returncode})",
+        ),
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == returncode
+    assert "owned-child-output" in result.stdout
+    logs = list(log_root.rglob("latest.log"))
+    assert len(logs) == 1
+    assert "owned-child-output" in logs[0].read_text()
+
+
+def test_logged_runner_without_home_or_selected_state_keeps_console_and_result(
+    tmp_path: Path,
+) -> None:
+    if os.name == "nt":
+        pytest.skip("run logging is POSIX shell tooling")
+    env = logging_host_env(tmp_path)
+    for name in ("HOME", "OH_GOON_RUN_LOG_DIR", "XDG_STATE_HOME"):
+        env.pop(name, None)
+    result = subprocess.run(
+        (
+            "bash",
+            str(RUNNER),
+            "test",
+            sys.executable,
+            "-c",
+            "import os; assert 'HOME' not in os.environ; "
+            "print('owned-child-output'); raise SystemExit(7)",
+        ),
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 7
+    assert "owned-child-output" in result.stdout
+    assert "Continuing without persistent command logging" in result.stderr
+    assert "Saved run log:" not in result.stdout
+
+
 def test_logged_runner_exposes_output_before_child_completion(tmp_path: Path) -> None:
     if os.name == "nt":
         pytest.skip("run logging is POSIX shell tooling")
@@ -251,8 +319,9 @@ def test_logged_runner_uses_one_live_spinner_line_on_a_real_terminal(
         os.close(master_fd)
 
 
+@pytest.mark.parametrize("home_available", [True, False])
 def test_unavailable_uv_keeps_console_and_child_result_without_persistent_logs(
-    tmp_path: Path,
+    tmp_path: Path, home_available: bool
 ) -> None:
     tools = tmp_path / "tools"
     tools.mkdir()
@@ -263,6 +332,8 @@ def test_unavailable_uv_keeps_console_and_child_result_without_persistent_logs(
     (tools / "sh").symlink_to(shell)
     (tools / "bash").symlink_to(bash)
     env = dict(os.environ, PATH=str(tools), OH_GOON_RUN_LOG_DIR=str(tmp_path / "logs"))
+    if not home_available:
+        env.pop("HOME", None)
     result = subprocess.run(
         (
             "bash",

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_result import CliTermination, record_cli_cleanup_failure
-from oh_goon.core.errors import FleetDomainError
+from oh_goon.core.errors import FleetDomainError, RepositoryEffectQuarantined
 from oh_goon.core.models.agent_providers import (
     DEFAULT_NATIVE_AGENT,
     AgentProviderError,
@@ -271,12 +271,14 @@ def run_ai_command(args: argparse.Namespace) -> int:
             print("Native run interrupted during setup.", file=sys.stderr)
         return 143 if isinstance(interruption, CliTermination) else 130
     except (FleetDomainError, OSError, ValueError, UnicodeError) as exc:
-        code = (
-            "AGENT_PROVIDER_ERROR"
-            if isinstance(exc, AgentProviderError)
-            else "NATIVE_COMMAND_ERROR"
-        )
+        code = type(exc).code if isinstance(exc, FleetDomainError) else "NATIVE_COMMAND_ERROR"
         action = "Review the selected native profile, workspace policy, installed tools and model connection. Inspect retained Run evidence before retrying; this diagnostic grants no repair or replay authority."
+        if isinstance(exc, RepositoryEffectQuarantined):
+            action = (
+                "Preserve the selected state. Run 'oh-goon doctor --runtime' with the "
+                "matching original runtime to inspect recovery findings; settle the "
+                "quarantined effects through its recovery owner before starting new work."
+            )
         if args.as_json:
             print(
                 json.dumps(

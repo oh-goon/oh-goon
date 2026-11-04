@@ -15,6 +15,7 @@ from oh_goon import cli_ai
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli import main
 from oh_goon.cli_parser import build_parser
+from oh_goon.core.errors import FleetPlanInvalid, RepositoryEffectQuarantined
 from oh_goon.core.models.agent_providers import AgentProviderError
 from oh_goon.core.models.game_tape import GameTapeSummary
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
@@ -232,7 +233,7 @@ def test_ai_defaults_to_codex_with_the_selected_signed_in_profile(
         monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     if selection == "interactive":
         assert main([*argv, "--interactive"]) == 2
-        assert "NATIVE_COMMAND_ERROR" in capsys.readouterr().err
+        assert "FLEET_PLAN_INVALID" in capsys.readouterr().err
         native_cli.build.assert_not_called()
         load.assert_called_once_with(native_cli.config)
         terminal.assert_not_called()
@@ -493,6 +494,60 @@ def test_ai_cleanup_does_not_mask_primary_failure(
     native_cli.runtime.shutdown.assert_called_once_with(wait_for_runs=False)
 
 
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize(
+    "failure_type,expected_code",
+    [
+        (RepositoryEffectQuarantined, "REPOSITORY_EFFECT_QUARANTINED"),
+        (FleetPlanInvalid, "FLEET_PLAN_INVALID"),
+        (OSError, "NATIVE_COMMAND_ERROR"),
+        (ValueError, "NATIVE_COMMAND_ERROR"),
+    ],
+)
+def test_ai_admission_refusal_preserves_typed_reason_without_private_payload(
+    native_cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure_type: type[Exception],
+    expected_code: str,
+    as_json: bool,
+) -> None:
+    failure = failure_type("PRIVATE_EXCEPTION_PATH /private/auth/token")
+    failure.add_note("PRIVATE_EXCEPTION_NOTE")
+    monkeypatch.setattr(failure, "code", "PRIVATE_INSTANCE_CODE", raising=False)
+    native_cli.runtime.plans.run_native_agent.side_effect = failure
+
+    assert main([*native_cli.argv, *(["--json"] if as_json else [])]) == 2
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    for private in (
+        "PRIVATE_EXCEPTION_PATH",
+        "/private/auth/token",
+        "PRIVATE_EXCEPTION_NOTE",
+        "PRIVATE_INSTANCE_CODE",
+    ):
+        assert private not in combined
+    if as_json:
+        result = json.loads(captured.out)
+        assert result["schema"] == "oh-goon.native-run-error/v1"
+        assert result["status"] == "error"
+        assert result["code"] == expected_code
+        assert result["_cli"]["exit_code"] == 2
+        assert captured.err == ""
+        action = result["safe_next_action"]
+    else:
+        assert captured.out == ""
+        assert captured.err.startswith(f"{expected_code}: ")
+        action = captured.err
+    if failure_type is RepositoryEffectQuarantined:
+        assert "oh-goon doctor --runtime" in action
+    assert "Durable Run handoff argv:" not in combined
+    native_cli.runtime.runs.wait_for_terminal.assert_not_called()
+    native_cli.runtime.runs.cancel.assert_not_called()
+    native_cli.runtime.shutdown.assert_called_once_with(wait_for_runs=False)
+
+
 @pytest.mark.parametrize(
     "outcome,expected", [(FleetRunOutcome.SUCCESS, 2), (FleetRunOutcome.FAILED, 1)]
 )
@@ -599,7 +654,7 @@ def test_ai_absent_default_catalog_does_not_infer_native_model_connection(
     index = argv.index("--config")
     del argv[index : index + 2]
     assert main(argv) == 2
-    assert "NATIVE_COMMAND_ERROR" in capsys.readouterr().err
+    assert "FLEET_PLAN_INVALID" in capsys.readouterr().err
     lookup.assert_called_once_with(agent or "codex", path=os.environ.get("PATH", ""))
     native_cli.build.assert_not_called()
 
@@ -1146,7 +1201,7 @@ def test_ai_unknown_prior_handoff_rejects_before_catalog_mutation_or_new_run(
     native_cli.runtime.runs.wait_for_terminal.assert_not_called()
     native_cli.runtime.runs.cancel.assert_not_called()
     captured = capsys.readouterr()
-    assert "NATIVE_COMMAND_ERROR" in captured.err
+    assert "RUN_NOT_FOUND" in captured.err
     assert "Durable Run handoff argv:" not in captured.err
     assert not captured.out
 
@@ -1161,7 +1216,7 @@ def test_ai_oversize_prior_handoff_rejects_before_new_admission_or_catalog_mutat
     assert main([*native_cli.argv, "--handoff-from", "prior-run"]) == 2
     native_cli.runtime.plans.run_native_agent.assert_not_called()
     native_cli.runtime.locations.add.assert_not_called()
-    assert "NATIVE_COMMAND_ERROR" in capsys.readouterr().err
+    assert "FLEET_PLAN_INVALID" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
