@@ -5,7 +5,6 @@ import os
 import secrets
 import sqlite3
 import stat
-import sys
 import time
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
@@ -420,6 +419,7 @@ class LocalDatabase:
             connection = self._connect_with_context("explicit offline SQLite backup")
             staged: Path | None = None
             descriptor: int | None = None
+            primary_error: BaseException | None = None
             try:
                 self._require_durable_connection_policy(connection)
                 connection.execute("BEGIN")
@@ -518,8 +518,10 @@ class LocalDatabase:
                                 "inspect offline candidate, never use as runtime authority"
                             ) from cleanup_error
                     raise
+            except BaseException as operation_error:
+                primary_error = operation_error
+                raise
             finally:
-                primary_error = sys.exception()
                 try:
                     try:
                         connection.close()

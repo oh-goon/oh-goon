@@ -208,6 +208,33 @@ def test_stage_cleanup_failure_still_closes_original_snapshot_descriptor(
     assert not list(target.parent.glob(".*.snapshot-tmp"))
 
 
+def test_cleanup_failure_is_not_suppressed_by_a_callers_handled_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backup_descriptors: list[BackupDescriptor],
+) -> None:
+    owner, target = _original_source(tmp_path)
+    native_unlink = Path.unlink
+    caller_error = RuntimeError("earlier caller failure")
+
+    def fail_final_stage_cleanup(path: Path, missing_ok: bool = False) -> None:
+        if path.name.endswith(".snapshot-tmp") and missing_ok:
+            raise OSError(errno.EIO, "injected final staging cleanup fault")
+        native_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_final_stage_cleanup)
+    try:
+        raise caller_error
+    except RuntimeError:
+        with pytest.raises(OSError, match="injected final staging cleanup fault"):
+            owner.export_verified_backup(target)
+
+    assert not getattr(caller_error, "__notes__", ())
+    assert backup_descriptors and all(handle.closed for handle in backup_descriptors)
+    assert target.is_file() and target.stat().st_nlink == 1
+    assert not list(target.parent.glob(".*.snapshot-tmp"))
+
+
 @pytest.mark.parametrize("cleanup_denied", [False, True])
 def test_interrupted_snapshot_closes_sqlite_then_cleans_only_its_sidecar(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup_denied: bool
