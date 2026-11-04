@@ -24,6 +24,7 @@ Start with the current operator and developer guides. The linked owners define b
 
 Use topic guides for current behavior. Specialized deployment and high-security contracts apply when selected; they are not additional startup steps for ordinary Linux/WSL work.
 
+- [Mandatory Hashmarks SSOT requirements](development/OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md) and [canonical execution-lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md) are the separate normative requirement owners. The first owns repository meaning and its public integration API; the second owns the target claimed Run-worker custody lifecycle. Their source crosswalk and bundled-issue traceability preserve the full imported requirements. Target requirements do not establish implemented or qualified behavior.
 - [Architecture](ARCHITECTURE.md) and [current architecture decisions](development/ARCHITECTURE_DECISIONS.md) — execution environments, admission, SQLite transactions, Journal and recovery ownership.
 - [Native engine](development/ENGINE.md), [execution supervisor](development/EXECUTION_SUPERVISOR.md), and [launch ownership](development/LAUNCH_OWNERSHIP.md) — command execution, cancellation and local process lifetime.
 - [Tool authority](development/FROZEN_TOOL_AUTHORITY.md) and [Enforcer receipts](development/ENFORCER_RECEIPTS.md) — selected tool permissions and comparison of recorded execution facts.
@@ -33,6 +34,12 @@ Use topic guides for current behavior. Specialized deployment and high-security 
 - [Complete Python Goon projects](architecture/ADR_PYTHON_GOON_PROJECTS.md) — package-owned projects and independently selected application sources, native environments, captured delivery and pinned Git acquisition.
 
 Retained ADRs explain architectural choices and their original evidence limits. Checkpoint status and historical test results in an ADR describe that source; they do not establish current qualification or select the next development task.
+
+The normative requirements define their own scopes; current architecture and owner
+documents locate implemented behavior and proof. Contributor/operator guides and
+examples follow those owners, and historical material provides context. A lower
+guide cannot redefine an owner, and a target design cannot be advertised as a
+current guarantee. See [documentation anti-drift](development/DOCUMENTATION_ANTI_DRIFT.md).
 
 ## Template and maintainer references
 

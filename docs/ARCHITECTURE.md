@@ -4,6 +4,18 @@
 
 oh-goon is a local-first control plane with one public Python process composition/lifecycle root, one SQLite coordination boundary, one append-only Journal, and domain-specific lifecycle owners. The repository is pre-live: prefer deleting a wrong internal design and updating all callers over preserving compatibility surfaces.
 
+The separate normative owners are the [mandatory Hashmarks SSOT requirements](development/OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
+and [canonical execution-lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md).
+Hashmarks is mandatory for repository intelligence, consumed through the public
+`oh_goon.integrations.hashmarks` API; missing producer precision never authorizes
+a local semantic replacement. The lifecycle requirements strengthen this same
+FleetRun path with isolated worker custody. At present `RunExecutionSupervisor`
+still submits the existing `FleetRunExecution` to a thread pool. The required
+fresh-process/atomic-claim cutover and its qualification belong to
+[HUG-180](https://linear.app/hugloss/issue/HUG-180) and
+[HUG-181](https://linear.app/hugloss/issue/HUG-181); the target diagram in the
+requirements is not a claim that those guarantees already exist.
+
 Selected Agent Steps use this same execution lifecycle and a neutral immutable
 intent with explicit search, bounded model, provider and native workload variants.
 The [Agent Skills guide](AGENT_SKILLS.md) describes captured resources and explicit

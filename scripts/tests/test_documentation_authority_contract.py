@@ -21,6 +21,8 @@ def test_source_navigation_links_resolve_to_current_owners() -> None:
         ROOT / "docs/development/SSOT.md",
         ROOT / "docs/README.md",
         ROOT / "docs/DEVELOPMENT.md",
+        ROOT / "docs/development/OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md",
+        ROOT / "docs/development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md",
         ROOT / "docs/development/CHATGPT_ITERATION.md",
         ROOT / "docs/development/REAL_LIFECYCLE_QA.md",
         ROOT / "docs/AGENT_SKILLS.md",
