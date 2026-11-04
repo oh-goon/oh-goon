@@ -220,10 +220,7 @@ def test_initialized_workflow_executes_and_reads_back_through_fresh_cli_processe
 
 @pytest.mark.parametrize(
     "budgeted",
-    (
-        False,
-        pytest.param(True, marks=(pytest.mark.no_resume, pytest.mark.native_resources)),
-    ),
+    (False, pytest.param(True, marks=pytest.mark.no_resume)),
     ids=("inherited", "whole-run-budget"),
 )
 def test_plural_configuration_runs_actual_applications_concurrently_and_keeps_target_history(
