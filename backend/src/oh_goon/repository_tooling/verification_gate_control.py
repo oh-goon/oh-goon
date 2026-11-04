@@ -271,7 +271,11 @@ def _without_hashmarks_requirement(
     selected = [
         (index, value)
         for index, value in enumerate(dependencies)
-        if isinstance(value, str) and value.startswith("hashmarks @ ")
+        if isinstance(value, str)
+        and (
+            value.startswith("hashmarks @ ")
+            or (value.startswith("hashmarks[") and value.partition("]")[2].startswith(" @ "))
+        )
     ]
     if len(selected) != 1:
         return None

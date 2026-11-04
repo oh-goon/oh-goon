@@ -95,7 +95,10 @@ development-only, ambiguous or bounded-out paths cannot establish this proof.
 
 A Hashmarks-only upgrade has a separate bounded proof route when the parsed
 backend project declaration is unchanged except for its existing mandatory
-direct `hashmarks` requirement. Native uv owns the lock and transitive resolution;
+direct `hashmarks` requirement, including native extras selected on that required
+reference. This compares declaration intent, without interpreting extra names,
+dependency markers or versions. Native uv validates/materializes that intent and
+owns the lock and transitive resolution;
 new transitive components do not require a source-consumer graph prerequisite.
 This route runs focused startup, loaded-producer-identity and native integration
 proof, the existing protected-policy checks, and the native lock, Python
