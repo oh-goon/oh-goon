@@ -502,9 +502,11 @@ _BEFORE_HASHMARKS = (
 _AFTER_HASHMARKS = _BEFORE_HASHMARKS.replace("old.whl", "new.whl")
 
 
-def _hashmarks_upgrade_proof(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def _hashmarks_upgrade_proof(
+    root: Path, *, before: str = _BEFORE_HASHMARKS, after: str = _AFTER_HASHMARKS
+) -> tuple[dict[str, Any], dict[str, Any]]:
     (root / "backend").mkdir()
-    (root / "backend/pyproject.toml").write_text(_BEFORE_HASHMARKS)
+    (root / "backend/pyproject.toml").write_text(before)
     for argv in (
         ("init", "-q"),
         ("add", "backend/pyproject.toml"),
@@ -524,7 +526,7 @@ def _hashmarks_upgrade_proof(root: Path) -> tuple[dict[str, Any], dict[str, Any]
     base = command_owner.run_command(
         "git", "-C", str(root), "rev-parse", "HEAD"
     ).stdout.strip()
-    (root / "backend/pyproject.toml").write_text(_AFTER_HASHMARKS)
+    (root / "backend/pyproject.toml").write_text(after)
     (root / "backend/uv.lock").write_text(
         'version = 1\n[[package]]\nname = "opaque-new-transitive"\nversion = "anything"\n'
     )
@@ -561,6 +563,58 @@ def test_hashmarks_upgrade_uses_native_intent_despite_opaque_lock_transitives(
 ) -> None:
     plan, result = _hashmarks_upgrade_proof(tmp_path)
     _validate_declared(plan, result, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (
+            _BEFORE_HASHMARKS,
+            _BEFORE_HASHMARKS.replace("hashmarks @", "hashmarks[syntax] @"),
+        ),
+        (
+            _BEFORE_HASHMARKS,
+            _AFTER_HASHMARKS.replace("hashmarks @", "hashmarks[syntax] @"),
+        ),
+        (
+            _BEFORE_HASHMARKS.replace("hashmarks @", "hashmarks[syntax] @"),
+            _AFTER_HASHMARKS.replace("hashmarks @", "hashmarks[syntax,mcp] @"),
+        ),
+    ],
+)
+def test_required_hashmarks_extra_intent_keeps_the_existing_bounded_proof(
+    tmp_path: Path, before: str, after: str
+) -> None:
+    plan, result = _hashmarks_upgrade_proof(tmp_path, before=before, after=after)
+    _validate_declared(plan, result, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "fault", ["mixed-intent", "lookalike", "duplicate", "optional"]
+)
+def test_hashmarks_extra_cannot_hide_unrelated_or_optional_dependency_intent(
+    tmp_path: Path, fault: str
+) -> None:
+    after = _AFTER_HASHMARKS.replace("hashmarks @", "hashmarks[syntax] @")
+    plan, result = _hashmarks_upgrade_proof(tmp_path, after=after)
+    if fault == "mixed-intent":
+        after = after.replace("stable>=1", "stable>=2")
+    elif fault == "lookalike":
+        after = after.replace("hashmarks[syntax]", "hashmarks-lookalike[syntax]")
+    elif fault == "duplicate":
+        after = after.replace(
+            '"stable>=1"',
+            '"stable>=1", "hashmarks @ https://example.invalid/other.whl"',
+        )
+    else:
+        after = (
+            '[project]\nname = "proof"\nversion = "1"\ndependencies = ["stable>=1"]\n'
+            "[project.optional-dependencies]\n"
+            'syntax = ["hashmarks[syntax] @ https://example.invalid/new.whl"]\n'
+        )
+    (tmp_path / "backend/pyproject.toml").write_text(after)
+    with pytest.raises(ValueError):
+        _validate_declared(plan, result, tmp_path)
 
 
 @pytest.mark.parametrize(
