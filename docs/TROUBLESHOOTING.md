@@ -61,7 +61,12 @@ Use the Fleet Attention Center. Expand **Technical details** only when needed, f
 
 ## A run looks stuck
 
-Open the current run and cancel it. Execution cancellation terminates the child process group and releases the SQLite execution lease.
+Open the exact current Run and request cancellation through its original owner.
+Inspect the recorded cancellation, process cleanup and terminal outcome;
+accepting the request does not itself prove quiescence or lease release. The
+original lifecycle settles owned work and its exact lease. Unproven cleanup or
+unknown external effects remain unresolved for the existing recovery owner;
+do not force-release a lease, kill a guessed PID or repeat the workload.
 
 For contributor diagnosis:
 

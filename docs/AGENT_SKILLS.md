@@ -10,6 +10,17 @@ The Resolver captures the selected repository and Skill resources, Fleet owns
 admission and sequencing, the existing Step supervisor owns native processes,
 and Game Tape records their outcomes.
 
+Agent workflow execution and campaign phases enter the same FleetRun admission
+and execution owners. The current Run supervisor submits work to a thread
+pool. The [canonical lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+require isolated, claimed Run-worker custody before the existing
+FleetRunExecution → ExecutionSession → target scheduler → Step/Attempt path.
+HUG-180/HUG-181 own that migration and qualification. Native sessions and their
+owned protocol daemons remain subordinate Step resources; Skill text, native
+continuation or campaign policy cannot select another Run route or supply
+execution/recovery authority. See the
+[runtime owner map](development/AGENT_RUNTIME_OWNERS.md#run-custody-and-native-sessions).
+
 The workflow below uses built-in bounded model adapters. The
 [runtime ownership inventory](development/AGENT_RUNTIME_OWNERS.md) maps their
 current call paths and the native coding-agent integration. To run installed
@@ -226,7 +237,13 @@ This installs the mandatory Hashmarks dependency through native uv using
 [`backend/pyproject.toml`](../backend/pyproject.toml) and the committed
 [`backend/uv.lock`](../backend/uv.lock). Hashmarks owns repository identity and
 repository evidence; OH-Goon consumes it through its
-[integration boundary](architecture/hashmarks-oh-goon-authority-boundary.md).
+[public `oh_goon.integrations.hashmarks` API](../backend/src/oh_goon/integrations/hashmarks/__init__.py).
+The API's explicit exports are the capability census; private implementation
+modules are not consumer entry points. The
+[boundary contract](architecture/hashmarks-oh-goon-authority-boundary.md)
+keeps producer meaning distinct from admission, execution custody and results.
+Missing or incomplete producer facts cannot be replaced by Skill instructions,
+model output, consumer heuristics or execution diagnostics.
 Native package-manager failures remain installation failures. An importable
 host package or a test substitute does not replace the locked runtime.
 

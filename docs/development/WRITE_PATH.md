@@ -1,5 +1,14 @@
 # Write path
 
+These are the current effect and transaction owners. Normal Plan/FleetRun
+execution has one admission path, described in the
+[execution boundary](../execution-boundary.md). The required HUG-180/HUG-181
+process-worker custody claim will sit above these unchanged repository-effect
+and Step owners. Existing Direct maintenance operations are not a Plan or Run
+execution shortcut; native session, process exit and Game Tape cannot acquire
+their write authority. The current Run supervisor is thread-based, not proof
+of the required isolated-worker claim.
+
 ## One repository-effect algorithm
 
 `DirectEffectAdmission` owns Direct command identity, safety/quarantine admission, baseline capture, and atomic direct lease + claim. `RepositoryEffectExecution` is the only production owner of physical Direct/Fleet repository-effect semantics after a claim exists.

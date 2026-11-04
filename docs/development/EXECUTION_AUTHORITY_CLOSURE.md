@@ -2,6 +2,37 @@
 
 Oh-Goon's execution rule is strict: **if execution authority cannot be proven, the workload must not start**.
 
+This document describes tool permission, materialization and selected strict
+physical-attempt contracts. These checks share the original Fleet admission
+and execution owners; they are not another Run lifecycle or a requirement to select privileged
+custody for ordinary trusted-local verification. The current owner path is
+`FleetRunControlPlane → RunExecutionSupervisor → FleetRunExecution →
+ExecutionSession → FleetTargetScheduler → Step/Attempt`.
+The supervisor currently submits through a thread pool. The
+[required isolated Run-worker claim](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+is inserted between supervisor submission and `FleetRunExecution` and remains
+HUG-180/HUG-181 implementation/qualification work. A strict executable receipt cannot prove
+that the separate Run-worker custody boundary already exists.
+
+Reusable repository meaning belongs to mandatory Hashmarks through the public
+`oh_goon.integrations.hashmarks` API; private integration modules and producer
+imports stay inside that package. OH-Goon owns capability ceilings, execution
+admission, physical byte custody and results. Native uv/npm retain dependency
+resolution and installation semantics. The source-analysis migration is governed
+by the [SSOT requirements](OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
+and [current Hashmarks handoff](HASHMARKS_EXECUTION_LAYER.md), not an exception
+that lets this tool-policy document authorize a local repository-semantic
+fallback. Unsupported producer facts remain explicit; a native runtime fact
+such as effective shell expansion is not replaced by a source-syntax guess.
+
+Numbered closure sections below retain the history and rationale of strict
+attempt contracts. Their checkpoint measurements, proof counts and release
+claims describe those original sources; they are not qualification of the
+current checkout. Current implementation starts at the
+[logical/materialized authority owner](../../backend/src/oh_goon/integrations/executable_materialization_authority.py),
+[runtime reconciliation](../../backend/src/oh_goon/integrations/fleet_plan_runtime_authority.py)
+and [atomic handoff](../../backend/src/oh_goon/integrations/fleet_plan_atomic_runtime_authority.py).
+
 For canonical repository workloads, requirement discovery and permission are deliberately separate.
 Make/script/npm analysis derives executable **need**; `backend/goon-execution-requirements.json` owns
 only the independent `workload_tool_permissions` ceiling for each derived `make:<target>` owner.
@@ -15,7 +46,7 @@ frontend package resolution, actual Playwright launch owns browser availability,
 `oh-goon-qualification-exec` invocation owns its interpreter-binding proof. The removed npm graph,
 Playwright filesystem and ceremonial qualification preflights must not return under new names.
 
-## Current phase: Promotion-readiness strict tooling child authority closure
+## Logical tool authority
 
 Canonical Steps are validated from project-owned execution source before certification delegation, mutable certification state, workspace preparation, or Fleet Run creation. The closure now follows static Make edges, reached project-owned shell scripts, and reached project-owned npm package-script chains.
 
@@ -57,6 +88,10 @@ For every admitted package-local executable on the strict POSIX runtime, Oh-Goon
 - bounded content identities for the wrapper target, executable target, and provider tree; and
 - revalidation of that immutable receipt immediately before the process-isolation backend is invoked.
 
+These are scoped strict-attempt custody checks on admitted executable bytes,
+not a second npm resolver or an ordinary package-script readiness preflight.
+Normal developer setup and npm script execution still use their native owners.
+
 The provider receipt intentionally hashes only the admitted provider and target, not unrelated dependency trees. A change to an unrelated installed dependency therefore does not create false invalidation, while package-lock/source drift, provider mutation, target mutation, missing bins, retargeting, or dependency-root escape fail closed.
 
 Explicit generated/owned shell Steps also bind every reached owned script byte after the attempt workspace exists. Their derived host executables must already fit the Step's frozen host-tool authority, and package-local children must already exist in the pre-execution logical package authority. Mutation after binding is rejected at the same prelaunch fence.
@@ -73,7 +108,13 @@ For strict Bubblewrap execution, Oh-Goon resolves the exact sandbox workload pat
 
 For remote OpenSandbox execution, protocol v2 reconstructs the exact admitted root/toolchain/workspace, independently resolves and hashes the workload executable and shebang interpreter inside that root, and returns only the independently observable runtime subset. The host compares that observation to its admitted/materialized expectation. Provider identity, runtime-root identity, and materialization identity remain host-owned authority facts and are never trusted merely because the remote side echoes them. Missing or mismatching remote observation fails closed. Once observation has succeeded, timeout/failure results preserve that observation so execution outcome is not confused with authority divergence.
 
-Runtime executable/interpreter identity is deliberately raw SHA-256 of the actual executable bytes. This is distinct from Hashmarks `SnapshotIdentity`, which remains the admitted provider/source identity. The two identities must not be substituted for each other.
+Runtime executable/interpreter identity uses raw SHA-256 of the actual executable
+bytes at the execution boundary. Hashmarks repository/content observation identity states
+what source the producer observed; OH-Goon custody/materialization identities
+bind the exact admitted provider/source bytes transported and executed. These
+facts have different scopes even when they concern related bytes. Neither raw
+SHA-256 equality nor a shared snapshot representation lets one replace the
+other. See the [identity owner map](ARCHITECTURE_DECISIONS.md#git-is-optional-repository-native-metadata-not-source-authority).
 
 **Historical 869 status:** this checkpoint remained pre-exec reconciliation rather than an atomic verification-to-`exec` handoff. The then-next TOCTOU/descriptor closure subsequently landed in 870/873 as documented below. Direct workspace executable symlinks remain fail-closed.
 
@@ -84,7 +125,12 @@ Runtime executable/interpreter identity is deliberately raw SHA-256 of the actua
 
 The phase adds diagnostic `ExecutionAuthorityEconomicsReceipt` evidence so reuse and recomputation are auditable without becoming authority. Exact-870 measurements show provider verification 2→1 and pre-seal raw hashing 2→0 for a standalone executable, and 4→2 / 4→0 for executable+interpreter, while terminal sealed proofs stay 1→1 and 2→2 respectively.
 
-Native qualification also exposed two portability/source-hygiene boundaries now closed in 871: Linux memfd sealing must not depend on CPython exporting every `fcntl.F_SEAL_*` symbol, and Windows MOTW sidecars must never silently enter packageable source. `make init` may remove the latter for developer ergonomics, but source-layout, package construction, and archive identity fail closed if they reappear afterward.
+Native qualification also exposed two portability/source-hygiene boundaries at
+871: Linux memfd sealing must not depend on CPython exporting every
+`fcntl.F_SEAL_*` symbol, and Windows MOTW sidecars must never silently enter
+packageable source. The historical init cleanup is superseded: current repair
+is explicit `make source-transport-clean`. Init, validators and packaging do not
+silently clean source; physical admission fails while contamination remains.
 
 872 closes **F8 / Game Tape / Why-Not diagnostics** for materialization, reconciliation, atomic handoff, economics, and divergence provenance. The next authority work should be driven by measured/native gaps rather than another predeclared authority store.
 
@@ -98,7 +144,11 @@ OpenSandbox protocol v3 performs the equivalent sealed copy inside the private r
 
 Direct workspace executable symlinks remain rejected. Package-local npm `.bin` symlinks continue to use the dedicated 868 provider/lock/materialization proof. A future feature may admit additional symlink forms only with an equally explicit contained-target proof; 870 does not broaden authority.
 
-Native qualification of 869 also exposed two source/fixture boundary regressions that are now guarded here: strict materialization tests must use repositories that actually contain every declared owned script, and canonical initialization removes only disposable Windows MOTW sidecars before source/layout checks can mistake them for authored package members.
+Native qualification of 869 also exposed two source/fixture boundaries: strict
+materialization tests must contain every declared owned script, and transport
+sidecars must not become authored members. Current source-layout admission
+rejects contamination until the explicit transport-clean owner repairs it;
+initialization no longer performs that historical cleanup.
 
 ## 872 F8 Game Tape / Why-Not diagnostics closure
 
@@ -114,20 +164,28 @@ Acceptance requires that Game Tape authority diagnostics are strictly derived: t
 
 The execution-authority identity binds the closed host-tool set, derived host-tool set, provenance, opaque supplement contribution, package-local executable authority, package provenance, unresolved edges, Makefile identity, reached owned-script source identities, and reached `package.json` / `package-lock.json` identities. Changing any analyzed authority source therefore invalidates previous admission evidence even when the resulting tool names happen to remain unchanged.
 
-## Current canonical proof
+## Historical closure cohort
 
-Static admission currently proves:
+The original checkpoint reported:
 
 - **45/45 executable Step host-authority closures**;
 - **0 unresolved project-owned execution edges**;
 - **6 distinct locked package-local executable authorities**.
 
-The six current package-local bins are `depcruise`, `knip`, `playwright`, `tsc`, `vite`, and `vitest`. `playwright` is explicitly disambiguated to direct locked provider `@playwright/test`; the other five are unambiguous from project source and lock evidence.
+That cohort's six bins were `depcruise`, `knip`, `playwright`, `tsc`, `vite`, and
+`vitest`, with `playwright` disambiguated to `@playwright/test`. These counts do
+not establish current closure or enumerate current package authority. The
+actual source, native lock, selected execution policy and exact-source checks
+own that answer.
 
-## Remaining phases
+## Historical follow-up notes
 
-1. **Incremental economics** — cache closure/materialization/reconciliation/atomic-binding analysis only by source/Step/analyzer/materialization/runtime identity; identity mismatch always recomputes.
-2. **Game Tape / Why-Not — CLOSED IN 872** — materialization/runtime/atomic/economics receipts and divergence provenance are exposed as derived operator diagnostics; missing authority is never auto-granted.
+The checkpoint called for identity-bound incremental reuse and recorded the
+872 Game Tape/Why-Not projection work. Those notes do not select another active
+campaign, create a cache owner or grant authority from a historical PASS.
+Current reuse remains expectation/provenance rather than terminal proof;
+diagnostic projections expose original receipts without acquiring their effect,
+admission or result authority.
 
 ## Explicit non-goals
 

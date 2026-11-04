@@ -123,6 +123,15 @@ Does any execution path create `RUN_ADMITTED`, claim an attempt, prepare immutab
 Does any execution purpose select a different owner for the same base repository+Plan admissibility question instead of letting strict modes add proofs to one shared owner?
 Does any active doc turn expected workload outcomes such as test failures into shadow admission policy?
 Does any active doc present tactical containment as the target architecture?
+Does any active doc authorize another FleetRun execution entry path, including local, CI, ML, application or scheduled execution?
+Does it describe the required Run worker as a new Job, runner, queue or scheduler instead of physical custody beneath the original admission?
+Does it advertise isolated-worker custody as implemented before the HUG-180/HUG-181 cutover and qualification, or preserve thread/parent execution as a compatibility fallback afterward?
+Does it let a native harness/session, Schedule trigger or client transport acquire Run lifecycle or recovery authority?
+Does it let worker claim or bootstrap re-admit, re-place, re-resolve or reselect frozen work?
+Does it treat the Hashmarks integration directory as sufficient instead of requiring its public SSOT API, or authorize direct/private-submodule production consumers?
+Does it permit a local repository-intelligence provider, fallback or heuristic when producer evidence is missing, unknown, stale or incomplete?
+Does it confuse repository/content identity with execution-custody/materialization identity, or repository correlation with execution observability?
+Does it make Game Tape, diagnostics, a heartbeat or process exit durable Run authority, or create another owner registry instead of referencing the existing owners?
 Does any active doc preserve a historical five-phase APP model solely because dependency-materialize used to be a Goon?
 Does any internal API, event reader, alias, migration shim, fallback key, architecture grep, or test remain solely to accept or preserve a superseded development-generation shape?
 ```

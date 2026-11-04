@@ -2,6 +2,27 @@
 
 Oh-Goon defaults to the installed Codex CLI for managed coding tasks. Save the trusted local sign-in profile below as `default_native_profile` once, then run tasks without repeating `--agent` or `--profile`. Codex retains authentication, refresh and native session authority. No API key or local model server is needed for that profile. OpenCode, Pi and managed API connections remain explicit choices. Direct OpenAI API connections use API keys.
 
+Native selection resolves before FleetRun admission and remains frozen through
+the original Step/Attempt. CLI and owned-service transports share the same
+FleetRun lifecycle; a native thread, daemon or saved session cannot authorize a
+Run or its recovery. Owned native daemons remain Step resources under the
+original command owner. Readiness of an external server grants no execution
+or process-termination authority.
+
+The current Run supervisor uses a thread pool. The
+[canonical lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+require an isolated, atomically claimed Run worker beneath the same admission
+and above the existing Step/harness owners. HUG-180/HUG-181 own that cutover
+and qualification; no profile selects a second Run path or parent fallback.
+The [runtime owner map](development/AGENT_RUNTIME_OWNERS.md#run-custody-and-native-sessions)
+shows the required chain and current implementation limits.
+
+Repository evidence is mandatory and enters through the public
+[`oh_goon.integrations.hashmarks` API](../backend/src/oh_goon/integrations/hashmarks/__init__.py).
+Hashmarks owns repository meaning and its qualifications; Oh-Goon binds that
+evidence to the admitted Run and owns execution/results. Missing producer
+precision never authorizes native or local repository-intelligence replacement.
+
 ## Set up a native execution profile
 
 `oh-goon agent setup <codex|pi|opencode>` authors one profile in the existing JSON
@@ -570,8 +591,9 @@ disabled features, empty effective MCP catalog, state separation, preflight and 
 cleanup. Native Codex can create an empty reserved `.codex` directory in the
 workspace during setup; the agent cannot create, rename, remove or populate that
 directory. This is a native setup effect, so the profile claims agent-tool
-read-only protection rather than whole-process workspace immutability. Existing
-CLI profiles keep their current execution path.
+read-only protection rather than whole-process workspace immutability.
+CLI and service transports remain choices inside the same Step and FleetRun
+lifecycle.
 
 | Native service | Protocol to qualify |
 | --- | --- |

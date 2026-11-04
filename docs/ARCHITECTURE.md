@@ -16,6 +16,25 @@ fresh-process/atomic-claim cutover and its qualification belong to
 [HUG-181](https://linear.app/hugloss/issue/HUG-181); the target diagram in the
 requirements is not a claim that those guarantees already exist.
 
+Local, CI/CD, scheduled, ML, application and agentic Runs all enter that same
+admission. The required custody chain is:
+
+```text
+FleetRun admission → ExecutionTicket → RunExecutionSupervisor
+  → claimed isolated Run worker → FleetRunExecution → ExecutionSession
+  → FleetTargetScheduler → Step/Attempt → native harness or tool
+
+Hashmarks → public oh_goon.integrations.hashmarks API → Oh-Goon admission/policy
+```
+
+The worker claim changes live physical custody only. It does not re-admit,
+re-place, re-resolve or reselect work. The current thread-owned submission is
+the implementation to replace, not a compatibility mode to keep after cutover.
+Future remote placement or broader concurrency must preserve this lifecycle.
+The [execution boundary](execution-boundary.md) and
+[supervisor owner](development/EXECUTION_SUPERVISOR.md) distinguish current
+behavior from that target.
+
 Selected Agent Steps use this same execution lifecycle and a neutral immutable
 intent with explicit search, bounded model, provider and native workload variants.
 The [Agent Skills guide](AGENT_SKILLS.md) describes captured resources and explicit
@@ -50,8 +69,10 @@ explain their historical designs.
 | Fleet target parallelism | `FleetTargetScheduler` |
 | Fleet live lease + Journal lifecycle mutation | `FleetRunLifecycle` |
 | Fleet orchestration execution | `FleetRunExecution` |
+| live Run submission/lifetime supervision | `RunExecutionSupervisor`; currently thread-based, required claimed-process custody under HUG-180/HUG-181 |
 | Fleet admission policy | `FleetAdmissionPlanner` |
-| Repository metadata observation | `engine/project.py` |
+| repository-intelligence meaning, identity/freshness and correlation | Hashmarks through the public `oh_goon.integrations.hashmarks` API |
+| native project manifest observation / engine policy inputs | `engine/project.py`; not an alternate repository-intelligence owner |
 | user-selected repository path normalization | `core.path_authority.navigation_path` |
 | Repository root traversal | `RepositoryDiscoveryService.git_roots` |
 | Fleet command identity/query/submission | `FleetRunControlPlane` |
@@ -75,7 +96,7 @@ Scout's analytical sidecar is deliberately outside the canonical SQLite coordina
 
 ### Path clarity
 
-Write paths must expose their real owner directly. Fleet admission goes `FleetRunControlPlane -> FleetAdmissionPlanner -> FleetTargetSelector`; `FleetService` never participates in write admission. `ApplicationRuntime.build()` delegates concrete wiring to private `_application_*.py` wiring modules grouped by construction ownership; Fleet/Schedule owners stay explicit rather than hiding constructors inside managers. Schedule advancement is identity-based (`schedule_run_id`) because `ScheduleExecutionStore` owns current state, while its one canonical Fleet Run ID is derived rather than persisted as a second claim. Fleet lifecycle begin/finish derive `fleet_run_id` from the exact `ExecutionSession`. Repository metadata observation is centralized in `engine/project.py`; Git-root traversal policy is centralized in `RepositoryDiscoveryService` with `require_pyproject` explicit. Do not restore pass-through services, cross-service parsing helpers, duplicate filesystem walkers, scheduler-owned execution policy state, generic Workflow owners, or duplicate owner identities.
+Write paths must expose their real owner directly. Fleet admission goes `FleetRunControlPlane -> FleetAdmissionPlanner -> FleetTargetSelector`; `FleetService` never participates in write admission. `ApplicationRuntime.build()` delegates concrete wiring to private `_application_*.py` wiring modules grouped by construction ownership; Fleet/Schedule owners stay explicit rather than hiding constructors inside managers. Schedule advancement is identity-based (`schedule_run_id`) because `ScheduleExecutionStore` owns current state, while each repository target's canonical Fleet Run ID is derived from the occurrence and repository IDs rather than persisted as a second execution claim. Fleet lifecycle begin/finish derive `fleet_run_id` from the exact `ExecutionSession`. Repository metadata observation is centralized in `engine/project.py`; Git-root traversal policy is centralized in `RepositoryDiscoveryService` with `require_pyproject` explicit. Do not restore pass-through services, cross-service parsing helpers, duplicate filesystem walkers, scheduler-owned execution policy state, generic Workflow owners, or duplicate owner identities.
 
 Frontend presentation follows the same rule. Durable Runs review identity is URL-backed state owned at `RunsPage`/`runReviewState`; Game Tape surfaces consume those values rather than mirroring them. Schedule mutations invalidate canonical resources and the read owner reloads them; pages do not issue a second catalog refresh. Page-level browser state belongs to the page owner, not leaf feature components. Ephemeral interaction mechanics remain local and are not promoted into global state.
 
@@ -150,7 +171,7 @@ shared effect path
 
 `CapabilityExecutor` has no durable authority. It performs a concrete runner-kind lookup, invokes the concrete runner through the admitted-request contract, and validates that returned evidence still matches the complete admitted execution envelope: operation ID, Fleet owner, repository, capability, action, and target. There is no `CapabilityAdapterResolver` Protocol or default resolver registry. The canonical `OperationReport` includes `returncode`; `OperationExecution.returncode` is derived from that report so replay can reproduce the exact committed result.
 
-A successful Fleet target keeps the Fleet lease because more targets/terminalization remain. `FleetRunExecution` delegates terminal settlement to `FleetRunLifecycle`, which uses `ExecutionSession.finish` to atomically couple the terminal Fleet fact and lease deletion. The same lifecycle owner coordinates lease + Journal admission/start/cancel/submission-rejection; orchestration services do not duplicate that transaction policy. Worker begin performs the cancellation-vs-`RUN_STARTED` decision inside the exact-owner transaction so cancellation cannot commit between a pre-check and the start fact.
+A successful Fleet target keeps the Fleet lease because more targets/terminalization remain. `FleetRunExecution` delegates terminal settlement to `FleetRunLifecycle`, which uses `ExecutionSession.finish` to atomically couple the terminal Fleet fact and lease deletion. The same lifecycle owner coordinates lease + Journal admission/start/cancel/submission-rejection; orchestration services do not duplicate that transaction policy. The current lifecycle begin performs the cancellation-vs-`RUN_STARTED` decision inside the exact-owner transaction so cancellation cannot commit between a pre-check and the start fact.
 
 ### Exact-owner closure rule
 
@@ -238,7 +259,7 @@ Runtime diagnostics are a separate non-authoritative evidence plane. The compone
 
 ## Game Tape: read-only execution observability
 
-Game Tape is a read-only projection of the exact Fleet plan already admitted for execution. Failure recovery preserves that boundary: Game Tape may explain and navigate to a canonical recovery action, but it never starts work. Runs owns exact-target rerun and executor-placement readmission; Recovery owns uncertain or partially committed repository effects. Live UI refresh advances from backend-owned output cursors and preserves already-visible evidence monotonically, while one bounded canonical run/repository/step failure focus rolls exact errors upward for direct step-evidence drill-down without introducing severity, root-cause, scheduling, or persistence semantics. `goon.yml` resolves to one immutable `ResolvedFleetPlan`, that plan is embedded in `FleetPlanTarget`, the executor consumes it, and one canonical chronological execution-ledger projection orders the durable run lifecycle, admitted-plan, operation-report, and step-execution facts. `FleetRunDetail.game_tape` exposes those same facts through Summary, Flow, Timeline, Play-by-Play, Logs/evidence, Search, and a shared inspector. The ledger is not another persisted event store and cannot write to the journal. Lifecycle meaning, repository/step execution identity, and timing bounds each have one direct owner shared across the views. Summary additionally exposes plan-vs-actual, an execution receipt, safe immutable environment fingerprints, and deterministic bottleneck arithmetic. Historical Run Diff is produced by `compare_game_tapes()` over two canonical Game Tape projections; it compares only debugging facts such as status, duration, commit/branch, command and provenance-source changes rather than introducing a generic diff framework. Search filters the authoritative Game Tape payload directly and creates no index/store. Flow is intentionally graph-like only as a visualization: nodes are not schedulable, edges are not dependencies, and no DAG scheduler/topological semantics exist. Step wall-clock timing is recorded by the execution sequence, while raw stdout/stderr remains transient and historical Game Tape exposes only durable hash/size/line evidence; failed-step navigation uses those durable evidence anchors without reconstructing raw logs. Missing source lines, historical raw logs and tool-version strings remain explicitly unavailable instead of being inferred. Secret or literal values are never copied into the Game Tape projection. See `docs/development/GAME_TAPE.md`.
+Game Tape is a read-only projection of the exact Fleet plan already admitted for execution. Failure recovery preserves that boundary: Game Tape may explain and navigate to a canonical recovery action, but it never starts work. Runs owns exact-target rerun and executor-placement readmission; Recovery owns uncertain or partially committed repository effects. Live UI refresh advances from backend-owned output cursors and preserves already-visible evidence monotonically, while one bounded canonical run/repository/step failure focus rolls exact errors upward for direct step-evidence drill-down without introducing severity, root-cause, scheduling, or persistence semantics. `goon.yml` resolves to one immutable `ResolvedFleetPlan`, that plan is embedded in `FleetPlanTarget`, the executor consumes it, and one canonical chronological execution-ledger projection orders the durable run lifecycle, admitted-plan, operation-report, and step-execution facts. `FleetRunDetail.game_tape` exposes those same facts through Summary, Flow, Timeline, Play-by-Play, Logs/evidence, Search, and a shared inspector. The ledger is not another persisted event store and cannot write to the journal. Lifecycle meaning, repository/step execution identity, and timing bounds each have one direct owner shared across the views. Summary additionally exposes plan-vs-actual, an execution receipt, safe immutable environment fingerprints, and deterministic bottleneck arithmetic. Historical Run Diff is produced by `compare_game_tapes()` over two canonical Game Tape projections; it compares only debugging facts such as status, duration, commit/branch, command and provenance-source changes rather than introducing a generic diff framework. Search filters the canonical read-only Game Tape payload directly and creates no index/store. Flow is intentionally graph-like only as a visualization: nodes are not schedulable, edges are not dependencies, and no DAG scheduler/topological semantics exist. Step wall-clock timing is recorded by the execution sequence, while raw stdout/stderr remains transient and historical Game Tape exposes only durable hash/size/line evidence; failed-step navigation uses those durable evidence anchors without reconstructing raw logs. Missing source lines, historical raw logs and tool-version strings remain explicitly unavailable instead of being inferred. Secret or literal values are never copied into the Game Tape projection. See `docs/development/GAME_TAPE.md`.
 
 ## The Scout: optional cross-run observability
 

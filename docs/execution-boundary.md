@@ -1,6 +1,9 @@
 # Execution boundary
 
-Oh Goon has one executable Plan/Goon interpretation path. Execution families may differ in lifecycle and transport, but they must not own separate resolution, lock verification, admission, or target reconstruction semantics.
+Oh Goon has one executable Plan/Goon interpretation and FleetRun lifecycle.
+Manual, CI/CD, scheduled, agentic, ML and application-source work may select
+different transport, resource and isolation policies. They reuse the same
+resolution, lock verification, admission and execution owners.
 
 ## Canonical flow
 
@@ -17,18 +20,58 @@ ExecutionIdentity
     ↓
 FleetPlanTarget
     ↓
-admission / Enforcer
+Fleet admission / selected Enforcer policy
     ↓
-immediate | queued | scheduled | readmitted
+RUN_ADMITTED + ExecutionTicket
     ↓
-executor
+RunExecutionSupervisor (current thread submission)
     ↓
-Game Tape
+FleetRunExecution → ExecutionSession
+    ↓
+FleetTargetScheduler → Step / Attempt → harness / native tool
+    ↓
+FleetRunLifecycle terminalization / SQLite + Journal
+    ↓
+Game Tape read projection
 ```
 
 `FleetPlanService.prepare_execution_target()` is the production construction boundary for executable `FleetPlanTarget` values. It resolves once, verifies `goon.lock`, verifies the invocation source and preview Plan identity when supplied, and freezes the resulting semantic identity in `ExecutionIdentity`.
 
-A `FleetPlanTarget` is therefore not an authoring request. It is already-resolved execution authority transported toward admission and execution. Production code must not construct another `FleetPlanTarget` from loose Plan/source/digest fields later in the lifecycle.
+A `FleetPlanTarget` transports a resolved execution definition and verified
+source/lock facts toward original Fleet admission. Holding or reconstructing
+that value grants no repository effects. Production code must not construct
+another target from loose Plan/source/digest fields later in the lifecycle.
+
+Immediate, queued, scheduled and placement-readmitted submissions enter this
+same path. A Schedule or native session is not another executable Run owner.
+Native Pi/OpenCode/Codex session semantics remain beneath Step/Attempt.
+
+## Required Run-worker custody boundary
+
+The [canonical execution-lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+strengthen the physical boundary after admission:
+
+```text
+RUN_ADMITTED + ExecutionTicket
+    ↓
+RunExecutionSupervisor
+    ↓
+fresh isolated Run worker → atomic custody claim
+    ↓
+existing FleetRunExecution → ExecutionSession → FleetTargetScheduler
+    ↓
+existing Step / Attempt / harness and terminalization
+```
+
+This is the required target, not an implemented process-custody guarantee.
+`RunExecutionSupervisor` currently submits the admitted callable to a thread
+pool; [HUG-180](https://linear.app/hugloss/issue/HUG-180) owns replacement of that
+physical submission boundary and [HUG-181](https://linear.app/hugloss/issue/HUG-181)
+owns its failure/drain qualification. The worker claim transfers only live
+execution custody: it cannot re-admit, re-place, re-reserve capacity, re-resolve
+the Plan or reselect repository work. The old thread route must be removed at
+cutover; no local, CI, Schedule, ML, agent or fallback route survives beside it.
+SQLite/Journal and existing lifecycle owners retain durable Run truth.
 
 ## Identity ownership
 
@@ -40,9 +83,20 @@ A `FleetPlanTarget` is therefore not an authoring request. It is already-resolve
 
 `FleetPlanTarget` recomputes the canonical semantic lock digest during model validation. A target reconstructed from durable data therefore rejects an `ExecutionIdentity` that cannot describe its embedded resolved Plan.
 
+Repository/content observation identity is supplied by mandatory Hashmarks
+through the public `oh_goon.integrations.hashmarks` API. OH-Goon's admitted
+source and workspace/materialization identities bind the exact bytes frozen,
+transported and executed; they prove different scoped facts. Neither replaces
+the semantic Plan identity, nor may consumer-local paths or hashes recreate a
+Hashmarks-owned repository fact. See the [Hashmarks SSOT requirements](development/OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md#35-ssot-is-scoped-by-semantic-fact-scope-and-generation).
+
 ## Schedule boundary
 
 A Schedule owns timing and repository target selection. It transports one already-verified `FleetPlanTarget` as `target`.
+
+Each explicit repository target is admitted through the same Fleet owners and
+retains its own Run. Timing and occurrence bookkeeping cannot bypass admission
+or become a Schedule-specific worker lifecycle.
 
 A Schedule must not persist duplicate sibling copies of:
 
@@ -59,6 +113,11 @@ Durable Fleet intent serializes the complete immutable operation target. Queuein
 Executor placement readmission preserves the exact parent target and capability. A changed Plan/Goon definition requires a new preparation/admission path and a new execution identity; readmission is not re-resolution.
 
 Cancellation, placement changes and retries are lifecycle facts around the admitted target. They do not mutate the frozen execution definition.
+
+Producer evidence and logical membership are likewise frozen before execution.
+Revalidation can reject source drift; it cannot silently replace the current
+Run's selected work. New producer observations require the appropriate new
+admission rather than a worker-local discovery path.
 
 ## Non-negotiable invariants
 

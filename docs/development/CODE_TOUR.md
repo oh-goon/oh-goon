@@ -16,6 +16,8 @@ api/routes/fleet_runs.py
        one owner for Fleet lease + Journal admission/start/cancel/finish
   -> runtime/execution/coordinator.py
        exact lease primitives under caller-owned lifecycle transactions
+  -> runtime/execution/run_supervisor.py
+       submit the admitted ticket to the current thread executor
   -> services/fleet_run_execution.py
        orchestration only; delegates lifecycle mutations
   -> services/fleet_target_scheduler.py
@@ -29,9 +31,18 @@ api/routes/fleet_runs.py
        owner-atomic canonical evidence / unresolved coordination
 ```
 
-`FleetService` is read-only snapshot projection and is deliberately absent from this write path. There is no `FleetCapabilityAdmission` pass-through. Repository metadata used by selectors comes from `engine/project.py`.
+`FleetService` is read-only snapshot projection and is deliberately absent from this write path. There is no `FleetCapabilityAdmission` pass-through. Native manifest/policy observations come from `engine/project.py`; repository-intelligence meaning comes through the public Hashmarks boundary below.
 
 `FleetTargetScheduler` must not grow effect-state logic. `RepositoryEffectExecution` is the one owner of claim → fence → effect-start → runner → settlement/interruption.
+
+All local, CI/CD, scheduled, ML, application and agentic Runs use that path.
+[The required worker custody boundary](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+under HUG-180/HUG-181 inserts a claimed isolated process between the supervisor
+and `FleetRunExecution`. Existing ticket activation is not that new custody
+claim. The worker will consume frozen admitted facts without another admission,
+placement, Plan resolution or repository selection. The
+[supervisor owner](EXECUTION_SUPERVISOR.md) describes current behavior and the
+required cutover; no thread/parent fallback is a supported target mode.
 
 ## Direct write path
 
@@ -49,6 +60,8 @@ CLI / direct service caller
 ```
 
 `DirectEffectAdmission` is a real boundary because command identity/safety/lease admission differs from physical effect execution. Do not turn it into a pass-through wrapper, and do not move fence/start/runner/settlement logic into it. Also do not restore `DirectOperationService` merely to preserve the former file boundary.
+
+These Direct maintenance operations are not an alternate Plan/FleetRun route.
 
 ## Execution ownership
 
@@ -98,7 +111,8 @@ There is no `core/run_transitions.py`; do not recreate a status table beside the
 
 ## Repository discovery/traversal ownership
 
-- `engine/project.py` — one pyproject/TOML/Python/dependency metadata observation implementation shared by selectors and product projections.
+- `engine/project.py` — native manifest/Python declaration observation and engine policy inputs shared by existing consumers; not an alternate repository-intelligence provider.
+- [public `oh_goon.integrations.hashmarks`](../../backend/src/oh_goon/integrations/hashmarks/__init__.py) — mandatory consumption boundary for producer-owned repository identity/freshness, relationships, verification selection and source correlation. Missing precision remains incomplete or receives conservative policy; it cannot invoke a local semantic replacement.
 - `services/repository_discovery.py::RepositoryDiscoveryService.git_roots` — one Git-root/depth/pruning traversal policy; `require_pyproject` makes discovery-vs-migration intent explicit.
 - `services/migration.py` — migration classification only; no second `os.walk`.
 
@@ -118,7 +132,7 @@ Direct/Fleet origin is provenance only.
 - `runtime/schedule_definitions.py` — caller-owned `schedule_id`, immutable definition `generation_id`, version-bound replay-safe replace/delete, and active-execution deletion guard.
 - `services/schedule_admission.py` — manual/scheduled one-cut definition + latest execution + due decision + Runtime Safety Cut observation, then one immutable `ScheduledFleetRunIntent`.
 - `runtime/schedule_executions.py` — structural Schedule execution persistence + record-version CAS.
-- `services/schedule_execution.py` — starts/observes exactly one deterministic Fleet Run per `schedule_run_id` and terminalizes the Schedule from canonical Fleet evidence.
+- `services/schedule_execution.py` — admits/observes one deterministic FleetRun per occurrence/repository pair and settles the occurrence from canonical Fleet evidence. It owns no repository Step execution or separate worker.
 - `services/schedule_timing.py` — wall-clock interval ownership only.
 - `runtime/schedule_scheduler.py::ScheduleScheduler` — process-local periodic invocation/lifetime only.
 
@@ -130,8 +144,8 @@ The product owner is `services/schedules.py::ScheduleService`: one Schedule sele
 - `domain/concurrency/MutationController.ts` — write admission + causal revision only; no write supersession identity.
 - `app/api/httpTransport.ts` — raw fetch, timeout, GET retry and abortable retry waits.
 - `app/api/mutationTransport.ts` — write diagnostics/result classification.
-- `domain/api/generated/operations.ts` + `validators.ts` — stable OpenAPI-owned facades for operation facts and runtime decoding; large generated type/schema/validator bodies live in bounded deterministic generated shards while component validators stay internal.
-- `app/createApiClient.ts` — readable frontend API mapping and argument shaping only; no route/method/schema declarations.
+- [`generated/frontend/`](../../generated/frontend/) — backend OpenAPI-derived contracts and validators; authored React consumes this generated owner without duplicating endpoint or schema facts.
+- [`app/createApiClient.ts`](../../frontend/src/app/createApiClient.ts) — readable frontend API mapping and argument shaping only; no route/method/schema declarations.
 - `domain/identity/commandIdentity.ts` — caller-generated Fleet/Schedule run IDs.
 - `app/pages/runReviewState.ts` + `RunsPage.tsx` — one owner for durable Run-review URL/presentation identity; Game Tape, Logs, Flow and Run History are controlled consumers.
 - `app/pages/OverviewPage.tsx` — owner of Overview timeline URL/query state; the timeline grid only emits view-state changes.

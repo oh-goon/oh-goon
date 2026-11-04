@@ -109,3 +109,23 @@ OCI/Kubernetes detail is therefore not the introductory authoring model. `python
 ## Resolution is exact
 
 Authoring simplicity does not weaken execution identity. Backend resolution produces stable Step identities, exact argv, resolved inputs, requirements, provenance, execution environment and artifact digests. `goon.lock`, admission, execution and Game Tape consume that resolved truth; the browser renders it rather than inventing another model.
+
+## One admitted execution lifecycle
+
+Plan/Goon authoring defines no process-worker mode or independent scheduler.
+Manual, CI/CD, scheduled, agentic, ML and independent application-source work
+enters the same FleetRun admission, `ExecutionTicket`, `RunExecutionSupervisor`,
+`FleetRunExecution`, `ExecutionSession` and Step/Attempt path. A selected
+application is captured source for that Run, not permission to manufacture a
+repository-free execution subject. Native harnesses own session behavior below
+Step/Attempt; they do not own Run identity or recovery.
+
+The supervisor currently submits through a thread pool. The
+[canonical lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+require a fresh isolated Run worker and atomic custody claim before the existing
+execution path. That physical boundary remains HUG-180/HUG-181 implementation
+and qualification work. It must not add a second Plan resolver, Job model,
+Schedule worker, agent runner, thread/process mode or parent fallback. Frozen
+Plan and repository-evidence membership travel unchanged; drift requires refusal
+or a new admission rather than worker-side reselection. See the
+[execution boundary](../execution-boundary.md).

@@ -6,6 +6,36 @@ Fleet and Step lifecycle. Current operator behavior is documented in [Agent Skil
 and [Agent providers](../AGENT_PROVIDERS.md). The [contributor contract](../../AGENTS.md)
 and [Hashmarks handoff](HASHMARKS_EXECUTION_LAYER.md) retain their authority.
 
+## Run custody and native sessions
+
+Agent CLI, Plan and campaign ingress reuse the same FleetRun admission,
+ExecutionTicket, RunExecutionSupervisor, FleetRunExecution and Step/Attempt
+owners. The current supervisor submits the admitted Run to a thread pool.
+The [canonical lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+require the following custody boundary beneath that same admission:
+
+```text
+FleetRun admission → ExecutionTicket → RunExecutionSupervisor
+  → isolated Run worker → atomic custody claim → FleetRunExecution
+  → ExecutionSession → FleetTargetScheduler → Step/Attempt → harness
+```
+
+The process cutover and its failure qualification remain HUG-180/HUG-181 work;
+this diagram is a requirement, not implemented worker support. Native profile,
+CLI/service transport, session, resume and compaction choices remain below
+Step/Attempt. An owned Codex app-server, OpenCode CLI server or inference relay
+is an admitted Step resource under the original command owner, never another
+Run worker or recovery authority. An operator-owned server is not adopted by
+readiness. Local, scheduled, CI, ML and agent callers cannot gain an alternate
+Run route, parent-execution fallback or native-session-derived effect authority.
+
+Hashmarks repository meaning enters through the public
+[`oh_goon.integrations.hashmarks` API](../../backend/src/oh_goon/integrations/hashmarks/__init__.py).
+Its exports are the capability census; private modules implement that boundary.
+Missing, stale or incomplete producer facts remain qualified or cause existing
+conservative policy/refusal. Neither a native session nor an execution diagnostic
+may reconstruct the missing repository meaning.
+
 ## Two different loops
 
 Oh-Goon owns the outer workflow. Findings can lead to adjudication and a
@@ -57,6 +87,32 @@ Standard-local execution supervises host processes and makes no kernel-isolation
 deep-custody claim. Ordinary Bubblewrap profiles enforce shared-kernel namespaces,
 explicit filesystem scope and host/external network denial. Selected strict/native qualification remains a separate workload
 contract. See the [execution-first decision](../architecture/ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md).
+
+### Selection and capability admission
+
+The [HUG-24 selection review](https://linear.app/hugloss/issue/HUG-24)
+rechecked [source `28f4c41b`](https://github.com/oh-goon/oh-goon/commit/28f4c41bdf11fe17bac00a1860d98645e73b489e)
+against SWAP-01–03/06–07, SEC-06, T24/T29 and D04/D14. Disposition:
+**LEAVE ALONE** the existing selection and refusal owners. The
+[CLI resolver](../../backend/src/oh_goon/cli_ai.py) consumes one selected catalog,
+honors the saved default or explicit profile, freezes native intent and checks
+compatibility before application state. The
+[run.yml model](../../backend/src/oh_goon/core/models/run_configuration.py) and
+[CLI projection](../../backend/src/oh_goon/cli_configuration.py) carry explicit
+implementation/profile selection to that same resolver; native model overrides
+and conflicting source/selection shapes refuse before their associated effects.
+
+The passive [harness contract](../../backend/src/oh_goon/core/agent_harness_contract.py)
+rejects missing required capabilities and reports unavailable optional ones;
+these are data-compatibility facts, not native security qualification. The
+[native receiver](../../backend/src/oh_goon/integrations/fleet_plan_native_steps.py)
+checks transported selection, protected-mode, platform and backend authority.
+OpenCode's readiness client refuses protected execution before submission,
+including after a successful readiness exchange. Native sign-in/configuration
+remain native-owned. No new resolver, capability store, authentication copy,
+implicit fallback or runtime/test deletion is justified by this review.
+Portable selection/refusal proof does not qualify installed tool/store isolation,
+real-account continuity, other hosts or the future Run-worker cutover.
 
 ## Bounded authority census
 
@@ -244,7 +300,7 @@ capability evidence. Ordinary execution gains no strict qualification prerequisi
 | Deadlines and cancellation | The original Step runner supervises every command. Native Agent timeout includes producer preparation and the complete native conversation. Bounded built-in Agents without repair execution limits retain per-command timeouts; repair adds shared Step/campaign deadlines. Unsupported combinations with a separate admitted watchdog reject before work. |
 | Failure translation | [Step dispatch](../../backend/src/oh_goon/integrations/fleet_plan_step_execution.py) propagates cancellation through the original operation lifecycle and converts timeout/output-limit exceptions to bounded failure outcomes. Canonical `PlanStepSettlementEvidence` retains `SUCCESS`, `FAILED`, `CANCELLED`, `TIMED_OUT`, `OUTPUT_LIMITED`, `AUTHORITY_LOST`, `INCOMPLETE` or `SKIPPED`, separately from `VERIFIED`, `UNVERIFIED` or `UNAVAILABLE` cleanup and the observed return code. Local model/read failures can become contract failures; [provider execution](../../backend/src/oh_goon/integrations/agent_review_execution.py) preserves nonzero child results and validates output with typed acceptors. Malformed or misbound claims are rejected; zero process exit alone cannot establish successful verification. |
 | Outer continuation | [AgentReviewRepairCampaign](../../backend/src/oh_goon/services/fleet_plan_repair.py) and [AgentRepairContext](../../backend/src/oh_goon/core/models/agent_repair.py) bound linked phase Runs and fresh-candidate capture. Each Run retains its own result. The invocation selects work; canonical Journal campaign facts retain intent, exact phase linkage and advancement/terminal decisions. Reopening evidence never automatically resumes a campaign, and rerun/readmission cannot inherit repair limits. |
-| Durable evidence | Stream evidence retains hashes, byte counts and line counts. Typed review/adjudication records, bounded native event summaries and actual standard-isolation receipts persist separately. Initial Hashmarks packets are included in transient supervised Step output; there is no durable raw producer packet or model/tool transcript. [Live output](../../backend/src/oh_goon/runtime/game_tape_live_output.py) is bounded process-local state, and [Hashmarks preparation](../../backend/src/oh_goon/integrations/hashmarks/agent_tools.py) owns disposable scratch. Safe native control failures also use the existing private rotating [diagnostic sink](../../backend/src/oh_goon/runtime/diagnostics.py), with Run/repository/Step/attempt correlation and frame-only redacted owner tracebacks; this supporting evidence survives process shutdown without retaining private protocol or replacing journal truth. |
+| Durable evidence | Stream evidence retains hashes, byte counts and line counts. Typed review/adjudication records, bounded native event summaries and actual standard-isolation receipts persist separately. Initial Hashmarks packets are included in transient supervised Step output; there is no durable raw producer packet or model/tool transcript. [Live output](../../backend/src/oh_goon/runtime/game_tape_live_output.py) is bounded process-local state. Hashmarks preparation scratch belongs to the private implementation beneath the [public API](../../backend/src/oh_goon/integrations/hashmarks/__init__.py). Safe native control failures also use the existing private rotating [diagnostic sink](../../backend/src/oh_goon/runtime/diagnostics.py), with Run/repository/Step/attempt correlation and frame-only redacted owner tracebacks; this supporting evidence survives process shutdown without retaining private protocol or replacing journal truth. |
 
 The byte/action limits above describe this inspected implementation. They are not
 portable native-agent capabilities or a second configuration owner. Source owners
