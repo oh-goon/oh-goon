@@ -84,4 +84,31 @@ with os.scandir(path) as entries:
 print("Native SDK overlay identity, emptiness and read-only view verified")
 PY
 fi
-"${selected_command[@]}"
+selected_pid=
+requested_signal=
+requested_status=0
+forward_selected_signal() {
+  requested_signal=$1
+  requested_status=$2
+  if [[ -n "$selected_pid" ]]; then
+    kill -s "$requested_signal" -- "-$selected_pid" 2>/dev/null || true
+  fi
+}
+trap 'forward_selected_signal INT 130' INT
+trap 'forward_selected_signal TERM 143' TERM
+# Native Bash job control preserves INT for the asynchronous command and owns
+# its process group. Native wait can then receive entry-process cancellation.
+set -m
+"${selected_command[@]}" &
+selected_pid=$!
+set +m
+if ((requested_status)); then
+  forward_selected_signal "$requested_signal" "$requested_status"
+fi
+while :; do
+  if wait -f "$selected_pid"; then selected_status=0; else selected_status=$?; fi
+  # A trapped signal interrupts wait before the selected command has settled.
+  if ! kill -0 "$selected_pid" 2>/dev/null; then break; fi
+done
+if ((requested_status)); then exit "$requested_status"; fi
+exit "$selected_status"

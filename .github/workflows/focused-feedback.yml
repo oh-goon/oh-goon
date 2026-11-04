@@ -76,7 +76,7 @@ jobs:
           if [ "$NATIVE_RESOURCES_NEEDED" = true ]; then
             native_host=(bash scripts/ci_native_runtime.sh --native-resources-needed true --)
           fi
-          "${native_host[@]}" bash scripts/development_test_resources.sh \
+          exec "${native_host[@]}" bash scripts/development_test_resources.sh \
             uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
             --qualified --focused --fail-fast --next-check "$NEXT_CHECK" --show-output \
             --granularity tests --workers 1 --batch-size 64 \
