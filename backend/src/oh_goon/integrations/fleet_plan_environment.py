@@ -10,6 +10,7 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedAgentStep,
     ResolvedGitStep,
     ResolvedPlanStep,
+    ResolvedProviderAgentWorkload,
 )
 from oh_goon.core.models.fleet_plan_values import (
     HostEnvironmentPart,
@@ -126,11 +127,7 @@ def step_host_environment_names(step: ResolvedPlanStep) -> tuple[str, ...]:
         connection = None
         if step.workload.harness == "native":
             connection = step.workload.native_agent.connection
-        elif step.workload.harness in (
-            "provider-review",
-            "provider-adjudicate",
-            "provider-proposal",
-        ):
+        elif isinstance(step.workload, ResolvedProviderAgentWorkload):
             connection = step.workload.connection
         if connection is not None:
             provider = connection.provider

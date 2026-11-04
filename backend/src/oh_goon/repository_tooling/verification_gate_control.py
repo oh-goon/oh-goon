@@ -333,6 +333,25 @@ def require_native_pytest_pass(
     return {node.split("::", 1)[0] for node in selected}
 
 
+def native_changed_paths(name_status: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Project changed and removed members from one native Git diff observation."""
+    tokens = name_status.split("\0")
+    changed: set[str] = set()
+    removed: set[str] = set()
+    cursor = 0
+    while cursor < len(tokens) and tokens[cursor]:
+        status = tokens[cursor]
+        count = 2 if status[0] in {"R", "C"} else 1
+        paths = tokens[cursor + 1 : cursor + 1 + count]
+        if len(paths) != count or any(not path for path in paths):
+            raise ValueError("Git returned incomplete changed-path evidence")
+        changed.update(paths)
+        if status[0] in {"D", "R"}:
+            removed.add(paths[0])
+        cursor += count + 1
+    return tuple(sorted(changed)), tuple(sorted(removed))
+
+
 def validate_merge_proof(
     plan: Mapping[str, Any],
     result: Mapping[str, Any],
@@ -342,6 +361,7 @@ def validate_merge_proof(
     changed_paths: Sequence[str],
     control_base: str | None,
     root: Path | None = None,
+    removed_paths: Sequence[str] = (),
 ) -> None:
     if plan.get("schema_version") != "oh-goon.development-verification/v1":
         raise ValueError("Verification plan schema is unsupported")
@@ -376,6 +396,16 @@ def validate_merge_proof(
     evidence = plan.get("evidence", {})
     if not isinstance(evidence, Mapping):
         raise ValueError("Producer evidence has an invalid shape")
+    recorded_removals = plan.get("removed_paths", [])
+    if (
+        not isinstance(recorded_removals, list)
+        or any(not isinstance(path, str) for path in recorded_removals)
+        or len(recorded_removals) != len(set(recorded_removals))
+        or sorted(recorded_removals) != sorted(removed_paths)
+        or not set(removed_paths) <= set(changed_paths)
+    ):
+        raise ValueError("Removed membership differs from independent native Git evidence")
+    removed = set(removed_paths)
     assets = _independent_documentation_assets(root, changed_paths, evidence) if root else set()
     if assets and DOCUMENTATION_ASSET_OBLIGATION not in plan.get("obligations", []):
         raise ValueError("Bounded documentation-asset policy was not explicitly admitted")
@@ -480,10 +510,14 @@ def validate_merge_proof(
             path.endswith(suffix) for suffix in (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
         )
     )
-    if not changed_tests <= executed_files:
+    if not changed_tests - removed <= executed_files:
         raise ValueError("Changed tests have no meaningful execution proof")
     observations = {row.get("changed_path"): row for row in evidence.get("observations", [])}
     for source in changed_paths:
+        # An absent member cannot execute. Git proves only its removal, never
+        # absence of remaining consumers; surviving sources retain their proof.
+        if source in removed:
+            continue
         if is_generated_contract_path(source):
             continue
         if is_verification_policy_path(source) and not source.endswith(".py"):
@@ -932,19 +966,17 @@ def main() -> int:
         if args.head is None or plan.get("requested_head") != args.head:
             raise ValueError("Independent requested head differs from selected proof")
         git(args.root, "merge-base", "--is-ancestor", args.head, args.candidate)
-        changed_paths = [
-            path
-            for path in git(
+        changed_paths, removed_paths = native_changed_paths(
+            git(
                 args.root,
                 "diff",
-                "--name-only",
-                "--no-renames",
+                "--name-status",
+                "--find-renames",
                 "-z",
                 args.base,
                 args.candidate,
-            ).split("\0")
-            if path
-        ]
+            )
+        )
         if plan.get("source_identity") != canonical_source_identity(args.root):
             raise ValueError("Candidate contents differ from selected proof")
         dependency_intent, unsupported_intent = admission_owner._backend_dependency_intent(
@@ -958,6 +990,7 @@ def main() -> int:
             candidate=args.candidate,
             base=args.base,
             changed_paths=changed_paths,
+            removed_paths=removed_paths,
             control_base=args.control_base,
             root=args.root,
         )

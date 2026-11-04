@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import AbstractContextManager, nullcontext
 from importlib import metadata
 from pathlib import Path
 from shutil import copytree
@@ -139,6 +140,56 @@ def test_dependency_nominations_keep_actual_source_owner_after_reopen(
         assert _LOCK_PATH not in chain["ownership"]["edit_candidates"]
         assert packet["dependency_changes"]["consumer_scope"]["completeness"] == "incomplete"
     assert reopened == cold
+
+
+def test_dependency_source_preparation_reuses_one_inventory_before_composite_read(
+    distribution_repository: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _info = distribution_repository
+    base = {"lock": _lock("1.0"), "base_revision": "a" * 40, "lock_path": _LOCK_PATH}
+    with CodeMap(root) as native:
+
+        def selected_map(workspace: Path) -> AbstractContextManager[CodeMap]:
+            assert workspace == root
+            return nullcontext(native)
+
+        monkeypatch.setattr("hashmarks.CodeMap", selected_map)
+        cold = nominate_changed_verification(root, (_LOCK_PATH,), dependency_base=base)
+        assert cold["observations"][0]["state"] == "LINKED"
+        (root / _SOURCE_PATH).write_text(
+            "from different_import.api import answer\ndef selected():\n    return answer() + 1\n",
+            encoding="utf-8",
+        )
+        assert not native.index.is_current(_SOURCE_PATH)
+        inventory = native.files.iter_files
+        synchronize = native.index.sync
+        inventory_depths: list[int] = []
+        prepared: list[tuple[int, tuple[str, ...]]] = []
+
+        def track_inventory(prefix: str = "") -> Iterator[Any]:
+            if prefix == "backend/src":
+                inventory_depths.append(native.reads.depth)
+            yield from inventory(prefix)
+
+        def track_synchronization(paths: Any = None, **options: Any) -> Any:
+            if paths is not None:
+                prepared.append((native.reads.depth, tuple(str(path) for path in paths)))
+            return synchronize(paths, **options)
+
+        monkeypatch.setattr(native.files, "iter_files", track_inventory)
+        monkeypatch.setattr(native.index, "sync", track_synchronization)
+        refreshed = nominate_changed_verification(root, (_LOCK_PATH,), dependency_base=base)
+        assert refreshed["observations"][0]["state"] == "LINKED", refreshed["dependency_changes"]
+        changes = refreshed["dependency_changes"]
+        assert inventory_depths == [0]
+        assert prepared == [(0, tuple(changes["consumer_scope"]["paths"]))]
+        assert native.index.is_current(_SOURCE_PATH)
+    assert changes["consumer_scope"]["completeness"] == "incomplete"
+    assert changes["consumer_scope"]["negative_evidence"] == "not-admissible"
+    assert all(
+        packet["source_scope"]["completeness"] == "complete"
+        for packet in changes["consumer_packets"]
+    )
 
 
 def test_source_scope_is_chunked_without_losing_native_members(

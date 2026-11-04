@@ -27,7 +27,12 @@ def _linked_verification(
     ownership = cast(
         dict[str, Any],
         native.tasks.verification_ownership_graph(
-            f"Verify {relative}", limit=20, candidate_limit=16
+            # The producer retains its canonical selection and first ranked
+            # reference within this pair. Keep its source authority and residual
+            # bounds; complete unrelated verification remains daily.
+            f"Verify {relative}",
+            limit=20,
+            candidate_limit=2,
         ),
     )
     validate_operation_response("verification_ownership", ownership)
@@ -51,23 +56,15 @@ def _linked_verification(
 
 
 def _dependency_verification(
-    native: CodeMap, root: Path, base: Mapping[str, Any]
+    native: CodeMap, root: Path, base: Mapping[str, Any], source_paths: tuple[str, ...]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    # This is an explicit runtime source bound, not a second import resolver or
-    # an assertion that all possible distribution consumers have been found.
-    sources: list[str] = []
-    for item in native.files.iter_files(prefix="backend/src"):
-        if item.rel.endswith(".py") and item.visibility.value != "deny":
-            sources.append(item.rel)
-            if len(sources) > 4096:
-                raise ValueError("Dependency source inventory exceeds its transport bound")
     evidence = observe_changed_dependency_consumers(
         native,
         root=root,
         lock_path=base["lock_path"],
         before_lock=base["lock"],
         base_revision=base["base_revision"],
-        source_paths=tuple(sorted(sources)),
+        source_paths=source_paths,
     )
     evidence["source_selection"] = {
         "owner": "hashmarks.files.iter_files",
@@ -181,12 +178,44 @@ def nominate_changed_verification(
                 # Reconcile discovery once, including newly added consumers.
                 # Member rereads alone cannot discover a new indexed source.
                 native.index.sync()
+            else:
+                # Let the producer establish cold or changed analysis scope
+                # before any path-scoped preparation publishes a generation.
+                native.reads.ready()
+
+            dependency_sources: tuple[str, ...] = ()
+            if not prefix and dependency_base and dependency_base["lock_path"] in selected_paths:
+                # Capture the caller's explicit source scope once. Reconcile
+                # these same contributors through the producer before entering
+                # the read scope; member mismatches remain unavailable inside it.
+                sources: list[str] = []
+                for item in native.files.iter_files(prefix="backend/src"):
+                    if item.rel.endswith(".py") and item.visibility.value != "deny":
+                        sources.append(item.rel)
+                        if len(sources) > 4096:
+                            raise ValueError(
+                                "Dependency source inventory exceeds its transport bound"
+                            )
+                dependency_sources = tuple(sorted(sources))
+                if dependency_sources and not asset_paths:
+                    native.index.sync(dependency_sources)
+
+            preparation_paths = (*selected_paths, *(() if prefix else required))
+            for path in dict.fromkeys(preparation_paths):
+                if not (root / path).is_file():
+                    continue
+                if not prefix and dependency_base and path == dependency_base["lock_path"]:
+                    continue
+                # Public task decisions prepare their contributors before their
+                # read scope. Preserve that phase outside our composite read.
+                native.tasks.prepare(f"Verify {path.removeprefix(prefix)}", 20)
 
             def nominate_workspace(
                 _scope: object,
                 *,
                 prefix: str = prefix,
                 selected_paths: tuple[str, ...] = selected_paths,
+                dependency_sources: tuple[str, ...] = dependency_sources,
             ) -> tuple[
                 list[dict[str, Any]],
                 list[dict[str, Any]],
@@ -222,7 +251,7 @@ def nominate_changed_verification(
                     if not prefix and dependency_base and path == dependency_base["lock_path"]:
                         try:
                             dependencies, observation = _dependency_verification(
-                                native, root, dependency_base
+                                native, root, dependency_base, dependency_sources
                             )
                         except (OSError, ValueError) as exc:
                             dependencies = {"unavailable": str(exc)}

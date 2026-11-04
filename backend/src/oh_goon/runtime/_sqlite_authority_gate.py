@@ -6,7 +6,7 @@ import os
 import stat
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock, local
@@ -145,7 +145,7 @@ def _release_kernel_gate(descriptor: int) -> None:
 
 
 @contextmanager
-def sqlite_authority_gate(database_path: Path, *, write: bool) -> Iterator[None]:
+def sqlite_authority_gate(database_path: Path, *, write: bool) -> Generator[None, None, None]:
     """Coordinate canonical SQLite cuts across Oh-Goon threads and processes.
 
     SQLite remains transaction and durability authority. This advisory gate only prevents an

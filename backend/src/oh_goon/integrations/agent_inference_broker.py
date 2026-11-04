@@ -14,7 +14,7 @@ import socketserver
 import ssl
 import tempfile
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -212,7 +212,8 @@ class _BrokerServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 class _BrokerHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server: _BrokerServer
+    # _BrokerServer constructs this handler with itself as the native server.
+    server: _BrokerServer  # ty: ignore[invalid-mutable-override]
 
     def log_message(self, format: str, *args: Any) -> None:
         return
@@ -420,7 +421,7 @@ def approved_model_broker(
     repository_evidence: str,
     skill_instructions: str,
     cancel_requested: Callable[[], bool] | None = None,
-) -> Iterator[ApprovedModelBroker]:
+) -> Generator[ApprovedModelBroker, None, None]:
     """Own a private, revocable inference socket for one resolved native workload."""
     if not isinstance(selected, ResolvedAgentModel) or any(
         type(value) is not str or not value.strip()

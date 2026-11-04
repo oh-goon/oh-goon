@@ -12,7 +12,7 @@ from oh_goon.integrations.content_snapshot import SnapshotIdentity
 
 
 class _Hash(Protocol):
-    def update(self, data: bytes) -> None: ...
+    def update(self, data: bytes, /) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)

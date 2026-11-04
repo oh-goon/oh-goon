@@ -21,6 +21,7 @@ from oh_goon.core.agent_harness_contract import (
     AgentHarnessInput,
     AgentHarnessIntent,
     AgentHarnessSelection,
+    HarnessCapability,
     decode_agent_harness_submission,
     prepare_agent_harness_input,
 )
@@ -212,18 +213,20 @@ def prepare_native_step_input(
         ):
             raise FleetPlanInvalid("Native backend configuration differs from resolved Run intent")
     verify_native_agent_executable(selected)
-    capabilities = tuple(
-        sorted(
-            {"frozen_source", "hashmarks_evidence", "observations", step.workload.role, "terminal"}
-        )
-    )
+    capabilities: set[HarnessCapability] = {
+        "frozen_source",
+        "hashmarks_evidence",
+        "observations",
+        step.workload.role,
+        "terminal",
+    }
     prepared = prepare_agent_harness_input(
         packet,
         expected_handoff_identity=step.handoff_identity,
         selection=AgentHarnessSelection(
             harness="native",
             implementation_identity=f"{selected.agent}:sha256:{selected.executable_sha256}",
-            capabilities=capabilities,  # type: ignore[arg-type]
+            capabilities=tuple(sorted(capabilities)),
         ),
         execution=AgentHarnessIntent(
             execution_identity=runtime.execution_identity,

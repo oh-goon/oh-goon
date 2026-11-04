@@ -507,6 +507,27 @@ def test_focused_native_selection_never_claims_unselected_integration_verificati
     }
 
 
+def _four_worker_launcher(tmp_path: Path) -> str:
+    native_proc = tmp_path / "native-proc"
+    native_proc.mkdir()
+    (native_proc / "meminfo").write_text("MemAvailable: 4194304 kB\n", encoding="utf-8")
+    # Exercise actual one/two/four-worker launches independently of the host's
+    # quota. Only native capacity observation is controlled; children, receipts,
+    # timeouts and collection remain real. Native-limit precedence has unit proof.
+    return (
+        "import os\nfrom functools import partial\nfrom pathlib import Path\n"
+        "from oh_goon.repository_tooling import pytest_batch_orchestration as owner\n"
+        "os.sched_getaffinity = lambda _pid: set(range(16))\n"
+        "owner.resolve_pytest_resource_budget = partial(\n"
+        "    owner.resolve_pytest_resource_budget,\n"
+        f"    proc_root=Path({str(native_proc)!r}),\n"
+        f"    cgroup_root=Path({str(tmp_path / 'native-cgroup')!r}),\n"
+        ")\n"
+        "from oh_goon.repository_tooling.test_batches import main\n"
+        "raise SystemExit(main())\n"
+    )
+
+
 def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparable(
     tmp_path: Path,
 ) -> None:
@@ -518,24 +539,7 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
     for test_file in test_files:
         test_file.write_text("def test_ok(): assert True\n", encoding="utf-8")
     expected_members = [str(path) for path in test_files]
-    native_proc = tmp_path / "native-proc"
-    native_proc.mkdir()
-    (native_proc / "meminfo").write_text("MemAvailable: 4194304 kB\n", encoding="utf-8")
-    # Exercise actual one/two/four-worker launches independently of the host's
-    # quota. Only native capacity observation is controlled; children, receipts,
-    # timeouts and collection remain real. Native-limit precedence has unit proof.
-    launcher = (
-        "import os\nfrom functools import partial\nfrom pathlib import Path\n"
-        "from oh_goon.repository_tooling import pytest_batch_orchestration as owner\n"
-        "os.sched_getaffinity = lambda _pid: set(range(4))\n"
-        "owner.resolve_pytest_resource_budget = partial(\n"
-        "    owner.resolve_pytest_resource_budget,\n"
-        f"    proc_root=Path({str(native_proc)!r}),\n"
-        f"    cgroup_root=Path({str(tmp_path / 'native-cgroup')!r}),\n"
-        ")\n"
-        "from oh_goon.repository_tooling.test_batches import main\n"
-        "raise SystemExit(main())\n"
-    )
+    launcher = _four_worker_launcher(tmp_path)
     state = tmp_path / "state"
     report = tmp_path / "report.json"
     command = [
@@ -561,7 +565,7 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
         "--report-path",
         str(report),
     ]
-    for budget in (1, 2, 4):
+    for budget in (0, 1, 2, 4):
         command[command.index("--resume-state-root") + 1] = str(state / str(budget))
         first = subprocess.run(
             command,
@@ -577,9 +581,11 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
         assert "reused-members=0" in first.stdout
         first_payload = json.loads(report.read_text(encoding="utf-8"))
         assert first_payload["timing_comparable"] is True
+        assert first_payload["diagnostics"]["resource_budget"]["effective_workers"] == (
+            budget or 4
+        )
         assert (
-            first_payload["diagnostics"]["resource_budget"]["effective_workers"]
-            == budget
+            first_payload["diagnostics"]["resource_budget"]["configured_cpus"] == budget
         )
         first_membership = first_payload["membership_receipt"]
         assert first_membership["selected"] == expected_members
@@ -631,14 +637,16 @@ def test_batch_runner_reuses_exact_member_receipt_and_marks_timing_non_comparabl
 @pytest.mark.skipif(
     os.name != "posix", reason="process-group cleanup is POSIX-specific"
 )
+@pytest.mark.parametrize("workers", (1, 4))
 def test_long_lived_batch_runner_cleans_completed_pytest_background_groups(
     tmp_path: Path,
+    workers: int,
 ) -> None:
     import subprocess
 
     root = Path(__file__).resolve().parents[2]
     files: list[str] = []
-    for index in range(3):
+    for index in range(4):
         test_file = tmp_path / f"test_background_{index}.py"
         test_file.write_text(
             "import subprocess, sys\n"
@@ -653,14 +661,15 @@ def test_long_lived_batch_runner_cleans_completed_pytest_background_groups(
     result = subprocess.run(
         [
             sys.executable,
-            "backend/src/oh_goon/repository_tooling/test_batches.py",
+            "-c",
+            _four_worker_launcher(tmp_path),
             *files,
             "--granularity",
             "files",
             "--batch-size",
             "1",
             "--workers",
-            "1",
+            str(workers),
             "--batch-timeout",
             "5",
             "--suite-timeout",
@@ -669,6 +678,7 @@ def test_long_lived_batch_runner_cleans_completed_pytest_background_groups(
             "",
         ],
         cwd=root,
+        env={**os.environ, "OH_GOON_TEST_CPUS": "0"},
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -681,6 +691,88 @@ def test_long_lived_batch_runner_cleans_completed_pytest_background_groups(
     assert "PYTEST BATCH RESULT: PASS" in result.stdout
     assert "BATCH TIMEOUT" not in result.stdout
     assert elapsed < 25
+
+
+@pytest.mark.skipif(
+    os.name != "posix", reason="native cancellation uses process groups"
+)
+def test_four_worker_fail_fast_cancels_active_pytest_without_starting_queued_work(
+    tmp_path: Path,
+) -> None:
+    import json
+    import subprocess
+
+    root = Path(__file__).resolve().parents[2]
+    files: list[str] = []
+    for index in range(5):
+        test_file = tmp_path / f"test_fail_fast_{index}.py"
+        test_file.write_text(
+            "import os,time\nfrom pathlib import Path\n"
+            "def test_work():\n"
+            f"    root = Path({str(tmp_path)!r})\n"
+            f"    (root / 'started-{index}').write_text(str(os.getpid()))\n"
+            + (
+                "    deadline = time.monotonic() + 10\n"
+                "    while len(list(root.glob('started-*'))) < 4:\n"
+                "        assert time.monotonic() < deadline, 'four workers did not start'\n"
+                "        time.sleep(0.02)\n"
+                "    assert False, 'controlled native failure'\n"
+                if index == 0
+                else "    time.sleep(30)\n"
+            ),
+            encoding="utf-8",
+        )
+        files.append(str(test_file))
+    report = tmp_path / "fail-fast.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _four_worker_launcher(tmp_path),
+            *files,
+            "--granularity",
+            "files",
+            "--batch-size",
+            "1",
+            "--workers",
+            "4",
+            "--batch-timeout",
+            "20",
+            "--suite-timeout",
+            "25",
+            "--fail-fast",
+            "--marker",
+            "",
+            "--report-path",
+            str(report),
+        ],
+        cwd=root,
+        env={**os.environ, "OH_GOON_TEST_CPUS": "0"},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode != 0, result.stdout
+    payload = json.loads(report.read_text())
+    assert payload["diagnostics"]["resource_budget"]["effective_workers"] == 4
+    assert payload["fail_fast_triggered"] and payload["stop_reason"] == "first_failure"
+    assert not payload["suite_timed_out"]
+    membership = payload["membership_receipt"]
+    assert membership["selected"] == files
+    assert membership["attempted"] == files[:4]
+    assert files[0] in membership["failed"]
+    assert files[4] in membership["missing"]
+    assert not membership["terminal_success"]
+    assert not membership["duplicates"] and not membership["extras"]
+    assert not (tmp_path / "started-4").exists()
+    for marker in tmp_path.glob("started-*"):
+        proc = Path("/proc") / marker.read_text() / "stat"
+        if proc.exists():
+            assert proc.read_text().split()[2] == "Z", (
+                "cancelled pytest is still running"
+            )
 
 
 def test_repeated_batch_commands_leave_no_reader_threads_or_fd_growth() -> None:

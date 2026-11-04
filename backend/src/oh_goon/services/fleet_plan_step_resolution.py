@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import posixpath
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from oh_goon.core.errors import FleetExtensionInvalid, FleetPlanInvalid
 from oh_goon.core.fleet_plan_git import resolve_git_step
@@ -117,7 +118,9 @@ def resolve_plan_step(
         )
         connection = context.agent_connection if step.harness.startswith("provider-") else None
         if callable(connection):
-            connection = connection()
+            # ty retains callable model subclasses; preserve the declared factory result.
+            connect = cast(Callable[[], AgentConnection], connection)  # type: ignore[redundant-cast]
+            connection = connect()
         resolved = resolve_delivered_agent_step(
             handoff, connection=connection, native_agent=context.native_agent, role=step.role
         )

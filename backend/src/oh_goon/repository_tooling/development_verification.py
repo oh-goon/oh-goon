@@ -34,6 +34,7 @@ from oh_goon.repository_tooling.verification_gate_control import (
     documentation_asset_candidates,
     is_generated_contract_path,
     is_verification_policy_path,
+    native_changed_paths,
     non_executable_documentation,
     require_native_pytest_pass,
     required_policy_obligations,
@@ -55,6 +56,7 @@ class ChangeVerificationPlan(ImmutableModel):
     requested_head: str | None = None
     source_identity: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     changed_paths: tuple[str, ...]
+    removed_paths: tuple[str, ...] = ()
     static: tuple[_STATIC, ...]
     pytest: tuple[str, ...]
     frontend: tuple[str, ...]
@@ -109,7 +111,7 @@ def _base_lock_bytes(root: Path, base: str) -> bytes:
 
 def capture_change(
     root: Path, base: str, candidate: str | None
-) -> tuple[str, str, tuple[str, ...]]:
+) -> tuple[str, str, tuple[str, ...], tuple[str, ...]]:
     base_sha = _git(root, "rev-parse", "--verify", f"{base}^{{commit}}").strip()
     head = _git(root, "rev-parse", "--verify", "HEAD^{commit}").strip()
     if (
@@ -118,17 +120,10 @@ def capture_change(
     ):
         raise ValueError("Effective checkout differs from the requested candidate")
     arguments = (base_sha, head) if candidate is not None else (base_sha,)
-    tokens = _git(root, "diff", "--name-status", "-z", "--find-renames", *arguments).split("\0")
-    paths: set[str] = set()
-    cursor = 0
-    while cursor < len(tokens) and tokens[cursor]:
-        status = tokens[cursor]
-        count = 2 if status[0] in {"R", "C"} else 1
-        selected = tokens[cursor + 1 : cursor + 1 + count]
-        if len(selected) != count or any(not path for path in selected):
-            raise ValueError("Git returned incomplete changed-path evidence")
-        paths.update(selected)
-        cursor += count + 1
+    changed, removed = native_changed_paths(
+        _git(root, "diff", "--name-status", "-z", "--find-renames", *arguments)
+    )
+    paths = set(changed)
     untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
     dirty = _git(root, "diff", "--name-only", "HEAD").strip()
     if candidate is not None and (dirty or any(untracked)):
@@ -138,7 +133,7 @@ def capture_change(
     for path in paths:
         if Path(path).is_absolute() or ".." in Path(path).parts or "\n" in path:
             raise ValueError("Git comparison contains an unsafe path")
-    return base_sha, head, tuple(sorted(paths))
+    return base_sha, head, tuple(sorted(paths)), removed
 
 
 def _backend_dependency_intent(root: Path, base: str, paths: tuple[str, ...]) -> tuple[bool, bool]:
@@ -406,12 +401,12 @@ def _bounded_dependency_scope(
     } == set(nodes)
 
 
-def _collect_dependency_proof(
+def _collect_pytest_proof(
     root: Path,
     evidence: dict[str, Any],
     pytest: set[str],
     required: tuple[str, ...],
-    accepted_assets: set[str],
+    excluded_paths: set[str],
 ) -> tuple[set[str], list[str]]:
     invocation = replace(
         resolve_pytest_invocation(qualified=True, pytest_config=root / "backend/pyproject.toml"),
@@ -423,8 +418,12 @@ def _collect_dependency_proof(
     )
     selected = {row["file"] for row in collection.selected}
     if not selected <= pytest:
-        raise ValueError("Native dependency proof collection escaped the admitted test files")
-    admission = evidence["dependency_admission"]
+        raise ValueError("Native pytest collection escaped the admitted test files")
+    admission = (
+        evidence["dependency_admission"]
+        if "dependency_admission" in evidence
+        else evidence.setdefault("pytest_admission", {})
+    )
     admission["collection"] = collection.payload()
     admission["collection_context"] = invocation.correctness_context()
     deselected = {row["file"] for row in collection.deselected}
@@ -434,7 +433,7 @@ def _collect_dependency_proof(
     if not set(required) <= selected:
         missing.append("VERIFICATION_POLICY_PROTECTION_UNAVAILABLE")
     for row in evidence.get("observations", []):
-        if row.get("changed_path") in accepted_assets:
+        if row.get("changed_path") in excluded_paths:
             continue
         if row.get("state") == "CHANGED_TEST" and row["changed_path"] not in selected:
             missing.append(f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{row['changed_path']}")
@@ -459,7 +458,8 @@ def admit_change(
     requested_head: str | None = None,
     nominator: Callable[..., dict[str, Any]] = nominate_changed_verification,
 ) -> ChangeVerificationPlan:
-    base_sha, head, changed = capture_change(root, base, candidate)
+    base_sha, head, changed, removed = capture_change(root, base, candidate)
+    removed_paths = set(removed)
     if requested_head is not None:
         _git(root, "merge-base", "--is-ancestor", requested_head, head)
     before = canonical_source_identity(root)
@@ -512,7 +512,7 @@ def admit_change(
                 "remain outside this positive proof; complete impact is not claimed."
             ),
         }
-    observations = evidence.get("observations", [])
+    observations: list[dict[str, Any]] = evidence.get("observations", [])
     policy_proofs = [
         projected
         for projected in evidence.get("required_checks", [])
@@ -528,13 +528,15 @@ def admit_change(
         pytest.update(str(path) for path in qualified_policy_paths if path in required)
     observed_paths = {row.get("changed_path") for row in observations}
     for path in authored:
-        if path not in observed_paths:
+        if path not in removed_paths and path not in observed_paths:
             unverified.append(f"NO_PRODUCER_OBSERVATION:{path}")
     for row in observations:
         path = str(row.get("changed_path", ""))
         if path not in authored:
             raise ValueError("Producer observation is outside the admitted change set")
-        if path in accepted_assets:
+        # Git identifies removed members; they cannot supply execution proof.
+        # Keep any producer absence observation without claiming no consumers.
+        if path in removed_paths or path in accepted_assets:
             continue
         if row.get("state") not in {"LINKED", "CHANGED_TEST"} or row.get("stale") is True:
             if (
@@ -543,7 +545,8 @@ def admit_change(
                 and policy_proofs
                 and row.get("stale") is not True
             ):
-                row = {**row, "state": "POLICY_OBLIGATION", "nominations": policy_proofs}
+                row = row.copy()
+                row.update(state="POLICY_OBLIGATION", nominations=policy_proofs)
             else:
                 unverified.append(f"NO_QUALIFIED_VERIFIER:{path}")
                 continue
@@ -583,11 +586,12 @@ def admit_change(
             admitted += 1
         if not admitted:
             unverified.append(f"NO_EXECUTABLE_VERIFIER:{path}")
-    if dependency_qualified and not unverified:
-        pytest, unavailable = _collect_dependency_proof(
-            root, evidence, pytest, required, set(accepted_assets)
+    if pytest and not unverified:
+        pytest, unavailable = _collect_pytest_proof(
+            root, evidence, pytest, required, set(accepted_assets) | removed_paths
         )
         unverified.extend(unavailable)
+    if dependency_qualified and "collection" in evidence["dependency_admission"]:
         if not _bounded_dependency_scope(evidence, base_sha, selected_files=pytest):
             unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
         require_current_dependency_environment(evidence["dependency_changes"])
@@ -601,6 +605,7 @@ def admit_change(
         requested_head=requested_head,
         source_identity=before,
         changed_paths=changed,
+        removed_paths=removed,
         static=tuple(sorted(static)),
         pytest=tuple(sorted(pytest)),
         frontend=tuple(sorted(frontend)),
@@ -846,6 +851,8 @@ def execute_change(
                 _MERGE_MARKER,
                 "--report-path",
                 str(report),
+                "--report-projection",
+                "verification",
                 *plan.pytest,
                 cwd=root,
                 timeout=None,

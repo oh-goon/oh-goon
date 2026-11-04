@@ -239,6 +239,11 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         owner, "canonical_source_identity", lambda _root: "sha256:" + "a" * 64
     )
+    monkeypatch.setattr(
+        owner,
+        "collect_native_pytest",
+        lambda paths, **options: _synthetic_pytest_collection(paths, [], **options),
+    )
     return tmp_path
 
 
@@ -289,9 +294,83 @@ def test_native_git_change_capture_preserves_renames_deletions_and_untracked(
     base = owner._git(repository, "rev-parse", "HEAD").strip()
     owner._git(repository, "mv", "README.md", "RENAMED.md")
     (repository / "new.py").write_text("value = 1\n", encoding="utf-8")
-    observed_base, _, paths = owner.capture_change(repository, base, None)
+    observed_base, _, paths, removed = owner.capture_change(repository, base, None)
     assert observed_base == base
     assert paths == ("README.md", "RENAMED.md", "new.py")
+    assert removed == ("README.md",)
+
+
+@pytest.mark.parametrize(
+    "retired", ("obsolete.py", "backend/tests/unit/services/test_obsolete.py")
+)
+def test_native_removed_members_retain_absence_without_execution_obligations(
+    repository: Path, retired: str
+) -> None:
+    source = repository / retired
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("def obsolete():\n    return 1\n", encoding="utf-8")
+    owner._git(repository, "add", retired)
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "removal baseline",
+    )
+    source.unlink()
+    (repository / "behavior.py").write_text("answer = 2\n", encoding="utf-8")
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(tuple(path for path in paths if path != retired))
+        evidence["observations"].append(
+            {"changed_path": retired, "state": "UNAVAILABLE", "reason": "source-absent"}
+        )
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+
+    owner.require_merge_selection(repository, plan)
+    assert plan.removed_paths == (retired,)
+    assert not plan.unverified
+    assert retired not in plan.pytest
+    assert plan.evidence["owner_coverage"] == "not-claimed"
+    assert plan.evidence["observations"][-1] == {
+        "changed_path": retired,
+        "state": "UNAVAILABLE",
+        "reason": "source-absent",
+    }
+
+
+def test_source_absence_advice_cannot_waive_a_surviving_change(
+    repository: Path,
+) -> None:
+    source = repository / "behavior.py"
+    source.write_text("answer = 2\n", encoding="utf-8")
+    baseline = owner.admit_change(
+        repository, base="HEAD", nominator=lambda _root, paths: _evidence(paths)
+    )
+    owner.require_merge_selection(repository, baseline)
+
+    def unavailable(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        evidence["observations"][0] = {
+            "changed_path": "behavior.py",
+            "state": "UNAVAILABLE",
+            "reason": "source-absent",
+        }
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=unavailable)
+
+    assert not plan.removed_paths
+    assert "NO_QUALIFIED_VERIFIER:behavior.py" in plan.unverified
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
 
 
 def test_effective_candidate_refuses_local_source_drift(repository: Path) -> None:
@@ -362,7 +441,7 @@ def test_native_documentation_asset_admission_retains_explicit_bounded_policy(
     assert observed["consumer_scope"]["negative_evidence_admissible"] is False
 
 
-def test_documentation_asset_rename_retains_unavailable_base_side_scope(
+def test_documentation_asset_rename_retains_native_removal_and_required_behavior(
     repository: Path,
 ) -> None:
     old, new = "docs/assets/before.png", "docs/assets/after.png"
@@ -391,7 +470,8 @@ def test_documentation_asset_rename_retains_unavailable_base_side_scope(
 
     assert old in plan.changed_paths and new in plan.changed_paths
     assert plan.behavioral_status == "REQUIRED"
-    assert f"NO_QUALIFIED_VERIFIER:{old}" in plan.unverified
+    assert plan.removed_paths == (old,)
+    assert f"NO_QUALIFIED_VERIFIER:{old}" not in plan.unverified
     with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
         owner.require_merge_selection(repository, plan)
 
@@ -688,6 +768,59 @@ def test_required_membership_cannot_be_qualified_by_pytest_exit_zero(
     invalid["membership_receipt"][outcome] = ["test.py::test_case"]
     with pytest.raises(ValueError, match="incomplete"):
         owner.require_complete_membership(invalid)
+
+
+def test_selected_pytest_requests_compact_exact_membership_proof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    node = "backend/tests/unit/test_behavior.py::test_behavior"
+    identity = "sha256:" + "c" * 64
+    plan = owner.ChangeVerificationPlan(
+        base="a" * 40,
+        candidate="b" * 40,
+        source_identity=identity,
+        changed_paths=("behavior.py",),
+        static=(),
+        pytest=(node,),
+        frontend=(),
+        unverified=(),
+        evidence={},
+        behavioral_status="REQUIRED",
+        policy_status="ORDINARY",
+    )
+    native = {
+        "status": "PASS",
+        "source_identity": identity,
+        "native_collection": {"discovered": [node], "deselected": []},
+        "membership_receipt": {
+            "selected": [node],
+            "passed": [node],
+            "terminal_success": True,
+            "effective_pytest_outcomes": [
+                {
+                    "member": node,
+                    "status": "PASSED",
+                    "pytest_outcomes": [{"nodeid": node, "outcome": "PASSED"}],
+                }
+            ],
+        },
+    }
+    commands: list[tuple[str, ...]] = []
+
+    def execute(*argv: str, **_options: Any) -> Any:
+        commands.append(argv)
+        assert argv[argv.index("--report-projection") + 1] == "verification"
+        Path(argv[argv.index("--report-path") + 1]).write_text(json.dumps(native))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+    monkeypatch.setattr(owner, "run_command", execute)
+
+    result = owner.execute_change(tmp_path, plan, mode="merge", workers=1)
+
+    assert result["status"] == "CHECKS_PASSED"
+    assert len(commands) == 1 and commands[0][-1] == node
+    assert result["outcomes"][0]["native_report"] == native
 
 
 def test_supported_hashmarks_adapter_returns_real_source_qualified_links(
@@ -1413,7 +1546,7 @@ def _required_dependency_evidence(
     return evidence
 
 
-def _synthetic_dependency_collection(
+def _synthetic_pytest_collection(
     paths: tuple[Path, ...], calls: list[tuple[str, ...]], **options: Any
 ) -> NativePytestCollection:
     invocation = options["invocation"]
@@ -1433,7 +1566,7 @@ def dependency_collection(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ..
     calls: list[tuple[str, ...]] = []
 
     def collect(paths: tuple[Path, ...], **options: Any) -> NativePytestCollection:
-        return _synthetic_dependency_collection(paths, calls, **options)
+        return _synthetic_pytest_collection(paths, calls, **options)
 
     monkeypatch.setattr(owner, "collect_native_pytest", collect)
     monkeypatch.setattr(
@@ -1443,6 +1576,176 @@ def dependency_collection(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ..
         owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
     )
     return calls
+
+
+@pytest.mark.parametrize("cadence", ("empty", "daily"))
+def test_ordinary_collection_keeps_raw_advice_and_prunes_nonexecuting_targets(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, cadence: str
+) -> None:
+    (repository / "behavior.py").write_text("answer = 2\n")
+    advisory = "backend/tests/unit/services/test_advisory.py"
+    calls: list[tuple[str, ...]] = []
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        projected = copy.deepcopy(evidence["observations"][0]["nominations"][0])
+        projected["nomination"]["verification_target"]["path"] = advisory
+        evidence["observations"][0]["nominations"].append(projected)
+        return evidence
+
+    def collect(paths: tuple[Path, ...], **options: Any) -> NativePytestCollection:
+        native = _synthetic_pytest_collection(paths, calls, **options)
+        omitted = tuple(row for row in native.selected if row["file"] == advisory)
+        return NativePytestCollection(
+            tuple(row for row in native.selected if row["file"] != advisory),
+            omitted if cadence == "daily" else (),
+        )
+
+    monkeypatch.setattr(owner, "collect_native_pytest", collect)
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+
+    owner.require_merge_selection(repository, plan)
+    assert len(calls) == 1 and advisory in calls[0] and advisory not in plan.pytest
+    admission = plan.evidence["pytest_admission"]
+    assert admission["targets_without_selected_members"] == [advisory]
+    assert admission["empty_advisory_targets"] == (
+        [advisory] if cadence == "empty" else []
+    )
+    assert bool(admission["collection"]["deselected"]) == (cadence == "daily")
+    assert admission["collection_context"]
+    assert (
+        plan.evidence["observations"][0]["nominations"][-1]["nomination"][
+            "verification_target"
+        ]["path"]
+        == advisory
+    )
+
+
+@pytest.mark.parametrize("missing", ("policy", "changed-test", "linked-source"))
+def test_ordinary_collection_cannot_drop_required_behavior_or_policy(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    changed = (
+        "backend/tests/unit/services/test_changed.py"
+        if missing == "changed-test"
+        else "behavior.py"
+    )
+    source = repository / changed
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("answer = 2\n")
+    if missing == "policy":
+        (repository / "README.md").write_text("Updated governing guidance.\n")
+    target = (
+        VERIFICATION_POLICY_TESTS[0]
+        if missing == "policy"
+        else "backend/tests/unit/services/test_example.py"
+    )
+
+    def nominate(
+        _root: Path, paths: tuple[str, ...], *, required: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        evidence["required_checks"] = [
+            {
+                "nomination": {
+                    "available": True,
+                    "runner_evidence": "pytest",
+                    "verification_target": {"path": path},
+                }
+            }
+            for path in required
+        ]
+        row = next(
+            row for row in evidence["observations"] if row["changed_path"] == changed
+        )
+        row["nominations"] = row["nominations"][:1]
+        if missing == "changed-test":
+            row["state"] = "CHANGED_TEST"
+            row["nominations"][0]["nomination"]["verification_target"]["path"] = changed
+        return evidence
+
+    baseline = owner.admit_change(repository, base="HEAD", nominator=nominate)
+    owner.require_merge_selection(repository, baseline)
+
+    def collect(paths: tuple[Path, ...], **options: Any) -> NativePytestCollection:
+        native = _synthetic_pytest_collection(paths, [], **options)
+        omitted = changed if missing == "changed-test" else target
+        return NativePytestCollection(
+            tuple(row for row in native.selected if row["file"] != omitted),
+            tuple(row for row in native.selected if row["file"] == omitted),
+        )
+
+    monkeypatch.setattr(owner, "collect_native_pytest", collect)
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+    reason = (
+        "VERIFICATION_POLICY_PROTECTION_UNAVAILABLE"
+        if missing == "policy"
+        else f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{changed}"
+        if missing == "changed-test"
+        else f"NO_EXECUTABLE_VERIFIER:{changed}"
+    )
+    assert reason in plan.unverified
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
+
+
+def test_ordinary_admission_uses_real_native_collection_for_cadence_and_empty_files(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
+
+    backend = repository / "backend"
+    backend.mkdir()
+    (backend / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\nmarkers = ["daily", "slow", "certification"]\n'
+    )
+    root = backend / "tests/unit/services"
+    root.mkdir(parents=True)
+    files = ("test_ordinary.py", "test_daily.py", "test_empty.py")
+    (root / files[0]).write_text("def test_behavior():\n    assert True\n")
+    (root / files[1]).write_text(
+        "import pytest\n@pytest.mark.daily\ndef test_exhaustive():\n    assert True\n"
+    )
+    (root / files[2]).write_text("VALUE = 1\n")
+    owner._git(repository, "add", ".")
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "native collector fixture",
+    )
+    (repository / "behavior.py").write_text("answer = 2\n")
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        original = evidence["observations"][0]["nominations"][0]
+        evidence["observations"][0]["nominations"] = []
+        for name in files:
+            projected = copy.deepcopy(original)
+            projected["nomination"]["verification_target"]["path"] = (
+                "backend/tests/unit/services/" + name
+            )
+            evidence["observations"][0]["nominations"].append(projected)
+        return evidence
+
+    monkeypatch.setattr(owner, "collect_native_pytest", collect_native_pytest)
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+
+    owner.require_merge_selection(repository, plan)
+    assert plan.pytest == ("backend/tests/unit/services/test_ordinary.py",)
+    admission = plan.evidence["pytest_admission"]
+    assert admission["empty_advisory_targets"] == [
+        "backend/tests/unit/services/test_empty.py"
+    ]
+    assert [row["file"] for row in admission["collection"]["deselected"]] == [
+        "backend/tests/unit/services/test_daily.py"
+    ]
 
 
 @pytest.mark.parametrize("package", ("ordinary-library", "hashmarks"))
@@ -1631,9 +1934,7 @@ def test_required_dependency_addition_cannot_use_an_uncollected_parent_verifier(
     def native_selection(
         paths: tuple[Path, ...], **options: Any
     ) -> NativePytestCollection:
-        result = _synthetic_dependency_collection(
-            paths, dependency_collection, **options
-        )
+        result = _synthetic_pytest_collection(paths, dependency_collection, **options)
         return NativePytestCollection(
             tuple(row for row in result.selected if row["file"] != target), ()
         )
@@ -1859,9 +2160,7 @@ def test_dependency_collection_preserves_raw_nominations_and_distinguishes_empty
     def without_advisory(
         paths: tuple[Path, ...], **options: Any
     ) -> NativePytestCollection:
-        result = _synthetic_dependency_collection(
-            paths, dependency_collection, **options
-        )
+        result = _synthetic_pytest_collection(paths, dependency_collection, **options)
         omitted = tuple(row for row in result.selected if row["file"] == advisory)
         return NativePytestCollection(
             tuple(row for row in result.selected if row["file"] != advisory),
@@ -1904,9 +2203,7 @@ def test_one_collected_dependency_chain_cannot_qualify_another_unselected_change
     def native_selection(
         paths: tuple[Path, ...], **options: Any
     ) -> NativePytestCollection:
-        result = _synthetic_dependency_collection(
-            paths, dependency_collection, **options
-        )
+        result = _synthetic_pytest_collection(paths, dependency_collection, **options)
         return NativePytestCollection(
             tuple(row for row in result.selected if row["file"] != unselected),
             tuple(row for row in result.selected if row["file"] == unselected),
@@ -1945,9 +2242,7 @@ def test_dependency_native_selection_cannot_drop_required_policy_or_changed_test
     def native_selection(
         paths: tuple[Path, ...], **options: Any
     ) -> NativePytestCollection:
-        result = _synthetic_dependency_collection(
-            paths, dependency_collection, **options
-        )
+        result = _synthetic_pytest_collection(paths, dependency_collection, **options)
         return NativePytestCollection(
             tuple(row for row in result.selected if row["file"] != target), ()
         )
