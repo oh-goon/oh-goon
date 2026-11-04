@@ -59,6 +59,15 @@ The documentation must prevent future work from reconstructing a superseded mech
 
 Current normative architecture documents outrank stale historical implementation descriptions.
 
+The [Hashmarks SSOT requirements](OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
+own repository-intelligence semantics; the
+[canonical execution lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+own the required execution-custody model. Current owner documents describe what
+is implemented. Guides, examples and Linear tasks must preserve both boundaries
+and distinguish required target behavior from proven current behavior. A
+requirement document cannot itself establish that worker migration or
+qualification has completed.
+
 When a historical document still describes a superseded model, update it or mark that section clearly historical/non-authoritative. Do not leave two current-looking contradictory instructions.
 
 ## Required active-document sweep

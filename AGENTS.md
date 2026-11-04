@@ -69,6 +69,12 @@ artifact digest and remains diagnostic evidence.
 Preserve execution, validation, privacy, isolation, trace, and failure semantics
 unless the task explicitly changes them. Current owner decisions are in
 `docs/ARCHITECTURE.md` and `docs/development/ARCHITECTURE_DECISIONS.md`.
+The normative [Hashmarks SSOT requirements](docs/development/OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
+and [canonical execution lifecycle requirements](docs/development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+own the repository-intelligence boundary and required Run-worker custody model.
+The worker migration remains HUG-180/HUG-181 work; requirements are not evidence
+that process custody is implemented. Local, CI, scheduled, ML, application and
+agent work must extend the same FleetRun lifecycle.
 Update the owning current documentation when a contract changes; do not create
 phase/status files or runtime prose gates. See
 `docs/development/DOCUMENTATION_ANTI_DRIFT.md`.

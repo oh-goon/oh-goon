@@ -8,6 +8,16 @@ Before implementing an open issue, read the [QA baseline](development/REAL_LIFEC
 to locate existing behavior, its proof scope and the qualification still needed.
 An open qualification task is not evidence that its mechanism needs rebuilding.
 
+Before changing repository-intelligence or Run lifecycle ownership, read the
+[mandatory Hashmarks SSOT requirements](development/OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
+and [canonical execution-lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md).
+They are separate normative scopes with a source crosswalk and bundled delivery
+map. Current owner docs and executable checks describe actual implementation;
+the required isolated Run-worker claim/custody model remains a target until
+[HUG-180](https://linear.app/hugloss/issue/HUG-180) and its qualification land.
+Use existing review and focused check owners; this documentation introduces no
+additional startup, test-selection or approval step.
+
 Test design/cleanup policy: [`development/TEST_QUALITY.md`](development/TEST_QUALITY.md). Use it to choose the proof layer, avoid false-confidence tests, and review mocks/fixtures/timing/skips without creating a test-quality meta-suite.
 
 ```bash
@@ -44,9 +54,12 @@ remain invalid. Native uv owns project validity and lock freshness.
 
 Hashmarks is a mandatory backend dependency supplied through that same
 `pyproject.toml` / `uv.lock` contract. The single
-[`integrations/hashmarks/`](../backend/src/oh_goon/integrations/hashmarks/)
-adapter owns consumption of its repository-evidence APIs; installing or changing
-the dependency does not introduce a second repository-identity implementation.
+public [`oh_goon.integrations.hashmarks` API](../backend/src/oh_goon/integrations/hashmarks/__init__.py)
+owns consumption of its repository-evidence APIs. Private implementation modules
+and direct producer imports stay inside that package; its explicit exports are
+the capability census. Missing, unknown or stale producer facts cannot be
+replaced by local repository semantics. Installing or changing the dependency
+does not introduce a second repository-identity implementation.
 See [Agent Skills](AGENT_SKILLS.md) for the bounded Agent execution surface and
 native local-model qualification.
 

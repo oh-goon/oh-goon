@@ -53,6 +53,14 @@ The main engineering boundaries are:
 - **Fail-closed recovery.** Ambiguous external outcomes are quarantined for evidence-based reconciliation rather than replayed blindly.
 - **Focused verification.** Edit and merge feedback can select relevant real checks without redefining the complete release owner.
 
+The [canonical execution lifecycle requirements](docs/development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+specify the next custody boundary: one claimed isolated worker beneath the same
+FleetRun admission and Step/Attempt owners. That migration is tracked by
+[HUG-180](https://linear.app/hugloss/issue/HUG-180) and
+[HUG-181](https://linear.app/hugloss/issue/HUG-181); the current runtime still
+submits Runs through the thread-based supervisor. Process workers must strengthen
+this lifecycle without adding an execution route.
+
 ## Recorded qualification examples
 
 These are scoped observations from specific merged changes, not blanket
@@ -102,6 +110,11 @@ Hashmarks is a required OH-Goon dependency for repository identity and
 evidence. Agents Cookbook and EvalShot remain separately usable projects;
 OH-Goon integrates with them without creating a second skill catalog or
 evaluation authority.
+
+The [mandatory Hashmarks SSOT requirements](docs/development/OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
+define `oh_goon.integrations.hashmarks` as the public consumer API. Missing or
+unknown producer evidence remains incomplete or receives conservative OH-Goon
+policy; it never authorizes local repository-intelligence replacement.
 
 ## Test this checkout
 
