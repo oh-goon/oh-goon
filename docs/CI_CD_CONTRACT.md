@@ -74,6 +74,16 @@ The retained `consumer_scope` remains incomplete and its negative
 evidence is not admissible; these chains establish the selected positive
 relationships without claiming all consumers have been found.
 
+In the consumer-graph route, a single existing dependency upgrade may introduce
+up to 32 uniquely selected required dependencies. Each introduction needs a
+producer-qualified direct path from the upgraded selection, an unconditional
+runtime dependency edge, current inventory and installed metadata, and the
+parent's qualified source-to-verifier chain. An unconditional runtime edge from
+the application root must also bind the upgraded parent. The evidence names the
+actually imported parent separately from the new selection; it does not claim
+that the new dependency is directly imported by Oh-Goon. Conditional, optional,
+development-only, ambiguous or bounded-out paths cannot establish this proof.
+
 A Hashmarks-only upgrade has a separate bounded proof route when the parsed
 backend project declaration is unchanged except for its existing mandatory
 direct `hashmarks` requirement. Native uv owns the lock and transitive resolution;
@@ -91,8 +101,8 @@ and mandatory policy checks still need ordinary executable members. The original
 batch owner independently collects the admitted files for execution; the plan's
 file set and the exact native execution membership remain separately checked.
 
-Outside that Hashmarks-only route, added, removed or forked components,
-changes to optional/group/build declarations,
+Outside these bounded routes, other added components, removed or forked
+components, changes to optional/group/build declarations,
 Python runtime requirements or uv source/workspace policy, and missing or
 mismatched metadata, stale or truncated required lock/metadata/consumer
 observations, or a component without a qualified chain remain unverified.
@@ -105,6 +115,13 @@ also require the **Native package** obligation: `backend-lock-check`,
 applicable bounded route, meaningful execution and independently observed
 producer identity through the same proof contract. The consumer-graph route
 also requires retained `LINKED` evidence.
+For the consumer-graph dependency route, the trusted controller also observes
+the candidate lock and installed metadata independently in its existing native
+dependency environment.
+It uses immutable base policy and the candidate's locked producer, and requires
+fresh positive chains to the verifier files whose execution was proved. Separate
+installations retain their own metadata provenance and observation identities;
+one installation's paths or generated entrypoint bytes are not identity for another.
 
 The named **bounded documentation-asset policy** covers newly added or currently
 modified images under `docs/assets/` up to 1 MiB. Hashmarks must observe the image

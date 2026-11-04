@@ -1605,6 +1605,111 @@ def test_hashmarks_upgrade_does_not_qualify_unrelated_changes(
         owner.require_merge_selection(repository, plan)
 
 
+def _required_dependency_evidence(
+    paths: tuple[str, ...], **options: Any
+) -> dict[str, Any]:
+    evidence = _dependency_evidence(paths, **options)
+    bundle = evidence["dependency_changes"]
+    after, delta = bundle["after_observation"], bundle["delta"]
+    parent, child = "node-0", "introduced-node"
+    after["selections"][0].update(contexts=["lock"], marker="")
+    after["components"].append(
+        {
+            "component_id": "introduced-component",
+            "name": "required-child",
+            "ecosystem": "pypi",
+        }
+    )
+    after["selections"].append(
+        {
+            "node_id": child,
+            "component_id": "introduced-component",
+            "version": "1",
+            "contexts": ["lock"],
+            "marker": "",
+        }
+    )
+    edge = {
+        "source": parent,
+        "target": child,
+        "kind": "dependency",
+        "context": "lock",
+        "marker": "",
+        "effective_scope": "",
+    }
+    parent_edge = {**edge, "source": "application-node", "target": parent}
+    after["relationships"] = [parent_edge, edge]
+    after["roots"] = [{"node_id": "application-node", "context": "lock"}]
+    after["inventory"] = [
+        {"node_id": node, "context": "lock"}
+        for node in ("application-node", parent, child)
+    ]
+    delta.update(
+        components_added=["introduced-component"],
+        inventory_added=[[parent, "lock"], [child, "lock"]],
+        inventory_removed=[["old-node-0", "lock"]],
+        relationships_added=[
+            ["application-node", parent, "dependency", "lock", "", ""],
+            [parent, child, "dependency", "lock", "", ""],
+        ],
+        relationships_removed=[
+            ["application-node", "old-node-0", "dependency", "lock", "", ""]
+        ],
+    )
+    delta["selections_added"].append(child)
+    bundle["changed_node_ids"].append(child)
+    metadata = copy.deepcopy(bundle["metadata"][0])
+    metadata.update(
+        node_id=child,
+        component_id="introduced-component",
+        name="required-child",
+        version="1",
+    )
+    bundle["metadata"].append(metadata)
+    child_chain = copy.deepcopy(bundle["chains"][0])
+    child_chain.update(node_id=child, consumer_node_id=parent)
+    bundle["chains"].append(child_chain)
+    request = {
+        "operation": "paths",
+        "node_id": parent,
+        "target_id": child,
+        "context": "lock",
+        "max_depth": 1,
+        "max_results": 2,
+        "max_visits": 64,
+    }
+    bundle["dependency_introductions"] = {
+        "parent_node_id": parent,
+        "node_ids": [child],
+        "requests": [request],
+        "edges": [edge],
+        "queries": {
+            "schema": "hashmarks.dependency-query-batch.v1",
+            "observation_identity": after["observation_identity"],
+            "authority": "qualified-external-observation",
+            "results": [
+                {
+                    "schema": "hashmarks.dependency-query-result.v1",
+                    "operation": "paths",
+                    "context": "lock",
+                    "result": [[parent, child]],
+                    "completeness": "complete",
+                    "negative_evidence": "not-applicable",
+                    "omissions": [],
+                    "authority": "qualified-external-observation",
+                    "bounds": {
+                        "max_depth": 1,
+                        "max_results": 2,
+                        "max_visits": 64,
+                        "visited": 1,
+                    },
+                }
+            ],
+        },
+    }
+    return evidence
+
+
 def _synthetic_pytest_collection(
     paths: tuple[Path, ...], calls: list[tuple[str, ...]], **options: Any
 ) -> NativePytestCollection:
@@ -1876,6 +1981,165 @@ def test_dependency_admission_preserves_incomplete_scope_and_native_base_provena
         in plan.evidence["dependency_admission"]["rationale"]
     )
     owner.require_current_plan(repository, plan)
+
+
+def test_required_dependency_addition_uses_the_executed_parent_consumer_chain(
+    repository: Path, dependency_collection: list[tuple[str, ...]]
+) -> None:
+    base, _lock, _manifest = _dependency_update(repository)
+    plan = owner.admit_change(
+        repository,
+        base=base,
+        nominator=lambda _root, paths, **options: _required_dependency_evidence(
+            paths, **options
+        ),
+    )
+
+    assert not plan.unverified
+    assert len(dependency_collection) == 1
+    assert set(plan.static) >= {"python", "package", "architecture"}
+    bundle = plan.evidence["dependency_changes"]
+    child = next(
+        chain for chain in bundle["chains"] if chain["node_id"] == "introduced-node"
+    )
+    assert child["consumer_node_id"] == "node-0"
+    assert child["consumer"]["distribution_nodes"] == ["node-0"]
+    assert (
+        child["nomination"]["nomination"]["verification_target"]["path"] in plan.pytest
+    )
+    assert bundle["dependency_introductions"]["queries"]["results"][0]["result"] == [
+        ["node-0", "introduced-node"]
+    ]
+    assert bundle["consumer_scope"]["completeness"] == "incomplete"
+    assert bundle["consumer_scope"]["negative_evidence"] == "not-admissible"
+    owner.require_merge_selection(repository, plan)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "missing-introduction",
+        "wrong-parent",
+        "foreign-observation",
+        "wrong-selector",
+        "incomplete-path",
+        "omitted-path",
+        "optional-edge",
+        "conditional-edge",
+        "direct-root-edge",
+        "root-child",
+        "optional-parent",
+        "development-parent",
+        "conditional-parent",
+        "wrong-consumer-parent",
+        "claimed-child-import",
+        "missing-parent-chain",
+        "missing-child-chain",
+        "missing-child-metadata",
+        "foreign-child-version",
+        "boolean-bound",
+    ),
+)
+def test_required_dependency_addition_refuses_unqualified_or_forged_parent_proof(
+    repository: Path, dependency_collection: list[tuple[str, ...]], fault: str
+) -> None:
+    base, _lock, _manifest = _dependency_update(repository)
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        evidence = _required_dependency_evidence(paths, **options)
+        bundle = evidence["dependency_changes"]
+        introduction = bundle["dependency_introductions"]
+        child = bundle["chains"][1]
+        if fault == "missing-introduction":
+            bundle.pop("dependency_introductions")
+        elif fault == "wrong-parent":
+            introduction["parent_node_id"] = "foreign-parent"
+        elif fault == "foreign-observation":
+            introduction["queries"]["observation_identity"] = "foreign-observation"
+        elif fault == "wrong-selector":
+            introduction["requests"][0]["target_id"] = "foreign-child"
+        elif fault == "incomplete-path":
+            introduction["queries"]["results"][0]["completeness"] = "incomplete"
+        elif fault == "omitted-path":
+            introduction["queries"]["results"][0]["omissions"] = [
+                {"reason": "result-limit"}
+            ]
+        elif fault in {"optional-edge", "conditional-edge"}:
+            introduction["edges"][0][
+                "effective_scope" if fault == "optional-edge" else "marker"
+            ] = (
+                "extra:feature"
+                if fault == "optional-edge"
+                else 'sys_platform == "linux"'
+            )
+        elif fault == "direct-root-edge":
+            edge = copy.deepcopy(introduction["edges"][0])
+            edge["source"] = "application-node"
+            bundle["after_observation"]["relationships"].append(edge)
+        elif fault == "root-child":
+            bundle["after_observation"]["roots"].append(
+                {"node_id": "introduced-node", "context": "lock"}
+            )
+        elif fault in {"optional-parent", "development-parent", "conditional-parent"}:
+            parent_edge = bundle["after_observation"]["relationships"][0]
+            if fault == "conditional-parent":
+                parent_edge["marker"] = 'sys_platform == "linux"'
+            else:
+                parent_edge["effective_scope"] = (
+                    "extra:feature" if fault == "optional-parent" else "group:dev"
+                )
+        elif fault == "wrong-consumer-parent":
+            child["consumer_node_id"] = "foreign-parent"
+        elif fault == "claimed-child-import":
+            child["consumer"]["distribution_nodes"] = ["introduced-node"]
+        elif fault == "missing-parent-chain":
+            del bundle["chains"][0]
+        elif fault == "missing-child-chain":
+            del bundle["chains"][1]
+        elif fault == "missing-child-metadata":
+            bundle["metadata"] = bundle["metadata"][:1]
+        elif fault == "foreign-child-version":
+            bundle["metadata"][1]["version"] = "99"
+        else:
+            introduction["queries"]["results"][0]["bounds"]["max_depth"] = True
+        return evidence
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+
+    assert "DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED" in plan.unverified
+    assert dependency_collection == []
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
+
+
+def test_required_dependency_addition_cannot_use_an_uncollected_parent_verifier(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dependency_collection: list[tuple[str, ...]],
+) -> None:
+    base, _lock, _manifest = _dependency_update(repository)
+    target = "backend/tests/unit/integrations/test_dependency_user_0.py"
+
+    def native_selection(
+        paths: tuple[Path, ...], **options: Any
+    ) -> NativePytestCollection:
+        result = _synthetic_pytest_collection(paths, dependency_collection, **options)
+        return NativePytestCollection(
+            tuple(row for row in result.selected if row["file"] != target), ()
+        )
+
+    monkeypatch.setattr(owner, "collect_native_pytest", native_selection)
+    plan = owner.admit_change(
+        repository,
+        base=base,
+        nominator=lambda _root, paths, **options: _required_dependency_evidence(
+            paths, **options
+        ),
+    )
+
+    assert "DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED" in plan.unverified
+    assert target not in plan.pytest
+    assert len(dependency_collection) == 1
 
 
 def test_dependency_collection_preserves_admitted_asset_policy_with_advisory_nominations(
