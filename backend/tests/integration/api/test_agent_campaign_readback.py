@@ -84,6 +84,12 @@ def test_initial_admission_refusal_reopens_by_campaign_id_in_api_and_fresh_cli(
             text=True,
             timeout=30,
         )
-        assert json.loads(cli.stdout) == report
+        cli_report = json.loads(cli.stdout)
+        assert cli_report.pop("_cli") == {
+            "schema": "oh-goon.cli/v1",
+            "exit_code": 0,
+            "exit_kind": "SUCCESS",
+        }
+        assert cli_report == report
     finally:
         reopened.shutdown(wait_for_runs=True)
