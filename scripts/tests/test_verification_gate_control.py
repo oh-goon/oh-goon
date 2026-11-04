@@ -23,6 +23,10 @@ from oh_goon.repository_tooling import development_verification as admission_own
 from oh_goon.repository_tooling.release import package_slim
 from oh_goon.repository_tooling.verification_gate_control import (
     DOCUMENTATION_ASSET_OBLIGATION,
+    DOCUMENTATION_PROOF_OBLIGATION,
+    DOCUMENTATION_PROOF_TEST,
+    HASHMARKS_UPGRADE_OBLIGATION,
+    HASHMARKS_UPGRADE_TESTS,
     REAL_LIFECYCLE_QA_PATHS,
     REAL_LIFECYCLE_QA_TEST,
     VERIFICATION_POLICY_TESTS,
@@ -240,7 +244,7 @@ def _proof(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     identity = "sha256:" + "a" * 64
     test_files = [test_file, *additional_tests]
-    nodes = [f"{path}::test_result" for path in test_files]
+    nodes = [path if "::" in path else f"{path}::test_result" for path in test_files]
     plan = {
         "schema_version": "oh-goon.development-verification/v1",
         "candidate": "a" * 40,
@@ -335,6 +339,252 @@ def _validate(
 
 def test_exact_fast_proof_does_not_claim_daily_full() -> None:
     _validate(*_proof())
+
+
+def _documentation_proof(
+    *, behavioral: bool = True
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    plan, result = _proof(
+        source="docs/guide.md",
+        test_file=DOCUMENTATION_PROOF_TEST,
+        additional_tests=("tests/test_source.py",) if behavioral else (),
+    )
+    plan["evidence"]["observations"][0].update(state="UNAVAILABLE", nominations=[])
+    plan["changed_paths"] = ["docs/guide.md"]
+    plan["evidence"]["observations"] = plan["evidence"]["observations"][:1]
+    if behavioral:
+        plan["changed_paths"].append("source.py")
+        plan["evidence"]["observations"].append(
+            {
+                "changed_path": "source.py",
+                "state": "LINKED",
+                "nominations": [
+                    {
+                        "nomination": {
+                            "available": True,
+                            "verification_target": {"path": "tests/test_source.py"},
+                        }
+                    }
+                ],
+            }
+        )
+    plan["evidence"]["documentation_policy"] = {
+        "authority": "oh-goon-execution-policy",
+        "paths": ["docs/guide.md"],
+        "coverage": "not-claimed",
+    }
+    plan["obligations"] = [DOCUMENTATION_PROOF_OBLIGATION]
+    result["plan"] = copy.deepcopy(plan)
+    return plan, result
+
+
+def _validate_declared(
+    plan: dict[str, Any],
+    result: dict[str, Any],
+    root: Path | None = None,
+    *,
+    removed_paths: tuple[str, ...] = (),
+) -> None:
+    validate_merge_proof(
+        plan,
+        result,
+        candidate=plan["candidate"],
+        base=plan["base"],
+        changed_paths=plan["changed_paths"],
+        removed_paths=removed_paths,
+        control_base=plan["base"],
+        root=root,
+    )
+
+
+def test_documentation_proof_handles_fenced_and_deleted_sources(tmp_path: Path) -> None:
+    document = tmp_path / "docs/guide.md"
+    document.parent.mkdir()
+    document.write_text("# Guide\n```sh\nuv run pytest\n```\n")
+    plan, result = _documentation_proof(behavioral=False)
+    plan.update(
+        changed_paths=["docs/guide.md"],
+        behavioral_status="NOT_APPLICABLE",
+        static=["architecture"],
+        evidence={"documentation_policy": plan["evidence"]["documentation_policy"]},
+    )
+    result["plan"] = copy.deepcopy(plan)
+    result["outcomes"] = [
+        outcome
+        for outcome in result["outcomes"]
+        if outcome["owner"] in {"Native pytest", "Architecture"}
+    ]
+
+    assert non_executable_documentation(tmp_path, "docs/guide.md")
+    _validate_declared(plan, result, tmp_path)
+    document.unlink()
+    plan["removed_paths"] = ["docs/guide.md"]
+    result["plan"] = copy.deepcopy(plan)
+    assert non_executable_documentation(tmp_path, "docs/guide.md")
+    _validate_declared(plan, result, tmp_path, removed_paths=("docs/guide.md",))
+
+
+def test_documentation_check_does_not_substitute_for_required_behavior() -> None:
+    plan, result = _documentation_proof()
+    _validate_declared(plan, result)
+
+    plan, result = _documentation_proof(behavioral=False)
+    with pytest.raises(ValueError, match="Executable changes have no behavioral proof"):
+        _validate_declared(plan, result)
+
+
+def test_source_qualified_documentation_check_retains_its_behavioral_role() -> None:
+    plan, result = _documentation_proof(behavioral=False)
+    observation = {
+        "changed_path": "source.py",
+        "state": "LINKED",
+        "nominations": [
+            {
+                "nomination": {
+                    "available": True,
+                    "verification_target": {"path": DOCUMENTATION_PROOF_TEST},
+                }
+            }
+        ],
+    }
+    plan["changed_paths"].append("source.py")
+    plan["evidence"]["observations"].append(observation)
+    result["plan"] = copy.deepcopy(plan)
+    _validate_declared(plan, result)
+
+    plan["changed_paths"].remove("source.py")
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError, match="Executable changes have no behavioral proof"):
+        _validate_declared(plan, result)
+
+
+@pytest.mark.parametrize("fault", ["omit-contract", "claim-code", "failed-contract"])
+def test_documentation_policy_cannot_omit_proof_or_claim_executable_source(
+    fault: str,
+) -> None:
+    plan, result = _documentation_proof()
+    _validate_declared(plan, result)
+    if fault == "omit-contract":
+        plan["pytest"] = []
+    elif fault == "claim-code":
+        plan["changed_paths"].append("source.py")
+        plan["evidence"]["documentation_policy"]["paths"].append("source.py")
+    else:
+        result["outcomes"][0]["returncode"] = 1
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError):
+        _validate_declared(plan, result)
+
+
+def test_documentation_route_keeps_policy_and_certification_sources_protected() -> None:
+    assert (
+        gate.documentation_proof_paths(
+            (
+                "AGENTS.md",
+                "docs/CI_CD_CONTRACT.md",
+                "docs/certification/questions/exam.md",
+            )
+        )
+        == ()
+    )
+    plan, result = _documentation_proof()
+    plan["changed_paths"].append("other.py")
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError, match="consumer evidence is unavailable"):
+        _validate_declared(plan, result)
+
+
+_BEFORE_HASHMARKS = (
+    '[project]\nname = "proof"\nversion = "1"\n'
+    'dependencies = ["hashmarks @ https://example.invalid/old.whl", "stable>=1"]\n'
+)
+_AFTER_HASHMARKS = _BEFORE_HASHMARKS.replace("old.whl", "new.whl")
+
+
+def _hashmarks_upgrade_proof(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    (root / "backend").mkdir()
+    (root / "backend/pyproject.toml").write_text(_BEFORE_HASHMARKS)
+    for argv in (
+        ("init", "-q"),
+        ("add", "backend/pyproject.toml"),
+        (
+            "-c",
+            "user.name=Proof",
+            "-c",
+            "user.email=proof@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "base",
+        ),
+    ):
+        assert command_owner.run_command("git", "-C", str(root), *argv).returncode == 0
+    base = command_owner.run_command(
+        "git", "-C", str(root), "rev-parse", "HEAD"
+    ).stdout.strip()
+    (root / "backend/pyproject.toml").write_text(_AFTER_HASHMARKS)
+    (root / "backend/uv.lock").write_text(
+        'version = 1\n[[package]]\nname = "opaque-new-transitive"\nversion = "anything"\n'
+    )
+    plan, result = _proof(
+        source="backend/pyproject.toml",
+        test_file=HASHMARKS_UPGRADE_TESTS[0],
+        additional_tests=(*HASHMARKS_UPGRADE_TESTS[1:], *VERIFICATION_POLICY_TESTS),
+    )
+    plan.update(
+        base=base,
+        changed_paths=["backend/pyproject.toml", "backend/uv.lock"],
+        policy_status="REVIEW_REQUIRED",
+        obligations=["verification-policy protection", HASHMARKS_UPGRADE_OBLIGATION],
+        static=["python", "architecture", "package"],
+    )
+    plan["evidence"].update(
+        hashmarks_upgrade={
+            "authority": "oh-goon-execution-policy",
+            "scope": "mandatory-hashmarks-upgrade",
+            "consumer_coverage": "not-claimed",
+        },
+        observations=[
+            {"changed_path": path, "state": "UNAVAILABLE", "nominations": []}
+            for path in plan["changed_paths"]
+        ],
+    )
+    result["outcomes"].append({"owner": "Native package", "returncode": 0})
+    result["plan"] = copy.deepcopy(plan)
+    return plan, result
+
+
+def test_hashmarks_upgrade_uses_native_intent_despite_opaque_lock_transitives(
+    tmp_path: Path,
+) -> None:
+    plan, result = _hashmarks_upgrade_proof(tmp_path)
+    _validate_declared(plan, result, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "fault", ["mixed-intent", "wrong-smoke", "package-failure", "no-root"]
+)
+def test_hashmarks_upgrade_cannot_forge_intent_or_omit_native_proof(
+    tmp_path: Path, fault: str
+) -> None:
+    plan, result = _hashmarks_upgrade_proof(tmp_path)
+    _validate_declared(plan, result, tmp_path)
+    if fault == "mixed-intent":
+        (tmp_path / "backend/pyproject.toml").write_text(
+            _AFTER_HASHMARKS.replace("stable>=1", "stable>=2")
+        )
+    elif fault == "wrong-smoke":
+        selector = HASHMARKS_UPGRADE_TESTS[2]
+        wrong = selector.split("::", 1)[0] + "::test_another_result"
+        native = result["outcomes"][0]["native_report"]
+        result["outcomes"][0]["native_report"] = json.loads(
+            json.dumps(native).replace(selector, wrong)
+        )
+    elif fault == "package-failure":
+        result["outcomes"][-1]["returncode"] = 1
+    with pytest.raises(ValueError):
+        _validate_declared(plan, result, None if fault == "no-root" else tmp_path)
 
 
 def test_native_git_removals_include_rename_source_but_not_copy_source() -> None:
@@ -1858,6 +2108,10 @@ def test_candidate_producer_rejects_local_dependency_before_native_materializati
         "foreign-asset-owner",
         "unsupported-dependency-intent",
         "dependency-intent-without-lock",
+        "hashmarks-upgrade",
+        "hashmarks-identity-mismatch",
+        "generic-dependency-update",
+        "unclaimed-hashmarks-upgrade",
     ),
 )
 def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observation(
@@ -1887,8 +2141,52 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
             continue
         monkeypatch.setattr(module, "__file__", str(trusted_sources / relative))
     plan, result = _proof()
-    plan["requested_head"] = "c" * 40
     base_manifest = (root / "backend/pyproject.toml").read_text(encoding="utf-8")
+    if fault in {"hashmarks-upgrade", "hashmarks-identity-mismatch"}:
+        base_manifest = _BEFORE_HASHMARKS
+        (root / "backend/pyproject.toml").write_text(_AFTER_HASHMARKS, encoding="utf-8")
+        plan, result = _proof(
+            source="backend/uv.lock",
+            test_file=HASHMARKS_UPGRADE_TESTS[0],
+            additional_tests=(*HASHMARKS_UPGRADE_TESTS[1:], *VERIFICATION_POLICY_TESTS),
+        )
+        plan.update(
+            changed_paths=["backend/pyproject.toml", "backend/uv.lock"],
+            policy_status="REVIEW_REQUIRED",
+            obligations=[
+                "verification-policy protection",
+                HASHMARKS_UPGRADE_OBLIGATION,
+            ],
+        )
+        plan["evidence"]["hashmarks_upgrade"] = {
+            "authority": "oh-goon-execution-policy",
+            "scope": "mandatory-hashmarks-upgrade",
+            "consumer_coverage": "not-claimed",
+        }
+    elif fault in {"generic-dependency-update", "unclaimed-hashmarks-upgrade"}:
+        plan["changed_paths"].append("backend/uv.lock")
+        plan["evidence"]["observations"].append(
+            {
+                **copy.deepcopy(plan["evidence"]["observations"][0]),
+                "changed_path": "backend/uv.lock",
+            }
+        )
+        if fault == "unclaimed-hashmarks-upgrade":
+            base_manifest = _BEFORE_HASHMARKS
+            (root / "backend/pyproject.toml").write_text(
+                _AFTER_HASHMARKS, encoding="utf-8"
+            )
+            plan["changed_paths"].append("backend/pyproject.toml")
+            plan["pytest"].extend(VERIFICATION_POLICY_TESTS)
+            plan.update(
+                policy_status="REVIEW_REQUIRED",
+                obligations=["verification-policy protection"],
+            )
+            _plan, result = _proof(additional_tests=VERIFICATION_POLICY_TESTS)
+    if "backend/uv.lock" in plan["changed_paths"]:
+        plan["static"].append("package")
+        result["outcomes"].append({"owner": "Native package", "returncode": 0})
+    plan["requested_head"] = "c" * 40
     if fault in {"unsupported-dependency-intent", "dependency-intent-without-lock"}:
         plan["changed_paths"].append("backend/pyproject.toml")
         current_manifest = base_manifest
@@ -1934,14 +2232,34 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
         ],
     )
     observed: list[Path] = []
+    base_intent_reads: list[str] = []
 
-    def producer(candidate: Path) -> str:
+    def producer(candidate: Path, **options: Any) -> str:
         observed.append(candidate)
+        expects_dependency_probe = (
+            "backend/uv.lock" in plan["changed_paths"]
+            and "hashmarks_upgrade" not in plan["evidence"]
+        )
+        assert bool(options) == expects_dependency_probe
+        if expects_dependency_probe:
+            assert options["dependency_plan"] == plan
+            assert options["trusted_root"] == trusted
+            options["dependency_receipt"].update(
+                source_identity=plan["source_identity"]
+            )
         if fault == "native-timeout":
             raise command_owner.CommandTimeoutExpired(
                 ("uv", "sync"), 120, supervisor=command_owner.CommandSupervisorReceipt()
             )
-        return "sha256:" + ("d" if fault == "identity-mismatch" else "b") * 64
+        return (
+            "sha256:"
+            + (
+                "d"
+                if fault in {"identity-mismatch", "hashmarks-identity-mismatch"}
+                else "b"
+            )
+            * 64
+        )
 
     def source_identity(candidate: Path) -> str:
         assert candidate == root
@@ -1974,6 +2292,7 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
         elif arguments[0] == "merge-base":
             output = ""
         elif arguments[0] == "show":
+            base_intent_reads.append(arguments[-1])
             output = base_manifest
         else:
             assert arguments[0] == "diff"
@@ -1987,7 +2306,19 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
 
     status = gate.main()
 
-    assert status == (0 if fault == "none" else 1)
+    if fault in {
+        "hashmarks-upgrade",
+        "hashmarks-identity-mismatch",
+        "unclaimed-hashmarks-upgrade",
+    }:
+        assert base_intent_reads == [f"{plan['base']}:backend/pyproject.toml"]
+    accepted = fault in {
+        "none",
+        "hashmarks-upgrade",
+        "generic-dependency-update",
+        "unclaimed-hashmarks-upgrade",
+    }
+    assert status == (0 if accepted else 1)
     assert observed == (
         []
         if fault
@@ -2002,5 +2333,5 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
         else [root]
     )
     output = capsys.readouterr().out
-    assert ("MERGE_VERIFIED:" in output) == (fault == "none")
-    assert ("MERGE UNVERIFIED:" in output) == (fault != "none")
+    assert ("MERGE_VERIFIED:" in output) == accepted
+    assert ("MERGE UNVERIFIED:" in output) != accepted

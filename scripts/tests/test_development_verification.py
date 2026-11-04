@@ -3,22 +3,26 @@ from __future__ import annotations
 import copy
 import json
 import stat
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from oh_goon.engine.command import run_command
 from oh_goon.integrations.hashmarks.development_verification import (
     nominate_changed_verification,
     observe_repository_assets,
 )
 from oh_goon.repository_tooling import development_verification as owner
-from oh_goon.engine.command import run_command
 from oh_goon.repository_tooling.pytest_member_selection import NativePytestCollection
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
     DOCUMENTATION_ASSET_OBLIGATION,
+    DOCUMENTATION_PROOF_OBLIGATION,
+    DOCUMENTATION_PROOF_TEST,
+    HASHMARKS_UPGRADE_OBLIGATION,
+    HASHMARKS_UPGRADE_TESTS,
     VERIFICATION_POLICY_TESTS,
 )
 
@@ -170,7 +174,12 @@ def test_plan_cli_publishes_after_actual_source_admission(
     readme = source / "docs/explanation.md"
     readme.parent.mkdir()
     readme.write_text("Original explanation.\n", encoding="utf-8")
-    owner._git(source, "add", "docs/explanation.md")
+    (source / "backend").mkdir()
+    (source / "backend/pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    contract = source / DOCUMENTATION_PROOF_TEST
+    contract.parent.mkdir(parents=True)
+    contract.write_text("def test_documentation_contract():\n    assert True\n")
+    owner._git(source, "add", ".")
     owner._git(
         source,
         "-c",
@@ -211,7 +220,7 @@ def test_plan_cli_publishes_after_actual_source_admission(
     assert plan.behavioral_status == "NOT_APPLICABLE"
     assert (
         outputs.read_text(encoding="utf-8")
-        == "python=false\nfrontend=false\npytest=false\n"
+        == "python=false\nfrontend=false\npytest=true\n"
     )
     assert (
         json.loads(target.read_text())["candidate"]
@@ -381,12 +390,14 @@ def test_effective_candidate_refuses_local_source_drift(repository: Path) -> Non
         owner.capture_change(repository, head, head)
 
 
-def test_prose_only_plan_does_not_start_intelligence_or_unrelated_toolchains(
+@pytest.mark.parametrize("content", ("Changed explanation.\n", "```sh\nuv sync\n```\n"))
+def test_documentation_uses_bounded_proof_without_starting_intelligence(
     repository: Path,
+    content: str,
 ) -> None:
     document = repository / "docs/ordinary.md"
     document.parent.mkdir(parents=True)
-    document.write_text("Changed explanation.\n", encoding="utf-8")
+    document.write_text(content, encoding="utf-8")
 
     def forbidden(_root: Path, _paths: tuple[str, ...]) -> dict[str, Any]:
         raise AssertionError(
@@ -396,7 +407,38 @@ def test_prose_only_plan_does_not_start_intelligence_or_unrelated_toolchains(
     plan = owner.admit_change(repository, base="HEAD", nominator=forbidden)
     assert plan.behavioral_status == "NOT_APPLICABLE"
     assert plan.static == ("architecture",)
-    assert not plan.pytest and not plan.frontend and not plan.unverified
+    assert plan.pytest == (DOCUMENTATION_PROOF_TEST,)
+    assert plan.obligations == (DOCUMENTATION_PROOF_OBLIGATION,)
+    assert plan.evidence["documentation_policy"] == {
+        "authority": "oh-goon-execution-policy",
+        "paths": ["docs/ordinary.md"],
+        "coverage": "not-claimed",
+    }
+    assert not plan.frontend and not plan.unverified
+    owner.require_current_plan(repository, plan)
+
+
+def test_documentation_contract_can_also_prove_a_source_qualified_behavior(
+    repository: Path,
+) -> None:
+    (repository / "behavior.py").write_text("answer = 2\n")
+    guide = repository / "docs/guide.md"
+    guide.parent.mkdir()
+    guide.write_text("Updated usage.\n")
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            for projected in row["nominations"]:
+                projected["nomination"]["verification_target"]["path"] = (
+                    DOCUMENTATION_PROOF_TEST
+                )
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+    assert plan.behavioral_status == "REQUIRED"
+    assert plan.pytest == (DOCUMENTATION_PROOF_TEST,)
+    owner.require_merge_selection(repository, plan)
 
 
 @pytest.mark.parametrize("operation", ("addition", "modification"))
@@ -432,8 +474,11 @@ def test_native_documentation_asset_admission_retains_explicit_bounded_policy(
     owner.require_merge_selection(repository, plan)
     assert plan.behavioral_status == "NOT_APPLICABLE"
     assert plan.static == ("architecture",)
-    assert plan.obligations == (DOCUMENTATION_ASSET_OBLIGATION,)
-    assert not plan.unverified and not plan.pytest and not plan.frontend
+    assert DOCUMENTATION_ASSET_OBLIGATION in plan.obligations
+    assert not plan.unverified and not plan.frontend
+    assert plan.pytest == (
+        (DOCUMENTATION_PROOF_TEST,) if operation == "addition" else ()
+    )
     observed = plan.evidence["asset_evidence"]["changes"][0]["asset"]
     assert observed["content"]["media_type"] == "image/png"
     assert observed["content"]["integrity"] == "not-validated"
@@ -662,8 +707,7 @@ def test_source_change_invalidates_admitted_plan_before_work(
 def test_source_change_stops_before_a_later_command_can_restore_old_bytes(
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = repository / "docs/source-change.md"
-    document.parent.mkdir(parents=True)
+    document = repository / "LICENSE"
     document.write_text("Changed explanation.\n", encoding="utf-8")
     plan = owner.admit_change(repository, base="HEAD")
     state = {"identity": plan.source_identity, "mutate": False}
@@ -708,8 +752,7 @@ def test_source_change_stops_before_a_later_command_can_restore_old_bytes(
 def test_native_package_proof_delegates_lock_runtime_and_build_to_existing_owners(
     repository: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    document = repository / "docs/package-proof.md"
-    document.parent.mkdir(parents=True)
+    document = repository / "LICENSE"
     document.write_text("Package verification policy.\n", encoding="utf-8")
     plan = owner.admit_change(repository, base="HEAD").model_copy(
         update={"static": ("package",)}
@@ -1158,7 +1201,7 @@ def test_qa_policy_change_admits_actual_required_producer_checks(
 @pytest.mark.parametrize(
     ("relative", "reason"),
     (
-        ("docs/ordinary.md", "NO_QUALIFIED_VERIFIER"),
+        ("docs/certification/questions.md", "NO_QUALIFIED_VERIFIER"),
         ("docs/development/REAL_LIFECYCLE_QA.extra.yml", "NO_QUALIFIED_VERIFIER"),
         ("backend/tests/factories/qa.py", "SHARED_FIXTURE_CONSUMER_SCOPE_UNVERIFIED"),
     ),
@@ -1441,6 +1484,127 @@ def _dependency_evidence(
     return evidence
 
 
+def _hashmarks_upgrade(repository: Path) -> str:
+    _base, lock, manifest = _dependency_update(repository, ("hashmarks",))
+    manifest = manifest.replace(
+        "hashmarks==1", "hashmarks @ https://example.invalid/hashmarks-1.whl"
+    )
+    (repository / "backend/pyproject.toml").write_text(manifest, encoding="utf-8")
+    (repository / "backend/uv.lock").write_bytes(lock)
+    owner._git(repository, "add", "backend")
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "mandatory Hashmarks baseline",
+    )
+    base = owner._git(repository, "rev-parse", "HEAD").strip()
+    (repository / "backend/pyproject.toml").write_text(
+        manifest.replace("hashmarks-1.whl", "hashmarks-2.whl"), encoding="utf-8"
+    )
+    (repository / "backend/uv.lock").write_bytes(
+        lock.replace(b'version = "1"', b'version = "2"')
+        + b'[[package]]\nname = "new-transitive-component"\nversion = "1"\n'
+        + b'source = { registry = "https://pypi.org/simple" }\n'
+    )
+    return base
+
+
+@pytest.mark.parametrize("producer_rows", ("unavailable", "missing"))
+def test_mandatory_hashmarks_upgrade_admits_new_transitive_components_without_consumer_graph(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    producer_rows: str,
+) -> None:
+    base = _hashmarks_upgrade(repository)
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("Hashmarks upgrades use native uv and runtime proof")
+
+    monkeypatch.setattr(owner, "require_current_dependency_environment", forbidden)
+    monkeypatch.setattr(
+        owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
+    )
+    observations: list[dict[str, Any]] = []
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        assert "dependency_base" not in options
+        evidence = _dependency_evidence(paths, dependency_base=None, **options)
+        for row in evidence["observations"]:
+            row.update(state="UNAVAILABLE", nominations=[], stale=True)
+        if producer_rows == "missing":
+            evidence["observations"] = []
+        observations.extend(copy.deepcopy(evidence["observations"]))
+        return evidence
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+    owner.require_merge_selection(repository, plan)
+    owner.require_current_plan(repository, plan)
+    assert not plan.unverified
+    assert plan.evidence["observations"] == observations
+    assert "dependency_changes" not in plan.evidence
+    assert "dependency_admission" not in plan.evidence
+    assert plan.evidence["hashmarks_upgrade"] == {
+        "authority": "oh-goon-execution-policy",
+        "scope": "mandatory-hashmarks-upgrade",
+        "consumer_coverage": "not-claimed",
+    }
+    assert set(HASHMARKS_UPGRADE_TESTS) | set(VERIFICATION_POLICY_TESTS) == set(
+        plan.pytest
+    )
+    assert HASHMARKS_UPGRADE_OBLIGATION in plan.obligations
+    assert {"python", "package", "architecture"} <= set(plan.static)
+    commands = {
+        name: command for name, command, _cwd in owner._commands(repository, plan)
+    }
+    assert commands["Native package"] == (
+        "make",
+        "backend-lock-check",
+        "backend-python-capability-check",
+        "backend-package-build-check",
+    )
+
+
+@pytest.mark.parametrize("extra", ("manifest", "source"))
+def test_hashmarks_upgrade_does_not_qualify_unrelated_changes(
+    repository: Path,
+    extra: str,
+) -> None:
+    base = _hashmarks_upgrade(repository)
+    if extra == "manifest":
+        with (repository / "backend/pyproject.toml").open(
+            "a", encoding="utf-8"
+        ) as stream:
+            stream.write('\n[project.scripts]\nunrelated = "application:main"\n')
+    else:
+        (repository / "behavior.py").write_text("value = 1\n", encoding="utf-8")
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        if extra == "manifest":
+            assert "dependency_base" in options
+        evidence = _dependency_evidence(
+            paths, dependency_base=options.pop("dependency_base", None), **options
+        )
+        for row in evidence["observations"]:
+            row.update(state="UNAVAILABLE", nominations=[])
+        return evidence
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+    if extra == "manifest":
+        assert "hashmarks_upgrade" not in plan.evidence
+        assert "DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED" in plan.unverified
+    else:
+        assert "NO_QUALIFIED_VERIFIER:behavior.py" in plan.unverified
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
+
+
 def _required_dependency_evidence(
     paths: tuple[str, ...], **options: Any
 ) -> dict[str, Any]:
@@ -1556,7 +1720,13 @@ def _synthetic_pytest_collection(
     files = tuple(path.relative_to(invocation.cwd).as_posix() for path in paths)
     calls.append(files)
     return NativePytestCollection(
-        tuple({"file": file, "selector": file + "::test_behavior"} for file in files),
+        tuple(
+            {
+                "file": target.split("::", 1)[0],
+                "selector": target if "::" in target else target + "::test_behavior",
+            }
+            for target in files
+        ),
         (),
     )
 
@@ -1689,8 +1859,11 @@ def test_ordinary_collection_cannot_drop_required_behavior_or_policy(
         owner.require_merge_selection(repository, plan)
 
 
+@pytest.mark.parametrize("scope", ("file", "named", "parametrized"))
 def test_ordinary_admission_uses_real_native_collection_for_cadence_and_empty_files(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scope: str,
 ) -> None:
     from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
 
@@ -1702,7 +1875,13 @@ def test_ordinary_admission_uses_real_native_collection_for_cadence_and_empty_fi
     root = backend / "tests/unit/services"
     root.mkdir(parents=True)
     files = ("test_ordinary.py", "test_daily.py", "test_empty.py")
-    (root / files[0]).write_text("def test_behavior():\n    assert True\n")
+    behavior = (
+        "import pytest\n@pytest.mark.parametrize('value', [1, 2])\n"
+        "def test_behavior(value):\n    assert value > 0\n"
+        if scope == "parametrized"
+        else "def test_behavior():\n    assert True\n"
+    )
+    (root / files[0]).write_text(behavior + "def test_unrelated():\n    assert True\n")
     (root / files[1]).write_text(
         "import pytest\n@pytest.mark.daily\ndef test_exhaustive():\n    assert True\n"
     )
@@ -1729,7 +1908,9 @@ def test_ordinary_admission_uses_real_native_collection_for_cadence_and_empty_fi
         for name in files:
             projected = copy.deepcopy(original)
             projected["nomination"]["verification_target"]["path"] = (
-                "backend/tests/unit/services/" + name
+                "backend/tests/unit/services/"
+                + name
+                + ("::test_behavior" if name == files[0] and scope != "file" else "")
             )
             evidence["observations"][0]["nominations"].append(projected)
         return evidence
@@ -1738,8 +1919,16 @@ def test_ordinary_admission_uses_real_native_collection_for_cadence_and_empty_fi
     plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
 
     owner.require_merge_selection(repository, plan)
-    assert plan.pytest == ("backend/tests/unit/services/test_ordinary.py",)
+    target = "backend/tests/unit/services/test_ordinary.py"
+    assert plan.pytest == (target + ("::test_behavior" if scope != "file" else ""),)
     admission = plan.evidence["pytest_admission"]
+    assert {row["selector"] for row in admission["collection"]["selected"]} == (
+        {target + "::test_behavior", target + "::test_unrelated"}
+        if scope == "file"
+        else {target + "::test_behavior"}
+        if scope == "named"
+        else {target + "::test_behavior[1]", target + "::test_behavior[2]"}
+    )
     assert admission["empty_advisory_targets"] == [
         "backend/tests/unit/services/test_empty.py"
     ]

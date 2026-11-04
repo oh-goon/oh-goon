@@ -15,6 +15,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import tomllib
 from collections.abc import Mapping, Sequence
 from importlib import metadata
 from pathlib import Path
@@ -32,6 +33,15 @@ REAL_LIFECYCLE_QA_TEST = "scripts/tests/test_real_lifecycle_qa_contract.py"
 
 _MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES = 1024 * 1024
 DOCUMENTATION_ASSET_OBLIGATION = "bounded documentation-asset policy"
+DOCUMENTATION_PROOF_TEST = "scripts/tests/test_documentation_authority_contract.py"
+DOCUMENTATION_PROOF_OBLIGATION = "bounded documentation proof"
+HASHMARKS_UPGRADE_TESTS = (
+    "backend/tests/unit/entrypoints/test_application_hashmarks_requirement.py",
+    "backend/tests/unit/integrations/test_hashmarks_same_version_rebase.py",
+    "backend/tests/unit/integrations/test_hashmarks_downstream_interoperability.py::test_native_collection_handoff_preserves_exact_selectors_and_missing_revision_claims",
+    "scripts/tests/test_dependency_minimization.py::test_hashmarks_upgrade_is_normal_uv_dependency_without_oh_goon_release_client",
+)
+HASHMARKS_UPGRADE_OBLIGATION = "mandatory Hashmarks upgrade proof"
 
 
 def is_verification_policy_path(path: str) -> bool:
@@ -215,25 +225,169 @@ def _independent_documentation_assets(
     return set(accepted)
 
 
-def non_executable_documentation(root: Path, path: str) -> bool:
-    if is_verification_policy_path(path):
-        return False
-    markdown = Path(path).suffix == ".md" and (
-        path.startswith("docs/") or path in {"README.md", "CONTRIBUTING.md"}
+def non_executable_documentation(_root: Path, path: str) -> bool:
+    return path == "LICENSE" or bool(documentation_proof_paths((path,)))
+
+
+def documentation_proof_paths(paths: Sequence[str]) -> tuple[str, ...]:
+    """The existing authored-doc owner; machine inputs keep their own proof."""
+    return tuple(
+        path
+        for path in paths
+        if not is_verification_policy_path(path)
+        and (
+            path == "CONTRIBUTING.md"
+            or (
+                path.startswith("docs/")
+                and not path.startswith("docs/certification/")
+                and Path(path).suffix == ".md"
+            )
+        )
     )
-    if path != "LICENSE" and not markdown:
-        return False
-    try:
-        with (root / path).open("r", encoding="utf-8") as stream:
-            content = stream.read(1024 * 1024 + 1)
-    except OSError:
-        return False
+
+
+def hashmarks_upgrade_intent(before: Mapping[str, Any], after: Mapping[str, Any]) -> bool:
+    """Compare native TOML intent without resolving versions or lock contents."""
+    previous = _without_hashmarks_requirement(before)
+    current = _without_hashmarks_requirement(after)
     return (
-        len(content) <= 1024 * 1024
-        and "\x00" not in content
-        and "```" not in content
-        and "~~~" not in content
+        previous is not None
+        and current is not None
+        and previous[1] != current[1]
+        and previous[0] == current[0]
     )
+
+
+def _without_hashmarks_requirement(
+    document: Mapping[str, Any],
+) -> tuple[dict[str, Any], str] | None:
+    project = document.get("project")
+    if not isinstance(project, Mapping):
+        return None
+    dependencies = project.get("dependencies")
+    if not isinstance(dependencies, list):
+        return None
+    selected = [
+        (index, value)
+        for index, value in enumerate(dependencies)
+        if isinstance(value, str) and value.startswith("hashmarks @ ")
+    ]
+    if len(selected) != 1:
+        return None
+    index, requirement = selected[0]
+    remainder = dict(document)
+    remainder["project"] = {
+        **project,
+        "dependencies": dependencies[:index] + dependencies[index + 1 :],
+    }
+    return remainder, requirement
+
+
+def _independent_hashmarks_upgrade(
+    root: Path | None,
+    base: str,
+    paths: Sequence[str],
+    evidence: Mapping[str, Any],
+    *,
+    observed_hashmarks_upgrade: bool | None = None,
+) -> bool:
+    if "hashmarks_upgrade" not in evidence:
+        return False
+    claimed = evidence["hashmarks_upgrade"]
+    if claimed != {
+        "authority": "oh-goon-execution-policy",
+        "scope": "mandatory-hashmarks-upgrade",
+        "consumer_coverage": "not-claimed",
+    }:
+        raise ValueError("Hashmarks upgrade policy is invalid or overclaimed")
+    if root is None or "backend/pyproject.toml" not in paths:
+        raise ValueError("Hashmarks upgrade requires candidate and native base intent")
+    if observed_hashmarks_upgrade is None:
+        from oh_goon.engine.command import run_command
+
+        observed = run_command(
+            "git",
+            "-C",
+            str(root),
+            "show",
+            "--no-ext-diff",
+            "--no-textconv",
+            f"{base}:backend/pyproject.toml",
+            cwd=root,
+            timeout=20,
+            max_capture_bytes_per_stream=8 * 1024 * 1024,
+            require_process_group_quiescence=True,
+            parent_death_signal=True,
+        )
+        if observed.returncode or observed.stdout_truncated:
+            raise ValueError("Native base Hashmarks intent is unavailable")
+        before = tomllib.loads(observed.stdout)
+        after = tomllib.loads((root / "backend/pyproject.toml").read_text(encoding="utf-8"))
+        observed_hashmarks_upgrade = hashmarks_upgrade_intent(before, after)
+    if not observed_hashmarks_upgrade:
+        raise ValueError("Hashmarks upgrade changes unrelated dependency or project intent")
+    return True
+
+
+def _require_documentation_proof(
+    paths: Sequence[str], plan: Mapping[str, Any], evidence: Mapping[str, Any]
+) -> set[str]:
+    documentation = documentation_proof_paths(paths)
+    expected = {
+        "authority": "oh-goon-execution-policy",
+        "paths": list(documentation),
+        "coverage": "not-claimed",
+    }
+    if documentation:
+        if (
+            evidence.get("documentation_policy") != expected
+            or DOCUMENTATION_PROOF_OBLIGATION not in plan.get("obligations", [])
+            or DOCUMENTATION_PROOF_TEST not in plan.get("pytest", [])
+        ):
+            raise ValueError("Bounded documentation proof was omitted or overclaimed")
+    elif "documentation_policy" in evidence:
+        raise ValueError("Documentation proof names another authoring surface")
+    return set(documentation)
+
+
+def behavioral_pytest_targets(
+    pytest: Sequence[str], evidence: Mapping[str, Any], current_paths: set[str]
+) -> set[str]:
+    """Retain an automatic doc check's independently nominated behavioral role."""
+    targets = set(pytest)
+    if "documentation_policy" not in evidence:
+        return targets
+    for observation in evidence.get("observations", []):
+        if (
+            observation.get("changed_path") not in current_paths
+            or observation.get("state") not in {"LINKED", "CHANGED_TEST"}
+            or observation.get("stale") is True
+        ):
+            continue
+        for projected in observation.get("nominations", []):
+            nomination = projected.get("nomination", {})
+            target = projected.get("workspace_prefix", "") + nomination.get(
+                "verification_target", {}
+            ).get("path", "")
+            if (
+                nomination.get("available") is True
+                and target.split("::", 1)[0] == DOCUMENTATION_PROOF_TEST
+            ):
+                return targets
+    return {target for target in targets if target.split("::", 1)[0] != DOCUMENTATION_PROOF_TEST}
+
+
+def _require_hashmarks_smoke_membership(native: Mapping[str, Any]) -> None:
+    passed = native.get("membership_receipt", {}).get("passed", [])
+    for selector in HASHMARKS_UPGRADE_TESTS:
+        if "::" not in selector:
+            satisfied = any(member.split("::", 1)[0] == selector for member in passed)
+        else:
+            satisfied = any(
+                member == selector or member.startswith(selector + "[") for member in passed
+            )
+        if not satisfied:
+            raise ValueError("Mandatory Hashmarks smoke has no native execution proof")
 
 
 def is_generated_contract_path(path: str) -> bool:
@@ -362,6 +516,7 @@ def validate_merge_proof(
     control_base: str | None,
     root: Path | None = None,
     removed_paths: Sequence[str] = (),
+    observed_hashmarks_upgrade: bool | None = None,
 ) -> None:
     if plan.get("schema_version") != "oh-goon.development-verification/v1":
         raise ValueError("Verification plan schema is unsupported")
@@ -388,14 +543,24 @@ def validate_merge_proof(
         or not set(policy_tests) <= set(plan.get("pytest", []))
     ):
         raise ValueError("Required independent verification-policy protection was omitted")
-    plain_docs = {
-        path
-        for path in changed_paths
-        if root is not None and non_executable_documentation(root, path)
-    }
     evidence = plan.get("evidence", {})
     if not isinstance(evidence, Mapping):
         raise ValueError("Producer evidence has an invalid shape")
+    documentation = _require_documentation_proof(changed_paths, plan, evidence)
+    plain_docs = documentation | ({"LICENSE"} if "LICENSE" in changed_paths else set())
+    hashmarks_upgrade = _independent_hashmarks_upgrade(
+        root,
+        base,
+        changed_paths,
+        evidence,
+        observed_hashmarks_upgrade=observed_hashmarks_upgrade,
+    )
+    if hashmarks_upgrade and (
+        HASHMARKS_UPGRADE_OBLIGATION not in plan.get("obligations", [])
+        or not set(HASHMARKS_UPGRADE_TESTS) <= set(plan.get("pytest", []))
+        or not {"python", "package"} <= set(plan.get("static", []))
+    ):
+        raise ValueError("Mandatory Hashmarks upgrade proof was omitted")
     recorded_removals = plan.get("removed_paths", [])
     if (
         not isinstance(recorded_removals, list)
@@ -418,7 +583,10 @@ def validate_merge_proof(
         for path in changed_paths:
             if path not in plain_docs:
                 raise ValueError("Executable inputs cannot claim behavioral NOT_APPLICABLE")
-    if behavior_required and not (plan.get("pytest") or plan.get("frontend")) and not contract_only:
+    behavioral_pytest = behavioral_pytest_targets(
+        plan.get("pytest", []), evidence, set(changed_paths) - plain_docs - removed
+    )
+    if behavior_required and not (behavioral_pytest or plan.get("frontend")) and not contract_only:
         raise ValueError("Executable changes have no behavioral proof")
     if (assets or (behavior_required and not contract_only)) and (
         not isinstance(evidence, Mapping)
@@ -486,6 +654,10 @@ def validate_merge_proof(
         pytest_files = require_native_pytest_pass(
             row.get("native_report", {}), expected_source=plan.get("source_identity")
         )
+        if documentation and DOCUMENTATION_PROOF_TEST not in pytest_files:
+            raise ValueError("Bounded documentation check has no native execution proof")
+        if hashmarks_upgrade:
+            _require_hashmarks_smoke_membership(row.get("native_report", {}))
         if policy_change and not set(policy_tests) <= pytest_files:
             raise ValueError("Required verification-policy tests have no execution proof")
         if pytest_files != {path.split("::", 1)[0] for path in plan.get("pytest", [])}:
@@ -519,6 +691,8 @@ def validate_merge_proof(
         if source in removed:
             continue
         if is_generated_contract_path(source):
+            continue
+        if hashmarks_upgrade and source in {"backend/pyproject.toml", "backend/uv.lock"}:
             continue
         if is_verification_policy_path(source) and not source.endswith(".py"):
             continue
@@ -979,8 +1153,8 @@ def main() -> int:
         )
         if plan.get("source_identity") != canonical_source_identity(args.root):
             raise ValueError("Candidate contents differ from selected proof")
-        dependency_intent, unsupported_intent = admission_owner._backend_dependency_intent(
-            args.root, args.base, tuple(changed_paths)
+        dependency_intent, unsupported_intent, hashmarks_upgrade_intent = (
+            admission_owner._backend_dependency_intent(args.root, args.base, tuple(changed_paths))
         )
         if unsupported_intent or (dependency_intent and "backend/uv.lock" not in changed_paths):
             raise ValueError("Dependency declarations lack an admitted native lock scope")
@@ -993,6 +1167,7 @@ def main() -> int:
             removed_paths=removed_paths,
             control_base=args.control_base,
             root=args.root,
+            observed_hashmarks_upgrade=hashmarks_upgrade_intent,
         )
         producer = plan.get("evidence", {}).get("producer_implementation_identity")
         dependency_receipt: dict[str, Any] = {}
@@ -1005,6 +1180,7 @@ def main() -> int:
                     dependency_receipt=dependency_receipt,
                 )
                 if "backend/uv.lock" in changed_paths
+                and "hashmarks_upgrade" not in plan.get("evidence", {})
                 else _candidate_producer_identity(args.root)
             )
             if producer != observed_producer:
