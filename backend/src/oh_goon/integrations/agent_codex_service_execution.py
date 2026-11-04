@@ -273,6 +273,11 @@ def service_arguments(
     )
 
 
+def _require_uncancelled(runtime: StepRuntime) -> None:
+    if runtime.cancel_requested is not None and runtime.cancel_requested():
+        raise OperationCancelledError("Codex service Run was cancelled")
+
+
 async def _turn(
     client: CodexServiceClient,
     thread: str,
@@ -284,8 +289,7 @@ async def _turn(
 ) -> NativeAgentEvents:
     final = ""
     while True:
-        if runtime.cancel_requested is not None and runtime.cancel_requested():
-            raise OperationCancelledError("Codex service Run was cancelled")
+        _require_uncancelled(runtime)
         if time.monotonic() >= deadline:
             raise OperationDeadlineExpired("Codex service Step deadline expired")
         if not worker.is_alive():
@@ -295,6 +299,7 @@ async def _turn(
                 message = await client.next_notification(thread)
         except TimeoutError:
             continue
+        _require_uncancelled(runtime)
         visible.event_count += 1
         params = message.get("params", {})
         if not isinstance(params, dict):
@@ -363,6 +368,7 @@ def execute_codex_service_run(
     connection = selected.profile.codex_service
     if connection is None:
         raise FleetPlanInvalid("Codex service requires its resolved native selection")
+    _require_uncancelled(runtime)
     private = control / "service-private"
     scratch = control / "service-scratch"
     socket = private / "agent.sock"
@@ -446,6 +452,8 @@ def execute_codex_service_run(
             visible=visible.snapshot(),
         )
 
+    _require_uncancelled(runtime)
+
     def serve() -> None:
         try:
             results.append(
@@ -471,18 +479,19 @@ def execute_codex_service_run(
     async def execute() -> NativeAgentEvents:
         nonlocal mcp_exclusion_identity
         while not socket.exists():
-            if runtime.cancel_requested is not None and runtime.cancel_requested():
-                raise OperationCancelledError("Codex service cancelled before readiness")
+            _require_uncancelled(runtime)
             if not worker.is_alive():
                 raise AgentProviderError("Owned Codex service failed before readiness")
             if time.monotonic() >= deadline:
                 raise OperationDeadlineExpired("Codex service readiness deadline expired")
             await asyncio.sleep(0.02)
+        _require_uncancelled(runtime)
         async with CodexServiceClient(
             socket,
             timeout_seconds=min(10, max(0.001, deadline - time.monotonic())),
             experimental_api=True,
         ) as client:
+            _require_uncancelled(runtime)
             client.require_native_home_separation(
                 (
                     *read_roots,
@@ -493,7 +502,9 @@ def execute_codex_service_run(
                 ),
                 expected_home=Path(connection.home),
             )
+            _require_uncancelled(runtime)
             exclusions = await client.mcp_exclusion_configuration()
+            _require_uncancelled(runtime)
             mcp_exclusion_identity = stable_id("codex-service-mcp-exclusions", exclusions)
             created = await client.start_thread(
                 cwd=repository,
@@ -503,13 +514,16 @@ def execute_codex_service_run(
                 ephemeral=True,
                 configuration={"features.incremental_tools": False, **exclusions},
             )
+            _require_uncancelled(runtime)
             thread = created["thread"]["id"]
             await client.require_mcp_servers_excluded(thread)
+            _require_uncancelled(runtime)
             flags = await client.feature_flags(thread)
             if any(flags.get(name) is not False for name in _DISABLED_FEATURES):
                 raise AgentProviderError(
                     "Codex service tool capability exclusion was not established"
                 )
+            _require_uncancelled(runtime)
             qualification = await client.command_exec(
                 (
                     sys.executable,
@@ -527,6 +541,7 @@ def execute_codex_service_run(
             qualification_exit_code = qualification.get("exitCode")
             if type(qualification_exit_code) is not int or qualification_exit_code != 0:
                 raise AgentProviderError("Codex service native sandbox qualification failed")
+            _require_uncancelled(runtime)
             turn = await client.start_turn(
                 thread,
                 task,
