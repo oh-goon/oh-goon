@@ -380,12 +380,12 @@ def _bounded_dependency_scope(
     } == set(nodes)
 
 
-def _collect_dependency_proof(
+def _collect_pytest_proof(
     root: Path,
     evidence: dict[str, Any],
     pytest: set[str],
     required: tuple[str, ...],
-    accepted_assets: set[str],
+    excluded_paths: set[str],
 ) -> tuple[set[str], list[str]]:
     invocation = replace(
         resolve_pytest_invocation(qualified=True, pytest_config=root / "backend/pyproject.toml"),
@@ -397,8 +397,12 @@ def _collect_dependency_proof(
     )
     selected = {row["file"] for row in collection.selected}
     if not selected <= pytest:
-        raise ValueError("Native dependency proof collection escaped the admitted test files")
-    admission = evidence["dependency_admission"]
+        raise ValueError("Native pytest collection escaped the admitted test files")
+    admission = (
+        evidence["dependency_admission"]
+        if "dependency_admission" in evidence
+        else evidence.setdefault("pytest_admission", {})
+    )
     admission["collection"] = collection.payload()
     admission["collection_context"] = invocation.correctness_context()
     deselected = {row["file"] for row in collection.deselected}
@@ -408,7 +412,7 @@ def _collect_dependency_proof(
     if not set(required) <= selected:
         missing.append("VERIFICATION_POLICY_PROTECTION_UNAVAILABLE")
     for row in evidence.get("observations", []):
-        if row.get("changed_path") in accepted_assets:
+        if row.get("changed_path") in excluded_paths:
             continue
         if row.get("state") == "CHANGED_TEST" and row["changed_path"] not in selected:
             missing.append(f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{row['changed_path']}")
@@ -560,11 +564,12 @@ def admit_change(
             admitted += 1
         if not admitted:
             unverified.append(f"NO_EXECUTABLE_VERIFIER:{path}")
-    if dependency_qualified and not unverified:
-        pytest, unavailable = _collect_dependency_proof(
-            root, evidence, pytest, required, set(accepted_assets)
+    if pytest and not unverified:
+        pytest, unavailable = _collect_pytest_proof(
+            root, evidence, pytest, required, set(accepted_assets) | removed_paths
         )
         unverified.extend(unavailable)
+    if dependency_qualified and "collection" in evidence["dependency_admission"]:
         if not _bounded_dependency_scope(evidence, base_sha, selected_files=pytest):
             unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
         require_current_dependency_environment(evidence["dependency_changes"])

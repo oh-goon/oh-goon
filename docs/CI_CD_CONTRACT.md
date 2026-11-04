@@ -7,7 +7,8 @@ This document is the short product-level contract for local CI/CD execution. The
 ## Repository checks on GitHub
 
 Ordinary updates use [relevant verification](../.github/workflows/ci.yml).
-Hashmarks supplies source-qualified direct and indirect verifier nominations;
+Hashmarks supplies a bounded pair of its selected and source-reference verifiers,
+with direct and indirect relationships and the original search qualifications;
 Oh-Goon admits the affected fast tests, bounded real proofs and applicable
 static/contracts. The existing native batch owner collects and executes that
 flat membership. It retains source/configuration/environment identity and exact
@@ -63,10 +64,11 @@ requirement. The retained `consumer_scope` remains incomplete and its negative
 evidence is not admissible; these chains establish the selected positive
 relationships without claiming all consumers have been found.
 
-The existing native pytest collector resolves advisory dependency verifiers before
+The existing native pytest collector resolves all advisory Python verifiers before
 plan admission, using the execution configuration and cadence. Evidence retains
 selected and deselected members and empty advisory targets; a support file with
-no collected tests cannot count as a component's required verifier. The original
+no collected tests cannot count as a source's required verifier. Changed tests
+and mandatory policy checks still need ordinary executable members. The original
 batch owner independently collects the admitted files for execution; the plan's
 file set and the exact native execution membership remain separately checked.
 
