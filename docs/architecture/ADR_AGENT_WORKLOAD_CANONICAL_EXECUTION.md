@@ -16,14 +16,23 @@ roadmap or current qualification record.
 The current Agent Step and bounded review/repair workflows are implemented.
 Outer review/repair phases use distinct linked Fleet Runs with caller-bound
 budgets; the original single-Run iteration proposal below was superseded.
-External native coding-agent adapters remain design work.
+Codex, Pi and OpenCode native adapters are shipped beneath the original Agent
+Step. [Agent providers](../AGENT_PROVIDERS.md) defines their selected profiles
+and mode limits; native sessions, authentication and compaction remain native.
+Built-in Agent workloads retain their standard-local contract, while native
+workloads consume their explicitly selected profile. A native executable's
+presence or service readiness does not qualify protection, session execution or
+another environment. Strict Agent Step execution remains rejected; selected
+strict source-custody/prework and installed-model qualification are separate.
+The historical gate/status and cost statements below do not add privileged
+qualification prerequisites to ordinary local use. See the
+[execution-first decision](ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md).
 
-Ordinary Agent execution currently uses the existing standard-local host path,
-without a kernel-isolation or deep-custody claim. Strict Agent Step execution is
-currently rejected; selected strict source-custody/prework and installed-model
-qualification are separate capabilities. The historical gate/status and cost
-statements below do not add privileged qualification prerequisites to ordinary
-local use. See the [execution-first decision](ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md).
+The current FleetRun supervisor submits this common execution chain to a thread
+pool. HUG-180/HUG-181's required claimed-worker boundary strengthens physical
+custody beneath the same admission; it is not implemented or qualified by this
+ADR. [The execution boundary](../execution-boundary.md) locates that target and
+its existing semantic owners.
 
 The enduring constraint is one canonical execution, recovery and result path.
 Current authority belongs to the [contributor contract](../../AGENTS.md) and

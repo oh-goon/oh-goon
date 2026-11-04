@@ -26,6 +26,29 @@ The detailed normative change-review and anti-drift rules are in `FAIL_BEFORE_WO
 
 ## Execution and repository-effect ownership
 
+### One FleetRun path, with a required stronger custody boundary
+
+Normal Plan/Goon work, whether manual, CI/CD, scheduled, agentic, ML or selected
+application-source execution, uses the existing FleetRun admission/lifecycle
+and Step/Attempt owners. Direct maintenance effects retain their separate
+admission into the same repository-effect owner below; they are not a FleetRun
+execution shortcut. Current
+`RunExecutionSupervisor` submits `FleetRunExecution` through a thread pool. The
+[canonical lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+require that same supervisor to transfer an admitted ticket to one fresh isolated
+Run worker through an atomic custody claim. This physical cutover remains
+[HUG-180](https://linear.app/hugloss/issue/HUG-180) work, with failure/drain proof in
+[HUG-181](https://linear.app/hugloss/issue/HUG-181); the requirements do not certify
+that process custody already exists.
+
+The claimed worker enters the existing `FleetRunExecution → ExecutionSession →
+FleetTargetScheduler → Step/Attempt → harness` path. It cannot re-admit, re-place,
+re-resolve or reselect work. SQLite/Journal and the existing lifecycle retain
+durable state and terminalization; worker exit, logs and Game Tape remain
+evidence/projections. The cutover removes direct thread-owned Run submission
+rather than retaining a second execution mode or parent fallback. Native session,
+Schedule and client identities never become Run custody or recovery authority.
+
 ### Repository effects have one owner-neutral durable lifecycle
 A repository effect is claimed, started, settled and reconciled through one durable lifecycle independent of which executor implementation performed it. Durable facts, not process memory, determine recovery.
 
@@ -113,11 +136,20 @@ admission, and physical custody identities answer different questions:
 | Stable catalog identity for a canonical path | [`core/product_identity.py::repository_id()`](../../backend/src/oh_goon/core/product_identity.py) |
 | Git-specific stale-observation token | `core/product_identity.py::repository_instance_id()` |
 | Git-optional execution subject token | `core/product_identity.py::repository_subject_instance_id()` |
-| Repository-evidence/content identity and freshness | Hashmarks through [`integrations/hashmarks/`](../../backend/src/oh_goon/integrations/hashmarks/) |
+| Repository-evidence/content identity and freshness | Mandatory Hashmarks through the public [`oh_goon.integrations.hashmarks` API](../../backend/src/oh_goon/integrations/hashmarks/__init__.py) |
 | Admitted subject plus captured source | [`RepositorySourceAuthority`](../../backend/src/oh_goon/core/models/source_authority.py) and the existing [repository/Plan admission owner](../../backend/src/oh_goon/integrations/fleet_plan_preview.py) |
 | Durable workspace allocation, state, checkpoints, and leases | [`runtime/workspaces.py::RepositoryWorkspaceAuthority`](../../backend/src/oh_goon/runtime/workspaces.py) and its existing runtime collaborators |
 | Validation of supplied execution authority | Existing [Fleet admission](../../backend/src/oh_goon/services/fleet_admission.py) and [Enforcer](../../backend/src/oh_goon/core/enforcer_lace_semantics.py) owners |
 | Active physical execution custody | Existing LACE and [process-isolation owners](../../backend/src/oh_goon/integrations/fleet_plan_process_isolation.py) |
+
+The [mandatory Hashmarks SSOT requirements](OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
+own repository meaning and producer evidence qualifications. Direct producer imports and private
+integration-submodule imports remain inside that package; its explicit exports
+are the capability census. Unknown, stale or incomplete producer facts cannot
+be replaced by a local repository heuristic. OH-Goon policy may refuse or apply
+an existing bounded execution policy without claiming new repository truth.
+Execution-custody/materialization identities retain their separate ownership
+over frozen bytes, physical transfer and execution evidence.
 
 Fleet instance fencing uses the repository-subject token, which includes Git metadata when
 it exists and remains defined when it does not. Git-derived inputs and Git Steps still require
@@ -238,6 +270,7 @@ Plan-path/input/root/agent flag assembly is removed without compatibility reader
 `goon.yml` owns executable behavior, composition, inputs and requirements. One
 canonical resolver produces the immutable resolved execution. `goon.lock` is only
 its compact deterministic fingerprint. Enforcer/admission owns whether it may run,
-executor performs the already-admitted identity, and Game Tape owns what actually
-happened. Internal certification/release retain their owner-controlled frontdoors
+executor performs the already-admitted identity, and the original Journal/Fleet
+lifecycle and accepted results retain what happened. Game Tape projects those
+facts without acquiring execution or result authority. Internal certification/release retain their owner-controlled frontdoors
 and state-owned locks; they are not alternate normal configuration routes.

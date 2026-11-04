@@ -124,7 +124,8 @@ original published output/artifact and stdout/stderr **hash/size evidence**.
 `runs outputs` does not retrieve raw log bytes; `runs logs` is transient and
 may be `UNAVAILABLE`. Nothing here replays a Run, grants admission, or certifies
 physical containment. JSON `runs tape` can be large; use `runs steps` or
-`runs outputs` for focused agent inspection. No new Hashmarks dependency.
+`runs outputs` for focused agent inspection. These views consume recorded
+execution facts; they do not reacquire or reinterpret repository intelligence.
 
 ## Resume a bounded journal event page (RUN-3)
 

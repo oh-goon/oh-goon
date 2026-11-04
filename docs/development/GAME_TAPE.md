@@ -2,17 +2,23 @@
 
 
 Historical comparison, performance, and failure analysis receive already-projected `GameTape` values: `FleetRunControlPlane` projects each selected durable run once per request and reuses that exact projection rather than walking the same `FleetRunDetail` again.
-Game Tape is oh-goon's read-only execution observability projection. `goon.yml` is the Game Plan; Game Tape shows the admitted plan and the durable facts produced by execution.
+Game Tape is Oh-Goon's read-only execution observability projection. Plan/Goon
+definitions own intent and executable behavior; Game Tape shows the admitted
+resolved Plan and durable facts accepted by the original Fleet/Journal owners.
+It does not own Run state, live custody, effect settlement or terminal results.
 
 ## Non-negotiable execution boundary
 
 ```text
-goon.yml
+Plan / Goons
   -> resolve once
   -> ResolvedFleetPlan
-  -> FleetPlanTarget (durable admitted intent)
-  -> executor
+  -> FleetPlanTarget (frozen prepared target)
+  -> FleetRun admission + ExecutionTicket
+  -> RunExecutionSupervisor (current thread-owned execution)
+  -> existing FleetRunExecution / Step / Attempt
   -> FleetPlanResult / OperationReport
+  -> accepted Journal / Fleet lifecycle facts
   -> canonical execution ledger projection
   -> FleetRunDetail.game_tape
   -> Summary | Flow | Timeline | Performance | Play-by-Play | Attempts | Logs/evidence | Search | Run Diff
@@ -21,6 +27,16 @@ goon.yml
 Game Tape never schedules work. A Flow node is not schedulable, a Flow edge is not a dependency, visual grouping is not an execution phase, and there is no DAG/topological execution model behind the view. The order shown by Flow is the exact `ResolvedFleetPlan.steps` order already embedded in the admitted `FleetPlanTarget`.
 
 The browser owns no parallel execution model. `FleetRunDetail.game_tape` is the API projection consumed by every Game Tape view.
+
+The [canonical lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+insert an isolated Run worker and atomic custody claim between the supervisor and
+the existing execution path. This is the
+[HUG-180](https://linear.app/hugloss/issue/HUG-180)/[HUG-181](https://linear.app/hugloss/issue/HUG-181)
+target, not implemented worker support advertised by this view. It applies to
+local, CI, scheduled, ML, application and native-agent Runs through one admission
+path. Worker exit, heartbeat and native session events remain execution or
+diagnostic evidence; they cannot replace the original Journal/Fleet outcome.
+Missing custody/cleanup observations remain unavailable rather than inferred.
 
 Command Steps expose their admitted `project_source` and selected `uv`
 environment directly from the resolved Plan. Captured application facts include
@@ -96,6 +112,12 @@ The ledger vocabulary names observable facts such as run admission/start/termina
 One optional `ResolvedExecutionReference` binds Plan ID/name, typed `FleetPlanSource`, source SHA and verified `ExecutionIdentity` as a single structural fact. Game Tape cannot carry an execution digest without the source identity that was admitted with it.
 
 One stable `repository_execution_id` identifies a repository lane for a Fleet run. One stable `step_execution_id` identifies a resolved plan step within that repository execution. Flow, Timeline, Play-by-Play, Logs/evidence, Search, and the shared inspector all select the same `GameTapeStepExecution`; there are no separate graph, timeline, ledger-step, or log-step models.
+
+Hashmarks repository/content identity describes the source observed at its scope
+and producer generation. Execution-custody/materialization identities describe
+the exact bytes frozen, transported and exposed to the admitted attempt. Game
+Tape preserves those distinct provenances when recorded; matching bytes, paths
+or native session IDs do not prove custody, permission or equivalent executions.
 
 ## Lifecycle meanings
 
@@ -177,7 +199,7 @@ The repository projection identifies the slowest recorded step and its percentag
 
 ### Historical performance baseline
 
-The Performance view is an on-demand read projection over earlier durable Game Tape facts. It does not persist aggregates, create a metrics table, maintain a cache, or run an anomaly/AI model. `FleetRunControlPlane` reads the existing chronological run details and `project_game_tape_performance()` applies one explicit comparison rule:
+The Performance view is an on-demand read projection over earlier durable execution facts exposed through Game Tape. It does not persist aggregates, create a metrics table, maintain a cache, or run an anomaly/AI model. `FleetRunControlPlane` reads the existing chronological run details and `project_game_tape_performance()` applies one explicit comparison rule:
 
 - only earlier runs with the same resolved `plan_id` are candidates,
 - run totals additionally require the same repository set,
@@ -198,7 +220,7 @@ The browser localizes and renders these facts but does not choose comparison run
 
 ### Search
 
-Run-level Search filters the authoritative Game Tape payload in memory. It covers step identity/kind/status, exact commands, safe environment source names, declared outputs, `why` facts, failure fingerprints, and repository requirements. While a run is active, it also searches the currently retained bounded transient output chunks directly. There is no persisted search index or second cache/source of truth. Historical raw-log text remains absent because transient stdout/stderr is discarded when execution ends.
+Run-level Search filters the backend Game Tape projection in memory. It covers step identity/kind/status, exact commands, safe environment source names, declared outputs, `why` facts, failure fingerprints, and repository requirements. It also searches currently retained bounded transient output chunks in the active or sealed process-local window. There is no persisted search index or second cache/source of truth. Raw-log text is absent from durable history; the sealed debugging window expires after its ten-minute handoff or is lost on process restart.
 
 ### Failure fingerprint and evidence navigation
 
@@ -221,6 +243,17 @@ When a selected step has a deterministic failure signature, Game Tape can scan e
 Each exact occurrence also compares the current and historical reproduction context using three-state facts: `MATCH`, `DIFFERENT`, or `UNKNOWN`. Workspace, runtime-root, host-toolchain, isolation identity, and exact command are compared only when both sides recorded the relevant identity. Missing evidence remains `UNKNOWN`; two missing facts never become a claimed match. This gives developers a useful “same failure under the same recorded physical context?” check without replaying either run or reconstructing missing bytes.
 
 Failure history uses the same chronological Journal read view as historical performance and is calculated on demand. It does not persist clusters, maintain a diagnostics/search database, or turn a repeated signature into a causal claim.
+
+These exact execution-evidence comparisons do not infer repository relationships.
+Interpreting a runtime path, traceback, line or symbol against repository source
+requires producer-qualified Hashmarks correlation through the public
+`oh_goon.integrations.hashmarks` API. Keep source/producer identity, freshness,
+completeness, ambiguity and omissions; unavailable correlation stays unavailable
+without ambient source reads or local mapping heuristics. The compiler's retained
+Plan/Goon source positions above are already-resolved authoring facts, not a new
+repository-correlation pass. Later diagnostic correlation cannot reselect an
+active Run's frozen work. See the
+[Hashmarks handoff](HASHMARKS_EXECUTION_LAYER.md#runtimesource-correlation).
 
 ### Failure evolution and later-pass evidence
 
@@ -286,7 +319,7 @@ Host-backed step secret values are stream-redacted **before** text enters the st
 
 While execution is active the resource is `ACTIVE`. When Fleet execution terminalizes, the store is **sealed**, not persisted: `SEALED` output remains process-local for one explicit 10-minute debugging handoff with an exposed expiry timestamp and then becomes `UNAVAILABLE` through lazy expiry. A process restart also loses it. Durable run history still contains only output SHA-256/byte/line evidence, never raw bytes.
 
-The durable failure fingerprint already owns the failed physical attempt, authoritative stdout/stderr stream and recorded evidence line count. One `GameTapeLiveOutputStore.snapshot_cut()` acquires the live-output lock once and returns both the incremental batch requested by `after` and the complete currently retained chunk tuple. `game_tape_live_failure_anchor.py` maps durable failure facts to sequence identity only inside that immutable retained tuple; it never calls back into the mutable store after the batch is chosen. The browser receives that anchor and does not regex/parse logs or infer a failure line. If the target chunk was dropped or the sealed window expired, Game Tape says so and keeps the durable hash/count evidence available instead of manufacturing raw output.
+The durable failure fingerprint identifies the recorded failed physical attempt, selected stdout/stderr stream and evidence line count. One `GameTapeLiveOutputStore.snapshot_cut()` acquires the live-output lock once and returns both the incremental batch requested by `after` and the complete currently retained chunk tuple. `game_tape_live_failure_anchor.py` maps durable failure facts to sequence identity only inside that immutable retained tuple; it never calls back into the mutable store after the batch is chosen. The browser receives that anchor and does not regex/parse logs or infer a failure line. If the target chunk was dropped or the sealed window expired, Game Tape says so and keeps the durable hash/count evidence available instead of manufacturing raw output.
 
 The Logs view follows the newest output by default, stops following when the developer scrolls upward, reports newer chunks, and offers **Jump to latest** without yanking the viewport. **Open failure evidence** selects Logs and scrolls to the backend-owned sequence when retained. The same active/sealed transient chunks can be searched directly without a separate index. Never manufacture historical logs from hashes, summaries, or event text.
 
@@ -306,7 +339,7 @@ The live-output limits have one source of truth in `core/game_tape_policy.py`: 2
 
 ## Run Preview boundary
 
-Plan preview remains non-effecting and uses the canonical Fleet plan owner. Shared Plan preview returns both the deterministic resolved `plan_id` and the digest of the canonical execution lock for the reviewed source plus inputs. Run and Schedule requests must carry those identities back as `expected_plan_id` and `expected_execution_digest`. The execution boundary re-resolves the current source plus inputs and rejects either identity if it changed before admission. This is a freshness fence, not a claim that two HTTP requests share one in-memory object. File-backed execution still requires its admitted `goon.lock`; saved Shared Plans use the explicit reviewed digest because their source lives outside Team repositories and one saved input-parametric Plan cannot own a single static source-adjacent lock for every input set. Execution authority still begins with the exact `ResolvedFleetPlan` embedded in `FleetPlanTarget`, and Game Tape reads that admitted object rather than resolving YAML itself.
+Plan preview remains non-effecting and uses the canonical Fleet plan owner. Shared Plan preview returns both the deterministic resolved `plan_id` and the digest of the canonical execution lock for the reviewed source plus inputs. Run and Schedule requests must carry those identities back as `expected_plan_id` and `expected_execution_digest`. The execution boundary re-resolves the current source plus inputs and rejects either identity if it changed before admission. This is a freshness fence, not a claim that two HTTP requests share one in-memory object. File-backed execution still requires its admitted `goon.lock`; saved Shared Plans use the explicit reviewed digest because their source lives outside Team repositories and one saved input-parametric Plan cannot own a single static source-adjacent lock for every input set. Execution consumes the exact `ResolvedFleetPlan` embedded in `FleetPlanTarget` only after original Fleet admission; the target alone is not effect permission. Game Tape reads that admitted object rather than resolving YAML itself.
 
 ## Invariants
 
@@ -325,7 +358,7 @@ Tests and architecture review should preserve these rules:
 11. Run Diff compares canonical Game Tape facts only; it is not a generic data-diff framework.
 12. Search reads the Game Tape payload directly and creates no durable search/index authority.
 13. Missing source lines, raw historical logs, or undeclared tool version strings are shown as unavailable rather than inferred.
-14. Lifecycle meanings are derived only by the canonical Game Tape lifecycle owner.
+14. The Game Tape lifecycle projector maps original durable lifecycle/result facts to observability status once; it never establishes Run state itself.
 15. Play-by-Play is a read projection over existing durable owners; it never appends a duplicate durable execution event.
 16. Equal-timestamp ledger ordering remains deterministic and preserves admitted step order.
 17. Physical attempts come directly from canonical `PlanStepAttemptEvidence`; Game Tape does not create a second retry/attempt model.

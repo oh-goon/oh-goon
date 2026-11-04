@@ -7,8 +7,8 @@ oh-goon persists facts and unresolved coordination only. Read models are rebuilt
 - **Journal** — append-only, hash-linked canonical `OperationReport`, Fleet orchestration, effect reconciliation, and acknowledgement history.
 - **RepositoryEffectAttemptStore** — unresolved external-effect lifecycle for Direct/Fleet; origin is provenance only.
 - **SQLite execution lease** — exact cross-process execution authority; a live owner is never time-expired.
-- **WorkflowDefinitionStore** — saved definitions with immutable generation + monotonic version; replace/delete are generation-and-version-bound replay-safe commands.
-- **WorkflowExecutionStore** — structural workflow lifecycle/cursor/CAS; step FleetRun IDs are derived.
+- **ScheduleDefinitionStore** — one explicit repository target set, one resolved Plan and wall-clock interval, with immutable generation + monotonic version; replace/delete are generation-and-version-bound replay-safe commands.
+- **ScheduleExecutionStore** — structural occurrence and repository-result state with record-version CAS. Each repository's FleetRun ID is derived from the occurrence and repository IDs; this store owns no Step program, workflow cursor or alternate Run lifecycle.
 - **LocalState** — repository scope/exclusions and durable read-cut boundary.
 - **Local configuration files** — `league.yml` owns saved League folders and `plans/<plan-key>/plan.yml` owns saved Shared Plan source bytes. These preferences live outside disposable SQLite; they are not execution evidence.
 
@@ -23,6 +23,27 @@ oh-goon persists facts and unresolved coordination only. Read models are rebuilt
 There is no generic `release`/`abandon` cleanup for admitted work. A process crash leaves durable evidence for recovery.
 
 `CapabilityExecutor` performs no durable mutation.
+
+`RunExecutionSupervisor` currently submits the original FleetRun execution to a
+thread pool. The [required Run-worker cutover](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+under HUG-180/HUG-181 transfers live process custody by an atomic claim beneath
+the same admission and SQLite authority; it adds no durable Job/worker store or
+second local, CI, scheduled, ML, application or agent path. A PID, native session,
+worker exit or Game Tape view cannot establish custody or terminal truth.
+
+## Repository evidence and physical custody
+
+Mandatory Hashmarks owns repository/content identity, freshness, relationships,
+selection and repository/source correlation. The public
+[`oh_goon.integrations.hashmarks` API](../../backend/src/oh_goon/integrations/hashmarks/__init__.py)
+is the consumer SSOT boundary; direct producer and private-submodule consumers
+cannot establish production authority. Missing or unknown producer precision
+permits conservative Oh-Goon policy or refusal, never local semantic fallback.
+Oh-Goon owns execution admission, physical grouping, custody/materialization,
+result acceptance and certification. Repository/content evidence and physical
+custody identities bind different facts. The
+[Hashmarks requirements](OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
+and [current execution boundary](../execution-boundary.md) retain those scopes.
 
 ## Journal projection SSOT
 
@@ -46,7 +67,7 @@ SSOT values are immutable once published: admitted intents, lifecycle states/fac
 
 A run has exactly one selected source before resolution. A repository-owned run uses that repository's exact root `goon.yml`; a Shared Run uses one saved `plans/<plan-key>/plan.yml` plus explicit current repository IDs. The CLI additionally selects exact catalog, contained file or pinned Git Plans through [run configuration](TEMPLATE_INPUT_INSPECTION.md). These source selections are mutually exclusive. Shared Run target selection operates on managed Git repository identity and must not read, validate, merge, inherit, or fall back to repository `goon.yml` files. All selections enter the same `FleetPlanService` / execution boundary; the admitted run records selected source identity. Root and canonical shipped YAML use one exact-byte source snapshot so path, decoded text, parsed contract, and digest cannot come from separate filesystem reads. Catalog YAML digests exclude README prose. Package-owned Python runtime separately binds the complete captured authored project, including its README, metadata, native lock, implementation and resources, into execution identity; receivers consume those captured bytes.
 
-Source YAML and extension TOML are authoring inputs, not runtime state. Browser Plan authoring has one saved-Plan owner under **Plans**. Shared Runs and Schedules only consume saved Plans, while internal path-based Plan tooling resolves source through `FleetPlanService`/`FleetPlanResolver`. There is no second `/plans/*` HTTP editor/workspace owner. `ResolvedFleetPlan` remains the admitted execution SSOT; once admitted, execution never reopens authoring files to reinterpret intent.
+Source YAML and extension TOML are authoring inputs, not runtime state. Browser Plan authoring has one saved-Plan owner under **Plans**. Shared Runs and Schedules only consume saved Plans, while internal path-based Plan tooling resolves source through `FleetPlanService`/`FleetPlanResolver`. There is no second `/plans/*` HTTP editor/workspace owner. `ResolvedFleetPlan` retains resolved Plan intent; only original Fleet admission grants execution authority, and the Journal/lifecycle retain Run truth. Once admitted, execution never reopens authoring files to reinterpret intent.
 
 ### Local Lineups are selection preferences, not Team state
 

@@ -14,6 +14,13 @@ installed cases remain **NOT_RUN** in this review. Native executable facts remai
 in the frozen selection and original execution evidence, never in a second
 version database here.
 
+Native protocol adaptations operate below the common FleetRun/Step lifecycle;
+owned native daemons and sessions do not become Run custody or recovery owners.
+The [required isolated Run-worker boundary](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+remains HUG-180/HUG-181 work; current Run supervision still uses a thread pool.
+The historical installed observations below do not qualify the worker cutover
+or create a CLI/service compatibility route around its required atomic claim.
+
 Resource-admission disposition: **retain** the protocol, settlement and
 reserved-directory adaptations below. Capped standard execution now verifies
 that native scope placement retains the caller's aggregate limits; see the

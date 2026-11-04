@@ -4,6 +4,25 @@
 
 This document is the short product-level contract for local CI/CD execution. The detailed mechanics live in [`development/FLEET_PLANS.md`](development/FLEET_PLANS.md), while [Architecture](ARCHITECTURE.md) explains the current ownership boundaries.
 
+CI platforms own their triggers and host jobs. A workflow that invokes an
+Oh-Goon Plan enters the same FleetRun admission and Step/Attempt path as local,
+scheduled, ML, application and agentic work. It does not gain a CI-specific
+runner. The [canonical execution boundary](execution-boundary.md) distinguishes
+current thread-based Run submission from the required claimed isolated-worker
+custody migration under HUG-180/HUG-181. That claim will consume already-admitted
+facts without reselecting work; neither a worker exit nor a hosted job result
+replaces the original Fleet/Journal terminal outcome. The test-batch processes
+used to verify this repository below are native verification infrastructure,
+not a second production FleetRun path or evidence of completed worker custody.
+
+Repository meaning comes from mandatory Hashmarks through the public
+`oh_goon.integrations.hashmarks` SSOT API. The
+[Hashmarks requirements](development/OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
+retain producer identity, freshness, scope and uncertainty; unavailable producer
+precision permits conservative execution policy or refusal, never a local
+semantic replacement. Execution grouping, retries, cancellation, results and
+certification remain Oh-Goon-owned.
+
 ## Repository checks on GitHub
 
 Ordinary updates use [relevant verification](../.github/workflows/ci.yml).
@@ -512,11 +531,16 @@ authoring source
     -> typed resolution
     -> repository baseline admission
     -> executor/isolation/resource admission
-    -> RUN_ADMITTED
-    -> frozen execution inputs
-    -> isolated step attempts
+    -> RUN_ADMITTED + ExecutionTicket + frozen facts
+    -> RunExecutionSupervisor
+    -> FleetRunExecution / ExecutionSession / target scheduler
+    -> ordered Step attempts under the selected execution contract
     -> evidence-bound result
 ```
+
+The current supervisor runs that semantic path in a thread. The required
+cutover inserts one freshly claimed isolated Run worker between the supervisor
+and `FleetRunExecution`; it strengthens custody without another admission path.
 
 The key rule is not “run an Enforcer job first.” The rule is stronger:
 
@@ -598,7 +622,7 @@ a lease or certificate. Shared Plan and Schedule UI/service APIs retain their
 own explicit reviewed target and source identities. The config cannot select
 an implicit fleet, define scheduler Steps, or grant stored permission.
 
-Strict CI/CD backend authority is also explicit. `FleetExecutorPool` selects and reserves one exact executor/backend before `RUN_ADMITTED`; the admitted backend/configuration evidence is then consumed by `FleetPlanRunExecutor.prepare_strict_run()` and revalidated before launch. Strict preparation never performs a second backend search, while direct plans use the separate `prepare_direct_run()` path and cannot consume isolation evidence. Missing admitted evidence, changed configuration, or unavailable exact placement fails closed instead of selecting a currently suitable fallback.
+Strict CI/CD backend authority is also explicit. `FleetExecutorPool` selects and reserves one exact executor/backend before `RUN_ADMITTED`; the admitted backend/configuration evidence is then consumed by `FleetPlanRunExecutor.prepare_strict_run()` and revalidated before launch. Strict preparation never performs a second backend search, while trusted-local plans use `prepare_direct_run()` within the same FleetRun lifecycle and cannot consume strict isolation evidence. These are Step preparation contracts, not competing Run execution routes or worker compatibility modes. Missing admitted evidence, changed configuration, or unavailable exact placement fails closed instead of selecting a currently suitable fallback.
 The durable admission shape is equally explicit: `RUN_ADMITTED.execution` is either `kind: direct` or `kind: strict`. The strict variant contains one `placement` fact whose backend evidence and executor-capacity reservation were selected together before admission, plus optional placement-loss re-admission lineage. Execution revalidates and later releases that same placement; backend/capacity are never carried as sibling authority fields or paired again downstream.
 
 Goon source scope is independent of repository target scope. The browser has two normal modes:
@@ -740,7 +764,7 @@ Network remains denied by default. Most networked commands use the readable step
 
 The product theme uses a hockey team to make the safety model memorable, but it does not restore a stage scheduler. **The Enforcer**, **Equipment Manager**, **Warm-Up**, **Red Team**, **Trainer**, **Coach**, **Linesman**, **Penalty Box**, **Goalie**, **Zamboni**, and **Mascot** are presentation vocabulary over canonical admission/execution/evidence facts. **The Scout** is the separate optional cross-run workload/resource observability feature and remains outside execution control. The complete copy and UI contract lives in [`HACKER_HOCKEY_THEME.md`](HACKER_HOCKEY_THEME.md).
 
-The rule is simple: **humor may rename an explanation, never a guarantee.** If a persona status cannot be derived from canonical evidence, the UI must not invent it. Repositories/Runs Rink Board fields are projections of same-run canonical facts. Game Tape step evidence owns only timing/attempt/tool chronology, while the backend-derived Game Sheet trust receipt owns admission, runtime/tool authority, explicit cache lineage, boundary policy, release/readiness, teardown, and artifact/output digest evidence. React renders the generated receipt and does not reclassify those facts. The projection is allowlisted: it does not dump secrets, resolved values, argv, stdout/stderr payloads, or resolved network addresses. Strict Fleet Plan results carry canonical per-step teardown evidence for attempt-private roots. Zamboni renders exactly that receipt: cleanup failure is a known failed run fact and later steps stop. Release-capable attempts separately carry typed release-boundary evidence: immutable OCI publication identity or the exact Kubernetes image-state transition/observation. Goalie derives its ledger only from those facts, never by parsing workspace JSON. A run can therefore fail while still truthfully reporting a release that already crossed the boundary. The receipt does not claim retained-content deletion, external-system cleanup, signing, scanning, rollout readiness, or rollback.
+The rule is simple: **humor may rename an explanation, never a guarantee.** If a persona status cannot be derived from canonical evidence, the UI must not invent it. Repositories/Runs Rink Board fields are projections of same-run canonical facts. Game Tape step evidence projects timing/attempt/tool chronology, while the backend-derived Game Sheet trust receipt projects the original owners' admission, runtime/tool authority, explicit cache lineage, boundary policy, release/readiness, teardown, and artifact/output digest evidence. Neither projection acquires those authorities. React renders the generated receipt and does not reclassify those facts. The projection is allowlisted: it does not dump secrets, resolved values, argv, stdout/stderr payloads, or resolved network addresses. Strict Fleet Plan results carry canonical per-step teardown evidence for attempt-private roots. Zamboni renders exactly that receipt: cleanup failure is a known failed run fact and later steps stop. Release-capable attempts separately carry typed release-boundary evidence: immutable OCI publication identity or the exact Kubernetes image-state transition/observation. Goalie derives its ledger only from those facts, never by parsing workspace JSON. A run can therefore fail while still truthfully reporting a release that already crossed the boundary. The receipt does not claim retained-content deletion, external-system cleanup, signing, scanning, rollout readiness, or rollback.
 
 ### “The Enforcer” became admission
 

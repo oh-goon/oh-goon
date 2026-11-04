@@ -2,7 +2,10 @@
 
 Oh-Goon keeps **execution truth** and **diagnostic evidence** separate.
 
-Journal/Fleet lifecycle, operation evidence and Game Tape remain authoritative for what executed, what state a Run reached, which attempt happened, and whether work succeeded, failed or was cancelled. Diagnostics exist only to explain failures in application/runtime behavior and in non-authoritative observability projections.
+The original Journal/Fleet lifecycle and accepted operation/Step/Attempt evidence
+establish what executed and which outcome was recorded. Game Tape and diagnostics
+project or explain those facts; neither owns Run state, execution custody, effect
+settlement or terminal results.
 
 ```text
 semantic source owner
@@ -31,6 +34,23 @@ A sink may format, redact, persist, rotate, aggregate or project that event. It 
 - infer execution truth from diagnostics.
 
 `make architecture` enforces the dependency side of this boundary.
+
+## Repository correlation
+
+An operational source may capture a traceback, runtime path, line, symbol and
+Run/Step/Attempt identity. Interpreting that observation against repository source
+belongs to mandatory Hashmarks through the public
+`oh_goon.integrations.hashmarks` API. Use the admitted source/revision and retain
+producer provenance, freshness, completeness, ambiguity and unsupported state.
+Missing precision stays unknown or refused; a sink cannot fill it with filesystem,
+Git, path-name or traceback heuristics. This is the
+[repository correlation boundary](HASHMARKS_EXECUTION_LAYER.md#runtimesource-correlation),
+not a claim that every correlation capability is implemented.
+
+Oh-Goon still owns capture, redaction, transport and execution identity. Repository
+content observation and physical execution-custody/materialization identity prove
+different facts. New diagnostic correlation cannot reselect the active Run's
+frozen work, transfer custody or grant effects.
 
 ## Current event contract
 
@@ -71,6 +91,14 @@ The initial closure covers the debugging dead ends with the highest causality lo
 
 These paths keep their existing behavior. For example, a live-output projection failure still leaves the command and Fleet lifecycle untouched; it now also leaves a typed explanation of why observability degraded.
 
+The current Run supervisor submits existing Fleet execution through a thread
+pool. The isolated claimed Run-worker lifecycle remains the
+[HUG-180](https://linear.app/hugloss/issue/HUG-180)/[HUG-181](https://linear.app/hugloss/issue/HUG-181)
+target. Its future spawn/claim/exit/drain diagnostics must remain observations of
+original lifecycle transitions: a heartbeat, process exit or missing log cannot
+transfer ownership, terminalize work or trigger a separate respawn loop. Claim
+capabilities and bearer lease tokens must not enter diagnostic payloads.
+
 ## Relationship to command logs and Game Tape
 
 Configuration explanation is a canonical read projection. The resolver captures
@@ -88,6 +116,9 @@ Neither JSONL diagnostics nor JSON exports become another authoritative store.
 
 The strong setup/test/certification command logs remain useful and keep their current owner/command/failure-class semantics. They are not converted into execution truth. Saved `test`/`certify` sessions now record completion UTC and duration as well as start, exact command and exit result.
 
-Game Tape remains the one-run execution debugger. It owns durable execution evidence and the short-lived live-output projection. Diagnostic events may point at a Run/repository/Step identity, but they cannot manufacture missing Step output or rewrite Game Tape lifecycle facts.
+Game Tape remains the one-run execution debugger. It projects accepted durable
+execution evidence and supplies the short-lived live-output view. Diagnostic
+events may point at a Run/repository/Step identity, but they cannot manufacture
+missing Step output or rewrite the underlying Journal/Fleet lifecycle facts.
 
 The next migrations should follow the same rule: replace silent `except ...: pass/return/continue` only when the exception is a real diagnostic degradation, emit from the semantic source, and keep the resulting sink passive.

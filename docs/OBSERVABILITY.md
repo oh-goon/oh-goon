@@ -3,9 +3,9 @@
 Oh Goon observability is read-only projection over facts that already have an owner. It is not a second execution model and it does not own execution state.
 
 ```text
-canonical execution facts        typed domain evidence        optional resource analytics
-Fleet Journal / FleetRunDetail   dependency observations      Scout
-Game Tape                        future evidence indexes       CPU / memory / frequency
+canonical execution facts        producer-qualified evidence   optional resource analytics
+Fleet lifecycle / Journal        dependency observations       Scout
+accepted Step/Attempt results    retained producer qualifiers   CPU / memory / frequency
              \                       |                       /
               \________________ read-only views ____________/
                        Overview / filters / drill-down
@@ -15,13 +15,46 @@ Game Tape                        future evidence indexes       CPU / memory / fr
 
 ### Execution truth
 
-The Fleet Journal, `FleetRunDetail`, and Game Tape own Run, repository, Step, Plan identity and execution status. `GameTapeStatus` is the canonical read-only repository/Step observability vocabulary. Execution Overview may bucket, count, filter and page these facts, but it must not invent another status vocabulary or persist another copy.
+The original Fleet lifecycle and Journal own durable Run state and its accepted
+repository/Step/Attempt evidence. `FleetRunDetail` and Game Tape are read
+projections of those facts, not additional state authorities. `GameTapeStatus` is
+the shared read-only repository/Step observability vocabulary. Execution Overview
+may bucket, count, filter and page these facts, but it must not invent another
+status vocabulary or persist another copy.
+
+Worker health, process exit, logs and diagnostic events cannot establish custody
+or terminal success. The required claimed-worker boundary remains
+[HUG-180](https://linear.app/hugloss/issue/HUG-180)/[HUG-181](https://linear.app/hugloss/issue/HUG-181)
+implementation and qualification work; the current supervisor is thread-owned.
+See the [execution-lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+for the target and [execution supervisor](development/EXECUTION_SUPERVISOR.md) for
+current process ownership. Observability does not create a second Run route.
 
 An empty time-grid cell means there is no execution observation for that repository and bucket. It is absence of evidence, not a `NO_EXECUTION` status.
 
 ### Domain observations
 
-A typed evidence domain may maintain a rebuildable index when querying raw Run evidence repeatedly would be expensive. Dependency observations are the current example. The index owns dependency facts only; Run/Plan/repository identity continues to point back to canonical execution evidence.
+A typed evidence domain may maintain a rebuildable index when querying raw Run
+evidence repeatedly would be expensive. Dependency observations are the current
+example: they retain producer-qualified repository facts and their admission
+bindings. Hashmarks owns dependency meaning, freshness, completeness and consumer
+relationships; persistence or Fleet aggregation cannot reinterpret those facts.
+Run/Plan identity and execution lineage still point to the original Journal.
+
+### Repository meaning
+
+Repository/source correlation, including interpreting a runtime path, traceback,
+line or symbol against captured source, belongs to mandatory Hashmarks through the
+public `oh_goon.integrations.hashmarks` API. Missing or ambiguous producer facts
+remain unavailable or qualified; observability cannot reconstruct them from
+ambient Git/filesystem state. Preserve source/producer identity, scope,
+freshness, completeness and omissions beside any execution observation. See the
+[Hashmarks handoff](development/HASHMARKS_EXECUTION_LAYER.md#runtimesource-correlation).
+
+Repository/content identity describes observed source; execution-custody and
+materialization identities describe the bytes admitted and exposed to execution.
+Related bytes do not make those different scopes interchangeable. Later
+correlation may explain a Run, but cannot change its frozen work or permissions.
 
 ### Resource analytics
 
@@ -43,7 +76,7 @@ cleanup claim. See [local Run budgets](development/TEMPLATE_INPUT_INSPECTION.md#
 For every new observability request, choose the existing owner before adding storage or models:
 
 1. If the fact already exists in Run/Game Tape, add only a read projection or aggregation.
-2. If the fact is typed evidence produced by execution and needs fleet querying, add it to the narrow domain observation owner.
+2. If typed evidence needs Fleet querying, reuse its narrow domain observation owner and preserve producer qualification for repository facts.
 3. If the fact is high-volume analytical/resource telemetry, use an explicit optional analytical owner such as Scout.
 4. Otherwise wait for a concrete use case instead of creating a generic metrics framework.
 

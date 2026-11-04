@@ -16,4 +16,11 @@ Use [the template first-run guide](../templates/README.md) to register a target 
 | [Python Goon project from Git](python-goon-project/README.md) | Runnable with prerequisites | A complete example's explicit Plan and local Python project captured at one pinned Git revision. |
 | [Independent application](independent-application/README.md) | Runnable with prerequisites | Separately maintained Atomic Goon selecting local or pinned Git application bytes, native commands and original Run readback; actual registered target required. |
 
-The per-domain Plan READMEs contain small configurations for Python, OCI, Kubernetes, security, ML and advanced teaching workflows. Native tools and services retain their configuration and execution authority. Example infrastructure addresses and target IDs must be replaced deliberately; configuration inspection is not an external qualification receipt.
+The per-domain Plan READMEs contain small configurations for Python, OCI, Kubernetes, security, ML and advanced teaching workflows. Native tools and services retain their command/session semantics beneath the admitted Step; they do not own Oh-Goon Run admission, recovery or results. Example infrastructure addresses and target IDs must be replaced deliberately; configuration inspection is not an external qualification receipt.
+
+Every runnable Oh-Goon example uses the same public FleetRun lifecycle. The
+[execution boundary](../docs/execution-boundary.md) distinguishes current
+thread-based Run submission from HUG-180/HUG-181's required claimed-worker
+custody. Neither a standalone application development command, external Airflow
+deployment nor a low-level test probe establishes that future Run guarantee or
+authorizes a special example/ML/CI runner.

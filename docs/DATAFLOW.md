@@ -2,6 +2,14 @@
 
 This document describes the current authoritative data flow. It is intentionally about ownership and irreversible boundaries rather than individual helper calls.
 
+The Direct repository-effect operations below are existing operation semantics,
+not an alternate route for an Oh-Goon Plan or FleetRun. Local, strict CI/CD,
+scheduled, ML, application and agentic Runs share the Fleet path. The
+[execution boundary](execution-boundary.md) owns its current thread-based
+submission and the required HUG-180/HUG-181 claimed-worker cutover. That target
+adds physical custody below admission without a new resolver or durable Run
+state owner; worker bootstrap consumes frozen facts and cannot reselect work.
+
 ## Direct repository effect
 
 ```text
@@ -49,7 +57,7 @@ FleetRunRequest(fleet_run_id, intent, selection)
        + exact Fleet lease
        + RUN_ADMITTED in the same transaction
   -> RunExecutionSupervisor
-       live submission set + bounded last-failure diagnostic only
+       current thread submission + bounded last-failure diagnostic only
   -> FleetRunExecution
        -> FleetRunLifecycle.begin
           -> exact-owner transaction decides cancellation-vs-RUN_STARTED
@@ -67,6 +75,13 @@ FleetRunRequest(fleet_run_id, intent, selection)
 ```
 
 If background submission itself is rejected after admission, `FleetRunControlPlane` delegates the exact admitted ticket to `FleetRunLifecycle.finish_admitted`, which resolves `RUN_FAILED + lease release` through one `ExecutionSession.finish` transaction. It never terminalizes and then separately abandons a lease. Dead-owner cancellation is likewise one lifecycle transaction: reclaim stale lease + terminalize orphan.
+
+The required process cutover inserts a fresh isolated worker and atomic
+single-use custody claim between `RunExecutionSupervisor` and
+`FleetRunExecution`. Existing ticket activation is not that claim, and current
+thread submission is not a supported future fallback. Process exit, native
+session status and Game Tape remain evidence or projections; the original
+Fleet lifecycle and SQLite/Journal own terminalization and recovery.
 
 ## Repository-effect interruption
 
@@ -104,7 +119,7 @@ ScheduleDefinition(schedule_id, generation_id, record_version)
        recreated same schedule_id with new generation_id -> old command conflicts
 ```
 
-The immutable generation closes the delete/recreate ABA hole that a version counter alone cannot detect. The persisted definition itself contains one repository, one resolved Plan target, one interval, and active/paused state; it cannot carry an executable step list or multi-repository scope.
+The immutable generation closes the delete/recreate ABA hole that a version counter alone cannot detect. The persisted definition contains one explicit repository target set, one resolved Plan target, one interval, and active/paused state. Each repository becomes an independently admitted FleetRun; the definition cannot carry executable Steps or introduce a Schedule execution owner.
 
 Across this flow, admitted intent, lifecycle states, Journal facts/indexes, and completed projections are immutable after publication. Mutable folds/builders exist only inside one construction step; opaque third-party JSON is isolated by defensive copying at the Journal boundary rather than shared by alias.
 
@@ -350,13 +365,23 @@ YAML plan/templates + TOML allowlist
        +------v------+
           FleetRunControlPlane
               |
+     Fleet admission + ExecutionTicket
+              |
+  RunExecutionSupervisor (current thread)
+              |
+         FleetRunExecution
+              |
+ ExecutionSession / FleetTargetScheduler
+              |
      RepositoryEffectExecution
               |
-       read-only preflight
+   admitted-fact drift revalidation
               |
          EFFECT_STARTED
               |
         FleetPlanRunner
+              |
+         ordered Step/Attempt
 ```
 
 YAML/TOML are read only before admission. Declarative YAML includes are contained beneath the root plan tree, bind only declared typed scalar inputs, evaluate small compile-time include_when selectors, rewrite public module outputs to concrete leaf outputs, statically expand bounded template matrices, namespace local runtime dependencies, and flatten completely before admission; managed extension source/revision/lock identity is embedded without persisting Fleet-local checkout paths. The existing explicit runtime-preparation service imports only extensions referenced by the contained static composition tree, prepares their locked uv environments, and prepares any built-in runtime referenced by that tree; merely supplying a catalog does not authorize acquisition. Execution uses those prepared environments without synchronization. The durable target contains the exact contract-versioned flat resolved plan, including typed conditions, retry policy, declared artifact paths, public step-output declarations/references, and a trailing finalizer suffix. Schedule triggering and manual/Shared execution therefore share the same resolved Plan intent and Fleet execution path. Conditions that evaluate false create explicit skipped facts; retryable known failures preserve per-attempt repository before/after provenance; artifact evidence stores only hash/size or missing state; published output values remain process-local while canonical evidence stores only name/hash/size and declarative argv markers; finalizers run only on normal/known-failure control flow. Raw stdout/stderr remain transient and no matrix scheduler, module runtime, output store, step-level checkpoint, plugin registry, or recovery authority exists. The original read-only Plan preview service observes path conditions without executing commands and marks prior-step-status/output decisions runtime-dependent. Git steps may use common typed actions or arbitrary native Git argv; both resolve to one `GitService` execution envelope with explicit timeout-or-null/environment/working-directory/failure policy. Every executable step declares a positive process deadline or explicit `null`; runtime does not invent one.

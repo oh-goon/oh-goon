@@ -8,11 +8,24 @@ The frozen product boundary is:
 
 Hashmarks describes what repository evidence says matters. The coding agent decides what change to make. Oh-Goon decides whether, where, and how admitted work may run and whether the resulting execution evidence is certifiable.
 
+The [mandatory Hashmarks requirements](OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
+own repository semantics and the public integration boundary. The separate
+[execution-lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
+own Run custody. This guide describes the current handoff and its remaining
+migration limits; requirements alone do not establish qualification.
+
 ## Ownership
 
-Hashmarks owns repository identity/freshness, CodeMap relationships, static cross-project topology, impact/provenance, flat verification selection membership, repository-negative evidence, and repository-evidence provenance. Physical grouping/process-isolation hints are not admitted as execution authority.
+Hashmarks owns repository identity/freshness, CodeMap relationships, static cross-project topology, dependency-consumer meaning, impact/provenance, flat verification selection membership, repository-negative evidence, repository/source correlation and repository-evidence provenance. Physical grouping/process-isolation hints are not admitted as execution authority.
 
 Oh-Goon owns process launch and process-tree cleanup, deadlines, bounded concurrency, retry/resume admission, environment recovery, Fleet scheduling, execution/refinement grouping, result authority, execution provenance, certification provenance, Repository Understanding qualification, certificates, and Game Tape.
+
+Repository/content observation identity describes what Hashmarks observed in its
+source scope and generation. Oh-Goon's execution-custody/materialization identity
+describes the exact bytes frozen, transported and exposed to an admitted attempt.
+These identities may concern the same bytes while proving different facts;
+neither substitutes for the other's authority. A workspace path or matching hash
+does not itself grant effect permission or live execution custody.
 
 A thin Oh-Goon adapter consumes required Hashmarks evidence. Runtime startup verifies the loaded producer before database creation, recovery or execution. Missing or invalid producer authority fails startup; there is no local repository-intelligence fallback. The adapter must never call Hashmarks execution-loop helpers such as `execute_shard`, `run_next`, or `run_warmup`, and it must never build a second CodeMap/impact/verification-selection engine.
 
@@ -87,6 +100,16 @@ Those remain Oh-Goon-owned inputs.
 ## Execution grouping and isolation
 
 Hashmarks owns selected membership, not physical shards. Oh-Goon applies its own explicit grouping policy and process/isolation authority after admission. Producer fields such as `preferred_granularity`, `may_regroup`, `isolated_process`, worker hints, or physical shard layouts cannot gain authority through the Hashmarks contract.
+
+Local, CI, scheduled, agentic and ML work use the existing FleetRun admission and
+`FleetRunExecution` → `ExecutionSession` → `FleetTargetScheduler` → Step/Attempt
+path. The current `RunExecutionSupervisor` submits that work to a thread pool.
+The required isolated Run worker and atomic ExecutionTicket custody claim belong
+to [HUG-180](https://linear.app/hugloss/issue/HUG-180), with failure/drain proof in
+[HUG-181](https://linear.app/hugloss/issue/HUG-181). They strengthen this same path;
+they are not an implemented alternative mode or a Hashmarks executor. The claimed
+worker must consume frozen admitted facts without re-resolving or reselecting
+logical work; source drift requires the original invalidation/admission handling.
 
 Oh-Goon may refine execution grouping after a timeout only if the exact admitted membership is conserved:
 
@@ -177,18 +200,40 @@ The integration inherits Hashmarks' default bound of 100,000 physical entries;
 exceeding it fails identity admission without returning partial evidence.
 
 Make/shell declarations, Python manifests, byte-range receipts and ECMAScript
-syntax are supported repository observations. Their explicit coverage does not
-yet replace every architecture guard: authored shell text does not establish
-native expansion or effective environment, and bounded source syntax does not
-establish complete alias closure or runtime call targets. Existing exact syntax
-guards and policy lists remain Oh-Goon repository policy until equivalent producer
-facts pass the same negative-boundary tests. The public API migration does not
-claim that these remaining source analyzers have been removed. Qualification grading and SECRET
-answer truth remain outside repository retrieval.
+syntax are supported repository observations. Authored shell text does not
+establish native expansion or effective environment, and bounded source syntax
+does not establish complete alias closure or runtime call targets. Current
+architecture/tooling still contains local Python, TypeScript and Make/shell
+semantic analyzers. Their retirement is remaining
+[HUG-179](https://linear.app/hugloss/issue/HUG-179) migration work, not permission
+for another repository-intelligence owner or a fallback when producer evidence
+is incomplete. Oh-Goon's architecture verdicts, approved-owner rules and policy
+lists remain Oh-Goon-owned; repository facts must come through the public API
+with their qualifications. Public import protection does not prove that this
+semantic migration is complete. Qualification grading and SECRET answer truth
+remain outside repository retrieval.
 
 Detailed producer implementation provenance is unavailable until a supported
 public diagnostic API exists; the public loaded implementation identity remains
 authoritative.
+
+## Runtime/source correlation
+
+Oh-Goon captures operational observations and binds them to the original
+Run/Step/Attempt. Interpreting which repository member, line, symbol or dependency
+that observation refers to is Hashmarks-owned repository intelligence, consumed
+only through the public `oh_goon.integrations.hashmarks` API. A bounded request
+uses the admitted source identity/revision and already-known workspace/path
+evidence; responses retain provenance, freshness, completeness, ambiguity,
+unsupported state and omissions. Unavailable producer precision remains unknown
+or refused, never repaired with ambient Git, filesystem or traceback heuristics.
+
+Game Tape, diagnostics and Scout may project those qualified facts beside
+execution evidence. Correlation obtained after admission cannot change the active
+Run's frozen verification membership, acquire custody or establish a terminal
+result. A supported producer capability and its consumer conformance must exist
+before that correlation is advertised; this boundary does not claim a new runtime
+correlation feature.
 
 ## Relevant development admission
 
@@ -204,7 +249,8 @@ map/read session serves the supplied paths; producer bounds and source-member
 provenance remain in the bounded selection artifact. Oh-Goon applies accepted
 fast/daily cadence and native result admission; it does not infer another impact
 graph. Missing consumer proof stays SELECTION_UNVERIFIED or uses a specifically
-justified bounded fallback. Policy protection is a named execution-policy
+justified bounded execution-policy fallback. That policy cannot supply missing
+repository meaning or strengthen unknown producer scope. Policy protection is a named execution-policy
 obligation, not a Hashmarks-inferred relationship. See the
 [CI contract](../CI_CD_CONTRACT.md#repository-checks-on-github).
 
