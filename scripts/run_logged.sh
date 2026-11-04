@@ -12,6 +12,8 @@ shift
 script_dir="${BASH_SOURCE[0]%/*}"
 [[ "$script_dir" == "${BASH_SOURCE[0]}" ]] && script_dir=.
 ROOT="$(cd "$script_dir/.." && pwd -P)"
+# Isolated native tools may omit HOME; logging must not supply one to the child.
+logging_home="${HOME:-}"
 
 # Transient progress is not durable run evidence. Preserve one direct presentation
 # descriptor before stdout/stderr enter the sanitize/log pipeline so long-running
@@ -28,12 +30,18 @@ export PYTHONUNBUFFERED=1
 if [[ -n "${OH_GOON_RUN_LOG_DIR:-}" ]]; then
   base="$OH_GOON_RUN_LOG_DIR"
 else
-  state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
-  repo_key="$(printf '%s' "$ROOT" | sha256sum | cut -c1-16)"
-  base="$state_home/oh-goon/run-logs/$repo_key"
+  state_home="${XDG_STATE_HOME:-}"
+  if [[ -z "$state_home" && -n "$logging_home" ]]; then
+    state_home="$logging_home/.local/state"
+  fi
+  base=""
+  if [[ -n "$state_home" ]]; then
+    repo_key="$(printf '%s' "$ROOT" | sha256sum | cut -c1-16)"
+    base="$state_home/oh-goon/run-logs/$repo_key"
+  fi
 fi
 case "$base" in
-  /*) ;;
+  ""|/*) ;;
   *) base="$ROOT/$base" ;;
 esac
 log_dir="$base/$label"
@@ -44,7 +52,7 @@ log_dir="$base/$label"
 # this same command/cancellation owner with pinned descriptors.
 if [[ -z "${OH_GOON_RUN_LOG_BOOTSTRAPPED:-}" ]]; then
   logging_python=""
-  if [[ -x "$ROOT/backend/.venv/bin/python" ]] && command -v uv >/dev/null 2>&1; then
+  if [[ -n "$base" && -x "$ROOT/backend/.venv/bin/python" ]] && command -v uv >/dev/null 2>&1; then
     logging_python="$(uv run --offline --frozen --no-sync --project "$ROOT/backend" oh-goon-run-log --interpreter 2>/dev/null)" || logging_python=""
   fi
   if [[ -n "$logging_python" && "$logging_python" != *$'\n'* && -x "$logging_python" ]]; then
@@ -62,7 +70,7 @@ unset OH_GOON_RUN_LOG_FILE_FD OH_GOON_RUN_LOG_ACTIVE_NAME OH_GOON_RUN_LOG_TIMEST
 
 sanitize_stream() {
   if [[ -n "$logging_python" ]]; then
-    "$logging_python" -m oh_goon.repository_tooling.run_logging --stream "$ROOT" "$base" "$HOME" -1
+    "$logging_python" -m oh_goon.repository_tooling.run_logging --stream "$ROOT" "$base" "$logging_home" -1
     return $?
   fi
   # The pre-environment path must also bound newline-free output. Carry only a
@@ -71,7 +79,7 @@ sanitize_stream() {
   local state_label="<state>/run-logs" LC_ALL=C
   (( ${#ROOT} > overlap )) && overlap=${#ROOT}
   (( ${#base} > overlap )) && overlap=${#base}
-  (( ${#HOME} > overlap )) && overlap=${#HOME}
+  (( ${#logging_home} > overlap )) && overlap=${#logging_home}
   while :; do
     chunk=""
     IFS= read -r -n 8192 chunk
@@ -86,8 +94,8 @@ sanitize_stream() {
     fi
     buffer="$pending$chunk"
     buffer="${buffer//"$ROOT"/<repo>}"
-    buffer="${buffer//"$base"/"$state_label"}"
-    buffer="${buffer//"$HOME"/<home>}"
+    [[ -z "$base" ]] || buffer="${buffer//"$base"/"$state_label"}"
+    [[ -z "$logging_home" ]] || buffer="${buffer//"$logging_home"/<home>}"
     while [[ "$buffer" =~ /tmp/tmp\.[A-Za-z0-9._-]+ ]]; do
       tmp_match="${BASH_REMATCH[0]}"
       [[ "$buffer" == *"$tmp_match" ]] && discard_tmp=1
@@ -147,7 +155,7 @@ set +e
 # asynchronous now; it receives EOF as soon as the foreground command exits.
 sanitize_and_persist() {
   if [[ -n "$run_log_fd" ]]; then
-    "$logging_python" -m oh_goon.repository_tooling.run_logging --stream "$ROOT" "$base" "$HOME" "$run_log_fd"
+    "$logging_python" -m oh_goon.repository_tooling.run_logging --stream "$ROOT" "$base" "$logging_home" "$run_log_fd"
   else
     sanitize_stream
   fi

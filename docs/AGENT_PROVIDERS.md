@@ -109,7 +109,14 @@ and prints the terminal Run detail. `--interactive` requires a terminal and
 conflicts with `--headless` and `--json`. Ctrl-C requests Run cancellation and
 waits for its result. The command prints the Run ID and waits. Failed Runs return
 a nonzero exit status and a bounded tail of transient stderr; JSON stdout remains
-valid Run detail. When transient stderr is absent, the diagnostic reports recorded
+valid Run detail. Admission refusals preserve the rejecting domain owner's code
+without exposing its exception text. `REPOSITORY_EFFECT_QUARANTINED` requires
+preserving the selected state and inspecting `oh-goon doctor --runtime` with the
+matching original runtime before settling uncertain effects. It does not
+authorize a reset, repair or replay. Non-domain failures retain the redacted
+`NATIVE_COMMAND_ERROR` diagnostic.
+
+When transient stderr is absent, the diagnostic reports recorded
 failed Step exits and bounded native failure claims, including Pi stop reasons.
 These claims do not replace verification results. Producer stdout is not dumped
 by the failure diagnostic. Safe Codex service controller failures also enter the
@@ -281,8 +288,12 @@ An executable copied alone may start successfully while native tool initializati
 fails. Oh-Goon does not reconstruct an installation or copy credentials to repair
 it. Native argument/config overrides are rejected.
 
-Git hooks and separate verification Steps retain trusted local execution. This
-profile does not provide whole-process Bubblewrap isolation, broker endpoint
+Git hooks and separate verification Steps retain trusted local execution. The
+native Codex tool PATH is limited to platform directories; a per-user `uv`
+installation may be unavailable there. Use the existing `--verify` commands for
+independent project checks through their original command environment.
+
+This profile does not provide whole-process Bubblewrap isolation, broker endpoint
 enforcement, read-only review roles, interactive execution or resource caps.
 Those guarantees remain with the explicitly selected broker/Bubblewrap profile;
 there is no automatic fallback between the profiles. Authentication failures and
