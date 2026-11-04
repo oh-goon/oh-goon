@@ -1690,7 +1690,17 @@ class CausalRunJournal:
                     ):
                         raise ValueError("sample mount targets invalid")
                     reconstructed = PhysicalObservationScope(
-                        **{**scope, "mount_targets": tuple(targets)}
+                        run_id=scope["run_id"],
+                        subject_identity=scope["subject_identity"],
+                        cgroup_path=scope["cgroup_path"],
+                        cgroup_device=scope["cgroup_device"],
+                        cgroup_inode=scope["cgroup_inode"],
+                        tracked_pid=scope["tracked_pid"],
+                        tracked_birth=scope["tracked_birth"],
+                        mount_targets=tuple(targets),
+                        network_namespace=scope["network_namespace"],
+                        host_veth=scope["host_veth"],
+                        nft_table=scope["nft_table"],
                     )
                     if (
                         reconstructed.run_id != run_id

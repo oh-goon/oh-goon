@@ -8,7 +8,7 @@ dependencies = [
   "cryptography>=46.0.4",
   "fastapi>=0.128.2",
   "httpx2[ws]>=2.12",
-  "hashmarks @ https://github.com/Hugloss/Hashmarks/releases/download/v0.34.0/hashmarks-0.34.0-py3-none-any.whl",
+  "hashmarks @ https://github.com/Hugloss/Hashmarks/releases/download/v0.35.0/hashmarks-0.35.0-py3-none-any.whl",
   "pydantic>=2.13.4",
   "pyyaml>=6.0.3",
   "uvicorn>=0.48.0",
@@ -177,6 +177,19 @@ mypy_path = [
   "$MYPY_CONFIG_FILE_DIR/../scripts/tests",
 ]
 warn_unused_configs = true
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.src]
+include = ["src/oh_goon"]
+
+[tool.ty.analysis]
+respect-type-ignore-comments = false
+
+[tool.ty.rules]
+dynamic-function-decorator-return = "error"
+missing-type-argument = "error"
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/dependency_complete", "tests/integration"]

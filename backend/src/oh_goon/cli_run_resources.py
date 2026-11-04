@@ -12,7 +12,7 @@ import stat
 import sys
 import tempfile
 import threading
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -161,7 +161,7 @@ def prepare_run_resource_handoff(
     snapshot: RunConfigurationSnapshot,
     state: ResolvedCliState,
     scope: ResolvedRunResourceScope,
-) -> Iterator[PreparedRunResourceHandoff]:
+) -> Generator[PreparedRunResourceHandoff, None, None]:
     """Own private bounded scratch and an immutable FD until the native CLI finishes."""
     temporary: tempfile.TemporaryDirectory[str] | None = None
     sealed: SealedExecutionBytes | None = None
@@ -368,7 +368,7 @@ class RunResourceSignalForwarder:
 
 
 @contextmanager
-def original_run_resource_signals() -> Iterator[RunResourceSignalForwarder]:
+def original_run_resource_signals() -> Generator[RunResourceSignalForwarder, None, None]:
     from oh_goon.cli_result import is_default_cli_sigterm
 
     if (
@@ -597,6 +597,7 @@ def run_with_resource_envelope(
         operational_errors.append(signals.failure)
     code = result.returncode if result.returncode >= 0 else 128 - result.returncode
     if args.as_json:
+        receipt: dict[str, object]
         try:
             if result.stdout_truncated:
                 operational_errors.append("ORIGINAL_CLI_RESULT_TRUNCATED")

@@ -16,8 +16,8 @@ from oh_goon.engine.command import CommandSupervisorReceipt, RuntimeAuthorityRec
 from oh_goon.runtime.execution.offline_proof import verify_completed_shard_proof
 from oh_goon.runtime.execution.shard_models import ShardExecutionReport
 
-TERMINAL_EXECUTION_ATTESTATION_SCHEMA_FAMILY = "oh-goon.terminal-execution-attestation"
-TERMINAL_EXECUTION_ATTESTATION_SCHEMA_VERSION = 1
+TERMINAL_EXECUTION_ATTESTATION_SCHEMA_FAMILY: str = "oh-goon.terminal-execution-attestation"
+TERMINAL_EXECUTION_ATTESTATION_SCHEMA_VERSION: int = 1
 
 
 def terminal_execution_attestation_schema() -> str:

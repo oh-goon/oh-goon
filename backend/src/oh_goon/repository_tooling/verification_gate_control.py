@@ -333,6 +333,25 @@ def require_native_pytest_pass(
     return {node.split("::", 1)[0] for node in selected}
 
 
+def native_changed_paths(name_status: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Project changed and removed members from one native Git diff observation."""
+    tokens = name_status.split("\0")
+    changed: set[str] = set()
+    removed: set[str] = set()
+    cursor = 0
+    while cursor < len(tokens) and tokens[cursor]:
+        status = tokens[cursor]
+        count = 2 if status[0] in {"R", "C"} else 1
+        paths = tokens[cursor + 1 : cursor + 1 + count]
+        if len(paths) != count or any(not path for path in paths):
+            raise ValueError("Git returned incomplete changed-path evidence")
+        changed.update(paths)
+        if status[0] in {"D", "R"}:
+            removed.add(paths[0])
+        cursor += count + 1
+    return tuple(sorted(changed)), tuple(sorted(removed))
+
+
 def validate_merge_proof(
     plan: Mapping[str, Any],
     result: Mapping[str, Any],
@@ -342,6 +361,7 @@ def validate_merge_proof(
     changed_paths: Sequence[str],
     control_base: str | None,
     root: Path | None = None,
+    removed_paths: Sequence[str] = (),
 ) -> None:
     if plan.get("schema_version") != "oh-goon.development-verification/v1":
         raise ValueError("Verification plan schema is unsupported")
@@ -376,6 +396,16 @@ def validate_merge_proof(
     evidence = plan.get("evidence", {})
     if not isinstance(evidence, Mapping):
         raise ValueError("Producer evidence has an invalid shape")
+    recorded_removals = plan.get("removed_paths", [])
+    if (
+        not isinstance(recorded_removals, list)
+        or any(not isinstance(path, str) for path in recorded_removals)
+        or len(recorded_removals) != len(set(recorded_removals))
+        or sorted(recorded_removals) != sorted(removed_paths)
+        or not set(removed_paths) <= set(changed_paths)
+    ):
+        raise ValueError("Removed membership differs from independent native Git evidence")
+    removed = set(removed_paths)
     assets = _independent_documentation_assets(root, changed_paths, evidence) if root else set()
     if assets and DOCUMENTATION_ASSET_OBLIGATION not in plan.get("obligations", []):
         raise ValueError("Bounded documentation-asset policy was not explicitly admitted")
@@ -480,10 +510,14 @@ def validate_merge_proof(
             path.endswith(suffix) for suffix in (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
         )
     )
-    if not changed_tests <= executed_files:
+    if not changed_tests - removed <= executed_files:
         raise ValueError("Changed tests have no meaningful execution proof")
     observations = {row.get("changed_path"): row for row in evidence.get("observations", [])}
     for source in changed_paths:
+        # An absent member cannot execute. Git proves only its removal, never
+        # absence of remaining consumers; surviving sources retain their proof.
+        if source in removed:
+            continue
         if is_generated_contract_path(source):
             continue
         if is_verification_policy_path(source) and not source.endswith(".py"):
@@ -517,12 +551,203 @@ def _read(path: Path) -> dict[str, Any]:
     return value
 
 
-def _candidate_producer_identity(root: Path) -> str:
+def _observe_dependency_candidate(
+    root: Path,
+    *,
+    base: str,
+    selected_files: Sequence[str],
+    source_identity: str,
+    producer_identity: str,
+) -> dict[str, Any]:
+    """Establish fresh dependency proof under immutable base admission code."""
+    from oh_goon.integrations.hashmarks import dependencies as dependency_owner
+    from oh_goon.integrations.hashmarks import development_verification as nomination_owner
+    from oh_goon.integrations.hashmarks import runtime_contract as runtime_owner
+    from oh_goon.repository_tooling import development_verification as admission_owner
+    from oh_goon.repository_tooling.release import package_slim as source_owner
+
+    trusted_source = Path(__file__).resolve().parents[1]
+    for owner in (
+        dependency_owner,
+        nomination_owner,
+        runtime_owner,
+        admission_owner,
+        source_owner,
+    ):
+        if owner.__file__ is None or not Path(owner.__file__).resolve().is_relative_to(
+            trusted_source
+        ):
+            raise ValueError("Dependency observer imported code outside its trusted source")
+    if source_owner.canonical_source_identity(root) != source_identity:
+        raise ValueError("Candidate changed before independent dependency observation")
+    runtime_owner.require_loaded_hashmarks_runtime(
+        expected_implementation_identity=producer_identity
+    )
+    evidence = nomination_owner.nominate_changed_verification(
+        root,
+        ("backend/uv.lock",),
+        dependency_base={
+            "lock": admission_owner._base_lock_bytes(root, base),
+            "base_revision": base,
+            "lock_path": "backend/uv.lock",
+        },
+    )
+    if evidence.get("producer_implementation_identity") != producer_identity or not (
+        admission_owner._bounded_dependency_scope(
+            evidence, base, selected_files=set(selected_files)
+        )
+    ):
+        raise ValueError("Independent dependency chains do not reach executed verifiers")
+    bundle = evidence["dependency_changes"]
+    dependency_owner.require_current_dependency_environment(bundle)
+    if source_owner.canonical_source_identity(root) != source_identity:
+        raise ValueError("Candidate changed during independent dependency observation")
+    return {
+        "source_identity": source_identity,
+        "producer_implementation_identity": producer_identity,
+        "base": base,
+        "changed_node_ids": bundle["changed_node_ids"],
+        "before_observation_identity": bundle["before_observation"]["observation_identity"],
+        "after_observation_identity": bundle["after_observation"]["observation_identity"],
+        "metadata": [
+            {
+                key: row[key]
+                for key in (
+                    "node_id",
+                    "metadata_member_revision",
+                    "record_member_revision",
+                )
+            }
+            for row in bundle["metadata"]
+        ],
+        "executed_verifier_files": sorted(set(selected_files)),
+    }
+
+
+def _trusted_dependency_probe(
+    root: Path,
+    *,
+    trusted_root: Path,
+    environment: Path,
+    env: Mapping[str, str],
+    plan: Mapping[str, Any],
+    producer_identity: str,
+) -> dict[str, Any]:
+    """Run base code with the already materialized, candidate-locked producer."""
+    from oh_goon.engine.command import run_command
+
+    request = {
+        "trusted_root": str(trusted_root.resolve(strict=True)),
+        "environment": str(environment.resolve(strict=True)),
+        "root": str(root.resolve(strict=True)),
+        "base": plan["base"],
+        "selected_files": plan["pytest"],
+        "source_identity": plan["source_identity"],
+        "producer_identity": producer_identity,
+    }
+    encoded = json.dumps(request).encode("utf-8")
+    if len(encoded) > 1024 * 1024:
+        raise ValueError("Independent dependency request exceeds its transport bound")
+    # The only source path added is the separately checked-out immutable base.
+    # -I excludes the candidate cwd and ambient Python path configuration. Native
+    # dependency site semantics remain owned by the selected Python environment.
+    bootstrap = (
+        "import contextlib,json,sys\n"
+        "from pathlib import Path\n"
+        "raw=sys.stdin.buffer.read(1048577)\n"
+        "if len(raw)>1048576: raise ValueError('dependency request exceeds bound')\n"
+        "request=json.loads(raw)\n"
+        "trusted=Path(request['trusted_root']).resolve(strict=True)\n"
+        "if Path(sys.prefix).resolve()!=Path(request['environment']): "
+        "raise ValueError('dependency environment mismatch')\n"
+        "sys.path.insert(0,str(trusted/'backend/src'))\n"
+        "from oh_goon.repository_tooling import verification_gate_control as owner\n"
+        "expected=trusted/'backend/src/oh_goon/repository_tooling/verification_gate_control.py'\n"
+        "if Path(owner.__file__).resolve()!=expected: "
+        "raise ValueError('dependency observer origin mismatch')\n"
+        "with contextlib.redirect_stdout(sys.stderr):\n"
+        " receipt=owner._observe_dependency_candidate(Path(request['root']),"
+        "base=request['base'],selected_files=request['selected_files'],"
+        "source_identity=request['source_identity'],"
+        "producer_identity=request['producer_identity'])\n"
+        "print(json.dumps(receipt,sort_keys=True,allow_nan=False))\n"
+    )
+    observed = run_command(
+        str(environment / "bin/python"),
+        "-I",
+        "-c",
+        bootstrap,
+        cwd=environment.parent,
+        env=dict(env),
+        input_data=encoded,
+        timeout=180,
+        max_capture_bytes_per_stream=256 * 1024,
+        require_process_group_quiescence=True,
+        parent_death_signal=True,
+    )
+    if (
+        observed.returncode
+        or observed.stdout_truncated
+        or observed.supervisor is None
+        or observed.supervisor.final_process_group_quiescent is not True
+    ):
+        raise ValueError("Independent dependency observation did not complete")
+    try:
+        receipt = json.loads(observed.stdout)
+    except (ValueError, RecursionError) as exc:
+        raise ValueError(
+            "Independent dependency observation is not a single bounded reply"
+        ) from exc
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("source_identity") != request["source_identity"]
+        or receipt.get("producer_implementation_identity") != producer_identity
+        or receipt.get("base") != request["base"]
+        or receipt.get("executed_verifier_files") != sorted(set(plan["pytest"]))
+        or not receipt.get("changed_node_ids")
+        or not receipt.get("metadata")
+        or not receipt.get("before_observation_identity")
+        or not receipt.get("after_observation_identity")
+    ):
+        raise ValueError("Independent dependency observation differs from admitted authority")
+    nodes, captured = receipt["changed_node_ids"], receipt["metadata"]
+    if (
+        not isinstance(nodes, list)
+        or not 1 <= len(nodes) <= 64
+        or any(not isinstance(node, str) or not node for node in nodes)
+        or len(nodes) != len(set(nodes))
+        or not isinstance(captured, list)
+        or len(captured) != len(nodes)
+        or any(
+            not isinstance(row, Mapping)
+            or any(
+                not isinstance(row.get(key), str) or not row[key]
+                for key in ("node_id", "metadata_member_revision", "record_member_revision")
+            )
+            for row in captured
+        )
+        or {row["node_id"] for row in captured} != set(nodes)
+        or not isinstance(receipt["before_observation_identity"], str)
+        or not isinstance(receipt["after_observation_identity"], str)
+        or receipt["before_observation_identity"] == receipt["after_observation_identity"]
+    ):
+        raise ValueError("Independent dependency observation has inconsistent member bindings")
+    return receipt
+
+
+def _candidate_producer_identity(
+    root: Path,
+    *,
+    dependency_plan: Mapping[str, Any] | None = None,
+    trusted_root: Path | None = None,
+    dependency_receipt: dict[str, Any] | None = None,
+) -> str:
     """Observe the candidate's native locked package using only trusted code.
 
     uv owns dependency selection and artifact verification. Its fresh dependency-only
-    environment is inspected as data; neither candidate Python nor project build hooks
-    run. Hashmarks retains ownership of the implementation identity algorithm.
+    environment supplies the selected producer. Candidate project code and build
+    hooks do not run. Dependency admission runs immutable base code there only
+    when requested. Hashmarks owns the implementation identity algorithm.
     """
     from oh_goon.engine.command import run_command
     from oh_goon.integrations.hashmarks.runtime_contract import (
@@ -649,7 +874,26 @@ def _candidate_producer_identity(root: Path) -> str:
                     raise ValueError(
                         "Candidate native Hashmarks package exceeds its inspection bound"
                     )
-        return native_producer_implementation_identity(package_root=package)
+        identity = native_producer_implementation_identity(package_root=package)
+        if dependency_plan is not None:
+            if trusted_root is None or dependency_receipt is None:
+                raise ValueError("Independent dependency observation requires trusted authority")
+            if (
+                dependency_plan.get("evidence", {}).get("producer_implementation_identity")
+                != identity
+            ):
+                raise ValueError("Producer implementation differs from trusted admission")
+            dependency_receipt.update(
+                _trusted_dependency_probe(
+                    root,
+                    trusted_root=trusted_root,
+                    environment=environment,
+                    env=env,
+                    plan=dependency_plan,
+                    producer_identity=identity,
+                )
+            )
+        return identity
 
 
 def main() -> int:
@@ -673,12 +917,20 @@ def main() -> int:
         from oh_goon.integrations.hashmarks import development_verification as asset_owner
         from oh_goon.integrations.hashmarks import runtime_contract as runtime_owner
         from oh_goon.repository_tooling import _dependency_lock_portability as lock_owner
+        from oh_goon.repository_tooling import development_verification as admission_owner
         from oh_goon.repository_tooling.release import package_slim as identity_owner
 
         trusted = args.trusted_root.resolve(strict=True)
         if Path(__file__).resolve().parents[4] != trusted:
             raise ValueError("Controller source differs from the trusted checkout")
-        for module in (command_owner, asset_owner, runtime_owner, lock_owner, identity_owner):
+        for module in (
+            command_owner,
+            asset_owner,
+            runtime_owner,
+            admission_owner,
+            lock_owner,
+            identity_owner,
+        ):
             filename = module.__file__
             if filename is None or not Path(filename).resolve().is_relative_to(
                 trusted / "backend/src"
@@ -714,33 +966,49 @@ def main() -> int:
         if args.head is None or plan.get("requested_head") != args.head:
             raise ValueError("Independent requested head differs from selected proof")
         git(args.root, "merge-base", "--is-ancestor", args.head, args.candidate)
-        changed_paths = [
-            path
-            for path in git(
+        changed_paths, removed_paths = native_changed_paths(
+            git(
                 args.root,
                 "diff",
-                "--name-only",
-                "--no-renames",
+                "--name-status",
+                "--find-renames",
                 "-z",
                 args.base,
                 args.candidate,
-            ).split("\0")
-            if path
-        ]
+            )
+        )
         if plan.get("source_identity") != canonical_source_identity(args.root):
             raise ValueError("Candidate contents differ from selected proof")
+        dependency_intent, unsupported_intent = admission_owner._backend_dependency_intent(
+            args.root, args.base, tuple(changed_paths)
+        )
+        if unsupported_intent or (dependency_intent and "backend/uv.lock" not in changed_paths):
+            raise ValueError("Dependency declarations lack an admitted native lock scope")
         validate_merge_proof(
             plan,
             _read(args.result),
             candidate=args.candidate,
             base=args.base,
             changed_paths=changed_paths,
+            removed_paths=removed_paths,
             control_base=args.control_base,
             root=args.root,
         )
         producer = plan.get("evidence", {}).get("producer_implementation_identity")
-        if producer is not None and producer != _candidate_producer_identity(args.root):
-            raise ValueError("Producer implementation differs from trusted admission")
+        dependency_receipt: dict[str, Any] = {}
+        if producer is not None:
+            observed_producer = (
+                _candidate_producer_identity(
+                    args.root,
+                    dependency_plan=plan,
+                    trusted_root=trusted,
+                    dependency_receipt=dependency_receipt,
+                )
+                if "backend/uv.lock" in changed_paths
+                else _candidate_producer_identity(args.root)
+            )
+            if producer != observed_producer:
+                raise ValueError("Producer implementation differs from trusted admission")
         if (
             git(args.root, "rev-parse", "HEAD").strip() != args.candidate
             or git(trusted, "rev-parse", "HEAD").strip() != args.base
@@ -755,6 +1023,8 @@ def main() -> int:
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as exc:
         print(f"MERGE UNVERIFIED: {exc}")
         return 1
+    if dependency_receipt:
+        print("DEPENDENCY_REOBSERVED: " + json.dumps(dependency_receipt, sort_keys=True))
     print(
         "MERGE_VERIFIED: exact candidate and all admitted obligations satisfied; daily full is separate"
     )

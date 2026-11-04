@@ -7,7 +7,8 @@ This document is the short product-level contract for local CI/CD execution. The
 ## Repository checks on GitHub
 
 Ordinary updates use [relevant verification](../.github/workflows/ci.yml).
-Hashmarks supplies source-qualified direct and indirect verifier nominations;
+Hashmarks supplies a bounded pair of its selected and source-reference verifiers,
+with direct and indirect relationships and the original search qualifications;
 Oh-Goon admits the affected fast tests, bounded real proofs and applicable
 static/contracts. The existing native batch owner collects and executes that
 flat membership. It retains source/configuration/environment identity and exact
@@ -41,7 +42,12 @@ of ordinary changes.
 A ready PR or merge group checks its effective checkout SHA against its actual
 base. The PR head is recorded separately where it differs. Native Git accounts
 for additions, deletions and both sides of renames; local feedback also includes
-untracked source. Missing required consumer or verifier evidence remains
+untracked source. The same observation retains removed members separately;
+the independent controller derives that membership again from its own Git diff.
+Removed source and tests cannot supply execution receipts. Their removal does
+not claim that no consumers remain: surviving changed sources and tests still
+require their ordinary qualified behavioral proof and applicable static checks.
+Missing required consumer or verifier evidence remains
 `SELECTION_UNVERIFIED`; it never passes as an empty selection or silently launches
 the daily corpus. Governing instructions, workflow/result policy and selector
 changes require the named
@@ -58,14 +64,25 @@ requirement. The retained `consumer_scope` remains incomplete and its negative
 evidence is not admissible; these chains establish the selected positive
 relationships without claiming all consumers have been found.
 
-The existing native pytest collector resolves advisory dependency verifiers before
+A single existing dependency upgrade may introduce up to 32 uniquely selected
+required dependencies. Each introduction needs a producer-qualified direct path
+from the upgraded selection, an unconditional runtime dependency edge, current
+inventory and installed metadata, and the parent's qualified source-to-verifier
+chain. An unconditional runtime edge from the application root must also bind the
+upgraded parent. The evidence names the actually imported parent separately from the new
+selection; it does not claim that the new dependency is directly imported by
+Oh-Goon. Conditional, optional, development-only, ambiguous or bounded-out paths
+cannot establish this proof.
+
+The existing native pytest collector resolves all advisory Python verifiers before
 plan admission, using the execution configuration and cadence. Evidence retains
 selected and deselected members and empty advisory targets; a support file with
-no collected tests cannot count as a component's required verifier. The original
+no collected tests cannot count as a source's required verifier. Changed tests
+and mandatory policy checks still need ordinary executable members. The original
 batch owner independently collects the admitted files for execution; the plan's
 file set and the exact native execution membership remain separately checked.
 
-Added, removed or forked components, changes to optional/group/build declarations,
+Other added components, removed or forked components, changes to optional/group/build declarations,
 Python runtime requirements or uv source/workspace policy, and missing or
 mismatched metadata, stale or truncated required lock/metadata/consumer
 observations, or a component without a qualified chain remain unverified.
@@ -77,6 +94,12 @@ also require the **Native package** obligation: `backend-lock-check`,
 `backend-package-build-check`. The existing trusted-base gate validates the
 retained `LINKED` evidence, meaningful execution and independently observed
 producer identity through the same proof contract.
+For a dependency update, the trusted controller also observes the candidate lock
+and installed metadata independently in its existing native dependency environment.
+It uses immutable base policy and the candidate's locked producer, and requires
+fresh positive chains to the verifier files whose execution was proved. Separate
+installations retain their own metadata provenance and observation identities;
+one installation's paths or generated entrypoint bytes are not identity for another.
 
 The named **bounded documentation-asset policy** covers newly added or currently
 modified images under `docs/assets/` up to 1 MiB. Hashmarks must observe the image
@@ -125,12 +148,20 @@ receipts. Invocations without `--report` retain their full JSON stdout for
 existing direct consumers. Neither output mode changes selected checks, their
 result authority or independent validation.
 
+The merge route requests the native batch owner's compact verification report:
+exact selected/passed membership, effective pytest outcomes, source identity and
+native collection remain in the proof. Repeated attempt history, batch commands
+and output captures stay in the existing detailed local receipts rather than
+being copied into the bounded merge transport. Daily and diagnostic callers keep
+the full report by default. Projection never turns a skipped or failed member
+into a pass.
+
 The candidate job emits **MERGE_PROOF_READY** only after its selected checks.
 The required **merge-gate** separately checks out the immutable base controller,
 inspects the candidate as data, and validates the bounded same-run proof artifact.
 It never executes or imports candidate code. Missing, skipped, failed, cancelled,
 stale or mismatched proof cannot qualify. The base control also rejects missing
-owners and changed tests without meaningful execution. Absence of reviewed base
+owners and surviving changed tests without meaningful execution. Absence of reviewed base
 controls is **CUTOVER_UNVERIFIED**. Draft feedback has the distinct nonrequired
 name **draft-feedback** and means **FOCUSED / NOT_FULLY_VERIFIED**.
 

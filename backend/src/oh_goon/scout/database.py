@@ -4,7 +4,7 @@ import errno
 import os
 import sqlite3
 import stat
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -30,7 +30,7 @@ class ScoutAnalyticalDatabase:
     @contextmanager
     def transaction(
         self, *, write: bool = False, track_revision: bool = False
-    ) -> Iterator[sqlite3.Connection]:
+    ) -> Generator[sqlite3.Connection, None, None]:
         del track_revision
         connection = self._connect(write=write)
         try:

@@ -9,7 +9,7 @@ import signal
 import sys
 import tempfile
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, redirect_stdout
 from contextvars import ContextVar
 from types import FrameType
@@ -218,16 +218,17 @@ class JsonReply(io.TextIOBase):
         command_result = result
         if self._staging_cleanup_failed and result == 0:
             result = 2
-        payload["_cli"] = {
+        metadata: dict[str, object] = {
             "schema": "oh-goon.cli/v1",
             "exit_code": result,
             "exit_kind": _EXIT_KINDS.get(result, "COMMAND_NON_SUCCESS"),
         }
+        payload["_cli"] = metadata
         if self.cleanup_code is not None:
-            payload["_cli"]["cleanup"] = {"status": "UNVERIFIED", "code": self.cleanup_code}
+            metadata["cleanup"] = {"status": "UNVERIFIED", "code": self.cleanup_code}
         if self._staging_cleanup_failed:
-            payload["_cli"]["command_exit_code"] = command_result
-            payload["_cli"]["presentation_cleanup"] = {
+            metadata["command_exit_code"] = command_result
+            metadata["presentation_cleanup"] = {
                 "status": "UNVERIFIED",
                 "code": "CLI_OUTPUT_STAGING_CLEANUP_FAILED",
             }
@@ -262,7 +263,7 @@ def _terminate(_signum: int, _frame: FrameType | None) -> NoReturn:
 
 
 @contextmanager
-def _default_sigterm() -> Iterator[None]:
+def _default_sigterm() -> Generator[None, None, None]:
     if (
         threading.current_thread() is not threading.main_thread()
         or signal.getsignal(signal.SIGTERM) != signal.SIG_DFL

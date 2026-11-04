@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from oh_goon.core.models.run import CancelledFleetRun, CompletedFleetRun, FailedFleetRun
@@ -396,19 +397,19 @@ class FleetSnapshot(ImmutableModel):
             for detail in self.latest_fleet_runs
             if detail.run.capability.capability_id == capability_id and detail.run.target == target
         ]
-        return max(
-            matches,
-            key=lambda detail: (detail.run.accepted_at, detail.run.fleet_run_id),
-            default=None,
-        )
+
+        def run_order(detail: FleetRunDetail) -> tuple[datetime, str]:
+            return detail.run.accepted_at, detail.run.fleet_run_id
+
+        return max(matches, key=run_order, default=None)
 
     def latest_run_family(self, action: OperationAction) -> FleetRunDetail | None:
         matches = [detail for detail in self.latest_fleet_runs if detail.run.action is action]
-        return max(
-            matches,
-            key=lambda detail: (detail.run.accepted_at, detail.run.fleet_run_id),
-            default=None,
-        )
+
+        def run_order(detail: FleetRunDetail) -> tuple[datetime, str]:
+            return detail.run.accepted_at, detail.run.fleet_run_id
+
+        return max(matches, key=run_order, default=None)
 
     def _run_details(self) -> list[FleetRunDetail]:
         details = list(self.latest_fleet_runs)

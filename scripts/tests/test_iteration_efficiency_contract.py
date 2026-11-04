@@ -30,10 +30,12 @@ def _target_body(name: str) -> str:
     return rest if next_target < 0 else rest[:next_target]
 
 
-def _native_batch_commands(target: str) -> list[list[str]]:
+def _native_batch_commands(target: str, *overrides: str) -> list[list[str]]:
     environment = os.environ.copy()
     for name in (
         "BACKEND_CHECK_TEST_ROOTS",
+        "BACKEND_CHECK_TEST_WORKERS",
+        "INTEGRATION_TEST_WORKERS",
         "CHECK_PYTEST_MARKER",
         "TOOLING_TEST_MARKER",
         "TOOLING_COMPLETE_TEST_MARKER",
@@ -43,7 +45,7 @@ def _native_batch_commands(target: str) -> list[list[str]]:
     ):
         environment.pop(name, None)
     result = subprocess.run(
-        ["make", "--no-print-directory", "--dry-run", target],
+        ["make", "--no-print-directory", "--dry-run", target, *overrides],
         cwd=ROOT,
         env=environment,
         capture_output=True,
@@ -640,13 +642,16 @@ def test_python_profile_uses_qualified_native_batches_and_retains_duration_diagn
     assert options.exclude == [] and options.batch is None and not options.resume
 
 
-def test_integration_gates_keep_original_serial_selection_in_both_owners(
+@pytest.mark.parametrize("workers", (None, 3))
+def test_integration_gates_preserve_selection_and_worker_configuration_in_both_owners(
     monkeypatch: pytest.MonkeyPatch,
+    workers: int | None,
 ) -> None:
     from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
 
     profiles = []
-    for command in _native_batch_commands("test-integration"):
+    overrides = () if workers is None else (f"INTEGRATION_TEST_WORKERS={workers}",)
+    for command in _native_batch_commands("test-integration", *overrides):
         monkeypatch.setattr(sys, "argv", command)
         _parser, options = parse_batch_args()
         profiles.append(options)
@@ -662,7 +667,7 @@ def test_integration_gates_keep_original_serial_selection_in_both_owners(
     assert [profile.marker for profile in profiles] == [
         "not certification and not slow"
     ] * 2
-    assert [profile.workers for profile in profiles] == [1, 1]
+    assert [profile.workers for profile in profiles] == [workers or 1] * 2
     assert [profile.batch_size for profile in profiles] == [8, 8]
     assert all(
         profile.granularity == "tests" and profile.batch_timeout == 180

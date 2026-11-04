@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from shutil import copytree
+from typing import Any, cast
 
 import pytest
+from hashmarks import CodeMap
 
 from oh_goon.integrations.hashmarks.development_verification import (
     nominate_changed_verification,
@@ -114,3 +117,92 @@ def test_nested_manifest_change_rebinds_verifier_to_current_source_root(
     assert after[alternate]["qualification"]["authority"] == (
         "bounded-index-evidence-not-verification-execution"
     )
+
+
+def test_public_nominations_keep_native_bounded_verifiers_and_residual_qualifications(
+    nested_repository: Path,
+) -> None:
+    source = "backend/src/sample/feature.py"
+    for suffix in ("secondary", "additional"):
+        (nested_repository / f"backend/tests/test_feature_{suffix}.py").write_text(
+            f"from sample.feature import answer\ndef test_{suffix}():\n    assert answer() == 42\n",
+            encoding="utf-8",
+        )
+    with CodeMap(nested_repository) as native:
+        native_primary = native.tasks.verification_ownership_graph(
+            f"Verify {source}", limit=20, candidate_limit=1
+        )
+        native_candidates = native.tasks.verification_relevance(
+            f"Verify {source}", limit=20, candidate_limit=16
+        )
+        native_graph = native.tasks.verification_ownership_graph(
+            f"Verify {source}", limit=20, candidate_limit=2
+        )
+    native_owners = cast(list[dict[str, Any]], native_graph["verification_owners"])
+    assert len(native_owners) == 2
+    primary = cast(list[dict[str, Any]], native_primary["verification_owners"])[0]
+    first_reference = native_candidates["candidates"][0]
+    assert {primary["path"], first_reference["path"]} <= {row["path"] for row in native_owners}
+    for row in native_owners:
+        assert row["covers_edit_candidates"] == [source]
+        assert row["coverage_evidence"] in {"direct-reference", "bounded-indirect-reference"}
+    qualification = cast(dict[str, Any], native_graph["verification_qualification"])
+    assert qualification["candidate_count"] > len(native_owners)
+
+    packet = nominate_changed_verification(nested_repository, (source,))
+
+    linked = packet["observations"][0]
+    assert linked["state"] == "LINKED"
+    assert linked["edit_candidates"] == native_graph["edit_candidates"]
+    assert linked["qualification"] == qualification
+    assert packet["owner_coverage"] == "not-claimed"
+    assert len(linked["nominations"]) == 2
+    assert [
+        (row["nomination"]["verification_target"]["path"], row["relationship"])
+        for row in linked["nominations"]
+    ] == [(row["path"], row["coverage_evidence"]) for row in native_owners]
+    assert all(
+        row["nomination"]["execution_authority"] == "external" for row in linked["nominations"]
+    )
+
+
+def test_native_task_preparation_refreshes_contributors_before_composite_observation(
+    nested_repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = "backend/src/sample/feature.py"
+    verifier = "backend/tests/test_feature.py"
+    with CodeMap(nested_repository) as native:
+        baseline = native.tasks.verification_ownership_graph(
+            f"Verify {source}", limit=20, candidate_limit=2
+        )
+        assert baseline["edit_candidates"] == [source]
+        assert native.index.is_current(source)
+        (nested_repository / source).write_text("def answer():\n    return 43\n", encoding="utf-8")
+        assert not native.index.is_current(source)
+        prepare = native.tasks.prepare
+        observed: list[tuple[str, int, bool, bool]] = []
+
+        def track_preparation(
+            task: str, limit: int, *, probe_on_miss: bool = True
+        ) -> tuple[str, ...]:
+            before = native.index.is_current(source)
+            depth = native.reads.depth
+            result = prepare(task, limit, probe_on_miss=probe_on_miss)
+            observed.append((task, depth, before, native.index.is_current(source)))
+            return result
+
+        def selected_map(workspace: Path) -> AbstractContextManager[CodeMap]:
+            assert workspace == nested_repository
+            return nullcontext(native)
+
+        monkeypatch.setattr(native.tasks, "prepare", track_preparation)
+        monkeypatch.setattr("hashmarks.CodeMap", selected_map)
+        evidence = nominate_changed_verification(
+            nested_repository, (verifier, source), required=(verifier,)
+        )
+        assert any(depth == 0 and not before and after for _task, depth, before, after in observed)
+        assert native.index.is_current(source)
+    assert [row["state"] for row in evidence["observations"]] == ["CHANGED_TEST", "LINKED"]
+    assert [row["changed_path"] for row in evidence["observations"]] == [verifier, source]
+    assert len(evidence["required_checks"]) == 1
+    assert evidence["owner_coverage"] == "not-claimed"

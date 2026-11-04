@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import shlex
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -22,8 +21,8 @@ from oh_goon.engine.command import (
     run_command,
 )
 from oh_goon.runtime._sqlite_authority_gate import sqlite_authority_gate
+from oh_goon.runtime.journal_codec import JournalFactCodec, JournalFactKind
 from oh_goon.runtime.journal_facts import JournalEntry
-from oh_goon.runtime.journal_store import JournalFactStore
 
 
 @pytest.mark.process
@@ -52,19 +51,27 @@ def test_step_lifecycle_reuses_publicly_warmed_journal_cut_and_refreshes_after_a
     ):
         monkeypatch.setenv(name, str(tmp_path / directory))
 
-    loads = 0
-    original_load = JournalFactStore.load_entries
+    decodes = 0
+    verifications = 0
+    original_decode = JournalFactCodec.decode
+    original_verify = JournalFactCodec.verify
 
-    def counted_load(connection: sqlite3.Connection) -> list[JournalEntry]:
-        nonlocal loads
-        loads += 1
-        return original_load(connection)
+    def counted_decode(**fields: Any) -> JournalEntry:
+        nonlocal decodes
+        decodes += 1
+        return original_decode(**fields)
 
-    monkeypatch.setattr(JournalFactStore, "load_entries", staticmethod(counted_load))
+    def counted_verify(**fields: Any) -> JournalFactKind:
+        nonlocal verifications
+        verifications += 1
+        return original_verify(**fields)
+
+    monkeypatch.setattr(JournalFactCodec, "decode", staticmethod(counted_decode))
+    monkeypatch.setattr(JournalFactCodec, "verify", staticmethod(counted_verify))
     runtime = ApplicationRuntime.build(standard_local=True)
     run_id = "application-journal-reuse"
     readbacks: list[tuple[FleetRunDetail, FleetRunDetail]] = []
-    read_counts: list[tuple[int, int, int]] = []
+    read_counts: list[tuple[tuple[int, int], tuple[int, int], tuple[int, int]]] = []
     process_ids: list[str] = []
 
     def observed_command(*argv: str, **options: Any) -> CommandResult:
@@ -76,12 +83,12 @@ def test_step_lifecycle_reuses_publicly_warmed_journal_cut_and_refreshes_after_a
                 return
             with sqlite_authority_gate(database_path, write=True):
                 before = runtime.runs.get(run_id)
-                warmed_loads = loads
+                warmed_counts = (decodes, verifications)
                 observer(event)
-                callback_loads = loads
+                callback_counts = (decodes, verifications)
                 after = runtime.runs.get(run_id)
                 readbacks.append((before, after))
-                read_counts.append((warmed_loads, callback_loads, loads))
+                read_counts.append((warmed_counts, callback_counts, (decodes, verifications)))
                 process_ids.append(event.physical_execution_id)
 
         return run_command(*argv, **(options | {"process_observer": observe}))
@@ -114,13 +121,19 @@ def test_step_lifecycle_reuses_publicly_warmed_journal_cut_and_refreshes_after_a
         assert before.run.status is after.run.status is FleetRunStatus.RUNNING
         assert before.journal_revision is not None and after.journal_revision is not None
         assert after.journal_revision == before.journal_revision + 1
+        assert not any(
+            isinstance(event, ProcessStartingEvent)
+            and event.physical_execution_id == process_ids[0]
+            for event in before.lifecycle_events
+        )
         assert any(
             isinstance(event, ProcessStartingEvent)
             and event.physical_execution_id == process_ids[0]
             for event in after.lifecycle_events
         )
-        warmed_loads, callback_loads, refreshed_loads = read_counts[0]
-        assert callback_loads == warmed_loads
-        assert refreshed_loads > callback_loads
+        warmed_counts, callback_counts, refreshed_counts = read_counts[0]
+        assert callback_counts == warmed_counts
+        assert refreshed_counts[0] == callback_counts[0] + 1
+        assert refreshed_counts[1] - callback_counts[1] == after.journal_revision
     finally:
         runtime.shutdown(wait_for_runs=True)

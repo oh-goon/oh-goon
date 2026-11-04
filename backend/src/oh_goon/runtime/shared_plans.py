@@ -91,13 +91,13 @@ class SharedPlanFileStore(ExactFileStore):
         return FleetPlanInvalid(f"Shared Plan must be a regular file: {key}/plan.yml")
 
     @staticmethod
-    def _changed_stale(_key: str) -> Exception:
+    def _changed_stale(key: str) -> Exception:
         return FleetPlanSourceStale(
             "Shared Plan changed since it was read; reload the current SHA-256 revision"
         )
 
     @staticmethod
-    def _removed_stale(_key: str) -> Exception:
+    def _removed_stale(key: str) -> Exception:
         return FleetPlanSourceStale(
             "Shared Plan was removed before save; reload the Shared Plans catalog"
         )

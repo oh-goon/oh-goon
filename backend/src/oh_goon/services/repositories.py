@@ -20,7 +20,7 @@ class RepositoryService:
         self._state = state
         self._discovery = discovery
 
-    def list(self, view: LocalStateReadView | None = None) -> list[RepositoryCatalogEntry]:
+    def list(self, view: LocalStateReadView | None = None) -> builtins.list[RepositoryCatalogEntry]:
         captured = view or self._state.read_view()
         return self._discovery.discover(captured.locations, captured.exclusions)
 

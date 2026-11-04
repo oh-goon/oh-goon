@@ -19,20 +19,21 @@ class LoopbackNetworkGuard:
             return
         guard = self
 
-        def guarded_connect(sock: socket.socket, address: Any) -> None:
+        def guarded_connect(sock: socket.socket, address: Any, /) -> None:
             if not _allowed_address(address):
                 guard._record(address, "connect")
                 raise OSError("Oh Goon certification blocked non-loopback outbound TCP")
             return guard._real_connect(sock, address)
 
-        def guarded_connect_ex(sock: socket.socket, address: Any) -> int:
+        def guarded_connect_ex(sock: socket.socket, address: Any, /) -> int:
             if not _allowed_address(address):
                 guard._record(address, "connect_ex")
                 return 101
             return guard._real_connect_ex(sock, address)
 
-        socket.socket.connect = guarded_connect  # type: ignore[method-assign, assignment]
-        socket.socket.connect_ex = guarded_connect_ex  # type: ignore[method-assign, assignment]
+        # The guard deliberately replaces the native descriptors until uninstall().
+        socket.socket.connect = guarded_connect  # type: ignore[method-assign, assignment]  # ty: ignore[invalid-assignment]
+        socket.socket.connect_ex = guarded_connect_ex  # type: ignore[method-assign, assignment]  # ty: ignore[invalid-assignment]
         self._installed = True
 
     def uninstall(self) -> None:

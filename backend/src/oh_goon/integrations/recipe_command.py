@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -25,7 +25,7 @@ class PreparedRecipeCommand:
 @contextmanager
 def prepare_recipe_command(
     target: UvRecipeTarget, capability: CapabilityDefinition
-) -> Iterator[PreparedRecipeCommand]:
+) -> Generator[PreparedRecipeCommand, None, None]:
     """Render one capability-owned uv recipe command and own temporary output lifetime."""
     if capability.recipe is not target.recipe:
         raise CapabilityUnavailable(

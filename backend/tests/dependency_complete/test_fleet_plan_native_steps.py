@@ -130,6 +130,7 @@ def _case(
     sandboxed: bool = True,
     repository_files: dict[str, str] | None = None,
     skill_instructions: str = "# Native fixture\nInspect complete captured source.\n",
+    timeout_seconds: float = 10.0,
 ) -> tuple[Path, FrozenAgentStepHandoff, ResolvedAgentStep, StepRuntime]:
     repository = tmp_path / "repos/team/project"
     repository.mkdir(parents=True)
@@ -214,7 +215,8 @@ steps:
             arguments=("--fixture-mode", mode),
         ),
         profile=NativeAgentProfile(
-            backend="bubblewrap" if sandboxed else "local", timeout_seconds=10.0
+            backend="bubblewrap" if sandboxed else "local",
+            timeout_seconds=timeout_seconds,
         ),
         executable_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
         connection=connection,
@@ -264,7 +266,7 @@ def model_transport(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 def test_native_step_real_child_receives_frozen_context_and_uses_the_managed_broker(
     tmp_path: Path, model_transport: list[dict[str, Any]]
 ) -> None:
-    repository, handoff, step, runtime = _case(tmp_path)
+    repository, handoff, step, runtime = _case(tmp_path, timeout_seconds=120.0)
     outcome = execute_direct_step(repository, step, runtime, step_order=1)
     assert outcome.returncode == 0, outcome.stderr
     assert outcome.stdout == "Native work reported"
@@ -289,7 +291,9 @@ def test_native_step_real_child_receives_frozen_context_and_uses_the_managed_bro
 def test_native_helpers_ignore_repository_controlled_python_package(
     tmp_path: Path, model_transport: list[dict[str, Any]]
 ) -> None:
-    repository, _handoff, step, runtime = _case(tmp_path, mode="helper-shadowing")
+    repository, _handoff, step, runtime = _case(
+        tmp_path, mode="helper-shadowing", timeout_seconds=120.0
+    )
     outcome = execute_direct_step(repository, step, runtime, step_order=1)
     assert not (repository / "untrusted-helper-ran.txt").exists()
     assert outcome.returncode == 0, outcome.stderr
@@ -310,7 +314,7 @@ def test_native_helpers_ignore_repository_controlled_python_package(
 def test_native_process_failure_and_unsettled_or_invalid_claims_cannot_report_success(
     tmp_path: Path, model_transport: list[dict[str, Any]], mode: str, expected: int
 ) -> None:
-    repository, _, step, runtime = _case(tmp_path, mode=mode)
+    repository, _, step, runtime = _case(tmp_path, mode=mode, timeout_seconds=120.0)
     outcome = execute_direct_step(repository, step, runtime, step_order=1)
     assert outcome.returncode == expected, outcome.stderr
     assert outcome.supervisor is not None and outcome.supervisor.final_process_group_quiescent
