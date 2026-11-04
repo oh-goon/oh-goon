@@ -58,6 +58,7 @@ def execute_fixture(
     notifications: list[dict[str, Any]] | None = None,
     protect_host_secret: bool = False,
     output_schema: dict[str, Any] | None = None,
+    cancel_at: str | None = None,
 ) -> tuple[
     Callable[[], execution.CodexServiceExecution],
     list[object],
@@ -70,6 +71,12 @@ def execute_fixture(
     release = tmp_path / "native-exit"
     events: list[object] = []
     physical: list[CommandResult | CommandCancelledError] = []
+
+    def completed_boundary(name: str) -> None:
+        if cancel_at == name:
+            events.append("cancel:" + name)
+            cancelled.set()
+
     native_environment = {
         "OPENAI_API_KEY": "SYNTHETIC_NATIVE_PROVIDER_SECRET",
         "HOME": str(tmp_path / "native-home"),
@@ -143,6 +150,7 @@ def execute_fixture(
                     ),
                 )
             events.append(("version_receipt", result))
+            completed_boundary("version")
             return result
         events.append("process_birth")
         if fault == "dead_before_socket":
@@ -171,6 +179,7 @@ def execute_fixture(
         except CommandCancelledError as error:
             physical.append(error)
             events.append("process_closed")
+            completed_boundary("daemon_shutdown")
             raise
         physical.append(result)
         events.append("process_closed")
@@ -183,10 +192,12 @@ def execute_fixture(
 
         async def __aenter__(self) -> NativeProtocol:
             events.append("connect")
+            completed_boundary("connect")
             return self
 
         async def __aexit__(self, *_args: object) -> None:
             events.append("disconnect")
+            completed_boundary("transport_close")
             if fault == "normal_daemon_exit":
                 release.touch()
                 deadline = time.monotonic() + 2
@@ -212,6 +223,7 @@ def execute_fixture(
             }
             if fault == "mcp_invalid_configuration":
                 raise AgentProviderError("Native Codex service refused the request")
+            completed_boundary("thread")
             return {"thread": {"id": "owned-thread"}}
 
         async def mcp_exclusion_configuration(self) -> dict[str, Any]:
@@ -220,6 +232,7 @@ def execute_fixture(
                 raise AgentProviderError(
                     "Native Codex MCP inventory is incomplete or exceeds its bound"
                 )
+            completed_boundary("mcp_discovery")
             return {"mcp_servers": {"PRIVATE_NATIVE_REGISTRATION": {"enabled": False}}}
 
         async def require_mcp_servers_excluded(self, thread: str) -> None:
@@ -232,16 +245,19 @@ def execute_fixture(
                     raise AgentProviderError(
                         "Native Codex MCP tool exclusion was not established"
                     ) from error
+            completed_boundary("mcp_gate")
 
         async def feature_flags(self, thread: str) -> dict[str, bool]:
             assert thread == "owned-thread"
             events.append("feature_gate")
+            completed_boundary("feature_gate")
             return {name: fault == "features" for name in execution._DISABLED_FEATURES}
 
         async def command_exec(self, *_args: object, **_kwargs: Any) -> dict[str, Any]:
             events.append("sandbox_qualification")
             if fault == "qualification_missing":
                 return {}
+            completed_boundary("qualification")
             return {
                 "exitCode": {
                     "qualification": 1,
@@ -258,6 +274,7 @@ def execute_fixture(
             events.append("model_turn")
             if fault == "turn_missing":
                 return {}
+            completed_boundary("turn")
             return {
                 "turn": {
                     "turn_null": None,
@@ -274,7 +291,16 @@ def execute_fixture(
         async def next_notification(self, thread: str) -> dict[str, Any]:
             assert thread == "owned-thread"
             if notifications is not None and notifications:
-                return notifications.pop(0)
+                message = notifications.pop(0)
+                if message.get("method") == "turn/completed":
+                    completed_boundary("terminal_notification")
+                else:
+                    item = message.get("params", {}).get("item", {})
+                    if item.get("type") == "commandExecution":
+                        completed_boundary("tool_notification")
+                    elif item.get("type") == "contextCompaction":
+                        completed_boundary("compaction_notification")
+                return message
             if fault == "cancel":
                 cancelled.set()
                 await asyncio.sleep(0.01)
@@ -663,6 +689,118 @@ def test_run_cancellation_keeps_actual_daemon_cleanup_and_never_returns_success(
     assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
     assert physical[0].supervisor.cleanup_reason == "cancel"
     assert physical[0].supervisor.final_process_group_quiescent is True
+
+
+def test_cancellation_after_qualification_ack_does_not_submit_model_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, cancel_at="qualification")
+
+    with pytest.raises(execution.CodexServiceExecutionCancelled) as cancelled:
+        invoke()
+
+    assert "cancel:qualification" in events
+    assert "model_turn" not in events
+    assert "disconnect" in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    assert cancelled.value.__cause__ is physical[0]
+    assert cancelled.value.outcome.supervisor is physical[0].supervisor
+    assert physical[0].supervisor.cleanup_reason == "cancel"
+    assert physical[0].supervisor.final_process_group_quiescent is True
+
+
+def test_cancellation_after_version_probe_does_not_start_daemon_or_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, cancel_at="version")
+
+    with pytest.raises(OperationCancelledError):
+        invoke()
+
+    assert "cancel:version" in events
+    assert "process_birth" not in events
+    assert "connect" not in events and "model_turn" not in events
+    assert not physical
+    version = next(
+        item[1] for item in events if isinstance(item, tuple) and item[0] == "version_receipt"
+    )
+    assert version.returncode == 0
+    assert version.supervisor.final_process_group_quiescent is True
+
+
+@pytest.mark.parametrize(
+    ("boundary", "next_effect"),
+    (
+        ("connect", "mcp_discovery"),
+        ("mcp_discovery", "thread_start"),
+        ("thread", "mcp_gate"),
+        ("mcp_gate", "feature_gate"),
+        ("feature_gate", "sandbox_qualification"),
+    ),
+)
+def test_cancelled_service_preflight_cannot_start_the_next_native_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str, next_effect: str
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, cancel_at=boundary)
+
+    with pytest.raises(execution.CodexServiceExecutionCancelled) as cancelled:
+        invoke()
+
+    assert "cancel:" + boundary in events
+    assert next_effect not in events and "model_turn" not in events
+    assert "disconnect" in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    assert cancelled.value.__cause__ is physical[0]
+    assert cancelled.value.outcome.supervisor is physical[0].supervisor
+    assert cancelled.value.outcome.physical_execution_id == physical[0].physical_execution_id
+    assert physical[0].supervisor.cleanup_reason == "cancel"
+    assert physical[0].supervisor.final_process_group_quiescent is True
+
+
+@pytest.mark.parametrize(
+    "boundary",
+    (
+        "turn",
+        "tool_notification",
+        "compaction_notification",
+        "terminal_notification",
+        "transport_close",
+        "daemon_shutdown",
+    ),
+)
+def test_caller_cancellation_wins_turn_claim_and_owned_daemon_shutdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
+) -> None:
+    notification = {
+        "tool_notification": _visible_item(
+            {"type": "commandExecution", "command": "pytest", "exitCode": 0}
+        ),
+        "compaction_notification": _visible_item({"type": "contextCompaction"}),
+        "terminal_notification": _visible_terminal(),
+    }.get(boundary)
+    invoke, events, physical = execute_fixture(
+        tmp_path,
+        monkeypatch,
+        cancel_at=boundary,
+        notifications=[notification] if notification is not None else None,
+    )
+
+    with pytest.raises(execution.CodexServiceExecutionCancelled) as cancelled:
+        invoke()
+
+    assert "model_turn" in events and "cancel:" + boundary in events
+    assert "disconnect" in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    outcome = cancelled.value.outcome
+    assert cancelled.value.__cause__ is physical[0]
+    assert outcome.returncode != 0 and outcome.completion != "service_shutdown"
+    assert outcome.supervisor is physical[0].supervisor
+    assert outcome.runtime_authority is physical[0].runtime_authority
+    assert outcome.physical_execution_id == physical[0].physical_execution_id
+    assert physical[0].supervisor.process_group_cleanup_requested is True
+    assert physical[0].supervisor.cleanup_reason == "cancel"
+    assert physical[0].supervisor.final_process_group_quiescent is True
+    assert physical[0].supervisor.termination_receipt is not None
 
 
 def test_service_policy_keeps_review_git_and_control_roots_protected(tmp_path: Path) -> None:
