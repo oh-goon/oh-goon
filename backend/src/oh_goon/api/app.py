@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import cast
 
@@ -49,7 +49,7 @@ from oh_goon.runtime.local_launch_owner import record_backend_startup_complete_f
 
 
 @asynccontextmanager
-async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     runtime = application()
     _app.state.diagnostics = runtime.diagnostics
     runtime.start_background()

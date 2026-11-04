@@ -532,7 +532,11 @@ def health_summary(
     complete = admitted[0] if admitted else None
     green = next((result for result in admitted if result.get("status") == "PASS"), None)
     expected_slot = daily_slot(now)
-    slot_attempts = [row for row in daily if _daily_identity(row)[0] == expected_slot]  # type: ignore[index]
+    slot_attempts = [
+        row
+        for row in daily
+        if (identity := _daily_identity(row)) is not None and identity[0] == expected_slot
+    ]
     stale = complete is None or now.astimezone(UTC) - _instant(
         complete["completed_at"]
     ) > timedelta(hours=36)

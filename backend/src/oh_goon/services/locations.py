@@ -14,7 +14,7 @@ class LocationService:
     def __init__(self, state: LocalState) -> None:
         self._state = state
 
-    def snapshot(self) -> tuple[list[Path], list[Path], str]:
+    def snapshot(self) -> tuple[builtins.list[Path], builtins.list[Path], str]:
         """Project one coherent configured-location cut and its derived identity."""
         locations = self._state.read_view().locations
         return (
@@ -23,7 +23,7 @@ class LocationService:
             locations_revision(locations),
         )
 
-    def list(self) -> list[Path]:
+    def list(self) -> builtins.list[Path]:
         return self.snapshot()[0]
 
     def unavailable(self) -> builtins.list[Path]:

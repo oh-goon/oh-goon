@@ -120,6 +120,10 @@ class CommandProcessLifecycleEvent:
 
 
 class CommandTimeoutExpired(subprocess.TimeoutExpired):
+    # Native command capture retains decoded text as well as subprocess bytes.
+    stdout: str | bytes | None  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
+    stderr: str | bytes | None  # type: ignore[assignment]  # ty: ignore[invalid-attribute-override]
+
     def __init__(
         self,
         cmd: str | Sequence[str],

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 from oh_goon.repository_tooling.generation.api_operation_generation import (
     HTTP_METHODS,
@@ -404,7 +404,7 @@ def _operation_switch_lines(operations: tuple[ApiOperation, ...], direction: str
     return lines
 
 
-def _runtime_file_lines() -> list[str]:
+def _runtime_file_lines() -> Sequence[str]:
     return """export type JsonRecord = Record<string, unknown>;
 export type Validator = (value: unknown, path: string, contract: string, refStack: Set<string>) => void;
 

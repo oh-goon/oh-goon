@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,7 +47,7 @@ class SQLiteExecutionLeaseStore:
         self._environment = environment or SystemLeaseEnvironment()
 
     @contextmanager
-    def execution_connection_scope(self) -> Iterator[None]:
+    def execution_connection_scope(self) -> Generator[None, None, None]:
         """Reuse one admitted native SQLite handle in the current execution thread."""
         with self._database.execution_connection_scope():
             yield
@@ -335,7 +335,7 @@ class SQLiteExecutionLeaseStore:
     @contextmanager
     def preparation_cancellation_observer(
         self, lease: ExecutionLease
-    ) -> Iterator[Callable[[], bool]]:
+    ) -> Generator[Callable[[], bool], None, None]:
         """Observe cancellation through one query-only connection during preparation.
 
         The observer connection is not mutation authority. Every callback re-proves the

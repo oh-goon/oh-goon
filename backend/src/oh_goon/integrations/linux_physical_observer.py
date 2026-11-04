@@ -292,11 +292,12 @@ def _network(
         namespaces = command(["ip", "-j", "netns", "list"])
         links = command(["ip", "-j", "link", "show"])
         tables = command(["nft", "-j", "list", "tables"])
+        table_entries = tables.get("nftables") if type(tables) is dict else None
         if (
             type(namespaces) is not list
             or type(links) is not list
             or type(tables) is not dict
-            or type(tables.get("nftables")) is not list
+            or type(table_entries) is not list
         ):
             return _component("UNKNOWN", "network inventory has invalid schema")
         match = (
@@ -306,18 +307,18 @@ def _network(
                 and (
                     x.get("ifname") == scope.host_veth
                     or (
-                        type(x.get("ifname")) is str
-                        and x["ifname"].startswith(cast(str, scope.host_veth) + "@")
+                        type(ifname := x.get("ifname")) is str
+                        and ifname.startswith(cast(str, scope.host_veth) + "@")
                     )
                 )
                 for x in links
             )
             or any(
                 type(x) is dict
-                and type(x.get("table")) is dict
-                and x["table"].get("family") == "inet"
-                and x["table"].get("name") == scope.nft_table
-                for x in tables["nftables"]
+                and type(table := x.get("table")) is dict
+                and table.get("family") == "inet"
+                and table.get("name") == scope.nft_table
+                for x in table_entries
             )
         )
         return _component(
@@ -989,13 +990,15 @@ def observe_kernel(
         methods = dict(diagnostic_probes)
 
     def scan() -> dict[str, dict[str, str]]:
-        return {
+        # Diagnostic probes may inject malformed objects; the original scan and
+        # fact validation below remain responsible for rejecting those results.
+        return {  # ty: ignore[invalid-return-type]
             "cgroup": methods["_cgroup"](scope),
             "subtree": methods["_cgroup_subtree"](scope, proc_root),
             "process": methods["_process"](scope, proc_root),
             "mounts": methods["_mounts"](scope, proc_root),
             "network": methods["_network"](scope),
-            **methods["_tracked_namespace_inventory"](scope, proc_root),
+            **methods["_tracked_namespace_inventory"](scope, proc_root),  # ty: ignore[invalid-argument-type]
             "visible_namespace_fd_holders": methods["_namespace_fd_holders"](scope, proc_root),
             "visible_foreign_mount_targets": methods["_visible_foreign_mount_targets"](
                 scope, proc_root
@@ -1036,7 +1039,8 @@ def observe_kernel(
             (
                 name,
                 PhysicalKernelFact(
-                    cast(Literal["PRESENT", "NOT_OBSERVED", "UNKNOWN"], value["state"]),
+                    # mypy requires the cast after membership validation; ty narrows it.
+                    cast(Literal["PRESENT", "NOT_OBSERVED", "UNKNOWN"], value["state"]),  # ty: ignore[redundant-cast]
                     value["detail"],
                 ),
             )

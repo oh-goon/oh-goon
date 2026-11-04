@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from oh_goon.services.fleet_local_lace_takeover import OriginalLocalLaceTakeoverCoordinator
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
@@ -583,7 +583,7 @@ class FleetRunControlPlane:
         *,
         repository_ids: set[str],
         expected_repository_instance_ids: dict[str, str] | None = None,
-    ) -> Iterator[tuple[FleetPlanTarget, dict[str, str]]]:
+    ) -> Generator[tuple[FleetPlanTarget, dict[str, str]], None, None]:
         """Retain Schedule source with the original Fleet input-custody lifecycle."""
         intent = resolve_capability_intent(OperationAction.EXECUTE_PLAN, target)
         scope = _requested_repository_scope(

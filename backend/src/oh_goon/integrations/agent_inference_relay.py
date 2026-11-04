@@ -14,7 +14,7 @@ import socket
 import socketserver
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -72,7 +72,8 @@ class _RelayServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 
 class _RelayHandler(socketserver.BaseRequestHandler):
-    server: _RelayServer
+    # _RelayServer constructs this handler with itself as the native server.
+    server: _RelayServer  # ty: ignore[invalid-mutable-override]
 
     def handle(self) -> None:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as upstream:
@@ -112,7 +113,9 @@ class _RelayHandler(socketserver.BaseRequestHandler):
 
 
 @contextlib.contextmanager
-def model_inference_relay(socket_path: Path, *, port: int = 18743) -> Iterator[InferenceRelay]:
+def model_inference_relay(
+    socket_path: Path, *, port: int = 18743
+) -> Generator[InferenceRelay, None, None]:
     """Expose only a namespace-local listener; the host endpoint stays a fixed UDS."""
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("inference relay port must be between 0 and 65535")
@@ -144,7 +147,7 @@ def _write_all(descriptor: int, data: bytes) -> None:
 
 
 @contextlib.contextmanager
-def _interactive_terminal() -> Iterator[CommandTerminal]:
+def _interactive_terminal() -> Generator[CommandTerminal, None, None]:
     import termios
     import tty
 

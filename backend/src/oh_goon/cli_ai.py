@@ -9,7 +9,7 @@ import select
 import shlex
 import shutil
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from functools import partial
@@ -45,8 +45,8 @@ _MAX_TERMINAL_CHUNK_BYTES = 65536
 _MAX_FAILURE_STDERR_BYTES = 16384
 
 
-def add_ai_command(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def add_ai_command[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     parser = subparsers.add_parser("ai", help="Run a native coding agent through a managed Run")
     parser.add_argument(
@@ -458,7 +458,7 @@ def _print_handoff_reference(fleet_run_id: str) -> None:
 
 
 @contextmanager
-def _host_terminal() -> Iterator[CommandTerminal]:
+def _host_terminal() -> Generator[CommandTerminal, None, None]:
     import fcntl
     import termios
     import tty
