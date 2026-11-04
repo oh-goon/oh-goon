@@ -73,6 +73,12 @@ def parse_batch_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         help="atomically write bounded batch execution evidence JSON",
     )
     parser.add_argument(
+        "--report-projection",
+        choices=("full", "verification"),
+        default="full",
+        help="retain full diagnostics or transport exact final verification evidence",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="reuse exact-identity non-failing member receipts from earlier interrupted runs",

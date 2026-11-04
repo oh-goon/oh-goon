@@ -289,9 +289,83 @@ def test_native_git_change_capture_preserves_renames_deletions_and_untracked(
     base = owner._git(repository, "rev-parse", "HEAD").strip()
     owner._git(repository, "mv", "README.md", "RENAMED.md")
     (repository / "new.py").write_text("value = 1\n", encoding="utf-8")
-    observed_base, _, paths = owner.capture_change(repository, base, None)
+    observed_base, _, paths, removed = owner.capture_change(repository, base, None)
     assert observed_base == base
     assert paths == ("README.md", "RENAMED.md", "new.py")
+    assert removed == ("README.md",)
+
+
+@pytest.mark.parametrize(
+    "retired", ("obsolete.py", "backend/tests/unit/services/test_obsolete.py")
+)
+def test_native_removed_members_retain_absence_without_execution_obligations(
+    repository: Path, retired: str
+) -> None:
+    source = repository / retired
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("def obsolete():\n    return 1\n", encoding="utf-8")
+    owner._git(repository, "add", retired)
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "removal baseline",
+    )
+    source.unlink()
+    (repository / "behavior.py").write_text("answer = 2\n", encoding="utf-8")
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(tuple(path for path in paths if path != retired))
+        evidence["observations"].append(
+            {"changed_path": retired, "state": "UNAVAILABLE", "reason": "source-absent"}
+        )
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+
+    owner.require_merge_selection(repository, plan)
+    assert plan.removed_paths == (retired,)
+    assert not plan.unverified
+    assert retired not in plan.pytest
+    assert plan.evidence["owner_coverage"] == "not-claimed"
+    assert plan.evidence["observations"][-1] == {
+        "changed_path": retired,
+        "state": "UNAVAILABLE",
+        "reason": "source-absent",
+    }
+
+
+def test_source_absence_advice_cannot_waive_a_surviving_change(
+    repository: Path,
+) -> None:
+    source = repository / "behavior.py"
+    source.write_text("answer = 2\n", encoding="utf-8")
+    baseline = owner.admit_change(
+        repository, base="HEAD", nominator=lambda _root, paths: _evidence(paths)
+    )
+    owner.require_merge_selection(repository, baseline)
+
+    def unavailable(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        evidence["observations"][0] = {
+            "changed_path": "behavior.py",
+            "state": "UNAVAILABLE",
+            "reason": "source-absent",
+        }
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=unavailable)
+
+    assert not plan.removed_paths
+    assert "NO_QUALIFIED_VERIFIER:behavior.py" in plan.unverified
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
 
 
 def test_effective_candidate_refuses_local_source_drift(repository: Path) -> None:
@@ -362,7 +436,7 @@ def test_native_documentation_asset_admission_retains_explicit_bounded_policy(
     assert observed["consumer_scope"]["negative_evidence_admissible"] is False
 
 
-def test_documentation_asset_rename_retains_unavailable_base_side_scope(
+def test_documentation_asset_rename_retains_native_removal_and_required_behavior(
     repository: Path,
 ) -> None:
     old, new = "docs/assets/before.png", "docs/assets/after.png"
@@ -391,7 +465,8 @@ def test_documentation_asset_rename_retains_unavailable_base_side_scope(
 
     assert old in plan.changed_paths and new in plan.changed_paths
     assert plan.behavioral_status == "REQUIRED"
-    assert f"NO_QUALIFIED_VERIFIER:{old}" in plan.unverified
+    assert plan.removed_paths == (old,)
+    assert f"NO_QUALIFIED_VERIFIER:{old}" not in plan.unverified
     with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
         owner.require_merge_selection(repository, plan)
 
@@ -688,6 +763,59 @@ def test_required_membership_cannot_be_qualified_by_pytest_exit_zero(
     invalid["membership_receipt"][outcome] = ["test.py::test_case"]
     with pytest.raises(ValueError, match="incomplete"):
         owner.require_complete_membership(invalid)
+
+
+def test_selected_pytest_requests_compact_exact_membership_proof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    node = "backend/tests/unit/test_behavior.py::test_behavior"
+    identity = "sha256:" + "c" * 64
+    plan = owner.ChangeVerificationPlan(
+        base="a" * 40,
+        candidate="b" * 40,
+        source_identity=identity,
+        changed_paths=("behavior.py",),
+        static=(),
+        pytest=(node,),
+        frontend=(),
+        unverified=(),
+        evidence={},
+        behavioral_status="REQUIRED",
+        policy_status="ORDINARY",
+    )
+    native = {
+        "status": "PASS",
+        "source_identity": identity,
+        "native_collection": {"discovered": [node], "deselected": []},
+        "membership_receipt": {
+            "selected": [node],
+            "passed": [node],
+            "terminal_success": True,
+            "effective_pytest_outcomes": [
+                {
+                    "member": node,
+                    "status": "PASSED",
+                    "pytest_outcomes": [{"nodeid": node, "outcome": "PASSED"}],
+                }
+            ],
+        },
+    }
+    commands: list[tuple[str, ...]] = []
+
+    def execute(*argv: str, **_options: Any) -> Any:
+        commands.append(argv)
+        assert argv[argv.index("--report-projection") + 1] == "verification"
+        Path(argv[argv.index("--report-path") + 1]).write_text(json.dumps(native))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+    monkeypatch.setattr(owner, "run_command", execute)
+
+    result = owner.execute_change(tmp_path, plan, mode="merge", workers=1)
+
+    assert result["status"] == "CHECKS_PASSED"
+    assert len(commands) == 1 and commands[0][-1] == node
+    assert result["outcomes"][0]["native_report"] == native
 
 
 def test_supported_hashmarks_adapter_returns_real_source_qualified_links(

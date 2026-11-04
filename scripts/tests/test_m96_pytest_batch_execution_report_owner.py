@@ -7,9 +7,11 @@ import json
 import os
 import stat
 import errno
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -55,8 +57,10 @@ def _report_payload(schema: str) -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("projection", ("full", "verification"))
 def test_execution_report_projection_follows_schema_owner_mutation(
     monkeypatch: pytest.MonkeyPatch,
+    projection: str,
 ) -> None:
     monkeypatch.setattr(
         pytest_execution_report,
@@ -73,6 +77,7 @@ def test_execution_report_projection_follows_schema_owner_mutation(
         fail_fast=False,
         resume=False,
         resume_key="unused",
+        report_projection=projection,
     )
     plan = SimpleNamespace(
         reusable_members=frozenset(),
@@ -110,6 +115,8 @@ def test_execution_report_projection_follows_schema_owner_mutation(
     )
 
     assert payload["schema"] == f"{FAMILY}/v7"
+    if projection == "verification":
+        assert payload["report_projection"] == "verification"
     assert payload["marker"] == "not certification and not daily"
     assert payload["native_collection"] == {
         "root": "backend",
@@ -132,6 +139,167 @@ def test_execution_report_projection_follows_schema_owner_mutation(
         diagnostics=diagnostics,
     )
     assert with_diagnostics == {**payload, "diagnostics": diagnostics}
+
+
+def _large_native_report(*, skipped: bool) -> dict[str, Any]:
+    members = [
+        "backend/tests/unit/integrations/test_transport.py::test_bound_member_"
+        + str(index)
+        + "["
+        + "parameter-" * 16
+        + "]"
+        for index in range(4400)
+    ]
+    effective = [
+        {
+            "member": member,
+            "status": "NON_PASSED"
+            if skipped and index == len(members) - 1
+            else "PASSED",
+            "attempt_identity": "sha256:" + "a" * 64,
+            "pytest_outcomes": [
+                {
+                    "nodeid": member,
+                    "outcome": "SKIPPED"
+                    if skipped and index == len(members) - 1
+                    else "PASSED",
+                }
+            ],
+        }
+        for index, member in enumerate(members)
+    ]
+    attempts = [
+        {
+            **row,
+            "suite_identity": "sha256:" + "b" * 64,
+            "execution_plan_identity": "sha256:" + "c" * 64,
+            "execution_run_identity": "sha256:" + "d" * 64,
+            "member_identity": "sha256:" + "e" * 64,
+            "observed_batch_identity": "sha256:" + "f" * 64,
+            "started_at_utc": "2026-11-04T00:00:00+00:00",
+            "completed_at_utc": "2026-11-04T00:00:01+00:00",
+        }
+        for row in effective
+    ]
+    payload = _report_payload(_schema())
+    membership = cast(dict[str, Any], payload["membership_receipt"])
+    membership.update(
+        selected=members,
+        attempted=members,
+        completed=members,
+        passed=members[:-1] if skipped else members,
+        non_passed=members[-1:] if skipped else [],
+        effective_pytest_outcomes=effective,
+        attempt_records=attempts,
+        retry_bisection_lineage=[],
+    )
+    payload.update(
+        source_identity="sha256:" + "0" * 64,
+        membership_receipt_path="/owned/run/membership-receipt.json",
+        native_collection={"discovered": members, "deselected": []},
+        batches=[
+            {"members": part, "output_captures": [{"members": part}]}
+            for start in range(0, len(members), 64)
+            if (part := members[start : start + 64])
+        ],
+    )
+    return payload
+
+
+@pytest.mark.parametrize("skipped", (False, True))
+def test_verification_report_transports_large_exact_proof_without_repeating_attempt_history(
+    tmp_path: Path, skipped: bool
+) -> None:
+    from oh_goon.repository_tooling.verification_gate_control import (
+        require_native_pytest_pass,
+    )
+
+    full = _large_native_report(skipped=skipped)
+    assert len(json.dumps(full).encode()) > 8 * 1024 * 1024
+    projected = pytest_execution_report.verification_report(full)
+    assert len(json.dumps(projected).encode()) < 8 * 1024 * 1024
+    assert projected["source_identity"] == full["source_identity"]
+    assert projected["native_collection"] is full["native_collection"]
+    assert projected["membership_receipt_path"] == full["membership_receipt_path"]
+    membership = cast(dict[str, Any], projected["membership_receipt"])
+    for field in ("selected", "passed", "effective_pytest_outcomes", "non_passed"):
+        assert membership[field] is full["membership_receipt"][field]
+    assert len(full["membership_receipt"]["attempt_records"]) == 4400
+    assert (
+        full["membership_receipt"]["attempted"]
+        == full["membership_receipt"]["selected"]
+    )
+    report = tmp_path / "verification.json"
+    pytest_execution_report.write_execution_report(report, projected)
+    transported = json.loads(report.read_text(encoding="utf-8"))
+    if skipped:
+        assert transported["membership_receipt"]["non_passed"]
+        for payload in (full, transported):
+            with pytest.raises(ValueError, match="incomplete"):
+                require_native_pytest_pass(
+                    payload, expected_source=full["source_identity"]
+                )
+    else:
+        assert require_native_pytest_pass(
+            transported, expected_source=full["source_identity"]
+        ) == require_native_pytest_pass(full, expected_source=full["source_identity"])
+
+
+@pytest.mark.process
+def test_native_verification_projection_keeps_the_complete_owned_receipt(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.verification_gate_control import (
+        require_native_pytest_pass,
+    )
+
+    config = tmp_path / "pyproject.toml"
+    config.write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    case = tmp_path / "test_native.py"
+    case.write_text("def test_example():\n    assert 2 + 2 == 4\n", encoding="utf-8")
+    destination = tmp_path / "report.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "oh_goon.repository_tooling.test_batches",
+            str(case),
+            "--pytest-config",
+            str(config),
+            "--granularity",
+            "tests",
+            "--workers",
+            "1",
+            "--batch-timeout",
+            "15",
+            "--marker",
+            "",
+            "--resume-state-root",
+            str(tmp_path / "state"),
+            "--report-path",
+            str(destination),
+            "--report-projection",
+            "verification",
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=25,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(destination.read_text(encoding="utf-8"))
+    assert report["report_projection"] == "verification"
+    assert require_native_pytest_pass(report, expected_source=report["source_identity"])
+    complete = json.loads(
+        Path(report["membership_receipt_path"]).read_text(encoding="utf-8")
+    )
+    assert complete["attempt_records"]
+    assert complete["attempted"] == complete["completed"] == complete["passed"]
+    assert (
+        report["membership_receipt"]["effective_pytest_outcomes"]
+        == complete["effective_pytest_outcomes"]
+    )
 
 
 def test_execution_report_persistence_rejects_stale_schema(

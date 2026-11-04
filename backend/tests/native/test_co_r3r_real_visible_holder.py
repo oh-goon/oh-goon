@@ -2,6 +2,8 @@
 
 This cannot qualify a foreign PID namespace, missing tasks, detached mounts or
 independently controlled observer.  No cgroup or mount mutations occur.
+The real probe requires complete host procfs visibility and is explicit native
+qualification; ordinary verification uses the deterministic holder-race case.
 """
 
 from __future__ import annotations
@@ -18,6 +20,56 @@ from oh_goon.integrations import linux_physical_observer as linux
 from oh_goon.repository_tooling.local_lace_physical_preflight import parse_scope
 
 
+def test_visible_namespace_fd_holder_disappearing_during_census_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proc = tmp_path / "proc"
+    (proc / "sys/kernel/random").mkdir(parents=True)
+    (proc / "sys/kernel/random/boot_id").write_text("holder-boot\n")
+    for pid, birth, namespace in ((710, 87, 4026531100), (711, 88, 4026531199)):
+        directory = proc / str(pid)
+        (directory / "ns").mkdir(parents=True)
+        (directory / "fd").mkdir()
+        (directory / "stat").write_text(
+            f"{pid} (worker) " + " ".join(["S"] + ["0"] * 18 + [str(birth)])
+        )
+        (directory / "ns/mnt").symlink_to(f"mnt:[{namespace}]")
+        (directory / "ns/net").symlink_to(f"net:[{namespace + 1}]")
+    (proc / "711/fd/4").symlink_to("mnt:[4026531100]")
+    group = tmp_path / "group"
+    group.mkdir()
+    scope = parse_scope(
+        {
+            "run_id": "co-r3r-census",
+            "subject_identity": "sha256:" + "e" * 64,
+            "cgroup_path": str(group),
+            "cgroup_device": group.stat().st_dev,
+            "cgroup_inode": group.stat().st_ino,
+            "tracked_pid": 710,
+            "tracked_birth": "holder-boot:87",
+            "mount_targets": ["/original"],
+            "network_namespace": None,
+            "host_veth": None,
+            "nft_table": None,
+        }
+    )
+    baseline = linux._namespace_fd_holders(scope, proc)
+    assert baseline["state"] == "PRESENT"
+    assert "matching_namespace_fds=1" in baseline["detail"]
+    read = linux._read_regular
+    holder = proc / "711/stat"
+
+    def holder_disappears(path: Path, limit: int) -> str:
+        value = read(path, limit)
+        if path == holder:
+            holder.unlink()
+        return value
+
+    monkeypatch.setattr(linux, "_read_regular", holder_disappears)
+    assert linux._namespace_fd_holders(scope, proc)["state"] == "UNKNOWN"
+
+
+@pytest.mark.certification
 @pytest.mark.skipif(sys.platform != "linux", reason="requires real Linux procfs")
 def test_detached_session_inherited_namespace_fd_remains_visible_but_not_proof(tmp_path):
     pid = os.getpid()

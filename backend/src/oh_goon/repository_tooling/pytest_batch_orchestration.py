@@ -817,6 +817,8 @@ def _execution_report(
             "full_verification_status": "NOT_FULLY_VERIFIED",
             "next_check": {"command": args.next_check, "status": "UNVERIFIED"},
         }
+    if getattr(args, "report_projection", "full") == "verification":
+        return execution_report_contract.verification_report(payload)
     return payload
 
 
