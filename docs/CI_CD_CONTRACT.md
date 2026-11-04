@@ -223,6 +223,13 @@ hosted native runtime view and its owned SDK-overlay cleanup through
 `ci_native_runtime.sh`; static/docs checks do not mount it. CPU budgets and
 process cleanup retain their existing native owners.
 
+The hosted SDK launcher receives runner cancellation directly: relevant/focused
+steps replace their entry shell with it, and complete Python-owner steps select
+it as their native GitHub custom shell. It forwards INT/TERM to its owned Bash
+job and waits for command settlement before releasing the SDK overlay. Complete
+owner source/readback accounting remains inside that selected shell, with its
+private evidence location prepared before launch.
+
 Native pytest collection transports the `native_resources` capability of the
 already selected tests. It changes host preparation only: it never adds, removes
 or defers verification members. Hosted relevant verification prepares the
@@ -263,6 +270,13 @@ transitions. Title and description edits do not start verification or replace th
 candidate's check suite. The `edited` trigger is intentionally absent: skipping
 every job after a metadata edit can leave a newer suite without the required
 `merge-gate` result. The gate validates the existing proof; it does not rerun tests.
+The verification job exports the immutable artifact ID returned by its native
+upload action. A gate-only retry consumes that producer output, including when
+the successful verification ran in an earlier attempt of the same workflow run.
+It does not reconstruct an artifact name from the retry's attempt or search for
+replacement proof. Missing or ambiguous artifact references refuse before download;
+the same digest and exact base/head/candidate validation still apply. A source or
+base update requires its own normal candidate verification.
 
 GitHub also reports a base-branch retarget as `edited`, so retargeting alone does
 not start verification. After changing the target branch, update the head branch
@@ -443,12 +457,15 @@ and discovery receipts remain the result authority.
 
 One daily concurrency domain never cancels an active campaign. Manual catch-up
 uses the same UTC slot and the first attempt's frozen source. When a slot
-already has an attempt, use **Re-run jobs** on that Actions run rather than
-creating a new campaign to overwrite a red result. Release qualification has a
-separate concurrency domain. A queued daily run can still be delayed by account
-capacity; separate groups do not reserve runners. The initial one-owner ceiling
-limits contention. PR latency during a real overlap remains a live qualification
-obligation, not a claim made by this configuration.
+already has an attempt, use **Re-run all jobs** on that Actions run rather than
+creating a new campaign to overwrite a red result. The final join requires every
+owner's fresh evidence from the same run attempt. **Re-run failed jobs** or
+retrying only the final join leaves earlier successful owners' evidence in the
+previous attempt and cannot produce a complete qualifying result. Release
+qualification has a separate concurrency domain. A queued daily run can still be
+delayed by account capacity; separate groups do not reserve runners. The initial
+one-owner ceiling limits contention. PR latency during a real overlap remains a
+live qualification obligation, not a claim made by this configuration.
 
 Run a missed slot through Actions → **Daily and release verification** →
 **Run workflow**, mode `daily`, with its UTC `YYYY-MM-DD` slot. Leave `ref` blank

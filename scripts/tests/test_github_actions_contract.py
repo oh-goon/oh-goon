@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -313,8 +316,34 @@ esac
 """
 
 
+_SDK_SIGNAL_COMMAND = """import json, os, pathlib, signal, sys, time
+events = pathlib.Path(os.environ['SDK_EVENTS'])
+def record(value):
+    with events.open('a') as stream:
+        stream.write(value + '\\n')
+def settle(signum, frame):
+    record('signal:' + str(signum))
+    time.sleep(0.15)
+    record('settled')
+    raise SystemExit(23)
+signal.signal(signal.SIGINT, settle)
+signal.signal(signal.SIGTERM, settle)
+record('make:' + sys.argv[1])
+pathlib.Path(os.environ['SDK_READY']).write_text(json.dumps({
+    'pid': os.getpid(), 'argument': sys.argv[1],
+    'environment': os.environ['SDK_TEST_LITERAL'],
+}))
+while True:
+    signal.pause()
+"""
+
+
 def _run_required_check(
-    tmp_path: Path, target: str, overrides: dict[str, str] | None = None
+    tmp_path: Path,
+    target: str,
+    overrides: dict[str, str] | None = None,
+    *,
+    entry_signal: int | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[str], bool]:
     """Execute native Bash while every privileged/tool effect is simulated."""
     bash = shutil.which("bash", path=os.defpath)
@@ -338,6 +367,9 @@ def _run_required_check(
         executable.write_text(f"#!{bash}\n" + _SDK_SHIM)
         executable.chmod(0o755)
     events, marker = tmp_path / "events", tmp_path / "mounted-owner"
+    ready = tmp_path / "selected-ready.json"
+    if entry_signal is not None:
+        (commands / "make").write_text(f"#!{sys.executable}\n" + _SDK_SIGNAL_COMMAND)
     script = (
         (ROOT / "scripts/ci_native_runtime.sh")
         .read_text()
@@ -346,22 +378,67 @@ def _run_required_check(
     script = "set -- make " + shlex.quote(target) + "\n" + script
     # Keep cancellation bound to our child even if a missing trap lets it exec Make.
     script = "export SDK_WORKFLOW_PID=$$\n" + script
-    result = subprocess.run(
-        [bash, "--noprofile", "--norc", "-c", script],
-        cwd=tmp_path,
-        env={
-            "PATH": str(commands) + os.pathsep + os.defpath,
-            "RUNNER_ENVIRONMENT": "github-hosted",
-            "GITHUB_RUN_ID": "synthetic-owned-run",
-            "SDK_EVENTS": str(events),
-            "SDK_MARKER": str(marker),
-            **options,
-        },
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
-    )
+    environment = {
+        "PATH": str(commands) + os.pathsep + os.defpath,
+        "RUNNER_ENVIRONMENT": "github-hosted",
+        "GITHUB_RUN_ID": "synthetic-owned-run",
+        "SDK_EVENTS": str(events),
+        "SDK_MARKER": str(marker),
+        "SDK_READY": str(ready),
+        "SDK_TEST_LITERAL": "literal $value; $(not-a-command)",
+        **options,
+    }
+    invocation = [bash, "--noprofile", "--norc", "-c", script]
+    if entry_signal is None:
+        result = subprocess.run(
+            invocation,
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    else:
+        process = subprocess.Popen(
+            invocation,
+            cwd=tmp_path,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        selected_pid = None
+        completed = False
+        try:
+            deadline = time.monotonic() + 5
+            while (
+                not ready.exists()
+                and process.poll() is None
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.02)
+            assert ready.exists(), "The selected command never started"
+            selected = json.loads(ready.read_text())
+            selected_pid = selected["pid"]
+            assert selected["argument"] == target
+            assert selected["environment"] == environment["SDK_TEST_LITERAL"]
+            process.send_signal(entry_signal)
+            stdout, stderr = process.communicate(timeout=5)
+            completed = True
+            result = subprocess.CompletedProcess(
+                invocation, process.returncode, stdout, stderr
+            )
+        finally:
+            if not completed and selected_pid is not None:
+                try:
+                    os.kill(selected_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
     return (
         result,
         events.read_text().splitlines() if events.exists() else [],
@@ -453,6 +530,33 @@ def test_sdk_overlay_lifecycle_preserves_outcome_and_cleans_only_owned_mounts(
     assert result.returncode == expected_status, result.stderr
     assert events == expected_events
     assert mounted is retained_mount
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "entry_signal,expected_status", [(signal.SIGINT, 130), (signal.SIGTERM, 143)]
+)
+@pytest.mark.parametrize("sdk_present", [False, True])
+def test_sdk_entry_cancellation_waits_for_selected_command_before_cleanup(
+    tmp_path: Path, entry_signal: int, expected_status: int, sdk_present: bool
+) -> None:
+    target = "owner test $SDK_TEST_LITERAL; $(touch escaped)"
+    result, events, mounted = _run_required_check(
+        tmp_path,
+        target,
+        {"SIM_SDK_PRESENT": "1" if sdk_present else "0"},
+        entry_signal=entry_signal,
+    )
+    assert result.returncode == expected_status, result.stderr
+    assert events == [
+        *(["mount", "view"] if sdk_present else []),
+        "make:" + target,
+        "signal:" + str(entry_signal),
+        "settled",
+        *(["umount"] if sdk_present else []),
+    ]
+    assert not mounted
+    assert not (tmp_path / "escaped").exists()
 
 
 @pytest.mark.parametrize("workflow_name", ["ci.yml", "focused-feedback.yml"])
@@ -744,6 +848,165 @@ def _merge_aggregate() -> dict[str, Any]:
     return aggregate
 
 
+def test_gate_retry_consumes_the_native_artifact_from_its_producer_job() -> None:
+    proof = _workflow()["jobs"]["verify"]
+    upload = next(
+        step
+        for step in proof["steps"]
+        if step.get("uses", "").startswith("actions/upload-artifact@")
+    )
+    assert proof["outputs"]["proof_artifact_id"] == (
+        "${{ steps." + upload["id"] + ".outputs.artifact-id }}"
+    )
+    gate = _merge_aggregate()
+    download = next(
+        step
+        for step in gate["steps"]
+        if step.get("uses", "").startswith("actions/download-artifact@")
+    )
+    # A gate-only retry retains the successful producer's resolved output;
+    # reconstructing a name from the retry's attempt would select no artifact.
+    assert download["with"]["artifact-ids"] == (
+        "${{ needs.verify.outputs.proof_artifact_id }}"
+    )
+    assert not {"name", "pattern", "run-id", "repository"} & download["with"].keys()
+    assert download["with"]["digest-mismatch"] == "error"
+    guard = gate["steps"][0]
+    assert guard["env"]["PROOF_ARTIFACT_ID"] == download["with"]["artifact-ids"]
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("workflow_name", ["ci.yml", "focused-feedback.yml"])
+@pytest.mark.parametrize("native_view", [False, True])
+def test_workflow_hands_its_entry_pid_to_the_selected_command_owner(
+    tmp_path: Path, workflow_name: str, native_view: bool
+) -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows" / workflow_name).read_text())
+    job = next(iter(workflow["jobs"].values()))
+    execution = next(
+        step
+        for step in job["steps"]
+        if "SELECTED_PYTEST" in step.get("env", {})
+        or "TEST_SELECTION" in step.get("env", {})
+    )
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    selected = commands / "bash"
+    selected.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "print(json.dumps({'pid':os.getpid(),'arguments':sys.argv[1:]}))\n"
+    )
+    selected.chmod(0o755)
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    process = subprocess.Popen(
+        [bash, "-e", "-o", "pipefail", "-c", execution["run"]],
+        env={
+            "PATH": str(commands) + os.pathsep + os.defpath,
+            "CONTROL_DIR": str(tmp_path),
+            "SELECTED_PYTEST": str(native_view).lower(),
+            "SELECTED_NATIVE_RESOURCES": "false",
+            "TEST_SELECTION": "selected/test.py::test_case",
+            "NEXT_CHECK": "remaining owner guidance",
+            "NATIVE_RESOURCES_NEEDED": str(native_view).lower(),
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=5)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=5)
+    assert process.returncode == 0, stderr
+    observed = json.loads(stdout)
+    assert observed["pid"] == process.pid
+    assert observed["arguments"][0] == (
+        "scripts/ci_native_runtime.sh"
+        if native_view
+        else "scripts/development_test_resources.sh"
+    )
+
+
+@pytest.mark.process
+def test_complete_native_owner_enters_its_sdk_shell_with_prepared_private_evidence(
+    tmp_path: Path,
+) -> None:
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/release-validation.yml").read_text()
+    )
+    job = workflow["jobs"]["full-regression"]
+    steps = job["steps"]
+    owner = next(step for step in steps if step.get("id") == "owner")
+    preparation = next(
+        step for step in steps if "FULL_OWNER_EVIDENCE=" in step.get("run", "")
+    )
+    assert steps.index(preparation) < steps.index(owner)
+    assert "shell" not in owner
+    assert all(
+        step["shell"] == "bash" for step in steps if "run" in step and step is not owner
+    )
+    shell = job["defaults"]["run"]["shell"]
+    assert set(re.findall(r"matrix.target == '([^']+)'", shell)) == {
+        "check-backend-tests",
+        "check-tooling-tests",
+        "test-backend-integration",
+        "test-cross-owner-integration",
+    }
+    assert (
+        "&& 'bash scripts/ci_native_runtime.sh --native-resources-needed true -- "
+        "bash --noprofile --norc -e -o pipefail {0}'"
+    ) in shell
+    assert shell.endswith("|| 'bash --noprofile --norc -e -o pipefail {0}' }}")
+    assert "ci_native_runtime.sh" not in owner["run"]
+    exported = tmp_path / "environment"
+    completed = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", preparation["run"]],
+        env={
+            "PATH": os.defpath,
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_ENV": str(exported),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    environment = dict(line.split("=", 1) for line in exported.read_text().splitlines())
+    evidence = Path(environment["FULL_OWNER_EVIDENCE"])
+    assert evidence.parent == tmp_path and evidence.is_dir()
+    assert evidence.stat().st_mode & 0o777 == 0o700
+    assert environment["OH_GOON_NATIVE_QUALIFICATION_REPORT_PATH"] == str(
+        evidence / "native-host.json"
+    )
+    assert 'evidence="$FULL_OWNER_EVIDENCE"' in owner["run"]
+
+
+@pytest.mark.parametrize(
+    "result,artifact_id,accepted",
+    [
+        ("success", "13339619478", True),
+        ("failure", "13339619478", False),
+        ("success", "", False),
+        ("success", "13339619478,13339619479", False),
+    ],
+)
+def test_gate_refuses_missing_or_ambiguous_producer_evidence_before_download(
+    result: str, artifact_id: str, accepted: bool
+) -> None:
+    guard = _merge_aggregate()["steps"][0]
+    completed = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", guard["run"]],
+        env={"PROOF_RESULT": result, "PROOF_ARTIFACT_ID": artifact_id},
+        capture_output=True,
+        check=False,
+    )
+    assert (completed.returncode == 0) is accepted
+
+
 def test_relevant_events_keep_merge_candidates_and_main_health_distinct() -> None:
     workflow = _workflow()
     events = workflow["on"]
@@ -988,7 +1251,7 @@ def test_required_aggregate_rejects_every_non_success_dependency(
     observed = subprocess.run(
         [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
         cwd=tmp_path,
-        env={"PATH": os.defpath, key: result},
+        env={"PATH": os.defpath, key: result, "PROOF_ARTIFACT_ID": "13339619478"},
         capture_output=True,
         text=True,
         timeout=10,

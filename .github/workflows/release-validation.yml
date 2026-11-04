@@ -126,6 +126,10 @@ jobs:
       max-parallel: 1
       matrix:
         target: ${{ fromJSON(needs.campaign.outputs.targets) }}
+    defaults:
+      run:
+        shell: >-
+          ${{ (matrix.target == 'check-backend-tests' || matrix.target == 'check-tooling-tests' || matrix.target == 'test-backend-integration' || matrix.target == 'test-cross-owner-integration') && 'bash scripts/ci_native_runtime.sh --native-resources-needed true -- bash --noprofile --norc -e -o pipefail {0}' || 'bash --noprofile --norc -e -o pipefail {0}' }}
     env:
       UV_PYTHON: '3.12'
       CHECK_PYTEST_MARKER: not certification
@@ -155,12 +159,14 @@ jobs:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
       - name: Install demanded native isolation tools
+        shell: bash
         if: matrix.target == 'check-backend-tests' || matrix.target == 'test-backend-integration' || matrix.target == 'test-cross-owner-integration' || matrix.target == 'check-tooling-tests'
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Prepare the selected native test host
+        shell: bash
         if: env.OH_GOON_TEST_CPUS != '0' || matrix.target == 'check-backend-tests' || matrix.target == 'test-backend-integration' || matrix.target == 'check-tooling-tests' || matrix.target == 'test-cross-owner-integration'
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
@@ -171,6 +177,7 @@ jobs:
           printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
           printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
       - name: Materialize committed backend locks
+        shell: bash
         run: uv sync --project backend --frozen --group dev --group quality --group build
       - name: Restore native mypy analysis for the complete backend quality owner
         if: matrix.target == 'check-backend-quality'
@@ -181,8 +188,16 @@ jobs:
           restore-keys: |
             mypy-v1-${{ runner.os }}-${{ runner.arch }}-py${{ env.UV_PYTHON }}-${{ hashFiles('backend/uv.lock', 'backend/pyproject.toml') }}-
       - name: Materialize frontend consumers
+        shell: bash
         if: matrix.target == 'frontend-check' || matrix.target == 'check-generated' || matrix.target == 'check-tooling-tests' || matrix.target == 'release-locks-check'
         run: make frontend-install
+      - name: Prepare owned full-verification evidence
+        shell: bash
+        run: |
+          evidence="$RUNNER_TEMP/full-owner"
+          mkdir -m 700 "$evidence"
+          printf 'FULL_OWNER_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          printf 'OH_GOON_NATIVE_QUALIFICATION_REPORT_PATH=%s/native-host.json\n' "$evidence" >> "$GITHUB_ENV"
       - name: Run one complete native owner
         id: owner
         env:
@@ -195,15 +210,11 @@ jobs:
             test "$(git rev-parse HEAD)" = "$FROZEN_SHA" && git diff --quiet HEAD && [ -z "$(git ls-files --others --exclude-standard)" ]
           }
           source_verified || exit 2
-          evidence="$RUNNER_TEMP/full-owner"
-          mkdir -m 700 "$evidence"
-          export OH_GOON_NATIVE_QUALIFICATION_REPORT_PATH="$evidence/native-host.json"
+          evidence="$FULL_OWNER_EVIDENCE"
           report_args=()
-          native_runtime=()
           case "$FULL_TARGET" in
             check-backend-tests|check-tooling-tests|test-backend-integration|test-cross-owner-integration)
-              report_args=(--requires-native-report --native-report "$evidence/pytest.json")
-              native_runtime=(bash scripts/ci_native_runtime.sh --native-resources-needed true --) ;;
+              report_args=(--requires-native-report --native-report "$evidence/pytest.json") ;;
             test-python-projects)
               report_args=(--project-report "$evidence/projects/summary.json") ;;
             frontend-check)
@@ -213,7 +224,7 @@ jobs:
             *) printf 'Unclassified full owner: %s\n' "$FULL_TARGET" >&2; exit 2 ;;
           esac
           owner_status=0
-          OH_GOON_PYTEST_REPORT_PATH="$evidence/pytest.json" OH_GOON_PYTHON_PROJECT_REPORT_DIRECTORY="$evidence/projects" "${native_runtime[@]}" make "$FULL_TARGET" || owner_status=$?
+          OH_GOON_PYTEST_REPORT_PATH="$evidence/pytest.json" OH_GOON_PYTHON_PROJECT_REPORT_DIRECTORY="$evidence/projects" make "$FULL_TARGET" || owner_status=$?
           source_status=VERIFIED
           if ! source_verified; then
             echo 'Source changed during full owner execution; evidence is not qualified' >&2
