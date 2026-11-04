@@ -34,6 +34,19 @@ def run_storage_command(args: argparse.Namespace) -> int | None:
 
 def _run_storage_prune(args: argparse.Namespace) -> int:
     if not args.yes:
+        if args.as_json:
+            print(
+                json.dumps(
+                    {
+                        "status": "confirmation_required",
+                        "code": "CONFIRMATION_REQUIRED",
+                        "safe_next_action": "To continue from this checkout: make storage-prune",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            return 2
         print("OH-GOON STORAGE PRUNE")
         print("Only storage classes with canonical positive disposal proof are eligible.")
         print("Durable state and unclassified bytes are refused.")

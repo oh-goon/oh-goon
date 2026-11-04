@@ -18,6 +18,27 @@ from oh_goon.cli import main
 from oh_goon.cli_result import MAX_CLI_JSON_BYTES, CliTermination, invoke_cli
 
 
+def test_storage_prune_json_requires_confirmation_before_effects(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("unconfirmed storage prune reached an effect owner")
+
+    monkeypatch.setattr("oh_goon.cli.ApplicationRuntime.build", forbidden)
+    monkeypatch.setattr("oh_goon.cli_storage.prune_generic_storage", forbidden)
+    monkeypatch.setattr(
+        "oh_goon.services.certification_bootstrap.reconcile_certification_run_workspaces",
+        forbidden,
+    )
+
+    assert main(["storage", "prune", "--json"]) == 2
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert report["code"] == "CONFIRMATION_REQUIRED"
+    assert report["_cli"]["exit_code"] == 2
+    assert captured.err == ""
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
