@@ -1138,6 +1138,11 @@ else:
                 "--scope",
                 "--quiet",
                 "--collect",
+                # Establish every inspected controller before testing one finite
+                # constraint. Missing controls are a separate refusal boundary.
+                "--property=CPUWeight=100",
+                "--property=MemoryAccounting=yes",
+                "--property=TasksAccounting=yes",
                 f"--property={property_}",
                 "--",
                 sys.executable,
@@ -1164,6 +1169,8 @@ else:
 
 
 @pytest.mark.process
+@pytest.mark.native_resources
+@pytest.mark.no_resume
 def test_real_native_scope_applies_limits_to_the_bubblewrap_workload(tmp_path: Path) -> None:
     executable, resources, query = (
         shutil.which(name) for name in ("bwrap", "systemd-run", "systemctl")
@@ -1497,6 +1504,8 @@ def test_standard_receipt_requires_native_successful_exec_acknowledgement(
 
 
 @pytest.mark.process
+@pytest.mark.native_resources
+@pytest.mark.no_resume
 def test_native_systemd_scope_reports_enforced_policy_after_nonzero_workload_exec(
     tmp_path: Path,
 ) -> None:

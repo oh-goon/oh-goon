@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import sys
 import tempfile
+import threading
 import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import replace
@@ -16,7 +18,7 @@ from typing import Any, Literal, cast
 from pydantic import ConfigDict, Field
 
 from oh_goon.core.models.base import ImmutableModel
-from oh_goon.engine.command import run_command
+from oh_goon.engine.command import CommandCancelledError, CommandTimeoutExpired, run_command
 from oh_goon.integrations.exact_file_write import publish_text_file
 from oh_goon.integrations.hashmarks import (
     nominate_changed_verification,
@@ -27,6 +29,7 @@ from oh_goon.integrations.hashmarks import (
 from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
 from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
 from oh_goon.repository_tooling.pytest_process_environment import resolve_pytest_invocation
+from oh_goon.repository_tooling.pytest_resource_budget import resolve_pytest_resource_budget
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
     DOCUMENTATION_ASSET_OBLIGATION,
@@ -799,18 +802,26 @@ def require_merge_selection(root: Path, plan: ChangeVerificationPlan) -> None:
         raise ValueError("SELECTION_UNVERIFIED: executable changes have no behavioral proof")
 
 
-def execute_change(
-    root: Path, plan: ChangeVerificationPlan, *, mode: str, workers: int
+def requires_native_resource_host(plan: ChangeVerificationPlan) -> bool:
+    """Consume native collection's declared capability without changing selection."""
+    return any(
+        row.get("native_resources") == "true"
+        for key in ("pytest_admission", "dependency_admission")
+        for row in plan.evidence.get(key, {}).get("collection", {}).get("selected", [])
+        if isinstance(row, dict)
+    )
+
+
+def _execute_check(
+    check: tuple[str, tuple[str, ...], Path], cancelled: threading.Event
 ) -> dict[str, Any]:
-    require_current_plan(root, plan)
-    if mode == "merge":
-        require_merge_selection(root, plan)
-    outcomes: list[dict[str, Any]] = []
-    for label, command, cwd in _commands(root, plan):
+    label, command, cwd = check
+    try:
         result = run_command(
             *command,
             cwd=cwd,
             timeout=300,
+            cancel_requested=cancelled.is_set,
             require_process_group_quiescence=True,
             parent_death_signal=True,
             max_capture_bytes_per_stream=64 * 1024,
@@ -818,17 +829,99 @@ def execute_change(
                 text, end="", file=sys.stdout if stream == "stdout" else sys.stderr, flush=True
             ),
         )
-        outcomes.append({"owner": label, "returncode": result.returncode})
+        return {"owner": label, "returncode": result.returncode}
+    except (CommandCancelledError, CommandTimeoutExpired) as exc:
+        return {
+            "owner": label,
+            "returncode": None,
+            "status": "CANCELLED" if isinstance(exc, CommandCancelledError) else "TIMEOUT",
+            "reason": str(exc),
+            "native_cleanup": {
+                "reason": exc.supervisor.cleanup_reason,
+                "process_group_quiescent": exc.supervisor.final_process_group_quiescent,
+            },
+        }
+    except OSError as exc:
+        return {"owner": label, "returncode": None, "status": "UNAVAILABLE", "reason": str(exc)}
+
+
+def _execute_check_group(
+    root: Path,
+    plan: ChangeVerificationPlan,
+    checks: list[tuple[str, tuple[str, ...], Path]],
+) -> dict[str, Any]:
+    cancelled = threading.Event()
+    observed: dict[int, dict[str, Any]] = {}
+    reason: str | None = None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(checks)) as pool:
+        pending: dict[concurrent.futures.Future[dict[str, Any]], int] = {}
         try:
-            require_current_plan(root, plan)
-        except ValueError as exc:
-            return {
-                "status": "FAIL" if result.returncode else "INCOMPLETE",
-                "outcomes": outcomes,
-                "reason": str(exc),
-            }
-        if result.returncode:
-            return {"status": "FAIL", "outcomes": outcomes}
+            for index, check in enumerate(checks):
+                pending[pool.submit(_execute_check, check, cancelled)] = index
+            while pending:
+                completed, _remaining = concurrent.futures.wait(
+                    pending, return_when=concurrent.futures.FIRST_COMPLETED
+                )
+                for future in sorted(completed, key=pending.__getitem__):
+                    index = pending.pop(future)
+                    outcome = future.result()
+                    observed[index] = outcome
+                    if outcome["returncode"] != 0:
+                        cancelled.set()
+                    try:
+                        require_current_plan(root, plan)
+                    except (OSError, ValueError) as exc:
+                        reason = str(exc)
+                        cancelled.set()
+        finally:
+            # Native command supervision owns process-tree settlement. A main
+            # thread interruption must request that cleanup before joining workers.
+            cancelled.set()
+    outcomes = [observed[index] for index in sorted(observed)]
+    if reason is None:
+        reason = next(
+            (row["reason"] for row in outcomes if row.get("status") in {"TIMEOUT", "UNAVAILABLE"}),
+            None,
+        )
+    failed = any(
+        row["returncode"] not in (0, None) or row.get("status") == "TIMEOUT" for row in outcomes
+    )
+    incomplete = reason is not None or any(row["returncode"] is None for row in outcomes)
+    result: dict[str, Any] = {
+        "status": "FAIL" if failed else "INCOMPLETE" if incomplete else "CHECKS_PASSED",
+        "outcomes": outcomes,
+    }
+    if reason is not None:
+        result["reason"] = reason
+    return result
+
+
+def execute_change(
+    root: Path, plan: ChangeVerificationPlan, *, mode: str, workers: int
+) -> dict[str, Any]:
+    require_current_plan(root, plan)
+    if mode == "merge":
+        require_merge_selection(root, plan)
+    outcomes: list[dict[str, Any]] = []
+    commands = _commands(root, plan)
+    capacity = min(2, resolve_pytest_resource_budget(workers).worker_ceiling) if commands else 1
+    # Keep cheap Ruff failures early and its native cache consumers serial. The
+    # two expensive read-only owners use separate native analysis/cache state.
+    parallel = {"Types", "Architecture"}
+    cursor = 0
+    while cursor < len(commands):
+        group = [commands[cursor]]
+        cursor += 1
+        if group[0][0] in parallel:
+            while (
+                cursor < len(commands) and len(group) < capacity and commands[cursor][0] in parallel
+            ):
+                group.append(commands[cursor])
+                cursor += 1
+        checked = _execute_check_group(root, plan, group)
+        outcomes.extend(checked["outcomes"])
+        if checked["status"] != "CHECKS_PASSED":
+            return {**checked, "outcomes": outcomes}
     if plan.frontend:
         with tempfile.TemporaryDirectory(prefix="oh-goon-change-frontend-") as directory:
             report = Path(directory) / "vitest.json"
@@ -981,6 +1074,9 @@ def main(argv: list[str] | None = None) -> int:
                     stream.write(f"python={'true' if 'python' in plan.static else 'false'}\n")
                     stream.write(f"frontend={'true' if 'frontend' in plan.static else 'false'}\n")
                     stream.write(f"pytest={'true' if plan.pytest else 'false'}\n")
+                    stream.write(
+                        f"native_resources={'true' if requires_native_resource_host(plan) else 'false'}\n"
+                    )
             return 0
         result = execute_change(root, plan, mode=args.mode, workers=args.workers)
         payload = {"plan": plan.model_dump(mode="json"), **result}

@@ -92,7 +92,16 @@ def test_resume_tracks_unqualified_native_python_import_path(tmp_path: Path) -> 
     assert trace.read_text().splitlines() == ["run", "run", "run"]
 
 
-@pytest.mark.parametrize("selector", ("XDG_STATE_HOME", "CUSTOM_TEST_INPUT"))
+@pytest.mark.parametrize(
+    "selector",
+    (
+        "XDG_STATE_HOME",
+        "CUSTOM_TEST_INPUT",
+        "OH_GOON_REQUIRE_NATIVE_RUN_RESOURCES",
+        "OH_GOON_NATIVE_QUALIFICATION_PROFILE",
+        "DBUS_SESSION_BUS_ADDRESS",
+    ),
+)
 def test_resume_binds_native_and_declared_environment_without_budget_or_value_leaks(
     tmp_path: Path, selector: str
 ) -> None:
@@ -585,6 +594,61 @@ def test_native_collection_respects_plugins_and_reports_collection_errors(
     path.write_text("raise RuntimeError('collection failed before work')\n")
     with pytest.raises(ValueError, match="Native pytest collection failed"):
         collect_native_pytest((path,))
+
+
+def test_native_resource_capability_keeps_membership_and_cadence_independent(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.development_verification import (
+        ChangeVerificationPlan,
+        requires_native_resource_host,
+    )
+
+    path = tmp_path / "test_resources.py"
+    path.write_text(
+        "import pytest\n"
+        "def test_portable(): pass\n"
+        "@pytest.mark.native_resources\n@pytest.mark.no_resume\n"
+        "def test_native(): pass\n"
+        "@pytest.mark.native_resources\n@pytest.mark.daily\n"
+        "def test_daily_native(): pass\n"
+    )
+    collection = collect_native_pytest((path,), marker="not daily")
+    assert [row["selector"].split("::", 1)[1] for row in collection.selected] == [
+        "test_portable",
+        "test_native",
+    ]
+    portable, native = collection.selected
+    assert "native_resources" not in portable
+    assert native["native_resources"] == native["no_resume"] == "true"
+    assert collection.deselected[0]["selector"].endswith("::test_daily_native")
+    plan = ChangeVerificationPlan(
+        base="a" * 40,
+        candidate="b" * 40,
+        source_identity="sha256:" + "c" * 64,
+        changed_paths=(str(path),),
+        static=(),
+        pytest=(str(path),),
+        frontend=(),
+        unverified=(),
+        evidence={"pytest_admission": {"collection": collection.payload()}},
+        behavioral_status="REQUIRED",
+        policy_status="ORDINARY",
+    )
+    assert requires_native_resource_host(plan)
+    portable_only = plan.model_copy(
+        update={
+            "evidence": {
+                "pytest_admission": {
+                    "collection": {
+                        "selected": [portable],
+                        "deselected": [native, *collection.deselected],
+                    }
+                }
+            }
+        }
+    )
+    assert not requires_native_resource_host(portable_only)
 
 
 def test_batch_rejects_changed_native_membership_before_running_tests(

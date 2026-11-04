@@ -220,7 +220,7 @@ def test_plan_cli_publishes_after_actual_source_admission(
     assert plan.behavioral_status == "NOT_APPLICABLE"
     assert (
         outputs.read_text(encoding="utf-8")
-        == "python=false\nfrontend=false\npytest=true\n"
+        == "python=false\nfrontend=false\npytest=true\nnative_resources=false\n"
     )
     assert (
         json.loads(target.read_text())["candidate"]
@@ -644,6 +644,7 @@ def test_plan_cli_rejects_ineligible_merge_before_capability_outputs(
         assert outputs.read_text(encoding="utf-8") == (
             previous
             + f"python=true\nfrontend=false\npytest={'true' if plan.pytest else 'false'}\n"
+            + "native_resources=false\n"
         )
 
 
@@ -686,6 +687,7 @@ def test_merge_plan_cli_keeps_qualified_behavior_and_generated_contract_paths(
         f"python={'true' if relative == 'behavior.py' else 'false'}\n"
         f"frontend={'true' if 'frontend' in plan.static else 'false'}\n"
         f"pytest={'true' if plan.pytest else 'false'}\n"
+        "native_resources=false\n"
     )
 
 

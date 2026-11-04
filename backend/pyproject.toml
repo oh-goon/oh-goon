@@ -199,6 +199,7 @@ markers = [
   "daily: complete ordinary journey or broad campaign retained in daily regression; relevant bounded or necessary critical proof runs before merge",
   "slow: exhaustive full-corpus checks with bounded regression counterparts; run by complete/release verification",
   "process: real child-process lifecycle tests excluded from the inner development gate",
+  "native_resources: requires a declared native test worker with shared systemd resource ancestry; selects host preparation, not extra tests",
   "no_resume: external state has no cross-invocation reusable PASS authority",
   "scale: intentionally large-count concurrency/scale regression tests",
   "certification: opt-in native model, privileged custody, or certification probes owned by explicit acceptance targets",

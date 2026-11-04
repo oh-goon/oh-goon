@@ -133,6 +133,9 @@ jobs:
       BACKEND_CHECK_TEST_WORKERS: '2'
       INTEGRATION_TEST_WORKERS: '2'
       OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
+      OH_GOON_NATIVE_QUALIFICATION_PROFILE: shared-user-manager
+      OH_GOON_REQUIRE_NATIVE_ISOLATION: '1'
+      OH_GOON_REQUIRE_NATIVE_RUN_RESOURCES: '1'
       PYTEST_ADDOPTS: -ra --durations=40 --durations-min=0.05
       PYTEST_RESUME: ''
     steps:
@@ -157,8 +160,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Prepare optional native test CPU control
-        if: env.OH_GOON_TEST_CPUS != '0'
+      - name: Prepare the selected native test host
+        if: env.OH_GOON_TEST_CPUS != '0' || matrix.target == 'check-backend-tests' || matrix.target == 'test-backend-integration' || matrix.target == 'check-tooling-tests' || matrix.target == 'test-cross-owner-integration'
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
           runner_uid=$(id -u)
@@ -194,12 +197,13 @@ jobs:
           source_verified || exit 2
           evidence="$RUNNER_TEMP/full-owner"
           mkdir -m 700 "$evidence"
+          export OH_GOON_NATIVE_QUALIFICATION_REPORT_PATH="$evidence/native-host.json"
           report_args=()
           native_runtime=()
           case "$FULL_TARGET" in
             check-backend-tests|check-tooling-tests|test-backend-integration|test-cross-owner-integration)
               report_args=(--requires-native-report --native-report "$evidence/pytest.json")
-              native_runtime=(bash scripts/ci_native_runtime.sh) ;;
+              native_runtime=(bash scripts/ci_native_runtime.sh --native-resources-needed true --) ;;
             test-python-projects)
               report_args=(--project-report "$evidence/projects/summary.json") ;;
             frontend-check)

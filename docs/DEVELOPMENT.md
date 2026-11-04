@@ -111,15 +111,23 @@ Agent-oriented repository comprehension is testable without granting write autho
 ## Focused edit loop
 
 For an issue-to-PR loop, run the affected file or native node while editing.
-`make check` and `make test` then apply the same relevant fast policy as hosted
-verification. They do not run unrelated complete owners. Set `VERIFY_BASE` to an
+Repeat that focused command after each small edit; do not repeat a complete owner
+suite, `make init`, or the whole merge proof after every change. Once the change
+is coherent, `make check` or `make test` applies the same relevant fast policy as
+hosted verification. They do not run unrelated complete owners. The local relevant
+check requests two workers and native capacity still clamps that request; use
+`VERIFY_WORKERS=1` when serial execution is needed. Set `VERIFY_BASE` to an
 explicit comparison commit when the default `origin/main` is not appropriate.
 
 ```bash
 uv run --offline --frozen --no-sync --project backend pytest -c backend/pyproject.toml backend/tests/unit/core/test_error_kinds.py
+# Repeat the affected file or ::test_case above while editing.
 make check
-VERIFY_BASE=<base-sha> make merge-check
 ```
+
+`VERIFY_BASE=<base-sha> make merge-check` is available for a deliberate local
+candidate-proof rehearsal. It is not another mandatory local step after
+`make check`; hosted required verification supplies the independent merge proof.
 
 Known-large selections still use the original bounded batch owner:
 

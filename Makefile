@@ -20,7 +20,7 @@ TOOLING_TEST_RESUME_CONTEXT = --resume-context "node=$$(node --version 2>/dev/nu
 PYTEST_RESUME ?= --resume
 # Empty preserves pytest's native testpaths; hosted CI partitions these with test-integration.
 BACKEND_CHECK_TEST_ROOTS ?=
-# Local checks stay serial; hosted jobs can use the existing bounded worker owner.
+# Complete local owner checks stay serial; relevant checks have their own request below.
 BACKEND_CHECK_TEST_WORKERS ?= 1
 INTEGRATION_TEST_WORKERS ?= 1
 OH_GOON_PYTEST_REPORT_PATH ?=
@@ -49,7 +49,7 @@ CERTIFICATION_FRONTDOOR = OH_GOON_RUN_LOG_DIR="$(RUN_LOG_DIR)" bash scripts/run_
 
 .PHONY: change-check merge-check broad-diagnostic
 VERIFY_BASE ?= origin/main
-VERIFY_WORKERS ?= 1
+VERIFY_WORKERS ?= 2
 .PHONY: release-check release-check-plan check-backend-quality check-backend-tests check-tooling-quality check-tooling-tests test-backend-integration test-cross-owner-integration
 .PHONY: test-python-projects
 
@@ -143,7 +143,7 @@ help:
 	  '  make browser-targeted-certification Run the seven Gate D Chromium specs sequentially, one worker/process each' \
 	  '  make browser-required-certification Run the complete required browser suite after preflights' \
 	  '  make check            Relevant fast feedback with PASS/FAIL/BLOCKED summary' \
-	  '    normal make test runs native uv/.venv backend and npm frontend tests; host-only sampling requires explicit opt-in' \
+	  '    run an affected pytest/Vitest file while editing; make test/check selects relevant proof once coherent' \
 	  '  make local-state-check Inspect this checkout local-state schema without mutation' \
 	  '  make local-state-prelaunch-check Prove SQLite write/lock/storage semantics before app launch' \
 	  '  make local-state-reset Reset this checkout disposable SQLite state after an epoch mismatch' \

@@ -28,7 +28,10 @@ pytestmark = pytest.mark.skipif(
 @pytest.mark.parametrize("termination,expected_exit", [(signal.SIGINT, 130), (signal.SIGTERM, 143)])
 @pytest.mark.parametrize(
     "budgeted",
-    (False, pytest.param(True, marks=pytest.mark.no_resume)),
+    (
+        False,
+        pytest.param(True, marks=(pytest.mark.no_resume, pytest.mark.native_resources)),
+    ),
     ids=("inherited", "whole-run-budget"),
 )
 def test_waited_public_run_cancels_owned_process_and_reopens_terminal_evidence(
