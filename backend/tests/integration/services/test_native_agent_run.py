@@ -134,15 +134,22 @@ def test_codex_login_conflicts_reject_before_run_admission(
 
 @pytest.mark.certification
 def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Path) -> None:
+    from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
+
     executable = os.environ.get("OH_GOON_NATIVE_CODEX")
     if not executable:
         pytest.skip("Select an installed Codex executable explicitly")
     program = Path(executable).resolve(strict=True)
+    runtime_root = os.environ.get("OH_GOON_NATIVE_CODEX_RUNTIME_ROOT")
     repo, home, scratch, capture, state = (
         tmp_path / name for name in ("repo", "native-auth", "scratch", "capture", "producer-state")
     )
     for directory in (repo, home, scratch, capture, state):
         directory.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    authored = repo / "README.md"
+    authored.write_text("PUBLIC_SOURCE_CANARY\n")
+    source_identity = canonical_source_identity(repo)
     private = home / "canary"
     private.write_text("synthetic private data; never a real credential")
     (capture / "evidence").write_text("frozen producer evidence")
@@ -167,12 +174,15 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
         "--tool",
         "list_paths",
     )
-    (repo / "escape").symlink_to(private)
-    script = repo / "probe.py"
+    (scratch / "escape").symlink_to(private)
+    script = scratch / "probe.py"
     script.write_text(
-        "import json,pathlib,socket,subprocess,sys\n"
+        "import json,os,pathlib,socket,stat,subprocess,sys\n"
+        "from oh_goon.repository_tooling.release.package_slim import canonical_source_identity\n"
         f"home=pathlib.Path({str(home)!r})\n"
-        "for path in (home/'canary',pathlib.Path('escape')):\n"
+        f"repo=pathlib.Path({str(repo)!r})\n"
+        f"scratch=pathlib.Path({str(scratch)!r})\n"
+        "for path in (home/'canary',scratch/'escape'):\n"
         "    try: path.read_bytes()\n"
         "    except OSError: pass\n"
         "    else: raise AssertionError('private path was readable')\n"
@@ -184,7 +194,24 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
         "try: socket.create_connection(('127.0.0.1',int(sys.argv[1])),timeout=1)\n"
         "except OSError: pass\n"
         "else: raise AssertionError('host loopback was reachable')\n"
-        "with pathlib.Path('hashmarks-output.json').open('w+b') as output:\n"
+        "authored=repo/'README.md'\n"
+        "content=authored.read_bytes()\n"
+        "authored.write_bytes(content)\n"
+        "metadata={}\n"
+        "for name in ('.agents','.aws','.codex'):\n"
+        "    path=repo/name\n"
+        "    try: info=path.lstat()\n"
+        "    except FileNotFoundError: metadata[name]={'exists':False}; continue\n"
+        "    assert stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode)\n"
+        "    descriptor=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)\n"
+        "    try:\n"
+        "        with os.scandir(descriptor) as entries: assert next(entries,None) is None\n"
+        "    finally: os.close(descriptor)\n"
+        "    metadata[name]={'exists':True,'mode':stat.S_IMODE(info.st_mode),"
+        "'device':info.st_dev,'inode':info.st_ino,'empty':True}\n"
+        f"assert canonical_source_identity(repo)=={source_identity!r}\n"
+        "(scratch/'namespace-metadata.json').write_text(json.dumps(metadata,sort_keys=True))\n"
+        "with (scratch/'hashmarks-output.json').open('w+b') as output:\n"
         f"    subprocess.run({producer_command!r},stdout=output,check=True)\n"
         "    output.seek(0)\n"
         "    encoded=output.read(65537)\n"
@@ -194,17 +221,20 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
         f"assert packet['capture_identity']=={capture_identity!r}\n"
         f"assert packet['producer_implementation_identity']=={producer_identity!r}\n"
         "assert packet['paths']==['repo/code.py']\n"
-        "pathlib.Path('native-boundary-proof').write_text('PASS')\n"
+        "(scratch/'native-boundary-proof').write_text('PASS')\n"
         f"pathlib.Path({str(state / 'index-proof')!r}).write_text('PASS')\n"
     )
     selected = ResolvedNativeAgent(
         agent="codex",
         profile_name="signed-in",
-        definition=NativeAgentDefinition(executable=str(program)),
+        definition=NativeAgentDefinition(
+            executable=str(program),
+            runtime_roots=(str(Path(runtime_root).resolve(strict=True)),) if runtime_root else (),
+        ),
         profile=NativeAgentProfile(
             codex_login=CodexLoginConnection(
                 home=str(home),
-                model="gpt-6-luna",
+                model="gpt-6.1-sol",
                 reasoning_effort="low",
             )
         ),
@@ -240,7 +270,7 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
             "--cd",
             str(repo),
             "--",
-            "/usr/bin/python3",
+            sys.executable,
             str(script),
             str(server.server_port),
             cwd=repo,
@@ -249,9 +279,12 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
             preserve_native_executable_path=True,
         )
     assert result.returncode == 0, result.stderr
-    assert (repo / "native-boundary-proof").read_text() == "PASS"
+    assert (scratch / "native-boundary-proof").read_text() == "PASS"
     assert (state / "index-proof").read_text() == "PASS"
     assert captured_source.read_bytes() == captured_bytes
+    assert canonical_source_identity(repo) == source_identity
+    assert authored.read_text() == "PUBLIC_SOURCE_CANARY\n"
+    assert all(not (repo / name).exists() for name in (".agents", ".aws", ".codex"))
 
 
 @pytest.mark.parametrize("verification_value", [42, 43])
