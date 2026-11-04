@@ -432,7 +432,7 @@ ty-acquire:
 	uv tool run --from '$(TY_REQUIREMENT)' ty --version
 
 ty-check:
-	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$@"' sh uv tool run --offline --from '$(TY_REQUIREMENT)' ty check
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv tool run --offline --from '$(TY_REQUIREMENT)' ty check
 
 
 repository-understanding-exam:

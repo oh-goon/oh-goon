@@ -132,6 +132,7 @@ jobs:
       BACKEND_CHECK_TEST_ROOTS: tests/unit tests/dependency_complete
       BACKEND_CHECK_TEST_WORKERS: '2'
       INTEGRATION_TEST_WORKERS: '2'
+      OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
       PYTEST_ADDOPTS: -ra --durations=40 --durations-min=0.05
       PYTEST_RESUME: ''
     steps:
@@ -156,7 +157,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Prepare native test CPU control
+      - name: Prepare optional native test CPU control
+        if: env.OH_GOON_TEST_CPUS != '0'
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
           runner_uid=$(id -u)
