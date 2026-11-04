@@ -257,6 +257,13 @@ slow security/isolation/durability proof or defect reproducer is a named narrow
 exception, never automatic full-owner expansion. Unknown protection scope stays
 `SELECTION_UNVERIFIED` or uses a justified bounded fallback.
 
+Blocking checks must protect a named current contract or reproducible defect
+through its existing owner. Prefer the smallest meaningful proof and remove
+redundant prerequisites. Blanket prose rules or missing selector nominations
+must not create extra merge prerequisites when an existing bounded proof route
+applies. Use ordinary review for this principle; do not add another checklist,
+approval step, gate or classification framework to enforce it.
+
 Constrained agent/tool sessions follow [Tool-session qualification](docs/development/TOOL_SESSION_QUALIFICATION.md): start known-large pytest surfaces in the existing resume-safe batch runner; already bounded owner files may run directly.
 For chat resets, use the [session continuation guide](docs/development/CHATGPT_ITERATION.md) to recover the current task and evidence through existing owners.
 

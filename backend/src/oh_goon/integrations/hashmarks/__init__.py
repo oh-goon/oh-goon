@@ -41,6 +41,9 @@ if TYPE_CHECKING:
     from .dependencies import (
         require_current_dependency_environment as require_current_dependency_environment,
     )
+    from .dependencies import (
+        validate_required_dependency_introductions as validate_required_dependency_introductions,
+    )
     from .development_verification import (
         nominate_changed_verification as nominate_changed_verification,
     )
@@ -116,6 +119,7 @@ _EXPORTS = {
     "assess_locked_dependencies": "dependencies",
     "observe_locked_dependencies": "dependencies",
     "require_current_dependency_environment": "dependencies",
+    "validate_required_dependency_introductions": "dependencies",
     "nominate_changed_verification": "development_verification",
     "observe_repository_assets": "development_verification",
     "HashmarksIdentityResult": "identity",

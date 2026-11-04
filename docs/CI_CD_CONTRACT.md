@@ -47,22 +47,51 @@ the independent controller derives that membership again from its own Git diff.
 Removed source and tests cannot supply execution receipts. Their removal does
 not claim that no consumers remain: surviving changed sources and tests still
 require their ordinary qualified behavioral proof and applicable static checks.
-Missing required consumer or verifier evidence remains
-`SELECTION_UNVERIFIED`; it never passes as an empty selection or silently launches
-the daily corpus. Governing instructions, workflow/result policy and selector
-changes require the named
+Missing required executable, shared-fixture or dependency proof outside an
+admitted bounded route remains `SELECTION_UNVERIFIED`; it never passes as an
+empty selection or silently launches the daily corpus. Governing instructions,
+workflow/result policy and selector changes require the named
 **verification-policy protection** obligation. Shared fixture or dependency
 uncertainty cannot be excused by that generic policy proof.
+
+Ordinary Markdown under `docs/` and root `CONTRIBUTING.md` use the existing
+[documentation contract](../scripts/tests/test_documentation_authority_contract.py)
+and architecture through the same admission, execution and trusted-gate owners.
+This bounded route requires no verifier nomination; code fences alone do not
+enlarge it. It claims neither a qualified nomination nor whole-owner coverage.
+Verification-policy paths retain their named protection, and the machine-consumed
+`docs/certification/` corpus is outside this documentation fallback. Other changed
+code retains its applicable checks, and actual check failures remain blocking.
+The root `LICENSE` remains non-executable by its declared document owner.
 
 Backend runtime dependency updates have a bounded admission path through the
 released Hashmarks lock-delta and consumer APIs. Before/after lock observations,
 selected distribution `METADATA`/`RECORD` from the native uv environment, and an
 explicit native file inventory of `backend/src` Python source support qualified
-consumer-to-verifier nominations. Every changed existing runtime component must
-have a positive chain to an executable verifier. Package names do not waive that
-requirement. The retained `consumer_scope` remains incomplete and its negative
+consumer-to-verifier nominations. In this consumer-graph route, every changed
+existing runtime component must have a positive chain to an executable verifier.
+The retained `consumer_scope` remains incomplete and its negative
 evidence is not admissible; these chains establish the selected positive
 relationships without claiming all consumers have been found.
+
+In the consumer-graph route, a single existing dependency upgrade may introduce
+up to 32 uniquely selected required dependencies. Each introduction needs a
+producer-qualified direct path from the upgraded selection, an unconditional
+runtime dependency edge, current inventory and installed metadata, and the
+parent's qualified source-to-verifier chain. An unconditional runtime edge from
+the application root must also bind the upgraded parent. The evidence names the
+actually imported parent separately from the new selection; it does not claim
+that the new dependency is directly imported by Oh-Goon. Conditional, optional,
+development-only, ambiguous or bounded-out paths cannot establish this proof.
+
+A Hashmarks-only upgrade has a separate bounded proof route when the parsed
+backend project declaration is unchanged except for its existing mandatory
+direct `hashmarks` requirement. Native uv owns the lock and transitive resolution;
+new transitive components do not require a source-consumer graph prerequisite.
+This route runs focused startup, loaded-producer-identity and native integration
+proof, the existing protected-policy checks, and the native lock, Python
+capability and package-build checks. Existing public-source and lock policy still
+applies. This bounded route makes no whole-consumer-coverage claim.
 
 The existing native pytest collector resolves all advisory Python verifiers before
 plan admission, using the execution configuration and cadence. Evidence retains
@@ -72,7 +101,8 @@ and mandatory policy checks still need ordinary executable members. The original
 batch owner independently collects the admitted files for execution; the plan's
 file set and the exact native execution membership remain separately checked.
 
-Added, removed or forked components, changes to optional/group/build declarations,
+Outside these bounded routes, other added components, removed or forked
+components, changes to optional/group/build declarations,
 Python runtime requirements or uv source/workspace policy, and missing or
 mismatched metadata, stale or truncated required lock/metadata/consumer
 observations, or a component without a qualified chain remain unverified.
@@ -82,8 +112,16 @@ It does not claim the verifier graph is exhaustive. Supported dependency updates
 also require the **Native package** obligation: `backend-lock-check`,
 `backend-python-capability-check` and
 `backend-package-build-check`. The existing trusted-base gate validates the
-retained `LINKED` evidence, meaningful execution and independently observed
-producer identity through the same proof contract.
+applicable bounded route, meaningful execution and independently observed
+producer identity through the same proof contract. The consumer-graph route
+also requires retained `LINKED` evidence.
+For the consumer-graph dependency route, the trusted controller also observes
+the candidate lock and installed metadata independently in its existing native
+dependency environment.
+It uses immutable base policy and the candidate's locked producer, and requires
+fresh positive chains to the verifier files whose execution was proved. Separate
+installations retain their own metadata provenance and observation identities;
+one installation's paths or generated entrypoint bytes are not identity for another.
 
 The named **bounded documentation-asset policy** covers newly added or currently
 modified images under `docs/assets/` up to 1 MiB. Hashmarks must observe the image
@@ -110,7 +148,8 @@ changed paths. Other documentation and shared fixtures retain their own evidence
 requirements.
 
 Merge-mode plan admission retains diagnostic JSON but refuses unresolved scope
-or missing required behavioral proof before publishing toolchain-selection outputs
+outside its bounded routes or missing required behavioral proof before publishing
+toolchain-selection outputs
 or preparing frontend/native-test capabilities. Focused plan inspection remains
 available for incomplete selections. Execution applies the same selection guard
 after checking the retained plan's current source; early refusal does not establish

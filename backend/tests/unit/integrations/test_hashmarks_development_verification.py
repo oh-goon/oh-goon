@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from shutil import copytree
 from typing import Any, cast
@@ -163,3 +164,45 @@ def test_public_nominations_keep_native_bounded_verifiers_and_residual_qualifica
     assert all(
         row["nomination"]["execution_authority"] == "external" for row in linked["nominations"]
     )
+
+
+def test_native_task_preparation_refreshes_contributors_before_composite_observation(
+    nested_repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = "backend/src/sample/feature.py"
+    verifier = "backend/tests/test_feature.py"
+    with CodeMap(nested_repository) as native:
+        baseline = native.tasks.verification_ownership_graph(
+            f"Verify {source}", limit=20, candidate_limit=2
+        )
+        assert baseline["edit_candidates"] == [source]
+        assert native.index.is_current(source)
+        (nested_repository / source).write_text("def answer():\n    return 43\n", encoding="utf-8")
+        assert not native.index.is_current(source)
+        prepare = native.tasks.prepare
+        observed: list[tuple[str, int, bool, bool]] = []
+
+        def track_preparation(
+            task: str, limit: int, *, probe_on_miss: bool = True
+        ) -> tuple[str, ...]:
+            before = native.index.is_current(source)
+            depth = native.reads.depth
+            result = prepare(task, limit, probe_on_miss=probe_on_miss)
+            observed.append((task, depth, before, native.index.is_current(source)))
+            return result
+
+        def selected_map(workspace: Path) -> AbstractContextManager[CodeMap]:
+            assert workspace == nested_repository
+            return nullcontext(native)
+
+        monkeypatch.setattr(native.tasks, "prepare", track_preparation)
+        monkeypatch.setattr("hashmarks.CodeMap", selected_map)
+        evidence = nominate_changed_verification(
+            nested_repository, (verifier, source), required=(verifier,)
+        )
+        assert any(depth == 0 and not before and after for _task, depth, before, after in observed)
+        assert native.index.is_current(source)
+    assert [row["state"] for row in evidence["observations"]] == ["CHANGED_TEST", "LINKED"]
+    assert [row["changed_path"] for row in evidence["observations"]] == [verifier, source]
+    assert len(evidence["required_checks"]) == 1
+    assert evidence["owner_coverage"] == "not-claimed"

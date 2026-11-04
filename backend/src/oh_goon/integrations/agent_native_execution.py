@@ -621,7 +621,9 @@ class NativeAgentEventParser:
             self._latch_error(error)
             raise
         self._finished = True
-        failed = self._failed or (returncode is not None and returncode != 0)
+        failed = (
+            self._failed or self._assistant_failed or (returncode is not None and returncode != 0)
+        )
         settled = self._settled
         if self._agent == "opencode":
             # OpenCode 2.1.2 waits for session.wait(), reconciles completed
@@ -734,6 +736,25 @@ class NativeAgentEventParser:
                 self._failed = True
                 self._observe("agent", "error")
         elif self._agent == "pi":
+            if event_type in (
+                "turn_start",
+                "turn_end",
+                "agent_end",
+                "message_start",
+                "message_update",
+                "message_end",
+                "tool_execution_start",
+                "tool_execution_end",
+                "compaction_start",
+                "compaction_end",
+                "auto_retry_start",
+                "auto_retry_end",
+            ):
+                # A terminal claim covers the work observed before it. Later
+                # native activity needs its own agent_settled acknowledgment.
+                if self._settled:
+                    self._set_final_text("")
+                self._settled = False
             if event_type == "agent_start":
                 self._settled = False
                 self._set_final_text("")
@@ -759,6 +780,12 @@ class NativeAgentEventParser:
             elif event_type in ("compaction_start", "compaction_end"):
                 self._observe("context", event_type)
         else:
+            if event_type in ("item.started", "item.updated", "item.completed", "error"):
+                # Late native activity cannot borrow a prior turn's completion,
+                # even when its turn.started frame was missing or out of order.
+                if self._settled:
+                    self._set_final_text("")
+                self._settled = False
             if event_type == "turn.started":
                 self._settled = False
                 self._set_final_text("")
@@ -772,7 +799,6 @@ class NativeAgentEventParser:
             elif event_type == "error":
                 # Codex can recover transport diagnostics within the same turn.
                 # Require its later terminal completion; never parse message prose.
-                self._settled = False
                 self._observe("agent", "error")
             elif event_type == "item.completed":
                 item = record.get("item")

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 from oh_goon.integrations.hashmarks.dependencies import (
     observe_changed_dependency_consumers,
     revalidate_changed_dependency_consumers,
+    validate_required_dependency_introductions,
 )
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 
@@ -59,23 +60,15 @@ def _linked_verification(
 
 
 def _dependency_verification(
-    native: CodeMap, root: Path, base: Mapping[str, Any]
+    native: CodeMap, root: Path, base: Mapping[str, Any], source_paths: tuple[str, ...]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    # This is an explicit runtime source bound, not a second import resolver or
-    # an assertion that all possible distribution consumers have been found.
-    sources: list[str] = []
-    for item in native.files.iter_files(prefix="backend/src"):
-        if item.rel.endswith(".py") and item.visibility.value != "deny":
-            sources.append(item.rel)
-            if len(sources) > 4096:
-                raise ValueError("Dependency source inventory exceeds its transport bound")
     evidence = observe_changed_dependency_consumers(
         native,
         root=root,
         lock_path=base["lock_path"],
         before_lock=base["lock"],
         base_revision=base["base_revision"],
-        source_paths=tuple(sorted(sources)),
+        source_paths=source_paths,
     )
     evidence["source_selection"] = {
         "owner": "hashmarks.files.iter_files",
@@ -84,6 +77,7 @@ def _dependency_verification(
         "scope": "explicit-backend-runtime-python-sources",
         "consumer_completeness": "not-claimed",
     }
+    introduced = validate_required_dependency_introductions(evidence)
     graphs: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
     chains: list[dict[str, Any]] = []
     nominations: dict[str, dict[str, Any]] = {}
@@ -99,24 +93,32 @@ def _dependency_verification(
             for node_id in consumer["distribution_nodes"]:
                 if node_id not in evidence["changed_node_ids"]:
                     continue
+                supported_nodes = (
+                    node_id,
+                    *(child for child, parent in introduced.items() if parent == node_id),
+                )
                 for projected in projected_nominations:
                     if projected["nomination"].get("available") is not True:
                         continue
                     key = json.dumps(projected, sort_keys=True)
-                    chain_key = node_id, source, key
-                    if chain_key in chain_keys:
-                        continue
-                    chain_keys.add(chain_key)
                     nominations[key] = projected
-                    chains.append(
-                        {
-                            "node_id": node_id,
+                    for supported in supported_nodes:
+                        chain_key = supported, source, key
+                        if chain_key in chain_keys:
+                            continue
+                        chain_keys.add(chain_key)
+                        chain = {
+                            "node_id": supported,
                             "source_path": source,
                             "consumer": consumer,
                             "ownership": ownership,
                             "nomination": projected,
                         }
-                    )
+                        if supported != node_id:
+                            # A required dependency path connects the child to
+                            # this imported parent. It is not a child import.
+                            chain["consumer_node_id"] = node_id
+                        chains.append(chain)
     evidence["chains"] = chains
     observation = {
         "changed_path": base["lock_path"],
@@ -176,15 +178,48 @@ def nominate_changed_verification(
         # Hashmarks owns this derived index and revalidates it natively. CI does
         # not transport/cache this mutable database as verification authority.
         with CodeMap(workspace) as native:
-            # Reconcile source and test discovery before obtaining ownership evidence.
-            # Member rereads alone cannot discover newly added verifier files.
-            native.index.sync()
+            if not prefix and asset_paths:
+                # Reconcile discovery once, including newly added consumers.
+                # Member rereads alone cannot discover a new indexed source.
+                native.index.sync()
+            else:
+                # Let the producer establish cold or changed analysis scope
+                # before any path-scoped preparation publishes a generation.
+                native.reads.ready()
+
+            dependency_sources: tuple[str, ...] = ()
+            if not prefix and dependency_base and dependency_base["lock_path"] in selected_paths:
+                # Capture the caller's explicit source scope once. Reconcile
+                # these same contributors through the producer before entering
+                # the read scope; member mismatches remain unavailable inside it.
+                sources: list[str] = []
+                for item in native.files.iter_files(prefix="backend/src"):
+                    if item.rel.endswith(".py") and item.visibility.value != "deny":
+                        sources.append(item.rel)
+                        if len(sources) > 4096:
+                            raise ValueError(
+                                "Dependency source inventory exceeds its transport bound"
+                            )
+                dependency_sources = tuple(sorted(sources))
+                if dependency_sources and not asset_paths:
+                    native.index.sync(dependency_sources)
+
+            preparation_paths = (*selected_paths, *(() if prefix else required))
+            for path in dict.fromkeys(preparation_paths):
+                if not (root / path).is_file():
+                    continue
+                if not prefix and dependency_base and path == dependency_base["lock_path"]:
+                    continue
+                # Public task decisions prepare their contributors before their
+                # read scope. Preserve that phase outside our composite read.
+                native.tasks.prepare(f"Verify {path.removeprefix(prefix)}", 20)
 
             def nominate_workspace(
                 _scope: object,
                 *,
                 prefix: str = prefix,
                 selected_paths: tuple[str, ...] = selected_paths,
+                dependency_sources: tuple[str, ...] = dependency_sources,
             ) -> tuple[
                 list[dict[str, Any]],
                 list[dict[str, Any]],
@@ -220,7 +255,7 @@ def nominate_changed_verification(
                     if not prefix and dependency_base and path == dependency_base["lock_path"]:
                         try:
                             dependencies, observation = _dependency_verification(
-                                native, root, dependency_base
+                                native, root, dependency_base, dependency_sources
                             )
                         except (OSError, ValueError) as exc:
                             dependencies = {"unavailable": str(exc)}

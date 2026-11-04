@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Thread
@@ -18,8 +21,200 @@ import pytest
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
+from oh_goon.core.models.agent_providers import (
+    AgentConnection,
+    AgentProvidersConfig,
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
+from oh_goon.core.models.agent_review import AgentReviewRecord
+from oh_goon.core.models.fleet_observation import AgentReviewObservation
+from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.vocabulary import FleetRunEventType, FleetRunOutcome, FleetRunStatus
+from oh_goon.engine.git import GitService
+from oh_goon.integrations.agent_native_execution import native_executable_sha256
+from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
+from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from tests.fakes.codex_responses import CodexResponsesFixture
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or shutil.which("bwrap") is None, reason="Bubblewrap required"
+)
+@pytest.mark.parametrize(
+    "agent,scenario,accepted",
+    (
+        ("pi", "stale-terminal", False),
+        ("pi", "fresh-terminal", True),
+        ("codex", "stale-terminal", False),
+        ("codex", "missing-current-result", False),
+        ("codex", "fresh-terminal", True),
+        ("codex", "omitted-failure", False),
+        ("codex", "failed-exit", False),
+        ("opencode", "completed-text", True),
+    ),
+)
+def test_native_terminal_sequence_is_accepted_once_by_original_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent: Literal["pi", "codex", "opencode"],
+    scenario: str,
+    accepted: bool,
+) -> None:
+    """Real protocol fixtures exercise typed acceptance, not installed conformance."""
+    repository = tmp_path / "repos" / "app"
+    repository.mkdir(parents=True)
+    source = repository / "source.py"
+    source.write_text("VALUE = 42\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    executable = tmp_path / "native-protocol-fixture"
+    executable.write_text(
+        "#!/usr/bin/python3\n"
+        "import json,sys\n"
+        f"agent={agent!r}\nscenario={scenario!r}\n"
+        "prompt=json.load(sys.stdin)\n"
+        "assert 'Hashmarks' in prompt['repository_evidence']\n"
+        "def emit(event): print(json.dumps(event),flush=True)\n"
+        "def message(summary):\n"
+        "    record={'schema':'oh-goon.agent-review/v1',**prompt['identity'],'verdict':'CLEAN','summary':summary,'reviewed_paths':{'complete_scope':prompt['identity']['scope_identity']},'findings':[]}\n"
+        "    text=json.dumps(record)\n"
+        "    if agent=='pi': return {'type':'message_end','message':{'role':'assistant','content':text,'stopReason':'stop'}}\n"
+        "    if agent=='codex': return {'type':'item.completed','item':{'type':'agent_message','text':text}}\n"
+        "    return {'type':'text','part':{'text':text,'time':{'end':1}}}\n"
+        "if agent=='opencode':\n"
+        "    emit({'type':'step_start'})\n"
+        "    emit(message('current role result'))\n"
+        "else:\n"
+        "    terminal={'type':'agent_settled','aborted':False} if agent=='pi' else {'type':'turn.completed'}\n"
+        "    emit({'type':'agent_start' if agent=='pi' else 'turn.started'})\n"
+        "    emit(message('prior role result'))\n"
+        "    emit(terminal)\n"
+        "    if scenario=='missing-current-result': emit({'type':'item.started','item':{'type':'agent_message','id':'current'}})\n"
+        "    else: emit(message('current role result'))\n"
+        "    if scenario!='stale-terminal':\n"
+        "        if agent=='codex' and scenario=='fresh-terminal': emit({'type':'error','message':'recoverable transport diagnostic'})\n"
+        "        emit(terminal)\n"
+        "        emit(terminal)\n"
+        "    if scenario=='omitted-failure':\n"
+        "        for index in range(140): emit({'type':'item.completed','item':{'type':'command_execution','id':str(index),'status':'completed'}})\n"
+        "        emit({'type':'turn.failed'})\n"
+        "sys.exit(7 if scenario=='failed-exit' else 0)\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o700)
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")
+    connection = AgentConnection.select(
+        AgentProvidersConfig.model_validate(
+            {
+                "providers": {
+                    "fixture": {
+                        "api": "openai-responses"
+                        if agent == "codex"
+                        else "openai-chat-completions",
+                        "base_url": "http://127.0.0.1:1/v1",
+                    }
+                },
+                "models": {"fixture": {"provider": "fixture", "model": "fixture"}},
+            }
+        ),
+        "fixture",
+    )
+    selected = ResolvedNativeAgent(
+        agent=agent,
+        profile_name="terminal-fixture",
+        definition=NativeAgentDefinition(executable=str(executable)),
+        profile=NativeAgentProfile(
+            backend="bubblewrap", inference_profile="fixture", timeout_seconds=30.0
+        ),
+        executable_sha256=native_executable_sha256(executable),
+        connection=connection,
+        backend_configuration_id=backend.configuration_identity(),
+    )
+    runner = native_profile_command_runner(
+        repository, selected, backend, RepositoryWorkspaceAuthority.pin_repository_subject
+    )
+    git = GitService(
+        command_runner=runner, observation_runner=partial(runner, read_only_workspace=True)
+    )
+    runtime = ApplicationRuntime.build(
+        standard_local=True, standard_process_isolation=backend, git_service=git
+    )
+    try:
+        runtime.locations.add(repository)
+        admitted = runtime.plans.run_native_agent(
+            selected=selected,
+            workspace=repository,
+            skill=None,
+            task="Review the captured source",
+            role="review",
+        )
+        detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=45)
+        assert (detail.outcome is FleetRunOutcome.SUCCESS) is accepted, (
+            runtime.runs.game_tape_live_output(admitted.fleet_run_id).model_dump_json()[-8192:]
+        )
+        operation = detail.operations[0].evidence
+        assert isinstance(operation, FleetPlanOperationEvidence)
+        assert len(operation.plan.steps) == 1
+        step = operation.plan.steps[0]
+        assert step.settlement.outcome == ("SUCCESS" if accepted else "FAILED")
+        assert step.settlement.cleanup == "VERIFIED"
+        assert len(step.attempts) == 1
+        attempt = step.attempts[0]
+        assert attempt.supervisor is not None
+        assert attempt.supervisor.final_process_group_quiescent is True
+        assert attempt.supervisor.cleanup_reason == "none"
+        assert step.settlement.observed_returncode == (7 if scenario == "failed-exit" else 0)
+        reviews = [
+            item.record for item in step.observations if isinstance(item, AgentReviewObservation)
+        ]
+        assert len(reviews) == int(accepted)
+        if accepted:
+            assert isinstance(reviews[0], AgentReviewRecord)
+            assert reviews[0].summary == "current role result"
+        claim = detail.game_tape.repositories[0].steps[0].native_agent_observations[0]
+        if scenario == "stale-terminal":
+            assert not claim.settled
+        elif scenario == "omitted-failure":
+            assert claim.failed and claim.omitted_observations > 0
+            assert not any(event.summary == "codex: error" for event in claim.events)
+        events = runtime.runs.events(admitted.fleet_run_id).events
+        terminal_steps = [
+            event
+            for event in events
+            if event.event_type in {FleetRunEventType.STEP_SUCCEEDED, FleetRunEventType.STEP_FAILED}
+        ]
+        assert len(terminal_steps) == 1
+        for kind in (
+            FleetRunEventType.PROCESS_EXITED,
+            FleetRunEventType.DESCENDANTS_QUIESCENT,
+        ):
+            physical_events = [event for event in events if event.event_type is kind]
+            assert physical_events, (kind, [event.event_type for event in events])
+            assert max(event.sequence for event in physical_events) < terminal_steps[0].sequence
+        assert (
+            sum(
+                event.event_type in {FleetRunEventType.RUN_COMPLETED, FleetRunEventType.RUN_FAILED}
+                for event in events
+            )
+            == 1
+        )
+        assert source.read_text(encoding="utf-8") == "VALUE = 42\n"
+    finally:
+        runtime.shutdown(wait_for_runs=True)
+
+    reopened = ApplicationRuntime.build(standard_local=True)
+    try:
+        retained = reopened.runs.get(admitted.fleet_run_id)
+        assert retained.operations == detail.operations
+        assert retained.game_tape.repositories[0].steps == detail.game_tape.repositories[0].steps
+        assert reopened.runs.events(admitted.fleet_run_id).events == events
+    finally:
+        reopened.shutdown(wait_for_runs=True)
 
 
 @pytest.mark.certification
