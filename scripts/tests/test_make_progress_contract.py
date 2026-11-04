@@ -276,6 +276,7 @@ def test_backend_gate_checks_configured_package_types_before_running_tests(
 
 
 @pytest.mark.parametrize("failure", ("", "backend", "cross-owner"))
+@pytest.mark.parametrize("workers", (None, 3))
 @pytest.mark.parametrize(
     ("marker_override", "expected_marker"),
     (
@@ -284,7 +285,11 @@ def test_backend_gate_checks_configured_package_types_before_running_tests(
     ),
 )
 def test_integration_gate_runs_both_owners_and_preserves_failures(
-    tmp_path: Path, failure: str, marker_override: str | None, expected_marker: str
+    tmp_path: Path,
+    failure: str,
+    marker_override: str | None,
+    expected_marker: str,
+    workers: int | None,
 ) -> None:
     shutil.copyfile(ROOT / "Makefile", tmp_path / "Makefile")
     scripts = tmp_path / "scripts"
@@ -306,11 +311,19 @@ def test_integration_gate_runs_both_owners_and_preserves_failures(
     executable.chmod(0o755)
     calls = tmp_path / "calls.jsonl"
     environment = dict(os.environ)
-    for name in ("CHECK_PYTEST_MARKER", "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
+    for name in (
+        "CHECK_PYTEST_MARKER",
+        "INTEGRATION_TEST_WORKERS",
+        "MAKEFLAGS",
+        "MFLAGS",
+        "MAKEOVERRIDES",
+    ):
         environment.pop(name, None)
     environment["OH_GOON_INTEGRATION_CALLS"] = str(calls)
     environment["OH_GOON_INTEGRATION_FAILURE"] = failure
     environment["OH_GOON_TEST_CPUS"] = "0"
+    if workers is not None:
+        environment["INTEGRATION_TEST_WORKERS"] = str(workers)
     command = ["make", "test-integration"]
     if marker_override is not None:
         command.append(f"CHECK_PYTEST_MARKER={marker_override}")
@@ -342,7 +355,7 @@ def test_integration_gate_runs_both_owners_and_preserves_failures(
         else:
             assert "--pytest-config" not in arguments
         assert arguments.count("tests/integration") == 1
-        assert arguments[arguments.index("--workers") + 1] == "1"
+        assert arguments[arguments.index("--workers") + 1] == str(workers or 1)
         assert arguments[arguments.index("--batch-size") + 1] == "8"
         assert arguments[arguments.index("--granularity") + 1] == "tests"
         assert arguments[arguments.index("--batch-timeout") + 1] == "180"

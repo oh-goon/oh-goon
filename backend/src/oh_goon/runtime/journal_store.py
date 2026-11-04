@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 
 from oh_goon.core.errors import JournalConflict
 from oh_goon.core.models.agent_repair import AgentCampaignFact
@@ -30,10 +31,14 @@ class JournalFactStore:
         cached = self._read_cache.lookup(key)
         if cached is not None:
             return cached
+        previous = self._read_cache.latest()
+        entries, facts = self._load_entries(connection, previous.facts if previous else {})
         view = JournalReadView.from_entries(
-            tuple(self.load_entries(connection)), self._database.session_id
+            tuple(entries),
+            self._database.session_id,
+            previous=previous.view if previous else None,
         )
-        self._read_cache.store(key, view)
+        self._read_cache.store(key, view, facts)
         return view
 
     def current_revision(self, connection: sqlite3.Connection) -> int:
@@ -78,6 +83,13 @@ class JournalFactStore:
 
     @staticmethod
     def load_entries(connection: sqlite3.Connection) -> list[JournalEntry]:
+        return JournalFactStore._load_entries(connection, {})[0]
+
+    @staticmethod
+    def _load_entries(
+        connection: sqlite3.Connection,
+        previous: Mapping[tuple[int, str], JournalEntry],
+    ) -> tuple[list[JournalEntry], dict[tuple[int, str], JournalEntry]]:
         rows = connection.execute(
             """
             SELECT revision, session_id, kind, report_json, event_json, effect_json,
@@ -87,11 +99,14 @@ class JournalFactStore:
             """
         ).fetchall()
         result: list[JournalEntry] = []
+        facts: dict[tuple[int, str], JournalEntry] = {}
         expected_previous_hash = GENESIS_HASH
         for row in rows:
             fact_hash = str(row["fact_hash"])
-            result.append(
-                JournalFactCodec.decode(
+            identity = (int(row["revision"]), fact_hash)
+            cached = previous.get(identity)
+            if cached is None:
+                entry = JournalFactCodec.decode(
                     revision=int(row["revision"]),
                     session_id=str(row["session_id"]),
                     kind=str(row["kind"]),
@@ -103,9 +118,26 @@ class JournalFactStore:
                     fact_hash=fact_hash,
                     expected_previous_hash=expected_previous_hash,
                 )
-            )
+            else:
+                # Recheck the full current payload and its predecessor even when
+                # its typed value was decoded in the previous verified cut.
+                JournalFactCodec.verify(
+                    revision=int(row["revision"]),
+                    session_id=str(row["session_id"]),
+                    kind=str(row["kind"]),
+                    report_json=str(row["report_json"]) if row["report_json"] is not None else None,
+                    event_json=str(row["event_json"]) if row["event_json"] is not None else None,
+                    effect_json=str(row["effect_json"]) if row["effect_json"] is not None else None,
+                    committed_at=str(row["committed_at"]),
+                    previous_hash=str(row["previous_hash"]),
+                    fact_hash=fact_hash,
+                    expected_previous_hash=expected_previous_hash,
+                )
+                entry = cached
+            result.append(entry)
+            facts[identity] = entry
             expected_previous_hash = fact_hash
-        return result
+        return result, facts
 
     def load_entries_after(
         self, connection: sqlite3.Connection, revision: int
@@ -182,7 +214,8 @@ class JournalFactStore:
 
     def _append_encoded(self, connection: sqlite3.Connection, encoded: EncodedJournalFact) -> None:
         self._append_encoded_in(connection, encoded, session_id=self._database.session_id)
-        self._read_cache.invalidate()
+        # The changed head invalidates exact-cut lookup. Keep the previous immutable
+        # projection until the next complete SQL cut passes hash-chain validation.
 
     @staticmethod
     def _append_encoded_in(

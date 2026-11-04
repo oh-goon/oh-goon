@@ -135,7 +135,9 @@ class JournalIndex:
     current_fleet_plan_operations: Mapping[tuple[str, tuple[str, str]], CurrentFleetPlanOperation]
 
     @classmethod
-    def build(cls, entries: tuple[JournalEntry, ...]) -> JournalIndex:
+    def build(
+        cls, entries: tuple[JournalEntry, ...], *, previous: JournalIndex | None = None
+    ) -> JournalIndex:
         operation_facts = _operation_facts(entries)
         operations_by_id = {
             entry.report.provenance.operation_id: entry.report for entry in operation_facts
@@ -152,8 +154,8 @@ class JournalIndex:
         for entry in entries:
             if isinstance(entry, AgentCampaignCommitted):
                 history = campaigns.setdefault(entry.fact.campaign_id, [])
-                previous = history[-1].revision if history else 0
-                if entry.fact.expected_revision != previous:
+                previous_revision = history[-1].revision if history else 0
+                if entry.fact.expected_revision != previous_revision:
                     raise InvalidRunTransition(
                         "Journal invariant violated: campaign predecessor mismatch"
                     )
@@ -191,10 +193,26 @@ class JournalIndex:
                 admitted.append((entry.revision, entry.event.fleet_run_id))
 
         events_by_run = {run_id: tuple(items) for run_id, items in run_events.items()}
-        run_details_by_id = {
-            run_id: project_fleet_run_detail(events_for_run, operations_by_id.get)
-            for run_id, events_for_run in events_by_run.items()
-        }
+        run_details_by_id: dict[str, FleetRunDetail] = {}
+        for run_id, events_for_run in events_by_run.items():
+            cached = previous.run_details_by_id.get(run_id) if previous is not None else None
+            # A successful fold records every resolved operation in detail.operations.
+            # Reuse requires the same validated events and every resolver dependency;
+            # outer indexes still derive from this complete, integrity-verified cut.
+            if (
+                cached is not None
+                and previous is not None
+                and previous.events_by_run.get(run_id) == events_for_run
+                and all(
+                    operations_by_id.get(report.provenance.operation_id) == report
+                    for report in cached.operations
+                )
+            ):
+                run_details_by_id[run_id] = cached
+            else:
+                run_details_by_id[run_id] = project_fleet_run_detail(
+                    events_for_run, operations_by_id.get
+                )
         ordered_states = sorted(
             (detail.run for detail in run_details_by_id.values()),
             key=lambda state: (state.accepted_at, state.fleet_run_id),

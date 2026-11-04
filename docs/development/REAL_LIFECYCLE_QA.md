@@ -54,16 +54,19 @@ do not turn this guide into a perpetual PASS list. Older ADR/checkpoint results
 describe their original source. Follow [documentation anti-drift](DOCUMENTATION_ANTI_DRIFT.md)
 when current and historical explanations disagree.
 
-### Smaller local-agent contributor trials
+### Coding-agent contributor trials
 
 [HUG-81](https://linear.app/hugloss/issue/HUG-81) owns blind first-use and
 contributor-usability trials. A documentation audit, native protocol fixture or
-successful stronger-agent review does not qualify a smaller local model to
-maintain this repository. Keep those evidence claims separate.
+successful stronger-agent review does not qualify another agent configuration
+to maintain this repository. Keep those evidence claims separate. Record where
+the agent executes and where model inference runs; distinguish hosted-model CLI
+trials from self-hosted model trials.
 
 Before inference, record the source revision, task and behavioral acceptance,
-exact model/artifact and quantization, serving runtime, native harness/version,
-context and output limits, tools, host resources, deadline and assistance rules.
+exact model and reasoning setting, native harness/version, context and output
+limits, tools, host resources, deadline and assistance rules. For self-hosted
+models, also record artifact/quantization and serving runtime.
 Use an isolated disposable checkout and a fresh session with normal repository
 entrypoints. Keep evaluator-only answers and prior solutions outside the
 candidate's accessible source and history. Record any source exclusions or

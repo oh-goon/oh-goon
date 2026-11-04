@@ -12,6 +12,8 @@ import sqlite3
 import stat
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -204,3 +206,117 @@ def test_stage_cleanup_failure_still_closes_original_snapshot_descriptor(
     assert backup_descriptors and all(handle.closed for handle in backup_descriptors)
     assert target.is_file() and target.stat().st_nlink == 1
     assert not list(target.parent.glob(".*.snapshot-tmp"))
+
+
+def test_cleanup_failure_is_not_suppressed_by_a_callers_handled_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backup_descriptors: list[BackupDescriptor],
+) -> None:
+    owner, target = _original_source(tmp_path)
+    native_unlink = Path.unlink
+    caller_error = RuntimeError("earlier caller failure")
+
+    def fail_final_stage_cleanup(path: Path, missing_ok: bool = False) -> None:
+        if path.name.endswith(".snapshot-tmp") and missing_ok:
+            raise OSError(errno.EIO, "injected final staging cleanup fault")
+        native_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_final_stage_cleanup)
+    try:
+        raise caller_error
+    except RuntimeError:
+        with pytest.raises(OSError, match="injected final staging cleanup fault"):
+            owner.export_verified_backup(target)
+
+    assert not getattr(caller_error, "__notes__", ())
+    assert backup_descriptors and all(handle.closed for handle in backup_descriptors)
+    assert target.is_file() and target.stat().st_nlink == 1
+    assert not list(target.parent.glob(".*.snapshot-tmp"))
+
+
+@pytest.mark.parametrize("cleanup_denied", [False, True])
+def test_interrupted_snapshot_closes_sqlite_then_cleans_only_its_sidecar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup_denied: bool
+) -> None:
+    owner, target = _original_source(tmp_path)
+    target.parent.mkdir(mode=0o700)
+    foreign = target.parent / f".{target.name}.other-owner.snapshot-tmp-journal"
+    foreign.write_bytes(b"another owner's journal")
+    native_connect, native_unlink = sqlite3.connect, Path.unlink
+    snapshot_connection: sqlite3.Connection | None = None
+    snapshot_closed = False
+    stage: Path | None = None
+    sidecar: Path | None = None
+
+    class InterruptedSnapshot(sqlite3.Connection):
+        def execute(self, sql: str, parameters: Any = (), /) -> sqlite3.Cursor:
+            nonlocal snapshot_connection, stage, sidecar
+            if sql == "VACUUM INTO ?":
+                snapshot_connection = self
+                stage = Path(parameters[0])
+                stage.write_bytes(b"unpublished snapshot")
+                sidecar = stage.with_name(stage.name + "-journal")
+                sidecar.write_bytes(b"interrupted rollback journal")
+                raise sqlite3.OperationalError("interrupted native snapshot")
+            return super().execute(sql, parameters)
+
+        def close(self) -> None:
+            nonlocal snapshot_closed
+            super().close()
+            if self is snapshot_connection:
+                snapshot_closed = True
+
+    def connect(*args: Any, **options: Any) -> sqlite3.Connection:
+        return native_connect(*args, **(options | {"factory": InterruptedSnapshot}))
+
+    def unlink(path: Path, missing_ok: bool = False) -> None:
+        if path in (stage, sidecar):
+            assert snapshot_closed, "SQLite must release its snapshot before cleanup"
+            if path == sidecar and cleanup_denied:
+                raise PermissionError(errno.EACCES, "staging sidecar cleanup denied")
+        native_unlink(path, missing_ok=missing_ok)
+
+    with monkeypatch.context() as change:
+        change.setattr(sqlite3, "connect", connect)
+        change.setattr(Path, "unlink", unlink)
+        with pytest.raises(sqlite3.OperationalError, match="interrupted native snapshot") as error:
+            owner.export_verified_backup(target)
+
+    assert snapshot_closed and stage is not None and sidecar is not None
+    assert not stage.exists() and not target.exists()
+    assert foreign.read_bytes() == b"another owner's journal"
+    if cleanup_denied:
+        assert sidecar.is_file()
+        assert "staging sidecar cleanup denied" in "\n".join(error.value.__notes__)
+    else:
+        assert not sidecar.exists()
+        assert list(target.parent.iterdir()) == [foreign]
+    receipt = owner.export_verified_backup(target)
+    LocalDatabase.verify_offline_backup(receipt)
+
+
+@pytest.mark.parametrize("suffix", ["", "-journal", "-wal", "-shm"])
+@pytest.mark.parametrize("symlink", [False, True])
+def test_preexisting_nonce_stage_or_sidecar_is_never_owned_or_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str, symlink: bool
+) -> None:
+    owner, target = _original_source(tmp_path)
+    target.parent.mkdir(mode=0o700)
+    nonce = UUID(int=0)
+    foreign = target.parent / f".{target.name}.{nonce.hex}.snapshot-tmp{suffix}"
+    sentinel = tmp_path / "foreign-owned.sqlite3"
+    sentinel.write_bytes(b"foreign snapshot bytes")
+    if symlink:
+        foreign.symlink_to(sentinel)
+    else:
+        foreign.write_bytes(b"foreign snapshot bytes")
+    monkeypatch.setattr(database_module, "uuid4", lambda: nonce)
+
+    with pytest.raises(FileExistsError, match="backup staging path already exists"):
+        owner.export_verified_backup(target)
+
+    assert foreign.read_bytes() == sentinel.read_bytes() == b"foreign snapshot bytes"
+    assert foreign.is_symlink() is symlink
+    assert list(target.parent.iterdir()) == [foreign]
+    assert not target.exists()

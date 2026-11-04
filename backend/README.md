@@ -39,18 +39,21 @@ policy difference. ty ignores mypy suppression comments, so the few intentional
 overrides have their own narrow, documented ty exceptions.
 
 Supported Make validation gates, including `backend-check`, `test-integration`,
-profiling, coverage and certification, share the default two-CPU native Linux
-budget. Use `OH_GOON_TEST_CPUS=4 make -C .. backend-check` to change that ceiling
-or `OH_GOON_TEST_CPUS=0` to disable the configured ceiling explicitly. A positive
+profiling, coverage and certification, inherit native host quotas and affinity
+by default. Use `OH_GOON_TEST_CPUS=2 make -C .. backend-check` to select a CPU
+ceiling; an unset variable or `OH_GOON_TEST_CPUS=0` adds no ceiling. A positive
 budget requires cgroup v2 and native systemd user CPU control; unavailable
 enforcement stops before test execution. Direct focused `uv run ... pytest`
 commands remain native and do not acquire the Make-owned CPU scope.
 
 Backend and integration Make gates use the existing bounded pytest batches,
 retain their original pytest configuration and markers, and default locally to
-one worker. Hosted CI requests two workers under the same two-CPU quota through
-`BACKEND_CHECK_TEST_WORKERS=2` and `INTEGRATION_TEST_WORKERS=2`; these explicit Make
-settings also support local isolation/performance qualification. Exact native collected test cases retain class
+one worker. Relevant hosted verification requests four workers; complete backend
+and integration CI gates request two through `BACKEND_CHECK_TEST_WORKERS=2` and
+`INTEGRATION_TEST_WORKERS=2`. The existing resource-budget owner clamps requested
+workers to native CPU and memory capacity and any configured ceiling. These
+explicit Make settings also support local isolation/performance qualification.
+Exact native collected test cases retain class
 and parameter suffixes, allowing the existing timeout refinement to split large
 files within the new 180-second per-batch timeout. An omitted
 `BACKEND_CHECK_TEST_ROOTS` still

@@ -105,11 +105,13 @@ class JournalReadView:
         cls,
         entries: tuple[JournalEntry, ...],
         session_id: str,
+        *,
+        previous: JournalReadView | None = None,
     ) -> JournalReadView:
         return cls(
             revision=entries[-1].revision if entries else 0,
             session_id=session_id,
-            _index=JournalIndex.build(entries),
+            _index=JournalIndex.build(entries, previous=previous._index if previous else None),
         )
 
     def campaigns(self) -> tuple[AgentCampaignReadback, ...]:
@@ -120,7 +122,7 @@ class JournalReadView:
             campaign_id=campaign_id,
             journal_revision=self.revision,
             records=self._index.campaigns.get(campaign_id, ()),
-        )
+        ).model_copy(deep=True)
 
     def operation(self, operation_id: str) -> OperationReport | None:
         report = self._index.operations_by_id.get(operation_id)
@@ -132,13 +134,13 @@ class JournalReadView:
         facts = self._index.reconciliations_by_operation.get(operation_id, ())
         if not facts:
             return None
-        return facts[-1].evidence
+        return facts[-1].evidence.model_copy(deep=True)
 
     def effect_acknowledgement(
         self, operation_id: str
     ) -> RepositoryEffectAcknowledgementEvidence | None:
         fact = self._index.acknowledgements_by_operation.get(operation_id)
-        return fact.evidence if fact is not None else None
+        return fact.evidence.model_copy(deep=True) if fact is not None else None
 
     def require_operation(self, operation_id: str) -> OperationReport:
         report = self.operation(operation_id)
@@ -208,7 +210,7 @@ class JournalReadView:
         if not self._index.active_run_ids:
             return None
         detail = self._index.run_details_by_id[self._index.active_run_ids[0]]
-        return detail.run
+        return detail.run.model_copy(deep=True)
 
     def active_run_detail(self) -> FleetRunDetail | None:
         state = self.active_run()
@@ -559,7 +561,7 @@ class JournalReadView:
             next_sequence=page[-1].sequence if page else run_events[-1].sequence,
             journal_revision=self.revision,
             has_more=has_more,
-        )
+        ).model_copy(deep=True)
 
     def _required_indexed_run_state(self, fleet_run_id: str) -> FleetRunState:
         """Return immutable indexed state for internal scans without copy-on-read cost."""
