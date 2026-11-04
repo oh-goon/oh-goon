@@ -288,10 +288,19 @@ An executable copied alone may start successfully while native tool initializati
 fails. Oh-Goon does not reconstruct an installation or copy credentials to repair
 it. Native argument/config overrides are rejected.
 
+Codex can expose absent or physically empty workspace-root `.agents`, `.aws` and
+`.codex` as synthetic read-only empty directories in its tool namespace, leaving
+the host unchanged. Canonical source admission excludes only genuinely empty
+directories at these exact paths, without following symlinks. Populated entries
+and symlinks retain their existing rejection; the names grant no general source
+exclusion. The [compatibility disposition](development/AGENT_HARNESS_COMPATIBILITY.md#permanent-mappings-and-product-responsibilities)
+records the selected installed repair proof and its native scope.
+
 Git hooks and separate verification Steps retain trusted local execution. The
 native Codex tool PATH is limited to platform directories; a per-user `uv`
 installation may be unavailable there. Use the existing `--verify` commands for
-independent project checks through their original command environment.
+independent project checks through their original command environment; model-free
+permission proof does not replace them.
 
 This profile does not provide whole-process Bubblewrap isolation, broker endpoint
 enforcement, read-only review roles, interactive execution or resource caps.

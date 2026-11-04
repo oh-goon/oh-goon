@@ -85,12 +85,55 @@ def _include(path: Path, root: Path = ROOT) -> bool:
     return True
 
 
+def _empty_native_directory(path: Path) -> bool:
+    """Empty native sandbox placeholders contribute no source members."""
+    if path.name not in {".agents", ".aws", ".codex"} or not all(
+        hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW")
+    ):
+        return False
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return False
+    try:
+        before = os.fstat(descriptor)
+        with os.scandir(descriptor) as entries:
+            if next(entries, None) is not None:
+                return False
+        after = os.fstat(descriptor)
+        current = path.stat(follow_symlinks=False)
+        return all(
+            (
+                item.st_dev,
+                item.st_ino,
+                item.st_mode,
+                item.st_size,
+                item.st_mtime_ns,
+                item.st_ctime_ns,
+            )
+            == (
+                before.st_dev,
+                before.st_ino,
+                before.st_mode,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            for item in (after, current)
+        )
+    except OSError:
+        return False
+    finally:
+        os.close(descriptor)
+
+
 def _validate_top_level_ownership(root: Path = ROOT) -> None:
     unknown = sorted(
         path.name
         for path in root.iterdir()
         if path.name not in OWNED_TOP_LEVEL
         and _include_relative_source_path(PurePosixPath(path.name))
+        and not _empty_native_directory(path)
     )
     if unknown:
         raise ValueError(

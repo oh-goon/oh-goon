@@ -4,6 +4,7 @@ from pathlib import Path
 import hashlib
 import os
 import zipfile
+from typing import Any
 
 import pytest
 
@@ -540,6 +541,111 @@ def test_package_slim_rejects_unowned_top_level_entry(
         package_slim.package_slim(tmp_path / "out.zip")
 
     assert not (tmp_path / "out.zip").exists()
+
+
+@pytest.mark.skipif(
+    not all(hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW")),
+    reason="non-following directory descriptors are unavailable",
+)
+@pytest.mark.parametrize("name", (".agents", ".aws", ".codex"))
+def test_empty_native_directories_preserve_source_members_and_archive_identity(
+    tmp_path: Path, name: str
+) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+    (root / "README.md").write_text("authored source\n", encoding="utf-8")
+    before = package_slim.canonical_source_identity(root)
+    members = package_slim.canonical_source_files(root)
+    native = root / name
+    native.mkdir(mode=0o555)
+
+    assert package_slim.canonical_source_files(root) == members
+    assert package_slim.canonical_source_identity(root) == before
+    output = tmp_path / "source.zip"
+    package_slim.package_slim(output, root=root)
+    assert package_slim.archive_source_identity(output) == before
+    with zipfile.ZipFile(output) as archive:
+        assert set(archive.namelist()) == {
+            "oh-goon-1.2.3/README.md",
+            "oh-goon-1.2.3/VERSION",
+        }
+    assert native.is_dir()
+
+
+@pytest.mark.parametrize("name", (".agents", ".aws", ".codex"))
+@pytest.mark.parametrize("kind", ("populated", "nested-directory", "file", "symlink"))
+def test_native_names_do_not_exempt_source_contents_or_filesystem_aliases(
+    tmp_path: Path, name: str, kind: str
+) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+    native = root / name
+    if kind == "file":
+        native.write_text("unowned\n", encoding="utf-8")
+    elif kind == "symlink":
+        target = tmp_path / "outside"
+        target.mkdir()
+        native.symlink_to(target, target_is_directory=True)
+    else:
+        native.mkdir()
+        if kind == "populated":
+            (native / "state").write_text("unowned\n", encoding="utf-8")
+        else:
+            (native / "nested").mkdir()
+
+    message = "refuses symlinks" if kind == "symlink" else "unowned top-level entries"
+    with pytest.raises(ValueError, match=message):
+        package_slim.canonical_source_identity(root)
+
+
+def test_unknown_empty_top_level_directory_remains_unowned(tmp_path: Path) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+    (root / ".unknown-native").mkdir()
+
+    with pytest.raises(ValueError, match="unowned top-level entries: .unknown-native"):
+        package_slim.canonical_source_identity(root)
+
+
+@pytest.mark.skipif(
+    not all(hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW")),
+    reason="non-following directory descriptors are unavailable",
+)
+def test_native_directory_replaced_by_symlink_is_not_opened_or_admitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+    native = root / ".codex"
+    native.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_identity = outside.stat()
+    original_open, original_scandir = os.open, os.scandir
+
+    def replace_before_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if path == native:
+            native.rename(tmp_path / "original-directory")
+            native.symlink_to(outside, target_is_directory=True)
+        return original_open(path, flags, *args, **kwargs)
+
+    def refuse_outside_inspection(path: Any) -> Any:
+        if isinstance(path, int):
+            opened = os.fstat(path)
+            assert (opened.st_dev, opened.st_ino) != (
+                outside_identity.st_dev,
+                outside_identity.st_ino,
+            )
+        return original_scandir(path)
+
+    monkeypatch.setattr(os, "open", replace_before_open)
+    monkeypatch.setattr(os, "scandir", refuse_outside_inspection)
+    with pytest.raises(ValueError, match="unowned top-level entries: .codex"):
+        package_slim.canonical_source_identity(root)
 
 
 def test_package_slim_allows_known_excluded_top_level_state(
