@@ -73,7 +73,8 @@ class SharedPlanPreviewRequest(BaseModel):
 
 
 class SharedPlanRepairRequest(SharedPlanRunRequest):
-    agent: RunAgentSelection
+    # Preserve the repair schema's required agent while retaining request ancestry.
+    agent: RunAgentSelection  # ty: ignore[invalid-mutable-override]
     repair: RunRepairSelection
     authorize_repair: Literal[True]
 

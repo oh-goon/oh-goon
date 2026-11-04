@@ -339,9 +339,33 @@ def test_exact_fast_proof_does_not_claim_daily_full() -> None:
     _validate(*_proof())
 
 
-def _documentation_proof() -> tuple[dict[str, Any], dict[str, Any]]:
-    plan, result = _proof(source="docs/guide.md", test_file=DOCUMENTATION_PROOF_TEST)
+def _documentation_proof(
+    *, behavioral: bool = True
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    plan, result = _proof(
+        source="docs/guide.md",
+        test_file=DOCUMENTATION_PROOF_TEST,
+        additional_tests=("tests/test_source.py",) if behavioral else (),
+    )
     plan["evidence"]["observations"][0].update(state="UNAVAILABLE", nominations=[])
+    plan["changed_paths"] = ["docs/guide.md"]
+    plan["evidence"]["observations"] = plan["evidence"]["observations"][:1]
+    if behavioral:
+        plan["changed_paths"].append("source.py")
+        plan["evidence"]["observations"].append(
+            {
+                "changed_path": "source.py",
+                "state": "LINKED",
+                "nominations": [
+                    {
+                        "nomination": {
+                            "available": True,
+                            "verification_target": {"path": "tests/test_source.py"},
+                        }
+                    }
+                ],
+            }
+        )
     plan["evidence"]["documentation_policy"] = {
         "authority": "oh-goon-execution-policy",
         "paths": ["docs/guide.md"],
@@ -353,7 +377,11 @@ def _documentation_proof() -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def _validate_declared(
-    plan: dict[str, Any], result: dict[str, Any], root: Path | None = None
+    plan: dict[str, Any],
+    result: dict[str, Any],
+    root: Path | None = None,
+    *,
+    removed_paths: tuple[str, ...] = (),
 ) -> None:
     validate_merge_proof(
         plan,
@@ -361,6 +389,7 @@ def _validate_declared(
         candidate=plan["candidate"],
         base=plan["base"],
         changed_paths=plan["changed_paths"],
+        removed_paths=removed_paths,
         control_base=plan["base"],
         root=root,
     )
@@ -370,7 +399,7 @@ def test_documentation_proof_handles_fenced_and_deleted_sources(tmp_path: Path) 
     document = tmp_path / "docs/guide.md"
     document.parent.mkdir()
     document.write_text("# Guide\n```sh\nuv run pytest\n```\n")
-    plan, result = _documentation_proof()
+    plan, result = _documentation_proof(behavioral=False)
     plan.update(
         changed_paths=["docs/guide.md"],
         behavioral_status="NOT_APPLICABLE",
@@ -387,8 +416,44 @@ def test_documentation_proof_handles_fenced_and_deleted_sources(tmp_path: Path) 
     assert non_executable_documentation(tmp_path, "docs/guide.md")
     _validate_declared(plan, result, tmp_path)
     document.unlink()
+    plan["removed_paths"] = ["docs/guide.md"]
+    result["plan"] = copy.deepcopy(plan)
     assert non_executable_documentation(tmp_path, "docs/guide.md")
-    _validate_declared(plan, result, tmp_path)
+    _validate_declared(plan, result, tmp_path, removed_paths=("docs/guide.md",))
+
+
+def test_documentation_check_does_not_substitute_for_required_behavior() -> None:
+    plan, result = _documentation_proof()
+    _validate_declared(plan, result)
+
+    plan, result = _documentation_proof(behavioral=False)
+    with pytest.raises(ValueError, match="Executable changes have no behavioral proof"):
+        _validate_declared(plan, result)
+
+
+def test_source_qualified_documentation_check_retains_its_behavioral_role() -> None:
+    plan, result = _documentation_proof(behavioral=False)
+    observation = {
+        "changed_path": "source.py",
+        "state": "LINKED",
+        "nominations": [
+            {
+                "nomination": {
+                    "available": True,
+                    "verification_target": {"path": DOCUMENTATION_PROOF_TEST},
+                }
+            }
+        ],
+    }
+    plan["changed_paths"].append("source.py")
+    plan["evidence"]["observations"].append(observation)
+    result["plan"] = copy.deepcopy(plan)
+    _validate_declared(plan, result)
+
+    plan["changed_paths"].remove("source.py")
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError, match="Executable changes have no behavioral proof"):
+        _validate_declared(plan, result)
 
 
 @pytest.mark.parametrize("fault", ["omit-contract", "claim-code", "failed-contract"])
@@ -421,7 +486,7 @@ def test_documentation_route_keeps_policy_and_certification_sources_protected() 
         == ()
     )
     plan, result = _documentation_proof()
-    plan["changed_paths"].append("source.py")
+    plan["changed_paths"].append("other.py")
     result["plan"] = copy.deepcopy(plan)
     with pytest.raises(ValueError, match="consumer evidence is unavailable"):
         _validate_declared(plan, result)
@@ -518,6 +583,113 @@ def test_hashmarks_upgrade_cannot_forge_intent_or_omit_native_proof(
         result["outcomes"][-1]["returncode"] = 1
     with pytest.raises(ValueError):
         _validate_declared(plan, result, None if fault == "no-root" else tmp_path)
+
+
+def test_native_git_removals_include_rename_source_but_not_copy_source() -> None:
+    changed, removed = gate.native_changed_paths(
+        "D\0old.py\0R100\0before.py\0after.py\0"
+        "C100\0source.py\0copy.py\0M\0modified.py\0"
+    )
+    assert changed == (
+        "after.py",
+        "before.py",
+        "copy.py",
+        "modified.py",
+        "old.py",
+        "source.py",
+    )
+    assert removed == ("before.py", "old.py")
+
+
+@pytest.mark.parametrize("observation", ("R100\0old.py\0", "D\0"))
+def test_incomplete_native_git_change_cannot_admit_a_removal(observation: str) -> None:
+    with pytest.raises(ValueError, match="incomplete changed-path evidence"):
+        gate.native_changed_paths(observation)
+
+
+@pytest.mark.parametrize("removed", ("obsolete.py", "tests/test_obsolete.py"))
+def test_confirmed_removal_does_not_require_executing_the_absent_member(
+    removed: str,
+) -> None:
+    plan, result = _proof()
+    plan["changed_paths"].append(removed)
+    plan["removed_paths"] = [removed]
+    plan["evidence"]["observations"].append(
+        {"changed_path": removed, "state": "UNAVAILABLE", "reason": "source-absent"}
+    )
+    result["plan"] = copy.deepcopy(plan)
+
+    def validate() -> None:
+        validate_merge_proof(
+            plan,
+            result,
+            candidate=plan["candidate"],
+            base=plan["base"],
+            changed_paths=plan["changed_paths"],
+            removed_paths=[removed],
+            control_base=None,
+        )
+
+    validate()
+    plan["evidence"]["observations"][0]["state"] = "UNAVAILABLE"
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError, match="Source-qualified consumer evidence"):
+        validate()
+
+
+@pytest.mark.parametrize(
+    "recorded", (None, [], ["source.py"], ["old.py", "old.py"], "old.py")
+)
+def test_removal_metadata_cannot_omit_duplicate_or_replace_native_membership(
+    recorded: object,
+) -> None:
+    plan, result = _proof()
+    plan["changed_paths"].append("old.py")
+    if recorded is not None:
+        plan["removed_paths"] = recorded
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError, match="Removed membership"):
+        validate_merge_proof(
+            plan,
+            result,
+            candidate=plan["candidate"],
+            base=plan["base"],
+            changed_paths=plan["changed_paths"],
+            removed_paths=["old.py"],
+            control_base=None,
+        )
+
+
+def test_candidate_cannot_call_a_present_member_removed() -> None:
+    plan, result = _proof()
+    plan["removed_paths"] = ["source.py"]
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError, match="Removed membership"):
+        _validate(plan, result)
+
+
+def test_removing_a_required_policy_test_does_not_waive_its_protection() -> None:
+    removed = VERIFICATION_POLICY_TESTS[0]
+    plan, result = _proof(
+        source="backend/src/oh_goon/repository_tooling/development_verification.py",
+        additional_tests=VERIFICATION_POLICY_TESTS[1:],
+    )
+    plan.update(
+        policy_status="REVIEW_REQUIRED", obligations=["verification-policy protection"]
+    )
+    plan["changed_paths"].append(removed)
+    plan["removed_paths"] = [removed]
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError, match="verification-policy protection was omitted"):
+        validate_merge_proof(
+            plan,
+            result,
+            candidate=plan["candidate"],
+            base=plan["base"],
+            changed_paths=plan["changed_paths"],
+            removed_paths=[removed],
+            control_base=plan["base"],
+        )
 
 
 def test_test_named_production_owner_qualifies_through_executed_consumer() -> None:
@@ -1618,7 +1790,7 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
             output = ""
         else:
             assert arguments[0] == "diff"
-            output = "\0".join(plan["changed_paths"]) + "\0"
+            output = "".join("M\0" + path + "\0" for path in plan["changed_paths"])
         return command_owner.CommandResult(0, output, "")
 
     monkeypatch.setattr(gate, "_candidate_producer_identity", producer)

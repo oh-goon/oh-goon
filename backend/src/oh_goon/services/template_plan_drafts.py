@@ -23,6 +23,7 @@ from oh_goon.core.template_identity import template_classification, template_ref
 from oh_goon.integrations.fleet_plan_compilation import (
     parse_plan_template,
 )
+from oh_goon.integrations.fleet_plan_source_snapshot import FleetPlanSourceSnapshot
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.services.fleet_plan_input_inspection import InputInspection, inspect_projected_inputs
@@ -244,18 +245,19 @@ def initialize_run_configuration(
                 if any(step.harness == "native" for step in agent_steps)
                 else {}
             )
-            payload["agent"] = {
+            agent: dict[str, PlanInputValue] = {
                 **selection,
                 "skill_root": ".",
             }
+            payload["agent"] = agent
             if not selection:
                 missing.append("agent.model_profile")
             if acceptance is not None:
-                payload["agent"]["acceptance"] = acceptance
+                agent["acceptance"] = acceptance
             else:
                 missing.append("agent.acceptance")
             if target is not None:
-                payload["agent"]["repository_root"] = str(target.parent)
+                agent["repository_root"] = str(target.parent)
             else:
                 missing.append("agent.repository_root")
         if values:
@@ -346,21 +348,21 @@ class _FrozenGoonSources:
 
     def __init__(self, store: GoonTemplateStore) -> None:
         self._store = store
-        self._snapshots: dict[str, Any] = {}
+        self._snapshots: dict[str, FleetPlanSourceSnapshot] = {}
 
     def keys(self) -> tuple[str, ...]:
         return self._store.keys()
 
-    def source(self, key: str) -> Any:
-        if key not in self._snapshots:
-            self._snapshots[key] = self._store.source(key)
-        return self._snapshots[key]
+    def source(self, template_key: str) -> FleetPlanSourceSnapshot:
+        if template_key not in self._snapshots:
+            self._snapshots[template_key] = self._store.source(template_key)
+        return self._snapshots[template_key]
 
 
 def _object(value: object, label: str) -> dict[str, Any]:
     if type(value) is not dict or not all(type(k) is str for k in value):
         raise FleetPlanInvalid(f"UX-C {label} requires a mapping with string keys")
-    return value
+    return cast(dict[str, Any], value)
 
 
 def _edit(items: list[object], action: Mapping[str, Any]) -> None:

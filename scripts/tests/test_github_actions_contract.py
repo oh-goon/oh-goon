@@ -717,6 +717,12 @@ def test_selected_proof_prepares_the_original_native_python_build_environment() 
         for position, step in enumerate(steps)
         if "--execute" in shlex.split(step.get("run", ""))
     )
+    execution = next(
+        shlex.split(step["run"])
+        for step in steps
+        if "--execute" in shlex.split(step.get("run", ""))
+    )
+    assert execution[execution.index("--workers") + 1] == "4"
 
 
 @pytest.mark.process

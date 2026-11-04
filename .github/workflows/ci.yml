@@ -103,7 +103,7 @@ jobs:
           "${native_view[@]}" \
           bash scripts/development_test_resources.sh \
             uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \
-            --execute "$CONTROL_DIR/plan.json" --mode "$VERIFY_MODE" --workers 2 \
+            --execute "$CONTROL_DIR/plan.json" --mode "$VERIFY_MODE" --workers 4 \
             --report "$CONTROL_DIR/result.json"
       - name: Retain bounded selection and native receipts
         if: always() && env.CONTROL_DIR != ''

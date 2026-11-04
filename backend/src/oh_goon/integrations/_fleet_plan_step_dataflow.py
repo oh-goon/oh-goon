@@ -13,7 +13,9 @@ from oh_goon.core.models.fleet_plan import (
     PathMissingCondition,
     PlanStreamOutput,
     ResolvedAgentStep,
+    ResolvedCommandStep,
     ResolvedExtensionStep,
+    ResolvedGitStep,
     ResolvedKubernetesRolloutVerifyStep,
     ResolvedKubernetesSetImageStep,
     ResolvedOciTagAssertStep,
@@ -233,7 +235,7 @@ def bind_step_outputs(
                 "Agent failed-test feedback must be nonempty and at most 2048 UTF-8 bytes"
             )
         updates["feedback_value"] = value
-    if hasattr(step, "argv"):
+    if isinstance(step, (ResolvedCommandStep, ResolvedGitStep)):
         updates["argv"] = tuple(bind(item) for item in step.argv)
     elif isinstance(step, ResolvedExtensionStep):
         updates["args"] = tuple(bind(item) for item in step.args)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Lock
@@ -96,7 +96,7 @@ class ExecutionSession:
         return self._finished
 
     @contextmanager
-    def execution_connection_scope(self) -> Iterator[None]:
+    def execution_connection_scope(self) -> Generator[None, None, None]:
         """Own one admitted SQLite handle for this execution thread's durable cuts."""
         if self._finished:
             raise OwnershipLost("Execution session already released its ownership")
@@ -114,7 +114,7 @@ class ExecutionSession:
         return self._leases.cancellation_requested_in(connection, self._lease)
 
     @contextmanager
-    def preparation_cancellation_observer(self) -> Iterator[Callable[[], bool]]:
+    def preparation_cancellation_observer(self) -> Generator[Callable[[], bool], None, None]:
         """Own one cadence-bounded query-only cancellation observer for preparation.
 
         One native read-only handle is retained only for the preparation scope. Each due

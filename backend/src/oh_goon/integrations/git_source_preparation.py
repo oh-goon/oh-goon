@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from functools import partial
 from pathlib import Path
@@ -32,7 +32,7 @@ def git_source_cache(environment: dict[str, str] | None = None) -> Path:
 @contextmanager
 def _git_source_scratch(
     *, prefix: str, quiescent: Callable[[], bool], parent: Path | None = None
-) -> Iterator[Path]:
+) -> Generator[Path, None, None]:
     directory = Path(mkdtemp(prefix=prefix, dir=parent))
     failure: BaseException | None = None
     try:
@@ -63,7 +63,7 @@ def prepare_git_source(
     cancel_requested: Callable[[], bool] | None = None,
     native_workspace: Path | None = None,
     allow_network: bool = True,
-) -> Iterator[tuple[Path, str]]:
+) -> Generator[tuple[Path, str], None, None]:
     """Fetch a selector only when authoring; locked use fetches the exact commit.
 
     Native Git refs retain cached objects. The OS lease covers preparation and

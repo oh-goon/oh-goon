@@ -343,6 +343,33 @@ def _require_documentation_proof(
     return set(documentation)
 
 
+def behavioral_pytest_targets(
+    pytest: Sequence[str], evidence: Mapping[str, Any], current_paths: set[str]
+) -> set[str]:
+    """Retain an automatic doc check's independently nominated behavioral role."""
+    targets = set(pytest)
+    if "documentation_policy" not in evidence:
+        return targets
+    for observation in evidence.get("observations", []):
+        if (
+            observation.get("changed_path") not in current_paths
+            or observation.get("state") not in {"LINKED", "CHANGED_TEST"}
+            or observation.get("stale") is True
+        ):
+            continue
+        for projected in observation.get("nominations", []):
+            nomination = projected.get("nomination", {})
+            target = projected.get("workspace_prefix", "") + nomination.get(
+                "verification_target", {}
+            ).get("path", "")
+            if (
+                nomination.get("available") is True
+                and target.split("::", 1)[0] == DOCUMENTATION_PROOF_TEST
+            ):
+                return targets
+    return {target for target in targets if target.split("::", 1)[0] != DOCUMENTATION_PROOF_TEST}
+
+
 def _require_hashmarks_smoke_membership(native: Mapping[str, Any]) -> None:
     passed = native.get("membership_receipt", {}).get("passed", [])
     for selector in HASHMARKS_UPGRADE_TESTS:
@@ -453,6 +480,25 @@ def require_native_pytest_pass(
     return {node.split("::", 1)[0] for node in selected}
 
 
+def native_changed_paths(name_status: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Project changed and removed members from one native Git diff observation."""
+    tokens = name_status.split("\0")
+    changed: set[str] = set()
+    removed: set[str] = set()
+    cursor = 0
+    while cursor < len(tokens) and tokens[cursor]:
+        status = tokens[cursor]
+        count = 2 if status[0] in {"R", "C"} else 1
+        paths = tokens[cursor + 1 : cursor + 1 + count]
+        if len(paths) != count or any(not path for path in paths):
+            raise ValueError("Git returned incomplete changed-path evidence")
+        changed.update(paths)
+        if status[0] in {"D", "R"}:
+            removed.add(paths[0])
+        cursor += count + 1
+    return tuple(sorted(changed)), tuple(sorted(removed))
+
+
 def validate_merge_proof(
     plan: Mapping[str, Any],
     result: Mapping[str, Any],
@@ -462,6 +508,7 @@ def validate_merge_proof(
     changed_paths: Sequence[str],
     control_base: str | None,
     root: Path | None = None,
+    removed_paths: Sequence[str] = (),
 ) -> None:
     if plan.get("schema_version") != "oh-goon.development-verification/v1":
         raise ValueError("Verification plan schema is unsupported")
@@ -500,6 +547,16 @@ def validate_merge_proof(
         or not {"python", "package"} <= set(plan.get("static", []))
     ):
         raise ValueError("Mandatory Hashmarks upgrade proof was omitted")
+    recorded_removals = plan.get("removed_paths", [])
+    if (
+        not isinstance(recorded_removals, list)
+        or any(not isinstance(path, str) for path in recorded_removals)
+        or len(recorded_removals) != len(set(recorded_removals))
+        or sorted(recorded_removals) != sorted(removed_paths)
+        or not set(removed_paths) <= set(changed_paths)
+    ):
+        raise ValueError("Removed membership differs from independent native Git evidence")
+    removed = set(removed_paths)
     assets = _independent_documentation_assets(root, changed_paths, evidence) if root else set()
     if assets and DOCUMENTATION_ASSET_OBLIGATION not in plan.get("obligations", []):
         raise ValueError("Bounded documentation-asset policy was not explicitly admitted")
@@ -512,7 +569,10 @@ def validate_merge_proof(
         for path in changed_paths:
             if path not in plain_docs:
                 raise ValueError("Executable inputs cannot claim behavioral NOT_APPLICABLE")
-    if behavior_required and not (plan.get("pytest") or plan.get("frontend")) and not contract_only:
+    behavioral_pytest = behavioral_pytest_targets(
+        plan.get("pytest", []), evidence, set(changed_paths) - plain_docs - removed
+    )
+    if behavior_required and not (behavioral_pytest or plan.get("frontend")) and not contract_only:
         raise ValueError("Executable changes have no behavioral proof")
     if (assets or (behavior_required and not contract_only)) and (
         not isinstance(evidence, Mapping)
@@ -608,10 +668,14 @@ def validate_merge_proof(
             path.endswith(suffix) for suffix in (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
         )
     )
-    if not changed_tests <= executed_files:
+    if not changed_tests - removed <= executed_files:
         raise ValueError("Changed tests have no meaningful execution proof")
     observations = {row.get("changed_path"): row for row in evidence.get("observations", [])}
     for source in changed_paths:
+        # An absent member cannot execute. Git proves only its removal, never
+        # absence of remaining consumers; surviving sources retain their proof.
+        if source in removed:
+            continue
         if is_generated_contract_path(source):
             continue
         if hashmarks_upgrade and source in {"backend/pyproject.toml", "backend/uv.lock"}:
@@ -844,19 +908,17 @@ def main() -> int:
         if args.head is None or plan.get("requested_head") != args.head:
             raise ValueError("Independent requested head differs from selected proof")
         git(args.root, "merge-base", "--is-ancestor", args.head, args.candidate)
-        changed_paths = [
-            path
-            for path in git(
+        changed_paths, removed_paths = native_changed_paths(
+            git(
                 args.root,
                 "diff",
-                "--name-only",
-                "--no-renames",
+                "--name-status",
+                "--find-renames",
                 "-z",
                 args.base,
                 args.candidate,
-            ).split("\0")
-            if path
-        ]
+            )
+        )
         if plan.get("source_identity") != canonical_source_identity(args.root):
             raise ValueError("Candidate contents differ from selected proof")
         validate_merge_proof(
@@ -865,6 +927,7 @@ def main() -> int:
             candidate=args.candidate,
             base=args.base,
             changed_paths=changed_paths,
+            removed_paths=removed_paths,
             control_base=args.control_base,
             root=args.root,
         )

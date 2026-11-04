@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -14,7 +14,7 @@ _LOCK_SHARDS = 64
 
 
 @contextmanager
-def serialize_run_admission(database_path: Path, identity: str) -> Iterator[None]:
+def serialize_run_admission(database_path: Path, identity: str) -> Generator[None, None, None]:
     """Serialize one caller-stable admission identity across threads and processes.
 
     The lock is deliberately ephemeral kernel authority, not durable Fleet state. A bounded

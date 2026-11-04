@@ -6,7 +6,7 @@ import secrets
 import sqlite3
 import stat
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -273,7 +273,7 @@ class LocalDatabase:
 
     @staticmethod
     @contextmanager
-    def observe_existing_for_inspection(path: Path) -> Iterator[sqlite3.Connection]:
+    def observe_existing_for_inspection(path: Path) -> Generator[sqlite3.Connection, None, None]:
         """Observe current domain facts without initialization or runtime admission."""
         with sqlite_authority_gate(path, write=False):
             admitted = _capture_database_path_identity(path)
@@ -328,7 +328,7 @@ class LocalDatabase:
     @contextmanager
     def existing_append_transaction(
         cls, expected: ExistingDatabaseAppendContext
-    ) -> Iterator[sqlite3.Connection]:
+    ) -> Generator[sqlite3.Connection, None, None]:
         """Rebind one captured cut without initialization, repair or connection retries.
 
         Only the original transaction owner opens and commits SQLite. The caller
@@ -367,7 +367,7 @@ class LocalDatabase:
 
     @staticmethod
     @contextmanager
-    def observe_existing_for_reset(path: Path) -> Iterator[sqlite3.Connection]:
+    def observe_existing_for_reset(path: Path) -> Generator[sqlite3.Connection, None, None]:
         """Provide native read-only maintenance observation without runtime admission.
 
         The canonical gate and read transaction remain held until the reset owner
@@ -625,7 +625,7 @@ class LocalDatabase:
             pass
 
     @contextmanager
-    def execution_connection_scope(self) -> Iterator[None]:
+    def execution_connection_scope(self) -> Generator[None, None, None]:
         """Reuse one admitted RW SQLite handle for one execution thread.
 
         Certification has one process-local worker owner, but an execution can perform many
@@ -688,7 +688,7 @@ class LocalDatabase:
         *,
         write: bool,
         context: str,
-    ) -> Iterator[sqlite3.Connection]:
+    ) -> Generator[sqlite3.Connection, None, None]:
         """Bind path/SQLite identity proof to the exact transaction snapshot it certifies."""
 
         with sqlite_authority_gate(self.path, write=write):
@@ -721,7 +721,7 @@ class LocalDatabase:
         *,
         write: bool = False,
         track_revision: bool = True,
-    ) -> Iterator[sqlite3.Connection]:
+    ) -> Generator[sqlite3.Connection, None, None]:
         if self._read_only:
             if write:
                 raise RuntimeError("Observation-only LocalDatabase cannot acquire write authority")
@@ -757,7 +757,9 @@ class LocalDatabase:
                 connection.close()
 
     @contextmanager
-    def _guard_atomic_domain_participant(self, connection: sqlite3.Connection) -> Iterator[None]:
+    def _guard_atomic_domain_participant(
+        self, connection: sqlite3.Connection
+    ) -> Generator[None, None, None]:
         """Deny participant BEGIN/COMMIT/ROLLBACK on the original SQLite cut.
 
         Only the canonical owner may finish the cut. This is a local correctness
@@ -1028,7 +1030,7 @@ class LocalDatabase:
             return read_durable_revision(connection)
 
     @contextmanager
-    def admitted_observer_connection(self) -> Iterator[sqlite3.Connection]:
+    def admitted_observer_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """Hold one query-only admitted SQLite connection for bounded observation loops.
 
         Connection lifetime is reused for preparation performance, but each observation
@@ -1121,7 +1123,7 @@ class LocalDatabase:
     @contextmanager
     def admitted_observer_cut(
         self, connection: sqlite3.Connection, *, context: str = "preparation observation"
-    ) -> Iterator[sqlite3.Connection]:
+    ) -> Generator[sqlite3.Connection, None, None]:
         """Own one atomic read-only proof cut on the persistent observer connection.
 
         BEGIN forces SQLite to establish one coherent read snapshot and SHARED lock for

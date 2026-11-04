@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from math import ceil
@@ -160,7 +160,7 @@ def _reconcile_certification_state(
 
 
 @contextmanager
-def certification_state_lease(state_root: Path) -> Iterator[None]:
+def certification_state_lease(state_root: Path) -> Generator[None, None, None]:
     """Acquire one non-blocking workflow lease for the shared certification control DB.
 
     SQLite supports cooperating concurrent readers/writers, but certification is a

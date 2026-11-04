@@ -51,7 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_agent_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def _add_agent_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
+) -> None:
     """Agent data operations and separately configured model connections."""
     agent = subparsers.add_parser(
         "agent", help="Agent data operations, model providers and native service preparation"
@@ -72,8 +74,8 @@ def _add_agent_commands(subparsers: argparse._SubParsersAction[argparse.Argument
     add_apply_arguments(apply)
 
 
-def _add_local_app_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_local_app_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     app = subparsers.add_parser("app", help="Start, inspect or stop the local application")
     commands = app.add_subparsers(dest="app_command", required=True)
@@ -105,8 +107,8 @@ def _add_local_app_commands(
     serve.add_argument("--port", type=int, default=8787)
 
 
-def _add_local_state_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_local_state_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     local_state = subparsers.add_parser(
         "local-state", help="Inspect or reset the disposable pre-live local database"
@@ -127,8 +129,8 @@ def _add_local_state_commands(
     )
 
 
-def _add_storage_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_storage_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     storage = subparsers.add_parser(
         "storage", help="Inspect local storage ownership, retention, and safe cleanup"
@@ -150,8 +152,8 @@ def _add_storage_commands(
     prune.add_argument("--json", action="store_true", dest="as_json")
 
 
-def _add_direct_repository_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_direct_repository_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     run = subparsers.add_parser(
         "operation", help="Run one native repository operation with its own operation identity"
@@ -187,8 +189,8 @@ def _add_direct_repository_commands(
     subparsers.add_parser("excluded", help="List persistently excluded repositories")
 
 
-def _add_league_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_league_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     league = subparsers.add_parser(
         "league", help="Scan saved local folders and map Git teams to their goon.yml entrypoint"
@@ -207,8 +209,8 @@ def _add_league_commands(
     _add_team_commands(subparsers)
 
 
-def _add_shared_plan_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_shared_plan_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     shared_plan = subparsers.add_parser(
         "shared-plan", help="Manage oh-goon-owned plan.yml files applied to explicit repositories"
@@ -253,8 +255,8 @@ def _add_shared_plan_repository_selection(parser: argparse.ArgumentParser) -> No
     )
 
 
-def _add_lineup_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_lineup_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     lineup = subparsers.add_parser("lineup", help="Save and inspect reusable local Team selections")
     commands = lineup.add_subparsers(dest="lineup_command", required=True)
@@ -271,8 +273,8 @@ def _add_lineup_commands(
     inspect.add_argument("--json", action="store_true", dest="as_json")
 
 
-def _add_team_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_team_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     team = subparsers.add_parser(
         "team", help="Inspect one League team through its canonical goon.yml entrypoint"
@@ -285,8 +287,8 @@ def _add_team_commands(
     validate.add_argument("--json", action="store_true", dest="as_json")
 
 
-def _add_enforcer_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_enforcer_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     enforcer = subparsers.add_parser(
         "enforcer",
@@ -307,8 +309,8 @@ def _add_enforcer_commands(
     enforcer_compare.add_argument("after", type=Path)
 
 
-def _add_developer_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_developer_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     dev = subparsers.add_parser("dev", help="Contributor debugging helpers")
     commands = dev.add_subparsers(dest="dev_command")
@@ -318,8 +320,8 @@ def _add_developer_commands(
     _add_developer_effect_commands(commands)
 
 
-def _add_developer_observation_commands(
-    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_developer_observation_commands[_Parser: argparse.ArgumentParser](
+    commands: argparse._SubParsersAction[_Parser],
 ) -> None:
     explain_run = commands.add_parser("explain-run", help="Trace one durable fleet run")
     explain_run.add_argument("fleet_run_id")
@@ -335,8 +337,8 @@ def _add_developer_observation_commands(
     projection_profile.add_argument("--samples", type=int, default=5)
 
 
-def _add_developer_certification_commands(
-    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_developer_certification_commands[_Parser: argparse.ArgumentParser](
+    commands: argparse._SubParsersAction[_Parser],
 ) -> None:
     for name in ("_lock-plan", "_run-plan"):
         command = commands.add_parser(name, help=argparse.SUPPRESS)
@@ -402,8 +404,8 @@ def _add_developer_certification_commands(
     require_success.add_argument("--fleet-run-id")
 
 
-def _add_developer_capability_commands(
-    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_developer_capability_commands[_Parser: argparse.ArgumentParser](
+    commands: argparse._SubParsersAction[_Parser],
 ) -> None:
     capability = commands.add_parser(
         "capability", help="Trace or scaffold the capability golden path"
@@ -435,8 +437,8 @@ def _add_developer_capability_commands(
     scaffold.add_argument("--output", type=Path)
 
 
-def _add_developer_effect_commands(
-    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_developer_effect_commands[_Parser: argparse.ArgumentParser](
+    commands: argparse._SubParsersAction[_Parser],
 ) -> None:
     commands.add_parser(
         "effect-quarantines", help="List repository effects that require recovery inspection"
@@ -460,8 +462,8 @@ def _add_developer_effect_commands(
     )
 
 
-def _add_self_commands(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+def _add_self_commands[_Parser: argparse.ArgumentParser](
+    subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     self_parser = subparsers.add_parser("self", help="Verify and certify this Oh-Goon source")
     commands = self_parser.add_subparsers(dest="self_command", required=True)

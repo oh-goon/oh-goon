@@ -13,7 +13,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from oh_goon.core.ports.physical_observation import PhysicalObservationScope as Scope
 from oh_goon.integrations import linux_physical_observer as linux
@@ -48,10 +48,17 @@ def parse_scope(raw: object) -> Scope:
     }
     if type(raw) is not dict or set(raw) != keys:
         raise PreflightError("exact original observation scope required")
+    fields = cast(dict[str, object], raw)
 
     def nonempty(name: str) -> str:
-        value = raw[name]
+        value = fields[name]
         if type(value) is not str or not value or len(value) > 1024 or "\x00" in value:
+            raise PreflightError(f"invalid {name}")
+        return value
+
+    def positive(name: str) -> int:
+        value = fields[name]
+        if type(value) is not int or value <= 0:
             raise PreflightError(f"invalid {name}")
         return value
 
@@ -66,13 +73,13 @@ def parse_scope(raw: object) -> Scope:
     path = nonempty("cgroup_path")
     if not Path(path).is_absolute() or ".." in Path(path).parts or path == "/":
         raise PreflightError("absolute bounded cgroup path required")
-    for field in ("cgroup_device", "cgroup_inode", "tracked_pid"):
-        if type(raw[field]) is not int or raw[field] <= 0:
-            raise PreflightError(f"invalid {field}")
+    device = positive("cgroup_device")
+    inode = positive("cgroup_inode")
+    pid = positive("tracked_pid")
     birth = nonempty("tracked_birth")
     if birth.rpartition(":")[0] == "" or not birth.rpartition(":")[2].isdigit():
         raise PreflightError("original boot/starttime identity required")
-    targets = raw["mount_targets"]
+    targets = fields["mount_targets"]
     if (
         type(targets) is not list
         or not targets
@@ -88,7 +95,7 @@ def parse_scope(raw: object) -> Scope:
         or len(set(targets)) != len(targets)
     ):
         raise PreflightError("explicit mounted-resource target set required")
-    network = (raw["network_namespace"], raw["host_veth"], raw["nft_table"])
+    network = (fields["network_namespace"], fields["host_veth"], fields["nft_table"])
     if not (
         all(x is None for x in network)
         or all(
@@ -104,12 +111,12 @@ def parse_scope(raw: object) -> Scope:
         run_id,
         subject,
         path,
-        raw["cgroup_device"],
-        raw["cgroup_inode"],
-        raw["tracked_pid"],
+        device,
+        inode,
+        pid,
         birth,
-        tuple(targets),
-        *network,
+        tuple(cast(list[str], targets)),
+        *cast(tuple[str | None, str | None, str | None], network),
     )
 
 

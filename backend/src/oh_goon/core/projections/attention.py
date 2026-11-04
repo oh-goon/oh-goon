@@ -34,12 +34,13 @@ def build_fleet_attention(context: FleetProjectionContext) -> FleetAttention:
     projected: list[AttentionGroup] = []
     for reason_code, items in groups.items():
         semantics = reason_semantics(reason_code)
+        repositories = tuple(sorted(items, key=lambda item: item.repository.name.lower()))
         projected.append(
             AttentionGroup(
                 reason_code=reason_code,
                 phase=semantics.phase,
                 risk=semantics.risk,
-                repositories=tuple(sorted(items, key=lambda item: item.repository.name.lower())),
+                repositories=repositories,
             )
         )
     projected.sort(key=lambda group: (risk_order[group.risk], group.reason_code.value))
