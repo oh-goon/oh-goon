@@ -127,14 +127,14 @@ def is_transient_source_path(
     """Whether a repository-relative path is generated/operational and never source identity."""
 
     relative = repository_relative_path(path)
-    if any(
-        relative == PurePosixPath(root) or PurePosixPath(root) in relative.parents
-        for root in exclude_paths
-    ):
+    # Construct the lexical ancestry once. PurePath.parents membership creates
+    # ancestor paths on each lookup; repeating it for every owned root dominated
+    # source admission on larger trees.
+    ancestry = frozenset((relative, *relative.parents))
+    if any(PurePosixPath(root) in ancestry for root in exclude_paths):
         return True
-    for root in TRANSIENT_RELATIVE_PATHS:
-        if relative == root or root in relative.parents:
-            return True
+    if not TRANSIENT_RELATIVE_PATHS.isdisjoint(ancestry):
+        return True
     if any(part in TRANSIENT_DIRECTORY_NAMES for part in relative.parts):
         return True
     if any(part.endswith(PYTHON_DISTRIBUTION_METADATA_SUFFIXES) for part in relative.parts):

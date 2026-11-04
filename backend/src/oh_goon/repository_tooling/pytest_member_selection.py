@@ -39,6 +39,8 @@ def collected_item(item: Any, root: Path) -> dict[str, str]:
     row = {"file": file, "selector": file + ("::" + suffix if suffix else "")}
     if item.get_closest_marker("no_resume") is not None:
         row["no_resume"] = "true"
+    if item.get_closest_marker("native_resources") is not None:
+        row["native_resources"] = "true"
     return row
 
 

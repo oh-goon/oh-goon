@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import re
@@ -390,12 +391,14 @@ def verify_current_run_resource_scope(
 
 @dataclass(slots=True)
 class PinnedRunResourceScope:
-    """Parent-owned readonly original directory handle, acquired before ready ACK."""
+    """Parent-owned readonly original kernel handles, acquired before ready ACK."""
 
     resolved: ResolvedRunResourceScope
     started: RunResourceEnvelopeEvidence
     _directory: Path = field(repr=False)
     _descriptor: int | None = field(repr=False)
+    _events_descriptor: int | None = field(repr=False)
+    _events_identity: tuple[int, int] = field(repr=False)
     _lifetime: ExitStack = field(repr=False)
 
     def __enter__(self) -> Self:
@@ -418,6 +421,7 @@ class PinnedRunResourceScope:
     def close(self) -> None:
         if self._descriptor is not None:
             self._descriptor = None
+            self._events_descriptor = None
             self._lifetime.close()
 
     def _metadata(self) -> os.stat_result:
@@ -439,7 +443,25 @@ class PinnedRunResourceScope:
         self._metadata()
 
     def _retired(self) -> bool:
-        return self._metadata().st_nlink == 0
+        self._metadata()
+        if self._events_descriptor is None:
+            raise FleetPlanInvalid("Whole-Run original event control handle is closed")
+        observed = os.fstat(self._events_descriptor)
+        if not stat.S_ISREG(observed.st_mode) or (observed.st_dev, observed.st_ino) != (
+            self._events_identity
+        ):
+            raise FleetPlanInvalid("Whole-Run original event control identity changed")
+        try:
+            os.lseek(self._events_descriptor, 0, os.SEEK_SET)
+            os.read(self._events_descriptor, 1)
+        except OSError as error:
+            # Kernfs retains a directory link count after cgroup retirement. Its
+            # already-open mandatory control instead reports the original node's
+            # native deactivation. Other read errors do not establish retirement.
+            if error.errno == errno.ENODEV:
+                return True
+            raise
+        return False
 
 
 def pin_started_run_resource_scope(
@@ -496,7 +518,28 @@ def pin_started_run_resource_scope(
         if native_cgroups._standard_mountinfo_snapshot() != mountinfo:
             raise FleetPlanInvalid("Whole-Run waiting mount view changed")
         native_cgroups._require_original_cgroup(target, identity)
-        return PinnedRunResourceScope(scope, started, target, handle, lifetime.pop_all())
+        events = os.open(
+            "cgroup.events",
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+            dir_fd=handle,
+        )
+        lifetime.callback(os.close, events)
+        event_metadata = os.fstat(events)
+        if (
+            not stat.S_ISREG(event_metadata.st_mode)
+            or event_metadata.st_dev != started.cgroup_device
+            or not os.read(events, 1)
+        ):
+            raise FleetPlanInvalid("Whole-Run waiting event control is unavailable")
+        return PinnedRunResourceScope(
+            scope,
+            started,
+            target,
+            handle,
+            events,
+            (event_metadata.st_dev, event_metadata.st_ino),
+            lifetime.pop_all(),
+        )
 
 
 def _native_unit_retired(scope: ResolvedRunResourceScope, properties: Mapping[str, str]) -> bool:

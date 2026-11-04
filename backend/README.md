@@ -48,7 +48,8 @@ commands remain native and do not acquire the Make-owned CPU scope.
 
 Backend and integration Make gates use the existing bounded pytest batches,
 retain their original pytest configuration and markers, and default locally to
-one worker. Relevant hosted verification requests four workers; complete backend
+one worker. Local relevant `make check` requests two workers; relevant hosted
+verification requests four workers. Complete backend
 and integration CI gates request two through `BACKEND_CHECK_TEST_WORKERS=2` and
 `INTEGRATION_TEST_WORKERS=2`. The existing resource-budget owner clamps requested
 workers to native CPU and memory capacity and any configured ceiling. These

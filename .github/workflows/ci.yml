@@ -29,6 +29,9 @@ jobs:
     env:
       UV_PYTHON: "3.12"
       OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
+      OH_GOON_NATIVE_QUALIFICATION_PROFILE: shared-user-manager
+      OH_GOON_REQUIRE_NATIVE_ISOLATION: '1'
+      OH_GOON_REQUIRE_NATIVE_RUN_RESOURCES: '1'
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || inputs.base }}
       REQUESTED_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
       VERIFY_MODE: ${{ github.event.pull_request.draft && 'focused' || 'merge' }}
@@ -46,16 +49,21 @@ jobs:
           cache-suffix: py312-dev-quality-build
       - name: Materialize only the Python verification and build environment
         run: uv sync --project backend --frozen --group dev --group quality --group build
+      - name: Resolve the native verification context before collection
+        run: |
+          runner_uid=$(id -u)
+          runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$runner_uid}"
+          printf 'OH_GOON_CI_RUNNER_UID=%s\n' "$runner_uid" >> "$GITHUB_ENV"
+          printf 'XDG_RUNTIME_DIR=%s\n' "$runtime_dir" >> "$GITHUB_ENV"
+          printf 'DBUS_SESSION_BUS_ADDRESS=%s\n' "${DBUS_SESSION_BUS_ADDRESS:-unix:path=$runtime_dir/bus}" >> "$GITHUB_ENV"
       - name: Prepare optional native test CPU control
         if: env.OH_GOON_TEST_CPUS != '0'
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
-          runner_uid=$(id -u)
+          runner_uid="$OH_GOON_CI_RUNNER_UID"
           sudo loginctl enable-linger "$runner_uid"
           sudo systemctl start "user@$runner_uid.service"
-          test -S "/run/user/$runner_uid/bus"
-          printf 'XDG_RUNTIME_DIR=/run/user/%s\n' "$runner_uid" >> "$GITHUB_ENV"
-          printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%s/bus\n' "$runner_uid" >> "$GITHUB_ENV"
+          test -S "$XDG_RUNTIME_DIR/bus"
       - name: Admit the exact candidate once
         id: selection
         run: |
@@ -69,6 +77,13 @@ jobs:
             uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \
             --base "$BASE_SHA" --candidate "$GITHUB_SHA" --head "$REQUESTED_HEAD" \
             --mode "$VERIFY_MODE" --plan "$CONTROL_DIR/plan.json" --github-output "$GITHUB_OUTPUT"
+      - name: Prepare the host required by admitted native resource tests
+        if: steps.selection.outputs.native_resources == 'true' && env.OH_GOON_TEST_CPUS == '0'
+        run: |
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          sudo loginctl enable-linger "$OH_GOON_CI_RUNNER_UID"
+          sudo systemctl start "user@$OH_GOON_CI_RUNNER_UID.service"
+          test -S "$XDG_RUNTIME_DIR/bus"
       - name: Restore native mypy analysis
         if: steps.selection.outputs.python == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -95,11 +110,13 @@ jobs:
       - name: Execute admitted proof through existing owners
         env:
           SELECTED_PYTEST: ${{ steps.selection.outputs.pytest }}
+          SELECTED_NATIVE_RESOURCES: ${{ steps.selection.outputs.native_resources }}
         run: |
           native_view=()
           if [ "$SELECTED_PYTEST" = true ]; then
-            native_view=(bash scripts/ci_native_runtime.sh)
+            native_view=(bash scripts/ci_native_runtime.sh --native-resources-needed "$SELECTED_NATIVE_RESOURCES" --)
           fi
+          export OH_GOON_NATIVE_QUALIFICATION_REPORT_PATH="$CONTROL_DIR/native-host.json"
           "${native_view[@]}" \
           bash scripts/development_test_resources.sh \
             uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \

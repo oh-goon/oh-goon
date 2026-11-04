@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import sys
@@ -160,6 +161,7 @@ def child(
         "pids.max": "max",
         "cgroup.type": "domain",
         "cgroup.procs": str(os.getpid()),
+        "cgroup.events": "populated 1\nfrozen 0\n",
     }.items():
         (target / name).write_text(value)
     properties = _properties(scope)
@@ -440,11 +442,49 @@ def _remove_group(directory: Path) -> None:
     directory.rmdir()
 
 
+def _retire_kernel_events(
+    directory: Path, monkeypatch: pytest.MonkeyPatch, *, error: int = errno.ENODEV
+) -> None:
+    original_read, original_stat = os.read, os.fstat
+    events = (directory / "cgroup.events").stat()
+    group = directory.stat()
+
+    def native_retired_read(descriptor: int, size: int) -> bytes:
+        metadata = original_stat(descriptor)
+        if (metadata.st_dev, metadata.st_ino) == (events.st_dev, events.st_ino):
+            raise OSError(error, "native event control no longer active")
+        return original_read(descriptor, size)
+
+    def kernfs_stat(descriptor: int) -> os.stat_result:
+        metadata = original_stat(descriptor)
+        if (metadata.st_dev, metadata.st_ino) == (group.st_dev, group.st_ino):
+            fields = list(metadata)
+            fields[3] = 2
+            return os.stat_result(fields)
+        return metadata
+
+    monkeypatch.setattr(os, "read", native_retired_read)
+    monkeypatch.setattr(os, "fstat", kernfs_stat)
+
+
 def test_parent_pin_retains_readonly_original_object_and_closes_deterministically(
-    scope: envelope.ResolvedRunResourceScope, child: tuple[dict[str, str], Path], tmp_path: Path
+    scope: envelope.ResolvedRunResourceScope,
+    child: tuple[dict[str, str], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import fcntl
 
+    opened_events: list[int] = []
+    native_open = os.open
+
+    def observe_open(path, flags, *args, **kwargs):
+        descriptor = native_open(path, flags, *args, **kwargs)
+        if path == "cgroup.events":
+            opened_events.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(os, "open", observe_open)
     started = envelope.verify_current_run_resource_scope(scope, handoff_sha256=_DIGEST)
     with envelope.pin_started_run_resource_scope(
         scope, started, expected_birth=_BIRTH, handoff_sha256=_DIGEST
@@ -453,11 +493,40 @@ def test_parent_pin_retains_readonly_original_object_and_closes_deterministicall
         assert os.get_inheritable(descriptor) is False
         assert fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDONLY
         assert os.fstat(descriptor).st_ino == started.cgroup_inode
+        assert len(opened_events) == 1
+        assert not os.get_inheritable(opened_events[0])
+        assert fcntl.fcntl(opened_events[0], fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDONLY
     with pytest.raises(OSError):
         os.fstat(descriptor)
+    with pytest.raises(OSError):
+        os.fstat(opened_events[0])
     with (tmp_path / "other").open("w") as other:
         pinned.close()
         assert os.fstat(other.fileno()).st_ino == (tmp_path / "other").stat().st_ino
+
+
+@pytest.mark.parametrize("boundary", ["missing", "symlink", "empty"])
+def test_parent_pin_refuses_unbound_mandatory_event_control_before_ack(
+    scope: envelope.ResolvedRunResourceScope,
+    child: tuple[dict[str, str], Path],
+    boundary: str,
+    tmp_path: Path,
+) -> None:
+    _properties, target = child
+    started = envelope.verify_current_run_resource_scope(scope, handoff_sha256=_DIGEST)
+    events = target / "cgroup.events"
+    events.unlink()
+    if boundary == "symlink":
+        foreign = tmp_path / "foreign-events"
+        foreign.write_text("populated 1\n")
+        events.symlink_to(foreign)
+    elif boundary == "empty":
+        events.write_text("")
+
+    with pytest.raises((OSError, FleetPlanInvalid)):
+        envelope.pin_started_run_resource_scope(
+            scope, started, expected_birth=_BIRTH, handoff_sha256=_DIGEST
+        )
 
 
 @pytest.mark.parametrize("boundary", ("birth", "invocation", "pid", "domain", "limits"))
@@ -493,8 +562,9 @@ def test_pinned_original_retirement_and_native_unit_retirement_prove_cleanup_onl
     with envelope.pin_started_run_resource_scope(
         scope, started, expected_birth=_BIRTH, handoff_sha256=_DIGEST
     ) as pinned:
+        _retire_kernel_events(target, monkeypatch)
         _remove_group(target)
-        assert os.fstat(pinned.fileno()).st_nlink == 0
+        assert os.fstat(pinned.fileno()).st_nlink == 2
         properties.clear()
         properties.update(_retired_properties(scope))
 
@@ -525,6 +595,7 @@ def test_missing_native_accounting_does_not_prove_cleanup_without_both_retiremen
         scope, started, expected_birth=_BIRTH, handoff_sha256=_DIGEST
     ) as pinned:
         if boundary != "linked":
+            _retire_kernel_events(target, monkeypatch)
             _remove_group(target)
         if boundary == "closed":
             pinned.close()
@@ -545,6 +616,56 @@ def test_missing_native_accounting_does_not_prove_cleanup_without_both_retiremen
             handoff_sha256=_DIGEST,
             pinned=None if boundary == "no-pin" else pinned,
         )
+    assert observed.cleanup == "INCOMPLETE" and observed.state == "INCOMPLETE"
+
+
+@pytest.mark.parametrize("error", [errno.EACCES, errno.EIO, errno.EBADF, errno.ENOENT])
+def test_native_event_control_read_errors_do_not_prove_original_retirement(
+    scope: envelope.ResolvedRunResourceScope,
+    child: tuple[dict[str, str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    error: int,
+) -> None:
+    properties, target = child
+    started = envelope.verify_current_run_resource_scope(scope, handoff_sha256=_DIGEST)
+    with envelope.pin_started_run_resource_scope(
+        scope, started, expected_birth=_BIRTH, handoff_sha256=_DIGEST
+    ) as pinned:
+        _retire_kernel_events(target, monkeypatch, error=error)
+        _remove_group(target)
+        properties.clear()
+        properties.update(_retired_properties(scope))
+        monkeypatch.setattr(
+            envelope,
+            "run_command",
+            lambda *_args, **_options: pytest.fail("unknown native cleanup mutated a unit"),
+        )
+        observed = envelope.finish_run_resource_scope(
+            scope, started, expected_birth=_BIRTH, handoff_sha256=_DIGEST, pinned=pinned
+        )
+
+    assert observed.cleanup == "INCOMPLETE"
+    assert observed.state == "INCOMPLETE" and observed.result is None
+
+
+def test_unlinked_directory_without_native_control_retirement_does_not_prove_cleanup(
+    scope: envelope.ResolvedRunResourceScope,
+    child: tuple[dict[str, str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    properties, target = child
+    started = envelope.verify_current_run_resource_scope(scope, handoff_sha256=_DIGEST)
+    with envelope.pin_started_run_resource_scope(
+        scope, started, expected_birth=_BIRTH, handoff_sha256=_DIGEST
+    ) as pinned:
+        _remove_group(target)
+        assert os.fstat(pinned.fileno()).st_nlink == 0
+        properties.clear()
+        properties.update(_retired_properties(scope))
+        observed = envelope.finish_run_resource_scope(
+            scope, started, expected_birth=_BIRTH, handoff_sha256=_DIGEST, pinned=pinned
+        )
+
     assert observed.cleanup == "INCOMPLETE" and observed.state == "INCOMPLETE"
 
 

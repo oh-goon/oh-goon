@@ -8,13 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.core.errors import InvalidRunTransition, JournalConflict
+from oh_goon.core.errors import InvalidRunTransition, JournalConflict, RepositoryEffectQuarantined
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunFailure
 from oh_goon.core.models.run_admission import fleet_repository_scope
 from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.product_identity import repository_attempt_operation_id, repository_id
 from oh_goon.core.vocabulary import (
+    CommandSafety,
     EffectBoundaryKind,
     FleetRunStatus,
     FleetRunTerminalIntent,
@@ -129,11 +130,15 @@ def test_context_capture_requires_terminal_run(tmp_path: Path) -> None:
     )
 
 
-def test_terminal_context_cannot_hide_unsettled_original_effect(tmp_path: Path) -> None:
+@pytest.mark.parametrize("effect_started", [False, True])
+def test_terminal_context_cannot_hide_unsettled_original_effect(
+    tmp_path: Path, effect_started: bool
+) -> None:
     journal, expected, repository = _journal(tmp_path, terminal=False)
     intent = run_resource_admission(repository, expected)
     with journal._database.transaction(write=True) as connection:
-        RepositoryEffectAttemptStore(journal._database).begin_fleet_in(
+        attempts = RepositoryEffectAttemptStore(journal._database)
+        attempt = attempts.begin_fleet_in(
             connection,
             repository.path,
             intent.capability,
@@ -145,11 +150,64 @@ def test_terminal_context_cannot_hide_unsettled_original_effect(tmp_path: Path) 
             baseline=baseline_for(repository),
             effect_boundary=EffectBoundaryKind.CONTAINED,
         )
+        if effect_started:
+            attempts.start_effect_in(connection, attempt.operation_id)
     _fail(journal, expected)
     before = _row_count(journal._database.path)
     with pytest.raises(InvalidRunTransition, match="settled original effects"):
         journal.capture_run_resource_observation_context(expected)
     assert _row_count(journal._database.path) == before
+
+
+def test_resource_observation_preserves_semantic_effect_quarantine_and_failed_run(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.services.effect_quarantine import (
+        effect_quarantines,
+        require_effects_allowed_for_repositories,
+    )
+
+    journal, expected, repository = _journal(tmp_path, terminal=False)
+    intent = run_resource_admission(repository, expected)
+    attempts = RepositoryEffectAttemptStore(journal._database)
+    with journal._database.transaction(write=True) as connection:
+        attempt = attempts.begin_fleet_in(
+            connection,
+            repository.path,
+            intent.capability,
+            fleet_run_id=expected.fleet_run_id,
+            operation_id=repository_attempt_operation_id(
+                expected.fleet_run_id, repository.repository_id
+            ),
+            target=intent.target,
+            baseline=baseline_for(repository),
+            effect_boundary=EffectBoundaryKind.EXTERNAL,
+        )
+        attempts.start_effect_in(connection, attempt.operation_id)
+        unknown = attempts.mark_unknown_in(
+            connection,
+            attempt.operation_id,
+            note="Native process settled; filesystem outcome unknown",
+        )
+    assert unknown.quarantines_repository
+    _fail(journal, expected)
+    original = journal.read_view().required_run_detail(expected.fleet_run_id)
+    context = journal.capture_run_resource_observation_context(expected)
+    observation = run_resource_observation(expected)
+
+    Journal.record_run_resource_observation_from_context(context, observation)
+
+    assert attempts.get(attempt.operation_id) == unknown
+    current = journal.read_view().required_run_detail(expected.fleet_run_id)
+    assert current.run == original.run and current.run.status is FleetRunStatus.FAILED
+    assert current.resource_observation == observation
+    assert current.execution == original.execution
+    with pytest.raises(RepositoryEffectQuarantined):
+        require_effects_allowed_for_repositories(
+            CommandSafety.WORKTREE_MUTATION,
+            (repository.repository_id,),
+            effect_quarantines(attempts.all()),
+        )
 
 
 @pytest.mark.parametrize("field", ("unit_name", "invocation_id", "handoff_sha256"))

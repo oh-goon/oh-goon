@@ -13,6 +13,10 @@ name: Focused behavior feedback
         required: true
         type: string
         default: make merge-check
+      native_resources:
+        description: Prepare the explicitly selected native resource-test worker
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +33,9 @@ jobs:
     env:
       UV_PYTHON: "3.12"
       OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
+      OH_GOON_NATIVE_QUALIFICATION_PROFILE: ${{ inputs.native_resources && 'shared-user-manager' || '' }}
+      OH_GOON_REQUIRE_NATIVE_ISOLATION: ${{ inputs.native_resources && '1' || '' }}
+      OH_GOON_REQUIRE_NATIVE_RUN_RESOURCES: ${{ inputs.native_resources && '1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,7 +53,7 @@ jobs:
           sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Prepare optional native test CPU control
-        if: env.OH_GOON_TEST_CPUS != '0'
+        if: env.OH_GOON_TEST_CPUS != '0' || inputs.native_resources
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
           runner_uid=$(id -u)
@@ -61,10 +68,15 @@ jobs:
         env:
           TEST_SELECTION: ${{ inputs.test_selection }}
           NEXT_CHECK: ${{ inputs.next_check }}
+          NATIVE_RESOURCES_NEEDED: ${{ inputs.native_resources && 'true' || 'false' }}
         run: |
           test -n "$TEST_SELECTION"
           test -n "$NEXT_CHECK"
-          bash scripts/development_test_resources.sh \
+          native_host=()
+          if [ "$NATIVE_RESOURCES_NEEDED" = true ]; then
+            native_host=(bash scripts/ci_native_runtime.sh --native-resources-needed true --)
+          fi
+          "${native_host[@]}" bash scripts/development_test_resources.sh \
             uv run --offline --frozen --no-sync --project backend oh-goon-test-batches \
             --qualified --focused --fail-fast --next-check "$NEXT_CHECK" --show-output \
             --granularity tests --workers 1 --batch-size 64 \

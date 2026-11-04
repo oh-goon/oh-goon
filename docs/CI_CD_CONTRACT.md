@@ -34,6 +34,15 @@ without weakening selection or requiring a manually warmed index.
 The same admission is available locally through `make check` or `make test`.
 Use a focused owner test while editing; these front doors do not run unrelated
 complete suites. `VERIFY_BASE=<commit> make check` selects an explicit comparison.
+Small local edits repeat the affected native file or test case, rather than
+repeating every owner or the complete merge proof. Run `make check` once the
+change is coherent; `make merge-check` is an optional deliberate local rehearsal,
+not another mandatory step after that check. Local relevant checks request two
+workers and hosted checks request four, both clamped by native capacity. Cheap
+Ruff/format feedback stays first. The independent Types and Architecture owners
+may overlap with at most two processes; generated/package/frontend owners remain
+ordered. Failure or source drift cancels and settles started children through
+the original native command owner before reporting incomplete proof.
 `make merge-check` produces candidate-bound selected proof for independent gate
 validation. `make broad-diagnostic`, complete owner targets and `make release-check`
 remain explicit broad diagnostics/daily/release actions, not hidden prerequisites
@@ -214,6 +223,25 @@ hosted native runtime view and its owned SDK-overlay cleanup through
 `ci_native_runtime.sh`; static/docs checks do not mount it. CPU budgets and
 process cleanup retain their existing native owners.
 
+Native pytest collection transports the `native_resources` capability of the
+already selected tests. It changes host preparation only: it never adds, removes
+or defers verification members. Hosted relevant verification prepares the
+explicit `shared-user-manager` test worker only when that capability is admitted;
+complete Python-owner campaigns select that host context explicitly.
+The focused workflow offers the same optional native-resource selection.
+Ordinary local commands keep their existing caller context and need no host
+preparation for unrelated edits.
+
+The qualification worker is allocated before test execution through native
+systemd, with no private resource limit that would be abandoned by a sibling
+test scope. Actual shared-ancestor controls, selected tools/interpreter, source
+and unit identity are retained in bounded evidence. Any explicitly requested CPU
+ceiling must already be proved on the shared ancestry or preparation refuses it.
+The original caller's private limits stay unchanged; its refused context is not
+claimed qualified by the new worker's result. The provider does not change
+production admission or turn missing evidence into PASS. These external-state
+native proofs carry `no_resume` and run fresh when selected.
+
 When the admitted plan requires Python static checks, hosted PR verification may
 restore native mypy analysis from `backend/.mypy_cache`. Cache keys bind the
 runner OS/architecture, selected Python version, committed backend lock and
@@ -241,8 +269,11 @@ not start verification. After changing the target branch, update the head branch
 or reopen the PR to obtain a fresh normal PR run before merging. A previous green
 head check is not proof for the new base; this contributor step is not automatic
 retarget enforcement. The fresh run retains the existing exact base/head/candidate
-validation. Up-to-date or merge-queue enforcement remains the protection policy
-described below.
+validation. Keep title/body edits outside this trigger: a skipped required job
+can count as successful on GitHub, and an all-skipped replacement suite can leave
+the required check missing. Neither outcome supplies fresh candidate proof.
+The platform up-to-date setting below protects ordinary merges after main moves;
+a retarget still requires the fresh PR event described here.
 
 An **Expected — Waiting for status to be reported** check is missing reporting,
 not a running test. Inspect the current head's normal PR run and its exact
@@ -269,6 +300,28 @@ replacement PR in draft until reviewed source, daily execution and the required
 administrator cutover are ready. A green optional workflow is not merge protection.
 A bounded manual replay uses **Relevant verification → Run workflow** with an
 immutable base SHA; it does not alter default-branch settings.
+
+For the repository's current personal-account ownership, use strict required
+status checks in the existing [main ruleset](https://github.com/oh-goon/oh-goon/rules/25700231).
+GitHub merge queues require an organization-owned repository; changing repository
+ownership is not part of this cutover. The workflow already handles `merge_group`
+if an eligible repository later selects that native GitHub feature.
+
+An administrator applies the existing rule once in **Settings → Rules → Rulesets
+→ main → Require status checks to pass before merging**, enabling **Require
+branches to be up to date before merging**. Preserve `merge-gate` and its GitHub
+Actions source, the existing branch targets, deletion/force-push protections and
+bypass policy. Ordinary PRs continue to use the same selected proof and independent
+aggregate. Keep the administrator operation separate from PR source verification:
+merging YAML or documentation does not apply this setting.
+
+After saving, read the actual rule back through GitHub and confirm
+`strict_required_status_checks_policy: true` in the existing
+`required_status_checks` rule. Observe a failing candidate and a previously green
+branch that is behind main being blocked. Updating the branch must produce fresh
+normal PR proof for its current base/head/candidate before merge. Retain the
+native source and check identities with that observation; no synthetic success or
+additional required check can replace the platform result.
 
 The normal required gate targets p95 ≤300 seconds and aims for p50 ≤120 seconds,
 including queue, setup, selection, execution and aggregation. Local warm focused

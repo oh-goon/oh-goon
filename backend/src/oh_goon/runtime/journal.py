@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from pydantic import Field
 
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
+from oh_goon.core.effect_attempts import LIVE_OWNED_EFFECT_STATUSES
 from oh_goon.core.errors import InvalidRunTransition, JournalConflict
 from oh_goon.core.models.agent_repair import (
     MAX_AGENT_CAMPAIGN_MESSAGE_CHARS,
@@ -738,8 +739,14 @@ class Journal:
                 raise InvalidRunTransition("Run resource context requires a terminal original Run")
             if detail.resource_observation is not None:
                 raise InvalidRunTransition("Run resource observation is already recorded")
-            if RepositoryEffectAttemptStore(self._database).by_fleet_run_in(
-                connection, expected.fleet_run_id
+            # A quarantined filesystem outcome does not establish a live effect
+            # owner. Recording native resource facts leaves that semantic state
+            # untouched; live claims and unresolved canonical reports still refuse.
+            if any(
+                attempt.status in LIVE_OWNED_EFFECT_STATUSES
+                for attempt in RepositoryEffectAttemptStore(self._database).by_fleet_run_in(
+                    connection, expected.fleet_run_id
+                )
             ) or any(report.resource_settlement == "UNRESOLVED" for report in detail.operations):
                 raise InvalidRunTransition("Run resource context requires settled original effects")
             events = view.run_events(expected.fleet_run_id).events

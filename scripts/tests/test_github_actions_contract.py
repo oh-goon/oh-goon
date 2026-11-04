@@ -33,7 +33,8 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
     runs = [
         step["run"]
         for step in job["steps"]
-        if "run" in step and step.get("if") != "always()"
+        if "run" in step
+        and str(step.get("if", "")).startswith("env.OH_GOON_TEST_CPUS != '0'")
     ]
     preparations = [
         (index, command)
@@ -47,15 +48,117 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
         step for step in job["steps"] if step.get("run") == preparation
     ]
     assert len(preparation_steps) == 1
-    assert preparation_steps[0]["if"] == "env.OH_GOON_TEST_CPUS != '0'"
+    expected_condition = "env.OH_GOON_TEST_CPUS != '0'"
+    if "matrix" in job.get("strategy", {}):
+        expected_condition += (
+            " || matrix.target == 'check-backend-tests'"
+            " || matrix.target == 'test-backend-integration'"
+            " || matrix.target == 'check-tooling-tests'"
+            " || matrix.target == 'test-cross-owner-integration'"
+        )
+    elif "inputs.native_resources" in job["env"].get(
+        "OH_GOON_NATIVE_QUALIFICATION_PROFILE", ""
+    ):
+        expected_condition += " || inputs.native_resources"
+    assert preparation_steps[0]["if"] == expected_condition
+    all_runs = [step["run"] for step in job["steps"] if "run" in step]
     effect_indices = [
         index
-        for index, command in enumerate(runs)
+        for index, command in enumerate(all_runs)
         if {"make", "scripts/development_test_resources.sh"}
         & set(shlex.split(command, comments=True))
     ]
-    assert effect_indices and all(preparation_index < index for index in effect_indices)
+    actual_preparation_index = all_runs.index(preparation)
+    assert effect_indices and all(
+        actual_preparation_index < index for index in effect_indices
+    )
     return preparation
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("configured", [False, True])
+def test_collection_resolves_manager_context_without_preparing_unneeded_capabilities(
+    tmp_path: Path, configured: bool
+) -> None:
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    steps = _workflow()["jobs"]["verify"]["steps"]
+    resolution = next(
+        step for step in steps if "OH_GOON_CI_RUNNER_UID=" in step.get("run", "")
+    )
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    identity = commands / "id"
+    identity.write_text('#!/bin/sh\ntest "$*" = -u\nprintf "1117\\n"\n')
+    identity.chmod(0o755)
+    mutations = tmp_path / "unexpected-native-effect"
+    for name in ("sudo", "loginctl", "systemctl"):
+        denied = commands / name
+        denied.write_text('#!/bin/sh\nprintf "called\\n" > "$NATIVE_EFFECT"\nexit 89\n')
+        denied.chmod(0o755)
+    exported = tmp_path / "environment"
+    environment = {
+        "PATH": str(commands) + os.pathsep + os.defpath,
+        "GITHUB_ENV": str(exported),
+        "NATIVE_EFFECT": str(mutations),
+    }
+    if configured:
+        environment["XDG_RUNTIME_DIR"] = str(tmp_path / "selected-runtime")
+        environment["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/selected/native-bus"
+    result = subprocess.run(
+        [
+            bash,
+            "--noprofile",
+            "--norc",
+            "-e",
+            "-o",
+            "pipefail",
+            "-c",
+            resolution["run"],
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    values = dict(line.split("=", 1) for line in exported.read_text().splitlines())
+    assert values == {
+        "OH_GOON_CI_RUNNER_UID": "1117",
+        "XDG_RUNTIME_DIR": environment.get("XDG_RUNTIME_DIR", "/run/user/1117"),
+        "DBUS_SESSION_BUS_ADDRESS": environment.get(
+            "DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1117/bus"
+        ),
+    }
+    assert not mutations.exists()
+    assert steps.index(resolution) < next(
+        index for index, step in enumerate(steps) if step.get("id") == "selection"
+    )
+
+
+def test_native_host_setup_uses_only_admitted_capability_without_new_required_checks() -> (
+    None
+):
+    workflow = _workflow()
+    assert set(workflow["jobs"]) == {"verify", "merge-gate", "main-health"}
+    job = workflow["jobs"]["verify"]
+    preparations = [
+        step
+        for step in job["steps"]
+        if "outputs.native_resources" in step.get("if", "")
+    ]
+    (preparation,) = preparations
+    assert preparation["if"] == (
+        "steps.selection.outputs.native_resources == 'true' && env.OH_GOON_TEST_CPUS == '0'"
+    )
+    assert job["env"]["OH_GOON_NATIVE_QUALIFICATION_PROFILE"] == "shared-user-manager"
+    assert job["env"]["OH_GOON_REQUIRE_NATIVE_RUN_RESOURCES"] == "1"
+    assert job["env"]["OH_GOON_REQUIRE_NATIVE_ISOLATION"] == "1"
+    steps = job["steps"]
+    assert next(
+        index for index, step in enumerate(steps) if step.get("id") == "selection"
+    ) < steps.index(preparation)
 
 
 @pytest.mark.process
@@ -117,27 +220,31 @@ def test_native_cpu_preparation_proves_user_bus_before_make_without_opting_out(
                 "PREPARATION_EVENTS": str(events),
                 "MANAGER_STATUS": str(manager_status),
                 "OH_GOON_TEST_CPUS": "2",
+                "OH_GOON_CI_RUNNER_UID": "1117",
+                "XDG_RUNTIME_DIR": str(bus_path.parent),
             },
             capture_output=True,
             text=True,
             timeout=10,
         )
         assert result.returncode == manager_status, result.stderr
-        expected = [
-            "id:-u",
+        expected = (["id:-u"] if workflow_name != "ci.yml" else []) + [
             "sudo:loginctl enable-linger 1117",
             "sudo:systemctl start user@1117.service",
         ]
         if manager_status == 0:
             expected.append("make:init")
-            environment = dict(
-                line.split("=", 1) for line in exported.read_text().splitlines()
-            )
-            assert environment == {
-                "XDG_RUNTIME_DIR": str(bus_path.parent),
-                "DBUS_SESSION_BUS_ADDRESS": f"unix:path={bus_path}",
-            }
-            assert "OH_GOON_TEST_CPUS" not in environment
+            if workflow_name != "ci.yml":
+                environment = dict(
+                    line.split("=", 1) for line in exported.read_text().splitlines()
+                )
+                assert environment == {
+                    "XDG_RUNTIME_DIR": str(bus_path.parent),
+                    "DBUS_SESSION_BUS_ADDRESS": f"unix:path={bus_path}",
+                }
+                assert "OH_GOON_TEST_CPUS" not in environment
+            else:
+                assert not exported.exists()
         else:
             assert not exported.exists()
         assert events.read_text().splitlines() == expected
@@ -468,10 +575,13 @@ def test_manual_focused_run_never_publishes_required_checks_or_cancels_full_ci()
     workflow = _focused_workflow()
     assert set(workflow["on"]) == {"workflow_dispatch"}
     inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-    assert set(inputs) == {"test_selection", "next_check"}
+    assert set(inputs) == {"test_selection", "next_check", "native_resources"}
     assert all(
-        value["required"] and value["type"] == "string" for value in inputs.values()
+        inputs[key]["required"] and inputs[key]["type"] == "string"
+        for key in ("test_selection", "next_check")
     )
+    assert inputs["native_resources"]["type"] == "boolean"
+    assert inputs["native_resources"]["default"] is False
     assert workflow["concurrency"]["group"].startswith("${{ github.workflow }}-")
     assert set(workflow["jobs"]) == {"focused-behavior"}
     job = workflow["jobs"]["focused-behavior"]
@@ -488,8 +598,9 @@ def test_manual_focused_run_never_publishes_required_checks_or_cancels_full_ci()
 
 @pytest.mark.process
 @pytest.mark.parametrize("exit_code", [0, 17, 124, 130])
+@pytest.mark.parametrize("native_resources", [False, True])
 def test_manual_focused_selection_and_guidance_are_inert_argv_and_preserve_failure(
-    tmp_path: Path, exit_code: int
+    tmp_path: Path, exit_code: int, native_resources: bool
 ) -> None:
     bash = shutil.which("bash", path=os.defpath)
     assert bash is not None
@@ -507,6 +618,7 @@ def test_manual_focused_selection_and_guidance_are_inert_argv_and_preserve_failu
     assert step["env"] == {
         "TEST_SELECTION": "${{ inputs.test_selection }}",
         "NEXT_CHECK": "${{ inputs.next_check }}",
+        "NATIVE_RESOURCES_NEEDED": "${{ inputs.native_resources && 'true' || 'false' }}",
     }
     assert "${{" not in step["run"]
     result = subprocess.run(
@@ -518,6 +630,7 @@ def test_manual_focused_selection_and_guidance_are_inert_argv_and_preserve_failu
             "NEXT_CHECK": guidance,
             "FORWARDED": str(forwarded),
             "TEST_STATUS": str(exit_code),
+            "NATIVE_RESOURCES_NEEDED": str(native_resources).lower(),
         },
         capture_output=True,
         text=True,
@@ -525,6 +638,15 @@ def test_manual_focused_selection_and_guidance_are_inert_argv_and_preserve_failu
     )
     assert result.returncode == exit_code, result.stderr
     arguments = forwarded.read_bytes().decode().split("\0")[:-1]
+    if native_resources:
+        assert arguments[:4] == [
+            "scripts/ci_native_runtime.sh",
+            "--native-resources-needed",
+            "true",
+            "--",
+        ]
+    else:
+        assert arguments[0] == "scripts/development_test_resources.sh"
     assert arguments[-2:] == ["--", selection]
     assert arguments[arguments.index("--next-check") + 1] == guidance
     assert not (tmp_path / "injected").exists()
@@ -650,6 +772,9 @@ def test_relevant_events_keep_merge_candidates_and_main_health_distinct() -> Non
     assert "github.event.merge_group.base_sha" in proof["env"]["BASE_SHA"]
     assert "github.event.pull_request.head.sha" in proof["env"]["REQUESTED_HEAD"]
     assert "github.event.merge_group.head_sha" in proof["env"]["REQUESTED_HEAD"]
+    aggregate = _merge_aggregate()
+    assert aggregate["env"]["BASE_SHA"] == proof["env"]["BASE_SHA"]
+    assert aggregate["env"]["REQUESTED_HEAD"] == proof["env"]["REQUESTED_HEAD"]
     assert workflow["jobs"]["main-health"]["if"] == "github.event_name == 'push'"
 
 
@@ -889,6 +1014,8 @@ def test_merge_control_uses_only_the_trusted_base_and_keeps_its_failure(
         if value.get("uses", "").startswith("actions/checkout@")
     ]
     trusted, candidate = [value["path"] for value in checkouts]
+    assert checkouts[0]["ref"] == job["env"]["BASE_SHA"]
+    assert checkouts[1]["ref"] == "${{ github.sha }}"
     binaries = tmp_path / "bin"
     binaries.mkdir()
     recorded = tmp_path / "arguments"

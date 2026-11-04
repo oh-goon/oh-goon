@@ -59,6 +59,25 @@ def test_local_repository_catalog_is_not_a_global_execution_exclusion() -> None:
 
 
 @pytest.mark.parametrize(
+    ("path", "excluded", "expected"),
+    (
+        ("custom/output", ("custom/output",), True),
+        ("custom/output/artifact.json", ("custom/output",), True),
+        ("custom/output-copy/artifact.json", ("custom/output",), False),
+        ("docs/custom/output/artifact.json", ("custom/output",), False),
+        ("custom/output/artifact.json", ("custom//output/",), True),
+        ("custom/output/artifact.json", (".",), True),
+        (".", (".",), True),
+        (".", (), False),
+    ),
+)
+def test_explicit_source_exclusions_use_exact_lexical_ancestry(
+    path: str, excluded: tuple[str, ...], expected: bool
+) -> None:
+    assert is_transient_source_path(path, exclude_paths=excluded) is expected
+
+
+@pytest.mark.parametrize(
     "path",
     (
         "src/project.egg-info/PKG-INFO",

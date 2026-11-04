@@ -1,8 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Preserve the original hosted native view and its owned cleanup around one selected command.
+# Preserve the original hosted view; qualification is an explicit additional context.
+profile=${OH_GOON_NATIVE_QUALIFICATION_PROFILE:-}
+case "$profile" in
+  ''|shared-user-manager) ;;
+  *) printf 'Unknown native qualification profile\n' >&2; exit 2 ;;
+esac
+needed=${profile:+true}
+if [[ ${1-} == --native-resources-needed ]]; then
+  [[ $# -ge 4 && ( $2 == true || $2 == false ) && $3 == -- ]] || {
+    printf 'Native capability selection must be true or false followed by --\n' >&2
+    exit 2
+  }
+  needed=$2
+  shift 3
+fi
 test "$#" -gt 0
-test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+selected_command=("$@")
+if [[ $needed == true ]]; then
+  [[ $profile == shared-user-manager ]] || {
+    printf 'Selected native resource tests require an explicit qualification profile\n' >&2
+    exit 2
+  }
+  owner_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+  source "$owner_root/scripts/development_test_resources.sh"
+  cpus=$(oh_goon_test_resolved_cpus "${OH_GOON_TEST_CPUS-0}") || exit 2
+  export OH_GOON_TEST_CPUS=$cpus
+  report_argument=()
+  if [[ -n ${OH_GOON_NATIVE_QUALIFICATION_REPORT_PATH:-} ]]; then
+    report_argument=(--report "$OH_GOON_NATIVE_QUALIFICATION_REPORT_PATH")
+  fi
+  selected_command=("$owner_root/backend/.venv/bin/python" -I \
+    -m oh_goon.repository_tooling._native_test_worker \
+    --root "$owner_root" --cpus "$cpus" "${report_argument[@]}" -- "$@")
+fi
+if [[ ${RUNNER_ENVIRONMENT:-} != github-hosted ]]; then
+  [[ $profile == shared-user-manager ]] || exit 1
+  exec "${selected_command[@]}"
+fi
 sdk_root=/usr/local/lib/android/sdk
 if [ -e "$sdk_root" ] || [ -L "$sdk_root" ]; then
   test -d "$sdk_root"
@@ -49,4 +84,4 @@ with os.scandir(path) as entries:
 print("Native SDK overlay identity, emptiness and read-only view verified")
 PY
 fi
-"$@"
+"${selected_command[@]}"
