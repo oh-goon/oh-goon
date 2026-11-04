@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import AbstractContextManager, nullcontext
 from importlib import metadata
 from pathlib import Path
 from shutil import copytree
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from hashmarks import CodeMap
@@ -141,6 +142,56 @@ def test_dependency_nominations_keep_actual_source_owner_after_reopen(
     assert reopened == cold
 
 
+def test_dependency_source_preparation_reuses_one_inventory_before_composite_read(
+    distribution_repository: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _info = distribution_repository
+    base = {"lock": _lock("1.0"), "base_revision": "a" * 40, "lock_path": _LOCK_PATH}
+    with CodeMap(root) as native:
+
+        def selected_map(workspace: Path) -> AbstractContextManager[CodeMap]:
+            assert workspace == root
+            return nullcontext(native)
+
+        monkeypatch.setattr("hashmarks.CodeMap", selected_map)
+        cold = nominate_changed_verification(root, (_LOCK_PATH,), dependency_base=base)
+        assert cold["observations"][0]["state"] == "LINKED"
+        (root / _SOURCE_PATH).write_text(
+            "from different_import.api import answer\ndef selected():\n    return answer() + 1\n",
+            encoding="utf-8",
+        )
+        assert not native.index.is_current(_SOURCE_PATH)
+        inventory = native.files.iter_files
+        synchronize = native.index.sync
+        inventory_depths: list[int] = []
+        prepared: list[tuple[int, tuple[str, ...]]] = []
+
+        def track_inventory(prefix: str = "") -> Iterator[Any]:
+            if prefix == "backend/src":
+                inventory_depths.append(native.reads.depth)
+            yield from inventory(prefix)
+
+        def track_synchronization(paths: Any = None, **options: Any) -> Any:
+            if paths is not None:
+                prepared.append((native.reads.depth, tuple(str(path) for path in paths)))
+            return synchronize(paths, **options)
+
+        monkeypatch.setattr(native.files, "iter_files", track_inventory)
+        monkeypatch.setattr(native.index, "sync", track_synchronization)
+        refreshed = nominate_changed_verification(root, (_LOCK_PATH,), dependency_base=base)
+        assert refreshed["observations"][0]["state"] == "LINKED", refreshed["dependency_changes"]
+        changes = refreshed["dependency_changes"]
+        assert inventory_depths == [0]
+        assert prepared == [(0, tuple(changes["consumer_scope"]["paths"]))]
+        assert native.index.is_current(_SOURCE_PATH)
+    assert changes["consumer_scope"]["completeness"] == "incomplete"
+    assert changes["consumer_scope"]["negative_evidence"] == "not-admissible"
+    assert all(
+        packet["source_scope"]["completeness"] == "complete"
+        for packet in changes["consumer_packets"]
+    )
+
+
 def test_source_scope_is_chunked_without_losing_native_members(
     distribution_repository: tuple[Path, Path], tmp_path: Path
 ) -> None:
@@ -219,6 +270,254 @@ def test_new_dependency_component_has_no_replacement_evidence(
     )
     with CodeMap(root, state_dir=tmp_path / "index") as native:
         with pytest.raises(ValueError, match="not an existing selection replacement"):
+            _observe(native, root)
+
+
+def _required_child_lock(*, scope: str = "required", marker: bool = False) -> bytes:
+    entry = (
+        '{name="required-child"' + (",marker=\"sys_platform == 'win32'\"" if marker else "") + "}"
+    )
+    field = {
+        "required": "dependencies",
+        "optional": "optional-dependencies.feature",
+        "development": "dev-dependencies.quality",
+    }[scope]
+    return (
+        _lock("2.0")
+        + f"{field}=[{entry}]\n".encode()
+        + b'[[package]]\nname="required-child"\nversion="1.0"\n'
+        + b'source={registry="https://pypi.org/simple"}\n'
+    )
+
+
+def _install_required_child(info: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    child = info.parent / "required_child-1.0.dist-info"
+    child.mkdir()
+    (child / "METADATA").write_text("Name: required-child\nVersion: 1.0\n")
+    (child / "RECORD").write_text(
+        f"child_namespace/__init__.py,,\n{child.name}/METADATA,,\n{child.name}/RECORD,,\n"
+    )
+    original = metadata.distributions
+
+    def discover(*, name: str) -> Iterator[metadata.Distribution]:
+        if name == "required-child":
+            yield metadata.Distribution.at(child)
+        else:
+            yield from original(name=name)
+
+    monkeypatch.setattr(metadata, "distributions", discover)
+    return child
+
+
+def test_existing_dependency_can_introduce_a_native_proven_required_child(
+    distribution_repository: tuple[Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, info = distribution_repository
+    child = _install_required_child(info, monkeypatch)
+    (root / _LOCK_PATH).write_bytes(_required_child_lock())
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        result = _observe(native, root)
+        assert (
+            revalidate_changed_dependency_consumers(native, result, root=root)
+            == result["after_assessment"]
+        )
+    introduction = result["dependency_introductions"]
+    parent = introduction["parent_node_id"]
+    (introduced,) = introduction["node_ids"]
+    assert set(result["changed_node_ids"]) == {parent, introduced}
+    assert (
+        introduction["queries"]["observation_identity"]
+        == result["after_observation"]["observation_identity"]
+    )
+    assert introduction["queries"]["results"][0]["result"] == [[parent, introduced]]
+    assert introduction["edges"][0] in result["after_observation"]["relationships"]
+    assert introduction["edges"][0]["effective_scope"] == ""
+    assert next(row for row in result["metadata"] if row["node_id"] == introduced)[
+        "metadata_path"
+    ] == str(child / "METADATA")
+    consumers = [row for packet in result["consumer_packets"] for row in packet["consumers"]]
+    assert consumers and all(row["distribution_nodes"] == [parent] for row in consumers)
+    assert result["consumer_scope"]["negative_evidence"] == "not-admissible"
+
+
+def test_required_child_uses_the_actual_parent_consumer_and_verifier_after_reopen(
+    distribution_repository: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, info = distribution_repository
+    _install_required_child(info, monkeypatch)
+    (root / _LOCK_PATH).write_bytes(_required_child_lock())
+    base = {"lock": _lock("1.0"), "base_revision": "a" * 40, "lock_path": _LOCK_PATH}
+    cold = nominate_changed_verification(root, (_LOCK_PATH,), dependency_base=base)
+    reopened = nominate_changed_verification(root, (_LOCK_PATH,), dependency_base=base)
+    assert reopened == cold
+    changes = cold["dependency_changes"]
+    introduction = changes["dependency_introductions"]
+    parent = introduction["parent_node_id"]
+    (child,) = introduction["node_ids"]
+    chains = {chain["node_id"]: chain for chain in changes["chains"]}
+    assert set(chains) == {parent, child}
+    assert "consumer_node_id" not in chains[parent]
+    assert chains[child]["consumer_node_id"] == parent
+    assert chains[child]["consumer"]["distribution_nodes"] == [parent]
+    assert chains[child]["consumer"] == chains[parent]["consumer"]
+    assert chains[child]["nomination"] == chains[parent]["nomination"]
+    assert (
+        chains[child]["nomination"]["nomination"]["verification_target"]["path"]
+        == "backend/tests/test_feature.py"
+    )
+
+
+def test_introduction_without_an_imported_parent_has_no_verifier_chain(
+    distribution_repository: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, info = distribution_repository
+    _install_required_child(info, monkeypatch)
+    (root / _LOCK_PATH).write_bytes(_required_child_lock())
+    (root / _SOURCE_PATH).write_text("def selected():\n    return 42\n")
+    evidence = nominate_changed_verification(
+        root,
+        (_LOCK_PATH,),
+        dependency_base={"lock": _lock("1.0"), "base_revision": "a" * 40, "lock_path": _LOCK_PATH},
+    )
+    assert evidence["observations"][0]["state"] == "UNAVAILABLE"
+    assert evidence["dependency_changes"]["chains"] == []
+
+
+@pytest.mark.parametrize(
+    "scope,marker", [("optional", False), ("development", False), ("required", True)]
+)
+def test_introduced_child_requires_an_unconditional_runtime_edge(
+    distribution_repository: tuple[Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scope: str,
+    marker: bool,
+) -> None:
+    root, info = distribution_repository
+    _install_required_child(info, monkeypatch)
+    (root / _LOCK_PATH).write_bytes(_required_child_lock(scope=scope, marker=marker))
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        with pytest.raises(ValueError):
+            _observe(native, root)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    ["direct-root", "new-root", "duplicate-selection", "many-introductions", "two-upgrades"],
+)
+def test_required_child_introduction_rejects_unaccounted_or_ambiguous_scope(
+    distribution_repository: tuple[Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extra: str,
+) -> None:
+    root, info = distribution_repository
+    _install_required_child(info, monkeypatch)
+    lock = _required_child_lock()
+    expected = "required introduction"
+    if extra == "direct-root":
+        lock = lock.replace(
+            b'dependencies=[{name="sample-distribution"}]',
+            b'dependencies=[{name="sample-distribution"},{name="required-child"}]',
+        )
+    elif extra == "new-root":
+        expected = "not an existing selection replacement"
+        lock = lock.replace(
+            b'name="required-child"\nversion="1.0"\nsource={registry="https://pypi.org/simple"}',
+            b'name="required-child"\nversion="1.0"\nsource={editable="."}',
+        )
+    elif extra == "duplicate-selection":
+        expected = "ambiguous or unsupported"
+        lock = lock.replace(b'{name="required-child"}', b'{name="required-child",version="1.0"}')
+        lock += b'[[package]]\nname="required-child"\nversion="2.0"\nsource={registry="https://pypi.org/simple"}\n'
+    elif extra == "many-introductions":
+        expected = "one bounded parent"
+        for index in range(32):
+            lock += f'[[package]]\nname="unrelated-{index}"\nversion="1"\nsource={{registry="https://pypi.org/simple"}}\n'.encode()
+    else:
+        expected = "one bounded parent"
+        before = (
+            _lock("1.0")
+            + b'[[package]]\nname="another-parent"\nversion="1"\nsource={registry="https://pypi.org/simple"}\n'
+        )
+        lock += b'[[package]]\nname="another-parent"\nversion="2"\nsource={registry="https://pypi.org/simple"}\n'
+    (root / _LOCK_PATH).write_bytes(lock)
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        with pytest.raises(ValueError, match=expected):
+            if extra == "two-upgrades":
+                native.reads.observe(
+                    lambda _scope: observe_changed_dependency_consumers(
+                        native,
+                        root=root,
+                        lock_path=_LOCK_PATH,
+                        before_lock=before,
+                        base_revision="a" * 40,
+                        source_paths=(_SOURCE_PATH,),
+                    )
+                )
+            else:
+                _observe(native, root)
+
+
+@pytest.mark.parametrize(
+    "fault", ["incomplete", "omitted", "different-path", "wrong-identity", "boolean-bound"]
+)
+def test_required_child_keeps_native_query_uncertainty_and_binding(
+    distribution_repository: tuple[Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+) -> None:
+    root, info = distribution_repository
+    _install_required_child(info, monkeypatch)
+    (root / _LOCK_PATH).write_bytes(_required_child_lock())
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        original = native.dependencies.queries
+
+        def observe_then_limit(observation: Any, requests: Any) -> dict[str, Any]:
+            packet = cast(dict[str, Any], original(observation, requests))
+            if requests:
+                row = packet["results"][0]
+                if fault == "incomplete":
+                    row["completeness"] = "incomplete"
+                elif fault == "omitted":
+                    row["omissions"] = [{"reason": "depth-limit"}]
+                elif fault == "different-path":
+                    row["result"] = []
+                elif fault == "boolean-bound":
+                    row["bounds"]["max_depth"] = True
+                else:
+                    packet["observation_identity"] = "sha256:" + "0" * 64
+            return packet
+
+        monkeypatch.setattr(native.dependencies, "queries", observe_then_limit)
+        with pytest.raises(ValueError, match="introduction"):
+            _observe(native, root)
+
+
+def test_introduced_distribution_metadata_cannot_drift_during_native_path_observation(
+    distribution_repository: tuple[Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, info = distribution_repository
+    child = _install_required_child(info, monkeypatch)
+    (root / _LOCK_PATH).write_bytes(_required_child_lock())
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        original = native.dependencies.queries
+
+        def observe_then_change(observation: Any, requests: Any) -> dict[str, Any]:
+            packet = cast(dict[str, Any], original(observation, requests))
+            if requests:
+                (child / "RECORD").write_text(
+                    (child / "RECORD").read_text().replace("child_namespace", "changed_namespace")
+                )
+            return packet
+
+        monkeypatch.setattr(native.dependencies, "queries", observe_then_change)
+        with pytest.raises(ValueError, match="metadata changed"):
             _observe(native, root)
 
 

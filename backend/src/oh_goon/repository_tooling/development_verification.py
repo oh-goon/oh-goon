@@ -18,7 +18,10 @@ from pydantic import ConfigDict, Field
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.engine.command import run_command
 from oh_goon.integrations.exact_file_write import publish_text_file
-from oh_goon.integrations.hashmarks.dependencies import require_current_dependency_environment
+from oh_goon.integrations.hashmarks.dependencies import (
+    require_current_dependency_environment,
+    validate_required_dependency_introductions,
+)
 from oh_goon.integrations.hashmarks.development_verification import nominate_changed_verification
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
@@ -162,7 +165,10 @@ def _backend_dependency_intent(root: Path, base: str, paths: tuple[str, ...]) ->
 
 
 def _dependency_chain_qualified(
-    chain: Mapping[str, Any], packets: list[dict[str, Any]], nominations: list[dict[str, Any]]
+    chain: Mapping[str, Any],
+    packets: list[dict[str, Any]],
+    nominations: list[dict[str, Any]],
+    introduced: Mapping[str, str],
 ) -> bool:
     source = chain.get("source_path")
     consumer = chain.get("consumer")
@@ -173,13 +179,21 @@ def _dependency_chain_qualified(
     assert isinstance(consumer, Mapping)
     assert isinstance(ownership, Mapping)
     assert isinstance(projected, Mapping)
+    node = chain.get("node_id")
+    consumer_node = introduced.get(node, node) if isinstance(node, str) else None
+    if (
+        not isinstance(node, str)
+        or (node in introduced and chain.get("consumer_node_id") != consumer_node)
+        or (node not in introduced and "consumer_node_id" in chain)
+    ):
+        return False
     nomination = projected.get("nomination", {})
     if (
         not isinstance(source, str)
         or not source.startswith("backend/src/")
         or consumer.get("source_path") != source
         or consumer.get("distribution_state") != "resolved-unique"
-        or consumer.get("distribution_nodes") != [chain.get("node_id")]
+        or consumer.get("distribution_nodes") != [consumer_node]
         or consumer.get("import_claim_authority") != "source-observed-static-import"
         or not consumer.get("source_member")
         or ownership.get("stale") is True
@@ -282,15 +296,19 @@ def _bounded_dependency_scope(
     ):
         return False
     transitions = delta.get("component_selection_transitions", [])
+    try:
+        introduced = validate_required_dependency_introductions(bundle)
+    except (ValueError, TypeError, KeyError):
+        return False
+    replaced_nodes = set(nodes) - introduced.keys()
     if (
         set(delta.get("selections_added", [])) != set(nodes)
         or len(delta.get("selections_added", [])) != len(nodes)
         or delta.get("selections_changed")
-        or delta.get("components_added")
         or delta.get("components_removed")
         or delta.get("components_changed")
         or not isinstance(transitions, list)
-        or len(transitions) != len(nodes)
+        or len(transitions) != len(replaced_nodes)
         or any(
             not isinstance(transition, Mapping)
             or len(transition.get("added", [])) != 1
@@ -302,7 +320,7 @@ def _bounded_dependency_scope(
         return False
     added = {transition["added"][0]["node_id"] for transition in transitions}
     removed = {transition["removed"][0]["node_id"] for transition in transitions}
-    if added != set(nodes) or removed != set(delta.get("selections_removed", [])):
+    if added != replaced_nodes or removed != set(delta.get("selections_removed", [])):
         return False
     selections = {row["node_id"]: row for row in after.get("selections", [])}
     components = {row["component_id"]: row for row in after.get("components", [])}
@@ -314,7 +332,8 @@ def _bounded_dependency_scope(
             or selection.get("version") != row["version"]
             or component.get("name") != row["name"]
             or component.get("ecosystem") != "pypi"
-            or not any(
+            or row["node_id"] not in introduced
+            and not any(
                 transition.get("component_id") == row["component_id"]
                 and transition["added"][0]["node_id"] == row["node_id"]
                 for transition in transitions
@@ -371,7 +390,9 @@ def _bounded_dependency_scope(
     ):
         return False
     nominations = lock_rows[0].get("nominations", [])
-    if not all(_dependency_chain_qualified(chain, packets, nominations) for chain in chains):
+    if not all(
+        _dependency_chain_qualified(chain, packets, nominations, introduced) for chain in chains
+    ):
         return False
     return selected_files is None or {
         chain["node_id"]
@@ -484,8 +505,9 @@ def admit_change(
             "changed_node_ids": evidence["dependency_changes"]["changed_node_ids"],
             "consumer_scope": evidence["dependency_changes"]["consumer_scope"],
             "rationale": (
-                "Each changed current dependency selection has a current resolved-unique "
-                "source consumer and a qualified verifier. Native lock, runtime and package "
+                "Each changed current dependency selection has a qualified source-consumer "
+                "verifier chain, directly or through a retained complete native required "
+                "dependency path to its imported parent. Native lock, runtime and package "
                 "checks are required. Unobserved consumers and bounded verifier searches "
                 "remain outside this positive proof; complete impact is not claimed."
             ),
