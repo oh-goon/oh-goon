@@ -118,6 +118,13 @@ precision blocks qualification instead of expanding every parameter automaticall
 All retained portable instances, including unrelated fast tests, remain in the
 unfiltered daily portfolio.
 
+Hosted execution uses `--report` to keep the full structured plan, selected
+native receipts and diagnostics in the private JSON artifact. Its console output
+is a bounded candidate/status/owner-exit summary, not a second copy of native
+receipts. Invocations without `--report` retain their full JSON stdout for
+existing direct consumers. Neither output mode changes selected checks, their
+result authority or independent validation.
+
 The candidate job emits **MERGE_PROOF_READY** only after its selected checks.
 The required **merge-gate** separately checks out the immutable base controller,
 inspects the candidate as data, and validates the bounded same-run proof artifact.

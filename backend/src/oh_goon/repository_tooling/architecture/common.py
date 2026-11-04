@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 import tomllib
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -483,7 +483,7 @@ _PYTHON_SOURCE_SNAPSHOT: ContextVar[dict[Path, ast.Module] | None] = ContextVar(
 
 
 @contextmanager
-def python_source_snapshot() -> Iterator[None]:
+def python_source_snapshot() -> Generator[None]:
     """Read and parse each source once for one architecture invocation."""
     if _PYTHON_SOURCE_SNAPSHOT.get() is not None:
         yield

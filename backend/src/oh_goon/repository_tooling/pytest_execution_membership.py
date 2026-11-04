@@ -423,19 +423,17 @@ class PytestExecutionMembershipSession:
         self._store = self._build_store()
 
     def _build_store(self) -> ExecutionMembershipStore | None:
-        values = (
-            self.context.directory,
-            self.context.suite_identity,
-            self.context.execution_plan_identity,
-            self.context.run_identity,
-        )
-        if not all(values):
+        directory = self.context.directory
+        suite_identity = self.context.suite_identity
+        execution_plan_identity = self.context.execution_plan_identity
+        run_identity = self.context.run_identity
+        if not directory or not suite_identity or not execution_plan_identity or not run_identity:
             return None
         return ExecutionMembershipStore(
-            self.context.directory,  # type: ignore[arg-type]
-            suite_identity=self.context.suite_identity,  # type: ignore[arg-type]
-            execution_plan_identity=self.context.execution_plan_identity,  # type: ignore[arg-type]
-            run_identity=self.context.run_identity,  # type: ignore[arg-type]
+            directory,
+            suite_identity=suite_identity,
+            execution_plan_identity=execution_plan_identity,
+            run_identity=run_identity,
         )
 
     def prepare(
@@ -467,7 +465,7 @@ class PytestExecutionMembershipSession:
         if self._store is None:
             return {}
         attempt_identity = execution_attempt_identity(
-            run_identity=context.run_identity,  # type: ignore[arg-type]
+            run_identity=self._store.run_identity,
             root_batch_identity=context.root_batch_identity,
             root_attempt=context.root_attempt,
             launch_ordinal=self._launch_ordinal,

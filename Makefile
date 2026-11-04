@@ -7,6 +7,7 @@ APPLICATION_VERIFY_RUNNER = bash scripts/application_verify.sh
 DEVELOPMENT_RESOURCE_RUNNER = bash scripts/development_test_resources.sh
 DEPENDENCY_POLICY = uv run --no-project python backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py
 PRE_COMMIT_REQUIREMENT = pre-commit>=4.0
+TY_REQUIREMENT = ty==0.0.95
 DIAGNOSTIC_SURFACE ?= all
 DIAGNOSTIC_BATCH ?= 1
 DIAGNOSTIC_BATCH_LIMIT ?= 1
@@ -75,6 +76,8 @@ help:
 	  '' \
 	  'Owner checks (non-canonical workflow):' \
 	  '  make backend-check    Backend lint, format, types and behavior tests' \
+	  '  make ty-acquire       Fetch pinned optional Astral ty into the uv tool cache' \
+	  '  make ty-check         Optional fast backend type check from that cache; strict mypy remains required' \
 	  '  make ruff-repair      Apply Ruff safe autofixes, then canonical Python formatting' \
 	  '  make frontend-functional-certification  Current functional gate: typecheck, architecture, i18n, unit tests, build' \
 	  '  make frontend-check   Strict later-release frontend gate: adds lint, coverage/quality checks' \
@@ -423,6 +426,13 @@ format-check:
 
 typecheck:
 	$(DEVELOPMENT_RESOURCE_RUNNER) uv run --offline --frozen --no-sync --group quality --project backend mypy --config-file backend/pyproject.toml scripts/tests tests/integration
+
+.PHONY: ty-check ty-acquire
+ty-acquire:
+	uv tool run --from '$(TY_REQUIREMENT)' ty --version
+
+ty-check:
+	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd backend && exec "$$@"' sh uv tool run --offline --from '$(TY_REQUIREMENT)' ty check
 
 
 repository-understanding-exam:

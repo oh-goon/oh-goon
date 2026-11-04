@@ -368,7 +368,7 @@ def _apply_native_agent_effect_policy(
         candidate = {**envelope, "agent_effect_limits": limits[step_id]}
         # Reuse exactly the original journal's conservative narrowing rules:
         # no alternative Agent policy interpreter in native compilation.
-        _independently_scoped_agent_effects(demand, candidate)
+        _independently_scoped_agent_effects(cast(dict[str, object] | None, demand), candidate)
         steps[step_id] = candidate
 
 

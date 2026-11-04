@@ -5,7 +5,7 @@ import os
 import shutil
 import sys
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -341,7 +341,7 @@ def new_lease_locked(
 
 
 @contextmanager
-def store_lock(path: Path) -> Iterator[None]:
+def store_lock(path: Path) -> Generator[None, None, None]:
     with path.open("a+b") as stream:
         _acquire_lock(stream)
         try:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
@@ -155,7 +155,7 @@ class FleetRunLifecycle:
             raise TrustProtocolError("Fleet Enforcer must have one provisioning authority")
 
     @contextmanager
-    def execution_connection_scope(self) -> Iterator[None]:
+    def execution_connection_scope(self) -> Generator[None, None, None]:
         """Delegate one worker-thread SQLite handle lifetime to the database owner."""
         with self._database.execution_connection_scope():
             yield
@@ -190,7 +190,7 @@ class FleetRunLifecycle:
             raise ExceptionGroup("Unadmitted Agent source cleanup failed", failures)
 
     @contextmanager
-    def serialize_admission(self, identity: str) -> Iterator[None]:
+    def serialize_admission(self, identity: str) -> Generator[None, None, None]:
         """Serialize one caller-stable admission identity without creating durable state."""
         with serialize_run_admission(self._database.path, identity):
             yield
@@ -332,7 +332,7 @@ class FleetRunLifecycle:
     @contextmanager
     def project_source_transport(
         self, intent: ResolvedCapabilityIntent, repositories: tuple[RepositoryIdentity, ...]
-    ) -> Iterator[ResolvedCapabilityIntent]:
+    ) -> Generator[ResolvedCapabilityIntent, None, None]:
         """Promote exact captured package inputs at the original Run reservation boundary."""
         import hashlib
 

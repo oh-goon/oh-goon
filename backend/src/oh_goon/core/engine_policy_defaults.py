@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-DEFAULT_EXCLUSION_REASON = "Excluded by user"
+DEFAULT_EXCLUSION_REASON: str = "Excluded by user"
 
 
 def default_exclusion_reason() -> str:

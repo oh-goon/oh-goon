@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -104,7 +104,7 @@ class DependencyObservationStore:
             return storage.observed_repository_ids(connection)
 
     @contextmanager
-    def assessment_scope(self) -> Iterator[None]:
+    def assessment_scope(self) -> Generator[None, None, None]:
         """Resolve each retained snapshot/source assessment once for this request."""
         if self._read.get() is not None:
             yield

@@ -215,7 +215,8 @@ steps:
             arguments=("--fixture-mode", mode),
         ),
         profile=NativeAgentProfile(
-            backend="bubblewrap" if sandboxed else "local", timeout_seconds=timeout_seconds
+            backend="bubblewrap" if sandboxed else "local",
+            timeout_seconds=timeout_seconds,
         ),
         executable_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
         connection=connection,

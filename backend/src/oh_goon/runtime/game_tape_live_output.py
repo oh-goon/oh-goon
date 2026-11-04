@@ -67,7 +67,8 @@ class GameTapeLiveOutputStore:
             return
         if stream not in {"stdout", "stderr"}:
             raise ValueError(f"Unsupported Game Tape live output stream: {stream}")
-        typed_stream = cast(Literal["stdout", "stderr"], stream)
+        # mypy requires the cast after membership validation; ty narrows it.
+        typed_stream = cast(Literal["stdout", "stderr"], stream)  # ty: ignore[redundant-cast]
         with self._lock:
             self._expire_locked()
             buffer = self._runs.get(fleet_run_id)

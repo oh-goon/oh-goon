@@ -19,8 +19,8 @@ from oh_goon.core.models.agent_providers import AgentProviderError
 from oh_goon.integrations.agent_native_execution import prepare_native_service_setup
 
 
-def add_service_commands(
-    commands: argparse._SubParsersAction[argparse.ArgumentParser],
+def add_service_commands[_Parser: argparse.ArgumentParser](
+    commands: argparse._SubParsersAction[_Parser],
 ) -> None:
     service = commands.add_parser(
         "service", help="Prepare or explicitly connect to a native service"

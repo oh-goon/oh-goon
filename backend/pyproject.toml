@@ -178,6 +178,19 @@ mypy_path = [
 ]
 warn_unused_configs = true
 
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.src]
+include = ["src/oh_goon"]
+
+[tool.ty.analysis]
+respect-type-ignore-comments = false
+
+[tool.ty.rules]
+dynamic-function-decorator-return = "error"
+missing-type-argument = "error"
+
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/dependency_complete", "tests/integration"]
 pythonpath = ["."]

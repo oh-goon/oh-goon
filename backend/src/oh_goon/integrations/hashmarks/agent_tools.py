@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +27,9 @@ class PreparedAgentEvidence:
 
 
 @contextmanager
-def prepare_agent_evidence(handoff: FrozenAgentStepHandoff) -> Iterator[PreparedAgentEvidence]:
+def prepare_agent_evidence(
+    handoff: FrozenAgentStepHandoff,
+) -> Generator[PreparedAgentEvidence, None, None]:
     """Materialize captured bytes; the supervised tool owns native index work."""
     handoff.verify()
     with tempfile.TemporaryDirectory(prefix="oh-goon-agent-evidence-") as directory:

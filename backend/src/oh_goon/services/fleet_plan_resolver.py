@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import replace
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
 
@@ -138,7 +138,7 @@ class FleetPlanResolver:
         locked_sources: tuple[LockedExecutionSource, ...],
         root_expected_name: str | None,
         cancel_requested: Callable[[], bool] | None,
-    ) -> Iterator[FleetPlanSourceGraph]:
+    ) -> Generator[FleetPlanSourceGraph, None, None]:
         """Re-read mutable source; reacquire frozen Git revisions through their original owner."""
         from oh_goon.integrations.git_source_preparation import prepare_git_source
 
@@ -1137,7 +1137,14 @@ class FleetPlanResolver:
                 imports=scope.imports,
                 steps=steps,
                 step_sources=scope.step_sources,
-                skill_sources=skill_sources() if callable(skill_sources) else skill_sources,
+                # ty retains callable tuple subclasses; keep the declared factory result.
+                skill_sources=(
+                    cast(  # type: ignore[redundant-cast]
+                        Callable[[], tuple[LockedSkillSource, ...]], skill_sources
+                    )()
+                    if callable(skill_sources)
+                    else skill_sources
+                ),
                 execution_sources=source_graph.execution_sources,
                 configuration=context.diagnostics.evidence(),
                 native_agent=native_agent,

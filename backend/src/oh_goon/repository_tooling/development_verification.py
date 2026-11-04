@@ -492,7 +492,7 @@ def admit_change(
                 "remain outside this positive proof; complete impact is not claimed."
             ),
         }
-    observations = evidence.get("observations", [])
+    observations: list[dict[str, Any]] = evidence.get("observations", [])
     policy_proofs = [
         projected
         for projected in evidence.get("required_checks", [])
@@ -534,7 +534,8 @@ def admit_change(
                 and policy_proofs
                 and row.get("stale") is not True
             ):
-                row = {**row, "state": "POLICY_OBLIGATION", "nominations": policy_proofs}
+                row = row.copy()
+                row.update(state="POLICY_OBLIGATION", nominations=policy_proofs)
             elif path in migration_verifiers and row.get("stale") is not True:
                 verifier = migration_verifiers[path]
                 if not (root / verifier).is_file():
@@ -670,6 +671,7 @@ def _commands(root: Path, plan: ChangeVerificationPlan) -> list[tuple[str, tuple
                         "ruff",
                         "format",
                         "--check",
+                        "--diff",
                         "backend/src",
                         "backend/tests",
                         "scripts",
@@ -941,7 +943,23 @@ def main(argv: list[str] | None = None) -> int:
                 )
         if args.report:
             _write_transport(args.report, payload, root)
-        print(json.dumps(payload, sort_keys=True))
+            # The report file is the complete machine-readable proof. Printing
+            # it again can stream megabytes of native pytest receipts into the
+            # hosted log and make the CI transport slower than the tests.
+            # Keep the historical complete stdout contract without --report.
+            summary: dict[str, Any] = {
+                "status": payload["status"],
+                "candidate": plan.candidate,
+                "outcomes": [
+                    {"owner": row["owner"], "returncode": row["returncode"]}
+                    for row in result["outcomes"]
+                ],
+            }
+            if "reason" in result:
+                summary["reason"] = result["reason"]
+            print(json.dumps(summary, sort_keys=True))
+        else:
+            print(json.dumps(payload, sort_keys=True))
         return (
             0 if payload["status"] in {"MERGE_PROOF_READY", "FOCUSED / NOT_FULLY_VERIFIED"} else 1
         )

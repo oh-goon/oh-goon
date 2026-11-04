@@ -8,8 +8,8 @@ import secrets
 import stat
 from pathlib import Path
 
-PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_FAMILY = "oh-goon.pytest-batch-execution"
-PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_VERSION = 1
+PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_FAMILY: str = "oh-goon.pytest-batch-execution"
+PYTEST_BATCH_EXECUTION_REPORT_SCHEMA_VERSION: int = 1
 
 
 def execution_report_schema() -> str:

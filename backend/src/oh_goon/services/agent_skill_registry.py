@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import stat
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -171,7 +171,7 @@ def original_skill_aliases(
     update_sources: bool = False,
     cancel_requested: Callable[[], bool] | None = None,
     native_workspace: Path | None = None,
-) -> Iterator[Mapping[str, str] | None]:
+) -> Generator[Mapping[str, str] | None, None, None]:
     """Prepare each collection once, preserving its lock pin across cache misses."""
     if isinstance(explicit_aliases, FrozenSkillRegistry):
         yield explicit_aliases

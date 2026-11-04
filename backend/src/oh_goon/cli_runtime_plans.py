@@ -7,7 +7,7 @@ import signal
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -28,6 +28,7 @@ from oh_goon.cli_result import CliTermination
 from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
 from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import AgentRepairBudget, AgentRepairResult
+from oh_goon.core.models.caller_input_file import CallerInputFileIdentity
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
@@ -43,6 +44,7 @@ from oh_goon.core.projections.agent_campaign import project_agent_campaign
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.integrations.exact_file_write import ExactPublicationDurabilityError
 from oh_goon.services.fleet_plan_resolution_context import AgentConnectionSelection
+from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph
 from oh_goon.services.run_configuration import NormalizedRunConfiguration
 
 PlanHandler = Callable[[ApplicationRuntime, argparse.Namespace], int]
@@ -59,6 +61,14 @@ class _AgentRunSelection(TypedDict, total=False):
     agent_connection: AgentConnectionSelection
     native_agent: ResolvedNativeAgent
     native_workspace: Path
+
+
+class _PlanSourceIdentity(TypedDict, total=False):
+    caller_input_file: CallerInputFileIdentity
+    repository: Path
+    source_graph: FleetPlanSourceGraph
+    repository_goon: bool
+    external_artifacts: tuple[tuple[str, bytes], ...]
 
 
 def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int | None:
@@ -177,7 +187,7 @@ def _request_cli_run_termination(_signum: int, _frame: FrameType | None) -> None
 
 
 @contextmanager
-def _waited_run_sigterm(wait: bool) -> Iterator[None]:
+def _waited_run_sigterm(wait: bool) -> Generator[None, None, None]:
     # Embedding threads and explicit caller signal handlers retain their native
     # authority. Only the ordinary executable's default SIGTERM is adapted.
     if (
@@ -228,7 +238,7 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         native = getattr(args, "_native_agent", None)
         selected_inputs = plan_inputs(args)
         snapshot = getattr(args, "_caller_input_file_snapshot", None)
-        source_identity = (
+        source_identity: _PlanSourceIdentity = (
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
         expected_repository_instances = None

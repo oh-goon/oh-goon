@@ -27,6 +27,7 @@ from oh_goon.integrations._fleet_plan_resource_evidence import write_remote_reso
 from oh_goon.integrations._fleet_plan_sandbox_launch import sandbox_process_launch
 from oh_goon.integrations.content_snapshot import (
     ArchiveSymlinkMaterializer,
+    SnapshotBinding,
     replace_tree_from_tar_gz_stream,
     verify_snapshot,
 )
@@ -545,14 +546,14 @@ def _request_payload(
 
 
 def _snapshot_payload(
-    binding: object,
+    binding: SnapshotBinding,
     *,
     declared_path: str,
     staging_root: Path,
     index: int,
 ) -> dict[str, object]:
-    path = binding.snapshot_path  # type: ignore[attr-defined]
-    verify_snapshot(path, binding.identity, label=f"OpenSandbox read-only input {declared_path}")  # type: ignore[attr-defined]
+    path = binding.snapshot_path
+    verify_snapshot(path, binding.identity, label=f"OpenSandbox read-only input {declared_path}")
     if path.is_dir():
         archive = staging_root / f"{index:03d}.tar.gz"
         _write_tree_archive(path, archive)
