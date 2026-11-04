@@ -178,6 +178,8 @@ def test_pinned_read_view_folds_each_run_once_then_reuses_indexed_view(
     _complete_run(
         journal, identity, run_id="run-2", action=OperationAction.PLAN, operation_id="op-2"
     )
+    # This is a cold-cut test, independent of views used while authoring the facts.
+    journal = Journal(LocalDatabase(tmp_path / "projection-context.db"))
 
     from oh_goon.runtime import journal_index
 
@@ -199,31 +201,96 @@ def test_pinned_read_view_folds_each_run_once_then_reuses_indexed_view(
     assert calls == 2
 
 
+def test_new_run_reuses_unchanged_verified_history_and_preserves_pinned_views(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.runtime import journal_index
+
+    journal = Journal(LocalDatabase(tmp_path / "growing-history.db"))
+    identity = RepositoryIdentity(name="api", path=tmp_path / "api")
+    _complete_run(
+        journal, identity, run_id="run-1", action=OperationAction.INIT, operation_id="op-1"
+    )
+    pinned = journal.read_view()
+    before = pinned.required_run_detail("run-1")
+    original = journal_index.project_fleet_run_detail
+    projected: list[str] = []
+
+    def record_projection(events, resolver):
+        projected.append(events[0].fleet_run_id)
+        return original(events, resolver)
+
+    monkeypatch.setattr(journal_index, "project_fleet_run_detail", record_projection)
+    _complete_run(
+        journal, identity, run_id="run-2", action=OperationAction.PLAN, operation_id="op-2"
+    )
+    current = journal.read_view()
+
+    assert projected and set(projected) == {"run-2"}
+    assert current.required_run_detail("run-2").run.status is FleetRunStatus.COMPLETED
+    assert current.required_run_detail("run-1").operations == before.operations
+    assert current.revision > pinned.revision
+    assert pinned.required_run_detail("run-1") == before
+    assert pinned.run_detail("run-2") is None
+    assert len(current.run_history().items) == 2
+
+
 def test_repeated_unchanged_reads_reuse_verified_read_cut(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import oh_goon.runtime.journal_store as journal_store_module
+    from oh_goon.runtime.journal_codec import JournalFactCodec
 
     journal = Journal(LocalDatabase(tmp_path / "read-cache.db"))
     identity = RepositoryIdentity(name="api", path=tmp_path / "api")
     commit_operation(journal, operation(identity, OperationAction.INIT, None, "op-cache"))
 
-    original = journal_store_module.JournalFactStore.load_entries
+    original = JournalFactCodec.decode
     calls = 0
 
-    def counting_load_entries(connection):
+    def counting_decode(**fields):
         nonlocal calls
         calls += 1
-        return original(connection)
+        return original(**fields)
 
-    monkeypatch.setattr(
-        journal_store_module.JournalFactStore, "load_entries", staticmethod(counting_load_entries)
-    )
+    monkeypatch.setattr(JournalFactCodec, "decode", staticmethod(counting_decode))
     first = journal.read_view()
     second = journal.read_view()
 
     assert first.revision == second.revision == 1
     assert calls == 1
+
+
+def test_new_cut_rechecks_every_fact_hash_and_decodes_only_new_payloads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.runtime.journal_codec import JournalFactCodec
+
+    journal = Journal(LocalDatabase(tmp_path / "decoded-cut.db"))
+    identity = RepositoryIdentity(name="api", path=tmp_path / "api")
+    commit_operation(journal, operation(identity, OperationAction.INIT, None, "op-1"))
+    decode, verify = JournalFactCodec.decode, JournalFactCodec.verify
+    decoded: list[int] = []
+    verified: list[int] = []
+
+    def counting_decode(**fields):
+        decoded.append(fields["revision"])
+        return decode(**fields)
+
+    def counting_verify(**fields):
+        verified.append(fields["revision"])
+        return verify(**fields)
+
+    monkeypatch.setattr(JournalFactCodec, "decode", staticmethod(counting_decode))
+    monkeypatch.setattr(JournalFactCodec, "verify", staticmethod(counting_verify))
+    pinned = journal.read_view()
+    commit_operation(journal, operation(identity, OperationAction.INIT, None, "op-2"))
+    current = journal.read_view()
+
+    assert decoded == [1, 2]
+    assert verified.count(1) >= 2 and 2 in verified
+    assert current.require_operation("op-1") == pinned.require_operation("op-1")
+    assert current.operation("op-2") is not None and pinned.operation("op-2") is None
+    assert current.revision == 2 and pinned.revision == 1
 
 
 def test_run_overview_partitions_canonical_execution_truth_and_history_filters(
