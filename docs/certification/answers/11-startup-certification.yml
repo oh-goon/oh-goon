@@ -470,30 +470,30 @@ questions:
   severity: critical
   expected_claims:
   - id: concept
-    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
-      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    statement: Native uv owns backend lock validity and project-environment materialization. Committed `backend/uv.lock` is exact resolution
+      authority; hashing its bytes may bind source, package and certification evidence, but must not reinterpret or normalize its dependency
+      graph into another resolution identity. `make init` materializes the committed lock with native locked semantics before APP certification.
     critical: true
   - id: ownership_boundary
-    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
-      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    statement: Native uv owns resolution, freshness, installation and cache semantics. Oh-Goon owns publication/privacy checks and exact-byte
+      evidence binding; the materialized `.venv` is host-local state, not a replacement for the committed lock.
     critical: true
   - id: consequence
-    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
-      the lean semantic `make certify` path release-critical.
+    statement: Preserves portable committed resolution authority without a shadow resolver or certification-specific dependency setup. APP
+      certification consumes the established environment rather than reacquiring dependencies or treating cache contents as proof.
     critical: true
   contradictions:
   - id: fatal-01
-    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
-      path instead of delegating to native tools.
+    statement: Replaces committed native lock authority with a normalized graph, local environment/cache identity, or certification-specific
+      resolver/materializer, or treats an Oh-Goon hash as proof of native dependency validity.
     severity: critical
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - docs/development/APP_CERTIFICATION.md:1-35
-  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
-  - templates/plans/oh-goon/app-certification/plan.yml:1-6
-  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:237-249
-  - templates/plans/oh-goon/app-certification/README.md:1-14
-  - scripts/tests/test_app_certification_contract.py:53-86
+  - backend/src/oh_goon/repository_tooling/dependency_locks.py:48-81
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-64
+  - Makefile:182-193
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:85-107
+  - docs/development/APP_CERTIFICATION.md:7-35
 - id: Q80
   severity: critical
   expected_claims:
@@ -601,20 +601,20 @@ questions:
       but evidence fingerprints cannot become a second package-manager or private-registry authority.
     critical: false
   - id: consequence
-    statement: Preserves exact execution/provenance evidence while keeping local registry-bearing lock bytes separate from portable dependency
-      and certification identities.
+    statement: Preserves exact committed resolution and artifact provenance without turning fingerprints into semantic authority or publishing
+      private registry-bearing lock bytes.
     critical: false
   contradictions:
   - id: fatal-01
-    statement: Treats local `uv.lock` SHA as portable dependency identity, persists private registry-bearing lock bytes in public evidence, or
-      lets an Oh-Goon hash decide native dependency validity/resolution.
+    statement: Substitutes private or host-specific lock/environment bytes for admitted committed resolution authority, persists private registry-bearing
+      lock bytes in public evidence, or lets an Oh-Goon hash decide native dependency validity/resolution.
     severity: normal
     misconception_id: identity_scope_confusion
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/dependency_locks.py:1-124
-  - docs/development/APP_CERTIFICATION.md:1-35
-  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
-  - backend/src/oh_goon/engine/fleet_tools.py:70-125
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:29-64
+  - backend/src/oh_goon/repository_tooling/dependency_locks.py:48-81
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:85-107
+  - docs/development/APP_CERTIFICATION.md:7-35
   - docs/goon-lock.md:8-14
 - id: Q84
   severity: normal
@@ -754,9 +754,10 @@ questions:
     severity: normal
     misconception_id: identity_scope_confusion
   evidence_expectations:
-  - Makefile:1-180
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
-  - scripts/tests/test_dependency_sync_contract.py:1-36
+  - Makefile:182-193
+  - Makefile:232-244
+  - backend/src/oh_goon/repository_tooling/dependency_locks.py:48-81
+  - scripts/tests/test_dependency_sync_contract.py:23-55
 - id: Q89
   severity: critical
   expected_claims:
@@ -810,26 +811,31 @@ questions:
   expected_claims:
   - id: concept
     statement: '`backend/uv.lock` is committed native uv resolution authority. `make init` consumes it, `make sync` may update it intentionally,
-      source/package/release identity includes it, and its exact SHA participates in qualification/certification evidence.'
+      source/package/release identity includes it, and its exact SHA participates in qualification/certification evidence. Approved public dependency
+      sources may appear in it, including the declared Hashmarks release artifact; the Oh-Goon project itself may use editable source `.`.'
     critical: true
   - id: ownership_boundary
     statement: Native uv owns committed lock semantics; public repository dependency identity is `backend/pyproject.toml` plus exact `backend/uv.lock`
-      bytes.
+      bytes. Oh-Goon publication policy rejects credentials, private infrastructure and host-local dependency sources without sanitizing or rewriting
+      the native lock into a second format.
     critical: true
   - id: consequence
-    statement: Prevents private registry artifact URLs from leaking through committed/source-packaged lock bytes while retaining native lock semantics
-      locally.
+    statement: Keeps reviewable cross-host resolution identity in public source while excluding private operator configuration, package-manager
+      caches and materialized environments from that authority.
     critical: true
   contradictions:
   - id: fatal-01
-    statement: Commits/packages the Oh-Goon backend lock, treats its SHA as cross-host identity, or sanitizes/rewrites the native lock.
+    statement: Treats the committed backend lock as disposable/local-only, excludes its publishable bytes from source/package identity, publishes
+      private source identities, or sanitizes/normalizes native lock bytes instead of using native authoring and publication admission.
     severity: critical
     misconception_id: identity_scope_confusion
   evidence_expectations:
-  - .gitignore:1-13
-  - backend/src/oh_goon/core/source_tree_policy.py:1-128
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
-  - scripts/tests/test_package_slim.py:115-165
+  - .gitignore:20-21
+  - backend/src/oh_goon/core/source_tree_policy.py:183-256
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:44-64
+  - backend/src/oh_goon/repository_tooling/_dependency_lock_portability.py:29-115
+  - scripts/tests/test_package_slim.py:267-291
+  - scripts/tests/test_public_dependency_privacy.py:72-114
 - id: Q92
   severity: normal
   expected_claims:
@@ -839,11 +845,12 @@ questions:
       than normalizing them into a second format.'
     critical: false
   - id: ownership_boundary
-    statement: Native uv owns the resolved graph and PEP 508 marker semantics; Oh-Goon owns only sanitized evidence, portable pin projection,
-      and comparison without becoming a second marker evaluator.
+    statement: Native uv owns the resolved graph and PEP 508 marker semantics; Oh-Goon owns publication/privacy admission and exact-byte evidence
+      binding without becoming a second marker evaluator or pin-projection authority.
     critical: false
   - id: consequence
-    statement: Restores reviewable cross-environment reproducibility after the native local lock is removed from public source identity.
+    statement: Preserves reviewable cross-environment resolution from the committed native lock while keeping private registry and host-absolute
+      identities outside public source and evidence.
     critical: false
   contradictions:
   - id: fatal-01
@@ -852,115 +859,122 @@ questions:
     severity: normal
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
-  - backend/uv.lock:1-1
-  - scripts/tests/test_dependency_resolution.py:1-35
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:44-64
+  - backend/src/oh_goon/repository_tooling/dependency_locks.py:48-81
+  - backend/src/oh_goon/repository_tooling/_dependency_lock_portability.py:29-115
+  - scripts/tests/test_dependency_resolution.py:32-52
+  - scripts/tests/test_public_dependency_privacy.py:72-103
 - id: Q93
   severity: normal
   expected_claims:
   - id: concept
-    statement: Fresh `make init` must consume committed `backend/uv.lock` exactly with frozen semantics and must not reconcile or rewrite it.
-      Offline cache state may satisfy materialization; operator-visible registry access is reserved for explicit acquisition. `make sync` is used
-      only when dependency intent is intentionally changed and the resulting native lock diff is reviewed.
+    statement: Fresh `make init` uses native `uv sync --project backend --locked` to validate freshness and materialize the committed resolution
+      without authoring a new lock. Native uv may acquire packages or reuse its cache under caller configuration. `make sync` intentionally
+      authors a new native lock when dependencies change; ordinary execution may use frozen/no-sync consumption after initialization.
     critical: false
   - id: ownership_boundary
-    statement: '`backend/pyproject.toml` owns intent; committed `backend/uv.lock` owns exact resolution; frozen consumers do not rewrite it; `make
-      sync` alone refreshes native lock authority intentionally.'
+    statement: '`backend/pyproject.toml` owns intent; committed `backend/uv.lock` owns exact resolution; native uv owns locked freshness and
+      materialization. Oh-Goon selects consumer versus authoring commands without adding an acquisition or supply-state authority.'
     critical: false
   - id: consequence
-    statement: Prevents stale/private operator-local lock bytes or historical evidence snapshots from overriding current dependency intent while
-      retaining strict retained-wheel and dependency-scope authority.
+    statement: A stale lock fails the native locked operation rather than being silently updated or accepted through frozen-only startup. APP
+      certification then consumes the initialized environment without repeating acquisition or selecting another interpreter.
     critical: false
   contradictions:
   - id: fatal-01
-    statement: Generates a second dependency representation, rewrites committed `uv.lock` from init, bypasses retained-wheel identity, or lets
-      ordinary consumers author resolution history.
+    statement: Lets init rewrite the committed lock, skips its native freshness requirement with frozen-only materialization, creates a second
+      dependency representation/supply path, or makes certification reacquire dependencies already materialized by init.
     severity: normal
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
-  - scripts/tests/test_dependency_sync_contract.py:1-36
+  - Makefile:185-193
+  - Makefile:232-244
+  - scripts/tests/test_dependency_sync_contract.py:23-55
+  - docs/development/APP_CERTIFICATION.md:7-35
 - id: Q94
   severity: normal
   expected_claims:
   - id: concept
-    statement: Universal resolution evidence must preserve uv's Python/platform marker forks rather than only the active environment. Oh-Goon
-      bounds supported Python to 3.12-3.14 and records marker-bearing evidence such as Windows-only or Python-specific packages. Native uv supplies
-      those marker semantics. Single-version marker text is evidence, not a second repository resolver; marker-qualified forks become hard bootstrap
-      authority only when the same package has multiple resolved versions.
+    statement: Committed native uv resolution preserves universal Python/platform marker branches rather than replacing them with packages
+      installed in the active environment. Native uv interprets all marker and version semantics, including multiple versions of one package;
+      Oh-Goon does not promote particular marker strings or forks into a separate bootstrap verdict.
     critical: false
   - id: ownership_boundary
-    statement: uv owns universal resolution and PEP 508 markers; repository policy owns the supported environment boundary; Oh-Goon preserves
-      marker evidence and constrains only the minimum marker semantics required to reproduce multi-version forks.
+    statement: uv owns universal resolution and PEP 508 marker evaluation; project metadata declares supported environments. Oh-Goon preserves
+      exact committed lock bytes and publication constraints without a second marker evaluator or normalized resolution model.
     critical: false
   - id: consequence
-    statement: Prevents a Linux/Python-3.14 checkout from erasing branches required for other explicitly supported environments.
+    statement: Prevents one host's installed population from erasing other supported branches while avoiding competing marker-format or
+      version-fork acceptance rules.
     critical: false
   contradictions:
   - id: fatal-01
-    statement: Builds the public baseline from `pip list`/active venv only, drops marker forks, or claims open-ended future Python support without
-      resolving/certifying it.
+    statement: Replaces the committed resolution with active-environment packages, drops native marker branches, or adds an Oh-Goon marker/version
+      comparison as another dependency-validity authority.
     severity: normal
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - backend/pyproject.toml:1-95
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
-  - backend/uv.lock:1-1
+  - backend/pyproject.toml:1-14
+  - backend/src/oh_goon/repository_tooling/dependency_locks.py:48-81
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-6
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:85-107
 - id: Q95
   severity: normal
   expected_claims:
   - id: concept
-    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
-      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    statement: Committed `backend/uv.lock` records exact native Python resolution and participates in portable source/package identity. The
+      selected interpreter, installed `.venv`, `node_modules` and package-manager caches are host-local materialization facts, not a replacement
+      resolution or portable certification identity.
     critical: false
   - id: ownership_boundary
-    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
-      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    statement: Native uv/npm own resolution and environment/cache semantics. Oh-Goon may bind the committed public lock and actual execution
+      evidence while preserving the initialized environment for APP verification; it must not certify raw cache or environment tree bytes as
+      ecosystem resolution authority.
     critical: false
   - id: consequence
-    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
-      the lean semantic `make certify` path release-critical.
+    statement: Allows different supported hosts to materialize the same committed resolution without requiring byte-identical environments
+      or treating cache presence as successful initialization or verification.
     critical: false
   contradictions:
   - id: fatal-01
-    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
-      path instead of delegating to native tools.
+    statement: Replaces committed lock authority with installed-package/cache state, requires cross-host environment tree equality, or creates
+      a certification-specific materializer instead of consuming native initialization.
     severity: normal
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - docs/development/APP_CERTIFICATION.md:1-35
-  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
-  - templates/plans/oh-goon/app-certification/plan.yml:1-6
-  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:237-249
-  - templates/plans/oh-goon/app-certification/README.md:1-14
-  - scripts/tests/test_app_certification_contract.py:53-86
+  - .gitignore:1-21
+  - docs/development/APP_CERTIFICATION.md:7-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:85-107
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:58-64
 - id: Q96
   severity: normal
   expected_claims:
   - id: concept
-    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
-      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    statement: '`make init` materializes committed locks through native uv/npm and performs executable smoke without authoring resolution.
+      `make sync` intentionally authors native locks and then materializes them. `diagnostic-dependency-check` observes the existing backend
+      executable; verification and certification consume initialized authority rather than authoring locks or repairing dependencies.'
     critical: false
   - id: ownership_boundary
-    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
-      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    statement: Native package managers own each selected resolution/materialization operation. Make and the existing verification owners
+      sequence the explicit read/write boundaries; diagnostics do not become setup and APP certification does not acquire a second dependency
+      environment or supply owner.
     critical: false
   - id: consequence
-    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
-      the lean semantic `make certify` path release-critical.
+    statement: Missing initialization is reported with the supported init action; a successful prerequisite is transported rather than repeated.
+      Running a diagnostic or verification command cannot silently publish a different dependency resolution.
     critical: false
   contradictions:
   - id: fatal-01
-    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
-      path instead of delegating to native tools.
+    statement: Lets init/diagnostics/verification/certification author dependency resolution, treats a readiness observation as materialization,
+      or adds a certification-specific dependency setup/cache/supply path.
     severity: normal
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - docs/development/APP_CERTIFICATION.md:1-35
-  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
-  - templates/plans/oh-goon/app-certification/plan.yml:1-6
-  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:237-249
-  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - Makefile:180-193
+  - Makefile:232-244
+  - Makefile:291-292
+  - scripts/tests/test_dependency_sync_contract.py:23-55
+  - docs/development/APP_CERTIFICATION.md:7-35
 - id: Q97
   severity: critical
   expected_claims:
@@ -970,23 +984,24 @@ questions:
       never render inherited index values. A clean `make init` may create ignored local state but must not modify committed/packageable evidence.'
     critical: true
   - id: ownership_boundary
-    statement: Source-tree/package policy owns public composition; dependency normalizer owns sanitized evidence validation; operator secrets
-      remain outside those owners.
+    statement: Source-tree/package policy owns public composition; the existing lock publication and public-source privacy checks reject
+      forbidden identity without normalizing native resolution. Operator registry configuration and secrets remain outside public source/evidence.
     critical: true
   - id: consequence
     statement: Provides defense in depth against accidental leakage through ZIPs, patches, logs, generated evidence, or local bootstrap side effects.
     critical: true
   contradictions:
   - id: fatal-01
-    statement: Allows local lock/private registry identity into a source ZIP/patch/log, or makes init modify committed public dependency evidence
-      without explicit sync.
+    statement: Publishes private registry/credential/host-local dependency identity or package-manager cache state, excludes the safe committed
+      lock as inherently local, or makes init rewrite committed dependency authority without explicit native authoring.
     severity: critical
     misconception_id: identity_scope_confusion
   evidence_expectations:
-  - backend/src/oh_goon/core/source_tree_policy.py:1-128
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
-  - scripts/tests/test_package_slim.py:115-165
-  - scripts/tests/test_native_command.py:1-176
+  - backend/src/oh_goon/core/source_tree_policy.py:183-256
+  - backend/src/oh_goon/repository_tooling/_dependency_lock_portability.py:29-115
+  - backend/src/oh_goon/repository_tooling/public_dependency_privacy.py:106-136
+  - scripts/tests/test_package_slim.py:267-291
+  - scripts/tests/test_public_dependency_privacy.py:48-114
 - id: Q98
   severity: normal
   expected_claims:
@@ -1015,29 +1030,29 @@ questions:
   severity: normal
   expected_claims:
   - id: concept
-    statement: Canonical dependency materialization happens once through native `make init` before APP certification. The APP verification Plan
-      consumes that initialized repository; there is no certification-specific dependency bootstrap or reacquisition path.
+    statement: Publishable dependency intent and committed native locks are portable release/source inputs. A locally selected interpreter,
+      installed environment and uv/npm caches are materialization facts. Their exact tree bytes vary by host and do not define another portable
+      package-manager or certification identity.
     critical: false
   - id: ownership_boundary
-    statement: Native uv/npm own dependency resolution, installation, cache, retry and network semantics. Oh-Goon owns Plan sequencing, explicit
-      Step capabilities, isolation, durable execution evidence and PASS/FAIL/INCOMPLETE classification.
+    statement: Native tools own resolution, acquisition and environment/cache reuse. Oh-Goon owns publication admission, exact source/artifact
+      evidence and execution custody; those bindings do not make local `.venv` or `node_modules` a cross-host dependency authority.
     critical: false
   - id: consequence
-    statement: This prevents a shadow package-manager/certification-supply implementation while keeping broad diagnostics in `make verify` and
-      the lean semantic `make certify` path release-critical.
+    statement: Preserves reproducible declared resolution while allowing native platform-specific materialization and avoiding package releases
+      or certificates that depend on copying private caches or an entire developer environment.
     critical: false
   contradictions:
   - id: fatal-01
-    statement: Reintroduces a certification-specific resolver, dependency cache/supply, offline replay authority, or mandatory `make certification-setup`
-      path instead of delegating to native tools.
+    statement: Uses materialized environment/cache tree bytes as portable resolution identity, omits the publishable committed native lock from
+      source authority, or requires certification to reconstruct a separate dependency environment.
     severity: normal
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - docs/development/APP_CERTIFICATION.md:1-35
-  - docs/development/NATIVE_TOOL_AUTHORITY.md:1-91
-  - templates/plans/oh-goon/app-certification/plan.yml:1-6
-  - backend/src/oh_goon/integrations/fleet_plan_compilation.py:237-249
-  - templates/plans/oh-goon/app-certification/README.md:1-14
+  - .gitignore:1-21
+  - docs/development/APP_CERTIFICATION.md:7-35
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:85-107
+  - scripts/tests/test_package_slim.py:267-291
 - id: Q100
   severity: normal
   expected_claims:
@@ -1065,53 +1080,58 @@ questions:
   severity: critical
   expected_claims:
   - id: concept
-    statement: Resolution schema 1 is registry-only, so certification materialization rejects PEP 610 `direct_url.json`; public package composition
-      scans dependency intent/locks for private infrastructure and never prints the sensitive hostname in failures. Local native diagnostics may
-      retain detail, but any packageable/persisted public evidence must pass the disclosure boundary.
+    statement: Native installers own origin metadata such as `direct_url.json`; it must not leak private paths, credentials or endpoints through
+      public source, handoffs or retained evidence. The committed lock may contain approved public release artifact URLs and the root Oh-Goon
+      project's editable `.` source. Public-source checks reject forbidden identity rather than enforcing a registry-only certification supply
+      schema or rewriting native origin metadata.
     critical: true
   - id: ownership_boundary
     statement: Native installers own local origin metadata and diagnostics; public source/evidence policy owns what may be persisted or published.
     critical: true
   - id: consequence
-    statement: Closes leakage through installed-origin metadata, source packaging, and failure evidence even when lock/resolution files themselves
-      are sanitized.
+    statement: Prevents disclosure through installed-origin metadata, packageable source and failure evidence without rejecting legitimate
+      public artifact dependencies or introducing another certification materializer.
     critical: true
   contradictions:
   - id: fatal-01
-    statement: Publishes direct-origin/local-path metadata or renders private infrastructure values in public privacy-check failures.
+    statement: Publishes private paths, credentials or endpoints from native origin metadata, renders private infrastructure values in public
+      privacy-check failures, or rejects all direct-origin dependencies through a registry-only certification supply rule.
     severity: critical
     misconception_id: semantic_invariant_violation
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/public_dependency_privacy.py:1-118
-  - backend/src/oh_goon/repository_tooling/release/package_slim.py:1-227
-  - backend/src/oh_goon/repository_tooling/public_dependency_privacy.py:1-130
-  - scripts/tests/test_public_dependency_privacy.py:1-44
-  - docs/development/APP_CERTIFICATION.md:1-35
+  - backend/src/oh_goon/repository_tooling/_dependency_lock_portability.py:29-115
+  - backend/src/oh_goon/repository_tooling/public_dependency_privacy.py:106-136
+  - scripts/tests/test_public_dependency_privacy.py:72-127
+  - scripts/tests/test_dependency_resolution.py:61-112
+  - docs/development/APP_CERTIFICATION.md:7-35
 - id: Q102
   severity: normal
   expected_claims:
   - id: concept
     statement: Native uv is the sole registry-version and PEP 508 marker authority. `make sync` resolves intent into committed `backend/uv.lock`;
-      `make init` consumes those exact lock bytes with frozen semantics. Oh-Goon does not reinterpret graph or marker semantics and separately
-      fails closed on retained-wheel artifact identity drift.
+      `make init` consumes that resolution with locked freshness and materialization semantics. Single-version rendering differences and
+      marker-qualified multi-version branches are interpreted by uv, not separate Oh-Goon bootstrap rules.
     critical: false
   - id: ownership_boundary
-    statement: Oh-Goon must never project exact registry pins from native evidence back into dependency intent and must not duplicate marker evaluation
-      or make formatting differences a second dependency-resolution policy.
+    statement: Native uv owns whether intent and lock agree and how supported environment markers select packages. Oh-Goon binds exact committed
+      bytes and applies publication/privacy policy without projecting pins back into intent, normalizing marker text or evaluating forks itself.
     critical: false
   - id: consequence
-    statement: Prevents false fresh-checkout and qualification failures when compatible registry versions change while retaining strict declared
-      minimums, scope/direct membership, and retained-wheel identity.
+    statement: Avoids false bootstrap verdicts from a parallel marker/version comparison while preserving native stale-lock refusal and exact
+      source identity. A changed lock can invalidate bound evidence without proving that native dependency semantics are wrong.
     critical: false
   contradictions:
   - id: fatal-01
-    statement: Treats snapshot registry versions or marker strings as dependency intent, injects `==` pins during bootstrap, or ignores scope/direct-membership
-      or retained-wheel artifact drift.
+    statement: Treats marker strings or native version forks as an independent Oh-Goon dependency-validity verdict, rewrites lock or intent
+      to fit a normalized snapshot, or bypasses native locked freshness during initialization.
     severity: normal
     misconception_id: caller_owner_confusion
   evidence_expectations:
-  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-84
-  - scripts/tests/test_dependency_resolution.py:1-35
+  - backend/src/oh_goon/repository_tooling/dependency_locks.py:48-81
+  - backend/src/oh_goon/repository_tooling/dependency_resolution_bootstrap.py:1-6
+  - Makefile:185-193
+  - scripts/tests/test_dependency_sync_contract.py:23-55
+  - docs/development/NATIVE_TOOL_AUTHORITY.md:85-107
 - id: Q103
   severity: normal
   expected_claims:

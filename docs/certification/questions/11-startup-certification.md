@@ -56,7 +56,7 @@ Who owns certification/setup command-heading color, and what TTY/`NO_COLOR` rule
 
 
 ## Q79
-Who owns backend lock validity and project-environment materialization, and why must Oh-Goon not hash, normalize, or reconstruct `uv.lock` into a second dependency identity?
+Who owns backend lock validity and project-environment materialization, and how does binding exact committed `uv.lock` bytes as provenance differ from normalizing or reconstructing a second dependency authority?
 
 ## Q80
 What is the repository-wide native-tool authority rule, how does it apply beyond package managers to tools such as Docker/BuildKit, Kubernetes, Git and operating-system process facilities, and how do you distinguish legitimate Oh-Goon orchestration from a ghost implementation of native semantics?
@@ -92,13 +92,13 @@ Why must `make init` own dependency materialization exactly once before APP cert
 Who owns private/public Python registry configuration, and which repository, evidence, logging, and packaging surfaces must never disclose operator-private registry identity?
 
 ## Q91
-Who owns Oh-Goon's local `backend/uv.lock`, where may it exist, which identities may use its SHA, and why must it never enter public source/package artifacts?
+Who owns committed `backend/uv.lock`, which source/package and qualification identities may bind its exact bytes, and how must that publishable authority remain distinct from private native configuration, caches, and the disposable `backend/.venv`?
 
 ## Q92
-Why is committed `backend/uv.lock` the sole exact Python resolution authority, how is it separated from `backend/pyproject.toml` dependency intent, and which registry/path identities are forbidden from public lock bytes?
+Why is committed `backend/uv.lock` the sole exact dependency-resolution authority for the backend project, how is it separated from `backend/pyproject.toml` dependency intent, and which registry/path identities are forbidden from public lock bytes?
 
 ## Q93
-How must a fresh `make init` consume committed `backend/uv.lock` with frozen semantics without reconciling or rewriting it, and why is `make sync` the only ordinary dependency-authoring boundary?
+How does a fresh `make init` use native uv's locked materialization to reject a stale committed `backend/uv.lock` without rewriting it, and how does that differ from `make sync` authoring and subsequent frozen, no-sync verification?
 
 ## Q94
 Why must dependency resolution evidence preserve universal Python/platform marker forks even though native uv, not Oh-Goon, owns marker and registry-version resolution?
@@ -110,7 +110,7 @@ What distinguishes committed dependency resolution identity from a locally mater
 Which dependency write/read authority belongs to `make init`, `diagnostic-dependency-check`, `sync`, `verify`, and `certify` under the lean native-tool model?
 
 ## Q97
-Which machine-enforced source/privacy guards prevent a local lock, private registry identity, or package-manager cache state from leaking into public source, patches, logs, or generated evidence?
+Which source/publication and privacy guards retain the publishable committed native locks while rejecting private dependency-source identity and excluding package-manager caches from public source and evidence?
 
 
 ## Q98
@@ -123,11 +123,11 @@ What dependency/environment facts are portable release inputs, which are host-lo
 How does the public/private registry boundary apply to npm and Playwright as well as uv, and what must happen if a committed `package-lock.json` resolves packages through an operator-private npm registry?
 
 ## Q101
-How must direct-origin metadata and persisted evidence be handled so local paths, VCS endpoints, registry hosts, or credentials cannot leak through `direct_url.json`, packaged source, handoffs, or retained public evidence?
+How must native installed-origin metadata and public dependency evidence distinguish approved publishable origins from private paths, endpoints, or credentials, without turning APP certification into another installer or rejecting all direct-origin dependencies?
 
 
 ## Q102
-Why are single-version marker-rendering differences non-blocking evidence while marker-qualified multi-version forks remain hard bootstrap authority, and which owner evaluates PEP 508 markers?
+Who decides whether version and PEP 508 marker differences change native dependency resolution, and how must Oh-Goon keep exact-lock identity and publication checks separate from that semantic decision?
 
 ## Q103
 Why must Oh-Goon report native tool requirements without parsing or enforcing their version semantics itself, and which native operations remain authoritative for uv, Python, Node, and npm compatibility?
