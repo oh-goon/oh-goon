@@ -834,9 +834,11 @@ def test_complete_release_check_executes_each_native_surface_once() -> None:
     assert all(
         options.batch is None and not options.resume for _cwd, options in invocations
     )
-    assert tooling.qualified is False and tooling.workers == 2
+    assert tooling.qualified and tooling.workers == 2
     assert tooling.pytest_config == Path("backend/pyproject.toml")
-    assert tooling.granularity == "files" and tooling.batch_size == 4
+    assert tooling.granularity == "tests" and tooling.batch_size == 64
+    assert tooling.batch_timeout == 180 and tooling.suite_timeout == 1800
+    assert tooling.pytest_arg == [] and tooling.exclude == []
     for options, configuration, batch_size in (
         (backend, Path("pyproject.toml"), 64),
         (backend_integration, Path("pyproject.toml"), 8),
