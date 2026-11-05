@@ -104,7 +104,8 @@ profile. Foreign-thread progress is filtered; wrong-turn observations cannot
 borrow an owned turn's terminal result. Closing one client closes its transport,
 without granting cancellation or cleanup authority over another client or an
 operator-owned server. These are separate accepting boundaries from physical
-transport-peer attestation, which remains unqualified under HUG-38.
+transport-peer attestation, which was unqualified at that review. The later
+HUG-38 section below updates only the selected owned Linux peer-binding scope.
 
 Product cross-Run native-session adoption, persistent Pi sessions and OpenCode
 service-session execution remain unsupported. Cold resume cannot supply missing
@@ -139,6 +140,71 @@ adaptations. This change selects no native upgrade or adaptation removal.
 Entrypoint-byte verification does not seal the complete imported native runtime,
 and this scoped identity proof does not qualify live accounts, arbitrary native
 reload, other hosts, strict custody or parallel mixed-harness Runs.
+
+## Protected native tools and owned peer binding — 2026-11-05
+
+[HUG-38](https://linear.app/hugloss/issue/HUG-38) binds the owned Linux Codex
+service connection to the daemon launched by its original Step command owner.
+The existing process lifecycle callback supplies a `ProcessBirthIdentity`; the
+client checks the actual WebSocket's Unix peer, matching birth and positive
+process liveness before initialization and every request, after receiving data
+and before returning queued notifications. A
+pathname, readiness reply or native-reported PID cannot substitute for that
+connection evidence. A zombie or unobservable process cannot retain authority
+from the kernel's connection-time credentials. This is not continuous
+per-message sender or descriptor-delegation attestation. Unknown introspection
+or changed identity refuses before model work; the original command owner still
+supplies cancellation and cleanup.
+Status-only connections remain explicitly unqualified.
+
+Controlled real-process peers reproduce replacement before connection and
+pathname rebind after readiness. A valid original connection keeps its peer;
+another process at the same pathname cannot inherit the old authority. Missing
+or unusable daemon-birth observations and missing socket introspection also
+refuse, with valid controls and the original process-quiescence receipt retained.
+No second probe socket, generic session lease or supervisor is introduced.
+
+The selected native Codex parser also accepts attached `-m`, `-c` and `-C`
+arguments. Existing managed-model/configuration and owned-workspace guards now
+reject those forms before producer/native work; ordinary native arguments and
+Pi's opaque option values retain their existing behavior. The framing evidence
+uses Codex 0.164.0 valid-help and unknown-option controls, not inference from
+OpenCode's different help behavior.
+
+Private repository/Skill hardlinks and a Skill-root alias into the selected
+native home refuse before private content opens or a Run is admitted. Public
+Skill aliases and ordinary source capture remain valid controls. Seven ordinary
+Run-entry privacy cases now live beside their actual service Run owner; the
+previous standalone file is removed with its case bodies and protection
+conserved. Native stores, plugins and MCP remain native-owned; no generic
+credential/configuration API is offered to model tools.
+
+Fresh focused proof is scoped as follows:
+
+| Boundary | Executed result and limit |
+| --- | --- |
+| Owned peer (SEC-04/T23) | Two real Unix-socket cases pass after reproducing the old replacement gap. Valid peers initialize and receive instructions; a foreign peer refuses before initialization, a rebound pathname preserves the original connection, and later birth or false/unknown liveness refuses without another RPC. Twelve existing native process-state cases and the unknown-introspection negative pass. Missing/invalid original daemon observations refuse with original cleanup receipts. |
+| Source privacy (SEC-01/T21) | All seven ordinary Run-entry privacy cases pass at their new owner, including hardlinks/native-home aliases and successful public-source controls. The old-to-new case census and source-preservation review retain the removed file's protection. |
+| Native argument authority (T24) | Attached Codex model/configuration/workspace forms each reproduced a missing refusal. Focused receiver/command checks pass after repair, with valid original inputs, opaque native options and non-echoing errors retained. |
+| Installed native phase/store policy | Codex 0.164.0 on Linux: three cases pass for the model-free review/repair policy and production-policy continuation with absent/populated reserved directories. All four synthetic store classes deny read/write/rename/delete and in-Run hardlink creation; allowed scratch/scoped repair and a scratch hardlink succeed. Traversal, private CWD, symlink/subprocess denial and unchanged canaries remain checked. A random canary exists in the exact owned daemon's synthetic environment, while each phase's tool environment omits its key and cannot read that daemon's `/proc/PID/environ`; the value is never supplied as a probe argument. The actual registered native MCP RPC is refused with an empty workload catalog and no tool call reaching the synthetic server. |
+| Installed original worker/tool paths | Two cases pass: protected managed Code Mode and the configured-MCP review/repair campaign. The latter retains ten original Step execution facts/empty catalogs and ten real Code Mode exclusion probes, unchanged synthetic native config and no MCP `CALLED` event. Exact RPC refusal is the separate model-free native proof, not an inert parent-process callback or an invented Code Mode API. |
+
+These five installed cases use the selected complete public runtime and
+synthetic state in a loopback-only namespace; inference uses local fixture
+providers. Worker-aware
+fixture observations consume existing wire data and bounded command input;
+they do not fill in missing Task/Skill/Hashmarks content or inject callbacks
+through the worker handoff. Source/typed-result, independent verification and
+original physical cleanup assertions remain in place. No live account or model
+reasoning quality is qualified by the fixtures.
+
+Disposition: **retain** the existing protocol, settlement and reserved-directory
+adaptations. This is peer/argument enforcement and scoped qualification, without
+a native upgrade or compatibility removal. Native MCP discovery may initialize
+registered servers before a workload thread; MCP-startup isolation remains
+unsupported under HUG-124. OpenCode service execution, Pi persistent sessions,
+cross-Run native-session adoption, live accounts, other hosts and strict custody
+remain outside this proof.
 
 ## Temporary adaptations and removal decisions
 

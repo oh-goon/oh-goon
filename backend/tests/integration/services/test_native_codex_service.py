@@ -12,11 +12,15 @@ import json
 import os
 import platform
 import shlex
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from threading import Event, Thread
 from time import monotonic, sleep
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -27,13 +31,19 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
-from oh_goon.engine.command import CommandCancelledError, CommandResult, run_command
+from oh_goon.core.process_birth import ProcessBirthIdentity, observe_process_birth
+from oh_goon.engine.command import (
+    CommandCancelledError,
+    CommandProcessLifecycleEvent,
+    CommandResult,
+    run_command,
+)
 from oh_goon.integrations.agent_codex_service import CodexServiceClient
 from oh_goon.integrations.agent_codex_service_execution import service_arguments
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from tests.fakes.codex_responses import CodexResponsesFixture
 
-_PROBE = r"""import json, pathlib, subprocess, sys
+_PROBE = r"""import json, os, pathlib, subprocess, sys
 repo, scratch, stores, repair = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3]), sys.argv[4] == 'repair'
 source = repo / 'src' / 'source.py'
 def denied(action):
@@ -45,6 +55,9 @@ def denied(action):
 facts = {'source_read': source.read_text().startswith('VALUE = ')}
 (scratch / 'owned.txt').write_text('scratch')
 facts['scratch_write'] = (scratch / 'owned.txt').read_text() == 'scratch'
+os.link(scratch / 'owned.txt', scratch / 'owned-hardlink')
+facts['scratch_hardlink_allowed'] = (scratch / 'owned-hardlink').read_text() == 'scratch'
+(scratch / 'owned-hardlink').unlink()
 if repair:
     source.write_text('VALUE = 42\n')
     source.rename(source.with_name('renamed.py'))
@@ -65,8 +78,18 @@ for name in ('codex-auth.json', 'codex-config.toml', 'opencode-auth.json', 'open
     facts[name + '_write_denied'] = denied(lambda: private_file.write_text('unauthorized'))
     facts[name + '_rename_denied'] = denied(lambda: private_file.rename(private_file.with_suffix('.moved')))
     facts[name + '_delete_denied'] = denied(private_file.unlink)
+    private_alias = scratch / (name + '.hardlink')
+    facts[name + '_hardlink_denied'] = denied(lambda: os.link(private_file, private_alias))
+    facts[name + '_hardlink_absent'] = not private_alias.exists()
 facts['private_alias_read_denied'] = denied(lambda: (repo / 'private-alias').read_bytes())
 facts['private_alias_write_denied'] = denied(lambda: (repo / 'private-alias').write_text('unauthorized'))
+facts['private_relative_read_denied'] = denied(lambda: (repo / '..' / stores.name / 'codex-auth.json').read_bytes())
+facts['private_cwd_denied'] = denied(lambda: os.chdir(stores))
+facts['private_mcp_environment_absent'] = 'MCP_PRIVATE_KEY' not in os.environ
+if len(sys.argv) == 7:
+    daemon_pid, daemon_canary_key = sys.argv[5:7]
+    facts['daemon_environment_canary_absent'] = daemon_canary_key not in os.environ
+    facts['daemon_proc_environment_denied'] = denied(lambda: (pathlib.Path('/proc') / daemon_pid / 'environ').read_bytes())
 child = subprocess.run([sys.executable, '-I', '-c', 'import pathlib, sys\ntry: pathlib.Path(sys.argv[1]).read_bytes()\nexcept OSError: sys.exit(0)\nelse: sys.exit(1)', str(stores / 'codex-auth.json')], capture_output=True, timeout=3)
 facts['subprocess_private_read_denied'] = child.returncode == 0
 """
@@ -121,6 +144,8 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
         (stores / name).write_text("SYNTHETIC_PRIVATE_CANARY")
     (workspace / "private-alias").symlink_to(stores / "codex-auth.json")
     advertised = control / "advertised.sock"
+    daemon_canary_key = "HUG38_OWNED_DAEMON_ENV_CANARY"
+    daemon_canary_value = uuid4().hex
     environment = {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "HOME": str(home),
@@ -129,10 +154,40 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
         "XDG_DATA_HOME": str(home / "data"),
         "XDG_CACHE_HOME": str(home / "cache"),
         "TMPDIR": str(scratch),
+        daemon_canary_key: daemon_canary_value,
     }
     for key in ("CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
         Path(environment[key]).mkdir(mode=0o700)
     assert not runtime.is_relative_to(home) and not home.is_relative_to(runtime)
+    mcp_trace = root / "mcp-startup-trace"
+    mcp_program = root / "public-mcp-probe.py"
+    mcp_program.write_text(
+        r"""import json,pathlib,sys
+trace=pathlib.Path(sys.argv[1])
+with trace.open('a') as stream: stream.write('startup\n')
+for line in sys.stdin:
+    request=json.loads(line)
+    if 'id' not in request: continue
+    method=request.get('method')
+    if method=='initialize':
+        result={'protocolVersion':request['params']['protocolVersion'],'capabilities':{'tools':{},'resources':{}},'serverInfo':{'name':'synthetic-registered','version':'1'},'instructions':'UNADMITTED_MCP_GUIDANCE_CANARY'}
+    elif method=='tools/list':
+        result={'tools':[{'name':'escape','description':'Must remain disabled','inputSchema':{'type':'object','properties':{}}}]}
+    elif method=='tools/call':
+        with trace.open('a') as stream: stream.write('CALLED\n')
+        result={'content':[{'type':'text','text':'UNAUTHORIZED'}]}
+    else:
+        result={'resources':[],'resourceTemplates':[],'prompts':[]}
+    print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
+"""
+    )
+    native_configuration = (
+        '[mcp_servers.registered]\ncommand="/usr/bin/python3"\nargs='
+        + json.dumps(["-u", str(mcp_program), str(mcp_trace)])
+        + '\n[mcp_servers.registered.env]\nMCP_PRIVATE_KEY="SYNTHETIC_PRIVATE_MCP_CONFIG_VALUE"\n'
+    )
+    native_config = Path(environment["CODEX_HOME"]) / "config.toml"
+    native_config.write_text(native_configuration)
     filesystem = {
         ":root": "deny",
         ":minimal": "read",
@@ -173,6 +228,14 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
     arguments = tuple(part for setting in settings for part in ("-c", setting))
     cancelled = Event()
     outcomes: list[CommandResult | BaseException] = []
+    process_births: list[ProcessBirthIdentity] = []
+
+    def process_started(event: CommandProcessLifecycleEvent) -> None:
+        if event.kind == "PROCESS_STARTED":
+            assert event.pid is not None
+            birth = observe_process_birth(event.pid)
+            assert birth is not None
+            process_births.append(birth)
 
     def serve() -> None:
         try:
@@ -189,6 +252,7 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
                     cancel_requested=cancelled.is_set,
                     max_capture_bytes_per_stream=65536,
                     require_process_group_quiescence=True,
+                    process_observer=process_started,
                 )
             )
         except BaseException as error:
@@ -210,10 +274,24 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
 
         async def inspect() -> None:
             async with CodexServiceClient(
-                advertised, timeout_seconds=10, experimental_api=True
+                advertised,
+                timeout_seconds=10,
+                experimental_api=True,
+                expected_process=process_births[0],
             ) as client:
                 assert client.metadata["service_version"] == "0.164.0"
                 assert client.metadata["execution_admitted"] is False
+                assert len(process_births) == 1
+                daemon_pid = process_births[0].pid
+                # This is the exact owned daemon's synthetic environment,
+                # never a parent environment or a discovered process.
+                with (Path("/proc") / str(daemon_pid) / "environ").open("rb") as stream:
+                    daemon_environment = stream.read(16385)
+                assert len(daemon_environment) <= 16384
+                assert (
+                    f"{daemon_canary_key}={daemon_canary_value}".encode()
+                    in daemon_environment.split(b"\x00")
+                )
                 available = await client.list_permission_profiles(cwd=workspace)
                 assert {"phase-review", "phase-repair"} <= {
                     item["id"] for item in available["data"]
@@ -233,6 +311,8 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
                             str(scratch),
                             str(stores),
                             phase,
+                            str(daemon_pid),
+                            daemon_canary_key,
                         ),
                         cwd=workspace,
                         permissions=profile,
@@ -249,19 +329,46 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
                         "facts": facts,
                     }
                 assert client.metadata["private_store_exclusion"] == "unverified"
+                exclusions = await client.mcp_exclusion_configuration()
+                assert exclusions == {"mcp_servers": {"registered": {"enabled": False}}}
                 created = await client.start_thread(
                     cwd=workspace,
                     permissions="phase-review",
                     model="gpt-6.1-sol",
                     developer_instructions="Frozen synthetic phase instructions; no model turn is requested.",
+                    configuration=exclusions,
                     ephemeral=False,
                 )
                 thread_id = created["thread"]["id"]
                 assert created["activePermissionProfile"]["id"] == "phase-review"
                 assert created["thread"]["turns"] == []
+                await client.require_mcp_servers_excluded(thread_id)
+                with pytest.raises(AgentProviderError, match="refused"):
+                    await client._request(
+                        "mcpServer/tool/call",
+                        {
+                            "threadId": thread_id,
+                            "server": "registered",
+                            "tool": "escape",
+                            "arguments": {},
+                        },
+                    )
+                (root / "mcp-refusal-receipt.json").write_text(
+                    json.dumps(
+                        {
+                            "native_registered_tool": "registered/escape",
+                            "workload_catalog": "empty",
+                            "native_direct_rpc": "refused",
+                            "model_turns_requested": 0,
+                        }
+                    )
+                )
             assert server.is_alive(), "Closing the client must not stop the operator-owned service"
             async with CodexServiceClient(
-                advertised, timeout_seconds=10, experimental_api=True
+                advertised,
+                timeout_seconds=10,
+                experimental_api=True,
+                expected_process=process_births[0],
             ) as resumed_client:
                 # Native 0.164 materializes persistent history at the first turn.
                 # An untouched thread can start, but cannot be resumed after detach.
@@ -288,6 +395,9 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
         assert source.read_text() == "VALUE = 42\n"
         assert git.read_text() == "SYNTHETIC_GIT_METADATA"
         assert outside.read_text() == "OUTSIDE_REPAIR_SCOPE"
+        assert native_config.read_text() == native_configuration
+        startup_lines = mcp_trace.read_text().splitlines()
+        assert startup_lines and set(startup_lines) == {"startup"}
         for private_file in stores.iterdir():
             assert private_file.read_text() == "SYNTHETIC_PRIVATE_CANARY"
         assert {private_file.name for private_file in stores.iterdir()} == {
@@ -306,6 +416,7 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
             assert isinstance(outcome, CommandCancelledError), {"outcome": type(outcome).__name__}
             assert outcome.supervisor.cleanup_reason == "cancel"
             assert outcome.supervisor.final_process_group_quiescent is True
+
             (root / "service-cleanup-receipt.json").write_text(
                 json.dumps(
                     {
@@ -518,6 +629,15 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(
     )
     cancelled = Event()
     outcomes: list[CommandResult | BaseException] = []
+    process_births: list[ProcessBirthIdentity] = []
+
+    def process_started(event: CommandProcessLifecycleEvent) -> None:
+        if event.kind == "PROCESS_STARTED":
+            assert event.pid is not None
+            birth = observe_process_birth(event.pid)
+            assert birth is not None
+            process_births.append(birth)
+
     endpoint = _ServiceContinuationResponses(command)
     with endpoint:
         settings = [
@@ -543,6 +663,7 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(
                         cancel_requested=cancelled.is_set,
                         max_capture_bytes_per_stream=65536,
                         require_process_group_quiescence=True,
+                        process_observer=process_started,
                     )
                 )
             except BaseException as error:
@@ -577,7 +698,10 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(
 
             async def inspect() -> None:
                 async with CodexServiceClient(
-                    advertised, timeout_seconds=15, experimental_api=True
+                    advertised,
+                    timeout_seconds=15,
+                    experimental_api=True,
+                    expected_process=process_births[0],
                 ) as client:
                     write_probe = await client.command_exec(
                         (
@@ -622,7 +746,10 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(
                     await completed(client, thread_id)
                 assert server.is_alive()
                 async with CodexServiceClient(
-                    advertised, timeout_seconds=15, experimental_api=True
+                    advertised,
+                    timeout_seconds=15,
+                    experimental_api=True,
+                    expected_process=process_births[0],
                 ) as client:
                     resumed = await client.resume_thread(
                         thread_id,
@@ -700,3 +827,233 @@ def test_installed_codex_service_preserves_followup_resume_and_compaction(
             outcome = outcomes[0]
             assert isinstance(outcome, CommandCancelledError), {"outcome": type(outcome).__name__}
             assert outcome.supervisor.final_process_group_quiescent is True
+
+
+_CONTROLLED_PEER = r"""
+import json, pathlib, sys
+import uvicorn
+from starlette.applications import Starlette
+from starlette.routing import WebSocketRoute
+from starlette.websockets import WebSocketDisconnect
+
+socket_path, audit_path, label = sys.argv[1:]
+async def endpoint(websocket):
+    await websocket.accept()
+    try:
+        while True:
+            message = await websocket.receive_json()
+            with open(audit_path, 'a', encoding='utf-8') as audit:
+                audit.write(json.dumps(message) + '\n')
+            if 'id' not in message:
+                continue
+            method = message['method']
+            if method == 'initialize':
+                result = {'userAgent': 'codex/0.164.0', 'platformFamily': 'unix',
+                          'platformOs': 'linux', 'codexHome': str(pathlib.Path(audit_path).parent)}
+            elif method == 'thread/start':
+                result = {'thread': {'id': label + '-thread'},
+                          'activePermissionProfile': {'id': message['params']['permissions']}}
+            elif method == 'turn/start':
+                result = {'turn': {'id': label + '-turn', 'status': 'inProgress'}}
+            else:
+                raise AssertionError('unexpected controlled native method: ' + method)
+            await websocket.send_json({'id': message['id'], 'result': result})
+    except WebSocketDisconnect:
+        pass
+
+uvicorn.run(Starlette(routes=[WebSocketRoute('/', endpoint)]), uds=socket_path,
+            log_level='error', ws='wsproto', ws_max_size=262144,
+            timeout_graceful_shutdown=1)
+"""
+
+
+@contextmanager
+def _controlled_codex_peer(
+    socket_path: Path, audit: Path, label: str
+) -> Iterator[ProcessBirthIdentity]:
+    """A real protocol peer whose lifetime belongs to the original command owner."""
+    stop = Event()
+    births: list[ProcessBirthIdentity] = []
+    outcomes: list[CommandResult | BaseException] = []
+
+    def observe(event: CommandProcessLifecycleEvent) -> None:
+        if event.kind == "PROCESS_STARTED":
+            assert event.pid is not None
+            birth = observe_process_birth(event.pid)
+            assert birth is not None
+            births.append(birth)
+
+    def serve() -> None:
+        try:
+            outcomes.append(
+                run_command(
+                    sys.executable,
+                    "-I",
+                    "-c",
+                    _CONTROLLED_PEER,
+                    str(socket_path),
+                    str(audit),
+                    label,
+                    cwd=socket_path.parent,
+                    timeout=10,
+                    cancel_requested=stop.is_set,
+                    process_observer=observe,
+                    require_process_group_quiescence=True,
+                    max_capture_bytes_per_stream=8192,
+                    input_data=b"",
+                )
+            )
+        except BaseException as error:
+            outcomes.append(error)
+
+    server = Thread(target=serve, name="controlled-native-peer-" + label)
+    server.start()
+    try:
+        deadline = monotonic() + 5
+        while not socket_path.exists():
+            assert server.is_alive(), outcomes
+            assert monotonic() < deadline, "controlled native peer did not bind its socket"
+            sleep(0.01)
+        assert len(births) == 1
+        yield births[0]
+    finally:
+        stop.set()
+        server.join(timeout=12)
+        assert not server.is_alive()
+        assert len(outcomes) == 1
+        outcome = outcomes[0]
+        assert isinstance(outcome, CommandCancelledError), outcome
+        assert outcome.supervisor.final_process_group_quiescent is True
+
+
+def _peer_messages(audit: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in audit.read_text().splitlines()] if audit.exists() else []
+
+
+async def _start_controlled_peer_thread(
+    socket_path: Path, expected: ProcessBirthIdentity, label: str
+) -> None:
+    async with CodexServiceClient(
+        socket_path, expected_process=expected, timeout_seconds=2, experimental_api=True
+    ) as client:
+        created = await client.start_thread(
+            cwd=socket_path.parent,
+            permissions="controlled-permission",
+            model="controlled-model",
+            developer_instructions="SYNTHETIC_FROZEN_INSTRUCTIONS",
+        )
+        assert created["thread"]["id"] == label + "-thread"
+
+
+@pytest.mark.process
+@pytest.mark.skipif(platform.system() != "Linux", reason="Linux native Unix peer credentials")
+def test_codex_service_checks_actual_unix_peer_before_initialization(tmp_path: Path) -> None:
+    socket_a, socket_b = tmp_path / "a.sock", tmp_path / "b.sock"
+    audit_a, audit_b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    with (
+        _controlled_codex_peer(socket_a, audit_a, "A") as expected_a,
+        _controlled_codex_peer(socket_b, audit_b, "B") as expected_b,
+    ):
+
+        async def inspect() -> None:
+            await _start_controlled_peer_thread(socket_a, expected_a, "A")
+            await _start_controlled_peer_thread(socket_b, expected_b, "B")
+            assert [item["method"] for item in _peer_messages(audit_b)] == [
+                "initialize",
+                "initialized",
+                "thread/start",
+            ]
+            audit_b.write_text("")
+            with pytest.raises(AgentProviderError):
+                async with CodexServiceClient(
+                    socket_b, expected_process=expected_a, timeout_seconds=2, experimental_api=True
+                ):
+                    pass
+            assert _peer_messages(audit_b) == []
+
+        asyncio.run(inspect())
+        authorized = _peer_messages(audit_a)
+        assert authorized[-1]["params"]["developerInstructions"] == "SYNTHETIC_FROZEN_INSTRUCTIONS"
+
+
+@pytest.mark.process
+@pytest.mark.skipif(platform.system() != "Linux", reason="Linux native Unix peer credentials")
+def test_codex_service_socket_rebind_cannot_replace_the_connected_peer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    advertised = tmp_path / "selected.sock"
+    audit_a, audit_b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    with _controlled_codex_peer(advertised, audit_a, "A") as expected_a:
+
+        async def inspect() -> None:
+            async with CodexServiceClient(
+                advertised, expected_process=expected_a, timeout_seconds=2, experimental_api=True
+            ) as original:
+                created = await original.start_thread(
+                    cwd=tmp_path,
+                    permissions="controlled-permission",
+                    model="controlled-model",
+                    developer_instructions="SYNTHETIC_ORIGINAL_INSTRUCTIONS",
+                )
+                thread = created["thread"]["id"]
+                assert thread == "A-thread"
+                advertised.unlink()
+                with _controlled_codex_peer(advertised, audit_b, "B") as expected_b:
+                    await _start_controlled_peer_thread(advertised, expected_b, "B")
+                    audit_b.write_text("")
+                    continued = await original.start_turn(
+                        thread, "SYNTHETIC_ORIGINAL_FOLLOWUP", permissions="controlled-permission"
+                    )
+                    assert continued["turn"]["id"] == "A-turn"
+                    with pytest.raises(AgentProviderError):
+                        async with CodexServiceClient(
+                            advertised,
+                            expected_process=expected_a,
+                            timeout_seconds=2,
+                            experimental_api=True,
+                        ):
+                            pass
+                    with monkeypatch.context() as changed_identity:
+
+                        def changed_birth(_expected: ProcessBirthIdentity) -> bool:
+                            return False
+
+                        changed_identity.setattr(
+                            "oh_goon.integrations.agent_codex_service.process_birth_matches",
+                            changed_birth,
+                        )
+                        with pytest.raises(AgentProviderError):
+                            await original.start_turn(
+                                thread,
+                                "SYNTHETIC_REFUSED_FOLLOWUP",
+                                permissions="controlled-permission",
+                            )
+                    for live in (False, None):
+                        with monkeypatch.context() as changed_liveness:
+
+                            def unavailable_liveness(
+                                _pid: int, observed: bool | None = live
+                            ) -> bool | None:
+                                return observed
+
+                            changed_liveness.setattr(
+                                "oh_goon.integrations.agent_codex_service.observe_process_liveness",
+                                unavailable_liveness,
+                            )
+                            with pytest.raises(AgentProviderError):
+                                await original.start_turn(
+                                    thread,
+                                    "SYNTHETIC_REFUSED_LIVENESS_FOLLOWUP",
+                                    permissions="controlled-permission",
+                                )
+                    assert _peer_messages(audit_b) == []
+
+        asyncio.run(inspect())
+        original = _peer_messages(audit_a)
+        assert [item["method"] for item in original] == [
+            "initialize",
+            "initialized",
+            "thread/start",
+            "turn/start",
+        ]
+        assert original[-1]["params"]["input"][0]["text"] == "SYNTHETIC_ORIGINAL_FOLLOWUP"

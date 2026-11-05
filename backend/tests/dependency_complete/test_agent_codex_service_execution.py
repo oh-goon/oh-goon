@@ -30,8 +30,10 @@ from oh_goon.core.models.fleet_plan_values import HostEnvironmentPart, ResolvedE
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.step_output import StepOutputObserver
+from oh_goon.core.process_birth import ProcessBirthIdentity, observe_process_birth
 from oh_goon.engine.command import (
     CommandCancelledError,
+    CommandProcessLifecycleEvent,
     CommandResult,
     CommandSupervisorReceipt,
     run_command,
@@ -71,6 +73,7 @@ def execute_fixture(
     release = tmp_path / "native-exit"
     events: list[object] = []
     physical: list[CommandResult | CommandCancelledError] = []
+    daemon_births: list[ProcessBirthIdentity] = []
 
     def completed_boundary(name: str) -> None:
         if cancel_at == name:
@@ -161,6 +164,21 @@ def execute_fixture(
                 "pathlib.Path(sys.argv[1]).touch()\n"
                 "while not pathlib.Path(sys.argv[2]).exists(): time.sleep(.01)\n"
             )
+
+        def observe(event: CommandProcessLifecycleEvent) -> None:
+            if event.kind == "PROCESS_STARTED":
+                assert event.pid is not None
+                birth = observe_process_birth(event.pid)
+                assert birth is not None
+                daemon_births.append(birth)
+            callback = kwargs.get("process_observer")
+            if callback is not None and fault != "missing_process_birth":
+                callback(
+                    replace(event, pid=None)
+                    if fault == "invalid_process_birth" and event.kind == "PROCESS_STARTED"
+                    else event
+                )
+
         try:
             result = run_command(
                 sys.executable,
@@ -173,6 +191,7 @@ def execute_fixture(
                 env={"PATH": "/usr/bin:/bin"},
                 timeout=kwargs["timeout"],
                 cancel_requested=kwargs["cancel_requested"],
+                process_observer=observe,
                 require_process_group_quiescence=True,
                 input_data=kwargs["input_data"],
             )
@@ -187,6 +206,8 @@ def execute_fixture(
 
     class NativeProtocol:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            assert daemon_births
+            assert _kwargs["expected_process"] == daemon_births[-1]
             self.metadata = {"service_version": None}
             self._message = 0
 
@@ -411,6 +432,33 @@ def test_service_turn_success_retains_actual_owned_daemon_cancellation_receipt(
     assert events.index("disconnect") < events.index("process_closed")
 
 
+@pytest.mark.parametrize("fault", ("missing_process_birth", "invalid_process_birth"))
+def test_service_requires_original_process_birth_before_connection_or_model_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    valid = tmp_path / "valid"
+    valid.mkdir()
+    baseline, valid_events, valid_physical = execute_fixture(valid, monkeypatch)
+    assert baseline().outcome.returncode == 0
+    assert "connect" in valid_events and "model_turn" in valid_events
+    assert len(valid_physical) == 1
+    assert valid_physical[0].supervisor.final_process_group_quiescent is True
+
+    invalid = tmp_path / "invalid"
+    invalid.mkdir()
+    invoke, events, physical = execute_fixture(invalid, monkeypatch, fault=fault)
+    with pytest.raises(execution.CodexServiceExecutionFailure) as failure:
+        invoke()
+    assert "process_birth" in events
+    assert "connect" not in events and "model_turn" not in events
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    assert failure.value.outcome.supervisor is physical[0].supervisor
+    assert failure.value.outcome.physical_execution_id == physical[0].physical_execution_id
+    assert failure.value.outcome.returncode != 0
+    assert physical[0].supervisor.final_process_group_quiescent is True
+    assert events[-1] == "process_closed"
+
+
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux AF_UNIX pathname transport")
 def test_long_service_socket_refuses_before_private_state_or_native_work(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -446,6 +494,8 @@ def test_service_turn_transports_the_selected_adjudication_schema_without_rewrit
     changed = invoke()
     assert events.count("model_turn") == 2
     assert physical[1].supervisor.final_process_group_quiescent
+    assert physical[0].physical_execution_id is not None
+    assert physical[1].physical_execution_id != physical[0].physical_execution_id
     assert changed.execution.permission_profile_id == result.execution.permission_profile_id
     assert changed.execution.configuration_id != result.execution.configuration_id
 

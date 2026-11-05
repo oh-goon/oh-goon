@@ -172,10 +172,13 @@ Select one node when iterating on one defect. The public runtime must remain
 outside native stores. The same service Run module includes complete bounded
 campaign cases: CLEAN, one or multiple independent defects repaired with real
 native read-only tools and fresh re-review, and interrupted proposal with no apply.
-An additional configured-MCP campaign completes the repair while the original
-thread's native MCP RPC refuses the exact registered server/tool identity and
-real native Code Mode attempts MCP access in every reasoning phase. Native
-threadless discovery may initialize that server; workload tools remain disabled,
+An additional configured-MCP campaign completes the repair while each original
+Step retains an empty effective MCP catalog and real native Code Mode attempts
+MCP access in every reasoning phase. The separate model-free service policy
+case sends the actual native MCP RPC for the exact registered server/tool
+identity and requires refusal. These observations use the actual worker/native
+connection; a parent-process client monkeypatch cannot observe a fresh worker.
+Native threadless discovery may initialize that server; workload tools remain disabled,
 no MCP tool call reaches it, and its native configuration/private canary remain
 unchanged.
 They retain the original native

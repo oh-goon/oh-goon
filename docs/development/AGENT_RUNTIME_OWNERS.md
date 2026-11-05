@@ -668,7 +668,17 @@ abort acknowledgement is not physical teardown proof.
 
 [CodexServiceClient](../../backend/src/oh_goon/integrations/agent_codex_service.py)
 owns its native protocol transport and owned thread/turn continuation methods;
-the original owned Step consumes its narrow protocol. Non-secret native feature
+the original owned Step consumes its narrow protocol. The owned daemon's
+existing command lifecycle callback supplies its process birth identity. The
+client verifies that identity and positive process liveness against its actual
+connected Unix peer before initialization, requests and accepting received or
+queued evidence. Unknown
+socket introspection or changed process birth refuses; a rebound pathname does
+not select another server. Operator readiness without an owned process remains
+unqualified. This adds no process launcher, credential reader or session owner.
+The [HUG-38 qualification](AGENT_HARNESS_COMPATIBILITY.md#protected-native-tools-and-owned-peer-binding--2026-11-05)
+records the selected Linux scope separately from older baseline observations.
+Non-secret native feature
 booleans, bounded connection-private MCP IDs, effective workload-thread MCP
 exclusion and connection-private native-home path separation are checked before
 model work; no auth/config read or generic API route is exposed. Native threadless
@@ -992,7 +1002,7 @@ independent verification remain legitimate separate responsibilities.
 [census-handoff]: ../../backend/tests/unit/entrypoints/test_run5_original_handoff.py
 [census-native-run]: ../../backend/tests/integration/services/test_native_agent_run.py
 [census-repair]: ../../backend/tests/integration/services/test_agent_review_repair_loop.py
-[census-privacy]: ../../backend/tests/integration/services/test_codex_service_run_source_privacy.py
+[census-privacy]: ../../backend/tests/integration/services/test_native_codex_service_run.py
 [census-context]: ../../backend/tests/integration/services/test_native_codex_context.py
 [census-pi-probe]: ../../backend/tests/integration/services/test_native_pi_session_protocol.py
 [census-broker]: ../../backend/tests/dependency_complete/test_agent_inference_broker.py
