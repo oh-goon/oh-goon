@@ -180,8 +180,10 @@ requirements.
 
 Merge-mode plan admission retains diagnostic JSON but refuses unresolved scope
 outside its bounded routes or missing required behavioral proof before publishing
-toolchain-selection outputs
-or preparing frontend/native-test capabilities. Focused plan inspection remains
+proof-selection outputs or preparing native-test capabilities. Existing frontend
+static requirements are resolved from native changed paths before admission so
+normal locked npm preparation supplies the actual compiler for observation.
+This preparation establishes capability, never verification. Focused plan inspection remains
 available for incomplete selections. Execution applies the same selection guard
 after checking the retained plan's current source; early refusal does not establish
 verification or relax the independent trusted-base gate.
@@ -218,6 +220,33 @@ stale or mismatched proof cannot qualify. The base control also rejects missing
 owners and surviving changed tests without meaningful execution. Absence of reviewed base
 controls is **CUTOVER_UNVERIFIED**. Draft feedback has the distinct nonrequired
 name **draft-feedback** and means **FOCUSED / NOT_FULLY_VERIFIED**.
+
+Complete native `classification.static_project` evidence can admit an authored
+frontend member containing only type declarations and explicit type-only imports
+to the named **native type-only static-project proof** obligation. The producer
+must establish complete syntax, exact native project membership, selected compiler
+identity and the complete configuration-input ledger. Runtime execution and
+repository-negative evidence remain unestablished. Python aliases, runtime models,
+value syntax, recovered parses, missing compilers and unknown project facts retain
+their ordinary qualified behavioral-proof requirement.
+The normal Hashmarks dependency selects its released `syntax` extra; native uv
+materializes the committed parser selections before admission.
+
+This route requires the existing frontend static owners and every applicable
+generated-contract owner to execute for the exact captured source. Their receipts
+retain native command completion, Node/npm entry-file identity, selected compiler,
+configuration and execution environment. The trusted base independently reobserves
+the same public producer facts with the actual native compiler and compares that
+context with the owner receipts. A retained named obligation may request only one
+bounded toolchain preparation: base code first validates the fixed frontend root,
+source, package/lock shape and trusted npm configuration, then invokes normal
+`npm ci --ignore-scripts` separately from Python dependency inspection. Source and
+package inputs are fenced before and after preparation. Missing or forged requests
+cannot waive final source/proof validation. Node selection remains with the existing
+setup-node pin/cache owner; this adds no unconditional Node requirement or new gate.
+This exemption requires package, lock and npm configuration bytes identical to the
+reviewed base, checked before preparation and independent native observation;
+unreviewed compiler implementations cannot establish this exemption's authority.
 
 The trusted controller independently observes the candidate's Hashmarks producer
 from its committed native dependency lock. After validating the proof and source,

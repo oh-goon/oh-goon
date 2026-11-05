@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import sysconfig
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from importlib import metadata
 from inspect import getsourcefile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -41,6 +44,813 @@ from oh_goon.repository_tooling.verification_gate_control import (
 _IMAGE_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1XkAAAAASUVORK5CYII="
 )
+
+
+@pytest.fixture
+def static_project_packet() -> dict[str, Any]:
+    path = "frontend/src/contracts.ts"
+    member = {"path": path, "state": "known-present", "member_revision": "source:1"}
+    config = {
+        "path": "frontend/tsconfig.app.json",
+        "state": "known-present",
+        "member_revision": "config:1",
+    }
+    return {
+        "schema": "hashmarks.changed-set-verification.v1",
+        "freshness": "current",
+        "changes": [
+            {
+                "path": path,
+                "classification": {
+                    "path": path,
+                    "kind": "source",
+                    "source_member_revision": member["member_revision"],
+                    "supporting_source_members": [member, config],
+                    "static_project": {
+                        "kind": "type-only-static-project",
+                        "qualification": "qualified",
+                        "syntax_completeness": "complete",
+                        "value_syntax": "none-observed-within-complete-member",
+                        "source_member": member,
+                        "parser": {
+                            "grammar": "typescript",
+                            "signature": "parser:1",
+                            "capability": {
+                                "available": True,
+                                "name": "tree-sitter-ranges",
+                                "version": "0.13.0",
+                            },
+                        },
+                        "compiler": "typescript-resolver:6.0.3:canonical-syntax.v2",
+                        "compilers": [
+                            {
+                                "module": "frontend/node_modules/typescript/lib/typescript.js",
+                                "version": "6.0.3",
+                                "entry_file_sha256": "a" * 64,
+                                "scope": "selected-compiler-entry-file-only",
+                            }
+                        ],
+                        "projects": [{"root": "frontend", "config": config["path"]}],
+                        "configuration_inputs": [config],
+                        "runtime_execution": "not-established",
+                        "negative_evidence_admissible": False,
+                        "evidence_identity": "native:1",
+                    },
+                },
+            }
+        ],
+    }
+
+
+def _static_proof(packet: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = packet["changes"][0]["path"]
+    plan = {
+        "schema_version": "oh-goon.development-verification/v1",
+        "candidate": "a" * 40,
+        "base": "b" * 40,
+        "changed_paths": [path],
+        "source_identity": "sha256:" + "c" * 64,
+        "policy_status": "ORDINARY",
+        "unverified": [],
+        "behavioral_status": "REQUIRED",
+        "static": ["architecture", "frontend"],
+        "pytest": [],
+        "frontend": [],
+        "obligations": [gate.STATIC_PROJECT_OBLIGATION],
+        "evidence": {
+            "producer_implementation_identity": "sha256:" + "d" * 64,
+            "owner_coverage": "not-claimed",
+            "static_project_evidence": [packet],
+            "observations": [{"changed_path": path, "state": "UNAVAILABLE"}],
+        },
+    }
+    context = {"source_identity": plan["source_identity"], "native": "context"}
+    outcomes = [{"owner": "Architecture", "returncode": 0}]
+    for script in ("typecheck", "lint", "architecture", "i18n:check"):
+        outcomes.append(
+            {
+                "owner": f"Frontend {script}",
+                "returncode": 0,
+                "static_project_context": copy.deepcopy(context),
+                "native_execution": {
+                    "argv": ["npm", "run", script],
+                    "process_group_quiescent": True,
+                },
+            }
+        )
+    return plan, {
+        "plan": copy.deepcopy(plan),
+        "status": "MERGE_PROOF_READY",
+        "outcomes": outcomes,
+    }
+
+
+def _validate_static(
+    root: Path, plan: dict[str, Any], result: dict[str, Any], trusted_root: Path
+) -> None:
+    result["plan"] = copy.deepcopy(plan)
+    validate_merge_proof(
+        plan,
+        result,
+        candidate="a" * 40,
+        base="b" * 40,
+        changed_paths=plan["changed_paths"],
+        control_base="b" * 40,
+        root=root,
+        trusted_root=trusted_root,
+    )
+
+
+def test_static_project_proof_uses_native_project_and_completed_existing_owners(
+    static_preparation_root: Path,
+    reviewed_static_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    static_project_packet: dict[str, Any],
+) -> None:
+    tmp_path = static_preparation_root
+    plan, result = _static_proof(static_project_packet)
+    observed: list[tuple[Path, tuple[str, ...]]] = []
+
+    def observe(root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        observed.append((root, paths))
+        return static_project_packet
+
+    monkeypatch.setattr(public_evidence, "observe_repository_assets", observe)
+    monkeypatch.setattr(
+        gate,
+        "static_project_context",
+        lambda *_args: result["outcomes"][1]["static_project_context"],
+    )
+    _validate_static(tmp_path, plan, result, reviewed_static_root)
+    assert observed == [(tmp_path, ("frontend/src/contracts.ts",))]
+    assert plan["frontend"] == []
+    assert plan["evidence"]["observations"][0]["state"] == "UNAVAILABLE"
+
+
+def test_static_project_and_runtime_frontend_keep_their_distinct_native_proofs(
+    static_preparation_root: Path,
+    reviewed_static_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    static_project_packet: dict[str, Any],
+) -> None:
+    tmp_path = static_preparation_root
+    plan, result = _static_proof(static_project_packet)
+    runtime, test = "frontend/src/runtime.ts", "frontend/src/runtime.test.ts"
+    plan["changed_paths"].append(runtime)
+    plan["frontend"] = [test]
+    plan["evidence"]["observations"].append(
+        {
+            "changed_path": runtime,
+            "state": "LINKED",
+            "nominations": [
+                {
+                    "workspace_prefix": "frontend/",
+                    "nomination": {
+                        "available": True,
+                        "verification_target": {"path": "src/runtime.test.ts"},
+                    },
+                }
+            ],
+        }
+    )
+    native = {
+        "success": True,
+        "numTotalTests": 1,
+        "numPassedTests": 1,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numTodoTests": 0,
+        "numTotalTestSuites": 1,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numPendingTestSuites": 0,
+        "testResults": [
+            {"name": str(tmp_path / test), "assertionResults": [{"status": "passed"}]}
+        ],
+    }
+    result["outcomes"].append(
+        {
+            "owner": "Frontend behavior",
+            "returncode": 0,
+            "native_project_root": str(tmp_path / "frontend"),
+            "native_report": native,
+        }
+    )
+    monkeypatch.setattr(
+        public_evidence,
+        "observe_repository_assets",
+        lambda *_args: static_project_packet,
+    )
+    monkeypatch.setattr(
+        gate,
+        "static_project_context",
+        lambda *_args: result["outcomes"][1]["static_project_context"],
+    )
+    _validate_static(tmp_path, plan, result, reviewed_static_root)
+    native["testResults"][0]["assertionResults"][0]["status"] = "skipped"
+    with pytest.raises(ValueError, match="frontend proof is skipped"):
+        _validate_static(tmp_path, plan, result, reviewed_static_root)
+
+
+@pytest.mark.parametrize(
+    "role", ["unknown", "verifier", "verification-support", "configuration"]
+)
+def test_native_non_source_role_cannot_take_static_project_source_route(
+    static_project_packet: dict[str, Any], role: str
+) -> None:
+    static_project_packet["changes"][0]["classification"]["kind"] = role
+    assert (
+        gate.admitted_static_projects(
+            ("frontend/src/contracts.ts",),
+            {"static_project_evidence": [static_project_packet]},
+        )
+        == {}
+    )
+
+
+def test_static_project_source_revision_must_match_native_classification(
+    static_project_packet: dict[str, Any],
+) -> None:
+    static_project_packet["changes"][0]["classification"]["source_member_revision"] = (
+        "another-source"
+    )
+    assert (
+        gate.admitted_static_projects(
+            ("frontend/src/contracts.ts",),
+            {"static_project_evidence": [static_project_packet]},
+        )
+        == {}
+    )
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "unknown",
+        "recovered",
+        "value",
+        "runtime",
+        "compiler",
+        "config",
+        "ledger",
+        "parser",
+        "parser-capability",
+        "outside-project",
+    ],
+)
+def test_incomplete_or_runtime_project_facts_keep_behavioral_proof_required(
+    static_project_packet: dict[str, Any], fault: str
+) -> None:
+    classification = static_project_packet["changes"][0]["classification"]
+    fact = classification["static_project"]
+    if fault == "unknown":
+        fact["qualification"] = "unknown"
+    elif fault == "recovered":
+        fact["syntax_completeness"] = "recovered"
+    elif fault == "value":
+        fact["value_syntax"] = "observed"
+    elif fault == "runtime":
+        fact["runtime_execution"] = "established"
+    elif fault == "compiler":
+        fact["compilers"] = []
+    elif fault == "config":
+        fact["configuration_inputs"] = []
+    elif fault == "ledger":
+        classification["supporting_source_members"] = []
+    elif fault == "parser":
+        fact["parser"] = {}
+    elif fault == "parser-capability":
+        fact["parser"]["capability"]["available"] = False
+    else:
+        fact["projects"][0]["root"] = "another-project"
+    assert (
+        gate.admitted_static_projects(
+            ("frontend/src/contracts.ts",),
+            {"static_project_evidence": [static_project_packet]},
+        )
+        == {}
+    )
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "fake-fact",
+        "omitted-obligation",
+        "omitted-fact",
+        "skipped",
+        "absent-execution",
+        "wrong-command",
+        "nonquiescent",
+        "source",
+        "context",
+        "omitted-owner",
+    ],
+)
+def test_static_project_gate_rejects_claim_and_execution_substitution(
+    static_preparation_root: Path,
+    reviewed_static_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    static_project_packet: dict[str, Any],
+    fault: str,
+) -> None:
+    tmp_path = static_preparation_root
+    observed = copy.deepcopy(static_project_packet)
+    plan, result = _static_proof(static_project_packet)
+    context = copy.deepcopy(result["outcomes"][1]["static_project_context"])
+    monkeypatch.setattr(
+        public_evidence, "observe_repository_assets", lambda *_args: observed
+    )
+    monkeypatch.setattr(gate, "static_project_context", lambda *_args: context)
+    row = result["outcomes"][1]
+    if fault == "fake-fact":
+        static_project_packet["changes"][0]["classification"]["static_project"][
+            "evidence_identity"
+        ] = "forged"
+    elif fault == "omitted-obligation":
+        plan["obligations"] = []
+    elif fault == "omitted-fact":
+        plan["evidence"].pop("static_project_evidence")
+    elif fault == "skipped":
+        row["status"] = "SKIPPED"
+    elif fault == "absent-execution":
+        row.pop("native_execution")
+    elif fault == "wrong-command":
+        row["native_execution"]["argv"] = ["true"]
+    elif fault == "nonquiescent":
+        row["native_execution"]["process_group_quiescent"] = False
+    elif fault == "source":
+        row["static_project_context"]["source_identity"] = "other-source"
+    elif fault == "context":
+        row["static_project_context"]["native"] = "other-compiler"
+    else:
+        result["outcomes"].pop()
+    with pytest.raises(ValueError):
+        _validate_static(tmp_path, plan, result, reviewed_static_root)
+
+
+@pytest.fixture
+def static_preparation_root(tmp_path: Path) -> Iterator[Path]:
+    project = tmp_path / "frontend"
+    project.mkdir()
+    repository = Path(__file__).resolve().parents[2]
+    for name in ("package.json", "package-lock.json", ".npmrc"):
+        shutil.copyfile(repository / "frontend" / name, project / name)
+    (project / "src").mkdir()
+    (project / "src/contracts.ts").write_text(
+        "export type Contract = { value: string };\n"
+    )
+    try:
+        yield tmp_path
+    finally:
+        installed = project / "node_modules"
+        if installed.exists():
+            shutil.rmtree(installed)
+
+
+@pytest.fixture
+def reviewed_static_root(
+    static_preparation_root: Path, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    trusted = tmp_path_factory.mktemp("reviewed-static-base")
+    shutil.copytree(static_preparation_root / "frontend", trusted / "frontend")
+    return trusted
+
+
+@pytest.mark.parametrize("name", ["package.json", "package-lock.json"])
+def test_changed_candidate_toolchain_is_refused_before_npm_and_native_observation(
+    static_preparation_root: Path,
+    reviewed_static_root: Path,
+    static_project_packet: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    root, trusted = static_preparation_root, reviewed_static_root
+    path = root / "frontend" / name
+    path.write_bytes(path.read_bytes() + b"\n")
+    identity = package_slim.canonical_source_identity(root)
+    monkeypatch.setattr(
+        command_owner,
+        "run_command",
+        lambda *_args, **_kwargs: pytest.fail("npm must not start"),
+    )
+    monkeypatch.setattr(
+        public_evidence,
+        "observe_repository_assets",
+        lambda *_args, **_kwargs: pytest.fail("unreviewed compiler must not load"),
+    )
+    with pytest.raises(ValueError, match="reviewed base authority"):
+        gate.prepare_static_project(root, trusted, identity)
+    with pytest.raises(ValueError, match="reviewed base authority"):
+        gate._independent_static_projects(
+            root,
+            ("frontend/src/contracts.ts",),
+            {"static_project_evidence": [static_project_packet]},
+            trusted_root=trusted,
+            source_identity=identity,
+        )
+
+
+def test_static_preparation_request_is_only_a_bounded_capability(
+    static_preparation_root: Path,
+    reviewed_static_root: Path,
+    static_project_packet: dict[str, Any],
+) -> None:
+    root = static_preparation_root
+    plan, _result = _static_proof(static_project_packet)
+    assert gate.static_project_capability_requested(
+        root, reviewed_static_root, plan, plan["changed_paths"]
+    )
+    plan["obligations"] = []
+    assert not gate.static_project_capability_requested(
+        root, reviewed_static_root, plan, plan["changed_paths"]
+    )
+    plan["obligations"] = [gate.STATIC_PROJECT_OBLIGATION]
+    plan["evidence"].pop("static_project_evidence")
+    with pytest.raises(ValueError, match="no retained native obligation"):
+        gate.static_project_capability_requested(
+            root, reviewed_static_root, plan, plan["changed_paths"]
+        )
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ["root-symlink", "lock-symlink", "package-shape", "lock-shape", "npm-config"],
+)
+def test_static_preparation_refuses_invalid_inputs_before_npm_effects(
+    static_preparation_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    root = static_preparation_root
+    trusted = tmp_path / "trusted"
+    shutil.copytree(root / "frontend", trusted / "frontend")
+    if fault == "root-symlink":
+        (root / "frontend").rename(root / "other")
+        (root / "frontend").symlink_to(root / "other", target_is_directory=True)
+    elif fault == "lock-symlink":
+        (root / "frontend/package-lock.json").rename(root / "lock")
+        (root / "frontend/package-lock.json").symlink_to(root / "lock")
+    elif fault == "package-shape":
+        (root / "frontend/package.json").write_text("[]")
+    elif fault == "lock-shape":
+        (root / "frontend/package-lock.json").write_text('{"lockfileVersion": 1}')
+    else:
+        (root / "frontend/.npmrc").write_text("ignore-scripts=false\n")
+    monkeypatch.setattr(
+        command_owner,
+        "run_command",
+        lambda *_args, **_kwargs: pytest.fail("npm must not start"),
+    )
+    with pytest.raises(ValueError):
+        gate.prepare_static_project(root, trusted, "sha256:" + "a" * 64)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        None,
+        "source",
+        "lock",
+        "failure",
+        "nonquiescent",
+        "tool-drift",
+        "environment-drift",
+    ],
+)
+def test_static_preparation_uses_native_npm_once_and_fences_its_source_inputs(
+    static_preparation_root: Path,
+    reviewed_static_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str | None,
+) -> None:
+    root = static_preparation_root
+    identity = package_slim.canonical_source_identity(root)
+    invocations: list[tuple[str, ...]] = []
+    monkeypatch.setenv("NODE_OPTIONS", "--untrusted-option")
+    monkeypatch.setenv("NPM_CONFIG_IGNORE_SCRIPTS", "false")
+    tool_state = {"selection": "before"}
+    monkeypatch.setattr(
+        gate,
+        "_static_project_tool_context",
+        lambda _root, env: {
+            "selection": tool_state["selection"],
+            "NODE_OPTIONS": env.get("NODE_OPTIONS"),
+        },
+    )
+
+    def npm(*arguments: str, **options: Any) -> SimpleNamespace:
+        invocations.append(arguments)
+        assert options["cwd"] == root / "frontend"
+        assert options["require_process_group_quiescence"] is True
+        assert "NODE_OPTIONS" not in options["env"]
+        assert "NPM_CONFIG_IGNORE_SCRIPTS" not in options["env"]
+        if fault == "source":
+            (root / "frontend/src/contracts.ts").write_text("export const value = 1;\n")
+        if fault == "lock":
+            (root / "frontend/package-lock.json").write_text("{}")
+        if fault == "tool-drift":
+            tool_state["selection"] = "after"
+        if fault == "environment-drift":
+            options["env"]["NODE_OPTIONS"] = "changed"
+        return SimpleNamespace(
+            returncode=1 if fault == "failure" else 0,
+            supervisor=SimpleNamespace(
+                final_process_group_quiescent=fault != "nonquiescent"
+            ),
+        )
+
+    monkeypatch.setattr(command_owner, "run_command", npm)
+    if fault is None:
+        gate.prepare_static_project(root, reviewed_static_root, identity)
+    else:
+        with pytest.raises(ValueError):
+            gate.prepare_static_project(root, reviewed_static_root, identity)
+    assert len(invocations) == 1
+    assert invocations[0][:-2] == (
+        "npm",
+        "--prefix",
+        str(root / "frontend"),
+        "--workspaces=false",
+        "ci",
+        "--prefer-offline",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+    )
+    user, global_config = (
+        Path(argument.split("=", 1)[1]) for argument in invocations[0][-2:]
+    )
+    assert user != global_config and user.parent == global_config.parent
+    assert not user.parent.exists()
+
+
+@pytest.mark.process
+@pytest.mark.daily
+def test_native_static_preparation_stays_in_fixed_project_despite_ancestor_workspace(
+    static_preparation_root: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    ancestor = static_preparation_root
+    root = ancestor / "candidate"
+    root.mkdir()
+    (ancestor / "frontend").rename(root / "frontend")
+    (ancestor / "package.json").write_text(
+        '{"private":true,"workspaces":["candidate/frontend","sibling"]}'
+    )
+    (ancestor / "package-lock.json").write_text('{"lockfileVersion":3,"packages":{}}')
+    (ancestor / "sibling").mkdir()
+    (ancestor / "sibling/package.json").write_text(
+        '{"name":"sibling","dependencies":{"must-not-resolve":"file:missing"}}'
+    )
+    original_lock = (ancestor / "package-lock.json").read_bytes()
+    package_path = root / "frontend/package.json"
+    package = json.loads(package_path.read_text())
+    package["scripts"]["preinstall"] = (
+        "node -e \"require('fs').writeFileSync('../hook-ran','bad')\""
+    )
+    package_path.write_text(json.dumps(package))
+    trusted = tmp_path_factory.mktemp("reviewed-npm-workspace-base")
+    shutil.copytree(root / "frontend", trusted / "frontend")
+    identity = package_slim.canonical_source_identity(root)
+    try:
+        gate.prepare_static_project(root, trusted, identity)
+        assert (root / "frontend/node_modules/typescript/lib/typescript.js").is_file()
+        assert not (ancestor / "node_modules").exists()
+        assert not (ancestor / "sibling/node_modules").exists()
+        assert not (root / "hook-ran").exists()
+        assert (ancestor / "package-lock.json").read_bytes() == original_lock
+        assert package_slim.canonical_source_identity(root) == identity
+    finally:
+        if (root / "frontend/node_modules").exists():
+            shutil.rmtree(root / "frontend/node_modules")
+
+
+def test_static_context_binds_selected_tool_bytes_and_detects_compiler_drift(
+    static_preparation_root: Path,
+    static_project_packet: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = static_preparation_root
+    fact = static_project_packet["changes"][0]["classification"]["static_project"]
+    compiler = root / fact["compilers"][0]["module"]
+    compiler.parent.mkdir(parents=True)
+    compiler.write_bytes(b"native selected compiler entry\n")
+    binaries: dict[str, str] = {}
+    for name in ("node", "npm"):
+        path = root / "frontend" / name
+        path.write_text(f"selected {name} entry\n")
+        binaries[name] = str(path)
+    monkeypatch.setattr(
+        gate.shutil, "which", lambda name, **_options: binaries.get(name)
+    )
+    monkeypatch.setattr(
+        command_owner,
+        "run_command",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="native-version\n",
+            stdout_truncated=False,
+            supervisor=SimpleNamespace(final_process_group_quiescent=True),
+        ),
+    )
+
+    fact["compilers"][0]["entry_file_sha256"] = hashlib.sha256(
+        compiler.read_bytes()
+    ).hexdigest()
+    projects = gate.admitted_static_projects(
+        ("frontend/src/contracts.ts",),
+        {"static_project_evidence": [static_project_packet]},
+    )
+    native_options = "--selected-mode=PRIVATE_CONFIGURATION"
+    monkeypatch.setenv("NODE_OPTIONS", native_options)
+    context = gate.static_project_context(
+        root, package_slim.canonical_source_identity(root), projects
+    )
+    assert set(context["tools"]) == {"node", "npm"}
+    assert all(
+        row["version"] and len(row["entry_file_sha256"]) == 64
+        for row in context["tools"].values()
+    )
+    assert (
+        context["environment"]["NODE_OPTIONS"]
+        == hashlib.sha256(native_options.encode()).hexdigest()
+    )
+    assert native_options not in json.dumps(context)
+    monkeypatch.setenv("NODE_OPTIONS", "--changed-native-mode")
+    assert (
+        gate.static_project_context(root, context["source_identity"], projects)
+        != context
+    )
+    compiler.write_bytes(b"replaced compiler entry\n")
+    with pytest.raises(ValueError, match="compiler changed"):
+        gate.static_project_context(root, context["source_identity"], projects)
+
+
+@pytest.mark.parametrize(
+    "fault", ["missing", "timeout", "failed", "truncated", "nonquiescent"]
+)
+def test_static_context_native_tool_observation_fails_closed(
+    static_preparation_root: Path,
+    static_project_packet: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+) -> None:
+    root = static_preparation_root
+    selected = root / "frontend/node"
+    selected.write_text("selected native tool entry\n")
+    monkeypatch.setattr(
+        gate.shutil,
+        "which",
+        lambda _name, **_options: None if fault == "missing" else str(selected),
+    )
+
+    def version(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
+        if fault == "timeout":
+            raise subprocess.TimeoutExpired("node", 20)
+        return SimpleNamespace(
+            returncode=1 if fault == "failed" else 0,
+            stdout="version\n",
+            stdout_truncated=fault == "truncated",
+            supervisor=SimpleNamespace(
+                final_process_group_quiescent=fault != "nonquiescent"
+            ),
+        )
+
+    monkeypatch.setattr(command_owner, "run_command", version)
+    projects = gate.admitted_static_projects(
+        ("frontend/src/contracts.ts",),
+        {"static_project_evidence": [static_project_packet]},
+    )
+    with pytest.raises(ValueError, match="Static-project native tool"):
+        gate.static_project_context(root, "sha256:" + "a" * 64, projects)
+
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_independent_static_observation_fences_actual_selected_tool_bytes(
+    static_preparation_root: Path,
+    reviewed_static_root: Path,
+    static_project_packet: dict[str, Any],
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    drift: bool,
+) -> None:
+    root = static_preparation_root
+    fact = static_project_packet["changes"][0]["classification"]["static_project"]
+    compiler = root / fact["compilers"][0]["module"]
+    compiler.parent.mkdir(parents=True)
+    compiler.write_bytes(b"selected compiler entry\n")
+    fact["compilers"][0]["entry_file_sha256"] = hashlib.sha256(
+        compiler.read_bytes()
+    ).hexdigest()
+    tool_root = tmp_path_factory.mktemp("native-observation-tools")
+    binaries: dict[str, str] = {}
+    for name in ("node", "npm"):
+        path = tool_root / name
+        path.write_text(f"selected {name} entry\n")
+        binaries[name] = str(path)
+    monkeypatch.setattr(
+        gate.shutil, "which", lambda name, **_options: binaries.get(name)
+    )
+    monkeypatch.setattr(
+        command_owner,
+        "run_command",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="native-version\n",
+            stdout_truncated=False,
+            supervisor=SimpleNamespace(final_process_group_quiescent=True),
+        ),
+    )
+    observations: list[tuple[str, ...]] = []
+
+    def observe(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        observations.append(paths)
+        if drift:
+            Path(binaries["node"]).write_text("replaced node entry\n")
+        return static_project_packet
+
+    monkeypatch.setattr(public_evidence, "observe_repository_assets", observe)
+    identity = package_slim.canonical_source_identity(root)
+
+    def reobserve() -> tuple[dict[str, Any], dict[str, Any] | None]:
+        return gate._independent_static_projects(
+            root,
+            ("frontend/src/contracts.ts",),
+            {"static_project_evidence": [static_project_packet]},
+            trusted_root=reviewed_static_root,
+            source_identity=identity,
+        )
+
+    if drift:
+        with pytest.raises(
+            ValueError, match="context changed during trusted observation"
+        ):
+            reobserve()
+    else:
+        projects, context = reobserve()
+        assert set(projects) == {"frontend/src/contracts.ts"} and context is not None
+    assert observations == [("frontend/src/contracts.ts",)]
+    assert package_slim.canonical_source_identity(root) == identity
+
+
+@pytest.mark.process
+@pytest.mark.daily
+def test_native_static_project_route_uses_locked_npm_and_independent_public_observation(
+    static_preparation_root: Path,
+    reviewed_static_root: Path,
+) -> None:
+    root = static_preparation_root
+    (root / "frontend/tsconfig.json").write_text(
+        '{"files":[],"references":[{"path":"./tsconfig.app.json"}]}'
+    )
+    (root / "frontend/tsconfig.app.json").write_text(
+        '{"compilerOptions":{"noEmit":true,"strict":true,"skipLibCheck":true,"target":"ES2022",'
+        '"module":"ESNext","moduleResolution":"Bundler"},"include":["src"]}'
+    )
+    source = root / "frontend/src/contracts.ts"
+    source.write_text("export interface Contract { value: string }\n")
+    identity = package_slim.canonical_source_identity(root)
+    gate.prepare_static_project(root, reviewed_static_root, identity)
+    packet = public_evidence.observe_repository_assets(
+        root, ("frontend/src/contracts.ts",)
+    )
+    evidence = {"static_project_evidence": [packet]}
+    projects = gate.admitted_static_projects(("frontend/src/contracts.ts",), evidence)
+    assert set(projects) == {"frontend/src/contracts.ts"}
+    assert (
+        gate._independent_static_projects(
+            root,
+            ("frontend/src/contracts.ts",),
+            evidence,
+            trusted_root=reviewed_static_root,
+            source_identity=identity,
+        )[0]
+        == projects
+    )
+    context = gate.static_project_context(root, identity, projects)
+    checked = command_owner.run_command(
+        "npm",
+        "run",
+        "typecheck",
+        cwd=root / "frontend",
+        timeout=30,
+        require_process_group_quiescence=True,
+        parent_death_signal=True,
+    )
+    assert checked.returncode == 0, checked.stderr
+    assert checked.supervisor.final_process_group_quiescent is True
+    assert gate.static_project_context(root, identity, projects) == context
+    source.write_text("export const value = 1;\n")
+    with pytest.raises(ValueError, match="differs from trusted native source"):
+        gate._independent_static_projects(
+            root,
+            ("frontend/src/contracts.ts",),
+            evidence,
+            trusted_root=reviewed_static_root,
+            source_identity=identity,
+        )
 
 
 def _write_documentation_asset(root: Path, path: str) -> None:

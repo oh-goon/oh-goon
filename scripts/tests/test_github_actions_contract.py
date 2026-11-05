@@ -1055,7 +1055,7 @@ def test_fast_paths_have_no_hidden_complete_gate_or_unconditional_frontend_setup
         "test-python-projects",
         "frontend-check",
     }
-    for job in workflow["jobs"].values():
+    for job_name, job in workflow["jobs"].items():
         for step in job["steps"]:
             words = shlex.split(step.get("run", ""), comments=True)
             assert not full_targets.intersection(words)
@@ -1064,9 +1064,65 @@ def test_fast_paths_have_no_hidden_complete_gate_or_unconditional_frontend_setup
                 "make",
                 "frontend-install",
             ]:
-                assert step["if"] == "steps.selection.outputs.frontend == 'true'"
+                assert step["if"] == (
+                    "steps.capabilities.outputs.frontend == 'true'"
+                    if job_name == "verify"
+                    else "github.event.pull_request.draft != true && steps.static-capability.outputs.frontend == 'true'"
+                )
     for command in _make_commands(["check", "merge-check"]):
         assert not full_targets.intersection(command)
+
+
+def test_static_project_preparation_precedes_observation_without_granting_proof() -> (
+    None
+):
+    workflow = _workflow()
+    steps = workflow["jobs"]["verify"]["steps"]
+    capabilities = next(step for step in steps if step.get("id") == "capabilities")
+    setup = next(
+        step for step in steps if step.get("uses", "").startswith("actions/setup-node@")
+    )
+    install = next(step for step in steps if step.get("run") == "make frontend-install")
+    selection = next(step for step in steps if step.get("id") == "selection")
+    assert "--prepare-capabilities" in capabilities["run"]
+    assert (
+        steps.index(capabilities)
+        < steps.index(setup)
+        < steps.index(install)
+        < steps.index(selection)
+    )
+    gate_steps = _merge_aggregate()["steps"]
+    request = next(step for step in gate_steps if step.get("id") == "static-capability")
+    preparation = next(
+        step for step in gate_steps if "--prepare-static-project" in step.get("run", "")
+    )
+    gate_setup = next(
+        step
+        for step in gate_steps
+        if step.get("uses", "").startswith("actions/setup-node@")
+    )
+    final = next(
+        step
+        for step in gate_steps
+        if step.get("name") == "Independently validate untrusted candidate evidence"
+    )
+    assert (
+        request["if"]
+        == "github.event.pull_request.draft != true && needs.verify.outputs.static_project == 'true'"
+    )
+    assert (
+        "trusted-base/backend/src/oh_goon/repository_tooling/verification_gate_control.py"
+        in preparation["run"]
+    )
+    assert (
+        gate_steps.index(request)
+        < gate_steps.index(gate_setup)
+        < gate_steps.index(preparation)
+        < gate_steps.index(final)
+    )
+    assert final["if"] == "github.event.pull_request.draft != true"
+    assert "--prepare-static-project" not in final["run"]
+    assert setup["with"]["node-version"] == gate_setup["with"]["node-version"]
 
 
 def test_selected_proof_prepares_the_original_native_python_build_environment() -> None:
@@ -1265,7 +1321,11 @@ def test_merge_control_uses_only_the_trusted_base_and_keeps_its_failure(
     tmp_path: Path, exit_code: int
 ) -> None:
     job = _merge_aggregate()
-    steps = [step for step in job["steps"] if "--trusted-root" in step.get("run", "")]
+    steps = [
+        step
+        for step in job["steps"]
+        if step.get("name") == "Independently validate untrusted candidate evidence"
+    ]
     assert len(steps) == 1
     step = steps[0]
     assert "continue-on-error" not in step

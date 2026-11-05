@@ -22,6 +22,7 @@ from oh_goon.engine.command import CommandCancelledError, CommandTimeoutExpired,
 from oh_goon.integrations.exact_file_write import publish_text_file
 from oh_goon.integrations.hashmarks import (
     nominate_changed_verification,
+    observe_repository_assets,
     require_current_dependency_environment,
     require_loaded_hashmarks_runtime,
     validate_required_dependency_introductions,
@@ -37,7 +38,10 @@ from oh_goon.repository_tooling.verification_gate_control import (
     DOCUMENTATION_PROOF_TEST,
     HASHMARKS_UPGRADE_OBLIGATION,
     HASHMARKS_UPGRADE_TESTS,
+    STATIC_PROJECT_OBLIGATION,
+    STATIC_PROJECT_OWNERS,
     admitted_documentation_assets,
+    admitted_static_projects,
     behavioral_pytest_targets,
     documentation_asset_candidates,
     documentation_proof_paths,
@@ -50,6 +54,8 @@ from oh_goon.repository_tooling.verification_gate_control import (
     required_policy_obligations,
     required_policy_tests,
     required_static_obligations,
+    static_project_candidates,
+    static_project_context,
 )
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -509,6 +515,11 @@ def admit_change(
     if assets:
         nomination_arguments["asset_paths"] = assets
     evidence = nominator(root, authored, **nomination_arguments) if authored or required else {}
+    static_candidates = tuple(
+        path for path in static_project_candidates(authored) if path not in removed_paths
+    )
+    if static_candidates:
+        evidence["static_project_evidence"] = [observe_repository_assets(root, static_candidates)]
     documents = documentation_proof_paths(changed)
     if documents:
         evidence["documentation_policy"] = {
@@ -523,6 +534,7 @@ def admit_change(
             "consumer_coverage": "not-claimed",
         }
     accepted_assets = admitted_documentation_assets(authored, evidence)
+    static_projects = admitted_static_projects(authored, evidence)
     executable = tuple(path for path in executable if path not in accepted_assets)
     static = cast(set[_STATIC], required_static_obligations(executable))
     pytest: set[str] = {DOCUMENTATION_PROOF_TEST} if documents else set()
@@ -580,7 +592,12 @@ def admit_change(
             raise ValueError("Producer observation is outside the admitted change set")
         # Git identifies removed members; they cannot supply execution proof.
         # Keep any producer absence observation without claiming no consumers.
-        if path in removed_paths or path in accepted_assets or path in upgrade_paths:
+        if (
+            path in removed_paths
+            or path in accepted_assets
+            or path in upgrade_paths
+            or path in static_projects
+        ):
             continue
         if row.get("state") not in {"LINKED", "CHANGED_TEST"} or row.get("stale") is True:
             if (
@@ -632,7 +649,11 @@ def admit_change(
             unverified.append(f"NO_EXECUTABLE_VERIFIER:{path}")
     if pytest and not unverified:
         pytest, unavailable = _collect_pytest_proof(
-            root, evidence, pytest, required, set(accepted_assets) | removed_paths | upgrade_paths
+            root,
+            evidence,
+            pytest,
+            required,
+            set(accepted_assets) | removed_paths | upgrade_paths | set(static_projects),
         )
         unverified.extend(unavailable)
     if dependency_qualified and "collection" in evidence["dependency_admission"]:
@@ -660,7 +681,8 @@ def admit_change(
         obligations=required_policy_obligations(policy_paths)
         + ((DOCUMENTATION_ASSET_OBLIGATION,) if accepted_assets else ())
         + ((DOCUMENTATION_PROOF_OBLIGATION,) if documents else ())
-        + ((HASHMARKS_UPGRADE_OBLIGATION,) if hashmarks_upgrade else ()),
+        + ((HASHMARKS_UPGRADE_OBLIGATION,) if hashmarks_upgrade else ())
+        + ((STATIC_PROJECT_OBLIGATION,) if static_projects else ()),
     )
 
 
@@ -783,6 +805,9 @@ def require_merge_selection(root: Path, plan: ChangeVerificationPlan) -> None:
     if plan.unverified:
         raise ValueError("SELECTION_UNVERIFIED: " + "; ".join(plan.unverified))
     assets = admitted_documentation_assets(plan.changed_paths, plan.evidence)
+    static_projects = admitted_static_projects(plan.changed_paths, plan.evidence)
+    if static_projects and STATIC_PROJECT_OBLIGATION not in plan.obligations:
+        raise ValueError("SELECTION_UNVERIFIED: native static-project obligation was omitted")
     current_paths = (
         {path for path in plan.changed_paths if not non_executable_documentation(root, path)}
         - set(plan.removed_paths)
@@ -796,6 +821,7 @@ def require_merge_selection(root: Path, plan: ChangeVerificationPlan) -> None:
             is_generated_contract_path(path)
             or non_executable_documentation(root, path)
             or path in assets
+            or path in static_projects
             for path in plan.changed_paths
         )
     ):
@@ -829,7 +855,13 @@ def _execute_check(
                 text, end="", file=sys.stdout if stream == "stdout" else sys.stderr, flush=True
             ),
         )
-        return {"owner": label, "returncode": result.returncode}
+        outcome: dict[str, Any] = {"owner": label, "returncode": result.returncode}
+        if label in STATIC_PROJECT_OWNERS:
+            outcome["native_execution"] = {
+                "argv": list(result.argv),
+                "process_group_quiescent": result.supervisor.final_process_group_quiescent,
+            }
+        return outcome
     except (CommandCancelledError, CommandTimeoutExpired) as exc:
         return {
             "owner": label,
@@ -903,6 +935,8 @@ def execute_change(
     if mode == "merge":
         require_merge_selection(root, plan)
     outcomes: list[dict[str, Any]] = []
+    static_projects = admitted_static_projects(plan.changed_paths, plan.evidence)
+    static_context = None
     commands = _commands(root, plan)
     capacity = min(2, resolve_pytest_resource_budget(workers).worker_ceiling) if commands else 1
     # Keep cheap Ruff failures early and its native cache consumers serial. The
@@ -918,10 +952,24 @@ def execute_change(
             ):
                 group.append(commands[cursor])
                 cursor += 1
+        if (
+            static_projects
+            and static_context is None
+            and any(label in STATIC_PROJECT_OWNERS for label, *_ in group)
+        ):
+            static_context = static_project_context(root, plan.source_identity, static_projects)
         checked = _execute_check_group(root, plan, group)
+        if static_context is not None:
+            for outcome in checked["outcomes"]:
+                if outcome["owner"] in STATIC_PROJECT_OWNERS:
+                    outcome["static_project_context"] = static_context
         outcomes.extend(checked["outcomes"])
         if checked["status"] != "CHECKS_PASSED":
             return {**checked, "outcomes": outcomes}
+    if static_context is not None and static_context != static_project_context(
+        root, plan.source_identity, static_projects
+    ):
+        raise ValueError("Static-project native context changed during execution")
     if plan.frontend:
         with tempfile.TemporaryDirectory(prefix="oh-goon-change-frontend-") as directory:
             report = Path(directory) / "vitest.json"
@@ -1053,11 +1101,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", type=Path)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--github-output", type=Path)
+    parser.add_argument("--prepare-capabilities", action="store_true")
     args = parser.parse_args(argv)
     if args.workers < 1:
         parser.error("workers must be positive")
     try:
         root = args.root.resolve(strict=True)
+        if args.prepare_capabilities:
+            _base, _head, paths, _removed = capture_change(root, args.base, args.candidate)
+            if args.github_output is None:
+                raise ValueError("Capability preparation requires an output transport")
+            with args.github_output.open("a", encoding="utf-8") as stream:
+                stream.write(
+                    f"frontend={'true' if 'frontend' in required_static_obligations(paths) else 'false'}\n"
+                )
+            return 0
         plan = (
             ChangeVerificationPlan.model_validate(_read_json(args.execute))
             if args.execute
@@ -1073,6 +1131,9 @@ def main(argv: list[str] | None = None) -> int:
                 with args.github_output.open("a", encoding="utf-8") as stream:
                     stream.write(f"python={'true' if 'python' in plan.static else 'false'}\n")
                     stream.write(f"frontend={'true' if 'frontend' in plan.static else 'false'}\n")
+                    stream.write(
+                        f"static_project={'true' if STATIC_PROJECT_OBLIGATION in plan.obligations else 'false'}\n"
+                    )
                     stream.write(f"pytest={'true' if plan.pytest else 'false'}\n")
                     stream.write(
                         f"native_resources={'true' if requires_native_resource_host(plan) else 'false'}\n"

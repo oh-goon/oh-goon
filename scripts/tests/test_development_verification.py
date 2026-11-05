@@ -220,7 +220,7 @@ def test_plan_cli_publishes_after_actual_source_admission(
     assert plan.behavioral_status == "NOT_APPLICABLE"
     assert (
         outputs.read_text(encoding="utf-8")
-        == "python=false\nfrontend=false\npytest=true\nnative_resources=false\n"
+        == "python=false\nfrontend=false\nstatic_project=false\npytest=true\nnative_resources=false\n"
     )
     assert (
         json.loads(target.read_text())["candidate"]
@@ -295,6 +295,166 @@ def _evidence(paths: tuple[str, ...], *, stale: bool = False) -> dict[str, Any]:
             for path in paths
         ],
     }
+
+
+def _static_project_evidence(path: str) -> dict[str, Any]:
+    member = {"path": path, "state": "known-present", "member_revision": "source:1"}
+    config = {
+        "path": "frontend/tsconfig.app.json",
+        "state": "known-present",
+        "member_revision": "config:1",
+    }
+    return {
+        "schema": "hashmarks.changed-set-verification.v1",
+        "freshness": "current",
+        "changes": [
+            {
+                "path": path,
+                "classification": {
+                    "path": path,
+                    "kind": "source",
+                    "source_member_revision": member["member_revision"],
+                    "supporting_source_members": [member, config],
+                    "static_project": {
+                        "kind": "type-only-static-project",
+                        "qualification": "qualified",
+                        "syntax_completeness": "complete",
+                        "value_syntax": "none-observed-within-complete-member",
+                        "source_member": member,
+                        "parser": {
+                            "grammar": "typescript",
+                            "signature": "native",
+                            "capability": {
+                                "available": True,
+                                "name": "tree-sitter-ranges",
+                                "version": "0.13.0",
+                            },
+                        },
+                        "compiler": "typescript-resolver:6.0.3:canonical-syntax.v2",
+                        "compilers": [
+                            {
+                                "module": "frontend/node_modules/typescript/lib/typescript.js",
+                                "version": "6.0.3",
+                                "entry_file_sha256": "a" * 64,
+                                "scope": "selected-compiler-entry-file-only",
+                            }
+                        ],
+                        "projects": [{"root": "frontend", "config": config["path"]}],
+                        "configuration_inputs": [config],
+                        "runtime_execution": "not-established",
+                        "negative_evidence_admissible": False,
+                        "evidence_identity": "native:1",
+                    },
+                },
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize("qualified", [True, False])
+def test_type_only_project_admission_retains_native_fact_without_runtime_nomination(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, qualified: bool
+) -> None:
+    path = "frontend/src/contracts.ts"
+    source = repository / path
+    source.parent.mkdir(parents=True)
+    source.write_text("export type Contract = { value: string };\n")
+    packet = _static_project_evidence(path)
+    if not qualified:
+        packet["changes"][0]["classification"].pop("static_project")
+    observed: list[tuple[Path, tuple[str, ...]]] = []
+
+    def observe(root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        observed.append((root, paths))
+        return packet
+
+    monkeypatch.setattr(owner, "observe_repository_assets", observe)
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            row.update(state="UNAVAILABLE", nominations=[])
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+    assert observed == [(repository, (path,))]
+    assert plan.evidence["static_project_evidence"] == [packet]
+    assert plan.evidence["static_project_evidence"][0] is packet
+    assert not plan.pytest and not plan.frontend
+    assert plan.behavioral_status == "REQUIRED"
+    assert set(plan.static) == {"frontend", "architecture"}
+    assert (owner.STATIC_PROJECT_OBLIGATION in plan.obligations) == qualified
+    if qualified:
+        assert not plan.unverified
+        owner.require_merge_selection(repository, plan)
+    else:
+        assert f"NO_QUALIFIED_VERIFIER:{path}" in plan.unverified
+        with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+            owner.require_merge_selection(repository, plan)
+
+
+def test_frontend_capability_preparation_uses_existing_requirements_before_admission(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    source = repository / "frontend/src/contracts.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text("export const value = 1;\n")
+    monkeypatch.setattr(
+        owner,
+        "admit_change",
+        lambda *_args, **_kwargs: pytest.fail("preparation must not claim admission"),
+    )
+    monkeypatch.setattr(
+        owner,
+        "observe_repository_assets",
+        lambda *_args: pytest.fail("no compiler observation before preparation"),
+    )
+    output = tmp_path_factory.mktemp("frontend-capability") / "output"
+    assert (
+        owner.main(
+            [
+                "--root",
+                str(repository),
+                "--base",
+                "HEAD",
+                "--prepare-capabilities",
+                "--github-output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    assert output.read_text() == "frontend=true\n"
+
+
+def test_static_project_admission_keeps_unrelated_runtime_sources_unverified(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = "frontend/src/contracts.ts"
+    source = repository / path
+    source.parent.mkdir(parents=True)
+    source.write_text("export type Contract = string;\n")
+    (repository / "runtime_model.py").write_text(
+        "from pydantic import BaseModel\nclass Model(BaseModel):\n    value: str\n"
+    )
+    monkeypatch.setattr(
+        owner,
+        "observe_repository_assets",
+        lambda *_args: _static_project_evidence(path),
+    )
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            row.update(state="UNAVAILABLE", nominations=[])
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+    assert plan.unverified == ("NO_QUALIFIED_VERIFIER:runtime_model.py",)
+    with pytest.raises(ValueError, match="runtime_model"):
+        owner.require_merge_selection(repository, plan)
 
 
 def test_native_git_change_capture_preserves_renames_deletions_and_untracked(
@@ -643,7 +803,7 @@ def test_plan_cli_rejects_ineligible_merge_before_capability_outputs(
         assert result == 0
         assert outputs.read_text(encoding="utf-8") == (
             previous
-            + f"python=true\nfrontend=false\npytest={'true' if plan.pytest else 'false'}\n"
+            + f"python=true\nfrontend=false\nstatic_project=false\npytest={'true' if plan.pytest else 'false'}\n"
             + "native_resources=false\n"
         )
 
@@ -686,6 +846,7 @@ def test_merge_plan_cli_keeps_qualified_behavior_and_generated_contract_paths(
     assert outputs.read_text(encoding="utf-8") == (
         f"python={'true' if relative == 'behavior.py' else 'false'}\n"
         f"frontend={'true' if 'frontend' in plan.static else 'false'}\n"
+        "static_project=false\n"
         f"pytest={'true' if plan.pytest else 'false'}\n"
         "native_resources=false\n"
     )

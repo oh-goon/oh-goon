@@ -8,9 +8,11 @@ It can be installed before the fast workflow without changing an existing gate.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import runpy
+import shutil
 import subprocess
 import sys
 import sysconfig
@@ -43,6 +45,353 @@ HASHMARKS_UPGRADE_TESTS = (
     "scripts/tests/test_dependency_minimization.py::test_hashmarks_upgrade_is_normal_uv_dependency_without_oh_goon_release_client",
 )
 HASHMARKS_UPGRADE_OBLIGATION = "mandatory Hashmarks upgrade proof"
+STATIC_PROJECT_OBLIGATION = "native type-only static-project proof"
+STATIC_PROJECT_OWNERS = frozenset(
+    {
+        "Frontend typecheck",
+        "Frontend lint",
+        "Frontend architecture",
+        "Frontend i18n:check",
+        "Generated contracts",
+    }
+)
+
+
+def static_project_candidates(paths: Sequence[str]) -> tuple[str, ...]:
+    """The existing authored frontend project; filenames alone prove nothing."""
+    return tuple(
+        path
+        for path in paths
+        if path.startswith("frontend/src/") and Path(path).suffix in {".ts", ".tsx"}
+    )
+
+
+def _source_path(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and "\\" not in value
+        and not Path(value).is_absolute()
+        and ".." not in Path(value).parts
+        and Path(value).as_posix() == value
+        and "\n" not in value
+    )
+
+
+def admitted_static_projects(
+    paths: Sequence[str], evidence: Mapping[str, Any]
+) -> dict[str, Mapping[str, Any]]:
+    """Retain positive complete native syntax/project facts, never runtime coverage."""
+    packets = evidence.get("static_project_evidence")
+    if not isinstance(packets, list):
+        return {}
+    accepted: dict[str, Mapping[str, Any]] = {}
+    for packet in packets:
+        if not isinstance(packet, Mapping):
+            return {}
+        projected = _admitted_static_project_packet(paths, packet)
+        if accepted.keys() & projected.keys():
+            raise ValueError("Producer static-project packets duplicate a changed path")
+        accepted.update(projected)
+    return accepted
+
+
+def _admitted_static_project_packet(
+    paths: Sequence[str], packet: Mapping[str, Any]
+) -> dict[str, Mapping[str, Any]]:
+    if (
+        not isinstance(packet, Mapping)
+        or packet.get("schema") != "hashmarks.changed-set-verification.v1"
+    ):
+        return {}
+    if packet.get("freshness") not in {"current", "unknown"}:
+        return {}
+    candidates = set(static_project_candidates(paths))
+    accepted: dict[str, Mapping[str, Any]] = {}
+    changes = packet.get("changes")
+    if not isinstance(changes, list):
+        return {}
+    seen: set[str] = set()
+    for change in changes:
+        if not isinstance(change, Mapping) or change.get("path") not in candidates:
+            continue
+        path = change["path"]
+        if path in seen:
+            raise ValueError("Producer static-project evidence duplicates a changed path")
+        seen.add(path)
+        classification = change.get("classification")
+        if not isinstance(classification, Mapping):
+            continue
+        fact = classification.get("static_project")
+        ledger = classification.get("supporting_source_members")
+        if not isinstance(fact, Mapping) or not isinstance(ledger, list):
+            continue
+        member, parser = fact.get("source_member"), fact.get("parser")
+        compilers, projects = fact.get("compilers"), fact.get("projects")
+        configuration = fact.get("configuration_inputs")
+        compiler = fact.get("compiler")
+        if (
+            classification.get("path") != path
+            or classification.get("kind") != "source"
+            or fact.get("kind") != "type-only-static-project"
+            or fact.get("qualification") != "qualified"
+            or fact.get("syntax_completeness") != "complete"
+            or fact.get("value_syntax") != "none-observed-within-complete-member"
+            or fact.get("runtime_execution") != "not-established"
+            or fact.get("negative_evidence_admissible") is not False
+            or not isinstance(fact.get("evidence_identity"), str)
+            or not fact["evidence_identity"]
+            or not isinstance(member, Mapping)
+            or not _present_asset_member(member)
+            or member.get("path") != path
+            or classification.get("source_member_revision") != member.get("member_revision")
+            or member not in ledger
+            or not all(_present_asset_member(row) for row in ledger)
+            or not isinstance(parser, Mapping)
+            or not all(
+                isinstance(parser.get(key), str) and parser[key] for key in ("grammar", "signature")
+            )
+            or not isinstance(parser.get("capability"), Mapping)
+            or parser["capability"].get("available") is not True
+            or not all(
+                isinstance(parser["capability"].get(key), str) and parser["capability"][key]
+                for key in ("name", "version")
+            )
+            or not isinstance(compiler, str)
+            or not compiler.startswith("typescript-resolver:")
+            or not compiler.endswith(":canonical-syntax.v2")
+            or not isinstance(compilers, list)
+            or not compilers
+            or any(
+                not isinstance(row, Mapping)
+                or not _source_path(row.get("module"))
+                or not str(row["module"]).startswith("frontend/node_modules/")
+                or not isinstance(row.get("version"), str)
+                or not row["version"]
+                or row.get("scope") != "selected-compiler-entry-file-only"
+                or not isinstance(row.get("entry_file_sha256"), str)
+                or len(row["entry_file_sha256"]) != 64
+                or any(
+                    character not in "0123456789abcdef" for character in row["entry_file_sha256"]
+                )
+                for row in compilers
+            )
+            or not isinstance(projects, list)
+            or not projects
+            or any(
+                not isinstance(row, Mapping)
+                or row.get("root") != "frontend"
+                or not _source_path(row.get("config"))
+                or not str(row["config"]).startswith("frontend/")
+                for row in projects
+            )
+            or not isinstance(configuration, list)
+            or not configuration
+            or any(not _present_asset_member(row) or row not in ledger for row in configuration)
+            or any(not _source_path(row.get("path")) for row in ledger)
+            or not {row["config"] for row in projects} <= {row["path"] for row in configuration}
+        ):
+            continue
+        accepted[path] = {"static_project": fact, "supporting_source_members": ledger}
+    return accepted
+
+
+def _independent_static_projects(
+    root: Path,
+    paths: Sequence[str],
+    evidence: Mapping[str, Any],
+    *,
+    trusted_root: Path,
+    source_identity: str,
+) -> tuple[dict[str, Mapping[str, Any]], dict[str, Any] | None]:
+    from oh_goon.integrations.hashmarks import observe_repository_assets
+
+    accepted = admitted_static_projects(paths, evidence)
+    if not accepted:
+        return {}, None
+    _static_project_preparation_inputs(root, trusted_root)
+    context = static_project_context(root, source_identity, accepted)
+    observed = observe_repository_assets(root, tuple(sorted(accepted)))
+    trusted = admitted_static_projects(paths, {"static_project_evidence": [observed]})
+    if accepted != trusted:
+        raise ValueError("Static-project evidence differs from trusted native source observation")
+    _static_project_preparation_inputs(root, trusted_root)
+    if context != static_project_context(root, source_identity, trusted):
+        raise ValueError("Static-project native context changed during trusted observation")
+    return accepted, context
+
+
+def _static_project_tool_context(root: Path, env: Mapping[str, str]) -> dict[str, Any]:
+    """Observe native selections under the exact receiving process environment."""
+    from oh_goon.engine.command import run_command
+
+    tools: dict[str, Any] = {}
+    for name in ("node", "npm"):
+        selected = shutil.which(name, path=env.get("PATH", os.defpath))
+        if selected is None:
+            raise ValueError("Static-project native toolchain is unavailable")
+        entry = Path(selected).resolve(strict=True)
+        if not entry.is_file() or not 0 < entry.stat().st_size <= 256 * 1024 * 1024:
+            raise ValueError("Static-project native executable is unbounded")
+        with entry.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        try:
+            version = run_command(
+                selected,
+                "--version",
+                cwd=root / "frontend",
+                env=dict(env),
+                timeout=20,
+                max_capture_bytes_per_stream=4096,
+                require_process_group_quiescence=True,
+                parent_death_signal=True,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError("Static-project native tool observation timed out") from exc
+        if (
+            version.returncode
+            or version.stdout_truncated
+            or version.supervisor.final_process_group_quiescent is not True
+        ):
+            raise ValueError("Static-project native tool observation is incomplete")
+        tools[name] = {"version": version.stdout.strip(), "entry_file_sha256": digest}
+    return {
+        "tools": tools,
+        "environment": {
+            key: hashlib.sha256(value.encode("utf-8")).hexdigest()
+            for key, value in sorted(env.items())
+            if key in {"NODE_OPTIONS", "NODE_PATH"} or key.startswith("TS_NODE_")
+        },
+    }
+
+
+def static_project_context(
+    root: Path, source_identity: str, projects: Mapping[str, Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Bind existing static owner execution to its actual native tools and inputs."""
+    native = _static_project_tool_context(root, dict(os.environ))
+    for projection in projects.values():
+        for compiler in projection["static_project"]["compilers"]:
+            path = root / compiler["module"]
+            resolved = path.resolve(strict=True)
+            if (
+                not resolved.is_relative_to(root / "frontend/node_modules")
+                or not resolved.is_file()
+            ):
+                raise ValueError("Static-project selected compiler escaped its native installation")
+            with resolved.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            if digest != compiler["entry_file_sha256"]:
+                raise ValueError("Static-project selected compiler changed")
+    return {
+        "source_identity": source_identity,
+        "project_root": "frontend",
+        "projects": dict(projects),
+        **native,
+    }
+
+
+def _static_project_preparation_inputs(root: Path, trusted_root: Path) -> dict[str, str]:
+    """Admit fixed source inputs before native npm effects, without resolving them."""
+    project = root / "frontend"
+    if project.is_symlink() or project.resolve(strict=True) != project or not project.is_dir():
+        raise ValueError("Static-project frontend root is unsafe")
+    inputs: dict[str, str] = {}
+    documents: dict[str, Any] = {}
+    for name in ("package.json", "package-lock.json", ".npmrc"):
+        path = project / name
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or not 0 < path.stat().st_size <= 8 * 1024 * 1024
+        ):
+            raise ValueError("Static-project native package inputs are unsafe or unbounded")
+        with path.open("rb") as stream:
+            raw = stream.read(8 * 1024 * 1024 + 1)
+        if len(raw) > 8 * 1024 * 1024:
+            raise ValueError("Static-project native package input grew beyond its bound")
+        inputs[name] = hashlib.sha256(raw).hexdigest()
+        if raw != (trusted_root / "frontend" / name).read_bytes():
+            raise ValueError("Static-project toolchain inputs differ from reviewed base authority")
+        if name == ".npmrc":
+            continue
+        else:
+            documents[name] = json.loads(raw)
+    package, lock = documents["package.json"], documents["package-lock.json"]
+    if (
+        not isinstance(package, Mapping)
+        or package.get("name") != "oh-goon-frontend"
+        or package.get("private") is not True
+        or package.get("type") != "module"
+        or not isinstance(lock, Mapping)
+        or lock.get("lockfileVersion") != 3
+        or not isinstance(lock.get("packages"), Mapping)
+        or not isinstance(lock["packages"].get(""), Mapping)
+    ):
+        raise ValueError("Static-project native frontend package shape is unsupported")
+    return inputs
+
+
+def static_project_capability_requested(
+    root: Path, trusted_root: Path, plan: Mapping[str, Any], paths: Sequence[str]
+) -> bool:
+    projects = admitted_static_projects(paths, plan.get("evidence", {}))
+    if STATIC_PROJECT_OBLIGATION not in plan.get("obligations", []):
+        return False
+    if not projects or "frontend" not in plan.get("static", []):
+        raise ValueError("Static-project preparation request has no retained native obligation")
+    _static_project_preparation_inputs(root, trusted_root)
+    return True
+
+
+def prepare_static_project(root: Path, trusted_root: Path, source_identity: str) -> None:
+    """Prepare once with normal locked npm, separately from producer inspection."""
+    from oh_goon.engine.command import run_command
+    from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
+
+    before = _static_project_preparation_inputs(root, trusted_root)
+    if canonical_source_identity(root) != source_identity:
+        raise ValueError("Static-project source changed before native preparation")
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.lower().startswith("npm_config_") and key not in {"NODE_OPTIONS", "NODE_PATH"}
+    }
+    native_context = _static_project_tool_context(root, env)
+    with tempfile.TemporaryDirectory(prefix="oh-goon-merge-npm-") as temporary:
+        user_config, global_config = (
+            Path(temporary) / name for name in ("user.npmrc", "global.npmrc")
+        )
+        user_config.write_text("")
+        global_config.write_text("")
+        result = run_command(
+            "npm",
+            "--prefix",
+            str(root / "frontend"),
+            "--workspaces=false",
+            "ci",
+            "--prefer-offline",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+            f"--userconfig={user_config}",
+            f"--globalconfig={global_config}",
+            cwd=root / "frontend",
+            env=env,
+            timeout=180,
+            max_capture_bytes_per_stream=64 * 1024,
+            require_process_group_quiescence=True,
+            parent_death_signal=True,
+        )
+    if result.returncode or result.supervisor.final_process_group_quiescent is not True:
+        raise ValueError("Static-project native preparation did not complete")
+    if (
+        before != _static_project_preparation_inputs(root, trusted_root)
+        or canonical_source_identity(root) != source_identity
+    ):
+        raise ValueError("Static-project source or package inputs changed during preparation")
+    if native_context != _static_project_tool_context(root, env):
+        raise ValueError("Static-project native tool context changed during preparation")
 
 
 def is_verification_policy_path(path: str) -> bool:
@@ -520,6 +869,7 @@ def validate_merge_proof(
     changed_paths: Sequence[str],
     control_base: str | None,
     root: Path | None = None,
+    trusted_root: Path | None = None,
     removed_paths: Sequence[str] = (),
     observed_hashmarks_upgrade: bool | None = None,
 ) -> None:
@@ -580,8 +930,32 @@ def validate_merge_proof(
     if assets and DOCUMENTATION_ASSET_OBLIGATION not in plan.get("obligations", []):
         raise ValueError("Bounded documentation-asset policy was not explicitly admitted")
     plain_docs.update(assets)
+    if admitted_static_projects(changed_paths, evidence) and trusted_root is None:
+        raise ValueError("Native static-project proof requires reviewed base toolchain authority")
+    static_projects, static_context = (
+        _independent_static_projects(
+            root,
+            changed_paths,
+            evidence,
+            trusted_root=trusted_root,
+            source_identity=plan["source_identity"],
+        )
+        if root is not None and trusted_root is not None
+        else ({}, None)
+    )
+    if static_projects and STATIC_PROJECT_OBLIGATION not in plan.get("obligations", []):
+        raise ValueError("Native static-project obligation was omitted")
+    if STATIC_PROJECT_OBLIGATION in plan.get("obligations", []) and not static_projects:
+        raise ValueError("Native static-project source authority is unavailable")
     contract_only = any(map(is_generated_contract_path, changed_paths)) and all(
         is_generated_contract_path(path) or path in plain_docs for path in changed_paths
+    )
+    static_only = bool(static_projects) and all(
+        path in plain_docs
+        or path in static_projects
+        or path in removed
+        or is_generated_contract_path(path)
+        for path in changed_paths
     )
     behavior_required = plan.get("behavioral_status") == "REQUIRED"
     if not behavior_required:
@@ -591,7 +965,11 @@ def validate_merge_proof(
     behavioral_pytest = behavioral_pytest_targets(
         plan.get("pytest", []), evidence, set(changed_paths) - plain_docs - removed
     )
-    if behavior_required and not (behavioral_pytest or plan.get("frontend")) and not contract_only:
+    if (
+        behavior_required
+        and not (behavioral_pytest or plan.get("frontend"))
+        and not (contract_only or static_only)
+    ):
         raise ValueError("Executable changes have no behavioral proof")
     if (assets or (behavior_required and not contract_only)) and (
         not isinstance(evidence, Mapping)
@@ -627,6 +1005,25 @@ def validate_merge_proof(
         expected.append("Native pytest")
     if sorted(owners) != sorted(expected):
         raise ValueError("Required check owners are missing, duplicated or extra")
+    if static_projects:
+        assert static_context is not None
+        for row in outcomes:
+            if row["owner"] in STATIC_PROJECT_OWNERS:
+                command = (
+                    ["make", "check-generated"]
+                    if row["owner"] == "Generated contracts"
+                    else ["npm", "run", row["owner"].removeprefix("Frontend ")]
+                )
+                native = row.get("native_execution", {})
+                if (
+                    row.get("static_project_context") != static_context
+                    or row.get("status") not in {None, "PASSED"}
+                    or native.get("argv") != command
+                    or native.get("process_group_quiescent") is not True
+                ):
+                    raise ValueError(
+                        "Static-project owner has no matching source/native context proof"
+                    )
     executed_files: set[str] = set()
     for row in outcomes:
         if row["owner"] == "Frontend behavior":
@@ -702,6 +1099,8 @@ def validate_merge_proof(
         if is_verification_policy_path(source) and not source.endswith(".py"):
             continue
         if source in plain_docs:
+            continue
+        if source in static_projects:
             continue
         observation = observations.get(source, {})
         if observation.get("stale") is True or observation.get("state") not in {
@@ -1108,6 +1507,8 @@ def main() -> int:
     parser.add_argument("--head")
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--trusted-root", type=Path, required=True)
+    parser.add_argument("--static-project-capability-output", type=Path)
+    parser.add_argument("--prepare-static-project", action="store_true")
     args = parser.parse_args()
     try:
         plan = _read(args.plan)
@@ -1178,6 +1579,16 @@ def main() -> int:
         )
         if plan.get("source_identity") != canonical_source_identity(args.root):
             raise ValueError("Candidate contents differ from selected proof")
+        if args.static_project_capability_output or args.prepare_static_project:
+            requested = static_project_capability_requested(args.root, trusted, plan, changed_paths)
+            if args.static_project_capability_output:
+                with args.static_project_capability_output.open("a", encoding="utf-8") as stream:
+                    stream.write(f"frontend={'true' if requested else 'false'}\n")
+            if args.prepare_static_project:
+                if not requested:
+                    raise ValueError("Native static-project preparation was not admitted")
+                prepare_static_project(args.root, trusted, plan["source_identity"])
+            return 0
         dependency_intent, unsupported_intent, hashmarks_upgrade_intent = (
             admission_owner._backend_dependency_intent(args.root, args.base, tuple(changed_paths))
         )
@@ -1192,6 +1603,7 @@ def main() -> int:
             removed_paths=removed_paths,
             control_base=args.control_base,
             root=args.root,
+            trusted_root=trusted,
             observed_hashmarks_upgrade=hashmarks_upgrade_intent,
         )
         producer = plan.get("evidence", {}).get("producer_implementation_identity")
@@ -1221,6 +1633,13 @@ def main() -> int:
             or git(args.root, "status", "--porcelain", "--untracked-files=normal").strip()
         ):
             raise ValueError("Candidate contents changed during trusted producer admission")
+        static_projects = admitted_static_projects(changed_paths, plan.get("evidence", {}))
+        if static_projects:
+            context = static_project_context(args.root, plan["source_identity"], static_projects)
+            for row in _read(args.result).get("outcomes", []):
+                if row["owner"] in STATIC_PROJECT_OWNERS:
+                    if row.get("static_project_context") != context:
+                        raise ValueError("Static-project context changed during trusted admission")
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as exc:
         print(f"MERGE UNVERIFIED: {exc}")
         return 1
