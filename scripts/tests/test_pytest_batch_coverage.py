@@ -259,17 +259,30 @@ def test_partial_pass_receipts_without_native_data_cannot_recover_coverage(
     capsys: pytest.CaptureFixture[str],
     returncode: int,
 ) -> None:
-    from argparse import Namespace
     from concurrent.futures import Future
 
     from oh_goon.repository_tooling import pytest_batch_orchestration as orchestration
     from oh_goon.repository_tooling import test_batches as batches
+    from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
     from oh_goon.repository_tooling.pytest_execution_membership import (
         ExecutionMembershipStore,
     )
     from oh_goon.runtime.recovery_evidence import ExecutionRecoveryEvent
 
     members = ("a.py::test_first", "b.py::test_second")
+    with monkeypatch.context() as configuration:
+        configuration.setattr(
+            sys,
+            "argv",
+            [
+                "oh-goon-test-batches",
+                *members,
+                "--batch-timeout=10",
+                "--environment-retries=2",
+                "--marker=",
+            ],
+        )
+        _, arguments = parse_batch_args()
     suite_identity = "sha256:" + "a" * 64
     plan_identity = "sha256:" + "b" * 64
     run_identity = "sha256:" + "c" * 64
@@ -351,9 +364,7 @@ def test_partial_pass_receipts_without_native_data_cannot_recover_coverage(
             suite_budget_stop=batches._suite_budget_stop,
         )
         retried = orchestration._consume_future(
-            Namespace(
-                environment_retries=2, marker=None, show_output=False, fail_fast=False
-            ),
+            arguments,
             state,
             future,
             batch,
