@@ -66,6 +66,20 @@ same-session continuation remains a separate, mode-specific capability.
 
 ## Current execution path
 
+Repository and Skill deliveries contain the admitted public source closure.
+The canonical source-tree privacy policy omits grader-only answer subtrees before
+content acquisition, and refuses a private subtree selected as a source root.
+Frozen verification also refuses unsafe retained members or explicit private
+references before any repository tool or provider request can consume them.
+Safe captures keep their original identity/codec semantics; an existing packet
+is rejected rather than filtered and silently assigned a new identity.
+Native Agents also receive an actual working workspace. Their existing bound
+repository capture refuses a workspace containing grader-only material before
+native work or Run admission; callers use the existing blind-checkout flow for
+that source. Filtering a prompt or a captured tree does not establish native
+filesystem isolation. This namespace policy does not recognize arbitrary copied
+answer text or certify secrecy of historical Git objects.
+
 | Responsibility | Existing owner and handoff |
 | --- | --- |
 | Authored Plan, inputs and Skill selection | [FleetPlanResolver](../../backend/src/oh_goon/services/fleet_plan_resolver.py), [Agent authoring sources](../../backend/src/oh_goon/services/agent_authoring_sources.py), and [Skill registry](../../backend/src/oh_goon/services/agent_skill_registry.py) capture the caller-selected source closure. Locked remote Skills retain their selected commits. |

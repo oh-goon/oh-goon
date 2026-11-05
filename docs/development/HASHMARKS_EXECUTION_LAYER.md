@@ -170,6 +170,25 @@ grading stay with Repository Understanding and are never sent to Hashmarks as
 repository truth. These custody hashes cannot prove repository relevance,
 currentness, completeness or absence.
 
+The source-tree policy owns the reserved grader-private answer namespace.
+Repository and Skill capture omit that subtree before opening its entries;
+explicit private roots and unsafe retained/frozen source deliveries refuse.
+Private answer changes cannot change an otherwise identical public capture.
+Grader source remains authoritative qualification input and is not disposable
+or globally excluded from package/custody identity.
+Because native Agents can access their real working workspace, their bound
+source capture rejects a private-bearing repository rather than relying on
+those filtered members to hide physical files. Existing blind preparation
+supplies an appropriate separate public source when required.
+
+Hashmarks repository observations compose the repository's captured context
+policy with trusted privacy exclusions applied last. The native producer alone
+interprets those rules and reconciles indexes when their fingerprint changes.
+Denied source stays unavailable/unsupported, never proof of absence. Policy
+mutation invalidates the observation; a repository allow rule cannot expose
+the private namespace. These protections classify declared source scope rather
+than attempting to recognize arbitrary copied answer text.
+
 The data-only dependency Step uses the explicitly selected native ecosystem adapter and dependency qualification
 contract. Its inventory and absence claims describe the supplied lock, not authored
 requirements or an installed environment. See [dependency observations](DEPENDENCY_OBSERVATIONS.md).

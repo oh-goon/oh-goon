@@ -34,6 +34,12 @@ Whole-Run `run.yml` budgets currently exclude Agent and repair workflows.
 Disposition: **retain** the existing harness adaptations; this CLI resource
 boundary does not replace their protocols or qualify another harness context.
 
+Grader-source privacy disposition: **retain** the existing protocol, settlement
+and reserved-directory adaptations. The common source-admission owner refuses
+private-bearing native workspaces before harness invocation; it does not add a
+native permission flag or infer a filesystem deny from a filtered prompt.
+Existing installed evidence retains its original environment and mode scope.
+
 | Installed check on this Linux host | Result and precise limit |
 | --- | --- |
 | OpenCode 2.1.2, [service readiness and stdin lease][opencode-installed-service] | **PASS**, two tests: bounded authenticated readiness/PID, client closure preserving the server, original-owner cancellation, plus actual `--stdio` endpoint discovery and parent stdin closure producing native exit 0 and process quiescence. No service-session execution qualification. |

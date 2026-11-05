@@ -21,6 +21,7 @@ from oh_goon.core.models.fleet_observation import (
     DependencyObservationSnapshot,
     ObservationSourceEvidence,
 )
+from oh_goon.integrations.hashmarks.repository_scope import repository_evidence_scope
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 
 if TYPE_CHECKING:
@@ -171,7 +172,6 @@ def observe_locked_dependencies(
     ecosystem: DependencyEcosystem = "pypi",
     lock_path: str | None = None,
 ) -> DependencyObservationSnapshot:
-    from hashmarks import CodeMap
     from hashmarks.adapters.npm_dependency import npm_lock_dependency_observation
     from hashmarks.adapters.uv_dependency import uv_lock_dependency_observation
 
@@ -184,9 +184,10 @@ def observe_locked_dependencies(
         implementation = require_loaded_hashmarks_runtime()
         with tempfile.TemporaryDirectory(prefix="oh-goon-dependency-evidence-") as directory:
             state = Path(directory)
-            with CodeMap(
+            with repository_evidence_scope(
                 repository, state_dir=state, artifact_db=state / "artifacts.sqlite3"
-            ) as native:
+            ) as scope:
+                native = scope.native
                 admitted = native.files.visible_file(lock_path)
                 if admitted is None or admitted.visibility.value != "source":
                     return DependencyObservationSnapshot(
@@ -264,8 +265,6 @@ def assess_locked_dependencies(
     repository: Path, snapshot: DependencyObservationSnapshot
 ) -> LockedInventoryAssessment:
     """Ask the producer to bind retained evidence to the current lock source."""
-    from hashmarks import CodeMap
-
     if snapshot.schema_version != 3:
         return LockedInventoryAssessment(
             DependencyEvidenceAssessment(
@@ -293,9 +292,10 @@ def assess_locked_dependencies(
             )
         with tempfile.TemporaryDirectory(prefix="oh-goon-dependency-assessment-") as directory:
             state = Path(directory)
-            with CodeMap(
+            with repository_evidence_scope(
                 repository, state_dir=state, artifact_db=state / "artifacts.sqlite3"
-            ) as native:
+            ) as scope:
+                native = scope.native
                 if snapshot.producer_projection:
                     projection = cast(
                         dict[str, Any], native.dependencies.requalify(snapshot.producer_projection)
@@ -324,8 +324,6 @@ def project_dependency_package(
     version_specifier: str | None = None,
 ) -> LockedInventoryAssessment:
     """Ask the producer for presence/absence/predicate facts over retained evidence."""
-    from hashmarks import CodeMap
-
     if snapshot.schema_version != 3:
         raise ValueError("Historical dependency observation requires a fresh producer projection")
     implementation = require_loaded_hashmarks_runtime()
@@ -340,9 +338,10 @@ def project_dependency_package(
         )
     with tempfile.TemporaryDirectory(prefix="oh-goon-dependency-projection-") as directory:
         state = Path(directory)
-        with CodeMap(
+        with repository_evidence_scope(
             repository, state_dir=state, artifact_db=state / "artifacts.sqlite3"
-        ) as native:
+        ) as scope:
+            native = scope.native
             if snapshot.producer_projection:
                 retained = native.dependencies.requalify(snapshot.producer_projection)
                 if retained["observation"] != snapshot.producer_observation:

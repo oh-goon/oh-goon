@@ -18,6 +18,7 @@ from typing import Any
 
 import yaml
 
+from oh_goon.core.source_tree_policy import GRADER_PRIVATE_SOURCE_ROOT
 from oh_goon.repository_tooling.release.package_slim import (
     canonical_source_identity,
 )
@@ -91,7 +92,7 @@ from oh_goon.repository_tooling.source_layout import (
 ROOT = Path(__file__).resolve().parents[4]
 CERTIFICATION_RELATIVE = Path("docs/certification")
 QUESTION_RELATIVE = CERTIFICATION_RELATIVE / "questions"
-ANSWER_RELATIVE = CERTIFICATION_RELATIVE / "answers"
+ANSWER_RELATIVE = Path(GRADER_PRIVATE_SOURCE_ROOT)
 QUESTION_METADATA_RELATIVE = QUESTION_RELATIVE / "question-metadata.yml"
 QUESTION_AUDIT_RELATIVE = ANSWER_RELATIVE / "question-audit.yml"
 QUESTION_LIFECYCLE_RELATIVE = ANSWER_RELATIVE / "question-lifecycle.yml"
@@ -143,7 +144,7 @@ SECRET_SCHEMA_VERSION = 1
 GRADER_SCHEMA_VERSION = 6
 RUBRIC_VERSION = "repository-understanding.v17"
 MISCONCEPTION_COVERAGE_POLICY_VERSION = "repository-misconception-coverage.v7"
-CANDIDATE_GOLD_MARKER = "docs/certification/answers"
+CANDIDATE_GOLD_MARKER = GRADER_PRIVATE_SOURCE_ROOT.as_posix()
 ANSWERABILITY_POLICY_VERSION = "repository-understanding-external-answerability.v1"
 QUESTION_HEALTH_MAINTENANCE_POLICY_VERSION = (
     "repository-understanding-question-health-maintenance.v1"
