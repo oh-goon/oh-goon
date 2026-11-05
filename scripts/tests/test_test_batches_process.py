@@ -967,9 +967,7 @@ def test_exact_member_deadline_isolates_slow_native_work_without_changing_member
     )
 
 
-@pytest.mark.parametrize(
-    "fault", ("unknown", "duplicate", "deselected", "files", "suite-budget")
-)
+@pytest.mark.parametrize("fault", ("unknown", "duplicate", "files", "suite-budget"))
 def test_invalid_member_deadline_refuses_before_any_native_test_body(
     tmp_path: Path, fault: str
 ) -> None:
@@ -985,13 +983,46 @@ def test_invalid_member_deadline_refuses_before_any_native_test_body(
     options = {
         "unknown": ("--member-timeout=" + str(test_file) + "::test_missing=8",),
         "duplicate": (valid, valid),
-        "deselected": (valid, "--marker=not daily"),
         "files": (valid, "--granularity=files"),
         "suite-budget": (valid, "--suite-timeout=8"),
     }[fault]
     rc, output = _run_member_deadline_case(test_file, report, *options)
     assert rc == 2, output
     assert not calls.exists() and not report.exists()
+
+
+def test_native_deselection_keeps_member_deadline_inactive_and_adds_no_work(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    test_file, calls = _member_deadline_case(tmp_path)
+    report = tmp_path / "report.json"
+    slow = str(test_file) + "::test_slow"
+    deadline = "--member-timeout=" + slow + "=8"
+    rc, output = _run_member_deadline_case(test_file, report, deadline)
+    assert rc == 0, output
+    assert calls.read_text().splitlines() == ["first", "slow", "last"]
+    calls.unlink()
+    rc, output = _run_member_deadline_case(
+        test_file, report, deadline, "--marker=not daily", "--suite-timeout=6"
+    )
+    assert rc == 0, output
+    assert calls.read_text().splitlines() == ["first", "last"]
+    payload = json.loads(report.read_text())
+    selected = [
+        str(test_file) + "::test_quick_" + suffix for suffix in ("first", "last")
+    ]
+    assert payload["membership_receipt"]["selected"] == selected
+    assert payload["membership_receipt"]["passed"] == selected
+    assert payload["native_collection"]["deselected"] == [slow]
+    assert payload["batches"][0]["members"] == selected
+    assert payload["batches"][0]["timeout_seconds"] == 3
+    assert "member_timeouts_seconds" not in payload
+    assert all(
+        payload["membership_receipt"][key] == []
+        for key in ("missing", "duplicates", "extras")
+    )
 
 
 def test_removing_member_deadline_does_not_reuse_its_native_pass_receipts(

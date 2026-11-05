@@ -583,7 +583,7 @@ a1-native-kernel-custody-test:
 # Certification-marked recursive tests remain owned by APP certification.
 # OH_GOON_OPAQUE_TOOLS: bash dd git node systemctl uv
 test-tooling-complete:
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches --qualified --pytest-config backend/pyproject.toml scripts/tests --granularity tests --batch-size 64 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker "$(TOOLING_COMPLETE_TEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --qualified --pytest-config backend/pyproject.toml --granularity tests --batch-size 64 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker "$(TOOLING_COMPLETE_TEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
 
 test-frontend:
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run test

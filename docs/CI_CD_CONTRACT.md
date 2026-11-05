@@ -538,8 +538,10 @@ Backend integration keeps its 180-second batch deadline. The exact native-collec
 deadline: the unchanged 100-worker journey measured 529 seconds and includes Iris,
 cancellation, live-lease pruning, retained history, exports and CLI readback.
 The existing batch owner's repeatable `--member-timeout NATIVE_SELECTOR=SECONDS`
-option admits only unique selected test members, preserves their flat order and
-binds the override to resume and execution identity. It adds no members or skips;
+option names unique native-collected tests. Native pytest alone owns selection:
+an excluded test's deadline stays inactive and adds no work or suite-budget demand.
+Active deadlines preserve flat order and bind to resume and execution identity.
+The configuration adds no members or skips;
 all other batches retain their original deadline and timeout refinement.
 Complete tooling uses the same qualified native case collection with 64-case
 batches, retaining all `scripts/tests` members, its two workers and 1800-second

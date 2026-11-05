@@ -218,9 +218,23 @@ def _discover_runnable_members(
         )
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
+    selected = {item["selector"] for item in collection.selected}
+    collected = selected | {item["selector"] for item in collection.deselected}
+    for selector in args.member_timeouts:
+        if selector not in collected:
+            parser.error(f"member-timeout selector is not collected by native pytest: {selector}")
+    args.member_timeouts = {
+        selector: seconds
+        for selector, seconds in args.member_timeouts.items()
+        if selector in selected
+    }
+    if args.suite_timeout is not None and args.suite_timeout <= max(
+        (args.batch_timeout, *args.member_timeouts.values())
+    ):
+        parser.error(
+            "suite-timeout must exceed every active batch deadline to preserve startup/checkpoint headroom"
+        )
     if not collection.selected:
-        if args.member_timeouts:
-            parser.error("member-timeout selector is not selected by native pytest")
         if invocation.qualified:
             print("Native pytest selected no tests (exit 5).", file=sys.stderr)
             raise SystemExit(5)
@@ -231,9 +245,6 @@ def _discover_runnable_members(
 def _select_batches(
     parser: argparse.ArgumentParser, args: argparse.Namespace, members: tuple[str, ...]
 ) -> tuple[Batch, ...]:
-    for selector in args.member_timeouts:
-        if selector not in members:
-            parser.error(f"member-timeout selector is not selected by native pytest: {selector}")
     batches = _chunks(members, args.batch_size, isolated=frozenset(args.member_timeouts))
     if args.batch is None:
         return batches

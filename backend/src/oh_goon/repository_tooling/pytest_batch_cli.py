@@ -58,7 +58,7 @@ def parse_batch_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         action="append",
         default=[],
         metavar="NATIVE_SELECTOR=SECONDS",
-        help="isolate one exact native-selected test with its explicit positive deadline",
+        help="set an exact native-collected test's positive deadline when it is selected",
     )
     parser.add_argument(
         "--suite-timeout",
@@ -167,9 +167,7 @@ def _validate_batch_args(parser: argparse.ArgumentParser, args: argparse.Namespa
         parser.error("environment-retries must be >= 0")
     if args.suite_timeout is not None and args.suite_timeout < 1:
         parser.error("suite-timeout must be positive")
-    if args.suite_timeout is not None and args.suite_timeout <= max(
-        (args.batch_timeout, *args.member_timeouts.values())
-    ):
+    if args.suite_timeout is not None and args.suite_timeout <= args.batch_timeout:
         parser.error(
-            "suite-timeout must exceed every configured batch deadline to preserve startup/checkpoint headroom"
+            "suite-timeout must exceed batch-timeout to preserve startup/checkpoint headroom"
         )
