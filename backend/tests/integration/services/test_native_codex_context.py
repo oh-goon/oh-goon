@@ -277,7 +277,8 @@ class _ManagedProtectedContextResponses(CodexResponsesFixture):
                 "type": "message",
                 "content": [{"type": "input_text", "text": item["content"]}],
             }
-            if isinstance(item.get("content"), str) and item.get("role") in {"developer", "user"}
+            if isinstance(item.get("content"), str)
+            and item.get("role") in {"system", "developer", "user"}
             else item
             for item in body["input"]
         ]
@@ -290,9 +291,28 @@ class _ManagedProtectedContextResponses(CodexResponsesFixture):
         ]
         task_input = self.task_input()
         assert task_input is not None
+        payload = json.loads(task_input)
+        privileged = "\n".join(
+            part["text"]
+            for item in messages
+            if item.get("role") in {"system", "developer"}
+            for part in item.get("content", [])
+            if part.get("type") == "input_text"
+        )
         events = super()._response({**body, "input": messages}, endpoint, transport)
         observation = self.observations[-1]
         observation["task_input_exact"] = task_input.decode() in user_texts
+        # Match the complete frozen components, independently of the broker's
+        # prose around them. Producer data cannot stand in for Skill or task.
+        observation["evidence_privileged_exact_count"] = privileged.count(
+            payload["repository_evidence"]
+        )
+        observation["skill_privileged_exact_count"] = privileged.replace(
+            payload["repository_evidence"], ""
+        ).count(payload["skill_instructions"])
+        observation["task_privileged"] = payload["task"] in privileged.replace(
+            payload["repository_evidence"], ""
+        ).replace(payload["skill_instructions"], "")
         observation["local_compaction_request"] = any(
             "CONTEXT CHECKPOINT COMPACTION" in text for text in user_texts
         )
@@ -515,7 +535,10 @@ def test_installed_protected_managed_codex_retains_context_with_native_code_mode
             assert endpoint.request_count == 4 and native_launch_count == 1, facts
             observations = endpoint.observations
             assert all(
-                item["synthetic_auth"] and item["privileged_exact_count"] == 1
+                item["synthetic_auth"]
+                and item["evidence_privileged_exact_count"] == 1
+                and item["skill_privileged_exact_count"] == 1
+                and item["task_privileged"]
                 for item in observations
             ), facts
             assert (

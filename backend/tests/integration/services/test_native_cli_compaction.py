@@ -119,7 +119,9 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 assert identity is not None and producer_evidence is not None
                 assert output_contract is not None
                 assert producer_evidence in privileged
-                assert task in all_text
+                assert task in privileged.replace(producer_evidence, "").replace(skill_text, ""), (
+                    "original task missing from privileged context outside evidence and Skill"
+                )
                 summarizing = (
                     "You are a context summarization assistant." in privileged
                     if agent == "pi"

@@ -683,6 +683,7 @@ def execute_native_agent_step(
                 approved_model_broker(
                     broker_parent,
                     model,
+                    task=prepared.task,
                     repository_evidence=disclosure,
                     skill_instructions=prepared.skill_instructions,
                     cancel_requested=lambda: (

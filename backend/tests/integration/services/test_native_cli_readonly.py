@@ -149,6 +149,7 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                     "qualified Hashmarks/Skill context missing"
                 )
                 request_identity: dict[str, str] | None = None
+                request_evidence: str | None = None
                 for message in body["messages"]:
                     if message.get("role") != "user":
                         continue
@@ -171,7 +172,12 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                         )
                         assert payload["repository_evidence"] in privileged
                         request_identity = payload["identity"]
+                        request_evidence = payload["repository_evidence"]
                 assert request_identity is not None, "frozen user prompt identity missing"
+                assert request_evidence is not None
+                assert task in privileged.replace(request_evidence, "").replace(skill_text, ""), (
+                    "original task missing from privileged context outside evidence and Skill"
+                )
                 if identity is not None:
                     assert request_identity == identity, "frozen task identity changed"
                 identity = request_identity
