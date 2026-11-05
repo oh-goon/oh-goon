@@ -20,13 +20,13 @@ from pydantic import ConfigDict, Field
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.engine.command import CommandCancelledError, CommandTimeoutExpired, run_command
 from oh_goon.integrations.exact_file_write import publish_text_file
-from oh_goon.integrations.native_uv_lock import compare_native_uv_dependency_artifacts
 from oh_goon.integrations.hashmarks import (
     nominate_changed_verification,
     require_current_dependency_environment,
     require_loaded_hashmarks_runtime,
     validate_required_dependency_introductions,
 )
+from oh_goon.integrations.native_uv_lock import compare_native_uv_dependency_artifacts
 from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
 from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
 from oh_goon.repository_tooling.pytest_process_environment import resolve_pytest_invocation
