@@ -140,6 +140,38 @@ class ExistingDatabaseAppendContext(ImmutableModel):
         return value
 
 
+class WorkerDatabaseContext(ImmutableModel):
+    """Captured canonical authority for a fresh worker, without a parent session.
+
+    The revision is a lower bound: unrelated canonical writes between admission
+    and worker startup do not invalidate the admitted database instance.
+    """
+
+    path: Path
+    device: int = Field(ge=0)
+    inode: int = Field(ge=1)
+    filesystem: str | None = Field(default=None, max_length=128)
+    schema_version: int = Field(default=DATABASE_SCHEMA_VERSION, ge=1)
+    schema_cookie: int = Field(ge=1)
+    database_identity_cookie: int = Field(ge=1, le=DATABASE_IDENTITY_COOKIE_MAX)
+    journal_mode: Literal["DELETE", "WAL"]
+    durable_revision_floor: int = Field(ge=0)
+
+    @field_validator("path")
+    @classmethod
+    def require_absolute_path(cls, value: Path) -> Path:
+        if not value.is_absolute() or ".." in value.parts:
+            raise ValueError("Worker database context requires its captured absolute path")
+        return value
+
+    @field_validator("schema_version")
+    @classmethod
+    def require_current_schema(cls, value: int) -> int:
+        if value != DATABASE_SCHEMA_VERSION:
+            raise ValueError("Worker database context uses another schema")
+        return value
+
+
 @dataclass(frozen=True, slots=True)
 class LocalStateBackupReceipt:
     """Offline owner-observed snapshot; NOT a signer or runtime admission receipt."""
@@ -323,6 +355,62 @@ class LocalDatabase:
             durable_revision=read_durable_revision(connection),
             session_id=self.session_id,
         )
+
+    def capture_worker_context(self) -> WorkerDatabaseContext:
+        """Capture admitted authority in one verified cut for a fresh Run worker."""
+        if self._read_only:
+            raise RuntimeError("Observation-only LocalDatabase cannot admit a worker")
+        with self.transaction() as connection:
+            admitted = self.capture_append_context(connection)
+            return WorkerDatabaseContext(
+                path=admitted.path,
+                device=admitted.device,
+                inode=admitted.inode,
+                filesystem=admitted.filesystem,
+                schema_version=admitted.schema_version,
+                schema_cookie=admitted.schema_cookie,
+                database_identity_cookie=admitted.database_identity_cookie,
+                journal_mode=admitted.journal_mode,
+                durable_revision_floor=admitted.durable_revision,
+            )
+
+    @classmethod
+    def open_worker(cls, expected: WorkerDatabaseContext) -> LocalDatabase:
+        """Reopen admitted canonical state with fresh process-local resources.
+
+        Read-only SQLite proves the complete authority before this owner can
+        acquire a write cut. No startup initialization, schema authoring, mode
+        repair, recovery or domain reconciliation runs here.
+        """
+        if expected.path.resolve() != expected.path:
+            raise DatabasePathIdentityLost("Worker database path is no longer canonical")
+        database = cls.__new__(cls)
+        database.path = expected.path
+        database.session_id = f"session-{uuid4().hex}"
+        database.journal_mode = expected.journal_mode
+        database._path_identity = DatabasePathIdentity(
+            expected.device, expected.inode, 0, expected.filesystem
+        )
+        database._schema_cookie = expected.schema_cookie
+        database._database_identity_cookie = expected.database_identity_cookie
+        database._durable_revision_floor = expected.durable_revision_floor
+        database._durable_revision_lock = RLock()
+        database._connection_scope = local()
+        database._recovery_observer = None
+        database.sqlite_diagnostics = SQLiteAccessDiagnostics()
+        database._read_only = False
+        database._initialized_new_state = False
+        database._require_path_identity()
+        with sqlite_authority_gate(database.path, write=False):
+            database._require_path_identity()
+            # The explicit captured mode never consults worker ambient defaults.
+            sqlite_journal_mode_for_path(database.path, requested=expected.journal_mode)
+            with cls.observe_existing_for_inspection(database.path) as connection:
+                database._prove_admitted_sqlite_identity(connection, context="Run worker reopen")
+                database._require_path_identity()
+                if database.path.resolve() != database.path:
+                    raise DatabasePathIdentityLost("Worker database path is no longer canonical")
+        return database
 
     @classmethod
     @contextmanager

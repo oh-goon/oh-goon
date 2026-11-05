@@ -27,9 +27,9 @@ FleetRun admission → ExecutionTicket → RunExecutionSupervisor
   → FleetTargetScheduler → Step/Attempt → native tool or harness
 ```
 
-This is the target of HUG-180/HUG-181. The current supervisor submits the
-existing Run execution to a thread pool; that implementation is not a second
-supported mode to preserve after cutover. Schedules remain triggers, and native
+The [supervisor contract](development/EXECUTION_SUPERVISOR.md) owns the fresh
+process/atomic-claim boundary and its remaining HUG-181/HUG-183 qualification.
+Schedules remain triggers, and native
 sessions remain below Step/Attempt. A worker claim transfers custody only;
 it cannot resolve another Plan, select repository work or reserve capacity
 again. SQLite/Journal and the Fleet lifecycle retain durable Run truth.

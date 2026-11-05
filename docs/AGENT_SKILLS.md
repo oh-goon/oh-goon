@@ -11,11 +11,10 @@ admission and sequencing, the existing Step supervisor owns native processes,
 and Game Tape records their outcomes.
 
 Agent workflow execution and campaign phases enter the same FleetRun admission
-and execution owners. The current Run supervisor submits work to a thread
-pool. The [canonical lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-require isolated, claimed Run-worker custody before the existing
+and execution owners. The [supervisor contract](development/EXECUTION_SUPERVISOR.md)
+uses a fresh, atomically claimed Run worker before the existing
 FleetRunExecution → ExecutionSession → target scheduler → Step/Attempt path.
-HUG-180/HUG-181 own that migration and qualification. Native sessions and their
+HUG-181/HUG-183 retain broader qualification. Native sessions and their
 owned protocol daemons remain subordinate Step resources; Skill text, native
 continuation or campaign policy cannot select another Run route or supply
 execution/recovery authority. See the

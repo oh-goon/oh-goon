@@ -9,13 +9,12 @@ Run or its recovery. Owned native daemons remain Step resources under the
 original command owner. Readiness of an external server grants no execution
 or process-termination authority.
 
-The current Run supervisor uses a thread pool. The
-[canonical lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-require an isolated, atomically claimed Run worker beneath the same admission
-and above the existing Step/harness owners. HUG-180/HUG-181 own that cutover
-and qualification; no profile selects a second Run path or parent fallback.
+The [supervisor contract](development/EXECUTION_SUPERVISOR.md) puts a fresh,
+atomically claimed Run worker beneath the same admission and above the existing
+Step/harness owners. HUG-181/HUG-183 retain broader qualification; no profile
+selects a second Run path or parent fallback.
 The [runtime owner map](development/AGENT_RUNTIME_OWNERS.md#run-custody-and-native-sessions)
-shows the required chain and current implementation limits.
+shows the chain and current qualification limits.
 
 Repository evidence is mandatory and enters through the public
 [`oh_goon.integrations.hashmarks` API](../backend/src/oh_goon/integrations/hashmarks/__init__.py).

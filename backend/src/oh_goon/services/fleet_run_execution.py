@@ -41,7 +41,7 @@ class FleetRunExecution:
         self,
         ticket: ExecutionTicket,
     ) -> FleetRunDetail:
-        # One worker thread owns one admitted native SQLite handle for the complete run.
+        # One claimed worker owns one native SQLite handle for the complete run.
         # Transactions and effect fences remain separate durable cuts; only reconnect churn
         # is removed. Parallel target workers get their own thread-local scopes when needed.
         if ticket.recovery_only:

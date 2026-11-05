@@ -183,6 +183,57 @@ def test_actual_child_controls_and_birth_are_retained_before_work(
     assert evidence.cgroup_inode == child[1].stat().st_ino
 
 
+def test_fresh_worker_retains_original_native_envelope_without_reauthoring_it(
+    scope: envelope.ResolvedRunResourceScope,
+    child: tuple[dict[str, str], Path],
+) -> None:
+    current = envelope.verify_current_run_resource_scope(scope, handoff_sha256=_DIGEST)
+    original = current.model_copy(
+        update={"process_birth": replace(_BIRTH, pid=_BIRTH.pid + 100, start_ticks=2)}
+    )
+    original_json = original.model_dump_json()
+    envelope.verify_worker_run_resource_scope(scope, original, worker_birth=_BIRTH)
+    assert original.model_dump_json() == original_json
+
+
+@pytest.mark.parametrize("changed", ["unit-generation", "cgroup", "controls", "membership"])
+def test_worker_rejects_changed_native_envelope(
+    scope: envelope.ResolvedRunResourceScope,
+    child: tuple[dict[str, str], Path],
+    changed: str,
+) -> None:
+    current = envelope.verify_current_run_resource_scope(scope, handoff_sha256=_DIGEST)
+    original = current.model_copy(
+        update={"process_birth": replace(_BIRTH, pid=_BIRTH.pid + 100, start_ticks=2)}
+    )
+    properties, target = child
+    if changed == "unit-generation":
+        properties["InvocationID"] = "f" * 32
+    elif changed == "cgroup":
+        original = original.model_copy(update={"cgroup_inode": current.cgroup_inode + 1})
+    elif changed == "controls":
+        (target / "cpu.max").write_text("50000 100000")
+    else:
+        (target / "cgroup.procs").write_text(str(os.getpid() + 100))
+    with pytest.raises(FleetPlanInvalid):
+        envelope.verify_worker_run_resource_scope(scope, original, worker_birth=_BIRTH)
+
+
+@pytest.mark.parametrize("changed", ["parent", "unknown-worker"])
+def test_worker_resource_evidence_requires_its_own_exact_birth(
+    scope: envelope.ResolvedRunResourceScope,
+    child: tuple[dict[str, str], Path],
+    changed: str,
+) -> None:
+    current = envelope.verify_current_run_resource_scope(scope, handoff_sha256=_DIGEST)
+    original = current.model_copy(
+        update={"process_birth": replace(_BIRTH, pid=_BIRTH.pid + 100, start_ticks=2)}
+    )
+    worker_birth = original.process_birth if changed == "parent" else replace(_BIRTH, start_ticks=9)
+    with pytest.raises(FleetPlanInvalid):
+        envelope.verify_worker_run_resource_scope(scope, original, worker_birth=worker_birth)
+
+
 @pytest.mark.parametrize("boundary", ("digest", "invocation", "pid", "domain", "cpu", "birth"))
 def test_child_refuses_unproven_actual_context(
     scope: envelope.ResolvedRunResourceScope,

@@ -17,7 +17,9 @@ api/routes/fleet_runs.py
   -> runtime/execution/coordinator.py
        exact lease primitives under caller-owned lifecycle transactions
   -> runtime/execution/run_supervisor.py
-       submit the admitted ticket to the current thread executor
+       spawn one fresh process for the admitted ticket
+  -> _application_worker.py / runtime/execution/coordinator.py
+       reopen SQLite, atomically claim custody, compose execution only
   -> services/fleet_run_execution.py
        orchestration only; delegates lifecycle mutations
   -> services/fleet_target_scheduler.py
@@ -36,13 +38,12 @@ api/routes/fleet_runs.py
 `FleetTargetScheduler` must not grow effect-state logic. `RepositoryEffectExecution` is the one owner of claim → fence → effect-start → runner → settlement/interruption.
 
 All local, CI/CD, scheduled, ML, application and agentic Runs use that path.
-[The required worker custody boundary](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-under HUG-180/HUG-181 inserts a claimed isolated process between the supervisor
-and `FleetRunExecution`. Existing ticket activation is not that new custody
-claim. The worker will consume frozen admitted facts without another admission,
+[The worker custody boundary](EXECUTION_SUPERVISOR.md) inserts a claimed fresh
+process between the supervisor and `FleetRunExecution`. Ticket activation requires
+that claimed custody. The worker consumes frozen admitted facts without another admission,
 placement, Plan resolution or repository selection. The
 [supervisor owner](EXECUTION_SUPERVISOR.md) describes current behavior and the
-required cutover; no thread/parent fallback is a supported target mode.
+remaining HUG-181/HUG-183 qualification.
 
 ## Direct write path
 

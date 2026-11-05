@@ -24,7 +24,9 @@ Fleet admission / selected Enforcer policy
     ↓
 RUN_ADMITTED + ExecutionTicket
     ↓
-RunExecutionSupervisor (current thread submission)
+RunExecutionSupervisor
+    ↓
+fresh Run worker → atomic SQLite custody claim
     ↓
 FleetRunExecution → ExecutionSession
     ↓
@@ -46,10 +48,10 @@ Immediate, queued, scheduled and placement-readmitted submissions enter this
 same path. A Schedule or native session is not another executable Run owner.
 Native Pi/OpenCode/Codex session semantics remain beneath Step/Attempt.
 
-## Required Run-worker custody boundary
+## Run-worker custody boundary
 
 The [canonical execution-lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-strengthen the physical boundary after admission:
+define the physical boundary after admission:
 
 ```text
 RUN_ADMITTED + ExecutionTicket
@@ -63,15 +65,13 @@ existing FleetRunExecution → ExecutionSession → FleetTargetScheduler
 existing Step / Attempt / harness and terminalization
 ```
 
-This is the required target, not an implemented process-custody guarantee.
-`RunExecutionSupervisor` currently submits the admitted callable to a thread
-pool; [HUG-180](https://linear.app/hugloss/issue/HUG-180) owns replacement of that
-physical submission boundary and [HUG-181](https://linear.app/hugloss/issue/HUG-181)
-owns its failure/drain qualification. The worker claim transfers only live
-execution custody: it cannot re-admit, re-place, re-reserve capacity, re-resolve
-the Plan or reselect repository work. The old thread route must be removed at
-cutover; no local, CI, Schedule, ML, agent or fallback route survives beside it.
-SQLite/Journal and existing lifecycle owners retain durable Run truth.
+The [supervisor contract](development/EXECUTION_SUPERVISOR.md) describes the
+implemented HUG-180 fresh-process/atomic-claim boundary and the remaining
+HUG-181 failure/drain and HUG-183 lifecycle qualification. The worker claim
+transfers only live execution custody: it cannot re-admit, re-place, re-reserve
+capacity, re-resolve the Plan or reselect repository work. All submissions use
+this physical boundary. SQLite/Journal and existing lifecycle owners retain
+durable Run truth; process exit cannot manufacture a terminal result.
 
 ## Identity ownership
 

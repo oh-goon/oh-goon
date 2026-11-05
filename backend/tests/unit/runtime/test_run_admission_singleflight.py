@@ -48,6 +48,7 @@ from oh_goon.core.vocabulary import (
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator
+from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
 from oh_goon.services.fleet_admission import FleetAdmissionPlan
@@ -337,6 +338,9 @@ def test_known_invalid_plan_creates_no_run_attempt_or_worker_before_admission(
         _UnusedRunExecution(),  # type: ignore[arg-type]
         supervisor,  # type: ignore[arg-type]
         GameTapeLiveOutputStore(),
+        worker_configuration=lambda run_id: lambda _ticket: RunWorkerLaunch(
+            argv=("recorded-unit-worker", run_id), cwd=database.path.parent, environment={}
+        ),
     )
 
     with pytest.raises(TargetSelectionError, match="known-invalid"):
@@ -369,6 +373,9 @@ def test_concurrent_fixed_strict_run_identity_admits_and_submits_once(tmp_path: 
         _UnusedRunExecution(),  # type: ignore[arg-type]
         supervisor,  # type: ignore[arg-type]
         GameTapeLiveOutputStore(),
+        worker_configuration=lambda run_id: lambda _ticket: RunWorkerLaunch(
+            argv=("recorded-unit-worker", run_id), cwd=database.path.parent, environment={}
+        ),
     )
     target = structural_fleet_plan_target(_plan())
 
@@ -409,6 +416,9 @@ def test_queue_cancellation_before_admission_commit_leaves_no_run_fact(tmp_path:
         _UnusedRunExecution(),  # type: ignore[arg-type]
         supervisor,  # type: ignore[arg-type]
         GameTapeLiveOutputStore(),
+        worker_configuration=lambda run_id: lambda _ticket: RunWorkerLaunch(
+            argv=("recorded-unit-worker", run_id), cwd=database.path.parent, environment={}
+        ),
     )
 
     with pytest.raises(ExecutorAdmissionCancelled):

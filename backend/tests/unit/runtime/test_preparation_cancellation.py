@@ -6,11 +6,26 @@ import pytest
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.effect_attempt_transitions import begin_effect_attempt
 from oh_goon.core.models.effect_origin import DirectEffectOrigin
+from oh_goon.core.models.run_admission import (
+    DirectFleetExecutionAdmission,
+    FleetRunAdmissionIntent,
+    fleet_repository_scope,
+)
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
 from oh_goon.core.time import utc_now
-from oh_goon.core.vocabulary import EffectAttemptOwner, EffectBoundaryKind, OperationAction
+from oh_goon.core.vocabulary import (
+    EffectAttemptOwner,
+    EffectBoundaryKind,
+    FleetRunTerminalIntent,
+    OperationAction,
+)
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionSession
+from oh_goon.runtime.journal import Journal
 from oh_goon.services.repository_effect_execution import RepositoryEffectExecution
+from tests.factories.capabilities import capability_snapshot
 from tests.factories.repository_state import baseline_for
+from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
 class _NoResourcePrepared:
@@ -54,6 +69,28 @@ class _PreparationSession:
             yield self._bounded_cancel
         finally:
             self.observer_exited += 1
+
+
+def _fleet_preparation_session(
+    database: LocalDatabase, fleet_run_id: str
+) -> tuple[LocalDatabase, ExecutionCoordinator, ExecutionSession]:
+    journal = Journal(database)
+    execution = ExecutionCoordinator(database)
+    intent = FleetRunAdmissionIntent(
+        capability=capability_snapshot(OperationAction.INIT),
+        execution=DirectFleetExecutionAdmission(),
+        repository_admissions=(),
+    )
+    ticket, _ = execution.reserve_fleet_with(
+        fleet_run_id,
+        expected_durable_revision=database.durable_revision(),
+        mutate=lambda connection: journal.admit_run_in(
+            connection, fleet_run_id, intent, fleet_repository_scope(None), []
+        ),
+    )
+    database, execution = simulated_worker_coordinator(database)
+    session = execution.activate(execution.claim_fleet_worker(ticket))
+    return database, execution, session
 
 
 def _request(repository: Path, cancel_requested) -> CapabilityExecutionRequest:
@@ -162,18 +199,10 @@ def test_persistent_preparation_observer_sees_external_fleet_cancellation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import oh_goon.runtime.execution.coordinator as coordinator
-    from oh_goon.runtime.database import LocalDatabase
-    from oh_goon.runtime.execution import ExecutionCoordinator
 
     database = LocalDatabase(tmp_path / "observer-cancel-visible.db", journal_mode="DELETE")
-    execution = ExecutionCoordinator(database)
     fleet_run_id = "fleet-preparation-observer"
-    ticket = execution.reserve_fleet_with(
-        fleet_run_id,
-        expected_durable_revision=database.durable_revision(),
-        mutate=lambda _connection: None,
-    )[0]
-    session = execution.activate(ticket)
+    database, execution, session = _fleet_preparation_session(database, fleet_run_id)
     now = [800.0]
     monkeypatch.setattr(coordinator, "monotonic", lambda: now[0])
 
@@ -184,7 +213,11 @@ def test_persistent_preparation_observer_sees_external_fleet_cancellation(
         now[0] += coordinator.PREPARATION_CANCELLATION_OBSERVATION_INTERVAL_SECONDS
         assert probe() is True
 
-    session.finish(lambda _connection: None)
+    session.finish(
+        lambda connection: Journal(database).terminalize_run_in(
+            connection, fleet_run_id, FleetRunTerminalIntent.CANCEL
+        )
+    )
 
 
 def test_persistent_preparation_observer_survives_sustained_concurrent_sqlite_writer(
@@ -192,18 +225,9 @@ def test_persistent_preparation_observer_survives_sustained_concurrent_sqlite_wr
 ) -> None:
     import threading
 
-    from oh_goon.runtime.database import LocalDatabase
-    from oh_goon.runtime.execution import ExecutionCoordinator
-
     database = LocalDatabase(tmp_path / "observer-concurrent-writer.db", journal_mode="DELETE")
-    execution = ExecutionCoordinator(database)
     fleet_run_id = "fleet-observer-concurrent-writer"
-    ticket = execution.reserve_fleet_with(
-        fleet_run_id,
-        expected_durable_revision=database.durable_revision(),
-        mutate=lambda _connection: None,
-    )[0]
-    session = execution.activate(ticket)
+    database, _execution, session = _fleet_preparation_session(database, fleet_run_id)
     errors: list[BaseException] = []
 
     def write_loop() -> None:
@@ -234,7 +258,11 @@ def test_persistent_preparation_observer_survives_sustained_concurrent_sqlite_wr
 
     assert not writer.is_alive()
     assert errors == []
-    session.finish(lambda _connection: None)
+    session.finish(
+        lambda connection: Journal(database).terminalize_run_in(
+            connection, fleet_run_id, FleetRunTerminalIntent.CANCEL
+        )
+    )
 
 
 def test_preparation_observer_survives_separate_database_owner_write_pressure(
@@ -243,20 +271,13 @@ def test_preparation_observer_survives_separate_database_owner_write_pressure(
     """Production shape: observer and writer own independent LocalDatabase instances."""
     import threading
 
-    from oh_goon.runtime.database import LocalDatabase
-    from oh_goon.runtime.execution import ExecutionCoordinator
-
     path = tmp_path / "cross-owner-preparation.db"
     observer_database = LocalDatabase(path, journal_mode="DELETE")
     writer_database = LocalDatabase(path, journal_mode="DELETE")
-    execution = ExecutionCoordinator(observer_database)
     fleet_run_id = "fleet-cross-owner-preparation"
-    ticket = execution.reserve_fleet_with(
-        fleet_run_id,
-        expected_durable_revision=observer_database.durable_revision(),
-        mutate=lambda _connection: None,
-    )[0]
-    session = execution.activate(ticket)
+    observer_database, _execution, session = _fleet_preparation_session(
+        observer_database, fleet_run_id
+    )
     errors: list[BaseException] = []
 
     def write_loop() -> None:
@@ -284,4 +305,8 @@ def test_preparation_observer_survives_separate_database_owner_write_pressure(
 
     assert not writer.is_alive()
     assert errors == []
-    session.finish(lambda _connection: None)
+    session.finish(
+        lambda connection: Journal(observer_database).terminalize_run_in(
+            connection, fleet_run_id, FleetRunTerminalIntent.CANCEL
+        )
+    )

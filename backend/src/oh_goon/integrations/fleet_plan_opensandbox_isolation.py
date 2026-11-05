@@ -9,17 +9,19 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from pydantic import ConfigDict, Field
 
 from oh_goon.core.errors import (
     ExecutionAuthorityDivergence,
     ExecutorPlacementLost,
     FleetPlanInvalid,
 )
+from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_isolation import (
     IsolationBackendCapabilities,
@@ -112,6 +114,15 @@ class OpenSandboxAttemptTransport(Protocol):
     ) -> CommandResult: ...
 
 
+class OpenSandboxWorkerConfiguration(ImmutableModel):
+    """Protected resolved configuration; credential values never enter its repr."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+    kind: Literal["opensandbox"] = "opensandbox"
+    settings: OpenSandboxSettings = Field(repr=False)
+    configuration_identity: str
+
+
 class OpenSandboxProcessIsolation:
     """Experimental one-sandbox-per-attempt backend behind Fleet's isolation contract."""
 
@@ -131,6 +142,29 @@ class OpenSandboxProcessIsolation:
         self.settings = settings
         self._transport = transport
         self.capabilities = _capabilities_for(settings.runtime)
+
+    def capture_worker_configuration(self) -> OpenSandboxWorkerConfiguration:
+        from oh_goon.integrations._fleet_plan_opensandbox_transport import (
+            OpenSandboxCliTransport,
+        )
+
+        if (
+            type(self) is not OpenSandboxProcessIsolation
+            or type(self._transport) is not OpenSandboxCliTransport
+        ):
+            raise FleetPlanInvalid("Run worker requires the concrete native OpenSandbox transport")
+        return OpenSandboxWorkerConfiguration(
+            settings=self.settings, configuration_identity=self.configuration_identity()
+        )
+
+    @classmethod
+    def from_worker_configuration(
+        cls, configuration: OpenSandboxWorkerConfiguration
+    ) -> OpenSandboxProcessIsolation:
+        backend = cls(configuration.settings)
+        if backend.configuration_identity() != configuration.configuration_identity:
+            raise FleetPlanInvalid("Run worker OpenSandbox configuration changed after capture")
+        return backend
 
     def configuration_identity(self) -> str:
         return stable_id(

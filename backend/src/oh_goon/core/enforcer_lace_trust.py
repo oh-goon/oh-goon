@@ -13,6 +13,10 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, cast
 
+from pydantic import ConfigDict, Field, field_validator
+
+from oh_goon.core.models.base import ImmutableModel
+
 PROTOCOL_VERSION = "enforcer-lace-authority/v1"
 DIGEST_PREFIX = "sha256:"
 # Stable diagnostic projections of the original FleetRunLifecycle admission
@@ -164,6 +168,26 @@ class AuthenticatedReceipt:
         return cast(dict[str, Any], json.loads(self.payload))
 
 
+class ProtectedReceiptKey(ImmutableModel):
+    """Privileged worker transport only; never receipt or diagnostic evidence."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+
+    key_id: str = Field(min_length=1)
+    secret_hex: str = Field(min_length=64, repr=False)
+
+    @field_validator("secret_hex")
+    @classmethod
+    def require_canonical_key(cls, value: str) -> str:
+        try:
+            decoded = bytes.fromhex(value)
+        except ValueError:
+            raise ValueError("invalid protected receipt key encoding") from None
+        if decoded.hex() != value or len(decoded) < 32:
+            raise ValueError("invalid protected receipt key encoding")
+        return value
+
+
 class ReceiptAuthenticator:
     """Versioned control-plane HMAC issuer/verifier; no ambient key fallback."""
 
@@ -174,6 +198,19 @@ class ReceiptAuthenticator:
             raise TrustProtocolError("independently provided 256-bit key required")
         self.key_id = key_id
         self._secret = secret
+
+    def capture_worker_key(self) -> ProtectedReceiptKey:
+        """Export only into the original worker's protected local transport."""
+        if type(self) is not ReceiptAuthenticator:
+            raise TrustProtocolError("original receipt authenticator required")
+        return ProtectedReceiptKey(key_id=self.key_id, secret_hex=self._secret.hex())
+
+    @classmethod
+    def restore_worker_key(cls, material: ProtectedReceiptKey) -> ReceiptAuthenticator:
+        """Reconstruct the same entrusted key, without minting or enrolling one."""
+        if type(material) is not ProtectedReceiptKey:
+            raise TrustProtocolError("protected original receipt key required")
+        return cls(key_id=material.key_id, secret=bytes.fromhex(material.secret_hex))
 
     def _mac(self, domain: str, payload: bytes) -> str:
         message = b"oh-goon/receipt-hmac-sha256/v1\x00" + domain.encode("ascii") + b"\x00" + payload

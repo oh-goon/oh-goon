@@ -36,11 +36,12 @@ from oh_goon.runtime._executor_configuration import configured_executor_pool
 from oh_goon.runtime.journal import Journal
 
 ENV_FIELD = "execution_environment_identity"
+InventorySnapshotIdentity = tuple[int, int, int, int, int, int, int, str]
 
 
-def _inventory_snapshot() -> tuple[Path, tuple[object, ...]]:
+def _inventory_snapshot(path: Path | None = None) -> tuple[Path, InventorySnapshotIdentity]:
     """Observe exact deployment-selected inventory, rejecting file alias/replacement."""
-    raw = os.environ.get(EXECUTORS_FILE_ENV)
+    raw = str(path) if path is not None else os.environ.get(EXECUTORS_FILE_ENV)
     if not isinstance(raw, str) or not raw or not Path(raw).is_absolute():
         raise TrustProtocolError("deployment-selected executor inventory required")
     path = Path(raw)
@@ -60,7 +61,7 @@ def _inventory_snapshot() -> tuple[Path, tuple[object, ...]]:
     except OSError as exc:
         raise TrustProtocolError("executor inventory is unavailable") from exc
 
-    def identity(item: os.stat_result) -> tuple[int, ...]:
+    def identity(item: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
         return (
             item.st_dev,
             item.st_ino,

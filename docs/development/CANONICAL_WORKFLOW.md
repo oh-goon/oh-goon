@@ -37,12 +37,10 @@ resolve required authority
 
 One semantic question has one owner: **is this repository plus resolved Plan admissible to execute?** Every Fleet Plan purpose uses the same base `FleetAdmissionPlanner` decision. Strict CI/CD may add stronger topology, repository-requirement, executor, isolation, resource, and placement proofs, but it never replaces or forks that base decision. Verification is not a relaxed admission mode.
 
-The supervisor currently submits that execution through a thread pool. The
-[required Run-worker cutover](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-inserts `fresh isolated worker → atomic custody claim` after the supervisor and
-before `FleetRunExecution`; [HUG-180](https://linear.app/hugloss/issue/HUG-180) and
-[HUG-181](https://linear.app/hugloss/issue/HUG-181) retain implementation and
-failure/drain qualification. A custody claim is not the later Step/effect-attempt
+The [supervisor contract](EXECUTION_SUPERVISOR.md) inserts
+`fresh Run worker → atomic custody claim` after the supervisor and before
+`FleetRunExecution`; HUG-181/HUG-183 retain broader qualification.
+A custody claim is not the later Step/effect-attempt
 claim shown above. The worker receives frozen authority and never repeats
 resolution, placement or repository selection. Manual, scheduled, CI/CD, ML,
 application-source and agentic Runs reuse that same lifecycle; neither a native

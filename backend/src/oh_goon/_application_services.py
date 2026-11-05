@@ -6,6 +6,7 @@ if TYPE_CHECKING:
     from oh_goon.application import ApplicationRuntime
 
 from oh_goon._application_foundation import RuntimeFoundation, _build_local_state_foundation
+from oh_goon._application_worker import capture_run_worker_submission
 from oh_goon.integrations.gitlab_ci_component import GitLabComponentFetcher
 from oh_goon.integrations.gitlab_ci_goon import GitLabCiGoonMigrator
 from oh_goon.integrations.hashmarks import require_loaded_hashmarks_runtime
@@ -119,6 +120,9 @@ def _build_fleet_services(
         foundation.diagnostics,
         schedule_executions=foundation.schedule_executions,
         content_store=foundation.content_store,
+        worker_configuration=lambda fleet_run_id: capture_run_worker_submission(
+            foundation, fleet_run_id
+        ),
     )
 
 

@@ -7,14 +7,17 @@ import stat
 import subprocess
 import tempfile
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from itertools import islice
 from pathlib import Path, PurePosixPath
 from threading import Lock
 from typing import Literal, cast
 
+from pydantic import ConfigDict, Field
+
 from oh_goon.core.errors import CapabilityUnavailable, FleetPlanInvalid
+from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanIsolationBackendEvidence,
@@ -91,6 +94,28 @@ _STANDARD_RUNTIME_DIRECTORIES = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/et
 _STANDARD_CAPABILITY_CACHE_LIMIT = 8
 
 
+class BubblewrapWorkerConfiguration(ImmutableModel):
+    """Resolved backend transport; no environment discovery in the receiving worker."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+    kind: Literal["bubblewrap"] = "bubblewrap"
+    configuration_identity: str
+    executable: str
+    ip_executable: str | None
+    nft_executable: str | None
+    egress_pool: str | None
+    egress_lock: Path
+    egress_state_dir: Path
+    cgroup_root: Path | None
+    cgroup_lock: Path
+    cgroup_state_dir: Path
+    require_local_resource_intent: bool
+    standard_resource_executable: str | None
+    standard_resource_query_executable: str | None
+    standard_resource_environment: dict[str, str] = Field(repr=False)
+    application_state_paths: tuple[tuple[Path, ...], tuple[Path, ...]] | None
+
+
 class BubblewrapProcessIsolation:
     """One Bubblewrap owner for ordinary namespaces and selected strict custody."""
 
@@ -127,16 +152,21 @@ class BubblewrapProcessIsolation:
         require_local_resource_intent: bool = False,
         standard_resource_executable: str | None = None,
         standard_resource_query_executable: str | None = None,
+        standard_resource_environment: Mapping[str, str] | None = None,
     ) -> None:
         self.executable = executable
         self.require_local_resource_intent = require_local_resource_intent
         self.standard_resource_executable = standard_resource_executable
         self.standard_resource_query_executable = standard_resource_query_executable
-        self._standard_resource_environment = {
-            name: os.environ[name]
-            for name in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
-            if name in os.environ
-        }
+        self._standard_resource_environment = (
+            {
+                name: os.environ[name]
+                for name in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+                if name in os.environ
+            }
+            if standard_resource_environment is None
+            else dict(standard_resource_environment)
+        )
         self.ip_executable = ip_executable
         self.nft_executable = nft_executable
         self.egress_pool = egress_pool
@@ -152,6 +182,58 @@ class BubblewrapProcessIsolation:
         self._standard_capability_lock = Lock()
         self._standard_system_checked = False
         self._application_state_paths: tuple[tuple[Path, ...], tuple[Path, ...]] | None = None
+
+    def capture_worker_configuration(self) -> BubblewrapWorkerConfiguration:
+        """Capture actual resolved state; caches and live leases are never transported."""
+        if type(self) is not BubblewrapProcessIsolation:
+            raise FleetPlanInvalid("Run worker requires the concrete native Bubblewrap owner")
+        return BubblewrapWorkerConfiguration(
+            configuration_identity=self.configuration_identity(),
+            executable=self.executable,
+            ip_executable=self.ip_executable,
+            nft_executable=self.nft_executable,
+            egress_pool=self.egress_pool,
+            egress_lock=self.egress_lock,
+            egress_state_dir=self.egress_state_dir,
+            cgroup_root=self.cgroup_root,
+            cgroup_lock=self.cgroup_lock,
+            cgroup_state_dir=self.cgroup_state_dir,
+            require_local_resource_intent=self.require_local_resource_intent,
+            standard_resource_executable=self.standard_resource_executable,
+            standard_resource_query_executable=self.standard_resource_query_executable,
+            standard_resource_environment=dict(self._standard_resource_environment),
+            application_state_paths=self._application_state_paths,
+        )
+
+    @classmethod
+    def from_worker_configuration(
+        cls, configuration: BubblewrapWorkerConfiguration
+    ) -> BubblewrapProcessIsolation:
+        """Rebind the captured backend and reject executable/configuration drift."""
+        backend = cls(
+            executable=configuration.executable,
+            control_state_root=configuration.egress_lock.parent,
+            ip_executable=configuration.ip_executable,
+            nft_executable=configuration.nft_executable,
+            egress_pool=configuration.egress_pool,
+            egress_lock=configuration.egress_lock,
+            egress_state_dir=configuration.egress_state_dir,
+            cgroup_root=configuration.cgroup_root,
+            cgroup_lock=configuration.cgroup_lock,
+            cgroup_state_dir=configuration.cgroup_state_dir,
+            require_local_resource_intent=configuration.require_local_resource_intent,
+            standard_resource_executable=configuration.standard_resource_executable,
+            standard_resource_query_executable=configuration.standard_resource_query_executable,
+            standard_resource_environment=configuration.standard_resource_environment,
+        )
+        if configuration.application_state_paths is not None:
+            private_paths, read_only_paths = configuration.application_state_paths
+            backend.bind_application_state(
+                private_paths=private_paths, read_only_paths=read_only_paths
+            )
+        if backend.capture_worker_configuration() != configuration:
+            raise FleetPlanInvalid("Run worker Bubblewrap configuration changed after capture")
+        return backend
 
     def bind_application_state(
         self, *, private_paths: tuple[Path, ...], read_only_paths: tuple[Path, ...]

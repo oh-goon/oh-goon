@@ -124,6 +124,15 @@ class GameTapeLiveOutputStore:
             while len(buffer.activities) > GAME_TAPE_MAX_CHUNKS_PER_RUN:
                 buffer.activities.popleft()
 
+    def record_dropped_chunks(self, fleet_run_id: str, count: int) -> None:
+        """Expose bounded transport loss without inventing durable Step output."""
+        if type(count) is not int or count < 1:
+            raise ValueError("Dropped live-output chunk count must be positive")
+        with self._lock:
+            buffer = self._runs.get(fleet_run_id)
+            if buffer is not None:
+                buffer.dropped_chunk_count += count
+
     def activity_snapshot(
         self, fleet_run_id: str, *, after: int = 0
     ) -> tuple[int, tuple[tuple[int, str], ...]]:

@@ -2,12 +2,12 @@
 
 These are the current effect and transaction owners. Normal Plan/FleetRun
 execution has one admission path, described in the
-[execution boundary](../execution-boundary.md). The required HUG-180/HUG-181
-process-worker custody claim will sit above these unchanged repository-effect
+[execution boundary](../execution-boundary.md). Its fresh-process worker custody
+claim sits above these unchanged repository-effect
 and Step owners. Existing Direct maintenance operations are not a Plan or Run
 execution shortcut; native session, process exit and Game Tape cannot acquire
-their write authority. The current Run supervisor is thread-based, not proof
-of the required isolated-worker claim.
+their write authority. Complete failure/drain and broader lifecycle qualification
+remain HUG-181/HUG-183 work; see the [supervisor contract](EXECUTION_SUPERVISOR.md).
 
 ## One repository-effect algorithm
 

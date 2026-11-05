@@ -168,7 +168,7 @@ def test_process_restart_recovery_terminalizes_orphan_from_durable_truth(tmp_pat
         fleet_run_id="local-lifecycle-restart",
         lease_environment=environment,
     )
-    session = execution.lifecycle.activate(execution.ticket)
+    session = execution.lifecycle.activate(execution.claim_worker())
     execution.lifecycle.begin(session)
     assert (
         execution.journal.read_view().required_run_detail(execution.fleet_run_id).run.status

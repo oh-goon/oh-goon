@@ -12,6 +12,7 @@ import pytest
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from oh_goon.core.vocabulary import OperationAction
+from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import facts
@@ -106,7 +107,15 @@ def test_normal_enrolled_fleet_ingress_still_reaches_existing_planner(tmp_path, 
             raise PlannerReached
 
     control = FleetRunControlPlane(
-        Planner(), args["journal"], lifecycle, object(), object(), object()
+        Planner(),
+        args["journal"],
+        lifecycle,
+        object(),
+        object(),
+        object(),
+        worker_configuration=lambda run_id: lambda _ticket: RunWorkerLaunch(
+            argv=("unused-unit-worker", run_id), cwd=tmp_path, environment={}
+        ),
     )
     try:
         with pytest.raises(PlannerReached):

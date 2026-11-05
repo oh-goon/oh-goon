@@ -18,8 +18,8 @@ version database here.
 
 Native protocol adaptations operate below the common FleetRun/Step lifecycle;
 owned native daemons and sessions do not become Run custody or recovery owners.
-The [required isolated Run-worker boundary](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-remains HUG-180/HUG-181 work; current Run supervision still uses a thread pool.
+The [Run-worker boundary](EXECUTION_SUPERVISOR.md) uses a fresh process and atomic
+SQLite claim; HUG-181/HUG-183 retain broader qualification.
 The historical installed observations below do not qualify the worker cutover
 or create a CLI/service compatibility route around its required atomic claim.
 

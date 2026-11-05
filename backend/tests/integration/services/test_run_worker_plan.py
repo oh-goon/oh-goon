@@ -1,0 +1,107 @@
+"""Small native training Plan through ordinary admission and the physical Run worker."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from threading import Event
+from time import monotonic
+
+import pytest
+import yaml
+
+from oh_goon._application_foundation import build_runtime_foundation
+from oh_goon._application_services import build_product_services
+from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.process_birth import observe_process_birth
+from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunSource
+from oh_goon.engine.atomic_execution_bytes import atomic_execution_bytes_supported
+
+
+@pytest.mark.process
+@pytest.mark.skipif(not atomic_execution_bytes_supported(), reason="native protected Run transport")
+@pytest.mark.parametrize("source", (FleetRunSource.MANUAL, FleetRunSource.CICD))
+def test_native_training_plan_has_worker_custody_and_canonical_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: FleetRunSource
+) -> None:
+    for name, value in (
+        ("OH_GOON_DB", tmp_path / "state" / "runtime.db"),
+        ("XDG_CONFIG_HOME", tmp_path / "config"),
+        ("XDG_DATA_HOME", tmp_path / "data"),
+        ("XDG_STATE_HOME", tmp_path / "state"),
+    ):
+        monkeypatch.setenv(name, str(value))
+    monkeypatch.delenv("OH_GOON_EXECUTORS", raising=False)
+    repository = tmp_path / "repos" / "training"
+    repository.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repository)], check=True, timeout=10)
+    (repository / "train.py").write_text(
+        "import json, os, time\n"
+        "from pathlib import Path\n"
+        "Path('ready').write_text(str(os.getpid()))\n"
+        "deadline = time.monotonic() + 20\n"
+        "while not Path('release').exists():\n"
+        "    if time.monotonic() > deadline: raise TimeoutError('test release unavailable')\n"
+        "    time.sleep(0.01)\n"
+        "weight = 0.0\n"
+        "for epoch in range(100):\n"
+        "    weight -= 0.01 * sum(2*x*(weight*x-y) for x,y in ((1.,2.),(2.,4.),(3.,6.)))/3\n"
+        "Path('metrics.json').write_text(json.dumps({'weight': weight}))\n"
+        "print('training completed', flush=True)\n"
+    )
+    workflow = tmp_path / "workflow"
+    workflow.mkdir()
+    plan_path = workflow / "goon.yml"
+    plan_path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "execution": {"purpose": "verification"},
+                "steps": [{"id": "train", "run": f"{sys.executable} train.py"}],
+            }
+        )
+    )
+    foundation = build_runtime_foundation(standard_local=True, startup_purpose="workflow")
+    runtime = build_product_services(foundation)
+    try:
+        runtime.locations.add(repository.parent)
+        runtime.plans.lock(plan_path)
+        target = runtime.plans.prepare_execution_target(plan_path, repository=repository)
+        run = runtime.runs.start_prepared_plan(
+            target,
+            repository_ids={RepositoryIdentity.model_validate({"path": repository}).repository_id},
+            fleet_run_id=f"training-{source.value.lower()}",
+            source=source,
+        )
+        deadline = monotonic() + 15
+        while not (repository / "ready").exists():
+            if monotonic() >= deadline:
+                pytest.fail("native training Step did not start")
+            Event().wait(0.01)
+        with foundation.database.transaction() as connection:
+            lease = connection.execute(
+                "SELECT custody_phase, owner_pid, owner_session_id FROM execution_lease"
+                " WHERE fleet_run_id=?",
+                (run.fleet_run_id,),
+            ).fetchone()
+        assert lease is not None and lease[0] == "WORKER_OWNED"
+        assert lease[1] != os.getpid()
+        assert observe_process_birth(lease[1]) is not None
+        assert lease[2] != foundation.database.session_id
+        (repository / "release").touch()
+        detail = runtime.runs.wait_for_terminal(run.fleet_run_id, timeout=20)
+        assert detail.outcome is FleetRunOutcome.SUCCESS
+        assert detail.run.source is source
+        assert json.loads((repository / "metrics.json").read_text())["weight"] == pytest.approx(
+            2.0, abs=0.001
+        )
+        output = foundation.live_output.snapshot(run.fleet_run_id)
+        assert "training completed" in "".join(chunk.text for chunk in output.chunks)
+        with foundation.database.transaction() as connection:
+            assert connection.execute("SELECT 1 FROM execution_lease").fetchone() is None
+    finally:
+        (repository / "release").touch()
+        runtime.shutdown(wait_for_runs=True)

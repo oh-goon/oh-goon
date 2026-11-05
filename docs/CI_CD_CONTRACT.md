@@ -7,13 +7,12 @@ This document is the short product-level contract for local CI/CD execution. The
 CI platforms own their triggers and host jobs. A workflow that invokes an
 Oh-Goon Plan enters the same FleetRun admission and Step/Attempt path as local,
 scheduled, ML, application and agentic work. It does not gain a CI-specific
-runner. The [canonical execution boundary](execution-boundary.md) distinguishes
-current thread-based Run submission from the required claimed isolated-worker
-custody migration under HUG-180/HUG-181. That claim will consume already-admitted
+runner. The [canonical execution boundary](execution-boundary.md) uses a fresh
+Run process and atomic SQLite custody claim. That worker consumes already-admitted
 facts without reselecting work; neither a worker exit nor a hosted job result
 replaces the original Fleet/Journal terminal outcome. The test-batch processes
 used to verify this repository below are native verification infrastructure,
-not a second production FleetRun path or evidence of completed worker custody.
+not a second production FleetRun path or evidence of complete HUG-181/HUG-183 qualification.
 
 Repository meaning comes from mandatory Hashmarks through the public
 `oh_goon.integrations.hashmarks` SSOT API. The
@@ -609,9 +608,9 @@ authoring source
     -> evidence-bound result
 ```
 
-The current supervisor runs that semantic path in a thread. The required
-cutover inserts one freshly claimed isolated Run worker between the supervisor
-and `FleetRunExecution`; it strengthens custody without another admission path.
+The [supervisor contract](development/EXECUTION_SUPERVISOR.md) places one fresh,
+atomically claimed Run worker between the supervisor and `FleetRunExecution`.
+It retains the same admission path; broader failure/drain qualification remains explicit.
 
 The key rule is not “run an Enforcer job first.” The rule is stronger:
 

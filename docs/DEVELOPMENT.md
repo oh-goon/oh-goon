@@ -13,8 +13,8 @@ Before changing repository-intelligence or Run lifecycle ownership, read the
 and [canonical execution-lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md).
 They are separate normative scopes with a source crosswalk and bundled delivery
 map. Current owner docs and executable checks describe actual implementation;
-the required isolated Run-worker claim/custody model remains a target until
-[HUG-180](https://linear.app/hugloss/issue/HUG-180) and its qualification land.
+the [supervisor contract](development/EXECUTION_SUPERVISOR.md) describes the
+implemented fresh-worker/atomic-claim boundary and remaining HUG-181/HUG-183 qualification.
 Use existing review and focused check owners; this documentation introduces no
 additional startup, test-selection or approval step.
 

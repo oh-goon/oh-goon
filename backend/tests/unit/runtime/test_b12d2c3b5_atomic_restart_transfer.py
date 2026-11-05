@@ -54,9 +54,10 @@ def seeded(tmp_path: Path):
     conn.execute("""CREATE TABLE execution_lease (
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), lease_token TEXT UNIQUE,
         owner_session_id TEXT, owner_pid INTEGER, owner_identity TEXT,
-        kind TEXT, fleet_run_id TEXT, acquired_at TEXT, cancel_requested_at TEXT)""")
+        kind TEXT, fleet_run_id TEXT, acquired_at TEXT, cancel_requested_at TEXT,
+        custody_phase TEXT NOT NULL)""")
     conn.execute(
-        "INSERT INTO execution_lease VALUES (1,?,?,?,?,?,?,?,NULL)",
+        "INSERT INTO execution_lease VALUES (1,?,?,?,?,?,?,?,NULL,'WORKER_OWNED')",
         ("lease-one", "old-session", 41, "old-birth", "FLEET", "run-one", "before"),
     )
     env = Host()
@@ -240,10 +241,10 @@ def test_original_intent_without_predecessor_reconciliation_cannot_transfer(tmp_
     conn.execute("""CREATE TABLE execution_lease (
         singleton INTEGER PRIMARY KEY, lease_token TEXT UNIQUE, owner_session_id TEXT,
         owner_pid INTEGER, owner_identity TEXT, kind TEXT, fleet_run_id TEXT,
-        acquired_at TEXT, cancel_requested_at TEXT)""")
+        acquired_at TEXT, cancel_requested_at TEXT, custody_phase TEXT NOT NULL)""")
     conn.execute(
         "INSERT INTO execution_lease VALUES (1,'lease-one','old-session',41,"
-        "'old-birth','FLEET','run-one','before',NULL)"
+        "'old-birth','FLEET','run-one','before',NULL,'WORKER_OWNED')"
     )
     coordinator = ExecutionCoordinator(
         SimpleNamespace(path=tmp_path / "original.sqlite", session_id="new-session"),

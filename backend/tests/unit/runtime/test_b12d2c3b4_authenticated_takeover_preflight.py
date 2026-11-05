@@ -148,10 +148,12 @@ def _lease_connection():
     conn.row_factory = sqlite3.Row
     conn.execute("""CREATE TABLE execution_lease (
         singleton INTEGER, lease_token TEXT, owner_session_id TEXT, owner_pid INTEGER,
-        owner_identity TEXT, kind TEXT, fleet_run_id TEXT, cancel_requested_at TEXT
+        owner_identity TEXT, kind TEXT, fleet_run_id TEXT, cancel_requested_at TEXT,
+        custody_phase TEXT NOT NULL
     )""")
     conn.execute(
-        "INSERT INTO execution_lease VALUES (1,'tok','old-session',41,'birth-41','FLEET','run-one',NULL)"
+        "INSERT INTO execution_lease VALUES "
+        "(1,'tok','old-session',41,'birth-41','FLEET','run-one',NULL,'WORKER_OWNED')"
     )
     return conn
 
