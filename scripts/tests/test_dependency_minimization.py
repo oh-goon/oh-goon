@@ -66,15 +66,25 @@ def test_normal_backend_install_delegates_one_materialization_operation_to_nativ
     assert "python_install" not in backend_install
     assert "uv run --isolated" not in backend_install
 
-    for command in ("ruff check", "ruff format", "mypy "):
-        lines = [line for line in makefile.splitlines() if command in line]
+    quality_commands = subprocess.run(
+        ("make", "--no-print-directory", "-n", "lint", "format-check", "typecheck"),
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    for tool, command in (
+        ("ruff", "ruff check"),
+        ("ruff", "ruff format"),
+        ("mypy", "mypy "),
+    ):
+        lines = [line for line in quality_commands if command in line]
         assert lines
         for line in lines:
             if "uv run" in line:
                 assert "--group quality" in line
                 continue
-            assert command.startswith("ruff ")
-            assert ".venv/bin/ruff" in line
+            assert f".venv/bin/{tool}" in line
     coverage_targets = (
         "coverage-python",
         "test-sqlite-coverage",
