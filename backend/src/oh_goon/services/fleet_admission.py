@@ -336,6 +336,7 @@ class FleetAdmissionPlanner:
         key_directory: Path,
         trusted_public_roots: "Mapping[str, tuple[str, bytes]]",
         control_state_root: Path | None = None,
+        before_admission: Callable[[str], None] | None = None,
     ) -> "tuple[ExecutionTicket, FleetRunState]":
         """M174: derive the contract in the original lease transaction, never before.
 
@@ -362,6 +363,8 @@ class FleetAdmissionPlanner:
         configured.require_unchanged(current)
 
         def admit_in(connection: sqlite3.Connection) -> FleetRunState:
+            if before_admission is not None:
+                before_admission(run_id)
             lease = execution.active_lease_in(connection)
             if lease is None or lease.kind != "FLEET" or lease.fleet_run_id != run_id:
                 raise TrustProtocolError("original Fleet reservation must own exact policy Run")
@@ -432,6 +435,7 @@ class FleetAdmissionPlanner:
         trusted_public_roots: "Mapping[str, tuple[str, bytes]]",
         control_state_root: Path | None = None,
         deployment_policy: "DeploymentRunContractPolicy | None" = None,
+        before_admission: Callable[[str], None] | None = None,
     ) -> "tuple[ExecutionTicket, FleetRunState]":
         """M169 opt-in Fleet execution-owner admission; **not** live-wired.
 
@@ -454,6 +458,8 @@ class FleetAdmissionPlanner:
         run_id = contract.fields["run_id"]
 
         def admit_in(connection: sqlite3.Connection) -> FleetRunState:
+            if before_admission is not None:
+                before_admission(run_id)
             lease = execution.active_lease_in(connection)
             if lease is None or lease.kind != "FLEET" or lease.fleet_run_id != run_id:
                 raise TrustProtocolError("Fleet reservation did not create the exact Run lease")

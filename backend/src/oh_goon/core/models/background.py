@@ -1,11 +1,25 @@
 from __future__ import annotations
 
+from enum import IntEnum
+
 from pydantic import Field
 
 from oh_goon.core.errors import ErrorKind, FleetDomainError
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import BackgroundFailureStage
+
+
+class RunWorkerExitCode(IntEnum):
+    """Diagnostic bootstrap cut only; never a durable Run result or custody receipt."""
+
+    HANDOFF_REFUSED = 70
+    RUNTIME_IDENTITY_REFUSED = 71
+    DATABASE_UNAVAILABLE = 72
+    CLAIM_REFUSED = 73
+    BOOTSTRAP_FAILED = 74
+    EXECUTION_FAILED = 75
+    CANCELLATION_OBSERVED = 76
 
 
 class BackgroundFailure(ImmutableModel):

@@ -47,7 +47,7 @@ from oh_goon.core.vocabulary import (
 )
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
-from oh_goon.runtime.execution import ExecutionCoordinator
+from oh_goon.runtime.execution import ExecutionCoordinator, RunExecutionSupervisor
 from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
@@ -107,7 +107,10 @@ class _CountingPool:
         repository_admissions=None,
         requested_priority=None,
         commit=None,
+        admission_check=None,
     ):
+        if admission_check is not None:
+            admission_check()
         del plan, targets, repository_admissions, requested_priority
         with self._lock:
             self.admit_calls += 1
@@ -167,25 +170,28 @@ class _CancelledAdmissionPool(_CountingPool):
         repository_admissions=None,
         requested_priority=None,
         commit=None,
+        admission_check=None,
     ):
+        if admission_check is not None:
+            admission_check()
         del plan, targets, repository_admissions, requested_priority, commit
         with self._lock:
             self.admit_calls += 1
         raise ExecutorAdmissionCancelled(f"Queued executor admission cancelled: {fleet_run_id}")
 
 
-class _RecordingSupervisor:
+class _RecordingSupervisor(RunExecutionSupervisor):
     def __init__(self) -> None:
+        super().__init__()
         self.submit_calls = 0
-        self._lock = Lock()
+        self._count_lock = Lock()
 
-    def submit(self, fleet_run_id: str, work: object) -> None:
-        del fleet_run_id, work
-        with self._lock:
+    def submit(self, fleet_run_id: str, launch: RunWorkerLaunch) -> None:
+        del fleet_run_id
+        with self._count_lock:
             self.submit_calls += 1
-
-    def shutdown(self, *, wait: bool = True) -> None:
-        del wait
+        if launch.admission is not None:
+            self.abandon_admission(launch.admission)
 
 
 class _UnusedRunExecution:

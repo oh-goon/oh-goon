@@ -588,6 +588,7 @@ def _check_run_worker_custody(package: Path) -> list[Violation]:
             (
                 "LocalDatabase.open_worker",
                 ".claim_fleet_worker",
+                "bind_process_child_custody",
                 "build_claimed_run_execution",
                 ".execute",
             ),

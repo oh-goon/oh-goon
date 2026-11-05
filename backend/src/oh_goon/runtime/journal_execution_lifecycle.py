@@ -39,9 +39,11 @@ class _StepFields(LifecycleRootFields):
     step_order: int
 
 
-class _PhysicalFields(_StepFields):
-    attempt_number: int
-    step_attempt_id: str
+class _PhysicalFields(LifecycleRootFields):
+    step_id: str | None
+    step_order: int | None
+    attempt_number: int | None
+    step_attempt_id: str | None
     physical_execution_id: str
 
 
@@ -85,10 +87,16 @@ def _execution_lifecycle_event(
     step_event = _step_event(event_type, step_common, attempt_number, returncode)
     if step_event is not None:
         return step_event
+    if any(value is not None for value in (step_id, step_order, attempt_number)):
+        if step_id is None or step_order is None or attempt_number is None:
+            raise ValueError("Physical Step execution requires complete Step/attempt scope")
+        physical_step: _StepFields | None = {**common, "step_id": step_id, "step_order": step_order}
+    else:
+        physical_step = None
     return _physical_event(
         event_type,
         common,
-        step_common,
+        physical_step,
         attempt_number,
         physical_execution_id,
         pid,
@@ -149,7 +157,7 @@ def _step_terminal(
 def _physical_event(
     event_type: FleetRunEventType,
     root: LifecycleRootFields,
-    step: _StepFields,
+    step: _StepFields | None,
     attempt_number: int | None,
     physical_execution_id: str | None,
     pid: int | None,
@@ -158,16 +166,20 @@ def _physical_event(
     termination_reason: str | None,
     output_count: int | None,
 ) -> FleetRunEvent:
-    if attempt_number is None:
+    if step is not None and attempt_number is None:
         raise ValueError(f"{event_type.value} requires attempt_number")
     if physical_execution_id is None:
         raise ValueError(f"{event_type.value} requires physical_execution_id")
     common: _PhysicalFields = {
-        **step,
+        **root,
+        "step_id": step["step_id"] if step is not None else None,
+        "step_order": step["step_order"] if step is not None else None,
         "attempt_number": attempt_number,
         "step_attempt_id": fleet_step_attempt_id(
             root["operation_id"], step["step_id"], attempt_number
-        ),
+        )
+        if step is not None and attempt_number is not None
+        else None,
         "physical_execution_id": physical_execution_id,
     }
     if event_type is FleetRunEventType.PROCESS_STARTING:

@@ -459,13 +459,26 @@ class _RunFold:
         self.completed_reports.append(report)
 
     def _validate_step_settlement(self, report: OperationReport) -> None:
-        if not isinstance(report.evidence, FleetPlanOperationEvidence):
-            return
         operation_events = [
             event
             for event in self.lifecycle_events
             if getattr(event, "operation_id", None) == report.provenance.operation_id
         ]
+        exited = {
+            event.physical_execution_id
+            for event in operation_events
+            if isinstance(event, ProcessExitedEvent)
+        }
+        if report.outcome.state == "successful" and any(
+            isinstance(event, ProcessStateUnknownEvent)
+            and event.physical_execution_id not in exited
+            for event in operation_events
+        ):
+            raise InvalidRunTransition(
+                "Unknown physical execution result cannot become a successful operation report"
+            )
+        if not isinstance(report.evidence, FleetPlanOperationEvidence):
+            return
         terminal_types = (StepSucceededEvent, StepFailedEvent, StepSkippedEvent, StepCancelledEvent)
         terminal_by_step = {
             event.step_id: event for event in operation_events if isinstance(event, terminal_types)

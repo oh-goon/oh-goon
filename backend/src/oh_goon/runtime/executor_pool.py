@@ -97,8 +97,11 @@ class FleetExecutorPool:
         repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...] | None = None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
         commit: Callable[[sqlite3.Connection, FleetExecutorPlacement], T],
+        admission_check: Callable[[], None] | None = None,
     ) -> tuple[FleetExecutorPlacement, T]:
         """Commit strict placement only through the caller's Fleet admission mutation."""
+        if admission_check is not None:
+            admission_check()
         return self._placement().admit_with(
             fleet_run_id=fleet_run_id,
             plan=plan,
@@ -106,6 +109,7 @@ class FleetExecutorPool:
             repository_admissions=repository_admissions,
             requested_priority=requested_priority,
             commit=commit,
+            admission_check=admission_check,
         )
 
     def placement_queue(self) -> PlacementQueueSnapshot:

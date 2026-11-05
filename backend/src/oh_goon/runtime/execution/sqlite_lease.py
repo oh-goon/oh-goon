@@ -673,6 +673,35 @@ class SQLiteExecutionLeaseStore:
         suffix = f" {run}" if run else ""
         raise ExecutionBusy(f"Cannot change fleet scope while {owner} execution{suffix} is active")
 
+    def assert_dead_fleet_worker_in(
+        self, connection: sqlite3.Connection, fleet_run_id: str
+    ) -> None:
+        """Prove a retained worker predecessor dead before scoped recovery mutates it.
+
+        Absence of an active lease also includes missing/foreign authority and
+        cannot establish this proof. Reuse the native positive-death condition
+        of the original explicit recovery transfer; a live reused PID remains
+        conservatively blocked rather than becoming a signal/cleanup target.
+        """
+        lease = self.retained_lease_in(connection)
+        if lease is None:
+            raise OwnershipLost("Worker-exit recovery lacks its retained execution custody")
+        if (
+            lease.kind != "FLEET"
+            or lease.fleet_run_id != fleet_run_id
+            or lease.custody is None
+            or lease.custody.phase != "WORKER_OWNED"
+        ):
+            raise OwnershipLost("Worker-exit recovery differs from retained worker custody")
+        if self._environment.process_alive(lease.custody.owner_pid) is not False:
+            raise ExecutionBusy("Worker predecessor death has not been positively established")
+
+    def retained_lease_in(self, connection: sqlite3.Connection) -> ExecutionLease | None:
+        """Observe retained custody in its canonical writer; grants no executable authority."""
+        self._database.require_atomic_write_cut(connection)
+        row = connection.execute("SELECT * FROM execution_lease WHERE singleton=1").fetchone()
+        return _lease_from_row(row) if row is not None else None
+
     def assert_scope_idle(self, connection: sqlite3.Connection) -> None:
         """Scope edits never reclaim recorded execution ownership as a side effect."""
         row = connection.execute(

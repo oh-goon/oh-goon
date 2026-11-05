@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sqlite3
 import sys
 import tempfile
 from collections.abc import Callable
@@ -19,7 +20,8 @@ from oh_goon._application_worker_runtime import (
     build_claimed_run_execution,
     capture_runtime_worker_configuration,
 )
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import FleetPlanInvalid, OperationCancelled
+from oh_goon.core.models.background import RunWorkerExitCode
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.process_birth import observe_process_birth
@@ -29,8 +31,9 @@ from oh_goon.engine.atomic_execution_bytes import (
     seal_execution_bytes,
     verify_sealed_execution_descriptor,
 )
+from oh_goon.engine.command import bind_process_child_custody, native_child_custody_supported
 from oh_goon.integrations.hashmarks import require_loaded_hashmarks_runtime
-from oh_goon.runtime.database import LocalDatabase, WorkerDatabaseContext
+from oh_goon.runtime.database import DatabasePathIdentityLost, LocalDatabase, WorkerDatabaseContext
 from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionTicket
 from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.runtime.execution.worker_observation import (
@@ -72,7 +75,11 @@ def capture_run_worker_submission(
     foundation: RuntimeFoundation, fleet_run_id: str
 ) -> Callable[[ExecutionTicket], RunWorkerLaunch]:
     """Resolve transportability once before admission; never capture parent live handles."""
-    if not atomic_execution_bytes_supported() or observe_process_birth() is None:
+    if (
+        not atomic_execution_bytes_supported()
+        or observe_process_birth() is None
+        or not native_child_custody_supported()
+    ):
         raise FleetPlanInvalid(
             "Run workers require protected native transport and process identity"
         )
@@ -173,19 +180,27 @@ def _restore_handoff(header: str) -> _WorkerHandoff:
 def execute_handoff(header: str) -> int:
     """The sole fresh-process Run entry: reopen, atomically claim, then compose and execute."""
     observations: WorkerRunObservations | None = None
+    fleet_run_id: str | None = None
+    failure_cut = RunWorkerExitCode.HANDOFF_REFUSED
     try:
         handoff = _restore_handoff(header)
+        fleet_run_id = handoff.configuration.fleet_run_id
         observations = WorkerRunObservations(
             handoff.configuration.fleet_run_id, handoff.observations_descriptor
         )
+        failure_cut = RunWorkerExitCode.RUNTIME_IDENTITY_REFUSED
         require_loaded_hashmarks_runtime(
             expected_implementation_identity=handoff.configuration.hashmarks_implementation_identity
         )
+        failure_cut = RunWorkerExitCode.DATABASE_UNAVAILABLE
         database = LocalDatabase.open_worker(handoff.database)
+        failure_cut = RunWorkerExitCode.CLAIM_REFUSED
         claimed = ExecutionCoordinator(database).claim_fleet_worker(
             ExecutionTicket.from_worker_handoff(handoff.ticket)
         )
         claimed_at = monotonic()
+        failure_cut = RunWorkerExitCode.BOOTSTRAP_FAILED
+        bind_process_child_custody()
         execution = build_claimed_run_execution(
             database,
             claimed,
@@ -209,16 +224,44 @@ def execute_handoff(header: str) -> int:
                 fleet_run_id=claimed.require_fleet_run_id(),
             )
         )
+        failure_cut = RunWorkerExitCode.EXECUTION_FAILED
         execution.execute(claimed)
         return 0
-    except BaseException:
+    except BaseException as error:
+        if isinstance(error, (DatabasePathIdentityLost, sqlite3.OperationalError)):
+            failure_cut = RunWorkerExitCode.DATABASE_UNAVAILABLE
+        elif isinstance(error, OperationCancelled):
+            failure_cut = RunWorkerExitCode.CANCELLATION_OBSERVED
         # Protected authority and arbitrary exception text must not reach argv,
         # stderr, observation frames, or the parent failure mailbox.
-        print("Run worker stopped; inspect canonical Run evidence", file=sys.stderr)
-        return 1
+        if observations is not None:
+            observations.emit(
+                DiagnosticEvent(
+                    severity="INFO"
+                    if failure_cut is RunWorkerExitCode.CANCELLATION_OBSERVED
+                    else "ERROR",
+                    source="run_worker",
+                    owner="RunWorker",
+                    operation="stop_execution",
+                    message=failure_cut.name,
+                    execution_affected=True,
+                    failure_class=failure_cut.name,
+                    fleet_run_id=fleet_run_id,
+                )
+            )
+        print(
+            f"Run worker stopped: {failure_cut.name}; inspect canonical Run evidence",
+            file=sys.stderr,
+        )
+        return int(failure_cut)
     finally:
         if observations is not None:
-            observations.close()
+            try:
+                observations.close()
+            except Exception:
+                # The parent reports absent final observation accounting. A
+                # display-channel cleanup failure cannot replace Run truth.
+                print("Run worker observation cleanup incomplete", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 
-from oh_goon.core.errors import ExecutorAdmissionBlocked, ExecutorPlacementLost, FleetPlanInvalid
+from oh_goon.core.errors import (
+    ExecutorAdmissionBlocked,
+    ExecutorPlacementLost,
+    FleetPlanInvalid,
+    RuntimeQuiescing,
+)
 from oh_goon.core.models.fleet_executor import FleetExecutorIdentity, FleetExecutorPlacement
 from oh_goon.core.models.fleet_plan import (
     ResolvedCommandStep,
@@ -40,9 +46,10 @@ from oh_goon.runtime._executor_configuration import (
     ConfiguredFleetExecutor,
     ExecutorPoolConfiguration,
 )
-from oh_goon.runtime._executor_placement import _placement_order
+from oh_goon.runtime._executor_placement import ExecutorPlacementAdmission, _placement_order
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution import ExecutionCoordinator
+from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor
 from oh_goon.runtime.executor_capacity import (
     ExecutorCapacitySettings,
     FleetExecutorCapacityReservations,
@@ -625,6 +632,135 @@ def test_drain_blocks_new_placement_without_invalidating_bound_run(tmp_path: Pat
     with pytest.raises(ExecutorAdmissionBlocked, match="draining"):
         _reserve_admitted(pool, fleet_run_id="run-new-drain", plan=_plan(), target_count=1)
     _release(tmp_path, placement)
+
+
+def test_drain_refuses_waiting_placement_after_capacity_becomes_available(tmp_path: Path) -> None:
+    """Native SQLite ordering only; the fake backend makes no provider/host claim."""
+    candidate = _candidate(tmp_path, "executor-a", priority=0, cpu=1000, memory=1024)
+    database = _database(tmp_path)
+    configuration = ExecutorPoolConfiguration(
+        placement_wait_seconds=1,
+        placement_queue_limit=64,
+        path_authority=TEST_PATH_AUTHORITY,
+        executors=(candidate,),
+    )
+    pool = FleetExecutorPool(database, configuration)
+    plan = _plan(parallel=2)
+    placement = _reserve_admitted(
+        pool, fleet_run_id="active-before-drain", plan=plan, target_count=1
+    )
+    released = False
+
+    def drain_then_release_capacity(_duration: float) -> None:
+        nonlocal released
+        assert not released, "a drained executor must not keep waiting for capacity"
+        assert [entry.fleet_run_id for entry in pool.placement_queue().entries] == [
+            "waiting-during-drain"
+        ]
+        assert _drain(pool).accepting_new_runs is False
+        assert isolation_backend_evidence(pool.require_bound(placement, plan)) == (
+            placement.isolation_backend
+        )
+        _release(tmp_path, placement)
+        released = True
+
+    admission = ExecutorPlacementAdmission(
+        database, configuration, wait=drain_then_release_capacity
+    )
+    try:
+        with pytest.raises(ExecutorAdmissionBlocked, match="draining"):
+            admission.admit_with(
+                fleet_run_id="waiting-during-drain",
+                plan=plan,
+                targets=_targets(1),
+                commit=lambda _connection, _placement: pytest.fail(
+                    "drain must win before capacity and Fleet admission commit"
+                ),
+            )
+        assert released
+        status = pool.executor_snapshot().executors[0]
+        assert status.admission_mode.value == "draining"
+        assert status.active_fleet_run_ids == ()
+        assert pool.placement_queue().entries == ()
+    finally:
+        if not released:
+            _release(tmp_path, placement)
+
+
+def test_runtime_quiesce_does_not_wait_for_executor_capacity_or_admit_after_its_cut(
+    tmp_path: Path,
+) -> None:
+    """Queue/SQLite proof only; the fake backend establishes no physical provider claim."""
+    candidate = _candidate(tmp_path, "executor-a", priority=0, cpu=1000, memory=1024)
+    database = _database(tmp_path)
+    configuration = ExecutorPoolConfiguration(
+        placement_wait_seconds=30,
+        placement_queue_limit=64,
+        path_authority=TEST_PATH_AUTHORITY,
+        executors=(candidate,),
+    )
+    pool = FleetExecutorPool(database, configuration)
+    plan = _plan(parallel=2)
+    placement = _reserve_admitted(pool, fleet_run_id="held-capacity", plan=plan, target_count=1)
+    supervisor = RunExecutionSupervisor()
+    waiting, release, quiesced = Event(), Event(), Event()
+    errors: list[BaseException] = []
+
+    def bounded_wait(_duration: float) -> None:
+        waiting.set()
+        assert release.wait(5), "test did not release the placement waiter"
+
+    admission = ExecutorPlacementAdmission(database, configuration, wait=bounded_wait)
+
+    def enter() -> None:
+        try:
+            admission.admit_with(
+                fleet_run_id="waiting-at-quiesce",
+                plan=plan,
+                targets=_targets(1),
+                admission_check=supervisor.require_accepting,
+                commit=lambda _connection, _placement: pytest.fail(
+                    "quiescing runtime must not enter final Fleet admission"
+                ),
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def stop_accepting() -> None:
+        supervisor.quiesce()
+        quiesced.set()
+
+    requester = Thread(target=enter, daemon=True)
+    quiescer = Thread(target=stop_accepting, daemon=True)
+    try:
+        requester.start()
+        assert waiting.wait(5)
+        assert [entry.fleet_run_id for entry in pool.placement_queue().entries] == [
+            "waiting-at-quiesce"
+        ]
+        quiescer.start()
+        assert quiesced.wait(1), "runtime admission lock was held across capacity waiting"
+        assert pool.executor_snapshot().executors[0].active_fleet_run_ids == ("held-capacity",)
+        release.set()
+        requester.join(5)
+        assert (
+            not requester.is_alive()
+            and len(errors) == 1
+            and isinstance(errors[0], RuntimeQuiescing)
+        )
+        assert pool.placement_queue().entries == ()
+        assert pool.executor_snapshot().executors[0].active_fleet_run_ids == ("held-capacity",)
+        assert (
+            isolation_backend_evidence(pool.require_bound(placement, plan))
+            == placement.isolation_backend
+        )
+    finally:
+        release.set()
+        requester.join(5)
+        if quiescer.ident is not None:
+            quiescer.join(5)
+        _release(tmp_path, placement)
+        supervisor.shutdown(wait=True)
 
 
 def test_trust_revocation_blocks_new_placement_and_invalidates_bound_revalidation(

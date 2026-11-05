@@ -64,6 +64,35 @@ def validate_execution_lifecycle(
         if any(isinstance(x, RepositoryStartedEvent) for x in attempt):
             raise InvalidRunTransition("Repository attempt cannot start more than once")
         return
+    if isinstance(event, ProcessStartingEvent):
+        for existing in history:
+            if (
+                isinstance(existing, ProcessStartingEvent)
+                and existing.physical_execution_id == event.physical_execution_id
+            ):
+                if (
+                    existing.repository_id,
+                    existing.operation_id,
+                    existing.step_id,
+                    existing.step_order,
+                    existing.attempt_number,
+                    existing.step_attempt_id,
+                ) != (
+                    event.repository_id,
+                    event.operation_id,
+                    event.step_id,
+                    event.step_order,
+                    event.attempt_number,
+                    event.step_attempt_id,
+                ):
+                    raise InvalidRunTransition(
+                        "Physical execution identity cannot be rebound to another operation or Step scope"
+                    )
+        if event.step_id is None:
+            # The Run and captured repository/operation identity above remain
+            # authoritative during pre-effect preparation; no Step is invented.
+            _physical_sequence(event, attempt)
+            return
     if not any(isinstance(x, RepositoryStartedEvent) for x in attempt):
         raise InvalidRunTransition(f"{event.event_type.value} requires matching REPOSITORY_STARTED")
     step = [x for x in attempt if getattr(x, "step_id", None) == getattr(event, "step_id", None)]
@@ -120,6 +149,17 @@ def _validate_step(event: StepLifecycleEvent, step: Sequence[FleetRunEvent]) -> 
 def _settlement(event: StepTerminalLifecycleEvent, step: Sequence[FleetRunEvent]) -> None:
     if any(isinstance(x, _STEP_TERMINAL) for x in step):
         raise InvalidRunTransition("Step cannot settle more than once per repository attempt")
+    if isinstance(event, StepSucceededEvent):
+        exited = {
+            item.physical_execution_id for item in step if isinstance(item, ProcessExitedEvent)
+        }
+        if any(
+            isinstance(item, ProcessStateUnknownEvent) and item.physical_execution_id not in exited
+            for item in step
+        ):
+            raise InvalidRunTransition(
+                "Unknown physical execution result cannot become Step success"
+            )
     if (
         isinstance(event, StepCancelledEvent)
         and event.cancellation is not None
@@ -191,9 +231,13 @@ def _physical(event: ProcessStartingEvent, step: Sequence[FleetRunEvent]) -> Non
         raise InvalidRunTransition(
             f"{event.event_type.value} step_attempt_id must match its Step attempt"
         )
+    _physical_sequence(event, step)
+
+
+def _physical_sequence(event: ProcessStartingEvent, history: Sequence[FleetRunEvent]) -> None:
     physical = [
         x
-        for x in step
+        for x in history
         if isinstance(x, ProcessStartingEvent)
         and x.physical_execution_id == event.physical_execution_id
     ]
@@ -293,13 +337,16 @@ def _exit(event: ProcessExitedEvent, st: _PhysicalState) -> None:
 
 
 def _quiescent(event: DescendantsQuiescentEvent, st: _PhysicalState) -> None:
-    if st["exited"] is None:
-        raise InvalidRunTransition("DESCENDANTS_QUIESCENT requires matching PROCESS_EXITED")
+    owner = st["exited"] or st["unknown"]
+    if owner is None:
+        raise InvalidRunTransition(
+            "DESCENDANTS_QUIESCENT requires matching PROCESS_EXITED or PROCESS_STATE_UNKNOWN"
+        )
     if st["quiescent"] is not None:
         raise InvalidRunTransition(
             "Physical execution descendants cannot become quiescent more than once"
         )
-    _same(event, st["exited"], "DESCENDANTS_QUIESCENT process identity must match PROCESS_EXITED")
+    _same(event, owner, "DESCENDANTS_QUIESCENT process identity must match its original process")
 
 
 def _same(event: ProcessStartedEvent, owner: ProcessStartedEvent, message: str) -> None:

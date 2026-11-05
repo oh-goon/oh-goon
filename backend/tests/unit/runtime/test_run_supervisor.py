@@ -3,17 +3,23 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 from typing import Literal, cast
 
 import pytest
 
 from oh_goon.core.errors import ExecutionBusy, RuntimeQuiescing
+from oh_goon.core.models.background import RunWorkerExitCode
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.vocabulary import BackgroundFailureStage
 from oh_goon.runtime.execution import RunExecutionSupervisor
-from oh_goon.runtime.execution.run_supervisor import RunSupervisorState, RunWorkerLaunch
+from oh_goon.runtime.execution.run_supervisor import (
+    RunSupervisorState,
+    RunWorkerAdmission,
+    RunWorkerLaunch,
+)
 
 
 class _Diagnostics:
@@ -160,7 +166,7 @@ def test_abnormal_child_exit_does_not_stop_control_or_the_next_run(tmp_path: Pat
         failure = supervisor.take_failure("failed")
         assert failure is not None
         assert failure.stage is BackgroundFailureStage.FLEET_RUN_SUPERVISOR
-        assert failure.code == "UNEXPECTED_BACKGROUND_FAILURE"
+        assert failure.code == "RUN_WORKER_CRASHED"
         assert supervisor.take_failure("failed") is None
         assert supervisor.take_failure("unrelated") is None
         assert outcomes == [17]
@@ -174,6 +180,133 @@ def test_abnormal_child_exit_does_not_stop_control_or_the_next_run(tmp_path: Pat
         assert supervisor.snapshot().last_failure is None
         assert supervisor.take_failure("success") is None
     finally:
+        supervisor.shutdown(wait=True)
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("code", tuple(RunWorkerExitCode))
+def test_native_exit_phase_is_a_safe_diagnostic_not_a_run_result(
+    tmp_path: Path, code: RunWorkerExitCode
+) -> None:
+    supervisor = RunExecutionSupervisor()
+    try:
+        supervisor.submit(
+            "phase",
+            _launch(tmp_path, "import sys; raise SystemExit(int(sys.argv[1]))", str(int(code))),
+        )
+        assert supervisor.wait_until_inactive("phase", timeout=5)
+        failure = supervisor.take_failure("phase")
+        assert failure is not None and failure.code == "RUN_WORKER_" + code.name
+    finally:
+        supervisor.shutdown(wait=True)
+
+
+@pytest.mark.process
+def test_failure_observation_retention_is_bounded_for_clients_without_waiters(
+    tmp_path: Path,
+) -> None:
+    supervisor = RunExecutionSupervisor(failure_retention=2)
+    try:
+        for index in range(3):
+            run_id = f"failed-{index}"
+            supervisor.submit(run_id, _launch(tmp_path, "raise SystemExit(4)"))
+            assert supervisor.wait_until_inactive(run_id, timeout=5)
+        assert supervisor.take_failure("failed-0") is None
+        assert supervisor.take_failure("failed-1") is not None
+        assert supervisor.take_failure("failed-2") is not None
+        assert supervisor.take_failure("failed-2") is None
+    finally:
+        supervisor.shutdown(wait=True)
+
+
+@pytest.mark.process
+def test_pre_quiesce_submission_registration_may_launch_and_drain(tmp_path: Path) -> None:
+    supervisor = RunExecutionSupervisor()
+    admission = supervisor.register_admission("accepted")
+    assert supervisor.quiesce() == ("accepted",)
+    with pytest.raises(RuntimeQuiescing):
+        supervisor.register_admission("too-late")
+    launch, release, ready, _pids = _blocked_worker(tmp_path)
+    try:
+        supervisor.submit("accepted", replace(launch, admission=admission))
+        assert ready.wait(5)
+        supervisor.abandon_admission(admission)
+        assert supervisor.is_active("accepted")
+    finally:
+        release.touch()
+        supervisor.shutdown(wait=True)
+    assert not supervisor.is_active("accepted")
+
+
+def test_registration_rollback_cannot_release_another_submission_with_the_same_run() -> None:
+    supervisor = RunExecutionSupervisor()
+    abandoned = supervisor.register_admission("same-run")
+    supervisor.abandon_admission(RunWorkerAdmission("same-run"))
+    assert supervisor.is_active("same-run")
+    supervisor.abandon_admission(abandoned)
+    replacement = supervisor.register_admission("same-run")
+    supervisor.abandon_admission(abandoned)
+    assert supervisor.is_active("same-run")
+    supervisor.abandon_admission(replacement)
+    assert supervisor.wait_until_idle(timeout=0)
+    supervisor.shutdown(wait=True)
+
+
+@pytest.mark.process
+def test_interrupted_thread_start_does_not_lose_an_already_started_native_observer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.runtime.execution import run_supervisor
+
+    class InterruptedStart(Thread):
+        def start(self) -> None:
+            super().start()
+            raise KeyboardInterrupt("submission interrupted after observer start")
+
+    monkeypatch.setattr(run_supervisor, "Thread", InterruptedStart)
+    supervisor = RunExecutionSupervisor()
+    launch, release, ready, _pids = _blocked_worker(tmp_path)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            supervisor.submit("interrupted", launch)
+        assert ready.wait(5)
+        assert supervisor.is_active("interrupted")
+    finally:
+        release.touch()
+        supervisor.shutdown(wait=True)
+    assert supervisor.wait_until_idle(timeout=0)
+
+
+@pytest.mark.process
+def test_native_containment_uses_the_existing_command_owner_for_an_unresponsive_group(
+    tmp_path: Path,
+) -> None:
+    supervisor = RunExecutionSupervisor()
+    ready = Event()
+    native_pids: list[int] = []
+
+    def observe(_stream: Literal["stdout", "stderr"], text: str) -> None:
+        if text.strip():
+            native_pids.append(int(text.strip()))
+            ready.set()
+
+    source = "import os,signal,time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nprint(os.getpid(), flush=True)\nwhile True: time.sleep(0.1)\n"
+    try:
+        supervisor.submit("stuck", replace(_launch(tmp_path, source), stream_output=observe))
+        assert ready.wait(5)
+        with pytest.raises(ValueError, match="between 0 and 60"):
+            supervisor.request_containment(grace_seconds=True)
+        assert supervisor.is_active("stuck")
+        assert supervisor.request_containment(grace_seconds=0.01) == ("stuck",)
+        assert supervisor.wait_until_idle(timeout=5)
+        supervisor.require_containment_complete()
+        failure = supervisor.take_failure("stuck")
+        assert failure is not None and failure.code == "RUN_WORKER_FORCED_CONTAINMENT"
+        from oh_goon.core.process_birth import observe_process_birth
+
+        assert observe_process_birth(native_pids[0]) is None
+    finally:
+        supervisor.request_containment(grace_seconds=0)
         supervisor.shutdown(wait=True)
 
 

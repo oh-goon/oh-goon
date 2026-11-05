@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Sequence
+from math import isfinite
+from threading import TIMEOUT_MAX
+from time import monotonic
 from typing import TypedDict
 
 from oh_goon.core.effect_attempts import (
+    AUTOMATIC_RECOVERY_EFFECT_STATUSES,
     EXTERNAL_OUTCOME_UNCERTAIN_STATUSES,
     OPERATOR_REQUIRED_EFFECT_STATUSES,
 )
@@ -22,7 +26,12 @@ from oh_goon.core.models.reconciliation import (
 from oh_goon.core.models.run import FleetRunDetail, FleetRunFailure, FleetRunState
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
+    OutputAbandonedEvent,
+    OutputFinalizedEvent,
+    OutputQuarantinedEvent,
+    ProcessExitedEvent,
     ProcessStartedEvent,
+    ProcessStartingEvent,
     ProcessStateUnknownEvent,
 )
 from oh_goon.core.time import utc_now
@@ -42,6 +51,10 @@ from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.executor_capacity import FleetExecutorCapacityReservations
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.journal_view import JournalReadView
+from oh_goon.runtime.process_group import (
+    process_session_exists,
+    wait_for_process_session_quiescence,
+)
 from oh_goon.services.reconciliation import RepositoryReconciler
 from oh_goon.services.repository_effect_settlement import (
     RepositoryEffectInterruptionDisposition,
@@ -79,14 +92,62 @@ class RepositoryEffectRecovery:
         self._reconciler = reconciler
         self._settlement = settlement
 
-    def recover(self) -> None:
-        """Recover only when no live Direct/Fleet execution owner exists."""
+    def recover(
+        self, *, fleet_run_id: str | None = None, quiescence_timeout_seconds: float = 0.0
+    ) -> None:
+        """Recover idle execution, optionally restricted to one owned worker exit.
+
+        Ordinary startup retains its existing global reconciliation. Runtime
+        shutdown supplies an exact Run and cannot sweep unrelated effects.
+        """
+        if (
+            isinstance(quiescence_timeout_seconds, bool)
+            or not isinstance(quiescence_timeout_seconds, (int, float))
+            or not isfinite(quiescence_timeout_seconds)
+            or not 0 <= quiescence_timeout_seconds <= TIMEOUT_MAX
+            or (fleet_run_id is None and quiescence_timeout_seconds != 0)
+        ):
+            raise ValueError("Native quiescence wait requires a finite bounded worker-exit scope")
+        if fleet_run_id is not None:
+            if type(fleet_run_id) is not str or not fleet_run_id:
+                raise StateConflict("Worker-exit recovery requires an exact Fleet Run identity")
+            with self._database.transaction() as connection:
+                detail = self._journal.read_view_from_connection(connection).required_run_detail(
+                    fleet_run_id
+                )
+                pending = self._attempts.by_fleet_run_in(connection, fleet_run_id)
+                terminal_scope = detail.run.status.terminal and not any(
+                    attempt.status in AUTOMATIC_RECOVERY_EFFECT_STATUSES for attempt in pending
+                )
+            if quiescence_timeout_seconds:
+                # Wait outside SQLite. This observation grants no recovery
+                # authority: the original writer below revalidates both worker
+                # death and native session absence before any durable mutation.
+                deadline = monotonic() + quiescence_timeout_seconds
+                for event in _unsettled_process_events(detail):
+                    if type(
+                        event
+                    ) is ProcessStartedEvent and not wait_for_process_session_quiescence(
+                        event.pid, timeout=max(0.0, deadline - monotonic())
+                    ):
+                        raise ExecutionBusy(
+                            "Original command session has not established quiescence"
+                        )
+            if terminal_scope:
+                # Another runtime may already own fresh work. A settled
+                # terminal scope needs no global-idle mutation or sweep.
+                _require_original_process_quiescence(detail, attempts=pending)
+                return
         if self._execution.active_lease() is not None:
+            if fleet_run_id is not None:
+                raise ExecutionBusy("Live execution custody prevents worker-exit recovery")
             return
         recovering_run_id: str | None = None
         try:
-            recovering_run_id = self._terminalize_interrupted_fleet()
+            recovering_run_id = self._terminalize_interrupted_fleet(fleet_run_id=fleet_run_id)
             for attempt in self._attempts.recovery_candidates():
+                if fleet_run_id is not None and attempt.fleet_run_id != fleet_run_id:
+                    continue
                 self._recover_attempt(attempt)
             if recovering_run_id is not None:
                 with self._database.transaction(write=True) as connection:
@@ -100,6 +161,8 @@ class RepositoryEffectRecovery:
             # Another process acquired execution ownership after the initial check.
             # Stop recovery immediately; the unresolved RECONCILIATION_STARTED fact is
             # canonical evidence that recovery did not settle.
+            if fleet_run_id is not None:
+                raise
             return
         except BaseException as exc:
             self._record_recovery_failure(recovering_run_id, exc)
@@ -187,6 +250,10 @@ class RepositoryEffectRecovery:
                 return _operator_reconciliation_evidence(current, view)
             if current.status is not EffectAttemptStatus.OUTCOME_UNKNOWN:
                 raise StateConflict(f"Effect attempt is not reconcilable: {operation_id}")
+            if current.fleet_run_id is not None:
+                _require_original_process_quiescence(
+                    view.required_run_detail(current.fleet_run_id), attempts=(current,)
+                )
             self._execution.assert_idle(connection)
             result = self._reconciler.reconcile(
                 current.repository.path,
@@ -243,6 +310,13 @@ class RepositoryEffectRecovery:
         )
         try:
             with self._database.transaction(write=True) as connection:
+                if current.fleet_run_id is not None:
+                    _require_original_process_quiescence(
+                        self._journal.read_view_from_connection(connection).required_run_detail(
+                            current.fleet_run_id
+                        ),
+                        attempts=(current,),
+                    )
                 self._execution.assert_idle(connection)
                 self._settlement.acknowledge_in(connection, current, evidence)
         except (OperationNotFound, StateConflict):
@@ -252,23 +326,38 @@ class RepositoryEffectRecovery:
             return existing
         return evidence
 
-    def _terminalize_interrupted_fleet(self) -> str | None:
-        if self._journal.active_run_detail() is None:
+    def _terminalize_interrupted_fleet(self, *, fleet_run_id: str | None = None) -> str | None:
+        if fleet_run_id is None and self._journal.active_run_detail() is None:
             return None
         with self._database.transaction(write=True) as connection:
-            detail = self._journal.read_view_from_connection(connection).active_run_detail()
+            view = self._journal.read_view_from_connection(connection)
+            detail = (
+                view.required_run_detail(fleet_run_id)
+                if fleet_run_id is not None
+                else view.active_run_detail()
+            )
             if detail is None:
                 return None
             run = detail.run
-            # B7: a dead original Fleet lease may hold signed LACE resource
-            # intents. Do NOT let assert_idle() reclaim it before the original
-            # issuer can transfer cleanup-only custody. One SQLite writer cut.
-            require_no_original_lace_intent_before_reclamation_in(
-                connection,
-                run.fleet_run_id,
-            )
-            self._execution.assert_idle(connection)
+            # B7: protected original custody must refuse the generic route
+            # before any portable worker-recovery interpretation or reclaim.
+            require_no_original_lace_intent_before_reclamation_in(connection, run.fleet_run_id)
             unresolved = self._attempts.by_fleet_run_in(connection, run.fleet_run_id)
+            if fleet_run_id is not None:
+                if detail.run.status.terminal:
+                    _require_original_process_quiescence(detail, attempts=unresolved)
+                    return None
+                self._execution.assert_dead_fleet_worker_in(connection, fleet_run_id)
+            else:
+                retained = self._execution.retained_lease_in(connection)
+                if (
+                    retained is not None
+                    and retained.custody is not None
+                    and retained.custody.phase == "WORKER_OWNED"
+                ):
+                    self._execution.assert_dead_fleet_worker_in(connection, detail.run.fleet_run_id)
+            quiescent_processes = _require_original_process_quiescence(detail, attempts=unresolved)
+            self._execution.assert_idle(connection)
             uncertain = [
                 attempt
                 for attempt in unresolved
@@ -286,18 +375,41 @@ class RepositoryEffectRecovery:
             self._journal.record_reconciliation_lifecycle_in(
                 connection, run.fleet_run_id, FleetRunEventType.RECONCILIATION_STARTED
             )
-            self._record_interrupted_process_uncertainty(connection, detail)
+            self._record_interrupted_process_uncertainty(
+                connection, detail, quiescent_processes=quiescent_processes
+            )
             self._terminalize_recovered_run(connection, run, uncertain)
             FleetExecutorCapacityReservations.release_run_in(connection, run.fleet_run_id)
             return run.fleet_run_id
 
     def _record_interrupted_process_uncertainty(
-        self, connection: sqlite3.Connection, detail: FleetRunDetail
+        self,
+        connection: sqlite3.Connection,
+        detail: FleetRunDetail,
+        *,
+        quiescent_processes: frozenset[str],
     ) -> None:
         settled = {
             later.physical_execution_id
             for later in detail.lifecycle_events
-            if isinstance(later, (DescendantsQuiescentEvent, ProcessStateUnknownEvent))
+            if isinstance(later, DescendantsQuiescentEvent)
+        }
+        uncertain = {
+            later.physical_execution_id
+            for later in detail.lifecycle_events
+            if isinstance(later, ProcessStateUnknownEvent)
+        }
+        exited = {
+            later.physical_execution_id
+            for later in detail.lifecycle_events
+            if isinstance(later, ProcessExitedEvent)
+        }
+        output_disposed = {
+            later.physical_execution_id
+            for later in detail.lifecycle_events
+            if isinstance(
+                later, (OutputFinalizedEvent, OutputAbandonedEvent, OutputQuarantinedEvent)
+            )
         }
         for event in detail.lifecycle_events:
             if type(event) is not ProcessStartedEvent or event.physical_execution_id in settled:
@@ -311,16 +423,33 @@ class RepositoryEffectRecovery:
                 attempt_number=event.attempt_number,
                 physical_execution_id=event.physical_execution_id,
             )
-            self._journal.record_execution_lifecycle_in(
-                connection,
-                event_type=FleetRunEventType.PROCESS_STATE_UNKNOWN,
-                pid=event.pid,
-                process_identity=event.process_identity,
-                **common,
+            result_unknown = (
+                event.physical_execution_id not in exited
+                or event.physical_execution_id in uncertain
             )
-            self._journal.record_execution_lifecycle_in(
-                connection, event_type=FleetRunEventType.OUTPUT_QUARANTINED, **common
-            )
+            if event.physical_execution_id not in uncertain and result_unknown:
+                self._journal.record_execution_lifecycle_in(
+                    connection,
+                    event_type=FleetRunEventType.PROCESS_STATE_UNKNOWN,
+                    pid=event.pid,
+                    process_identity=event.process_identity,
+                    **common,
+                )
+            if result_unknown and event.physical_execution_id not in output_disposed:
+                self._journal.record_execution_lifecycle_in(
+                    connection, event_type=FleetRunEventType.OUTPUT_QUARANTINED, **common
+                )
+            if event.physical_execution_id in quiescent_processes:
+                # Resource absence cannot replace a known exit or fill a lost
+                # process result. Preserve both the original result and output
+                # disposition without inventing an exit code or finalization.
+                self._journal.record_execution_lifecycle_in(
+                    connection,
+                    event_type=FleetRunEventType.DESCENDANTS_QUIESCENT,
+                    pid=event.pid,
+                    process_identity=event.process_identity,
+                    **common,
+                )
 
     def _terminalize_recovered_run(
         self,
@@ -341,7 +470,7 @@ class RepositoryEffectRecovery:
                 FleetRunFailure.uncertain_repository_effects(len(uncertain)),
             )
             return
-        if run.progress.completed == run.progress.total:
+        if run.status is FleetRunStatus.RUNNING and run.progress.completed == run.progress.total:
             self._journal.terminalize_run_in(
                 connection, run.fleet_run_id, FleetRunTerminalIntent.COMPLETE
             )
@@ -358,6 +487,79 @@ class RepositoryEffectRecovery:
         self._journal.terminalize_run_in(
             connection, run.fleet_run_id, FleetRunTerminalIntent.FAIL, failure
         )
+
+
+def _unsettled_process_events(detail: FleetRunDetail) -> tuple[ProcessStartingEvent, ...]:
+    settled_operations = {
+        report.provenance.operation_id
+        for report in detail.operations
+        if report.resource_settlement == "SETTLED"
+    }
+    settled_processes = {
+        event.physical_execution_id
+        for event in detail.lifecycle_events
+        if isinstance(event, DescendantsQuiescentEvent)
+    }
+    return tuple(
+        event
+        for event in detail.lifecycle_events
+        if isinstance(event, ProcessStartingEvent)
+        and event.operation_id not in settled_operations
+        and event.physical_execution_id not in settled_processes
+    )
+
+
+def _require_original_process_quiescence(
+    detail: FleetRunDetail, *, attempts: Sequence[RepositoryEffectAttempt] = ()
+) -> frozenset[str]:
+    """Reuse original result/native group authority; worker death is insufficient."""
+    settled_operations = {
+        report.provenance.operation_id
+        for report in detail.operations
+        if report.resource_settlement == "SETTLED"
+    }
+    settled_processes = {
+        event.physical_execution_id
+        for event in detail.lifecycle_events
+        if isinstance(event, DescendantsQuiescentEvent)
+    }
+    quiescent_processes = set(settled_processes)
+    started_processes = {
+        event.physical_execution_id
+        for event in detail.lifecycle_events
+        if type(event) is ProcessStartedEvent
+    }
+    observed_operations = {
+        event.operation_id
+        for event in detail.lifecycle_events
+        if isinstance(event, ProcessStartingEvent)
+    }
+    if any(
+        attempt.effect_boundary is EffectBoundaryKind.EXTERNAL
+        and attempt.status in EXTERNAL_OUTCOME_UNCERTAIN_STATUSES
+        and attempt.operation_id not in settled_operations
+        and attempt.operation_id not in observed_operations
+        for attempt in attempts
+    ):
+        raise StateConflict(
+            "Original native process evidence is unavailable for the unresolved Fleet effect"
+        )
+    for event in detail.lifecycle_events:
+        if type(event) is ProcessStartedEvent and event.operation_id in settled_operations:
+            quiescent_processes.add(event.physical_execution_id)
+    for event in _unsettled_process_events(detail):
+        if (
+            type(event) is ProcessStartingEvent
+            and event.physical_execution_id not in started_processes
+        ):
+            raise StateConflict(
+                "Original Step process identity is unavailable for worker-exit recovery"
+            )
+        if type(event) is ProcessStartedEvent:
+            if process_session_exists(event.pid) is not False:
+                raise ExecutionBusy("Original command session has not established quiescence")
+            quiescent_processes.add(event.physical_execution_id)
+    return frozenset(quiescent_processes)
 
 
 def _recovery_read_cut(

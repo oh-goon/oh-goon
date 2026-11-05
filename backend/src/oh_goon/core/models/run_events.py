@@ -131,11 +131,20 @@ class ProcessStartingEvent(_FleetRunEventBase):
     event_type: Literal[FleetRunEventType.PROCESS_STARTING]
     repository_id: str = Field(min_length=1)
     operation_id: str = Field(min_length=1)
-    step_id: str = Field(min_length=1)
-    step_order: int = Field(ge=1)
-    attempt_number: int = Field(ge=1)
-    step_attempt_id: str = Field(min_length=1)
+    step_id: str | None = Field(default=None, min_length=1)
+    step_order: int | None = Field(default=None, ge=1)
+    attempt_number: int | None = Field(default=None, ge=1)
+    step_attempt_id: str | None = Field(default=None, min_length=1)
     physical_execution_id: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_complete_process_scope(self) -> ProcessStartingEvent:
+        scope = (self.step_id, self.step_order, self.attempt_number, self.step_attempt_id)
+        if any(value is None for value in scope) and not all(value is None for value in scope):
+            raise ValueError(
+                "Physical process scope must be operation-only or one complete Step attempt"
+            )
+        return self
 
 
 # These immutable Pydantic variants intentionally retain payload inheritance and

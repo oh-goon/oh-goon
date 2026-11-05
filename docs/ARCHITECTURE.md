@@ -12,7 +12,7 @@ a local semantic replacement. The same FleetRun path now uses one fresh native
 Run-worker process per admission, with an atomic SQLite custody claim before
 the existing `FleetRunExecution` begins. This is the
 [HUG-180](https://linear.app/hugloss/issue/HUG-180) process-boundary cutover;
-the complete failure/drain matrix remains
+the native worker failure/drain contract is owned by
 [HUG-181](https://linear.app/hugloss/issue/HUG-181), and the broader lifecycle
 audit remains [HUG-183](https://linear.app/hugloss/issue/HUG-183).
 
@@ -74,7 +74,7 @@ explain their historical designs.
 | Fleet target parallelism | `FleetTargetScheduler` |
 | Fleet live lease + Journal lifecycle mutation | `FleetRunLifecycle` |
 | Fleet orchestration execution | `FleetRunExecution` |
-| live Run submission/lifetime supervision | `RunExecutionSupervisor`; fresh native process, atomic SQLite claim; failure/drain qualification remains HUG-181 |
+| live Run submission/lifetime supervision | `RunExecutionSupervisor`; fresh native process, atomic SQLite claim and bounded drain/containment; native qualification scoped by HUG-181 |
 | Fleet admission policy | `FleetAdmissionPlanner` |
 | repository-intelligence meaning, identity/freshness and correlation | Hashmarks through the public `oh_goon.integrations.hashmarks` API |
 | native project manifest observation / engine policy inputs | `engine/project.py`; not an alternate repository-intelligence owner |
