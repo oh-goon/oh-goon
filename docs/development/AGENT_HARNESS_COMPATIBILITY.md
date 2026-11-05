@@ -89,6 +89,57 @@ workaround. No installed Anthropic/Ollama parity, OpenCode service execution,
 Pi persistent-session integration, live accounts, other hosts or Run-worker
 custody is qualified by these results. Native harnesses still own compaction.
 
+## Frozen selection and native session identity — 2026-11-05
+
+[HUG-28](https://linear.app/hugloss/issue/HUG-28) checks configuration changes
+through the [claimed Run-worker boundary](EXECUTION_SUPERVISOR.md). Native
+selection remains one captured catalog, resolved executable, profile and model
+connection. A later catalog/default/provider update requires a fresh selection
+and admission; it cannot replace an already running Step's configuration.
+The existing scoped Git command owner is transported as resolved facts and
+restored inside the worker. Arbitrary injected callbacks remain refused.
+
+Native service clients retain their original endpoint, thread and permission
+profile. Foreign-thread progress is filtered; wrong-turn observations cannot
+borrow an owned turn's terminal result. Closing one client closes its transport,
+without granting cancellation or cleanup authority over another client or an
+operator-owned server. These are separate accepting boundaries from physical
+transport-peer attestation, which remains unqualified under HUG-38.
+
+Product cross-Run native-session adoption, persistent Pi sessions and OpenCode
+service-session execution remain unsupported. Cold resume cannot supply missing
+original instructions or silently change the model/profile. Native data is not
+patched, migrated or deleted to make continuation succeed. The native harness
+retains compaction and session storage; no generation manager, alternate worker
+or transcript interpreter is introduced.
+
+The selected Codex 0.164.0 generated protocol describes native RPC failures with
+an integer code, message and untyped data; it provides no exhaustive typed
+model-missing/session-missing distinction. Opaque native refusal remains
+unclassified, without inferring that a known thread disappeared. A model-turn
+refusal retains the original thread/instructions for explicit native resume;
+cold resume without original instructions refuses locally before an RPC. No
+model catalogue fallback or resumed-model migration is implemented.
+
+Focused evidence covers the following scopes; these rows do not replace the
+historical full requirements crosswalk:
+
+| Boundary | Executed proof |
+| --- | --- |
+| Catalog/default/provider/executable change (T09, T35–36) | The 60-case native selection owner passed, including catalog replacement after frozen selection and alias retarget with original-executable loss. |
+| Worker transport | The 17-case worker configuration owner and 28-case native isolation owner passed. Arbitrary callbacks, changed workspace pin/backend/observation and weakened transport bindings refuse. An equal-looking foreign callable cannot impersonate the canonical workspace pin. |
+| Actual Run selection (T09) | A controlled native process runs under a real claimed worker while its provider turn is held across catalog replacement. The old frozen connection remains selected; B uses its own newly selected runtime and fresh Run. Independent verification and physical cleanup remain separate. This preserves the one-active-Run limit. |
+| Native service identity (T10–12) | Fifteen focused portable service cases passed: interleaved original/new clients, foreign-thread filtering, stale-turn agent/tool/compaction rejection with valid controls, original cleanup, cold resume/restart refusal and diagnostic-sink invariance. OpenCode delayed readiness remains readiness-only. |
+| Existing refusal/identity contracts (T20, T35–36) | Ninety-six bounded existing CLI/native/core cases passed. Unsupported Pi continuation refuses before original native access; changed source/selection and old-cycle completion cannot acquire fresh authority. |
+| Context protection retained | All six ordinary context counterparts passed through the new worker. Their observer reads the actual bounded worker command input while the controlled request is live; task-free message history is unchanged. Erasing only broker task restoration still fails the original privileged-task assertion; restoring exact source passes. The real-CLI forged-handoff regression also passes. |
+| Installed native protocol | Codex 0.164.0 same-thread follow-up, explicit resume and compaction with absent reserved directories passed on Linux with synthetic state/provider in a loopback-only namespace. Original protected-state and process-quiescence checks remain required. This native protocol slice is distinct from the controlled Run-worker proof. |
+
+Disposition: **retain** the existing protocol, settlement and reserved-directory
+adaptations. This change selects no native upgrade or adaptation removal.
+Entrypoint-byte verification does not seal the complete imported native runtime,
+and this scoped identity proof does not qualify live accounts, arbitrary native
+reload, other hosts, strict custody or parallel mixed-harness Runs.
+
 ## Temporary adaptations and removal decisions
 
 ### OPENCODE-CLI-SETTLEMENT — retain pending installed replacement proof

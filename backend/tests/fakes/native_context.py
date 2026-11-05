@@ -11,6 +11,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -33,8 +34,6 @@ from oh_goon.core.models.agent_providers import (
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.agent_native_execution import (
-    NativeAgentCommand,
-    native_agent_command,
     native_executable_sha256,
 )
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
@@ -65,6 +64,7 @@ def controlled_native_context(
     review_payload: Literal["typed", "generic"] = "typed",
 ) -> Iterator[ControlledNativeContext]:
     observed: list[dict[str, Any]] = []
+    prompts: list[dict[str, Any]] = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
@@ -73,6 +73,20 @@ def controlled_native_context(
             assert self.headers["Authorization"] == "Bearer host-only-key"
             body = json.loads(self.rfile.read(size))
             assert body["model"] == "fixture/model"
+            # Observe the actual worker's command input while its request is
+            # live. A parent-process monkeypatch cannot observe a fresh worker.
+            # Only the path crosses this controlled fixture's metadata; native
+            # message history still contains no task, Skill or producer packet.
+            prompt_file = Path(body["metadata"]["fixture_prompt_file"])
+            assert prompt_file.is_relative_to(scratch_root) and prompt_file.name == "prompt.txt"
+            with prompt_file.open("rb") as stream:
+                prompt_bytes = stream.read(1_048_577)
+            assert len(prompt_bytes) <= 1_048_576
+            prompt = json.loads(prompt_bytes)
+            if prompts:
+                assert prompts[0] == prompt
+            else:
+                prompts.append(prompt)
             observed.append(body)
             assert len(observed) <= 3
             payload = json.dumps(
@@ -119,7 +133,8 @@ def controlled_native_context(
         "for index,label in enumerate(('initial reasoning','tool output without task history','summarize retained tool history')):\n"
         "    if index==2 and agent=='pi': print(json.dumps({'type':'compaction_start'}),flush=True)\n"
         "    field='input' if agent=='codex' else 'messages'\n"
-        "    body=json.dumps({'model':'fixture/model',field:[{'role':'user','content':label}]}).encode()\n"
+        "    metadata={'fixture_prompt_file':str(pathlib.Path(prompt['complete_source_manifest']).with_name('prompt.txt'))}\n"
+        "    body=json.dumps({'model':'fixture/model','metadata':metadata,field:[{'role':'user','content':label}]}).encode()\n"
         "    route='responses' if agent=='codex' else 'chat/completions'\n"
         "    request=urllib.request.Request('http://127.0.0.1:18743/v1/'+route,data=body,headers={'Content-Type':'application/json'})\n"
         "    with urllib.request.urlopen(request,timeout=10) as response: assert json.load(response)['choices']\n"
@@ -148,19 +163,15 @@ def controlled_native_context(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("NATIVE_RUN_KEY", "host-only-key")
-    prompts: list[dict[str, Any]] = []
-
-    def observe_command(*args: Any, **kwargs: Any) -> NativeAgentCommand:
-        invocation = native_agent_command(*args, **kwargs)
-        assert invocation.input_file is not None
-        prompts.append(json.loads(invocation.input_file.read_bytes()))
-        return invocation
-
-    monkeypatch.setattr(
-        "oh_goon.integrations.fleet_plan_native_steps.native_agent_command", observe_command
-    )
     backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")
-    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+    # Keep native AF_UNIX paths below the host's bound, while retaining one
+    # explicit root for the controlled worker's temporary command input.
+    with (
+        tempfile.TemporaryDirectory(prefix="ogctx-", dir="/tmp") as scratch,
+        ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server,
+    ):
+        scratch_root = Path(scratch)
+        monkeypatch.setenv("TMPDIR", str(scratch_root))
         worker = Thread(target=server.serve_forever)
         worker.start()
         try:
@@ -211,7 +222,7 @@ def controlled_native_context(
                     verification=((sys.executable, "verify.py"),),
                 )
                 detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=45)
-                assert len(prompts) == 1
+                assert len(prompts) == 1, detail.run.status
                 yield ControlledNativeContext(
                     runtime, detail, selected, observed, prompts[0], task, skill_text, source
                 )

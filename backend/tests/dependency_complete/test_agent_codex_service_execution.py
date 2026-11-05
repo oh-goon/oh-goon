@@ -906,6 +906,53 @@ def test_completed_visible_items_retain_actions_results_and_exclude_reasoning(
     assert len(retained) <= 28000
 
 
+@pytest.mark.parametrize("kind", ["agentMessage", "commandExecution", "contextCompaction"])
+@pytest.mark.parametrize("turn", ["owned-turn", "retired-turn"])
+def test_native_progress_cannot_change_the_selected_turn_or_borrow_its_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, turn: str
+) -> None:
+    item = {
+        "type": kind,
+        "text": "FOREIGN_TURN_MESSAGE",
+        "command": "FOREIGN_TURN_COMMAND",
+        "aggregatedOutput": "FOREIGN_TURN_OUTPUT",
+        "exitCode": 0,
+    }
+    message = _visible_item(item)
+    message["params"]["turnId"] = turn
+    script = [
+        _visible_item({"type": "agentMessage", "text": "Original turn progress"}),
+        message,
+        _visible_terminal(),
+    ]
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, notifications=script)
+    if turn == "owned-turn":
+        result = invoke()
+        assert result.protocol.settled and not result.protocol.failed
+        assert result.outcome.returncode == 0
+        retained = "\n".join(item.summary for item in result.protocol.observations)
+        expected = {
+            "agentMessage": "FOREIGN_TURN_MESSAGE",
+            "commandExecution": "FOREIGN_TURN_COMMAND",
+            "contextCompaction": "reported context compaction",
+        }[kind]
+        assert expected in retained
+        outcome = result.outcome
+    else:
+        with pytest.raises(execution.CodexServiceExecutionFailure, match="owned turn") as failure:
+            invoke()
+        outcome = failure.value.outcome
+        assert outcome.returncode != 0
+        retained = "\n".join(item.summary for item in failure.value.safe_diagnostics)
+        assert "Original turn progress" in retained
+        assert "FOREIGN_TURN" not in retained
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    assert outcome.supervisor is physical[0].supervisor
+    assert outcome.physical_execution_id == physical[0].physical_execution_id
+    assert physical[0].supervisor.final_process_group_quiescent is True
+    assert events.count("model_turn") == 1
+
+
 def test_tool_stacktrace_survives_model_error_with_original_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

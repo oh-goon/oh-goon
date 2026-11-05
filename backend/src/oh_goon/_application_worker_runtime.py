@@ -6,6 +6,8 @@ startup recovery nor scheduling, and is called only after SQLite custody claim.
 
 from __future__ import annotations
 
+from copy import deepcopy
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -13,6 +15,7 @@ from pydantic import ConfigDict, Field, JsonValue, model_validator
 
 from oh_goon._application_foundation import _build_capability_runtime
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
@@ -21,6 +24,11 @@ from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
+from oh_goon.integrations.fleet_plan_process_isolation import (
+    NativeProfileCommandRunner,
+    ProcessIsolationBackend,
+    native_profile_command_runner,
+)
 from oh_goon.integrations.hashmarks import require_loaded_hashmarks_runtime
 from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
 from oh_goon.runtime._executor_configuration import (
@@ -36,6 +44,7 @@ from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionTicket
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
+from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
@@ -55,23 +64,86 @@ if TYPE_CHECKING:
 class WorkerGitConfiguration(ImmutableModel):
     executable: str = Field(min_length=1)
     default_timeout_seconds: float
+    native_repository: Path | None = None
+    native_agent: ResolvedNativeAgent | None = Field(default=None, repr=False)
+    native_observation: bool = False
+
+    @model_validator(mode="after")
+    def require_native_binding(self) -> WorkerGitConfiguration:
+        if (self.native_repository is None) != (self.native_agent is None):
+            raise ValueError("Native Git requires one complete workspace/profile binding")
+        if self.native_repository is not None and (
+            not self.native_repository.is_absolute() or ".." in self.native_repository.parts
+        ):
+            raise ValueError("Native Git requires its resolved absolute workspace")
+        expected_observation = (
+            self.native_agent is not None and self.native_agent.profile.backend == "bubblewrap"
+        )
+        if self.native_observation is not expected_observation:
+            raise ValueError("Native Git observation differs from its selected backend")
+        return self
 
     @classmethod
-    def capture(cls, git: GitService | None) -> WorkerGitConfiguration:
+    def capture(
+        cls, git: GitService | None, *, isolation: ProcessIsolationBackend | None = None
+    ) -> WorkerGitConfiguration:
+        if type(git) is not GitService:
+            raise FleetPlanInvalid(
+                "Run worker requires native Git configuration without injected callbacks"
+            )
+        runner = git.command_runner
+        if runner is None and git.observation_runner is None:
+            return cls(
+                executable=git.executable, default_timeout_seconds=git.default_timeout_seconds
+            )
         if (
-            type(git) is not GitService
-            or git.command_runner is not None
-            or git.observation_runner is not None
+            type(runner) is not NativeProfileCommandRunner
+            or runner.workspace_pin is not RepositoryWorkspaceAuthority.pin_repository_subject
+            or runner.termination_requested is not None
+            or runner.repair_context is not None
+            or runner.backend is not isolation
         ):
             raise FleetPlanInvalid(
                 "Run worker requires native Git configuration without injected callbacks"
             )
+        observation = git.observation_runner
+        read_only = runner.native_agent.profile.backend == "bubblewrap"
+        if read_only:
+            if (
+                type(observation) is not partial
+                or observation.func is not runner
+                or observation.args
+                or set(observation.keywords) != {"read_only_workspace"}
+                or observation.keywords["read_only_workspace"] is not True
+            ):
+                raise FleetPlanInvalid("Run worker requires the original scoped Git observation")
+        elif observation is not None:
+            raise FleetPlanInvalid("Run worker requires the original scoped Git observation")
         return cls(
             executable=git.executable,
             default_timeout_seconds=git.default_timeout_seconds,
+            native_repository=runner.repository,
+            native_agent=deepcopy(runner.native_agent),
+            native_observation=read_only,
         )
 
-    def restore(self) -> GitService:
+    def restore(self, *, isolation: ProcessIsolationBackend | None = None) -> GitService:
+        if self.native_agent is not None:
+            assert self.native_repository is not None
+            runner = native_profile_command_runner(
+                self.native_repository,
+                self.native_agent,
+                isolation,
+                RepositoryWorkspaceAuthority.pin_repository_subject,
+            )
+            return GitService(
+                executable=self.executable,
+                default_timeout_seconds=self.default_timeout_seconds,
+                command_runner=runner,
+                observation_runner=partial(runner, read_only_workspace=True)
+                if self.native_observation
+                else None,
+            )
         return GitService(
             executable=self.executable, default_timeout_seconds=self.default_timeout_seconds
         )
@@ -142,7 +214,9 @@ def capture_runtime_worker_configuration(
         tool_root=foundation.tool_store.root,
         content_store_root=foundation.content_store.root,
         run_parent=paths.run_workspaces,
-        git=WorkerGitConfiguration.capture(foundation.git_service),
+        git=WorkerGitConfiguration.capture(
+            foundation.git_service, isolation=foundation.standard_process_isolation
+        ),
         executor_configuration=capture_worker_executor_configuration(
             foundation.executor_configuration
         ),
@@ -197,7 +271,12 @@ def build_claimed_run_execution(
     )
     extensions = FleetExtensionStore(configuration.extension_root, path_authority=path_authority)
     tools = FleetToolStore(configuration.tool_root, path_authority=path_authority)
-    git = configuration.git.restore()
+    standard_isolation = (
+        restore_worker_isolation_configuration(configuration.standard_process_isolation)
+        if configuration.standard_process_isolation is not None
+        else None
+    )
+    git = configuration.git.restore(isolation=standard_isolation)
     executor_pool, capabilities, content_store = _build_capability_runtime(
         database,
         journal,
@@ -210,11 +289,7 @@ def build_claimed_run_execution(
         live_output=live_output,
         diagnostics=diagnostics,
         terminal=terminal,
-        standard_process_isolation=(
-            restore_worker_isolation_configuration(configuration.standard_process_isolation)
-            if configuration.standard_process_isolation is not None
-            else None
-        ),
+        standard_process_isolation=standard_isolation,
     )
     lifecycle = FleetRunLifecycle(
         database,

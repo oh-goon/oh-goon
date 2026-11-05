@@ -47,6 +47,7 @@ MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM = 1024 * 1024
 
 if TYPE_CHECKING:
     from oh_goon.engine.command import CommandTerminal
+    from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,52 +183,85 @@ class ProcessIsolationBackend(Protocol):
     ) -> CommandResult: ...
 
 
-def native_profile_command_runner(
-    repository: Path,
-    native_agent: ResolvedNativeAgent,
-    backend: ProcessIsolationBackend | None,
-    workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None,
-    *,
-    termination_requested: Callable[[], TerminationSignal | None] | None = None,
-    repair_context: AgentRepairContext | None = None,
-) -> Callable[..., CommandResult]:
-    """Transport the frozen native profile to original Step and Git process births.
+@dataclass(frozen=True, slots=True, init=False)
+class NativeProfileCommandRunner:
+    """The existing native command owner with explicit, frozen selection facts."""
 
-    Native Git retains its parser, configuration and hook semantics. Its hooks
-    receive the same physical boundary as repository verification commands.
-    """
-    from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
-
-    workspace = repository.resolve(strict=True)
-    roots = tuple(Path(root) for root in native_agent.profile.workspace_roots)
-    if (
-        native_agent.agent not in native_agent.profile.allowed_agents
-        or any(not root.is_absolute() or ".." in root.parts for root in roots)
-        or (roots and not any(workspace.is_relative_to(root) for root in roots))
-    ):
-        raise FleetPlanInvalid("Native workload differs from its resolved agent/workspace policy")
-    sandboxed = native_agent.profile.backend == "bubblewrap"
-    standard_backend = backend if isinstance(backend, BubblewrapProcessIsolation) else None
-    if sandboxed:
-        if standard_backend is None or workspace_pin is None:
-            raise FleetPlanInvalid(
-                "Native sandbox execution requires backend and workspace authority"
-            )
-        if native_agent.backend_configuration_id != standard_backend.configuration_identity():
-            raise FleetPlanInvalid("Native sandbox backend configuration changed after resolution")
-        _require_standard_git_layout(workspace)
-    elif any(value is not None for value in native_agent.profile.resources.model_dump().values()):
-        raise FleetPlanInvalid("Native resource limits require the selected sandbox resource owner")
-
-    common_mounts = native_runtime_read_only_mounts(workspace, native_agent) if sandboxed else ()
-    protected = native_agent.profile.sandbox_owner == "execution_backend"
-    admitted_roots = (
-        tuple(workspace / root for root in repair_context.write_roots)
-        if protected and repair_context is not None and repair_context.phase == "repair"
-        else ()
+    repository: Path = field(repr=False)
+    native_agent: ResolvedNativeAgent = field(repr=False)
+    backend: BubblewrapProcessIsolation | None = field(repr=False)
+    workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None = field(
+        repr=False
     )
+    termination_requested: Callable[[], TerminationSignal | None] | None = field(repr=False)
+    repair_context: AgentRepairContext | None = field(repr=False)
+    _common_mounts: tuple[StandardReadOnlyMount, ...] = field(repr=False)
+    _protected: bool = field(repr=False)
+    _admitted_roots: tuple[Path, ...] = field(repr=False)
 
-    def command_runner(
+    def __init__(
+        self,
+        repository: Path,
+        native_agent: ResolvedNativeAgent,
+        backend: ProcessIsolationBackend | None,
+        workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None,
+        *,
+        termination_requested: Callable[[], TerminationSignal | None] | None = None,
+        repair_context: AgentRepairContext | None = None,
+    ) -> None:
+        from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+
+        workspace = repository.resolve(strict=True)
+        roots = tuple(Path(root) for root in native_agent.profile.workspace_roots)
+        if (
+            native_agent.agent not in native_agent.profile.allowed_agents
+            or any(not root.is_absolute() or ".." in root.parts for root in roots)
+            or (roots and not any(workspace.is_relative_to(root) for root in roots))
+        ):
+            raise FleetPlanInvalid(
+                "Native workload differs from its resolved agent/workspace policy"
+            )
+        sandboxed = native_agent.profile.backend == "bubblewrap"
+        standard_backend = backend if isinstance(backend, BubblewrapProcessIsolation) else None
+        if sandboxed:
+            if standard_backend is None or workspace_pin is None:
+                raise FleetPlanInvalid(
+                    "Native sandbox execution requires backend and workspace authority"
+                )
+            if native_agent.backend_configuration_id != standard_backend.configuration_identity():
+                raise FleetPlanInvalid(
+                    "Native sandbox backend configuration changed after resolution"
+                )
+            _require_standard_git_layout(workspace)
+        elif any(
+            value is not None for value in native_agent.profile.resources.model_dump().values()
+        ):
+            raise FleetPlanInvalid(
+                "Native resource limits require the selected sandbox resource owner"
+            )
+
+        common_mounts = (
+            native_runtime_read_only_mounts(workspace, native_agent) if sandboxed else ()
+        )
+        protected = native_agent.profile.sandbox_owner == "execution_backend"
+        admitted_roots = (
+            tuple(workspace / root for root in repair_context.write_roots)
+            if protected and repair_context is not None and repair_context.phase == "repair"
+            else ()
+        )
+
+        object.__setattr__(self, "repository", workspace)
+        object.__setattr__(self, "native_agent", native_agent)
+        object.__setattr__(self, "backend", standard_backend)
+        object.__setattr__(self, "workspace_pin", workspace_pin)
+        object.__setattr__(self, "termination_requested", termination_requested)
+        object.__setattr__(self, "repair_context", repair_context)
+        object.__setattr__(self, "_common_mounts", common_mounts)
+        object.__setattr__(self, "_protected", protected)
+        object.__setattr__(self, "_admitted_roots", admitted_roots)
+
+    def __call__(
+        self,
         *argv: str,
         timeout: float | None = 10.0,
         cwd: Path | None = None,
@@ -247,6 +281,15 @@ def native_profile_command_runner(
         preserve_native_executable_path: bool = True,
         retain_output_tail: bool = False,
     ) -> CommandResult:
+        workspace = self.repository
+        native_agent = self.native_agent
+        standard_backend = self.backend
+        workspace_pin = self.workspace_pin
+        termination_requested = self.termination_requested
+        common_mounts = self._common_mounts
+        protected = self._protected
+        admitted_roots = self._admitted_roots
+        sandboxed = native_agent.profile.backend == "bubblewrap"
         if type(retain_output_tail) is not bool:
             raise FleetPlanInvalid("Native output tail selection must be a boolean")
         if cancel_requested is not None and cancel_requested():
@@ -324,7 +367,25 @@ def native_profile_command_runner(
                 runtime_supervision=runtime_supervision,
             )
 
-    return command_runner
+
+def native_profile_command_runner(
+    repository: Path,
+    native_agent: ResolvedNativeAgent,
+    backend: ProcessIsolationBackend | None,
+    workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None,
+    *,
+    termination_requested: Callable[[], TerminationSignal | None] | None = None,
+    repair_context: AgentRepairContext | None = None,
+) -> NativeProfileCommandRunner:
+    """Use the original command algorithm with one explicit native selection."""
+    return NativeProfileCommandRunner(
+        repository,
+        native_agent,
+        backend,
+        workspace_pin,
+        termination_requested=termination_requested,
+        repair_context=repair_context,
+    )
 
 
 def _require_standard_git_layout(workspace: Path) -> None:
