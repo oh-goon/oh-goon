@@ -19,7 +19,9 @@ from typing import Any
 
 import pytest
 
+from oh_goon._application_worker_runtime import WorkerGitConfiguration
 from oh_goon.application import ApplicationRuntime
+from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.cli_plan_run_readback import run_handoff_projection
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import (
@@ -39,6 +41,7 @@ from oh_goon.integrations.agent_native_execution import (
 )
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import (
+    NativeProfileCommandRunner,
     native_profile_command_runner,
     native_runtime_read_only_mounts,
 )
@@ -301,13 +304,7 @@ def test_codex_login_uses_original_run_and_independent_verification(
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     home = tmp_path / "native-auth"
     home.mkdir()
-    python_alias = tmp_path / "python-runtime-alias"
     python_base = Path(sys.base_prefix).resolve()
-    python_alias.symlink_to(python_base, target_is_directory=True)
-    base_executable = getattr(sys, "_base_executable", None)
-    assert isinstance(base_executable, str)
-    interpreter_suffix = Path(base_executable).resolve().relative_to(python_base)
-    monkeypatch.setattr(sys, "_base_executable", str(python_alias / interpreter_suffix))
     os.mkfifo(home / "auth.json")
     (tmp_path / "bin").mkdir()
     executable = tmp_path / "bin" / "native-codex"
@@ -322,7 +319,7 @@ def test_codex_login_uses_original_run_and_independent_verification(
         "assert config['model_provider']=='openai'\n"
         "assert config['approval_policy']=='never'\n"
         "assert not config['permissions']['oh_goon']['network']['enabled']\n"
-        f"assert config['permissions']['oh_goon']['filesystem'][{str(python_alias)!r}] == 'read'\n"
+        f"assert config['permissions']['oh_goon']['filesystem'][{str(python_base)!r}] == 'read'\n"
         "assert '--ignore-user-config' in sys.argv and '--ignore-rules' in sys.argv\n"
         "prompt=json.loads(pathlib.Path(config['model_instructions_file']).read_bytes())\n"
         "assert sys.stdin.buffer.read()==prompt['task'].encode('utf-8')\n"
@@ -335,29 +332,39 @@ def test_codex_login_uses_original_run_and_independent_verification(
         "print(json.dumps({'type':'turn.completed'}))\n"
     )
     executable.chmod(0o700)
-    selected = ResolvedNativeAgent(
-        agent="codex",
-        profile_name="signed-in",
-        definition=NativeAgentDefinition(executable=str(executable)),
-        profile=NativeAgentProfile(
-            timeout_seconds=30.0,
-            codex_login=CodexLoginConnection(
-                home=str(home),
-                model="gpt-6-luna",
-                reasoning_effort="low",
-            ),
-        ),
-        executable_sha256=native_executable_sha256(executable),
+    catalog = tmp_path / "providers.json"
+    catalog.write_text(
+        AgentProvidersConfig(
+            default_native_profile="signed-in",
+            native_agents={"codex": NativeAgentDefinition(executable=str(executable))},
+            native_profiles={
+                "signed-in": NativeAgentProfile(
+                    timeout_seconds=30.0,
+                    workspace_roots=(str(repo),),
+                    codex_login=CodexLoginConnection(
+                        home=str(home), model="gpt-6-luna", reasoning_effort="low"
+                    ),
+                )
+            },
+        ).model_dump_json(),
+        encoding="utf-8",
     )
+    selected, isolation, git = resolve_native_cli_selection(
+        agent="codex", profile="signed-in", workspace=repo, config_file=catalog
+    )
+    assert isolation is None
+    assert type(git.command_runner) is NativeProfileCommandRunner
+    assert git.observation_runner is None
+    captured_git = WorkerGitConfiguration.capture(git)
+    restored_git = WorkerGitConfiguration.model_validate_json(
+        captured_git.model_dump_json()
+    ).restore()
+    assert restored_git == git
+    assert captured_git.native_repository == repo and captured_git.native_agent == selected
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-    runner = native_profile_command_runner(
-        repo, selected, None, RepositoryWorkspaceAuthority.pin_repository_subject
-    )
-    runtime = ApplicationRuntime.build(
-        standard_local=True, git_service=GitService(command_runner=runner)
-    )
+    runtime = ApplicationRuntime.build(standard_local=True, git_service=git)
     try:
         runtime.locations.add(repo)
         admitted = runtime.plans.run_native_agent(
@@ -578,22 +585,24 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
                 connection=connection,
                 backend_configuration_id=backend.configuration_identity(),
             )
-            if runtime is None:
-                runner = native_profile_command_runner(
-                    repository,
-                    selected,
-                    backend,
-                    RepositoryWorkspaceAuthority.pin_repository_subject,
-                )
-                runtime = ApplicationRuntime.build(
-                    standard_local=True,
-                    standard_process_isolation=backend,
-                    git_service=GitService(
-                        command_runner=runner,
-                        observation_runner=partial(runner, read_only_workspace=True),
-                    ),
-                )
-                runtime.locations.add(repository)
+            if runtime is not None:
+                runtime.shutdown(wait_for_runs=True)
+                runtime = None
+            runner = native_profile_command_runner(
+                repository,
+                selected,
+                backend,
+                RepositoryWorkspaceAuthority.pin_repository_subject,
+            )
+            runtime = ApplicationRuntime.build(
+                standard_local=True,
+                standard_process_isolation=backend,
+                git_service=GitService(
+                    command_runner=runner,
+                    observation_runner=partial(runner, read_only_workspace=True),
+                ),
+            )
+            runtime.locations.add(repository)
             admitted = runtime.plans.run_native_agent(
                 selected=selected,
                 workspace=repository,
