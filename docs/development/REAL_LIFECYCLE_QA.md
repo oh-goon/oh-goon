@@ -80,6 +80,29 @@ Use a bounded sample of actual contributor work:
 | Triage an audit or qualification request | Locate the current owner and existing capability, distinguish missing implementation from missing proof, and justify a focused next action or LEAVE ALONE disposition. |
 | Fix one small reproduced defect | Meet the observable requirement, preserve meaningful regression coverage and authority boundaries, and leave a reviewable diff with the applicable focused checks. |
 | Recover from a failed check or fresh-context handoff | Preserve existing work, interpret the actual failure, choose a safe next action, and distinguish PASS, product failure, environment block and incomplete evidence. |
+| Trace one original Run across CLI, API and Game Tape | Identify the admitted Run/Step/occurrence and accepted result owner; explain durable evidence, bounded omissions and unavailable live bytes; justify a correction or LEAVE ALONE with accepting-consumer references and focused behavioral proof. |
+
+For the Run-readback scenario, use a neutral task such as: “Investigate how this
+recorded native Run is presented after reconnect through CLI, API and Game Tape.
+Explain the evidence and limits, and determine whether a correction is justified.”
+Freeze an exact public source and safe original Run record before the trial.
+The [controlled native Run case](../../backend/tests/integration/services/test_native_agent_run.py)
+is the product-regression starting point: actual claimed-worker executions,
+independent verification, fresh CLI/API reads, retired fixture executables and
+unchanged durable state. Its protocol fixtures do not qualify an installed
+harness or a coding agent's understanding.
+
+Pair a healthy control with a separately reproduced, undisclosed consumer defect
+or safe diagnostic defect. Independently verify both controls before inference;
+keep the mutation recipe and expected solution outside participant source/history.
+Acceptance requires a concrete producer → read cut → public consumer trace,
+preserved original identities/statuses and unknown evidence, an appropriate
+owner-level fix only where demonstrated, and truthful executed/unrun checks.
+Include misleading successful native prose or missing transient output as a
+pressure variant; neither supplies missing accepted results. Do not tell the
+participant that every case needs a code change. Record actual trial outcomes
+under HUG-81; adding this scenario or passing product regressions is not an
+executed contributor trial.
 
 Execute through the selected existing native harness and verification owners;
 do not replace repository evidence, inference, tool execution or result
