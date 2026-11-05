@@ -198,6 +198,7 @@ def test_certification_make_workloads_admit_transitive_shell_and_workspace_tools
         "git",
         "node",
         "sh",
+        "systemctl",
         "systemd-run",
         "uv",
     )
@@ -258,10 +259,11 @@ def test_tooling_complete_opaque_runtime_authority_is_explicit_and_proven(tmp_pa
         "git",
         "node",
         "sh",
+        "systemctl",
         "systemd-run",
         "uv",
     )
-    for tool in ("bash", "dd", "git", "node"):
+    for tool in ("bash", "dd", "git", "node", "systemctl"):
         assert (
             tool,
             f"test-tooling-complete -> <opaque-owned-boundary> -> {tool}",
@@ -270,7 +272,7 @@ def test_tooling_complete_opaque_runtime_authority_is_explicit_and_proven(tmp_pa
     makefile = root / "Makefile"
     makefile.write_text(
         makefile.read_text(encoding="utf-8").replace(
-            "# OH_GOON_OPAQUE_TOOLS: bash dd git node uv\ntest-tooling-complete:",
+            "# OH_GOON_OPAQUE_TOOLS: bash dd git node systemctl uv\ntest-tooling-complete:",
             "test-tooling-complete:",
         ),
         encoding="utf-8",
@@ -280,7 +282,7 @@ def test_tooling_complete_opaque_runtime_authority_is_explicit_and_proven(tmp_pa
     assert reduced.identity != requirements.identity
 
 
-@pytest.mark.parametrize("tool", ("dd", "git"))
+@pytest.mark.parametrize("tool", ("dd", "git", "systemctl"))
 def test_tooling_runtime_need_must_fit_independent_permission(tmp_path: Path, tool: str) -> None:
     root = _copy_static_inputs(tmp_path)
     registry_path = root / REQUIREMENTS_FILE
@@ -365,6 +367,7 @@ def test_make_recipe_shell_is_derived_without_handwritten_tool_allow() -> None:
         "git",
         "node",
         "sh",
+        "systemctl",
         "systemd-run",
         "uv",
     )

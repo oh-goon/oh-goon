@@ -533,6 +533,11 @@ variants and expensive ordinary `daily` journeys remain included. Dependency
 downloads may use native uv/npm caches; environments and project code are
 materialized for the current checkout.
 
+The explicit native test worker streams complete stdout/stderr through the
+original command owner while retaining only a bounded 64 KiB diagnostic tail
+per stream. Output volume does not terminate an otherwise valid owner or
+replace its native exit status and required result receipt.
+
 The complete `check-backend-quality` owner also restores and publishes native
 mypy analysis under the same partition, using the campaign's frozen SHA. The
 daily run on the default branch supplies reusable analysis for later PRs;
