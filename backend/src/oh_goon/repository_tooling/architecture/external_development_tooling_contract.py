@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-import ast
 import json
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from oh_goon.repository_tooling.architecture.common import Violation
+from oh_goon.integrations.hashmarks import observe_source_bindings_text
+from oh_goon.repository_tooling.architecture.common import (
+    Violation,
+    source_binding_name,
+    source_binding_packet,
+)
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.architecture.typescript_semantics import project_typescript
 
@@ -28,42 +32,41 @@ def _is_tool_module(name: str) -> bool:
     return any(normalized == root or normalized.startswith(f"{root}.") for root in roots)
 
 
-def _imported_module_names(node: ast.AST) -> tuple[str, ...]:
-    if isinstance(node, ast.Import):
-        return tuple(alias.name for alias in node.names)
-    if isinstance(node, ast.ImportFrom) and node.module is not None:
-        return (node.module,)
-    return ()
-
-
-def _dynamic_import_name(node: ast.AST) -> str | None:
-    if not isinstance(node, ast.Call) or not node.args:
-        return None
-    first = node.args[0]
-    if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
-        return None
-    function = node.func
-    if isinstance(function, ast.Name) and function.id == "__import__":
-        return first.value
-    if isinstance(function, ast.Attribute) and function.attr == "import_module":
-        return first.value
-    return None
-
-
-def _python_imports_external_tool(text: str) -> bool:
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
-        return False
-    for node in ast.walk(tree):
-        names = (*_imported_module_names(node), *filter(None, (_dynamic_import_name(node),)))
-        if any(_is_tool_module(name) for name in names):
-            return True
+def _python_imports_external_tool(text: str, *, path: str) -> bool:
+    evidence = observe_source_bindings_text(text, path=path)
+    packet = source_binding_packet(evidence, language="python")
+    for fact in packet["facts"]:
+        target = source_binding_name(fact, imported_only=True)
+        if fact["kind"] == "import-binding":
+            syntax = fact.get("import_syntax") or {}
+            module = syntax.get("module")
+            if isinstance(module, str) and _is_tool_module(module):
+                return True
+        expression = fact.get("expression") or {}
+        unqualified_import_shape = (
+            fact.get("qualification") == "unknown"
+            and "unresolved-lexical-name" in fact.get("reasons", [])
+            and expression.get("syntax_type") == "Name"
+            and expression.get("name") == "__import__"
+        )
+        if fact["kind"] != "call-site" or not (
+            target in {"importlib.import_module", "builtins.__import__"} or unqualified_import_shape
+        ):
+            continue
+        for argument in fact.get("arguments", []):
+            if (argument.get("index") == 0 or argument.get("name") == "name") and argument.get(
+                "qualification"
+            ) == "qualified":
+                literal = argument.get("literal")
+                if isinstance(literal, str) and _is_tool_module(literal):
+                    return True
     return False
 
 
-def _frontend_imports_external_tool(text: str) -> bool:
-    return any(_contains_tool_marker(name) for name in project_typescript(text).module_imports)
+def _frontend_imports_external_tool(text: str, *, path: str) -> bool:
+    return any(
+        _contains_tool_marker(name) for name in project_typescript(text, path=path).module_imports
+    )
 
 
 def _active_text_references_tool(text: str) -> bool:
@@ -79,10 +82,10 @@ def _active_text_references_tool(text: str) -> bool:
 
 def _runtime_file_leaks(path: Path, kind: str, text: str) -> bool:
     if kind == "python":
-        return path.suffix == ".py" and _python_imports_external_tool(text)
+        return path.suffix == ".py" and _python_imports_external_tool(text, path=path.name)
     if kind == "frontend":
         return path.suffix in {".js", ".jsx", ".ts", ".tsx"} and _frontend_imports_external_tool(
-            text
+            text, path=path.name
         )
     # Package READMEs may explain caller-selected external Skills. Prose is
     # not an executable dependency; runtime imports and configuration still are.

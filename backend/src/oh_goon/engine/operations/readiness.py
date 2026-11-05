@@ -46,10 +46,10 @@ def readiness(
     tools = _toolchain(repository, observation, cancel_requested)
     branch_state, branch_name = observation.branch_state, observation.branch
     worktree = observation.worktree_state
-    requires, pin = project_python(repository)
+    python = project_python(repository)
     pin_state = (
         PythonPinReadiness.PRESENT
-        if pin
+        if python.pin
         else PythonPinReadiness.REQUIRED_MISSING
         if policy.values.require_python_pin
         else PythonPinReadiness.OPTIONAL
@@ -73,7 +73,7 @@ def readiness(
     )
     return (
         checks,
-        PythonRuntimeResult(requires=requires, pin=pin, selected=None),
+        python,
         tools,
         observation,
     )

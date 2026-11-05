@@ -34,14 +34,15 @@ def test_checks_share_one_source_read_within_the_invocation(
 ) -> None:
     path = tmp_path / "source.py"
     path.write_text("VALUE = 1\n")
-    native = Path.read_text
+    native = Path.open
     reads = []
 
-    def observe_read(self: Path, *args: Any, **kwargs: Any) -> str:
-        reads.append(self)
+    def observe_read(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == path:
+            reads.append(self)
         return native(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", observe_read)
+    monkeypatch.setattr(Path, "open", observe_read)
     with python_source_snapshot():
         first = python_ast(path)
         with python_source_snapshot():

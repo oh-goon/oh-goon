@@ -321,6 +321,11 @@ def _answer_payloads() -> list[tuple[Path, dict[str, Any]]]:
 
 
 def _validate_evidence(reference: str, *, root: Path = ROOT) -> None:
+    """Validate a grader-authored coordinate against its exact frozen input.
+
+    SECRET answer selection stays here; these coordinates never become a
+    repository-intelligence query or a producer relevance claim.
+    """
     match = EVIDENCE_REFERENCE.fullmatch(reference)
     if match is None:
         raise ValueError(f"invalid evidence reference: {reference!r}")

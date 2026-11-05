@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import ast
-import re
-import shlex
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -57,64 +55,6 @@ _MIRROR_MARKER_TOKENS = (
     "last_success_marker",
     "certification_pass_marker",
 )
-
-
-def _make_targets(text: str) -> dict[str, list[str]]:
-    targets: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in text.splitlines():
-        match = re.match(r"^([A-Za-z0-9_.-]+)\s*:(?:\s.*)?$", line)
-        if match and not match.group(1).startswith("."):
-            current = match.group(1)
-            targets.setdefault(current, [])
-            continue
-        if current is not None and line.startswith("\t"):
-            targets[current].append(line.lstrip("\t"))
-        elif line and not line[0].isspace() and not line.startswith("#"):
-            current = None
-    return targets
-
-
-def _make_recipe_commands(lines: list[str]) -> tuple[tuple[str, ...], ...]:
-    """Return bounded shell argv for literal Make recipe command lines.
-
-    Shell whitespace and quote spelling are representation-only here. Make recipe
-    prefix characters are stripped before tokenization. Compound shell statements
-    are still returned as their literal tokens; callers decide the exact owned argv.
-    """
-
-    commands: list[tuple[str, ...]] = []
-    for line in lines:
-        command = line.lstrip().lstrip("@-+").lstrip()
-        if not command:
-            continue
-        try:
-            words = tuple(shlex.split(command, posix=True))
-        except ValueError:
-            continue
-        if words:
-            commands.append(words)
-    return tuple(commands)
-
-
-def _make_variable_assignments(text: str) -> dict[str, list[tuple[str, str]]]:
-    """Return bounded top-level Make variable assignments.
-
-    Whitespace around the assignment operator is representation-only. The operator
-    itself remains semantic because recursive/immediate/conditional/append expansion
-    can change behavior. Recipe-local assignments are intentionally excluded.
-    """
-
-    assignments: dict[str, list[tuple[str, str]]] = {}
-    for line in text.splitlines():
-        if not line or line[0].isspace() or line.startswith("#"):
-            continue
-        match = re.match(r"^([A-Za-z0-9_.-]+)\s*(\?=|:=|\+=|=)\s*(.*)$", line)
-        if match is None:
-            continue
-        name, operator, value = match.groups()
-        assignments.setdefault(name, []).append((operator, value.rstrip()))
-    return assignments
 
 
 def _python_imports(path: Path) -> set[str]:
@@ -206,30 +146,6 @@ def _target_commands(facts: MakeSemanticFacts, target: str) -> tuple[ShellComman
     return facts.target_commands.get(target, ())
 
 
-def _make_references(value: str) -> set[str]:
-    return {
-        left or right
-        for left, right in re.findall(
-            r"\$\(([A-Za-z_][A-Za-z0-9_.-]*)\)|\$\{([A-Za-z_][A-Za-z0-9_.-]*)\}",
-            value,
-        )
-    }
-
-
-def _target_variable_chain(facts: MakeSemanticFacts, target: str) -> set[str]:
-    pending: list[str] = []
-    for line in facts.raw_targets.get(target, ()):
-        pending.extend(sorted(_make_references(line)))
-    seen: set[str] = set()
-    while pending:
-        name = pending.pop()
-        if name in seen:
-            continue
-        seen.add(name)
-        pending.extend(sorted(_make_references(facts.raw_variables.get(name, ""))))
-    return seen
-
-
 def _is_logged_frontdoor(command: ShellCommand, mode: str, owned_command: tuple[str, ...]) -> bool:
     argv = _command_argv(command)
     return (
@@ -255,18 +171,17 @@ def _check_make_frontdoors(root: Path, path: Path, facts: MakeSemanticFacts) -> 
             )
         )
 
-    # Recursive (=) Make binding remains semantic for the command selected by the
-    # test frontdoor because later operator/environment overrides must be observed.
-    # The private variable name is not authority: derive the binding through the
-    # actual target's variable reference chain and semantic resolved value.
-    test_chain = _target_variable_chain(facts, "test")
+    # Recursive (=) syntax remains policy for this owned runner declaration.
+    # Native supporting sites identify source use; no local variable graph or
+    # effective Make binding is reconstructed from the source names.
     runner_bindings = [
-        name
-        for name in test_chain
-        if facts.variables.get(name) == "bash scripts/development_check.sh"
+        declaration
+        for command in _target_commands(facts, "test")
+        for declaration in command.binding_observation.get("supporting_declarations", [])
+        if declaration["expression"] == "bash scripts/development_check.sh"
     ]
     if runner_bindings and any(
-        facts.variable_operators.get(name) != "=" for name in runner_bindings
+        declaration["assignment_operator"] != "=" for declaration in runner_bindings
     ):
         violations.append(
             Violation(
@@ -321,7 +236,10 @@ def _check_make_frontdoors(root: Path, path: Path, facts: MakeSemanticFacts) -> 
         if _command_argv(command)[:3] == ("test", "-x", "backend/.venv/bin/oh-goon-workflow")
     ]
     hint_present = any(
-        "Run: make init" in token for command in certify_commands for token in command.argv
+        "Run: make init" in token
+        for row in facts.facts
+        if "certify" in row["value"].get("make_targets", [])
+        for token in row["value"].get("token_expressions", [])
     )
     if (
         not executable_guards
@@ -387,13 +305,17 @@ def _check_make_orchestration_ownership(path: Path, facts: MakeSemanticFacts) ->
             )
         )
 
-    release_owner_argv = (
-        "backend/.venv/bin/oh-goon-release-version",
-        "set",
-        "$(OH_GOON_RELEASE_VERSION)",
-    )
     release_commands = _target_commands(facts, "release-version-set")
-    if sum(_command_argv(command) == release_owner_argv for command in release_commands) != 1:
+    release_sources = [
+        command
+        for command in release_commands
+        if _command_argv(command)[:2] == ("backend/.venv/bin/oh-goon-release-version", "set")
+        and len(command.source_words) == 3
+        and command.source_words[2].get("source_word", {}).get("reference", {}).get("kind")
+        == "make-variable"
+        and command.source_words[2]["source_word"]["reference"]["name"] == "OH_GOON_RELEASE_VERSION"
+    ]
+    if len(release_sources) != 1:
         violations.append(
             Violation(
                 path,

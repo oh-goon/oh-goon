@@ -31,4 +31,10 @@ describe("generated API contracts", () => {
       "/fleet/runs/run%20%2F%201/events?after=7",
     );
   });
+
+  it("transports a scoped npm name through the generated path and ecosystem query", () => {
+    expect(operationUrl(operations.dependency_repositories.operationId, {
+      path: { package_name: "@scope/shared" }, query: { ecosystem: "npm", offset: 0, limit: 25 },
+    })).toBe("/dependencies/%40scope%2Fshared/repositories?ecosystem=npm&offset=0&limit=25");
+  });
 });

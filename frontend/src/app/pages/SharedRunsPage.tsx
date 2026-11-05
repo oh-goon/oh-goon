@@ -43,7 +43,7 @@ export function SharedRunsPage({ onOpenRun, onOpenPlans }: Props) {
       <strong>{t("sharedPlans.observedSelectionTitle", { count: selection.data.total })}</strong>
       <p>{t("sharedPlans.observedSelectionMessage", { packageName: selection.data.filter.package_name })}</p>
       <dl className="shared-run-observed-selection__facts">
-        <div><dt>{t("sharedPlans.observedSelectionPackage")}</dt><dd>{selection.data.filter.package_name}</dd></div>
+        <div><dt>{t("sharedPlans.observedSelectionPackage")}</dt><dd>{selection.data.filter.ecosystem ? `${selection.data.filter.ecosystem}: ` : ""}{selection.data.filter.package_name}</dd></div>
         <div><dt>{t("sharedPlans.observedSelectionCoverage")}</dt><dd>{t(`dependencies.coverageStates.${selection.data.filter.coverage ?? "matching"}`)}</dd></div>
         {selection.data.filter.advisory_id ? <div><dt>{t("sharedPlans.observedSelectionAdvisory")}</dt><dd>{selection.data.filter.advisory_id}</dd></div> : null}
         {selection.data.filter.version_specifier ? <div><dt>{t("sharedPlans.observedSelectionRange")}</dt><dd><code>{selection.data.filter.version_specifier}</code></dd></div> : null}

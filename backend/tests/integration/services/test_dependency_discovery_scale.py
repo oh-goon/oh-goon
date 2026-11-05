@@ -12,7 +12,7 @@ from oh_goon.core.models.dependency_fleet import (
 )
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.vocabulary import FleetScope
-from oh_goon.integrations.hashmarks.dependencies import LockedInventoryAssessment
+from oh_goon.integrations.hashmarks import LockedInventoryAssessment, project_dependency_package
 from oh_goon.runtime import dependency_observations as observation_owner
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.dependency_observations import DependencyObservationStore
@@ -70,9 +70,31 @@ def test_five_thousand_repository_dependency_population_is_bounded(
         observation_owner,
         "assess_locked_dependencies",
         lambda repository, snapshot: LockedInventoryAssessment(
-            snapshot.evidence, frozenset(item.package_name for item in snapshot.dependencies)
+            snapshot.evidence, snapshot.producer_projection
         ),
     )
+    source_by_observation = {
+        snapshot.producer_observation["observation_identity"]: tmp_path / "producer" / str(index)
+        for index, snapshot in enumerate(admitted.values())
+    }
+    projections = {}
+
+    def admitted_projection(repository, snapshot, package_name, *, version_specifier=None):
+        # Only Fleet accounting is scaled here. Reuse actual producer-qualified
+        # packets from the three admitted fixtures, including predicate/absence
+        # facts, rather than recreating their semantics for 5,000 replicas.
+        identity = snapshot.producer_observation["observation_identity"]
+        key = (identity, package_name, version_specifier)
+        if key not in projections:
+            projections[key] = project_dependency_package(
+                source_by_observation[identity],
+                snapshot,
+                package_name,
+                version_specifier=version_specifier,
+            )
+        return projections[key]
+
+    monkeypatch.setattr(observation_owner, "project_dependency_package", admitted_projection)
 
     with database.transaction(write=True) as connection:
         for index, repository in enumerate(repositories[:4848]):

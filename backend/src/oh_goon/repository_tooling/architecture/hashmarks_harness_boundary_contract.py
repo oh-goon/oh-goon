@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import ast
-import copy
-from functools import lru_cache
 from importlib.util import resolve_name
 from pathlib import Path
+from typing import Any
 
 from oh_goon.repository_tooling.architecture.common import (
     PythonSemanticFacts,
     Violation,
+    _node_byte_range,
     python_ast,
     python_semantic_facts,
     python_source_snapshot,
+    source_binding_name,
+    source_import_spelling,
 )
 from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT, ROOT
 
@@ -40,51 +42,63 @@ _HASHMARKS_EXECUTION_IMPORT_PREFIXES = (
 _PUBLIC_HASHMARKS_API = "oh_goon.integrations.hashmarks"
 
 
-def _import_from_module(path: Path, node: ast.ImportFrom, package_root: Path) -> str:
-    module = node.module or ""
-    if not node.level:
-        return module
+def _owned_package_spelling(path: Path, reference: str, package_root: Path) -> str:
+    """Compare authored relative spelling inside an explicitly owned package."""
+    level = len(reference) - len(reference.lstrip("."))
+    if not level:
+        return reference
     try:
         package = path.resolve().parent.relative_to(package_root.resolve().parent).parts
     except ValueError:
         return ""
-    if node.level > len(package):
+    if level > len(package):
         return ""
-    parent = package[: len(package) - node.level + 1]
-    return ".".join((*parent, module)) if module else ".".join(parent)
+    parent = package[: len(package) - level + 1]
+    tail = reference[level:]
+    return ".".join((*parent, tail)) if tail else ".".join(parent)
 
 
 def _imports(
-    path: Path, *, tree: ast.AST | None = None, package_root: Path | None = None
+    path: Path,
+    *,
+    tree: ast.Module | None = None,
+    package_root: Path | None = None,
+    facts: PythonSemanticFacts | None = None,
 ) -> set[str]:
-    tree = python_ast(path) if tree is None else tree
+    observed = facts or python_semantic_facts(path, imported_only=True, tree=tree)
+    package_root = package_root or BACKEND_PACKAGE_ROOT
     result: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            result.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            module = _import_from_module(path, node, package_root or BACKEND_PACKAGE_ROOT)
-            if module:
-                result.add(module)
-                result.update(f"{module}.{alias.name}" for alias in node.names if alias.name != "*")
+    for fact in observed.evidence.packet()["facts"]:
+        syntax = fact.get("import_syntax")
+        if fact.get("kind") != "import-binding" or not isinstance(syntax, dict):
+            continue
+        base = "." * syntax["level"] + (syntax["module"] or "")
+        if base:
+            result.add(_owned_package_spelling(path, base, package_root))
+        if syntax["name"] != "*":
+            result.add(_owned_package_spelling(path, source_import_spelling(syntax), package_root))
+    result.discard("")
     return result
 
 
 def _import_facts(path: Path, tree: ast.Module, package_root: Path) -> PythonSemanticFacts:
-    # Qualify relative spelling on a copy. Other architecture policies may reuse
-    # the admitted tree; their syntax and scope observations must not be changed.
-    qualified = copy.deepcopy(tree)
-    for node in ast.walk(qualified):
-        if isinstance(node, ast.ImportFrom) and node.level:
-            node.module = _import_from_module(path, node, package_root) or None
-            node.level = 0
-    return python_semantic_facts(
-        path,
-        imported_only=True,
-        tree=qualified,
-        builtin_names=("__import__",),
-        bind_callable_inputs=False,
-    )
+    del package_root
+    return python_semantic_facts(path, imported_only=True, tree=tree)
+
+
+def _package_policy_references(
+    path: Path, facts: PythonSemanticFacts, package_root: Path
+) -> set[str]:
+    """Compare authored relative bindings under the explicitly owned package.
+
+    This is package-boundary policy, not a claim that an imported implementation
+    exists or resolves. The producer's target keeps module_resolution unresolved.
+    """
+    return {
+        authored
+        for reference in facts.references
+        if (authored := _owned_package_spelling(path, reference, package_root))
+    }
 
 
 def _call_argument(call: ast.Call, position: int, keyword: str) -> ast.expr | None:
@@ -93,29 +107,74 @@ def _call_argument(call: ast.Call, position: int, keyword: str) -> ast.expr | No
     return next((item.value for item in call.keywords if item.arg == keyword), None)
 
 
-def _literal_import_name(call: ast.Call, *, relative: bool) -> str | None:
-    name = _call_argument(call, 0, "name")
-    if not isinstance(name, ast.Constant) or not isinstance(name.value, str):
+def _native_argument(fact: dict[str, Any], position: int, keyword: str) -> dict[str, Any]:
+    return next(
+        (
+            argument
+            for argument in fact["arguments"]
+            if (argument["kind"] == "positional" and argument["index"] == position)
+            or (argument["kind"] == "keyword" and argument["name"] == keyword)
+        ),
+        {},
+    )
+
+
+def _native_literal_argument(fact: dict[str, Any], position: int, keyword: str) -> str | None:
+    argument = _native_argument(fact, position, keyword)
+    literal = argument.get("literal")
+    if (
+        argument.get("qualification") == "qualified"
+        and not argument.get("conditions")
+        and isinstance(literal, str)
+    ):
+        return literal
+    return None
+
+
+def _literal_import_name(fact: dict[str, Any], *, relative: bool) -> str | None:
+    name = _native_literal_argument(fact, 0, "name")
+    if name is None:
         return None
-    if not relative or not name.value.startswith("."):
-        return name.value
-    package = _call_argument(call, 1, "package")
-    if not isinstance(package, ast.Constant) or not isinstance(package.value, str):
+    if not relative or not name.startswith("."):
+        return name
+    package = _native_literal_argument(fact, 1, "package")
+    if package is None:
         return None
     try:
-        return resolve_name(name.value, package.value)
+        return resolve_name(name, package)
     except (ImportError, ValueError):
         return None
 
 
-def _literal_fromlist(call: ast.Call) -> tuple[str, ...]:
+def _literal_fromlist(
+    fact: dict[str, Any], call: ast.Call, facts: PythonSemanticFacts
+) -> tuple[str, ...]:
+    """Use AST only to select direct container elements in exact retained bytes."""
     selectors = _call_argument(call, 3, "fromlist")
     if not isinstance(selectors, (ast.List, ast.Tuple)):
         return ()
+    argument = _native_argument(fact, 3, "fromlist")
+    raw = facts.evidence.source_bytes
+    if not argument or raw is None:
+        return ()
+    offsets = [0]
+    for line in raw.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    literals = {
+        (row["range"]["start_byte"], row["range"]["end_byte"]): row["literal"]
+        for row in facts.evidence.packet()["facts"]
+        if row["kind"] == "literal-expression"
+        and row.get("qualification") == "qualified"
+        and not row.get("conditions")
+        and isinstance(row.get("literal"), str)
+        and row.get("call_argument") is not None
+        and row["call_argument"]["call_range"] == fact["range"]
+        and row["call_argument"]["range"] == argument["range"]
+    }
     return tuple(
-        item.value
+        literals[span]
         for item in selectors.elts
-        if isinstance(item, ast.Constant) and isinstance(item.value, str)
+        if isinstance(item, ast.Constant) and (span := _node_byte_range(item, offsets)) in literals
     )
 
 
@@ -123,16 +182,42 @@ def _literal_dynamic_imports(facts: PythonSemanticFacts) -> set[str]:
     # Only literal selectors on scope-qualified native import functions are
     # admitted here. Runtime reflection and supplied callable inputs are not.
     result: set[str] = set()
-    for target, call in facts.calls:
+    for fact, call in facts.call_observations:
+        target = source_binding_name(fact, imported_only=True)
         if target not in {"importlib.import_module", "builtins.__import__"}:
             continue
-        name = _literal_import_name(call, relative=target == "importlib.import_module")
+        name = _literal_import_name(fact, relative=target == "importlib.import_module")
         if name is None:
             continue
         result.add(name)
         if target == "builtins.__import__":
-            result.update(f"{name}.{selector}" for selector in _literal_fromlist(call))
+            result.update(f"{name}.{selector}" for selector in _literal_fromlist(fact, call, facts))
     return result
+
+
+def _unqualified_import_selectors(facts: PythonSemanticFacts) -> set[str]:
+    """Retain unresolved import-shaped syntax without inventing builtin meaning."""
+    selectors: set[str] = set()
+    for fact, call in facts.call_observations:
+        symbolic = fact.get("symbolic_reference") or {}
+        origin = symbolic.get("root") or {}
+        if (
+            fact.get("qualification") != "unknown"
+            or "unresolved-lexical-name" not in fact.get("reasons", [])
+            or symbolic.get("qualification") != "qualified"
+            or symbolic.get("conditions")
+            or symbolic.get("properties")
+            or origin.get("kind") != "unresolved-name"
+            or origin.get("name") != "__import__"
+        ):
+            continue
+        name = _literal_import_name(fact, relative=False)
+        if name is not None:
+            selectors.add(name)
+            selectors.update(
+                f"{name}.{selector}" for selector in _literal_fromlist(fact, call, facts)
+            )
+    return selectors
 
 
 def _assigned_expression(tree: ast.Module, name: str) -> ast.expr | None:
@@ -178,20 +263,6 @@ def _public_exports(package_root: Path) -> frozenset[str]:
     return frozenset(names) if len(set(names)) == len(names) else frozenset()
 
 
-def _may_reference_hashmarks(tree: ast.Module, imports: set[str]) -> bool:
-    if any("hashmarks" in module.split(".") for module in imports):
-        return True
-    return any(
-        (isinstance(node, ast.Attribute) and node.attr == "hashmarks")
-        or (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and "hashmarks" in node.value.split(".")
-        )
-        for node in ast.walk(tree)
-    )
-
-
 def _private_api_violations(
     path: Path, names: set[str], exports: frozenset[str], *, wildcard: bool
 ) -> list[Violation]:
@@ -220,22 +291,6 @@ def _is_hashmarks_integration(path: Path, *, package_root: Path | None = None) -
     except ValueError:
         return False
     return len(relative.parts) >= 3 and relative.parts[:2] == ("integrations", "hashmarks")
-
-
-def _package_source_state(package_root: Path) -> tuple[tuple[str, int, int, int], ...]:
-    package_root = package_root.resolve()
-    rows: list[tuple[str, int, int, int]] = []
-    for path in sorted(package_root.rglob("*.py")):
-        stat_result = path.stat()
-        rows.append(
-            (
-                path.relative_to(package_root).as_posix(),
-                stat_result.st_size,
-                stat_result.st_mtime_ns,
-                stat_result.st_ctime_ns,
-            )
-        )
-    return tuple(rows)
 
 
 def _hashmarks_integration_violations(path: Path, path_imports: set[str]) -> list[Violation]:
@@ -270,36 +325,34 @@ def _hashmarks_integration_violations(path: Path, path_imports: set[str]) -> lis
     return violations
 
 
-@lru_cache(maxsize=16)
-def _package_boundary_violations_cached(
-    package_root_text: str, state: tuple[tuple[str, int, int, int], ...]
-) -> tuple[Violation, ...]:
-    package_root = Path(package_root_text)
+def _package_boundary_violations_in_snapshot(package_root: Path) -> tuple[Violation, ...]:
     violations: list[Violation] = []
     exports = _public_exports(package_root)
-    for relative, _size, _mtime_ns, _ctime_ns in state:
-        path = package_root / relative
+    for path in sorted(package_root.rglob("*.py")):
         tree = python_ast(path)
-        path_imports = _imports(path, tree=tree, package_root=package_root)
         inside = _is_hashmarks_integration(path, package_root=package_root)
-        if inside or _may_reference_hashmarks(tree, path_imports):
-            facts = _import_facts(path, tree, package_root)
-            path_imports.update(_literal_dynamic_imports(facts))
-        else:
-            continue
+        facts = _import_facts(path, tree, package_root)
+        path_imports = _imports(path, package_root=package_root, facts=facts)
+        path_imports.update(_literal_dynamic_imports(facts))
         if inside:
             violations.extend(_hashmarks_integration_violations(path, path_imports))
             continue
         violations.extend(
             _private_api_violations(
                 path,
-                path_imports | set(facts.references),
+                path_imports | _package_policy_references(path, facts, package_root),
                 exports,
                 wildcard=any(
-                    isinstance(node, ast.ImportFrom)
-                    and _import_from_module(path, node, package_root) == _PUBLIC_HASHMARKS_API
-                    and any(alias.name == "*" for alias in node.names)
-                    for node in ast.walk(tree)
+                    fact.get("kind") == "import-binding"
+                    and fact.get("import_syntax", {}).get("name") == "*"
+                    and _owned_package_spelling(
+                        path,
+                        "." * fact["import_syntax"]["level"]
+                        + (fact["import_syntax"]["module"] or ""),
+                        package_root,
+                    )
+                    == _PUBLIC_HASHMARKS_API
+                    for fact in facts.evidence.packet()["facts"]
                 ),
             )
         )
@@ -316,14 +369,33 @@ def _package_boundary_violations_cached(
                     + ", ".join(direct_hashmarks),
                 )
             )
+        unqualified = _unqualified_import_selectors(facts)
+        for row in _private_api_violations(path, unqualified, exports, wildcard=False):
+            violations.append(
+                Violation(
+                    path,
+                    "Unqualified import-shaped source (native target unresolved): " + row.message,
+                )
+            )
+        direct_unqualified = sorted(
+            name for name in unqualified if name == "hashmarks" or name.startswith("hashmarks.")
+        )
+        if direct_unqualified:
+            violations.append(
+                Violation(
+                    path,
+                    "Unqualified Hashmarks import-shaped source must pass through the explicit "
+                    "oh_goon.integrations.hashmarks package; native target remains unresolved: "
+                    + ", ".join(direct_unqualified),
+                )
+            )
     return tuple(violations)
 
 
 def _package_boundary_violations(package_root: Path) -> tuple[Violation, ...]:
     package_root = package_root.resolve()
-    return _package_boundary_violations_cached(
-        str(package_root), _package_source_state(package_root)
-    )
+    with python_source_snapshot(package_root.parent):
+        return _package_boundary_violations_in_snapshot(package_root)
 
 
 def _boundary_documentation_violations() -> list[Violation]:

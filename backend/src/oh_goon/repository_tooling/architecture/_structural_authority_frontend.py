@@ -1,24 +1,9 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture.common import Violation
 from oh_goon.repository_tooling.architecture.typescript_semantics import project_typescript
-
-
-def _typescript_method_parameter_types(text: str, method: str) -> tuple[str, ...] | None:
-    match = re.search(rf"\b{re.escape(method)}\s*\(([^)]*)\)", text)
-    if match is None:
-        return None
-    parameters = [item.strip() for item in match.group(1).split(",") if item.strip()]
-    types: list[str] = []
-    for parameter in parameters:
-        if ":" not in parameter:
-            return None
-        _name, type_name = parameter.split(":", 1)
-        types.append(type_name.strip())
-    return tuple(types)
 
 
 def _check_frontend_transport_ownership(root: Path) -> list[Violation]:
@@ -39,7 +24,7 @@ def _check_frontend_transport_ownership(root: Path) -> list[Violation]:
         if path.name.endswith((".test.ts", ".test.tsx")):
             continue
         text = path.read_text(encoding="utf-8")
-        facts = project_typescript(text)
+        facts = project_typescript(text, path=path.name)
         if (
             "@/app/api/httpTransport" in facts.module_imports
             and relative not in allowed_http_importers
@@ -85,7 +70,7 @@ def _check_browser_persistence_boundary(root: Path) -> list[Violation]:
             continue
         relative = path.relative_to(source).as_posix()
         text = path.read_text(encoding="utf-8")
-        facts = project_typescript(text)
+        facts = project_typescript(text, path=path.name)
         if relative != "app/preferences.ts" and any(
             facts.uses(authority)
             for authority in ("localStorage", "sessionStorage", "indexedDB", "IndexedDB")
@@ -111,6 +96,7 @@ def _check_mutable_resource_fences(root: Path) -> list[Violation]:
     if not api_client.is_file():
         return violations
     text = api_client.read_text(encoding="utf-8")
+    facts = project_typescript(text, path=api_client.name)
     required = {
         "removeLocation": ("string", "string"),
         "cancelQueuedAdmission": ("string", "number"),
@@ -122,7 +108,7 @@ def _check_mutable_resource_fences(root: Path) -> list[Violation]:
         "acknowledgeEffect": ("string", "string", "number"),
     }
     for method, expected_types in required.items():
-        if _typescript_method_parameter_types(text, method) != expected_types:
+        if facts.method_parameter_types(method, container="ApiClient") != expected_types:
             violations.append(
                 Violation(
                     api_client,

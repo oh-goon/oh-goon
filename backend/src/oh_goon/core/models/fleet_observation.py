@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from oh_goon.core.dependency_identity import normalize_package_name
+from oh_goon.core.dependency_identity import DependencyEcosystem
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord, AgentReviewRecord
 from oh_goon.core.models.base import ImmutableModel
 
@@ -25,6 +25,9 @@ class DependencyEvidenceAssessment(ImmutableModel):
     availability: Literal["available", "unsupported", "unavailable", "missing"] = "unavailable"
     absence_admissible: bool = False
     reason: str | None = None
+    producer_assessment: dict[str, Any] = Field(
+        default_factory=dict, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def validate_absence(self) -> DependencyEvidenceAssessment:
@@ -40,22 +43,20 @@ class DependencyEvidenceAssessment(ImmutableModel):
 class DependencyObservation(ImmutableModel):
     """One producer-selected package in a resolved lock inventory."""
 
-    ecosystem: Literal["pypi"] = "pypi"
-    package_name: str = Field(min_length=1, max_length=200)
+    ecosystem: DependencyEcosystem = "pypi"
+    package_name: str = Field(min_length=1, max_length=4096)
+    component_id: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
     node_id: str = Field(min_length=1)
-    resolved_version: str = Field(min_length=1, max_length=200)
-    resolved_source: Literal["uv.lock"] = "uv.lock"
+    resolved_version: str = Field(min_length=1, max_length=4096)
+    resolved_source: str = Field(default="uv.lock", min_length=1)
     package_source: str = Field(min_length=1)
     contexts: tuple[str, ...] = Field(min_length=1)
     relationships: tuple[dict[str, Any], ...] = ()
-
-    @field_validator("package_name")
-    @classmethod
-    def normalize_name(cls, value: str) -> str:
-        normalized = normalize_package_name(value)
-        if not normalized:
-            raise ValueError("Dependency observation package name must be non-empty")
-        return normalized
+    producer_package: dict[str, Any] = Field(
+        default_factory=dict, exclude_if=lambda value: not value
+    )
 
 
 class DependencyObservationSnapshot(ImmutableModel):
@@ -66,13 +67,16 @@ class DependencyObservationSnapshot(ImmutableModel):
     """
 
     kind: Literal["dependency"] = "dependency"
-    schema_version: Literal[2] = 2
-    ecosystem: Literal["pypi"] = "pypi"
+    schema_version: Literal[2, 3] = 3
+    ecosystem: DependencyEcosystem = "pypi"
     sources: tuple[ObservationSourceEvidence, ...] = Field(default=(), max_length=512)
     evidence: DependencyEvidenceAssessment
     producer_implementation_identity: str | None = None
     adapter_observation: dict[str, Any] = Field(default_factory=dict)
     producer_observation: dict[str, Any] = Field(default_factory=dict)
+    producer_projection: dict[str, Any] = Field(
+        default_factory=dict, exclude_if=lambda value: not value
+    )
     dependencies: tuple[DependencyObservation, ...] = Field(default=(), max_length=100_000)
 
     @model_validator(mode="after")
@@ -92,6 +96,17 @@ class DependencyObservationSnapshot(ImmutableModel):
             raise ValueError("Available dependency observations require producer evidence")
         if self.evidence.availability != "available" and self.dependencies:
             raise ValueError("Unavailable dependency evidence cannot publish packages")
+        if any(item.ecosystem != self.ecosystem for item in self.dependencies):
+            raise ValueError("Dependency rows must preserve the snapshot ecosystem")
+        if (
+            self.schema_version == 3
+            and self.dependencies
+            and (
+                not self.producer_projection
+                or any(item.component_id is None for item in self.dependencies)
+            )
+        ):
+            raise ValueError("Current dependency projections require producer component identity")
         return self
 
 

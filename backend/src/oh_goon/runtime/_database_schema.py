@@ -351,7 +351,7 @@ CREATE TABLE IF NOT EXISTS repository_observation_heads (
 
 CREATE TABLE IF NOT EXISTS dependency_observation_snapshots (
     repository_id TEXT NOT NULL,
-    ecosystem TEXT NOT NULL CHECK (ecosystem IN ('pypi')),
+    ecosystem TEXT NOT NULL CHECK (ecosystem IN ('pypi', 'npm')),
     snapshot_json TEXT NOT NULL CHECK (json_valid(snapshot_json)),
     fleet_run_id TEXT NOT NULL,
     operation_id TEXT NOT NULL,
@@ -364,8 +364,9 @@ CREATE TABLE IF NOT EXISTS dependency_observation_snapshots (
 
 CREATE TABLE IF NOT EXISTS dependency_observations (
     repository_id TEXT NOT NULL,
-    ecosystem TEXT NOT NULL CHECK (ecosystem IN ('pypi')),
+    ecosystem TEXT NOT NULL CHECK (ecosystem IN ('pypi', 'npm')),
     package_name TEXT NOT NULL,
+    component_id TEXT,
     node_id TEXT NOT NULL,
     resolved_version TEXT NOT NULL,
     resolved_source TEXT NOT NULL,

@@ -149,7 +149,30 @@ Hashmarks selects membership and repository evidence. Oh-Goon chooses whether, w
 
 ## Local evidence consumers
 
-The data-only dependency Step uses the native uv adapter and dependency qualification
+Readiness obtains explanatory authored Python metadata through the public
+`observe_python_project_declarations` capability. Its public readiness result
+retains the exact project declaration, provider input revisions, repository
+qualifiers, producer observation identity and loaded identity. The explicit
+metadata disclosure excludes unrelated dependency/source configuration and
+grants no absence claim over omitted declarations. Missing, invalid and unsupported input do
+not become a complete empty project. Authored `requires-python` does not select
+an interpreter. Native uv readiness, the local runtime pin, and the selected
+extension's launch-entrypoint binding remain native/execution configuration.
+Producer input failures appear as unavailable explanatory metadata alongside
+native uv's original readiness result. A missing or incompatible mandatory
+producer remains an admission failure.
+
+Repository Understanding's evidence-reference hashes and exam input index bind
+the exact bytes retained for grading and differential recertification. They are
+execution/qualification custody facts, separate from Hashmarks repository
+identity and freshness. The existing package owner supplies that frozen input
+membership; SECRET answer files are excluded before source indexing. Grader
+answer choice, line-coordinate validity, question bindings, exam identity and
+grading stay with Repository Understanding and are never sent to Hashmarks as
+repository truth. These custody hashes cannot prove repository relevance,
+currentness, completeness or absence.
+
+The data-only dependency Step uses the explicitly selected native ecosystem adapter and dependency qualification
 contract. Its inventory and absence claims describe the supplied lock, not authored
 requirements or an installed environment. See [dependency observations](DEPENDENCY_OBSERVATIONS.md).
 Hashmarks qualifies the declared input scope, per-context inventory coverage and
@@ -240,10 +263,15 @@ correlation feature.
 The development check owner consumes supported Hashmarks verifier nominations
 for the captured Git change set. Direct and bounded indirect source-qualified
 links remain distinct from owner-completeness or negative evidence. The supported
-producer request bounds its selected and source-reference candidates with
-`candidate_limit=2`, rather than expanding every disclosed alternative into a
-whole-file test run. Hashmarks
-retains selection authority and its original ambiguity/truncation qualifications.
+producer's `verification.changed_set` operation uses `limit=2` for each changed
+member within one native root/lifetime. A global two-target cap cannot drop
+another member's proof, and the consumer does not rank or rebuild relationships
+from ownership graphs. Hashmarks retains selection authority and its original
+ambiguity, omitted-reference and truncation qualifications.
+Each observation retains its complete native changed-set packet. The ordinary
+executable projection omits duplicate contexts and relationships; support and
+dependency admission retain their consumed relationship views. Canonical packet
+facts and exact membership remain unchanged.
 Required policy proofs and changed-test nominations remain explicit. One native
 map/read session serves the supplied paths; producer bounds and source-member
 provenance remain in the bounded selection artifact. Oh-Goon applies accepted
@@ -254,10 +282,9 @@ repository meaning or strengthen unknown producer scope. Policy protection is a 
 obligation, not a Hashmarks-inferred relationship. See the
 [CI contract](../CI_CD_CONTRACT.md#repository-checks-on-github).
 
-Native readiness and task preparation happen before the composite read scope.
-Dependency observation captures its bounded source inventory once, reconciles
-those exact contributors through native scoped index preparation, and reuses
-the captured paths. The read constructs fresh observations after preparation;
+Native reconciliation and task preparation happen before the composite read scope.
+Dependency observation captures its bounded source inventory once and reuses
+those reconciled native contributors. The read constructs fresh observations after preparation;
 stale packets are not repaired or relabeled as current.
 
 Backend runtime dependency changes use the released producer's public lock
@@ -265,10 +292,10 @@ before/after delta and dependency-consumer evidence. The adapter supplies select
 distribution `METADATA` and `RECORD` from the native uv environment; package-name
 similarity does not establish import ownership. Consumer queries use an explicit
 inventory of admitted `backend/src` Python files from `native.files`. Hashmarks
-owns the module correspondence, import observations, qualified verifier graph and
-nominations; Oh-Goon retains those facts and applies the existing execution
-admission. Verifier graphs keep their actual source edit candidates; the changed
-lock is connected by retained dependency evidence. This does not introduce another
+owns the module correspondence, import observations, changed-set relationships
+and nominations; Oh-Goon retains those facts and applies the existing execution
+admission. Each chain keeps the consumer source's intact changed-set packet; the
+changed lock is connected by retained dependency evidence. This does not introduce another
 resolver or impact graph.
 
 Pytest-domain file nominations remain advisory until the existing native collector
@@ -278,6 +305,14 @@ targets alongside the raw producer evidence. Empty support-file nominations cann
 replace a component's required chain to a collected verifier. The execution batch
 owner independently collects the admitted files and accounts for exact native
 execution membership; the trusted-base gate also checks the plan's file set.
+For changed Python sources, the trusted base independently observes ordinary
+native membership once in the existing backend, tooling and cross-owner
+contexts, then requires exact passed selected cases from changed files. This
+does not broaden local focused planning or execute deselected journeys. The
+configured frontend's positive self-nomination policy is a logical obligation,
+not actual native collection or a claim over fixture-only projects. Other
+unavailable native project contexts stay explicitly unverified through the
+existing planner; source-role syntax cannot establish membership or absence.
 
 Every changed existing runtime component must have a positive qualified
 consumer-to-verifier chain. The aggregate `consumer_scope` stays incomplete with
@@ -291,10 +326,10 @@ parent's qualified source/verifier evidence; it does not invent direct imports o
 the introduced package. Other component additions, removals or forks,
 dependency-policy changes, unavailable or
 mismatched metadata, stale/truncated required delta or consumer observations and
-missing chains remain unverified. A verifier graph's aggregate search may be
+missing chains remain unverified. A changed-set packet's aggregate search may be
 incomplete, truncated or ambiguous while an individual native edge positively
-identifies its covered source. Admission retains the raw graph qualifications and
-uses only those exact positive edges; it does not upgrade the graph to complete.
+identifies its source and target. Admission retains the raw producer qualifications and
+uses only those exact positive relationships; it does not upgrade scope to complete.
 The CI contract names the additional native lock, Python capability
 and package-build obligations. These nominations retain repository-evidence-only
 authority and enter the existing trusted-base proof protocol; they grant no

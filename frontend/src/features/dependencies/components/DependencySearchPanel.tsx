@@ -2,6 +2,7 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ReadResource } from "@/domain/reads/ReadResource";
+import type { DependencyPackageIdentity } from "@/features/dependencies/model";
 import type { DependencySearchResult } from "@generated/models";
 
 interface Props {
@@ -9,7 +10,7 @@ interface Props {
   resource: ReadResource<DependencySearchResult>;
   onSearch: (query: string) => void;
   onPage: (offset: number) => void;
-  onOpenPackage: (packageName: string) => void;
+  onOpenPackage: (identity: DependencyPackageIdentity) => void;
 }
 
 export function DependencySearchPanel({ query, resource, onSearch, onPage, onOpenPackage }: Props) {
@@ -41,7 +42,7 @@ export function DependencySearchPanel({ query, resource, onSearch, onPage, onOpe
     {resource.status === "read-error" ? <p className="notice notice--warning" role="alert">{resource.failure?.message}</p> : null}
     {data && items.length === 0 ? <p className="dependency-empty" role="status">{t("dependencies.noSearchResults", { query: data.query })}</p> : null}
     {items.length > 0 ? <div className="dependency-search-results" role="group" aria-label={t("dependencies.searchResults")}>
-      {items.map((item) => <button className="dependency-search-result" type="button" key={`${item.ecosystem}:${item.package_name}`} onClick={() => onOpenPackage(item.package_name)}>
+      {items.map((item) => <button className="dependency-search-result" type="button" key={`${item.ecosystem}:${item.package_name}`} onClick={() => onOpenPackage({ packageName: item.package_name, ecosystem: item.ecosystem })}>
         <span><strong>{item.package_name}</strong><small>{item.ecosystem}</small></span>
         <span className="dependency-result-facts"><b>{t("dependencies.repositoryCount", { count: item.repositories })}</b><small>{t("dependencies.resolvedVersionCount", { count: item.resolved_versions })}</small></span>
       </button>)}

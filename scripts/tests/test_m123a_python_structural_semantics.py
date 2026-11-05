@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -303,3 +305,88 @@ def test_workflow_renamed_database_control_state_owner_is_rejected(
         "local authority module sqlite3" in message
         for message in _messages(check_workflow_runner_boundary(tmp_path))
     )
+
+
+def test_callable_defaults_and_observed_callers_do_not_prove_every_call_target(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.architecture.common import python_semantic_facts
+
+    owner = _write(
+        tmp_path,
+        "owner.py",
+        "from subprocess import Popen\n"
+        "def invoke(factory=Popen):\n    return factory(['echo', 'test'])\n"
+        "invoke(Popen)\n",
+    )
+    facts = python_semantic_facts(owner, imported_only=True)
+    assert not any(name == "subprocess.Popen" for name, _call in facts.calls)
+    native = facts.evidence.packet()["facts"]
+    assert any(
+        fact["kind"] == "default-binding" and fact["qualification"] == "conditional"
+        for fact in native
+    )
+    assert any(
+        fact["kind"] == "call-site"
+        and fact["qualification"] == "unknown"
+        and "parameter-value-unknown" in fact["reasons"]
+        for fact in native
+    )
+    owner.write_text("from subprocess import Popen\nPopen(['echo', 'test'])\n")
+    direct = python_semantic_facts(owner, imported_only=True)
+    assert [name for name, _call in direct.calls] == ["subprocess.Popen"]
+
+
+def test_unavailable_producer_cannot_activate_local_python_binding_inference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.architecture import common
+
+    owner = _write(
+        tmp_path, "owner.py", "from subprocess import Popen\nPopen(['echo'])\n"
+    )
+    baseline = common.python_semantic_facts(owner, imported_only=True)
+    assert [name for name, _call in baseline.calls] == ["subprocess.Popen"]
+    unavailable = baseline.evidence.packet()
+    unavailable.update(
+        availability="unavailable",
+        completeness="unknown",
+        truncation="unknown",
+        facts=[],
+        reason="source-binding-provider-failed",
+    )
+    refused = replace(
+        baseline.evidence,
+        canonical_packet_json=json.dumps(unavailable),
+        source_bytes=None,
+    )
+    monkeypatch.setattr(
+        common,
+        "observe_source_bindings",
+        lambda _root, paths, **_options: {paths[0]: refused},
+    )
+
+    with pytest.raises(ValueError, match="source-binding-provider-failed"):
+        common.python_semantic_facts(owner, imported_only=True)
+
+
+def test_producer_bindings_cannot_attach_to_different_captured_python_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.architecture import common
+
+    owner = _write(
+        tmp_path, "owner.py", "from subprocess import Popen\nPopen(['echo'])\n"
+    )
+    baseline = common.python_semantic_facts(owner, imported_only=True)
+    assert [name for name, _call in baseline.calls] == ["subprocess.Popen"]
+    # Keep the call range identical: range agreement cannot bind changed bytes.
+    owner.write_text("from subprocess import Popen\nprobe(['echo'])\n")
+    monkeypatch.setattr(
+        common,
+        "observe_source_bindings",
+        lambda _root, paths, **_options: {paths[0]: baseline.evidence},
+    )
+
+    with pytest.raises(ValueError, match="differ from captured Python structure"):
+        common.python_semantic_facts(owner, imported_only=True)

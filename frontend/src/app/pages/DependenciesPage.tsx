@@ -32,11 +32,12 @@ export function DependenciesPage({ navigate }: Props) {
   const reportSelection = useReportMutationFeedback("dependency-selections");
   const mutationBusy = useMutationBusy();
   const state = dependencyReviewStateFromHash(readLocationHash());
-  const search = useDependencySearch(state.q, state.offset);
-  const overview = useDependencyOverview(state.packageName);
-  const advisory = useDependencyAdvisory({ packageName: state.packageName, advisoryId: state.advisoryId, affectedSpecifier: state.versionSpecifier });
+  const search = useDependencySearch(state.q, state.offset, state.ecosystem);
+  const overview = useDependencyOverview({ packageName: state.packageName, ecosystem: state.ecosystem });
+  const advisory = useDependencyAdvisory({ packageName: state.packageName, ecosystem: state.ecosystem, advisoryId: state.advisoryId, affectedSpecifier: state.versionSpecifier });
   const repositories = useDependencyRepositories({
     packageName: state.coverage === "matching" ? state.packageName : "",
+    ecosystem: state.ecosystem,
     resolvedVersion: state.resolvedVersion,
     versionSpecifier: state.versionSpecifier,
     advisoryId: state.advisoryId,
@@ -45,18 +46,22 @@ export function DependenciesPage({ navigate }: Props) {
   });
   const coverageRepositories = useDependencyCoverageRepositories({
     packageName: state.packageName,
+    ecosystem: state.ecosystem,
     coverage: state.coverage,
     offset: state.offset,
   });
   const repositoryDependencies = useRepositoryDependencies(state.repositoryId, state.offset);
   const mountedRef = useRef(true);
   const materializeOwnerRef = useRef<IdentityIncarnation>({ identity: "", generation: 0 });
-  const populationId = state.coverage === "matching"
-    ? repositories.data?.population_id ?? null
-    : coverageRepositories.data?.population_id ?? null;
+  const population = state.coverage === "matching" ? repositories.data : coverageRepositories.data;
+  const populationId = population?.population_id ?? null;
+  const selectedEcosystem = state.ecosystem ?? population?.ecosystem;
+  const selectedPackageName = population?.package_name ?? state.packageName;
   const materializeIdentity = canonicalIdentity({
     populationId,
     packageName: state.packageName,
+    canonicalPackageName: selectedPackageName,
+    ecosystem: selectedEcosystem,
     coverage: state.coverage,
     evidence: state.coverage === "matching" ? state.evidence : "all",
     resolvedVersion: state.coverage === "matching" ? state.resolvedVersion : "",
@@ -72,11 +77,12 @@ export function DependenciesPage({ navigate }: Props) {
   const go = (next: Partial<DependencyReviewState>) => navigate("dependencies", dependencyQuery(next));
   const openEvidence = (runId: string, stepId: string) => navigate("runs", { run: runId, step: stepId });
   const materialize = async () => {
-    if (!state.packageName || populationId === null) return;
+    if (!state.packageName || populationId === null || selectedEcosystem === undefined) return;
     const commandOwner = materializeOwnerRef.current;
     const matching = state.coverage === "matching";
     const filter: DependencyTargetFilter = {
-      package_name: state.packageName,
+      package_name: selectedPackageName,
+      ecosystem: selectedEcosystem,
       coverage: state.coverage,
       evidence: matching ? state.evidence : "all",
       ...(matching && state.resolvedVersion ? { resolved_version: state.resolvedVersion } : {}),
@@ -100,12 +106,14 @@ export function DependenciesPage({ navigate }: Props) {
     {state.repositoryId ? <RepositoryDependenciesPanel
       repositoryId={state.repositoryId}
       resource={repositoryDependencies}
-      onBack={() => go({ q: state.q, packageName: state.packageName, offset: 0 })}
+      onBack={() => go({ q: state.q, packageName: state.packageName, ecosystem: state.ecosystem, offset: 0 })}
       onPage={(offset) => go({ ...state, offset })}
-      onOpenPackage={(packageName) => go({ packageName, q: packageName, offset: 0 })}
+      onOpenPackage={({ packageName, ecosystem }) => go({ packageName, ecosystem, q: packageName, offset: 0 })}
       onOpenEvidence={openEvidence}
     /> : state.packageName ? <DependencyPackagePanel
-      packageName={state.packageName}
+      key={canonicalIdentity({ packageName: state.packageName, ecosystem: state.ecosystem })}
+      packageName={overview.data?.package_name ?? selectedPackageName}
+      ecosystem={selectedEcosystem}
       resolvedVersion={state.resolvedVersion}
       versionSpecifier={state.versionSpecifier}
       advisoryId={state.advisoryId}
@@ -125,9 +133,9 @@ export function DependenciesPage({ navigate }: Props) {
     /> : <DependencySearchPanel
       query={state.q}
       resource={search}
-      onSearch={(q) => go({ q, offset: 0 })}
-      onPage={(offset) => go({ q: state.q, offset })}
-      onOpenPackage={(packageName) => go({ q: state.q || packageName, packageName, offset: 0 })}
+      onSearch={(q) => go({ q, ecosystem: state.ecosystem, offset: 0 })}
+      onPage={(offset) => go({ q: state.q, ecosystem: state.ecosystem, offset })}
+      onOpenPackage={({ packageName, ecosystem }) => go({ q: state.q || packageName, packageName, ecosystem, offset: 0 })}
     />}
   </main>;
 }

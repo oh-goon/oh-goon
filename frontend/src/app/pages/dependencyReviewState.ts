@@ -1,8 +1,10 @@
-import type { DependencyCoverage, DependencyEvidence } from "@/features/dependencies/DependenciesFeature";
+import type { DependencyCoverage, DependencyEvidence, DependencyEcosystem } from "@/features/dependencies/DependenciesFeature";
+import { DependencyEcosystem as DependencyEcosystemValues } from "@generated/enums";
 
 export interface DependencyReviewState {
   q: string;
   packageName: string;
+  ecosystem?: DependencyEcosystem;
   resolvedVersion: string;
   versionSpecifier: string;
   advisoryId: string;
@@ -23,9 +25,12 @@ export function dependencyReviewStateFromHash(hash: string): DependencyReviewSta
   const offset = Number.parseInt(params.get("offset") ?? "0", 10);
   const normalizedCoverage = COVERAGE.has(coverage as DependencyCoverage) ? coverage as DependencyCoverage : "matching";
   const matching = normalizedCoverage === "matching";
+  const requestedEcosystem = params.get("ecosystem");
+  const ecosystem = Object.values(DependencyEcosystemValues).find((value) => value === requestedEcosystem);
   return {
     q: params.get("q")?.trim() ?? "",
-    packageName: params.get("package")?.trim() ?? "",
+    packageName: requestedEcosystem !== null && ecosystem === undefined ? "" : params.get("package")?.trim() ?? "",
+    ecosystem,
     resolvedVersion: matching ? params.get("version")?.trim() ?? "" : "",
     versionSpecifier: matching ? params.get("affected")?.trim() ?? "" : "",
     advisoryId: matching ? params.get("advisory")?.trim() ?? "" : "",
@@ -40,6 +45,7 @@ export function dependencyQuery(state: Partial<DependencyReviewState>): Record<s
   const result: Record<string, string> = {};
   if (state.q) result.q = state.q;
   if (state.packageName) result.package = state.packageName;
+  if (state.ecosystem) result.ecosystem = state.ecosystem;
   if (state.resolvedVersion) result.version = state.resolvedVersion;
   if (state.versionSpecifier) result.affected = state.versionSpecifier;
   if (state.advisoryId) result.advisory = state.advisoryId;

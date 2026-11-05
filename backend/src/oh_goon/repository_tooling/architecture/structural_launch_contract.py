@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from oh_goon.integrations.hashmarks import HashmarksSourceEvidence
 from oh_goon.repository_tooling.architecture._launch_contract_control import (
     check_launch_activity_control,
     check_launch_birth_identity,
@@ -17,30 +20,64 @@ from oh_goon.repository_tooling.architecture._launch_contract_navigation import 
 from oh_goon.repository_tooling.architecture._launch_contract_status import (
     check_launch_status_schemas,
 )
-from oh_goon.repository_tooling.architecture.common import Violation, python_semantic_facts
+from oh_goon.repository_tooling.architecture.common import (
+    Violation,
+    python_semantic_facts,
+    python_source_snapshot,
+    source_import_spelling,
+)
+
+_LIFECYCLE_APIS = frozenset(
+    {"subprocess.Popen", "os.killpg", "uvicorn.Server", "uvicorn.server.Server"}
+)
 
 
-def _observed_runtime_authority_owners(root: Path) -> set[str]:
-    """Inventory imported Popen, POSIX process-group signaling and uvicorn Server.
+@dataclass(frozen=True, slots=True)
+class _LifecycleSourceUses:
+    evidence: HashmarksSourceEvidence
+    qualified: tuple[dict[str, Any], ...]
+    conditional: tuple[dict[str, Any], ...]
 
-    Resolve module/from-import aliases, simple callable aliases and defaults
-    through the shared bounded semantic projection. This inventory does not
-    infer dynamic imports or classify bounded subprocess.run invocations as
-    process lifecycle ownership.
+
+def _is_lifecycle_source_use(fact: dict[str, Any]) -> bool:
+    if fact.get("kind") not in {"call-site", "conditional-call-binding"}:
+        return False
+    if fact.get("qualification") not in {"qualified", "conditional"}:
+        return False
+    target = fact.get("target")
+    return (
+        isinstance(target, dict)
+        and target.get("kind") == "import"
+        and source_import_spelling(target) in _LIFECYCLE_APIS
+    )
+
+
+def _runtime_authority_source_uses(root: Path) -> dict[str, _LifecycleSourceUses]:
+    """Inventory admitted source uses, preserving conditional delegate evidence.
+
+    Native Source owns aliases, defaults and helper-use relationships. A
+    conditional row may require a declared source owner without establishing
+    any invocation's runtime target. Unknown calls are not evidence of absence.
+    Bounded subprocess.run calls remain outside this lifecycle-source policy.
     """
-    observed: set[str] = set()
-    for path in (root / "backend/src/oh_goon").rglob("*.py"):
-        facts = python_semantic_facts(path, imported_only=True)
-        if any(
-            name in {"subprocess.Popen", "os.killpg", "uvicorn.Server", "uvicorn.server.Server"}
-            for name, _node in facts.calls
-        ):
-            observed.add(path.relative_to(root).as_posix())
+    observed: dict[str, _LifecycleSourceUses] = {}
+    with python_source_snapshot(root):
+        for path in (root / "backend/src/oh_goon").rglob("*.py"):
+            facts = python_semantic_facts(path, imported_only=True)
+            admitted = tuple(
+                row for row in facts.evidence.packet()["facts"] if _is_lifecycle_source_use(row)
+            )
+            if admitted:
+                observed[path.relative_to(root).as_posix()] = _LifecycleSourceUses(
+                    facts.evidence,
+                    tuple(row for row in admitted if row["qualification"] == "qualified"),
+                    tuple(row for row in admitted if row["qualification"] == "conditional"),
+                )
     return observed
 
 
 def _check_runtime_authority_registry(root: Path) -> list[Violation]:
-    """Require every physical Python process-lifecycle owner to be explicitly classified."""
+    """Require supported native lifecycle source uses to retain declared owners."""
     import json
 
     registry_path = root / "docs/development/RUNTIME_AUTHORITY_REGISTRY.json"
@@ -84,18 +121,22 @@ def _check_runtime_authority_registry(root: Path) -> list[Violation]:
                 )
             ]
 
-    observed = _observed_runtime_authority_owners(root)
+    observed = _runtime_authority_source_uses(root)
     classified = set(owners)
     violations: list[Violation] = []
-    for path in sorted(observed - classified):
-        violations.append(
-            Violation(root / path, "physical process lifecycle authority is unclassified")
+    for path in sorted(observed.keys() - classified):
+        message = (
+            "physical process lifecycle authority is unclassified"
+            if observed[path].qualified
+            else "conditional lifecycle source use is unclassified; runtime target remains unknown"
         )
-    for path in sorted(classified - observed):
+        violations.append(Violation(root / path, message))
+    for path in sorted(classified - observed.keys()):
         violations.append(
             Violation(
                 root / path,
-                "runtime authority registry entry is stale; no physical lifecycle primitive remains",
+                "runtime authority registry entry has no admitted lifecycle source-use evidence; "
+                "inspection remains unqualified",
             )
         )
     return violations
@@ -113,6 +154,7 @@ def _check_launch_manifest_foundation(root: Path) -> list[Violation]:
         check_launch_current_selection,
     )
     violations: list[Violation] = []
-    for check in checks:
-        violations.extend(check(root))
+    with python_source_snapshot(root):
+        for check in checks:
+            violations.extend(check(root))
     return violations

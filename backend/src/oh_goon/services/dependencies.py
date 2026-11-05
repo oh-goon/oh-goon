@@ -5,12 +5,9 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from typing import get_args
 
-from oh_goon.core.dependency_identity import is_valid_package_name, normalize_package_name
-from oh_goon.core.dependency_version_filter import (
-    parse_version_specifier,
-    version_matches_specifier,
-)
+from oh_goon.core.dependency_identity import DependencyEcosystem
 from oh_goon.core.errors import InvalidRequest, RepositoryNotManaged, StateConflict
 from oh_goon.core.models.dependency_fleet import (
     DependencyAdvisoryOverview,
@@ -30,6 +27,7 @@ from oh_goon.core.models.dependency_fleet import (
 )
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.product_identity import repository_subject_instance_id, stable_id
+from oh_goon.integrations.hashmarks import dependency_package_query_identity
 from oh_goon.runtime.dependency_observations import DependencyObservationStore
 from oh_goon.runtime.dependency_targets import DependencyTargetMaterializationStore
 from oh_goon.services.dependency_advisory import DependencyAdvisoryService
@@ -53,69 +51,112 @@ class DependencyFleetService:
         self._coverage = DependencyCoverageService(repositories, observations)
         self._advisory = DependencyAdvisoryService(repositories, observations)
 
-    def search(self, query: str, *, offset: int = 0, limit: int = 20) -> DependencySearchResult:
+    def search(
+        self,
+        query: str,
+        *,
+        ecosystem: DependencyEcosystem | None = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> DependencySearchResult:
         with self._store.assessment_scope():
             if offset < 0:
                 raise InvalidRequest("Dependency search offset must be zero or greater")
-            normalized = _package_query(query)
+            requested = _package_query(query)
+            identities = tuple(
+                dependency_package_query_identity(scope, requested)
+                for scope in (
+                    (ecosystem,)
+                    if ecosystem is not None
+                    else get_args(DependencyEcosystem.__value__)
+                )
+            )
+            canonical_names = {
+                identity.ecosystem: identity.canonical_name for identity in identities
+            }
             current = self._current_repositories()
-            repository_ids_by_package: dict[str, set[str]] = defaultdict(set)
-            versions_by_package: dict[str, set[str]] = defaultdict(set)
-            for row in self._store.package_search_rows(normalized):
-                repository_id = str(row["repository_id"])
-                if repository_id not in current:
-                    continue
-                package_name = str(row["package_name"])
-                repository_ids_by_package[package_name].add(repository_id)
-                if row["resolved_version"] is not None:
-                    versions_by_package[package_name].add(str(row["resolved_version"]))
+            repository_ids_by_package: dict[tuple[DependencyEcosystem, str], set[str]] = (
+                defaultdict(set)
+            )
+            versions_by_package: dict[tuple[DependencyEcosystem, str], set[str]] = defaultdict(set)
+            for identity in identities:
+                for row in self._store.package_search_rows(
+                    identity.canonical_name, identity.ecosystem
+                ):
+                    repository_id = str(row["repository_id"])
+                    if repository_id not in current:
+                        continue
+                    package = (row["ecosystem"], str(row["package_name"]))
+                    repository_ids_by_package[package].add(repository_id)
+                    if row["resolved_version"] is not None:
+                        versions_by_package[package].add(str(row["resolved_version"]))
             items = [
                 DependencySearchItem(
-                    package_name=package_name,
+                    ecosystem=package[0],
+                    package_name=package[1],
                     repositories=len(repository_ids),
-                    resolved_versions=len(versions_by_package[package_name]),
+                    resolved_versions=len(versions_by_package[package]),
                 )
-                for package_name, repository_ids in repository_ids_by_package.items()
+                for package, repository_ids in repository_ids_by_package.items()
             ]
             ranked = sorted(
                 items,
                 key=lambda item: (
-                    0 if item.package_name == normalized else 1,
+                    0 if item.package_name == canonical_names[item.ecosystem] else 1,
                     -item.repositories,
                     item.package_name,
                 ),
             )
             return DependencySearchResult(
-                query=normalized,
+                query=requested,
+                ecosystem=ecosystem,
+                query_identities=identities,
                 total=len(ranked),
                 offset=offset,
                 limit=limit,
                 items=tuple(ranked[offset : offset + limit]),
             )
 
-    def fleet_coverage(self) -> DependencyFleetCoverageOverview:
+    def fleet_coverage(
+        self, *, ecosystem: DependencyEcosystem = "pypi"
+    ) -> DependencyFleetCoverageOverview:
         with self._store.assessment_scope():
-            return self._coverage.overview()
+            return self._coverage.overview(ecosystem=ecosystem)
 
-    def overview(self, package_name: str) -> DependencyPackageOverview:
+    def overview(
+        self, package_name: str, *, ecosystem: DependencyEcosystem = "pypi"
+    ) -> DependencyPackageOverview:
         with self._store.assessment_scope():
-            package = _package_query(package_name)
-            return build_dependency_overview(self._store, package, self._current_repositories())
+            identity = dependency_package_query_identity(ecosystem, _package_query(package_name))
+            return build_dependency_overview(
+                self._store,
+                identity.canonical_name,
+                self._current_repositories(),
+                ecosystem=ecosystem,
+            ).model_copy(update={"query_identity": identity})
 
     def advisory(
-        self, package_name: str, *, advisory_id: str, affected_specifier: str
+        self,
+        package_name: str,
+        *,
+        advisory_id: str,
+        affected_specifier: str,
+        ecosystem: DependencyEcosystem = "pypi",
     ) -> DependencyAdvisoryOverview:
         with self._store.assessment_scope():
+            identity = dependency_package_query_identity(ecosystem, _package_query(package_name))
             return self._advisory.overview(
-                _package_query(package_name),
+                identity.canonical_name,
                 advisory_id=advisory_id,
                 affected_specifier=affected_specifier,
-            )
+                ecosystem=ecosystem,
+            ).model_copy(update={"query_identity": identity})
 
     def repositories(
         self,
         package_name: str,
         *,
+        ecosystem: DependencyEcosystem = "pypi",
         resolved_version: str | None = None,
         version_prefix: str | None = None,
         version_specifier: str | None = None,
@@ -125,8 +166,10 @@ class DependencyFleetService:
         limit: int = 20,
     ) -> DependencyRepositoryPage:
         with self._store.assessment_scope():
+            identity = dependency_package_query_identity(ecosystem, _package_query(package_name))
             query = DependencyTargetFilter(
-                package_name=_package_query(package_name),
+                package_name=identity.canonical_name,
+                ecosystem=ecosystem,
                 resolved_version=resolved_version,
                 version_prefix=version_prefix,
                 version_specifier=version_specifier,
@@ -139,6 +182,8 @@ class DependencyFleetService:
             return DependencyRepositoryPage(
                 population_id=_population_id(query, repo_ids, repository_instance_ids),
                 package_name=query.package_name,
+                ecosystem=query.ecosystem,
+                query_identity=identity,
                 total=len(matches),
                 offset=offset,
                 limit=limit,
@@ -149,19 +194,25 @@ class DependencyFleetService:
         self,
         package_name: str,
         *,
+        ecosystem: DependencyEcosystem = "pypi",
         coverage: DependencyCoveragePopulation,
         offset: int = 0,
         limit: int = 20,
     ) -> DependencyCoverageRepositoryPage:
         with self._store.assessment_scope():
-            package = _package_query(package_name)
-            query = DependencyTargetFilter(package_name=package, coverage=coverage)
-            items = self._coverage.items(package, coverage)
+            identity = dependency_package_query_identity(ecosystem, _package_query(package_name))
+            package = identity.canonical_name
+            query = DependencyTargetFilter(
+                package_name=package, ecosystem=ecosystem, coverage=coverage
+            )
+            items = self._coverage.items(package, coverage, ecosystem=ecosystem)
             repo_ids = tuple(sorted(item.repository.repository_id for item in items))
             repository_instance_ids = _repository_instance_map(item.repository for item in items)
             return DependencyCoverageRepositoryPage(
                 population_id=_population_id(query, repo_ids, repository_instance_ids),
                 package_name=package,
+                ecosystem=ecosystem,
+                query_identity=identity,
                 coverage=coverage,
                 total=len(items),
                 offset=offset,
@@ -182,19 +233,20 @@ class DependencyFleetService:
             if repository is None:
                 raise RepositoryNotManaged("Repository is not in the current included League")
             rows = self._store.repository_rows(repository_id)
-            by_package: dict[str, list[sqlite3.Row]] = defaultdict(list)
+            by_package: dict[tuple[DependencyEcosystem, str], list[sqlite3.Row]] = defaultdict(list)
             for row in rows:
-                by_package[str(row["package_name"])].append(row)
+                by_package[(row["ecosystem"], str(row["package_name"]))].append(row)
+            groups = sorted(by_package.items())
             items = [
-                _match_from_rows(self._store, repository, package, group)
-                for package, group in sorted(by_package.items())
+                _match_from_rows(self._store, repository, package[1], group)
+                for package, group in groups[offset : offset + limit]
             ]
             return RepositoryDependencyPage(
                 repository=repository,
-                total=len(items),
+                total=len(groups),
                 offset=offset,
                 limit=limit,
-                items=tuple(items[offset : offset + limit]),
+                items=tuple(items),
             )
 
     def materialize(
@@ -202,9 +254,10 @@ class DependencyFleetService:
     ) -> DependencyTargetMaterialization:
         with self._store.assessment_scope():
             query = request.filter
-            normalized = query.model_copy(
-                update={"package_name": _package_query(query.package_name)}
+            identity = dependency_package_query_identity(
+                query.ecosystem, _package_query(query.package_name)
             )
+            normalized = query.model_copy(update={"package_name": identity.canonical_name})
             if normalized.coverage == "matching":
                 matches = self._matches(normalized)
                 repo_ids = tuple(sorted(item.repository.repository_id for item in matches))
@@ -212,7 +265,9 @@ class DependencyFleetService:
                     item.repository for item in matches
                 )
             else:
-                coverage_items = self._coverage.items(normalized.package_name, normalized.coverage)
+                coverage_items = self._coverage.items(
+                    normalized.package_name, normalized.coverage, ecosystem=normalized.ecosystem
+                )
                 repo_ids = tuple(sorted(item.repository.repository_id for item in coverage_items))
                 repository_instance_ids = _repository_instance_map(
                     item.repository for item in coverage_items
@@ -238,10 +293,19 @@ class DependencyFleetService:
 
     def _matches(self, query: DependencyTargetFilter) -> list[DependencyRepositoryMatch]:
         current = self._current_repositories()
-        if query.version_specifier is not None:
-            parse_version_specifier(query.version_specifier)
+        if query.version_specifier is not None and not query.version_specifier.strip():
+            raise InvalidRequest("Version predicate must be non-empty")
+        for snapshot in self._store.snapshot_rows(query.ecosystem):
+            if str(snapshot["repository_id"]) not in current:
+                continue
+            projection = self._store.package_projection(snapshot, query.package_name)
+            if projection is not None and projection["packages"][0]["truncation"] != "complete":
+                raise StateConflict(
+                    "Dependency package projection is incomplete; target population is unverified"
+                )
         rows = self._store.package_rows(
             query.package_name,
+            ecosystem=query.ecosystem,
             resolved_version=query.resolved_version,
             version_prefix=query.version_prefix,
             evidence=query.evidence,
@@ -253,15 +317,18 @@ class DependencyFleetService:
                 for repository_id, group in grouped.items()
                 if any(
                     row["resolved_version"] is not None
-                    and version_matches_specifier(
-                        str(row["resolved_version"]), query.version_specifier
-                    )
-                    is True
+                    and self._store.version_state(row, query.version_specifier) == "match"
                     for row in group
                 )
             }
         return [
-            _match_from_rows(self._store, current[repository_id], query.package_name, group)
+            _match_from_rows(
+                self._store,
+                current[repository_id],
+                query.package_name,
+                group,
+                version_specifier=query.version_specifier,
+            )
             for repository_id, group in sorted(
                 grouped.items(), key=lambda item: current[item[0]].name.casefold()
             )
@@ -287,8 +354,13 @@ def _match_from_rows(
     repository: RepositoryIdentity,
     package_name: str,
     rows: list[sqlite3.Row],
+    *,
+    version_specifier: str | None = None,
 ) -> DependencyRepositoryMatch:
     first = rows[0]
+    projection = (
+        store.package_projection(first, package_name, version_specifier=version_specifier) or {}
+    )
     resolved_versions = tuple(
         sorted(
             {str(row["resolved_version"]) for row in rows if row["resolved_version"] is not None}
@@ -300,11 +372,17 @@ def _match_from_rows(
     )
     return DependencyRepositoryMatch(
         repository=repository,
+        ecosystem=first["ecosystem"],
         package_name=package_name,
+        component_ids=tuple(
+            sorted({str(row["component_id"]) for row in rows if row["component_id"] is not None})
+        ),
+        selection_ids=tuple(sorted({str(row["node_id"]) for row in rows})),
         contexts=contexts,
         resolved_versions=resolved_versions,
         sources=sources,
         evidence=store.assessment(first),
+        producer_projection=projection,
         observed_at=datetime.fromisoformat(str(first["observed_at"])),
         fleet_run_id=str(first["fleet_run_id"]),
         operation_id=str(first["operation_id"]),
@@ -314,9 +392,10 @@ def _match_from_rows(
 
 
 def _package_query(value: str) -> str:
-    if not is_valid_package_name(value):
-        raise InvalidRequest("Dependency package must be a valid Python package name")
-    return normalize_package_name(value)
+    candidate = value.strip()
+    if not candidate or len(value) > 4096 or not value.isprintable():
+        raise InvalidRequest("Dependency package query must be bounded non-empty text")
+    return value
 
 
 def _repository_instance_map(repositories: Iterable[RepositoryIdentity]) -> dict[str, str]:

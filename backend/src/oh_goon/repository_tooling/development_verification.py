@@ -22,7 +22,6 @@ from oh_goon.engine.command import CommandCancelledError, CommandTimeoutExpired,
 from oh_goon.integrations.exact_file_write import publish_text_file
 from oh_goon.integrations.hashmarks import (
     nominate_changed_verification,
-    observe_repository_assets,
     require_current_dependency_environment,
     require_loaded_hashmarks_runtime,
     validate_required_dependency_introductions,
@@ -40,9 +39,11 @@ from oh_goon.repository_tooling.verification_gate_control import (
     HASHMARKS_UPGRADE_TESTS,
     STATIC_PROJECT_OBLIGATION,
     STATIC_PROJECT_OWNERS,
+    VERIFICATION_SUPPORT_OBLIGATION,
     admitted_documentation_assets,
     admitted_static_projects,
     behavioral_pytest_targets,
+    bounded_verification_support_targets,
     documentation_asset_candidates,
     documentation_proof_paths,
     hashmarks_upgrade_intent,
@@ -51,6 +52,7 @@ from oh_goon.repository_tooling.verification_gate_control import (
     native_changed_paths,
     non_executable_documentation,
     require_native_pytest_pass,
+    require_verification_support_proof,
     required_policy_obligations,
     required_policy_tests,
     required_static_obligations,
@@ -190,12 +192,12 @@ def _dependency_chain_qualified(
 ) -> bool:
     source = chain.get("source_path")
     consumer = chain.get("consumer")
-    ownership = chain.get("ownership")
+    changed = chain.get("changed_verification")
     projected = chain.get("nomination")
-    if not all(isinstance(value, Mapping) for value in (consumer, ownership, projected)):
+    if not all(isinstance(value, Mapping) for value in (consumer, changed, projected)):
         return False
     assert isinstance(consumer, Mapping)
-    assert isinstance(ownership, Mapping)
+    assert isinstance(changed, Mapping)
     assert isinstance(projected, Mapping)
     node = chain.get("node_id")
     consumer_node = introduced.get(node, node) if isinstance(node, str) else None
@@ -214,8 +216,8 @@ def _dependency_chain_qualified(
         or consumer.get("distribution_nodes") != [consumer_node]
         or consumer.get("import_claim_authority") != "source-observed-static-import"
         or not consumer.get("source_member")
-        or ownership.get("stale") is True
-        or source not in ownership.get("edit_candidates", [])
+        or changed.get("freshness") == "stale"
+        or changed.get("changed_paths") != [source]
         or projected not in nominations
         or projected.get("workspace_prefix") != ""
         or not isinstance(nomination, Mapping)
@@ -232,12 +234,22 @@ def _dependency_chain_qualified(
     ):
         return False
     target = nomination.get("verification_target", {}).get("path")
+    changes = changed.get("changes", [])
+    if len(changes) != 1 or changes[0].get("path") != source:
+        return False
+    if not any(
+        row.get("path") == target and row.get("nomination") == nomination
+        for row in changed.get("targets", [])
+    ):
+        return False
+    relationships = projected.get("relationships", [])
     return any(
-        row.get("path") == target
-        and source in row.get("covers_edit_candidates", [])
-        and row.get("coverage_evidence") in {"direct-reference", "bounded-indirect-reference"}
-        and projected.get("relationship") == row.get("coverage_evidence")
-        for row in ownership.get("verification_owners", [])
+        row in changes[0].get("relationships", [])
+        and row.get("source") == source
+        and row.get("target") == target
+        and row.get("relation_kind") in {"direct-reference", "bounded-indirect-reference"}
+        and row.get("evidence_identity")
+        for row in relationships
         if isinstance(row, Mapping)
     )
 
@@ -467,7 +479,27 @@ def _collect_pytest_proof(
     for row in evidence.get("observations", []):
         if row.get("changed_path") in excluded_paths:
             continue
-        if row.get("state") == "CHANGED_TEST" and row["changed_path"] not in selected:
+        pytest_self_nomination = any(
+            projected.get("nomination", {}).get("available") is True
+            and projected["nomination"].get("runner_evidence") == "pytest"
+            and projected.get("workspace_prefix", "")
+            + projected["nomination"].get("verification_target", {}).get("path", "")
+            == row.get("changed_path")
+            for projected in row.get("nominations", [])
+        )
+        vitest_self_nomination = any(
+            projected.get("nomination", {}).get("available") is True
+            and projected["nomination"].get("runner_evidence") == "vitest"
+            and projected.get("workspace_prefix", "")
+            + projected["nomination"].get("verification_target", {}).get("path", "")
+            == row.get("changed_path")
+            for projected in row.get("nominations", [])
+        )
+        if (
+            row.get("state") == "CHANGED_TEST"
+            and (pytest_self_nomination or not vitest_self_nomination)
+            and row["changed_path"] not in selected
+        ):
             missing.append(f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{row['changed_path']}")
         if row.get("state") == "LINKED":
             candidates = {
@@ -519,7 +551,11 @@ def admit_change(
         path for path in static_project_candidates(authored) if path not in removed_paths
     )
     if static_candidates:
-        evidence["static_project_evidence"] = [observe_repository_assets(root, static_candidates)]
+        evidence["static_project_evidence"] = [
+            row["changed_set"]
+            for row in evidence.get("observations", [])
+            if row.get("changed_path") in static_candidates and "changed_set" in row
+        ]
     documents = documentation_proof_paths(changed)
     if documents:
         evidence["documentation_policy"] = {
@@ -583,6 +619,7 @@ def admit_change(
         pytest.update(str(path) for path in qualified_policy_paths if path in required)
     observed_paths = {row.get("changed_path") for row in observations}
     upgrade_paths = {"backend/pyproject.toml", "backend/uv.lock"} if hashmarks_upgrade else set()
+    support_paths: set[str] = set()
     for path in authored:
         if path not in removed_paths and path not in observed_paths and path not in upgrade_paths:
             unverified.append(f"NO_PRODUCER_OBSERVATION:{path}")
@@ -613,15 +650,22 @@ def admit_change(
                 continue
         if (
             row.get("state") == "LINKED"
-            and path not in row.get("edit_candidates", [])
             and not (path == "backend/uv.lock" and dependency_qualified)
+            and row.get("changed_set", {}).get("changed_paths") != [path]
         ):
-            unverified.append(f"PRODUCER_SELECTED_ANOTHER_OWNER:{path}")
+            unverified.append(f"PRODUCER_CHANGE_SCOPE_UNVERIFIED:{path}")
             continue
-        if (Path(path).name == "conftest.py" or "/tests/factories/" in path) and row.get(
-            "qualification", {}
-        ).get("completeness") != "complete":
-            unverified.append(f"SHARED_FIXTURE_CONSUMER_SCOPE_UNVERIFIED:{path}")
+        native_support = any(
+            change.get("classification", {}).get("kind") == "verification-support"
+            for change in row.get("changed_set", {}).get("changes", [])
+        )
+        if (
+            native_support or Path(path).name == "conftest.py" or "/tests/factories/" in path
+        ) and row.get("qualification", {}).get("completeness") != "complete":
+            if bounded_verification_support_targets(row):
+                support_paths.add(path)
+            else:
+                unverified.append(f"SHARED_FIXTURE_CONSUMER_SCOPE_UNVERIFIED:{path}")
         admitted = 0
         for projected in row.get("nominations", []):
             nomination = projected["nomination"]
@@ -656,6 +700,20 @@ def admit_change(
             set(accepted_assets) | removed_paths | upgrade_paths | set(static_projects),
         )
         unverified.extend(unavailable)
+    if support_paths:
+        selected_files = {path.split("::", 1)[0] for path in pytest} | frontend
+        for row in observations:
+            support_path = row.get("changed_path")
+            if support_path in support_paths and not bounded_verification_support_targets(
+                row
+            ).intersection(selected_files):
+                unverified.append(f"SHARED_FIXTURE_CONSUMER_SCOPE_UNVERIFIED:{support_path}")
+        evidence["verification_support_admission"] = {
+            "authority": "oh-goon-execution-policy",
+            "scope": "positive-source-qualified-consumers",
+            "consumer_coverage": "not-claimed",
+            "paths": sorted(support_paths),
+        }
     if dependency_qualified and "collection" in evidence["dependency_admission"]:
         if not _bounded_dependency_scope(evidence, base_sha, selected_files=pytest):
             unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
@@ -682,7 +740,8 @@ def admit_change(
         + ((DOCUMENTATION_ASSET_OBLIGATION,) if accepted_assets else ())
         + ((DOCUMENTATION_PROOF_OBLIGATION,) if documents else ())
         + ((HASHMARKS_UPGRADE_OBLIGATION,) if hashmarks_upgrade else ())
-        + ((STATIC_PROJECT_OBLIGATION,) if static_projects else ()),
+        + ((STATIC_PROJECT_OBLIGATION,) if static_projects else ())
+        + ((VERIFICATION_SUPPORT_OBLIGATION,) if support_paths else ()),
     )
 
 
@@ -708,6 +767,11 @@ def require_current_plan(root: Path, plan: ChangeVerificationPlan) -> None:
         ):
             raise ValueError("Bounded dependency proof changed after admission")
         require_current_dependency_environment(plan.evidence["dependency_changes"])
+    require_verification_support_proof(
+        plan.model_dump(mode="json", by_alias=True),
+        plan.evidence,
+        {path.split("::", 1)[0] for path in plan.pytest} | set(plan.frontend),
+    )
 
 
 def _commands(root: Path, plan: ChangeVerificationPlan) -> list[tuple[str, tuple[str, ...], Path]]:

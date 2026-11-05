@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from oh_goon.core.dependency_identity import DependencyEcosystem
 from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet_observation import (
     DependencyObservationSnapshot,
@@ -23,15 +24,33 @@ from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import GitBranchState, OperationAction, Verdict, WorktreeState
-from oh_goon.integrations.hashmarks.dependencies import observe_locked_dependencies
+from oh_goon.integrations.hashmarks import observe_locked_dependencies
 from tests.factories.fleet_plan_targets import structural_execution_identity
 from tests.factories.operation_reports import make_operation_report
 
 
 def dependency_snapshot(
-    repository: Path, *packages: tuple[str, str]
+    repository: Path, *packages: tuple[str, str], ecosystem: DependencyEcosystem = "pypi"
 ) -> DependencyObservationSnapshot:
     repository.mkdir(parents=True, exist_ok=True)
+    if ecosystem == "npm":
+        (repository / "package-lock.json").write_text(
+            json.dumps(
+                {
+                    "name": "fixture-application",
+                    "version": "1.0.0",
+                    "lockfileVersion": 3,
+                    "packages": {
+                        "": {"name": "fixture-application", "version": "1.0.0"},
+                        **{
+                            "node_modules/" + name: {"name": name, "version": version}
+                            for name, version in packages
+                        },
+                    },
+                }
+            )
+        )
+        return observe_locked_dependencies(repository, ecosystem=ecosystem)
     chunks = [
         "version=1",
         "revision=1",
@@ -109,7 +128,7 @@ def dependency_report(
         worktree_state=WorktreeState.CLEAN,
         pyproject_sha256="2" * 64,
         uv_lock_sha256=hashlib.sha256((repository.path / "uv.lock").read_bytes()).hexdigest()
-        if snapshot.sources
+        if (repository.path / "uv.lock").is_file()
         else None,
     )
     return report.model_copy(

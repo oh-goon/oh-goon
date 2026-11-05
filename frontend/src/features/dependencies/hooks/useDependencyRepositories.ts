@@ -4,12 +4,11 @@ import { useTranslation } from "react-i18next";
 import { useApiClient } from "@/app/ApiClientProvider";
 import { useReadResource } from "@/app/reads/useReadResource";
 import { canonicalIdentity } from "@/domain/identity/canonicalValue";
-import type { DependencyEvidence } from "@/features/dependencies/model";
+import { matchesDependencyPackageIdentity, type DependencyEvidence, type DependencyPackageIdentity } from "@/features/dependencies/model";
 import type { ReadResource } from "@/domain/reads/ReadResource";
 import type { DependencyRepositoryPage } from "@generated/models";
 
-export interface DependencyRepositoryQuery {
-  packageName: string;
+export interface DependencyRepositoryQuery extends DependencyPackageIdentity {
   resolvedVersion: string;
   versionSpecifier: string;
   advisoryId: string;
@@ -22,7 +21,7 @@ export function useDependencyRepositories(query: DependencyRepositoryQuery): Rea
   const { t } = useTranslation();
   const request = useCallback(
     (signal: AbortSignal) => client.dependencyRepositories(
-      query.packageName,
+      { packageName: query.packageName, ecosystem: query.ecosystem },
       query.resolvedVersion || undefined,
       undefined,
       query.evidence,
@@ -32,7 +31,7 @@ export function useDependencyRepositories(query: DependencyRepositoryQuery): Rea
       query.advisoryId || undefined,
       { signal },
     ),
-    [client, query.advisoryId, query.evidence, query.offset, query.packageName, query.resolvedVersion, query.versionSpecifier],
+    [client, query.advisoryId, query.evidence, query.offset, query.packageName, query.ecosystem, query.resolvedVersion, query.versionSpecifier],
   );
   const identity = query.packageName ? canonicalIdentity(query) : null;
   return useReadResource<DependencyRepositoryPage>({
@@ -43,7 +42,7 @@ export function useDependencyRepositories(query: DependencyRepositoryQuery): Rea
     errorMessage: t("dependencies.errors.repositories"),
     request,
     validate: (value) => {
-      if (value.package_name !== query.packageName || value.offset !== query.offset || value.limit !== 25) {
+      if (!matchesDependencyPackageIdentity(query, value) || value.offset !== query.offset || value.limit !== 25) {
         throw new Error("Dependency repository response does not match the requested package page");
       }
     },

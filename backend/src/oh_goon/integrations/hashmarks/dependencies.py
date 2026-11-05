@@ -1,4 +1,4 @@
-"""Producer-owned uv evidence acquisition, qualification and source revalidation."""
+"""Native dependency acquisition and producer-owned projection/requalification."""
 
 from __future__ import annotations
 
@@ -13,7 +13,8 @@ from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from oh_goon.core.dependency_identity import normalize_package_name
+from oh_goon.core.dependency_identity import DependencyEcosystem
+from oh_goon.core.models.dependency_fleet import DependencyQueryIdentity
 from oh_goon.core.models.fleet_observation import (
     DependencyEvidenceAssessment,
     DependencyObservation,
@@ -36,7 +37,7 @@ _MAX_REQUIRED_DEPENDENCY_INTRODUCTIONS = 32
 @dataclass(frozen=True)
 class LockedInventoryAssessment:
     evidence: DependencyEvidenceAssessment
-    packages: frozenset[str] | None = None
+    projection: dict[str, Any] | None = None
 
 
 def _assessment(assessment: Mapping[str, Any]) -> DependencyEvidenceAssessment:
@@ -50,77 +51,212 @@ def _assessment(assessment: Mapping[str, Any]) -> DependencyEvidenceAssessment:
         availability=source["availability"],
         absence_admissible=inventory["negative_evidence"] == "admissible-within-declared-scope",
         reason=None if freshness == "current" else "lock-source-" + freshness,
+        producer_assessment=dict(assessment),
     )
 
 
-def observe_locked_dependencies(repository: Path) -> DependencyObservationSnapshot:
-    from hashmarks import CodeMap, hash_file
+def _projection_receipt(
+    projection: Mapping[str, Any], producer_implementation_identity: str
+) -> dict[str, Any]:
+    """Avoid copying the full retained inventory into each package query result.
+
+    Canonical Step evidence retains these raw domains. The producer's requested
+    package matches and every qualifier remain present; this disclosure receipt
+    is not an envelope accepted by the producer's retained requalification API.
+    """
+    observation = projection["observation"]
+    omitted = ("components", "selections", "inventory", "relationships", "module_ownership")
+    return {
+        **projection,
+        "producer_implementation_identity": producer_implementation_identity,
+        "observation": {key: value for key, value in observation.items() if key not in omitted},
+        "disclosure": {
+            "omitted_observation_fields": list(omitted),
+            "reason": "full-raw-domains-retained-in-original-step-observation",
+            "requalification_envelope": False,
+        },
+    }
+
+
+def dependency_version_predicate(ecosystem: DependencyEcosystem, expression: str) -> dict[str, Any]:
+    """Select the producer's ecosystem dialect without interpreting its expression."""
+    return {
+        "dialect": {"pypi": "pep440", "npm": "npm-semver"}[ecosystem],
+        "expression": expression,
+    }
+
+
+def _query_identity(
+    fact: Mapping[str, Any],
+    *,
+    ecosystem: DependencyEcosystem,
+    requested_name: str,
+    implementation: str,
+) -> DependencyQueryIdentity:
+    """Bind the supported native query fact without recreating its name semantics."""
+    engine = fact.get("engine")
+    pypi = ecosystem == "pypi"
+    if (
+        fact.get("schema") != "hashmarks.dependency-package-query-identity.v1"
+        or fact.get("ecosystem") != ecosystem
+        or fact.get("requested_name") != requested_name
+        or fact.get("semantics") != ("pypa-normalized-name.v1" if pypi else "opaque-exact-name.v1")
+        or fact.get("scope")
+        != "query-identity-only; retained-component-and-selection-ids-unchanged"
+        or fact.get("coordinate_existence") != "not-observed"
+        or not isinstance(fact.get("identity"), str)
+        or not fact["identity"]
+        or not isinstance(engine, Mapping)
+        or engine.get("name") != ("packaging" if pypi else "exact-text")
+        or engine.get("operation") != ("packaging.utils.canonicalize_name" if pypi else "equality")
+        or (
+            (not isinstance(engine.get("version"), str) or not engine["version"])
+            if pypi
+            else engine.get("version") is not None
+        )
+    ):
+        raise ValueError("Unsupported producer dependency query identity authority")
+    return DependencyQueryIdentity.model_validate(
+        {
+            "ecosystem": ecosystem,
+            "requested_name": requested_name,
+            "canonical_name": fact.get("canonical_name"),
+            "producer_implementation_identity": implementation,
+            "producer_evidence": dict(fact),
+        }
+    )
+
+
+def dependency_package_query_identity(
+    ecosystem: DependencyEcosystem, requested_name: str
+) -> DependencyQueryIdentity:
+    """Consume native ecosystem-qualified matching with its original provenance."""
+    from hashmarks import dependency_package_query_identity as native_query_identity
+
+    implementation = require_loaded_hashmarks_runtime()
+    return _query_identity(
+        native_query_identity(ecosystem, requested_name),
+        ecosystem=ecosystem,
+        requested_name=requested_name,
+        implementation=implementation,
+    )
+
+
+def _dependency_rows(
+    package: Mapping[str, Any], *, ecosystem: DependencyEcosystem, lock_path: str
+) -> tuple[DependencyObservation, ...]:
+    """Translate the producer's explicit positive inventory matches, without joins."""
+    return tuple(
+        DependencyObservation(
+            ecosystem=match["component"]["ecosystem"],
+            package_name=package["package_identity"]["canonical_name"],
+            component_id=match["component"]["component_id"],
+            node_id=match["selection"]["node_id"],
+            resolved_version=match["selection"]["version"],
+            resolved_source=lock_path,
+            package_source=match["selection"]["source"],
+            contexts=tuple(row["context"] for row in match["inventory"]),
+            relationships=tuple(match["relationships"]),
+            producer_package={key: value for key, value in package.items() if key != "matches"}
+            | {"matches": [match]},
+        )
+        for match in package["matches"]
+        if match["inventory"]
+    )
+
+
+def observe_locked_dependencies(
+    repository: Path,
+    *,
+    ecosystem: DependencyEcosystem = "pypi",
+    lock_path: str | None = None,
+) -> DependencyObservationSnapshot:
+    from hashmarks import CodeMap
+    from hashmarks.adapters.npm_dependency import npm_lock_dependency_observation
     from hashmarks.adapters.uv_dependency import uv_lock_dependency_observation
 
+    lock_path = (
+        {"pypi": "uv.lock", "npm": "package-lock.json"}[ecosystem]
+        if lock_path is None
+        else lock_path
+    )
     try:
+        implementation = require_loaded_hashmarks_runtime()
         with tempfile.TemporaryDirectory(prefix="oh-goon-dependency-evidence-") as directory:
             state = Path(directory)
             with CodeMap(
                 repository, state_dir=state, artifact_db=state / "artifacts.sqlite3"
             ) as native:
-                admitted = native.files.visible_file("uv.lock")
+                admitted = native.files.visible_file(lock_path)
                 if admitted is None or admitted.visibility.value != "source":
                     return DependencyObservationSnapshot(
+                        ecosystem=ecosystem,
                         evidence=DependencyEvidenceAssessment(
                             availability="unavailable",
-                            reason="uv.lock is not an admitted readable source file",
-                        )
+                            reason="Selected lock is not an admitted readable source file",
+                        ),
                     )
-                # Bounded byte transport follows native admission, so denied,
-                # symlink and special-file inputs are rejected before opening.
-                with (repository / "uv.lock").open("rb") as stream:
-                    lock = stream.read(_MAX_LOCK_BYTES + 1)
-                if len(lock) > _MAX_LOCK_BYTES:
-                    raise ValueError("uv.lock exceeds the dependency evidence byte budget")
-                captured = state / "captured.lock"
-                captured.write_bytes(lock)
-                revision = hash_file(captured).hash
-                adapter = uv_lock_dependency_observation(
-                    lock=lock, repository_inputs=[{"path": "uv.lock", "member_revision": revision}]
+                lock = _current_lock_bytes(native, repository.resolve(), lock_path)
+                revision = _captured_member_revision(lock)
+                adapter = {
+                    "pypi": uv_lock_dependency_observation,
+                    "npm": npm_lock_dependency_observation,
+                }[ecosystem](
+                    lock=lock, repository_inputs=[{"path": lock_path, "member_revision": revision}]
                 )
-                captured.unlink()
                 observation = cast(dict[str, Any], native.dependencies.observe(adapter))
                 assessment = _assessment(native.dependencies.assessment(observation))
-        selections = {row["node_id"]: row for row in observation["selections"]}
-        components = {row["component_id"]: row for row in observation["components"]}
-        members: dict[str, set[str]] = {}
-        for row in observation["inventory"]:
-            members.setdefault(row["node_id"], set()).add(row["context"])
-        relationships: dict[str, list[dict[str, Any]]] = {}
-        for edge in observation["relationships"]:
-            for endpoint in {edge["source"], edge["target"]}:
-                relationships.setdefault(endpoint, []).append(edge)
-        dependencies = tuple(
-            DependencyObservation(
-                package_name=components[selections[node_id]["component_id"]]["name"],
-                node_id=node_id,
-                resolved_version=selections[node_id]["version"],
-                package_source=selections[node_id]["source"],
-                contexts=tuple(sorted(contexts)),
-                relationships=tuple(relationships.get(node_id, ())),
-            )
-            for node_id, contexts in sorted(members.items())
-        )
+                # Native name correspondence scopes query deduplication only;
+                # retained component/selection identities remain unchanged.
+                from hashmarks import dependency_package_query_identity as native_query_identity
+
+                names = dict.fromkeys(
+                    (
+                        row["ecosystem"],
+                        _query_identity(
+                            native_query_identity(row["ecosystem"], row["name"]),
+                            ecosystem=row["ecosystem"],
+                            requested_name=row["name"],
+                            implementation=implementation,
+                        ).canonical_name,
+                    )
+                    for row in observation["components"]
+                )
+                selectors = [{"ecosystem": scope, "name": name} for scope, name in names]
+                dependencies: list[DependencyObservation] = []
+                retained: dict[str, Any] = {}
+                for start in range(0, len(selectors), 64):
+                    projection = cast(
+                        dict[str, Any],
+                        native.dependencies.projection(
+                            observation, packages=selectors[start : start + 64], limit=256
+                        ),
+                    )
+                    if not retained:
+                        retained = projection
+                    for package in projection["packages"]:
+                        dependencies.extend(
+                            _dependency_rows(package, ecosystem=ecosystem, lock_path=lock_path)
+                        )
         return DependencyObservationSnapshot(
-            sources=(ObservationSourceEvidence(path="uv.lock", member_revision=revision),),
+            ecosystem=ecosystem,
+            sources=(ObservationSourceEvidence(path=lock_path, member_revision=revision),),
             evidence=assessment,
-            producer_implementation_identity=require_loaded_hashmarks_runtime(),
+            producer_implementation_identity=implementation,
             adapter_observation=adapter,
             producer_observation=observation,
-            dependencies=dependencies if assessment.availability == "available" else (),
+            producer_projection=retained,
+            dependencies=tuple(dependencies) if assessment.availability == "available" else (),
         )
     except (OSError, RuntimeError) as exc:
         return DependencyObservationSnapshot(
-            evidence=DependencyEvidenceAssessment(availability="unavailable", reason=str(exc))
+            ecosystem=ecosystem,
+            evidence=DependencyEvidenceAssessment(availability="unavailable", reason=str(exc)),
         )
     except ValueError as exc:
         return DependencyObservationSnapshot(
-            evidence=DependencyEvidenceAssessment(availability="unsupported", reason=str(exc))
+            ecosystem=ecosystem,
+            evidence=DependencyEvidenceAssessment(availability="unsupported", reason=str(exc)),
         )
 
 
@@ -130,6 +266,13 @@ def assess_locked_dependencies(
     """Ask the producer to bind retained evidence to the current lock source."""
     from hashmarks import CodeMap
 
+    if snapshot.schema_version != 3:
+        return LockedInventoryAssessment(
+            DependencyEvidenceAssessment(
+                availability="unsupported",
+                reason="historical-dependency-observation-refresh-required",
+            )
+        )
     if snapshot.evidence.availability != "available":
         return LockedInventoryAssessment(
             snapshot.evidence.model_copy(
@@ -137,7 +280,8 @@ def assess_locked_dependencies(
             )
         )
     try:
-        if snapshot.producer_implementation_identity != require_loaded_hashmarks_runtime():
+        implementation = require_loaded_hashmarks_runtime()
+        if snapshot.producer_implementation_identity != implementation:
             return LockedInventoryAssessment(
                 DependencyEvidenceAssessment(
                     availability="unsupported", reason="producer-changed-refresh-inventory"
@@ -152,19 +296,67 @@ def assess_locked_dependencies(
             with CodeMap(
                 repository, state_dir=state, artifact_db=state / "artifacts.sqlite3"
             ) as native:
-                current = snapshot.producer_observation
-                assessment = native.dependencies.assessment(current)
-                selections = {row["node_id"]: row for row in current["selections"]}
-                components = {row["component_id"]: row for row in current["components"]}
-                packages = frozenset(
-                    normalize_package_name(
-                        components[selections[row["node_id"]]["component_id"]]["name"]
+                if snapshot.producer_projection:
+                    projection = cast(
+                        dict[str, Any], native.dependencies.requalify(snapshot.producer_projection)
                     )
-                    for row in current["inventory"]
+                    if projection["observation"] != snapshot.producer_observation:
+                        raise ValueError("Retained dependency projection changed its observation")
+                    return LockedInventoryAssessment(
+                        _assessment(projection["assessment"]),
+                        _projection_receipt(projection, implementation),
+                    )
+                # An empty inventory has no component selector. Its retained
+                # observation is still requalified by the same producer owner.
+                return LockedInventoryAssessment(
+                    _assessment(native.dependencies.assessment(snapshot.producer_observation))
                 )
-                return LockedInventoryAssessment(_assessment(assessment), packages)
     except (OSError, RuntimeError, ValueError) as exc:
         return LockedInventoryAssessment(DependencyEvidenceAssessment(reason=str(exc)))
+
+
+def project_dependency_package(
+    repository: Path,
+    snapshot: DependencyObservationSnapshot,
+    package_name: str,
+    *,
+    context: str | None = None,
+    version_specifier: str | None = None,
+) -> LockedInventoryAssessment:
+    """Ask the producer for presence/absence/predicate facts over retained evidence."""
+    from hashmarks import CodeMap
+
+    if snapshot.schema_version != 3:
+        raise ValueError("Historical dependency observation requires a fresh producer projection")
+    implementation = require_loaded_hashmarks_runtime()
+    if snapshot.producer_implementation_identity != implementation:
+        raise ValueError("Dependency projection producer changed; refresh inventory")
+    selector: dict[str, Any] = {"ecosystem": snapshot.ecosystem, "name": package_name}
+    if context is not None:
+        selector["context"] = context
+    if version_specifier is not None:
+        selector["version_predicate"] = dependency_version_predicate(
+            snapshot.ecosystem, version_specifier
+        )
+    with tempfile.TemporaryDirectory(prefix="oh-goon-dependency-projection-") as directory:
+        state = Path(directory)
+        with CodeMap(
+            repository, state_dir=state, artifact_db=state / "artifacts.sqlite3"
+        ) as native:
+            if snapshot.producer_projection:
+                retained = native.dependencies.requalify(snapshot.producer_projection)
+                if retained["observation"] != snapshot.producer_observation:
+                    raise ValueError("Retained dependency projection changed its observation")
+            projection = cast(
+                dict[str, Any],
+                native.dependencies.projection(
+                    snapshot.producer_observation, packages=[selector], limit=256
+                ),
+            )
+            return LockedInventoryAssessment(
+                _assessment(projection["assessment"]),
+                _projection_receipt(projection, implementation),
+            )
 
 
 def _captured_member_revision(data: bytes) -> str:
@@ -272,7 +464,7 @@ class _DistributionCapture:
 
 
 def _capture_distribution(selection: Mapping[str, Any]) -> _DistributionCapture:
-    name = normalize_package_name(selection["name"])
+    name = selection["name"]
     distributions = list(islice(distribution_metadata.distributions(name=name), 2))
     if len(distributions) != 1:
         raise ValueError(f"dependency requires one installed distribution: {name}")

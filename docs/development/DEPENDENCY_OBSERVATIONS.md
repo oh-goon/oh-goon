@@ -21,8 +21,11 @@ repository Runs → exceptions → Game Tape
 ## Evidence ownership
 
 The shipped `python/dependency-inventory` Goon is read-only and execution-free.
-The Step reads bounded `uv.lock` bytes and delegates interpretation and qualification
-to Hashmarks' uv adapter and dependency APIs. It does not invoke uv, install packages,
+The Step reads its explicitly selected bounded lock input and delegates interpretation and qualification
+to Hashmarks' ecosystem adapter and dependency APIs. Python/uv remains the default;
+npm requires an explicit ecosystem and defaults to `package-lock.json`. The
+optional `lock_path` selects another exact input; no lock discovery is performed.
+It does not invoke package managers, install packages,
 parse declarations or inspect the installed environment. Native uv still owns
 resolution and lock authoring.
 
@@ -78,9 +81,51 @@ Shared Runs consume the explicit repository IDs. There is no dependency-specific
 
 ## Advisory matching
 
-Oh Goon does not own a CVE database. The dependency surface may combine an explicitly supplied advisory identity and affected version range with observed resolved dependency versions. The initial range evaluator intentionally accepts only stable numeric comparisons such as `<2.18.0` or `>=2.0,<2.18.0`. Versions that cannot be compared safely are reported as unclassified, never silently safe.
+Oh Goon does not own a CVE database. The dependency surface combines an explicitly
+supplied advisory identity and affected version range with observed resolved
+dependency versions. Hashmarks owns version-predicate observations using native
+PEP 440 or npm semver semantics for the selected ecosystem. Unsupported predicates
+or versions remain unclassified, never silently safe.
 
 The advisory identity/range remains selection provenance. The dependency observation remains the evidence proving why a repository matched.
+
+## Ecosystem identity and retained history
+
+Every query, package selection and materialized filter carries ecosystem and
+package name together. Hashmarks supplies package query identity; Oh Goon does
+not apply Python normalization to npm names. Opaque producer component,
+resolution-node and context identities survive persistence independently of the
+searchable package name. Retained evidence is requalified by the producer rather
+than reconstructed from the searchable rows.
+
+Package responses retain the original requested spelling, canonical query name,
+native semantics/engine and producer identity together. Search keeps the caller's
+query text and qualifies it separately for each selected ecosystem. For PyPI,
+`MLFlow` matches `mlflow` while `ML_Flow` matches `ml-flow`; npm and scoped npm
+names retain exact native spelling. Materialized filters use the canonical name
+returned by the backend, so a qualified alias and its canonical spelling identify
+the same population without rewriting retained component or resolution-node IDs.
+
+Native inventory completeness and bounded package projection completeness are
+separate. The original observation and omission evidence remain retained when a
+package exceeds the projection limit. Its returned rows remain positive evidence;
+they cannot establish a complete filtered target population. Repository matching
+and target materialization then report an unverified population, including when
+the omitted resolutions would otherwise make an indexed result appear empty.
+Advisory classification keeps truncated predicate evidence unclassified rather
+than counting omitted resolutions as unaffected.
+
+Local database schema 93 stores ecosystem-qualified components. The existing
+exact-version durable-state policy refuses older physical databases before
+initialization writes; it does not migrate, reset or rewrite their history.
+Use the matching build to inspect retained older state, and a separately selected
+current database for this build after the original runtime has been quiesced;
+selecting a new database does not prove an old Run has stopped. Historical
+dependency Snapshot 2 payloads remain
+readable as historical evidence without invented component IDs or current
+qualification; fresh observation is required for current use. Resolved Plan
+contract 48 includes the explicit dependency-input authority; older executable
+Plans are not silently reinterpreted.
 
 ## Browser drill-down
 

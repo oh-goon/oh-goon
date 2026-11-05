@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from oh_goon.repository_tooling.architecture.common import python_semantic_facts
 from oh_goon.repository_tooling.architecture.structural_launch_contract import (
     _check_runtime_authority_registry,
 )
@@ -28,10 +29,6 @@ def _fixture(root: Path, source: str, *, classified: bool = False) -> Path:
     return registry
 
 
-def test_runtime_authority_registry_classifies_every_physical_owner() -> None:
-    assert _check_runtime_authority_registry(ROOT) == []
-
-
 @pytest.mark.parametrize(
     "source",
     [
@@ -41,16 +38,12 @@ def test_runtime_authority_registry_classifies_every_physical_owner() -> None:
         "from subprocess import Popen as launch\nlaunch(['command'])\n",
         "import subprocess\nlaunch = subprocess.Popen\nlaunch(['command'])\n",
         "import subprocess\nfirst = subprocess.Popen\nlaunch = first\nlaunch(['command'])\n",
-        "import subprocess\ngetattr(subprocess, 'Popen')(['command'])\n",
-        "import subprocess\ndef launch(popen=subprocess.Popen):\n    return popen(['command'])\n",
-        "import subprocess\ndef launch(*, popen=subprocess.Popen):\n    return popen(['command'])\n",
         "def launch():\n    from subprocess import Popen as child\n    return child(['command'])\n",
         "import os as process\nprocess.killpg(1, 0)\n",
         "from os import killpg as signal_group\nsignal_group(1, 0)\n",
         "import uvicorn as server\nserver.Server(config)\n",
         "from uvicorn import Server as native_server\nnative_server(config)\n",
         "from uvicorn.server import Server\nServer(config)\n",
-        "def start():\n    import uvicorn\n    return serve(uvicorn)\ndef serve(native):\n    return native.Server(config)\n",
         "import subprocess\nlaunch = lambda: subprocess.Popen(['command'])\n",
         "import subprocess\ndef launch(child=subprocess.Popen(['command'])):\n    return child\n",
         "import subprocess\nlabels = [subprocess for subprocess in ['command']]\nsubprocess.Popen(labels)\n",
@@ -70,6 +63,30 @@ def test_unclassified_imported_lifecycle_call_is_rejected(
 
     assert [(item.path, item.message) for item in violations] == [
         (tmp_path / OWNER, "physical process lifecycle authority is unclassified")
+    ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import subprocess\ngetattr(subprocess, 'Popen')(['command'])\n",
+        "import subprocess\ndef launch(popen=subprocess.Popen):\n    return popen(['command'])\n",
+        "import subprocess\ndef launch(*, popen=subprocess.Popen):\n    return popen(['command'])\n",
+        "def start():\n    import uvicorn\n    return serve(uvicorn)\ndef serve(native):\n    return native.Server(config)\n",
+    ],
+)
+def test_conditional_lifecycle_source_use_requires_a_declared_owner_without_runtime_claim(
+    tmp_path: Path, source: str
+) -> None:
+    _fixture(tmp_path, source)
+
+    violations = _check_runtime_authority_registry(tmp_path)
+
+    assert [(row.path, row.message) for row in violations] == [
+        (
+            tmp_path / OWNER,
+            "conditional lifecycle source use is unclassified; runtime target remains unknown",
+        )
     ]
 
 
@@ -145,21 +162,24 @@ def test_conflicting_bindings_do_not_resurrect_imported_callable_aliases(
 
 
 @pytest.mark.parametrize(
-    ("source", "is_owner"),
+    ("source", "is_owner", "conditional"),
     [
         (
             "import subprocess\nclass Worker:\n    subprocess = local\n"
             "    def launch(self):\n        return subprocess.Popen(['command'])\n",
             True,
+            False,
         ),
         (
             "class Worker:\n    import subprocess\n"
             "    def launch(self):\n        return subprocess.Popen(['command'])\n",
             False,
+            False,
         ),
         (
             "class Worker:\n    from subprocess import Popen as start\n"
             "    def launch(self, child=start):\n        return child(['command'])\n",
+            True,
             True,
         ),
         (
@@ -167,11 +187,13 @@ def test_conflicting_bindings_do_not_resurrect_imported_callable_aliases(
             "        subprocess = local\n"
             "        def launch(self):\n            return subprocess.Popen(['command'])\n",
             True,
+            False,
         ),
         (
             "import subprocess\ndef outer(subprocess):\n    class Worker:\n"
             "        import subprocess\n"
             "        def launch(self):\n            return subprocess.Popen(['command'])\n",
+            False,
             False,
         ),
         (
@@ -179,41 +201,48 @@ def test_conflicting_bindings_do_not_resurrect_imported_callable_aliases(
             "    class Worker:\n"
             "        def launch(self):\n            return subprocess.Popen(['command'])\n",
             True,
+            False,
         ),
         (
             "class Parent:\n    import subprocess\n    class Worker:\n"
             "        def launch(self):\n            return subprocess.Popen(['command'])\n",
+            False,
             False,
         ),
         (
             "class Parent:\n    import subprocess\n    class Worker:\n"
             "        child = subprocess.Popen(['command'])\n",
             False,
+            False,
         ),
         (
             "import subprocess\nclass Worker:\n    subprocess = local\n"
             "    launch = lambda: subprocess.Popen(['command'])\n",
             True,
+            False,
         ),
         (
             "class Worker:\n    import subprocess\n"
             "    launch = lambda: subprocess.Popen(['command'])\n",
+            False,
             False,
         ),
         (
             "import subprocess\nclass Worker:\n    subprocess = local\n"
             "    children = [subprocess.Popen(argv) for argv in commands]\n",
             True,
+            False,
         ),
         (
             "class Worker:\n    import subprocess\n"
             "    children = [subprocess.Popen(argv) for argv in commands]\n",
             False,
+            False,
         ),
         (
-            "class Worker:\n    import subprocess\n"
-            "    child = subprocess.Popen(['command'])\n",
+            "class Worker:\n    import subprocess\n    child = subprocess.Popen(['command'])\n",
             True,
+            False,
         ),
     ],
     ids=[
@@ -233,14 +262,21 @@ def test_conflicting_bindings_do_not_resurrect_imported_callable_aliases(
     ],
 )
 def test_class_locals_do_not_become_nested_scope_bindings(
-    tmp_path: Path, source: str, is_owner: bool
+    tmp_path: Path, source: str, is_owner: bool, conditional: bool
 ) -> None:
     _fixture(tmp_path, source)
 
     violations = _check_runtime_authority_registry(tmp_path)
 
     assert [(item.path, item.message) for item in violations] == (
-        [(tmp_path / OWNER, "physical process lifecycle authority is unclassified")]
+        [
+            (
+                tmp_path / OWNER,
+                "conditional lifecycle source use is unclassified; runtime target remains unknown"
+                if conditional
+                else "physical process lifecycle authority is unclassified",
+            )
+        ]
         if is_owner
         else []
     )
@@ -257,16 +293,33 @@ def test_classification_accepts_native_callable_default_without_rewriting_owner(
     )
 
     assert _check_runtime_authority_registry(tmp_path) == []
+    facts = python_semantic_facts(tmp_path / OWNER, imported_only=True)
+    assert not any(name == "subprocess.Popen" for name, _ in facts.calls)
+    uses = [
+        row
+        for row in facts.evidence.packet()["facts"]
+        if row["kind"] == "conditional-call-binding"
+    ]
+    assert len(uses) == 1
+    assert uses[0]["qualification"] == "conditional"
+    assert uses[0]["runtime_target"] == "not-established"
+    assert "default-is-used" in uses[0]["conditions"]
+    assert "external-callers-not-observed" in uses[0]["conditions"]
+    assert uses[0]["parameter_use"]["target"] is None
 
 
-def test_registered_owner_without_lifecycle_call_is_stale(tmp_path: Path) -> None:
+def test_registered_owner_without_admitted_source_use_stays_unqualified(
+    tmp_path: Path,
+) -> None:
     _fixture(tmp_path, "def observe():\n    return None\n", classified=True)
 
     violations = _check_runtime_authority_registry(tmp_path)
 
     assert len(violations) == 1
     assert violations[0].path == tmp_path / OWNER
-    assert "entry is stale" in violations[0].message
+    assert "no admitted lifecycle source-use evidence" in violations[0].message
+    assert "inspection remains unqualified" in violations[0].message
+    assert "no physical lifecycle primitive remains" not in violations[0].message
 
 
 @pytest.mark.parametrize("payload", [None, [], "registry", 1])

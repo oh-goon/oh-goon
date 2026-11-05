@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { StatusBadge } from "@/components/common/StatusBadge";
 import type { ReadResource } from "@/domain/reads/ReadResource";
-import type { DependencyCoverage, DependencyEvidence } from "@/features/dependencies/model";
+import type { DependencyCoverage, DependencyEvidence, DependencyPackageIdentity } from "@/features/dependencies/model";
 import type {
   DependencyAdvisoryOverview,
   DependencyCoverageRepository,
@@ -22,8 +22,7 @@ interface FilterState {
   offset: number;
 }
 
-interface Props extends FilterState {
-  packageName: string;
+interface Props extends FilterState, DependencyPackageIdentity {
   overview: ReadResource<DependencyPackageOverview>;
   advisory: ReadResource<DependencyAdvisoryOverview>;
   repositories: ReadResource<DependencyRepositoryPage>;
@@ -49,7 +48,7 @@ const resetMatchFilters = {
 };
 
 export function DependencyPackagePanel({
-  packageName, resolvedVersion, versionSpecifier, advisoryId, evidence, coverage, offset,
+  packageName, ecosystem, resolvedVersion, versionSpecifier, advisoryId, evidence, coverage, offset,
   overview, advisory, repositories, coverageRepositories, selecting,
   onBack, onFilter, onMaterialize, onOpenEvidence, onOpenRepository,
 }: Props) {
@@ -79,7 +78,7 @@ export function DependencyPackagePanel({
     <button className="text-button dependency-back" type="button" onClick={onBack}>← {t("dependencies.backToSearch")}</button>
     <section className="panel dependency-package-panel" aria-busy={loading}>
       <div className="section-heading dependency-package-heading"><div>
-        <span className="eyebrow">{t("dependencies.packageEyebrow")}</span>
+        <span className="eyebrow">{t("dependencies.packageEyebrow")} {ecosystem ?? data?.ecosystem}</span>
         <h2>{packageName}</h2>
         <p>{t("dependencies.packageDescription")}</p>
       </div>{data ? <span className="dependency-package-total"><strong>{data.observed_repositories}</strong><small>{t("dependencies.observedRepositories")}</small></span> : null}</div>

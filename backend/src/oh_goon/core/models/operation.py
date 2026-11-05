@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -154,10 +154,37 @@ class ToolchainResult(StrictModel):
     python: ToolVersionResult
 
 
+class ProjectDeclarationEvidence(StrictModel):
+    """Producer metadata disclosure; it does not resolve the environment."""
+
+    availability: Literal["observed"] = "observed"
+    producer_implementation_identity: str = Field(min_length=1)
+    observation_identity: str = Field(min_length=1)
+    repository: dict[str, Any]
+    provider: dict[str, Any]
+    declaration_group: dict[str, Any] | None
+    disclosure: Literal["python-project-declaration-only"] = "python-project-declaration-only"
+
+
+class ProjectDeclarationUnavailable(StrictModel):
+    """A producer input failure, without fabricated observation or absence."""
+
+    availability: Literal["unavailable"] = "unavailable"
+    producer_implementation_identity: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
 class PythonRuntimeResult(StrictModel):
     requires: str | None = None
     pin: str | None = None
     selected: str | None = None
+    project_declaration: (
+        Annotated[
+            ProjectDeclarationEvidence | ProjectDeclarationUnavailable,
+            Field(discriminator="availability"),
+        ]
+        | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class PreservedGitHead(StrictModel):
