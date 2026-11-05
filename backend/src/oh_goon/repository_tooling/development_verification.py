@@ -20,6 +20,7 @@ from pydantic import ConfigDict, Field
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.engine.command import CommandCancelledError, CommandTimeoutExpired, run_command
 from oh_goon.integrations.exact_file_write import publish_text_file
+from oh_goon.integrations.native_uv_lock import compare_native_uv_dependency_artifacts
 from oh_goon.integrations.hashmarks import (
     nominate_changed_verification,
     require_current_dependency_environment,
@@ -101,13 +102,15 @@ def _git(root: Path, *arguments: str) -> str:
     return result.stdout
 
 
-def _base_lock_bytes(root: Path, base: str) -> bytes:
+def _base_dependency_bytes(root: Path, base: str, path: str) -> bytes:
+    if path not in {"backend/uv.lock", "backend/pyproject.toml"}:
+        raise ValueError("Unsupported native dependency capture")
     observed = run_command(
         "git",
         "-C",
         str(root),
         "show",
-        f"{base}:backend/uv.lock",
+        f"{base}:{path}",
         timeout=20,
         max_capture_bytes_per_stream=4 * 1024 * 1024,
         require_process_group_quiescence=True,
@@ -125,6 +128,34 @@ def _base_lock_bytes(root: Path, base: str) -> bytes:
     ):
         raise ValueError("Native base lock transport does not preserve its exact source bytes")
     return encoded
+
+
+def _base_lock_bytes(root: Path, base: str) -> bytes:
+    return _base_dependency_bytes(root, base, "backend/uv.lock")
+
+
+def _current_dependency_bytes(root: Path, path: str) -> bytes:
+    if path not in {"backend/uv.lock", "backend/pyproject.toml"}:
+        raise ValueError("Unsupported native dependency capture")
+    source = root / path
+    if source.is_symlink() or not source.is_file():
+        raise ValueError("Native dependency input must be a regular project file")
+    with source.open("rb") as stream:
+        captured = stream.read(4 * 1024 * 1024 + 1)
+    if not captured or len(captured) > 4 * 1024 * 1024:
+        raise ValueError("Native dependency input is empty or exceeds its byte budget")
+    return captured
+
+
+def _native_hashmarks_artifact_comparison(root: Path, base: str) -> dict[str, Any]:
+    """Retain uv's non-Hashmarks export proof for the two exact dependency revisions."""
+    return compare_native_uv_dependency_artifacts(
+        before_manifest=_base_dependency_bytes(root, base, "backend/pyproject.toml"),
+        before_lock=_base_lock_bytes(root, base),
+        after_manifest=_current_dependency_bytes(root, "backend/pyproject.toml"),
+        after_lock=_current_dependency_bytes(root, "backend/uv.lock"),
+        excluded_packages=("hashmarks",),
+    )
 
 
 def capture_change(
@@ -576,6 +607,18 @@ def admit_change(
     pytest: set[str] = {DOCUMENTATION_PROOF_TEST} if documents else set()
     if hashmarks_upgrade:
         pytest.update(HASHMARKS_UPGRADE_TESTS)
+        if "backend/uv.lock" not in executable:
+            unverified.append("HASHMARKS_ARTIFACT_EQUIVALENCE_UNVERIFIED")
+        else:
+            try:
+                native_artifacts = _native_hashmarks_artifact_comparison(root, base_sha)
+            except (OSError, ValueError) as exc:
+                evidence["hashmarks_artifact_error"] = str(exc)[:512]
+                unverified.append("HASHMARKS_ARTIFACT_EQUIVALENCE_UNVERIFIED")
+            else:
+                evidence["hashmarks_native_artifacts"] = native_artifacts
+                if native_artifacts["equivalent"] is not True:
+                    unverified.append("HASHMARKS_NON_TARGET_ARTIFACT_CHANGED")
     frontend: set[str] = set()
     unverified: list[str] = []
     dependency_qualified = (
