@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -22,8 +24,77 @@ from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
-from oh_goon.core.vocabulary import FleetRunOutcome
+from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from tests.fakes.native_context import controlled_native_context
+
+
+@pytest.mark.process
+@pytest.mark.skipif(
+    sys.platform != "linux" or shutil.which("bwrap") is None, reason="Bubblewrap required"
+)
+@pytest.mark.parametrize("verification_value", [42, 43])
+def test_controlled_pi_retains_task_across_task_free_context_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verification_value: int
+) -> None:
+    """Portable receiver wiring; native compaction itself remains installed proof."""
+    with controlled_native_context(
+        tmp_path, monkeypatch, agent="pi", verification_value=verification_value
+    ) as case:
+        assert case.detail.outcome is (
+            FleetRunOutcome.SUCCESS
+            if verification_value == 42
+            else FleetRunOutcome.ATTENTION_REQUIRED
+        )
+        steps = case.detail.game_tape.repositories[0].steps
+        assert len(steps) == 2 and steps[0].status is GameTapeStatus.PASSED
+        assert steps[1].status is (
+            GameTapeStatus.PASSED if verification_value == 42 else GameTapeStatus.FAILED
+        )
+        for step in steps:
+            attempt = step.attempts[0]
+            assert attempt.standard_isolation is not None
+            assert (
+                attempt.standard_isolation.backend.configuration_id
+                == case.selected.backend_configuration_id
+            )
+            assert attempt.standard_isolation.host_and_external_ip_networking == "denied"
+            assert attempt.supervisor is not None
+            assert attempt.supervisor.final_process_group_quiescent
+        claims = steps[0].native_agent_observations
+        assert len(claims) == 1 and claims[0].agent == "pi"
+        assert claims[0].authority == "UNTRUSTED_HARNESS_CLAIM"
+        assert claims[0].settled and not claims[0].failed
+        assert any(event.kind == "agent" for event in claims[0].events)
+        assert any(event.kind == "context" for event in claims[0].events)
+        assert steps[1].native_agent_observations == ()
+        packet = case.prompt["repository_evidence"]
+        evidence = json.loads(packet)
+        assert evidence["producer_implementation_identity"] == require_loaded_hashmarks_runtime()
+        assert evidence["capture_identity"] == case.prompt["identity"]["candidate_identity"]
+        assert case.prompt["task"] == case.task
+        assert case.prompt["skill_instructions"] == case.skill_text
+        assert len(case.requests) == 3
+        for request in case.requests:
+            context = "\n".join(
+                message["content"]
+                for message in request["messages"]
+                if message["role"] in {"system", "developer"}
+            )
+            assert request["model"] == "fixture/model"
+            assert context.count(packet) == 1
+            assert context.replace(packet, "").count(case.skill_text) == 1
+            assert case.task in context.replace(packet, "").replace(case.skill_text, "")
+            assert all(
+                case.task not in message["content"]
+                for message in request["messages"]
+                if message["role"] == "user"
+            )
+            assert "host-only-key" not in json.dumps(request)
+        assert "host-only-key" not in case.detail.model_dump_json()
+        assert case.source.read_text() == "VALUE = 42\n"
+        reopened = case.runtime.runs.get(case.detail.run.fleet_run_id)
+        assert reopened == case.detail
 
 
 @pytest.mark.certification
@@ -119,7 +190,9 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 assert identity is not None and producer_evidence is not None
                 assert output_contract is not None
                 assert producer_evidence in privileged
-                assert task in all_text
+                assert task in privileged.replace(producer_evidence, "").replace(skill_text, ""), (
+                    "original task missing from privileged context outside evidence and Skill"
+                )
                 summarizing = (
                     "You are a context summarization assistant." in privileged
                     if agent == "pi"

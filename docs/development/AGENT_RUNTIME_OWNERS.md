@@ -113,6 +113,44 @@ implicit fallback or runtime/test deletion is justified by this review.
 Portable selection/refusal proof does not qualify installed tool/store isolation,
 real-account continuity, other hosts or the future Run-worker cutover.
 
+## Frozen context follow-up and compaction proof
+
+The [HUG-36 review](https://linear.app/hugloss/issue/HUG-36) reproduced a broker
+delivery defect: a task-free native follow-up retained Skill/evidence but lost
+the original task. The receiver now transports `prepared.task` to the existing
+broker, which restores that exact task separately from native history on every
+request. Missing context fails before channel creation; the unchanged selected
+provider/model, byte bounds, cancellation and native compaction owners remain.
+
+The [95-case broker owner](../../backend/tests/dependency_complete/test_agent_inference_broker.py)
+passes with four Chat Completions/Responses/Anthropic/Ollama task-free request
+scenarios and nine incomplete-context negatives. The
+[forged-handoff regression](../../backend/tests/unit/entrypoints/test_cli_ai.py)
+uses real CLI admission and three original Runs: forged prior-success, permission,
+model/profile and source/Skill claims cannot replace fresh authority or skip the
+independent failing verifier. This is controlled A-level protocol/authority
+proof, not installed native security or model-obedience proof.
+
+Six ordinary controlled-native cases in the CLI read-only, CLI compaction and
+Codex context owners also exercise the real receiving Step, broker, process,
+cleanup and independent verification. Four report/verifier controls were moved
+from the general native Run file, with two read-only typed/generic-role controls
+added through their shared test fixture. They send task/history-free requests;
+they do not emulate native compaction. A Task-erasure mutation still completed
+its Run but failed the privileged-task assertion; restoring the production bytes
+restores the valid baseline. The installed cases remain separate opt-in proof.
+
+Thirteen installed Linux context cases passed for the exact Codex/OpenCode/Pi
+versions and modes in the [dated compatibility observation](AGENT_HARNESS_COMPATIBILITY.md#frozen-context-continuity--2026-11-05).
+They cover real tool follow-up, native compaction and supported native protocol
+continuation using local provider fixtures. Live accounts, other environments,
+Pi persistent-session integration and product cross-Run native adoption remain
+unqualified; OpenCode protected service submission remains unsupported. No
+Run-worker qualification or earlier native claim is inherited.
+
+The later HUG-21 matrices retain their dated baseline. This observation updates
+only their SEC-07/T25 context and T27 forged-handoff gaps within the scopes above.
+
 ## Bounded authority census
 
 The implementation investigation started at commit
@@ -448,14 +486,20 @@ The existing owners enforce these contracts:
   execution scratch; native service configuration remains native-owned. Native process path semantics, shebangs, model settings,
   tool behavior and configuration precedence retain their native owners.
   Model/destination conflicts fail; there is no fallback provider or profile.
-- **Mandatory producer context.** Every admitted broker model request receives
-  the exact qualified initial Hashmarks presentation and selected Skill, including
-  native follow-up and compaction requests. This is context transport, not
+- **Mandatory frozen context.** For broker-managed native modes, the receiver supplies the original frozen
+  task, complete selected Skill and exact qualified Hashmarks presentation to the
+  existing broker. Every admitted model request receives those three inputs in a
+  privileged channel, including task-free native follow-up and compaction
+  requests. Native history is not the retained authority for the original task.
+  Missing inputs fail before broker socket creation; the existing request byte
+  budget includes the complete restored context. This is context transport, not
   compaction or relevance selection. Follow-up retrieval uses the existing
   Hashmarks CLI inside the boundary, with a read-only capture and disposable
   native index state. Bounded evidence never narrows a complete review scope.
-  Explicit headless local Codex sign-in profiles deliver the same captured
-  presentation and Skill as native session base instructions, with incremental
+  Prior-Run handoff remains separate bounded, explicitly untrusted context; it
+  cannot replace the frozen task or confer effects or verification authority.
+  Explicit headless local Codex sign-in profiles deliver the same frozen task,
+  captured presentation and Skill as native session base instructions, with incremental
   context disabled. Codex owns request construction, tools and compaction;
   Oh-Goon adds no authentication or agent loop. Its typed home/model/effort
   selection is frozen with the existing profile. The home is never copied,

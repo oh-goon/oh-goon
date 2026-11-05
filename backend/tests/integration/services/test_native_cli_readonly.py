@@ -10,7 +10,9 @@ import json
 import os
 import platform
 import shlex
+import shutil
 import subprocess
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -23,8 +25,72 @@ from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
-from oh_goon.core.vocabulary import FleetRunOutcome
+from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from tests.fakes.native_context import controlled_native_context
+
+
+@pytest.mark.process
+@pytest.mark.skipif(
+    sys.platform != "linux" or shutil.which("bwrap") is None, reason="Bubblewrap required"
+)
+@pytest.mark.parametrize("review_payload", ["typed", "generic"])
+def test_controlled_readonly_context_still_requires_typed_role_acceptance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    review_payload: Literal["typed", "generic"],
+) -> None:
+    """Real receiver/broker/process boundary with an explicitly controlled harness."""
+    with controlled_native_context(
+        tmp_path,
+        monkeypatch,
+        agent="opencode",
+        verification_value=42,
+        role="review",
+        review_payload=review_payload,
+    ) as case:
+        assert case.detail.outcome is (
+            FleetRunOutcome.SUCCESS
+            if review_payload == "typed"
+            else FleetRunOutcome.ATTENTION_REQUIRED
+        )
+        steps = case.detail.game_tape.repositories[0].steps
+        assert len(steps) == 2
+        assert steps[0].status is (
+            GameTapeStatus.PASSED if review_payload == "typed" else GameTapeStatus.FAILED
+        )
+        assert steps[1].status is (
+            GameTapeStatus.PASSED if review_payload == "typed" else GameTapeStatus.SKIPPED
+        )
+        attempt = steps[0].attempts[0]
+        assert attempt.standard_isolation is not None
+        assert attempt.standard_isolation.workspace_read_only
+        assert attempt.standard_isolation.broker_socket_mounted
+        assert attempt.supervisor is not None and attempt.supervisor.final_process_group_quiescent
+        assert case.source.read_text() == "VALUE = 42\n"
+        claims = steps[0].native_agent_observations
+        assert len(claims) == 1 and claims[0].settled
+        assert claims[0].authority == "UNTRUSTED_HARNESS_CLAIM"
+        assert steps[1].native_agent_observations == ()
+        packet = case.prompt["repository_evidence"]
+        assert case.prompt["task"] == case.task
+        assert case.prompt["skill_instructions"] == case.skill_text
+        assert len(case.requests) == 3
+        for request in case.requests:
+            context = "\n".join(
+                message["content"]
+                for message in request["messages"]
+                if message["role"] in {"system", "developer"}
+            )
+            assert context.count(packet) == 1
+            assert context.replace(packet, "").count(case.skill_text) == 1
+            assert case.task in context.replace(packet, "").replace(case.skill_text, "")
+            assert all(
+                case.task not in message["content"]
+                for message in request["messages"]
+                if message["role"] == "user"
+            )
+        assert case.runtime.runs.get(case.detail.run.fleet_run_id) == case.detail
 
 
 @pytest.mark.certification
@@ -149,6 +215,7 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                     "qualified Hashmarks/Skill context missing"
                 )
                 request_identity: dict[str, str] | None = None
+                request_evidence: str | None = None
                 for message in body["messages"]:
                     if message.get("role") != "user":
                         continue
@@ -171,7 +238,12 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                         )
                         assert payload["repository_evidence"] in privileged
                         request_identity = payload["identity"]
+                        request_evidence = payload["repository_evidence"]
                 assert request_identity is not None, "frozen user prompt identity missing"
+                assert request_evidence is not None
+                assert task in privileged.replace(request_evidence, "").replace(skill_text, ""), (
+                    "original task missing from privileged context outside evidence and Skill"
+                )
                 if identity is not None:
                     assert request_identity == identity, "frozen task identity changed"
                 identity = request_identity

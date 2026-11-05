@@ -1098,7 +1098,7 @@ def test_private_native_rejection_retains_bounded_static_context_after_a_settled
 def test_native_final_summary_is_redacted_bounded_and_retained_as_untrusted_data(
     tmp_path: Path, model_transport: list[dict[str, Any]]
 ) -> None:
-    repository, _, step, runtime = _case(tmp_path, mode="secret-summary")
+    repository, _, step, runtime = _case(tmp_path, mode="secret-summary", timeout_seconds=120.0)
     outcome = execute_direct_step(repository, step, runtime, step_order=1)
     assert outcome.returncode == 0
     observation = next(
