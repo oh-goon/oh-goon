@@ -2032,6 +2032,7 @@ def _hashmarks_upgrade(repository: Path) -> str:
     manifest = manifest.replace(
         "hashmarks==1", "hashmarks @ https://example.invalid/hashmarks-1.whl"
     )
+    lock = lock.replace(b"revision = 1\n", b'revision = 1\nrequires-python = ">=3.12"\n')
     (repository / "backend/pyproject.toml").write_text(manifest, encoding="utf-8")
     (repository / "backend/uv.lock").write_bytes(lock)
     owner._git(repository, "add", "backend")
