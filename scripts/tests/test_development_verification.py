@@ -3,13 +3,14 @@ from __future__ import annotations
 import copy
 import json
 import stat
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from oh_goon.engine.command import run_command
+from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.integrations.hashmarks.development_verification import (
     nominate_changed_verification,
     observe_repository_assets,
@@ -1027,6 +1028,97 @@ def test_selected_pytest_requests_compact_exact_membership_proof(
     assert result["status"] == "CHECKS_PASSED"
     assert len(commands) == 1 and commands[0][-1] == node
     assert result["outcomes"][0]["native_report"] == native
+
+
+def test_long_native_batch_diagnostics_preserve_failure_receipt_and_bounded_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    control = tmp_path / "control"
+    control.mkdir(mode=0o700)
+    node = "backend/tests/unit/test_behavior.py::test_behavior"
+    plan = owner.ChangeVerificationPlan(
+        base="a" * 40,
+        candidate="b" * 40,
+        source_identity="sha256:" + "c" * 64,
+        changed_paths=("behavior.py",),
+        static=(),
+        pytest=(node,),
+        frontend=(),
+        unverified=(),
+        evidence={},
+        behavioral_status="REQUIRED",
+        policy_status="ORDINARY",
+    )
+    native = {
+        "status": "FAIL",
+        "membership_receipt": {"selected": [node], "non_passed": [node]},
+        "failed_member": node,
+    }
+    observed: list[CommandResult] = []
+
+    def native_batch(*argv: str, **options: Any) -> CommandResult:
+        report = argv[argv.index("--report-path") + 1]
+        result = run_command(
+            sys.executable,
+            "-I",
+            "-c",
+            "import sys\nfrom pathlib import Path\n"
+            "Path(sys.argv[1]).write_text(sys.argv[2])\n"
+            "sys.stdout.write('member diagnostic ' * 6000 + '\\nBATCH_FINISHED\\n')\n"
+            "sys.stderr.write('failure diagnostic ' * 6000 + '\\nFAILURE_FINISHED\\n')\n"
+            "raise SystemExit(19)\n",
+            report,
+            json.dumps(native),
+            **options,
+        )
+        observed.append(result)
+        return result
+
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+    monkeypatch.setattr(owner, "run_command", native_batch)
+    plan_path = control / "plan.json"
+    result_path = control / "result.json"
+    owner._write_transport(plan_path, plan.model_dump(mode="json"), source)
+    assert (
+        owner.main(
+            [
+                "--root",
+                str(source),
+                "--execute",
+                str(plan_path),
+                "--report",
+                str(result_path),
+            ]
+        )
+        == 1
+    )
+    assert len(observed) == 1 and observed[0].returncode == 19
+    assert observed[0].stdout_truncated is True
+    assert observed[0].stdout_evidence is not None
+    assert observed[0].stdout_evidence.byte_count > 64 * 1024
+    assert len(observed[0].stdout.encode()) <= 64 * 1024
+    assert len(observed[0].stderr.encode()) <= 64 * 1024
+    assert observed[0].stdout.rstrip().endswith("BATCH_FINISHED")
+    assert observed[0].stderr.rstrip().endswith("FAILURE_FINISHED")
+    persisted = owner._read_json(result_path)
+    assert persisted["status"] == "FAIL"
+    assert persisted["outcomes"] == [
+        {"owner": "Native pytest", "returncode": 19, "native_report": native}
+    ]
+    output = capsys.readouterr()
+    assert len(output.out.encode()) > 64 * 1024
+    assert len(output.err.encode()) > 64 * 1024
+    summary = output.out.splitlines()[-1]
+    assert len(summary) < 500
+    assert json.loads(summary) == {
+        "status": "FAIL",
+        "candidate": plan.candidate,
+        "outcomes": [{"owner": "Native pytest", "returncode": 19}],
+    }
 
 
 def test_supported_hashmarks_adapter_returns_real_source_qualified_links(

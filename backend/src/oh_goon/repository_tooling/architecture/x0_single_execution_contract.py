@@ -15,6 +15,7 @@ from oh_goon.repository_tooling.architecture.common import (
     project_scripts_from_text,
     python_ast,
     python_semantic_facts,
+    source_import_spelling,
 )
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 
@@ -872,6 +873,18 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
             issues.append(Violation(path, "X0 AG-00 control source cannot be inspected"))
             continue
         facts = python_semantic_facts(path, imported_only=True)
+        # Absence policy must retain producer-reported possible forbidden
+        # bindings, including literal getattr aliases. A conditional candidate
+        # is not a qualified runtime target; preserve that distinction rather
+        # than dropping it through the unconditional convenience projection.
+        conditional_imports = {
+            source_import_spelling(fact["target"])
+            for fact in facts.evidence.packet()["facts"]
+            if fact.get("kind") in {"alias-binding", "reference"}
+            and fact.get("qualification") == "conditional"
+            and isinstance(fact.get("target"), dict)
+            and fact["target"].get("kind") == "import"
+        }
         if path not in native_protocol_owners:
             # Native wire/event meaning belongs to the adapters. Shared Step
             # acceptance, publication, campaign and domain owners consume the
@@ -893,6 +906,17 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
                             path, f"X0 native agent protocol outside adapter owner: {imported}"
                         )
                     )
+            for imported in sorted(conditional_imports - facts.imports - facts.references):
+                if any(
+                    imported == owner or imported.startswith(owner + ".") for owner in forbidden
+                ):
+                    issues.append(
+                        Violation(
+                            path,
+                            "X0 possible native agent protocol outside adapter owner "
+                            f"(conditional producer binding): {imported}",
+                        )
+                    )
         if not any(path.is_relative_to(package / part) for part in CONTROL_DIRS):
             continue
         agent_file = "agent" in path.stem.lower()
@@ -910,6 +934,21 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
                 if target in effect_calls:
                     issues.append(
                         Violation(path, f"X0 AG-00 agent adapter bypass effect: {target}")
+                    )
+            for fact, _node in facts.call_observations:
+                candidate = fact.get("target")
+                if (
+                    fact.get("qualification") == "conditional"
+                    and isinstance(candidate, dict)
+                    and candidate.get("kind") == "import"
+                    and (target := source_import_spelling(candidate)) in effect_calls
+                ):
+                    issues.append(
+                        Violation(
+                            path,
+                            "X0 AG-00 agent adapter bypass possible effect "
+                            f"(conditional producer target): {target}",
+                        )
                     )
             # Supplied capability receivers need not be imported symbols. Resolve
             # simple callable aliases without guessing arbitrary receiver types.

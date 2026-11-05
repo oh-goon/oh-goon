@@ -134,6 +134,51 @@ def test_adapter_callable_alias_cannot_bypass_effect_or_admission(
 @pytest.mark.parametrize(
     "source",
     [
+        "import os as native\n"
+        "getattr = lambda *args: lambda *params: None\n"
+        "launch = getattr(native, 'execve')\nlaunch('codex', [], {})\n",
+        "import os as native\ndef describe(getattr):\n"
+        "    launch = getattr(native, 'execve')\n    launch('codex', [], {})\n",
+        "from subprocess import Popen\ndef describe(factory=Popen):\n"
+        "    return factory(['codex'])\n",
+    ],
+)
+def test_unknown_shadowed_or_parameter_call_is_not_promoted_to_a_forbidden_target(
+    baseline: Path, source: str
+) -> None:
+    candidate = baseline / "backend/src/oh_goon/integrations/agent_harness_adapter.py"
+    candidate.write_text("def describe(request):\n    return request.argv\n")
+    assert _check(baseline) == []
+    candidate.write_text(source)
+    assert _check(baseline) == []
+
+
+def test_conditional_forbidden_candidate_remains_unqualified_execution_evidence(
+    baseline: Path,
+) -> None:
+    from oh_goon.repository_tooling.architecture.common import python_semantic_facts
+
+    candidate = baseline / "backend/src/oh_goon/integrations/agent_harness_adapter.py"
+    candidate.write_text("def describe(request):\n    return request.argv\n")
+    assert _check(baseline) == []
+    candidate.write_text(
+        "import os as operating_system\n"
+        "launch = getattr(operating_system, 'execve')\nlaunch('codex', [], {})\n"
+    )
+    facts = python_semantic_facts(candidate, imported_only=True)
+    assert not any(name == "os.execve" for name, _call in facts.calls)
+    assert any(
+        fact["qualification"] == "conditional"
+        and fact["conditions"] == ["unshadowed-builtin-getattr"]
+        and fact["runtime_target"] == "not-established"
+        for fact, _call in facts.call_observations
+    )
+    assert any("conditional producer target" in message for message in _check(baseline))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
         "from oh_goon.core.models.fleet_observation import NativeAgentObservation as Native\ndef accept(value):\n    return isinstance(value, Native)\n",
         "from oh_goon.core.models import fleet_observation as observations\ndef accept(value):\n    return isinstance(value, observations.NativeAgentObservation)\n",
         "from oh_goon.integrations import agent_codex_service as protocol\ndef choose():\n    return protocol.CodexServiceClient\n",
