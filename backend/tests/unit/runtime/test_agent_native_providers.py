@@ -19,6 +19,7 @@ from oh_goon.core.models.agent_providers import (
 )
 from oh_goon.integrations.agent_native_execution import (
     codex_login_command,
+    native_agent_command,
     verify_native_agent_executable,
 )
 from oh_goon.runtime.agent_providers import (
@@ -202,6 +203,131 @@ def test_native_inference_selects_public_snapshot_without_reading_credentials(
     assert selected.connection.selection.model == "exact-native-model"
     config.providers["host"].headers["X-Changed"] = "later"
     assert selected.connection.provider.headers == {}
+
+
+def test_reloaded_catalog_changes_only_fresh_native_selection(tmp_path: Path) -> None:
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    roots = [tmp_path / name for name in ("first-runtime", "second-runtime")]
+    for root in roots:
+        root.mkdir()
+    programs = [executable(root / "pi") for root in roots]
+    programs[1].write_bytes(b"#!/bin/sh\nexit 1\n")
+    catalog = tmp_path / "providers.json"
+
+    def write_catalog(name: str, index: int, api: str, thinking: str, temperature: float) -> None:
+        catalog.write_text(
+            json.dumps(
+                {
+                    "default_native_profile": name,
+                    "default_model": name,
+                    "providers": {
+                        name: {
+                            "api": api,
+                            "base_url": f"http://127.0.0.1:{11001 + index}/v1",
+                            "headers": {"X-Selection": name},
+                        }
+                    },
+                    "models": {
+                        name: {
+                            "provider": name,
+                            "model": name + "-model",
+                            "parameters": {"temperature": temperature},
+                        }
+                    },
+                    "native_agents": {
+                        "pi": {
+                            "executable": str(programs[index]),
+                            "runtime_roots": [str(roots[index])],
+                            "arguments": ["--thinking", thinking],
+                        }
+                    },
+                    "native_profiles": {
+                        name: {
+                            "backend": "bubblewrap",
+                            "inference_profile": name,
+                            "workspace_roots": [str(workspace)],
+                            "timeout_seconds": 30 + index,
+                        }
+                    },
+                }
+            )
+        )
+
+    write_catalog("first", 0, "openai-chat-completions", "low", 0.1)
+    config = load_agent_providers(catalog)
+    first = resolve_native_agent(config, "pi", None, workspace=workspace, environment={})
+    assert first.connection is not None
+    original = first.connection.resolve({})
+    config.providers["first"].headers["X-Selection"] = "changed-after-selection"
+    config.models["first"].parameters["temperature"] = 0.9
+
+    # The new catalog deliberately contains none of the prior provider/profile.
+    write_catalog("second", 1, "openai-responses", "high", 0.2)
+    fresh = load_agent_providers(catalog)
+    second = resolve_native_agent(fresh, "pi", None, workspace=workspace, environment={})
+    catalog.write_text("no longer valid configuration")
+    assert second.connection is not None
+    assert first.connection.resolve({}) == original
+    assert first.profile_name == "first" and second.profile_name == "second"
+    assert first.definition.runtime_roots == (str(roots[0]),)
+    assert second.definition.runtime_roots == (str(roots[1]),)
+    assert first.profile.timeout_seconds == 30 and second.profile.timeout_seconds == 31
+    assert first.connection.provider.headers == {"X-Selection": "first"}
+    assert second.connection.provider.headers == {"X-Selection": "second"}
+    for selected, index, api, thinking, temperature in (
+        (first, 0, "openai-chat-completions", "low", 0.1),
+        (second, 1, "openai-responses", "high", 0.2),
+    ):
+        verify_native_agent_executable(selected)
+        prompt = tmp_path / f"prompt-{index}.json"
+        prompt.write_text("{}")
+        command = native_agent_command(
+            selected, prompt_file=prompt, workspace=workspace, interactive=False
+        )
+        assert command.argv[0] == str(programs[index])
+        assert command.argv[command.argv.index("--thinking") + 1] == thinking
+        assert selected.connection is not None
+        model = selected.connection.resolve({})
+        assert model.provider.api == api
+        assert model.provider.base_url == f"http://127.0.0.1:{11001 + index}/v1"
+        assert model.model == selected.profile_name + "-model"
+        assert json.loads(model.parameters_json) == {"temperature": temperature}
+
+
+def test_native_alias_retarget_does_not_replace_or_rescue_a_frozen_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first_program = executable(tmp_path / "first-pi")
+    second_program = executable(tmp_path / "second-pi")
+    second_program.write_bytes(b"#!/bin/sh\nexit 1\n")
+    alias = tmp_path / "selected-pi"
+    alias.symlink_to(first_program)
+    catalog = tmp_path / "providers.json"
+    catalog.write_text(json.dumps({"native_agents": {"pi": {"executable": str(alias)}}}))
+    first = resolve_native_agent(
+        load_agent_providers(catalog), "pi", "local", workspace=tmp_path, environment={}
+    )
+    verify_native_agent_executable(first)
+
+    alias.unlink()
+    alias.symlink_to(second_program)
+    second = resolve_native_agent(
+        load_agent_providers(catalog), "pi", "local", workspace=tmp_path, environment={}
+    )
+    assert first.definition.executable == str(first_program)
+    assert second.definition.executable == str(second_program)
+    assert first.executable_sha256 != second.executable_sha256
+    verify_native_agent_executable(first)
+    verify_native_agent_executable(second)
+
+    # Neither the new catalog target nor an available PATH can rescue old work.
+    (tmp_path / "pi").symlink_to(second_program)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    first_program.unlink()
+    with pytest.raises(AgentProviderError, match="resolved identity"):
+        verify_native_agent_executable(first)
+    verify_native_agent_executable(second)
 
 
 def test_profile_rejects_escape_through_workspace_symlink(tmp_path: Path) -> None:

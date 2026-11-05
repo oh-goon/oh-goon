@@ -113,6 +113,21 @@ implicit fallback or runtime/test deletion is justified by this review.
 Portable selection/refusal proof does not qualify installed tool/store isolation,
 real-account continuity, other hosts or the future Run-worker cutover.
 
+## Frozen native selection through the Run worker
+
+Native ingress freezes the selected executable, profile and connection before
+admission. The [worker configuration](../../backend/src/oh_goon/_application_worker_runtime.py)
+also transports the existing scoped Git command owner's resolved workspace and
+selection, restoring it with the same admitted isolation backend and canonical
+workspace pin. It does not reload a catalog or accept an arbitrary injected
+callback. A different workspace or selection cannot reuse that frozen Git
+owner; it refuses before native preflight or Run admission. A changed
+default/provider selects new work only through fresh
+admission; original native service clients keep their own thread/turn and
+permission bindings. The [dated HUG-28 qualification](AGENT_HARNESS_COMPATIBILITY.md#frozen-selection-and-native-session-identity--2026-11-05)
+records the exercised scopes and retained limitations. It does not qualify
+cross-Run native-session adoption or transport-peer attestation.
+
 ## Frozen context follow-up and compaction proof
 
 The [HUG-36 review](https://linear.app/hugloss/issue/HUG-36) reproduced a broker
