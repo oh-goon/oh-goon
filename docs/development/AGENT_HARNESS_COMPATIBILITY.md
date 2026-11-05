@@ -206,6 +206,76 @@ unsupported under HUG-124. OpenCode service execution, Pi persistent sessions,
 cross-Run native-session adoption, live accounts, other hosts and strict custody
 remain outside this proof.
 
+## Shared conformance and compatibility subtraction — 2026-11-05
+
+[HUG-8](https://linear.app/hugloss/issue/HUG-8),
+[HUG-9](https://linear.app/hugloss/issue/HUG-9) and
+[HUG-49](https://linear.app/hugloss/issue/HUG-49) reconcile the existing matrix
+and registry after the claimed-worker cutover. The selected public implementations
+are Codex 0.164.0, OpenCode 2.1.2 and Pi 1.3.0 on this Linux host. Pi uses its
+exact released child entrypoint and complete public release root; the user
+launcher/authentication root is not a qualified runtime. Executable digests and
+loaded Hashmarks identity accompany the bounded native receipts, without
+claiming a seal of every imported runtime byte.
+
+The existing native pytest matrix supplies these automated results. **PASS**
+means the stated behavioral assertions passed, not that an intentionally failed,
+cancelled or timed-out Run succeeded. **REFUSED** is an exercised product
+boundary; **NOT QUALIFIED** is not promotion of historical or optional evidence.
+
+| Current scope | Codex 0.164.0 | Pi 1.3.0 | OpenCode 2.1.2 |
+| --- | --- | --- | --- |
+| Headless managed CLI success, later native error, caller cancel and deadline | PASS, four installed cases | PASS, four installed cases | PASS, four installed cases |
+| Native shell, read-only typed review and independent verifier | Lifecycle/source proof above; protected Code Mode has the separate HUG-38 scope | PASS, installed read-only case | PASS, installed read-only case |
+| Native context-overflow compaction and retained task/Skill/Hashmarks | Separate HUG-36/HUG-38 Codex context scopes, not rerun as new results here | PASS, installed overflow case | PASS, installed overflow case |
+| Owned service follow-up, same-thread resume/compaction, reserved directory absent/populated | PASS, two installed production-policy cases; original peer/liveness and cleanup retained | No product service mode | REFUSED execution; authenticated readiness is not session authority |
+| Fresh cross-harness Run handoff | PASS A-level Codex → Pi → OpenCode process fixture, fresh scoped runtime per selection, original failed verifier/readback preserved | Same fixture; ephemeral `--no-session` | Same fixture; separate original admission |
+| Product cross-Run native-session adoption | REFUSED cold identity/instruction replacement; no adoption workflow | REFUSED persistent session/continuation arguments | REFUSED service execution/continuation |
+| Live accounts/model quality, installed wheel, other hosts, overlapping mixed-harness Runs | NOT QUALIFIED by this bundle | NOT QUALIFIED by this bundle | NOT QUALIFIED by this bundle |
+
+The main installed lane passed **16/16** admitted cases: four read-only/overflow
+cases plus twelve lifecycle cases, with zero failed, skipped, reused, missing,
+duplicate or extra members. Two additional Codex reserved-directory cases pass.
+The lifecycle cases preserve distinct SUCCESS/FAILED/CANCELLED/TIMED_OUT
+settlement, actual native exit/cleanup evidence and unchanged Journal readback
+without another inference request. All selected model endpoints and native state
+are synthetic in a loopback-only namespace. This is not account or reasoning
+quality evidence.
+
+The mixed-harness fixture uses the fresh scoped runtime per selection landed in
+PR #150, preserving the same original database/Journal and the admission guard
+against reusing another selection's Git owner. This bundle additionally checks
+predecessor status, exit, settlement and native claims after each new Run.
+Existing three-Run source, typed-role, failed-verifier and untrusted-handoff
+checks remain. This A-level process chain does not become an installed
+three-harness repair demonstration.
+
+Uncovered extensions already have bounded owners: HUG-48 covers the installed
+mixed-harness chain; HUG-19/39/54/57 cover product Pi persistence and restored
+configuration; HUG-106 covers provider-owned history; HUG-107/108 cover detached
+work and control-stream origin; HUG-109/110 cover real accounts and host parity;
+HUG-122 covers actual overlap; HUG-96/123 cover release artifacts. HUG-181 owns
+worker crash/drain qualification. Their limits are not inherited from this
+matrix or silently implemented here.
+
+The source subtraction is limited to two unreachable assignments in
+`native_agent_command`: Codex/OpenCode `configuration_directory` values were
+already rejected before prepared-source access, yet later branches still tried
+to assign `CODEX_HOME`/`OPENCODE_CONFIG_DIR`. Those branches are deleted.
+The refusal remains, Pi's public configuration remains opaque and supported,
+and the managed disposable bootstrap remains the receiving owner. There is no
+compatibility alias or fallback left in their place. No protective test is
+deleted; positive Pi and before-source-access negative controls pass.
+
+Both active temporary adaptations below are **RETAIN**. Current installed
+counterfactual removal probes fail their gates: OpenCode terminal-only handling
+turns the valid success case into ATTENTION_REQUIRED; native direct-directory
+deny fails Codex's absent-directory startup with the placeholder collision.
+The populated Codex counterpart and all restored controls pass. Exact original
+source bytes were restored after each experiment. These are maintenance probes,
+not alternate production paths. No native version, runtime support bit, registry,
+execution route or qualification gate is introduced.
+
 ## Temporary adaptations and removal decisions
 
 ### OPENCODE-CLI-SETTLEMENT — retain pending installed replacement proof
@@ -213,6 +283,12 @@ remain outside this proof.
 - **Harness/mode and owner:** OpenCode CLI;
   [NativeAgentEventParser.finish][native], with state accumulated from the same
   bounded event stream.
+- **Live caller and supported scope:** headless
+  `execute_native_agent_step` → `parser.finish(returncode=...)` in the
+  [native receiver][receiver]. The batch `parse_native_agent_events` helper
+  delegates to this same parser and remains useful to tests/installed probes;
+  it is not another settlement owner. Current installed qualification is 2.1.2
+  in the selected managed Linux mode; other versions need their own evidence.
 - **Reason and current adaptation:** the implementation records OpenCode 2.1.2's
   `session.wait()`/reconciliation behavior, which can finish without `step_finish`.
   At physical EOF, completed nonblank text may supply the native completion claim
@@ -238,16 +314,21 @@ remain outside this proof.
   owner, then delete the completed-text alternative and obsolete fixtures
   together. The existing installed happy-path cases alone do not prove that
   removal condition.
-- **Last verification and disposition:** 2026-10-26, installed OpenCode 2.1.2:
+- **Last verification and disposition:** 2026-11-05, installed OpenCode 2.1.2:
   success emits `step_start` and final text without `step_finish`; the current
   completed-text adaptation is required. Streaming error fails with exit 1;
-  cancellation/deadline retain original process settlement. **Retain**; no fixed
-  upstream version is asserted.
+  cancellation/deadline retain original process settlement. Disabling only the
+  completed-text alternative fails the installed success case; restoring it
+  passes. **Retain**; no fixed upstream version is asserted.
 
 ### CODEX-SERVICE-RESERVED-DIRECTORY — retain; native replacement fails
 
 - **Harness/mode and owner:** Codex owned service;
   [service_arguments][codex-execution].
+- **Live caller and supported scope:** `execute_codex_service_run` calls
+  `service_arguments` for the original selected Step. Installed tests also call
+  the same policy owner directly. Current native qualification is 0.164.0 on the
+  selected Linux host; no broader version/environment range is inferred.
 - **Reason and current adaptation:** native Codex reserves workspace `.codex`
   read-only even when absent. The generated native policy grants the directory
   `read` while denying `.codex/**`; its source comment identifies a Linux
@@ -267,11 +348,12 @@ remain outside this proof.
   configuration reads and mutations for both absent and populated reserved
   directories, without the placeholder collision, while permitting required
   native startup. Replace the mapping and its obsolete fixtures together.
-- **Last verification and disposition:** 2026-10-26, installed Codex 0.164.0:
+- **Last verification and disposition:** 2026-11-05, installed Codex 0.164.0:
   current policy **PASS** for both states. A temporary direct-directory-deny
   replacement **FAILED** for the absent directory with native Bubblewrap's
   `Can't create file .../.codex: Is a directory`; it passed when populated.
-  **Retain** the current mapping. The failed experiment is removal evidence,
+  Fresh baseline/restored cases pass for both states. **Retain** the current
+  mapping. The failed experiment is removal evidence,
   not a second runtime path or a required fallback.
 
 ## Versioned qualification constraints
@@ -296,7 +378,7 @@ implementation; they do not erase their invariants.
 | Permanent instruction-delivery requirement | [Native receiver][receiver] consumes the frozen handoff. For broker-managed native modes, the existing broker receives the original task, complete selected Skill and qualified Hashmarks evidence from that input and restores them in a privileged channel on every request, independent of native history. Missing context fails before socket creation; request bounds include the complete context. [Broker negatives][broker-tests] cover task-free tool follow-up/compaction and incomplete context; [installed Codex context][codex-context-tests], [CLI compaction][cli-compaction-tests] and [service Run tests][codex-run-tests] cover selected real native paths. Codex sign-in/service modes retain their complete frozen native base instructions. This is required delivery, not a temporary workaround or another compaction owner. |
 | Product-owned service settlement | [Codex execution][codex-execution] combines native terminal-turn evidence with the original daemon's actual requested-shutdown receipt. **Retain** the original Step cancellation predicate before daemon birth, between preflight RPCs and before accepting notifications. [Service execution tests][codex-execution-tests] cover cancellation at preflight, turn/tool/compaction/terminal and shutdown boundaries with actual command-owner cleanup; [canonical settlement tests][settlement-tests] reject missing closure and failed turns. Normal daemon shutdown normalization stays outside campaign policy. These controlled boundaries do not extend installed-version or other-host qualification. |
 | Product-owned execution and evidence | The [runtime owner map](AGENT_RUNTIME_OWNERS.md) retains admission, source custody, process supervision, deadlines, cancellation, typed acceptance, independent verification, Journal and Game Tape. Harness-owned sessions, credentials, tools, reasoning and compaction do not acquire those authorities. |
-| Obsolete implementation, already withdrawn | The [native-store contract](../AGENT_PROVIDERS.md#native-owned-authentication-and-configuration) rejects the former protected credential-file mount route. [Native tests][native-tests] and [resolver tests][resolver-tests] check refusal before native state/source access. Do not retain aliases or restore the removed refresh helper as compatibility. |
+| Obsolete implementation, withdrawn | The [native-store contract](../AGENT_PROVIDERS.md#native-owned-authentication-and-configuration) rejects the former protected credential-file mount route. On 2026-11-05 its two unreachable Codex/OpenCode configuration-directory environment assignments were also deleted. [Native tests][native-tests] retain before-source-access refusal and Pi's legitimate public configuration. Managed disposable bootstraps and explicit native-owned login/service homes remain active. Do not restore credential-file aliases or the removed refresh helper as compatibility. |
 | Obsolete OpenCode CLI fixture, removed | The configured-MCP fixture selected the retired `configuration_directory` route and failed before admission. Disposition: **removed** both immediate/delayed MCP variants and obsolete configuration-byte assertions; [read-only review][cli-readonly-tests] now uses the current disposable managed bootstrap. Fixture removal changed no native execution path and restored no native configuration mount. |
 
 Codex sign-in source disposition (2026-11-04): **simplify** the existing
@@ -487,6 +569,16 @@ implementation using the existing test owners. Delete an obsolete adaptation,
 its retired fixtures and its superseded documentation together; unknown evidence
 remains unverified. Permanent product responsibilities remain with their current
 owners.
+
+For each affected record, verify the selected implementation/mode/environment,
+actual production callers, protected invariant, positive and adversarial proof,
+and falsifiable replacement/removal condition. Run a valid baseline before a
+removal experiment; a failed replacement is a retain decision, not permission
+to weaken the invariant. Preserve still-applicable refusal and failure tests,
+and account for any deleted source/test protection at its accepting owner.
+Native personal configuration, authentication and session data are not cleanup
+targets. Review methods may use the pinned external cookbook; that checkout and
+its prose never become an additional product or merge gate.
 
 Keep this inventory's owner/test links current through ordinary tooling review.
 Reference checks establish navigability only; document wording, row count or a

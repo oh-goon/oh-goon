@@ -6,6 +6,10 @@ import pytest
 
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import OperationNotFound, RepositoryEffectQuarantined
+from oh_goon.core.models.effect_attempt import (
+    ClaimedRepositoryEffectAttempt,
+    EffectStartedRepositoryEffectAttempt,
+)
 from oh_goon.core.models.effect_origin import FleetEffectOrigin
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
@@ -16,11 +20,13 @@ from oh_goon.core.vocabulary import (
     EffectAttemptOwner,
     EffectAttemptStatus,
     EffectBoundaryKind,
+    FleetRunEventType,
     FleetRunStatus,
     FleetRunTerminalIntent,
     OperationAction,
 )
 from oh_goon.core.vocabulary.fleet import FleetScope
+from oh_goon.engine.command import CommandProcessLifecycleEvent, observe_command_processes
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
 from oh_goon.runtime.database import LocalDatabase
@@ -84,6 +90,29 @@ def _begin_unknown_fleet(
 ):
     identity = RepositoryIdentity(name=repository.name, path=repository)
     operation_id = repository_attempt_operation_id(fleet_run_id, identity.repository_id)
+    journal = Journal(database)
+    if journal.read_view().run_detail(fleet_run_id) is None:
+        admit_test_run(journal, fleet_run_id, OperationAction.UPDATE, [identity])
+        start_run(journal, fleet_run_id)
+
+    def observe(event: CommandProcessLifecycleEvent) -> None:
+        journal.record_execution_lifecycle(
+            fleet_run_id=fleet_run_id,
+            repository_id=identity.repository_id,
+            operation_id=operation_id,
+            event_type=FleetRunEventType(event.kind),
+            physical_execution_id=event.physical_execution_id,
+            pid=event.pid,
+            process_identity=event.process_identity,
+            returncode=event.returncode,
+            termination_reason=event.termination_reason,
+        )
+
+    # These recovery-policy fixtures lose the effect result after actual native
+    # preparation has settled. Preserve its real resource receipt; missing
+    # process evidence is a separate refusal case in worker recovery tests.
+    with observe_command_processes(observe):
+        baseline = baseline_for(repository)
     with database.transaction(write=True) as connection:
         attempts.begin_fleet_in(
             connection,
@@ -92,7 +121,7 @@ def _begin_unknown_fleet(
             fleet_run_id=fleet_run_id,
             operation_id=operation_id,
             target=None,
-            baseline=baseline_for(repository),
+            baseline=baseline,
             effect_boundary=EffectBoundaryKind.EXTERNAL,
         )
         attempts.start_effect_in(connection, operation_id)
@@ -463,7 +492,9 @@ class _AmbiguousAttemptMutationSession:
 
     def mutate(self, mutate):
         result = self._session.mutate(mutate)
-        if not self._lost:
+        if not self._lost and isinstance(
+            result, (ClaimedRepositoryEffectAttempt, EffectStartedRepositoryEffectAttempt)
+        ):
             self._lost = True
             if self._after_commit is not None:
                 self._after_commit()
@@ -530,15 +561,17 @@ def test_fleet_claim_replays_exact_attempt_after_ambiguous_commit_response(tmp_p
     )
     session = execution.activate(ticket)
 
+    ambiguous = _AmbiguousAttemptMutationSession(session)
     result = effects.execute_fleet_target(
         resolve_capability_intent(OperationAction.UPDATE),
         capability_snapshot(OperationAction.UPDATE),
         entry,
-        _AmbiguousAttemptMutationSession(session),  # type: ignore[arg-type]
+        ambiguous,  # type: ignore[arg-type]
     )
     session.finish(lambda _connection: None)
 
     assert runner.calls == 1
+    assert ambiguous._lost
     assert journal.operation(result.report.provenance.operation_id) == result.report
     with pytest.raises(OperationNotFound):
         attempts.get(result.report.provenance.operation_id)
@@ -550,13 +583,15 @@ def test_execution_input_binding_replays_after_ambiguous_commit_response(tmp_pat
         _direct_effect_case(tmp_path, runner)
     )
 
+    ambiguous = _AmbiguousAttemptMutationSession(execution.activate(ticket))
     result = effects.execute_direct_claimed(
         attempt=attempt,
         intent=intent,
-        session=_AmbiguousAttemptMutationSession(execution.activate(ticket)),  # type: ignore[arg-type]
+        session=ambiguous,  # type: ignore[arg-type]
     )
 
     assert runner.calls == 1
+    assert ambiguous._lost
     assert result.report == journal.require_operation(operation_id)
     with pytest.raises(OperationNotFound):
         attempts.get(operation_id)
@@ -570,13 +605,15 @@ def test_effect_started_marker_replays_before_runner_after_ambiguous_commit_resp
         _direct_effect_case(tmp_path, runner)
     )
 
+    ambiguous = _AmbiguousAttemptMutationSession(execution.activate(ticket))
     result = effects.execute_direct_claimed(
         attempt=attempt,
         intent=intent,
-        session=_AmbiguousAttemptMutationSession(execution.activate(ticket)),  # type: ignore[arg-type]
+        session=ambiguous,  # type: ignore[arg-type]
     )
 
     assert runner.calls == 1
+    assert ambiguous._lost
     assert result.report == journal.require_operation(operation_id)
     with pytest.raises(OperationNotFound):
         attempts.get(operation_id)

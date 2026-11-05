@@ -138,6 +138,22 @@ def _linux_process_scope_has_live_member(scope_id: int, *, session: bool) -> boo
                 continue
             state = fields[0]
             identity = int(fields[3 if session else 2])
+        except (FileNotFoundError, ProcessLookupError):
+            # A PID can retire between readdir and stat. Ask the kernel about
+            # that exact entry instead of turning unrelated process churn into
+            # an unavailable whole inventory. ESRCH establishes disappearance;
+            # a surviving member/unknown probe still prevents quiescence.
+            try:
+                identity = (os.getsid if session else os.getpgid)(int(entry.name))
+            except ProcessLookupError:
+                continue
+            except OSError:
+                incomplete = True
+                continue
+            inspected = True
+            if identity == scope_id:
+                return True
+            continue
         except (OSError, ValueError, UnicodeError):
             # A disappearing/inaccessible process may be a member of the
             # group being fenced.  An incomplete /proc inventory cannot

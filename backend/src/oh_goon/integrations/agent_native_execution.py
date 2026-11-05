@@ -288,8 +288,6 @@ def native_agent_command(
     configuration = selected.definition.configuration_directory
     environment: dict[str, str] = {}
     if selected.agent == "opencode":
-        if configuration is not None:
-            environment["OPENCODE_CONFIG_DIR"] = configuration
         if interactive:
             # Native configuration owns how this additional instruction source
             # composes with the user's own settings and prompt machinery.
@@ -312,8 +310,6 @@ def native_agent_command(
             ),
         )
     else:
-        if configuration is not None:
-            environment["CODEX_HOME"] = configuration
         argv = (
             executable,
             "--no-daemon",

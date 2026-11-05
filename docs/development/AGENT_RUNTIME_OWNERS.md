@@ -128,6 +128,15 @@ permission bindings. The [dated HUG-28 qualification](AGENT_HARNESS_COMPATIBILIT
 records the exercised scopes and retained limitations. It does not qualify
 cross-Run native-session adoption or transport-peer attestation.
 
+The [HUG-8/9/49 conformance and subtraction review](AGENT_HARNESS_COMPATIBILITY.md#shared-conformance-and-compatibility-subtraction--2026-11-05)
+refreshes selected native lifecycle/review/compaction evidence and both temporary
+adaptation removal decisions after the worker cutover. Fresh cross-harness work
+uses a newly selected scoped runtime with the same original Journal, preserving
+earlier failed verification and untrusted prior context. Two unreachable
+Codex/OpenCode configuration-directory assignments are removed; their early
+refusal, Pi's public configuration, managed bootstraps and original settlement
+owners remain. The older census below retains its dated source and scopes.
+
 ## Frozen context follow-up and compaction proof
 
 The [HUG-36 review](https://linear.app/hugloss/issue/HUG-36) reproduced a broker

@@ -15,6 +15,7 @@ import pytest
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from oh_goon.core.models.goon_plan_source import PlanFileSource
 from oh_goon.core.vocabulary import FleetRunSource, FleetRunStatus
+from oh_goon.runtime.execution import RunExecutionSupervisor
 from oh_goon.services.fleet_plans import FleetPlanService
 from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
@@ -48,6 +49,7 @@ def _real_owner(*, provisioned_ids: tuple[str, ...] | None, authenticated: bool 
     )
     control = object.__new__(FleetRunControlPlane)
     control._lifecycle = lifecycle
+    control._supervisor = RunExecutionSupervisor()
     return FleetPlanService(_ForbiddenResolver(), control, object(), object(), object()), control
 
 

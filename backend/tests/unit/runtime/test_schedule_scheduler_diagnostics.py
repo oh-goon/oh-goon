@@ -3,7 +3,9 @@ from __future__ import annotations
 import pytest
 
 from oh_goon.core.vocabulary import BackgroundFailureStage
+from oh_goon.runtime.lifecycle import RuntimeDrainPolicy
 from oh_goon.runtime.schedule_scheduler import ScheduleScheduler
+from oh_goon.services.fleet_run_control_plane import FleetRunShutdownObservation
 
 
 class _Diagnostics:
@@ -12,6 +14,22 @@ class _Diagnostics:
 
     def emit(self, event) -> None:
         self.events.append(event)
+
+
+class _RunsStub:
+    """An empty owned-Run drain; it cannot close the application or scheduler lease."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.policies: list[RuntimeDrainPolicy] = []
+
+    def quiesce(self) -> None:
+        self.calls.append("quiesce")
+
+    def shutdown(self, *, wait: bool, policy: RuntimeDrainPolicy) -> FleetRunShutdownObservation:
+        self.calls.append(f"shutdown:{wait}")
+        self.policies.append(policy)
+        return FleetRunShutdownObservation(run_ids=(), containment_deadline=0.0)
 
 
 def test_scheduler_emits_diagnostic_without_replacing_typed_background_failure() -> None:
@@ -159,37 +177,33 @@ def test_stop_timeout_keeps_runtime_quiescing_and_fleet_open() -> None:
     from oh_goon.application import ApplicationRuntime
     from oh_goon.runtime.lifecycle import RuntimeLifecycle, RuntimeLifecycleState
 
+    scheduler_error = RuntimeError(
+        "schedule scheduler worker did not stop before the bounded shutdown deadline"
+    )
+
     class SchedulerStub:
         def stop(self) -> None:
-            raise RuntimeError(
-                "schedule scheduler worker did not stop before the bounded shutdown deadline"
-            )
-
-    class RunsStub:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-
-        def quiesce(self) -> None:
-            self.calls.append("quiesce")
-
-        def cancel_active_for_shutdown(self) -> None:
-            self.calls.append("cancel")
-
-        def shutdown(self, *, wait: bool = True) -> None:
-            self.calls.append(f"shutdown:{wait}")
+            assert runs.calls == ["quiesce"]
+            assert lifecycle.state is RuntimeLifecycleState.QUIESCING
+            raise scheduler_error
 
     runtime = object.__new__(ApplicationRuntime)
     lifecycle = RuntimeLifecycle()
-    runs = RunsStub()
+    runs = _RunsStub()
     object.__setattr__(runtime, "_lifecycle", lifecycle)
     object.__setattr__(runtime, "_schedule_scheduler", SchedulerStub())
     object.__setattr__(runtime, "runs", runs)
 
-    with pytest.raises(RuntimeError, match="did not stop before the bounded shutdown deadline"):
+    with pytest.raises(
+        RuntimeError, match="did not stop before the bounded shutdown deadline"
+    ) as raised:
         runtime.shutdown(wait_for_runs=False)
 
+    assert raised.value is scheduler_error
+    assert not getattr(raised.value, "__notes__", ())
     assert lifecycle.state is RuntimeLifecycleState.QUIESCING
-    assert runs.calls == []
+    assert runs.calls == ["quiesce", "shutdown:True"]
+    assert runs.policies == [RuntimeDrainPolicy(drain_seconds=0.0)]
 
 
 def test_stop_closes_tick_admission_until_a_new_scheduler_generation_starts() -> None:
@@ -237,32 +251,24 @@ def test_runtime_cannot_close_while_scheduler_tick_retains_mutation_lease(
     tick_thread.start()
     assert started.wait(timeout=1.0)
 
-    class RunsStub:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-
-        def quiesce(self) -> None:
-            self.calls.append("quiesce")
-
-        def cancel_active_for_shutdown(self) -> None:
-            self.calls.append("cancel")
-
-        def shutdown(self, *, wait: bool = True) -> None:
-            self.calls.append(f"shutdown:{wait}")
-
     runtime = object.__new__(ApplicationRuntime)
-    runs = RunsStub()
+    runs = _RunsStub()
     object.__setattr__(runtime, "_lifecycle", lifecycle)
     object.__setattr__(runtime, "_schedule_scheduler", scheduler)
     object.__setattr__(runtime, "runs", runs)
 
     clock = iter((30.0, 30.2, 31.1))
     monkeypatch.setattr(module.time, "monotonic", lambda: next(clock))
-    with pytest.raises(RuntimeError, match="did not stop before the bounded shutdown deadline"):
+    with pytest.raises(
+        RuntimeError, match="did not stop before the bounded shutdown deadline"
+    ) as raised:
         runtime.shutdown(wait_for_runs=False)
 
+    assert not getattr(raised.value, "__notes__", ())
     assert lifecycle.state is RuntimeLifecycleState.QUIESCING
-    assert runs.calls == []
+    assert runs.calls == ["quiesce", "shutdown:True"]
+    assert runs.policies == [RuntimeDrainPolicy(drain_seconds=0.0)]
+    assert tick_thread.is_alive() and not release.is_set()
     assert durable_mutations == []
 
     release.set()
