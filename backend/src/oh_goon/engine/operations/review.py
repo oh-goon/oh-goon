@@ -27,6 +27,7 @@ def run(context: OperationContext) -> OperationExecution:
     before_observation = context.git.observe(
         context.attempt.repository.path, context.cancel_requested
     )
+    before_observation.require_repository()
     before = before_observation.fingerprint
     policy = policy_snapshot(context.attempt.repository.path)
     if before_observation.changed_files != ("uv.lock",):
@@ -132,6 +133,7 @@ def _report(
     after_observation = context.git.observe(
         context.attempt.repository.path, context.cancel_requested
     )
+    after_observation.require_repository()
     after = after_observation.fingerprint
     clean = not after_observation.changed_files
     git = mutation_git_result(

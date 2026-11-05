@@ -45,7 +45,7 @@ def test_native_observation_and_journal_settlement_share_one_write_cut(
     monkeypatch.setattr(recovery._settlement, "apply_reconciliation_in", settlement)
 
     evidence = recovery.reconcile(attempt.operation_id)
-    assert evidence.reconciliation.retry_safe
+    assert not evidence.reconciliation.retry_safe
     assert len(observed) == len(settled) == 1
     assert observed[0] is settled[0]
     assert journal.read_view().latest_effect_reconciliation(attempt.operation_id) == evidence

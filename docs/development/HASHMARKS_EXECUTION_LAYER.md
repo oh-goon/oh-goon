@@ -238,6 +238,42 @@ Detailed producer implementation provenance is unavailable until a supported
 public diagnostic API exists; the public loaded implementation identity remains
 authoritative.
 
+## Native Git witnesses and repository content
+
+`GitService.observe()` owns the native Git witness used by init, plan, update,
+review, migration, Fleet attempts and managed-workspace lifecycle. Git branch,
+HEAD, status and changed paths retain Git's scope. A rename includes its source
+and destination for allowed-write checks; a copy includes its changed destination.
+Malformed or truncated successful status output is an observation failure.
+Unavailable status is never sufficient for a clean-tree or allowed-write gate.
+Git staging, commits, cancellation and uncertain publication stay with Oh-Goon.
+
+| Evidence | Owner and accepted use |
+| --- | --- |
+| Git position, status and changed paths | Native Git execution preconditions, allowed writes and operation reporting |
+| `pyproject_sha256`, `uv_lock_sha256`, legacy `state_id` | Oh-Goon operation/attempt provenance and manifest preconditions; historical fields retain their definitions |
+| Selected source identity, source freshness, dependency qualification, impact and verification relevance | Hashmarks, consumed through the public integration API |
+| Captured source, execution custody, outcome and recovery | Existing Oh-Goon source-admission, Fleet, Journal and reconciliation owners |
+
+The legacy fingerprint samples Git status and two files sequentially. It is not
+an atomic source snapshot and does not identify arbitrary repository bytes.
+`RepositoryEffectFence` and the strict Fleet post-run Git guard check these limited
+Git/manifest conditions; captured source admission separately uses Hashmarks
+content identity. Equal fingerprints
+cannot prove that an uncertain worktree effect did not happen: a second source
+edit in an already dirty tree, or a write followed by restoration, can leave the
+fingerprint unchanged. Without a canonical operation report, such equality keeps
+worktree-mutation recovery `INDETERMINATE` and blocks automatic replay. Recorded
+historical reconciliation results remain readable without reclassification.
+
+No separate Hashmarks Git API is required for these witnesses. Its existing
+`RepositoryIdentity.observe_inputs()` and `observe_directory()` establish scoped
+filesystem evidence; they do not replace Git refs or authorize Git lifecycle.
+For a single-file content identity, Oh-Goon retains both `hash_file()`'s digest
+and its hashed-byte count from the same producer result, without a later stat
+that could describe a different file revision. This low-level streaming digest
+does not claim stable selected-input observation or repository-wide freshness.
+
 ## Runtime/source correlation
 
 Oh-Goon captures operational observations and binds them to the original

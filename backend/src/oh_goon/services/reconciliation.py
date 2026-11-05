@@ -63,9 +63,13 @@ class RepositoryReconciler:
                 current=current,
             )
         if current.state_id == baseline.state_id:
-            return ConfirmedNotAppliedRepositoryReconciliation(
-                outcome=ReconciliationOutcome.CONFIRMED_NOT_APPLIED,
-                reason="Repository fingerprint is unchanged from the durable pre-effect baseline",
+            return IndeterminateRepositoryReconciliation(
+                outcome=ReconciliationOutcome.INDETERMINATE,
+                reason=(
+                    "The Git execution fingerprint is unchanged, but does not identify all "
+                    "repository content or prove that a worktree mutation was not applied; "
+                    "automatic replay remains blocked"
+                ),
                 baseline=baseline,
                 current=current,
             )

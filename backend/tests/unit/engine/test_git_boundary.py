@@ -8,9 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.core.vocabulary import GitBranchState, WorktreeState
+from oh_goon.core.errors import StateConflict
+from oh_goon.core.models.explanation import ReasonCode
+from oh_goon.core.vocabulary import GitBranchState, OperationAction, WorktreeState
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.git import GitService
+from oh_goon.engine.runner import EngineRunner
+from tests.factories.capabilities import capability_request, execute_capability_runner
 
 
 def _observed_status(*argv: str, **kwargs) -> CommandResult:
@@ -62,14 +66,31 @@ def test_observe_collects_repository_state_with_one_git_process(
     assert observation.changed_files == ("tracked file.txt",)
 
 
-def test_observe_reports_rename_destination_without_quoted_path_artifacts(tmp_path: Path) -> None:
+def test_observe_reports_both_rename_endpoints_without_quoted_path_artifacts(
+    tmp_path: Path,
+) -> None:
     repository = _repository(tmp_path)
     _git(repository, "mv", "tracked file.txt", "renamed file.txt")
 
     observation = GitService().observe(repository)
 
-    assert observation.changed_files == ("renamed file.txt",)
+    assert observation.changed_files == ("renamed file.txt", "tracked file.txt")
     assert observation.worktree_state is WorktreeState.DIRTY
+
+
+def test_review_rejects_a_rename_from_an_unapproved_path_into_the_allowed_lock(
+    tmp_path: Path,
+) -> None:
+    repository = _repository(tmp_path)
+    _git(repository, "mv", "tracked file.txt", "uv.lock")
+    before_head = _git(repository, "rev-parse", "HEAD")
+    request = capability_request(repository, OperationAction.PREPARE_REVIEW)
+
+    execution = execute_capability_runner(EngineRunner(GitService()), request)
+
+    assert execution.report.outcome.reason_code is ReasonCode.UNEXPECTED_FILE_CHANGES
+    assert _git(repository, "rev-parse", "HEAD") == before_head
+    assert _git(repository, "branch", "--show-current") == "main"
 
 
 def test_observe_handles_detached_head_and_unborn_branch(tmp_path: Path) -> None:
@@ -103,6 +124,91 @@ def test_observe_non_repository_fails_closed_without_fake_git_state(tmp_path: Pa
     assert observation.head_sha is None
     assert observation.worktree_state is WorktreeState.NOT_GIT
     assert observation.changed_files == ()
+    with pytest.raises(StateConflict, match="unavailable"):
+        observation.require_repository()
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        "",
+        "# branch.oid (initial)\0",
+        "# branch.oid invalid\0# branch.head main\0",
+        "# branch.oid (initial)\0# branch.head \0",
+        "# branch.oid (initial)\0# branch.head main\0# branch.head other\0",
+        "# branch.oid (initial)\0\0# branch.head main\0",
+        "# branch.oid (initial)\0# branch.head main\0? incomplete",
+        "# branch.oid (initial)\0# branch.head main\0unexpected record\0",
+        "# branch.oid (initial)\0# branch.head main\0" + "1 truncated\0",
+        "# branch.oid (initial)\0# branch.head main\0? \0",
+        "# branch.oid (initial)\0# branch.head main\0"
+        + "2 R. N... 100644 100644 100644 a b R100 destination\0",
+    ],
+)
+def test_incomplete_or_malformed_status_cannot_establish_worktree_evidence(
+    tmp_path: Path, records: str
+) -> None:
+    def runner(*_argv: str, **_kwargs: object) -> CommandResult:
+        return CommandResult(0, records, "")
+
+    with pytest.raises(StateConflict, match="Git worktree observation"):
+        GitService(command_runner=runner).observe(tmp_path)
+
+
+def test_truncated_status_is_rejected_even_when_retained_records_look_complete(
+    tmp_path: Path,
+) -> None:
+    def runner(*_argv: str, **_kwargs: object) -> CommandResult:
+        return CommandResult(
+            0, "# branch.oid (initial)\0# branch.head main\0", "", stdout_truncated=True
+        )
+
+    with pytest.raises(StateConflict, match="incomplete"):
+        GitService(command_runner=runner).observe(tmp_path)
+
+
+def test_future_branch_headers_and_copy_source_are_not_changed_members(tmp_path: Path) -> None:
+    def runner(*_argv: str, **_kwargs: object) -> CommandResult:
+        return CommandResult(
+            0,
+            "# branch.oid (initial)\0# branch.head main\0# future.header value\0"
+            "2 C. N... 100644 100644 100644 a b C100 destination\0source\0",
+            "",
+        )
+
+    observation = GitService(command_runner=runner).observe(tmp_path)
+    assert observation.changed_files == ("destination",)
+    assert observation.worktree_state is WorktreeState.DIRTY
+
+
+def test_missing_git_preserves_tool_unavailability_without_clean_evidence(tmp_path: Path) -> None:
+    def runner(*_argv: str, **_kwargs: object) -> CommandResult:
+        raise FileNotFoundError("selected Git executable is unavailable")
+
+    observation = GitService(command_runner=runner).observe(tmp_path)
+    assert not observation.tool_available
+    assert observation.worktree_state is WorktreeState.NOT_GIT
+    with pytest.raises(StateConflict, match="unavailable"):
+        observation.require_repository()
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_native_status_retains_unusual_changed_paths_and_ignores_declared_ignored_files(
+    tmp_path: Path, staged: bool
+) -> None:
+    repository = _repository(tmp_path)
+    (repository / ".gitignore").write_text("ignored\n", encoding="utf-8")
+    _git(repository, "add", ".gitignore")
+    _git(repository, "commit", "-q", "-m", "ignore scope")
+    unusual = "space tab\tnewline\nUnicode-å.txt"
+    _git(repository, "mv", "tracked file.txt", unusual)
+    if not staged:
+        _git(repository, "reset", "-q", "HEAD")
+    (repository / "ignored").write_text("outside Git status scope", encoding="utf-8")
+
+    observation = GitService().observe(repository)
+    assert observation.changed_files == tuple(sorted((unusual, "tracked file.txt")))
+    assert observation.worktree_state is WorktreeState.DIRTY
 
 
 def test_observation_uses_injected_native_process_transport(tmp_path: Path) -> None:

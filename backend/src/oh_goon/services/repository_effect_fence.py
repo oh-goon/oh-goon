@@ -10,7 +10,11 @@ from oh_goon.engine.git import GitService
 
 
 class RepositoryEffectFence:
-    """Verify cancellation and repository identity immediately before effects are admitted."""
+    """Check cancellation and native Git/manifest preconditions before effects.
+
+    This legacy witness does not prove complete source stability. Captured source
+    and its Hashmarks content identity retain their separate admission owners.
+    """
 
     def __init__(self, git: GitService) -> None:
         self._git = git

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import stat
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from oh_goon.core.errors import StateConflict
 from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import GitBranchState, WorktreeState
@@ -19,7 +21,7 @@ Cancel = Callable[[], bool] | None
 
 @dataclass(frozen=True, slots=True)
 class GitObservation:
-    """One coherent local Git read used for identity, invariants, and changed-file evidence."""
+    """Native Git execution witness with separately sampled legacy file digests."""
 
     fingerprint: RepositoryStateFingerprint
     changed_files: tuple[str, ...]
@@ -44,6 +46,11 @@ class GitObservation:
     @property
     def is_repository(self) -> bool:
         return self.worktree_state is not WorktreeState.NOT_GIT
+
+    def require_repository(self) -> None:
+        """Reject unavailable Git evidence before a worktree invariant is accepted."""
+        if not self.is_repository:
+            raise StateConflict("Git worktree observation is unavailable")
 
 
 _DEFAULT_TIMEOUT = object()
@@ -138,24 +145,37 @@ def _observe(
         )
     if result.returncode != 0:
         return _unavailable_observation(repository, confined_file_reads=confined_file_reads)
+    if result.stdout_truncated or not result.stdout.endswith("\0"):
+        raise StateConflict("Git worktree observation is incomplete")
 
     head_sha: str | None = None
     branch_state = GitBranchState.UNAVAILABLE
     branch_name: str | None = None
     changed: set[str] = set()
+    headers: set[str] = set()
     records = result.stdout.split("\0")
     index = 0
     while index < len(records):
         record = records[index]
         index += 1
         if not record:
-            continue
+            if index == len(records):
+                continue
+            raise StateConflict("Git worktree observation contains an empty record")
         if record.startswith("# branch.oid "):
             value = record.removeprefix("# branch.oid ")
+            if "oid" in headers or (
+                value != "(initial)" and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value) is None
+            ):
+                raise StateConflict("Git worktree observation has invalid branch identity")
+            headers.add("oid")
             head_sha = None if value == "(initial)" else value
             continue
         if record.startswith("# branch.head "):
             value = record.removeprefix("# branch.head ")
+            if "head" in headers or not value:
+                raise StateConflict("Git worktree observation has invalid branch position")
+            headers.add("head")
             if value == "(detached)":
                 branch_state = GitBranchState.DETACHED
                 branch_name = None
@@ -163,12 +183,20 @@ def _observe(
                 branch_state = GitBranchState.NAMED
                 branch_name = value
             continue
-        path, consumes_origin = _porcelain_path(record)
-        if path is not None:
-            changed.add(path)
-        if consumes_origin and index < len(records):
+        if record.startswith("# "):
+            # Porcelain v2 permits consumers to ignore additional branch headers.
+            continue
+        path, origin_kind = _porcelain_path(record)
+        changed.add(path)
+        if origin_kind is not None:
+            if index >= len(records) or not records[index]:
+                raise StateConflict("Git worktree observation has an incomplete rename or copy")
+            if origin_kind == "R":
+                changed.add(records[index])
             index += 1
 
+    if headers != {"oid", "head"}:
+        raise StateConflict("Git worktree observation is missing branch evidence")
     worktree = WorktreeState.CLEAN if not changed else WorktreeState.DIRTY
     fingerprint = _fingerprint(
         repository,
@@ -181,19 +209,22 @@ def _observe(
     return GitObservation(fingerprint=fingerprint, changed_files=tuple(sorted(changed)))
 
 
-def _porcelain_path(record: str) -> tuple[str | None, bool]:
+def _porcelain_path(record: str) -> tuple[str, str | None]:
     if record.startswith("1 "):
         fields = record.split(" ", 8)
-        return (fields[8], False) if len(fields) == 9 else (None, False)
-    if record.startswith("2 "):
+        if len(fields) == 9 and all(fields):
+            return fields[8], None
+    elif record.startswith("2 "):
         fields = record.split(" ", 9)
-        return (fields[9], True) if len(fields) == 10 else (None, True)
-    if record.startswith("u "):
+        if len(fields) == 10 and all(fields) and re.fullmatch(r"[RC][0-9]+", fields[8]) is not None:
+            return fields[9], fields[8][0]
+    elif record.startswith("u "):
         fields = record.split(" ", 10)
-        return (fields[10], False) if len(fields) == 11 else (None, False)
-    if record.startswith("? "):
-        return record[2:], False
-    return None, False
+        if len(fields) == 11 and all(fields):
+            return fields[10], None
+    elif record.startswith("? ") and record[2:]:
+        return record[2:], None
+    raise StateConflict("Git worktree observation contains an unsupported or malformed record")
 
 
 def _unavailable_observation(
