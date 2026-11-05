@@ -455,7 +455,14 @@ the separate installed CLI and service evidence.
 The explicit `codex_service` profile runs individual tasks and bounded
 review–repair campaigns through the original native Run/Step path. Each Agent
 Step owns a fresh app-server process and private Unix endpoint;
-an unrelated existing socket cannot authorize protected work. The original
+its original command owner supplies the daemon's process birth identity. Before
+initialization or model instructions cross the connection, the client checks
+the actual connected Unix peer against that identity and requires positive
+native process liveness. It rechecks before
+requests and accepting responses or queued notifications. Missing or changed
+peer evidence refuses the selected service workload and retains original
+process cleanup accounting. Rebinding the socket pathname cannot transfer an
+existing connection's authority to another process. The original
 resolver captures source once, Hashmarks supplies mandatory qualified evidence,
 and the exact frozen task/Skill/evidence becomes native developer instructions.
 Only task text becomes user input. Codex owns tool follow-up and automatic
@@ -624,6 +631,14 @@ Do not scan user stores, adopt unrelated sessions, expose broad service access t
 tools, or infer enrollment from a successful health check. Use authenticated local
 IPC or an explicitly approved authenticated transport; reject endpoint substitution,
 redirects and session/workspace mismatches.
+
+The Linux owned Codex path uses the same connected transport's `SO_PEERCRED`
+and the existing process-birth/liveness owner. These are connection credentials,
+not continuous attestation of an arbitrary process that inherits a descriptor.
+It does not trust native metadata's PID,
+open a second probe connection or add a native supervisor. Operator-only
+connection/status checks remain `connected_not_qualified`, with
+`transport_peer: unverified`; readiness cannot grant protected execution.
 
 Permit only the session operations needed by the admitted Run. Neither the adapter
 nor its tools may retrieve credential/configuration values, change provider login,

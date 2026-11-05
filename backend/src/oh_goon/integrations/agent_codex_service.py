@@ -12,6 +12,8 @@ import json
 import math
 import os
 import re
+import socket
+import struct
 import sys
 import time
 from collections import deque
@@ -23,6 +25,11 @@ import httpx2
 from httpx2.websockets import AsyncWebSocketSession, HTTPXWSException
 
 from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.process_birth import (
+    ProcessBirthIdentity,
+    observe_process_liveness,
+    process_birth_matches,
+)
 
 _MAX_MESSAGE_BYTES = 256 * 1024
 _MAX_REQUEST_BYTES = 4 * 1024 * 1024
@@ -104,6 +111,7 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         *,
         timeout_seconds: float = 10.0,
         experimental_api: bool = False,
+        expected_process: ProcessBirthIdentity | None = None,
     ) -> None:
         self._socket = codex_unix_socket_name(socket_path)
         if (
@@ -114,6 +122,10 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
             raise AgentProviderError("Native service timeout must be within 300 seconds")
         self._timeout = timeout_seconds
         self._experimental = experimental_api
+        if expected_process is not None and type(expected_process) is not ProcessBirthIdentity:
+            raise AgentProviderError("Native Codex peer requires its original process identity")
+        self._expected_process = expected_process
+        self._peer_verified = False
         self._stack: AsyncExitStack | None = None
         self._session: AsyncWebSocketSession | None = None
         self._owner: asyncio.Task[Any] | None = None
@@ -153,6 +165,9 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
             "private_store_exclusion": "unverified",
             "tool_quiescence": "unverified",
             "transport_cleanup": self._cleanup_status,
+            "transport_peer": "verified_original_process"
+            if self._session is not None and self._peer_verified
+            else "unverified",
             **self._facts,
         }
 
@@ -255,6 +270,7 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         self._require_owner()
         stack, self._stack = self._stack, None
         self._session = None
+        self._peer_verified = False
         self._notifications.clear()
         self._thread = None
         self._profile = None
@@ -277,10 +293,42 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         if self._owner is not None and asyncio.current_task() is not self._owner:
             raise AgentProviderError("Native service connection must keep its original async owner")
 
+    def _require_original_peer(self) -> None:
+        """Verify this connected transport, never a pathname or readiness claim."""
+        expected = self._expected_process
+        if expected is None:
+            return
+        self._peer_verified = False
+        if self._session is None:
+            raise AgentProviderError("Native Codex service is not connected")
+        try:
+            # SO_PEERCRED describes this connected native socket, not whichever
+            # process might later bind the advertised pathname. Linux unix(7):
+            # https://man7.org/linux/man-pages/man7/unix.7.html
+            connected = self._session.stream.get_extra_info("socket")
+            credentials = connected.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("iII")
+            )
+            peer_pid, _, _ = struct.unpack("iII", credentials)
+        except (AttributeError, OSError, TypeError, ValueError, struct.error):
+            raise AgentProviderError(
+                "Native Codex service transport peer cannot be verified"
+            ) from None
+        if (
+            peer_pid != expected.pid
+            or not process_birth_matches(expected)
+            or observe_process_liveness(expected.pid) is not True
+        ):
+            raise AgentProviderError(
+                "Native Codex service transport peer differs from its owned process"
+            )
+        self._peer_verified = True
+
     async def _send(self, message: dict[str, Any]) -> None:
         self._require_owner()
         if self._session is None:
             raise AgentProviderError("Native Codex service is not connected")
+        self._require_original_peer()
         try:
             data = json.dumps(message, ensure_ascii=False, allow_nan=False)
             if len(data.encode("utf-8")) > _MAX_REQUEST_BYTES:
@@ -298,11 +346,13 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         self._require_owner()
         if self._session is None:
             raise AgentProviderError("Native Codex service is not connected")
+        self._require_original_peer()
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise NativeCodexRequestUncertain("Native Codex response deadline expired")
         try:
             text = await self._session.receive_text(timeout=remaining)
+            self._require_original_peer()
             message = json.loads(text, object_pairs_hook=_unique_fields)
             if not isinstance(message, dict):
                 raise ValueError("native message must be an object")
@@ -708,7 +758,9 @@ class CodexServiceClient(AbstractAsyncContextManager["CodexServiceClient"]):
         )
 
     async def next_notification(self, thread_id: str) -> dict[str, Any]:
+        self._require_owner()
         self._require_thread(thread_id)
+        self._require_original_peer()
         if self._notifications:
             return self._notifications.popleft()
         deadline = time.monotonic() + self._timeout

@@ -22,6 +22,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from oh_goon.core.models.agent_providers import AgentProviderError
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord
+from oh_goon.core.process_birth import observe_process_birth
 from oh_goon.integrations.agent_codex_service import (
     CodexServiceClient,
     NativeCodexCleanupIncomplete,
@@ -95,6 +96,46 @@ def test_connect_initializes_only_and_never_exposes_native_global_metadata(
     assert messages[0]["params"]["capabilities"] == {"experimentalApi": False}
     assert transports == [{"uds": str(advertised), "trust_env": False, "retries": 0}]
     assert closed == [True]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux native peer birth identity")
+def test_expected_peer_refuses_unknown_transport_before_native_initialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    methods: list[str] = []
+    closed: list[bool] = []
+
+    async def endpoint(websocket: WebSocket) -> None:
+        await websocket.accept()
+        try:
+            while True:
+                message = await websocket.receive_json()
+                methods.append(message["method"])
+                if "id" in message:
+                    await websocket.send_json({"id": message["id"], "result": _INITIAL})
+        except WebSocketDisconnect:
+            closed.append(True)
+
+    endpoint_transport(monkeypatch, endpoint)
+    expected = observe_process_birth()
+    assert expected is not None
+
+    async def check() -> None:
+        advertised = tmp_path / "explicit.sock"
+        async with CodexServiceClient(advertised) as readiness:
+            assert readiness.metadata["status"] == "connected_not_qualified"
+        assert methods == ["initialize", "initialized"]
+        methods.clear()
+        guarded = CodexServiceClient(advertised, expected_process=expected)
+        with pytest.raises(AgentProviderError):
+            await guarded.connect()
+        assert methods == []
+        assert guarded.metadata["status"] == "not_connected"
+        assert guarded.metadata["transport_cleanup"] == "complete"
+        await guarded.close()
+
+    asyncio.run(check())
+    assert closed == [True, True]
 
 
 def test_explicit_native_profiles_and_continuation_remain_on_the_selected_thread(
