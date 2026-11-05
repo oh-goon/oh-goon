@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 class WorkerGitConfiguration(ImmutableModel):
     executable: str = Field(min_length=1)
     default_timeout_seconds: float
+    max_capture_bytes_per_stream: int | None = Field(default=None, gt=0, strict=True)
 
     @classmethod
     def capture(cls, git: GitService | None) -> WorkerGitConfiguration:
@@ -69,11 +70,14 @@ class WorkerGitConfiguration(ImmutableModel):
         return cls(
             executable=git.executable,
             default_timeout_seconds=git.default_timeout_seconds,
+            max_capture_bytes_per_stream=git.max_capture_bytes_per_stream,
         )
 
     def restore(self) -> GitService:
         return GitService(
-            executable=self.executable, default_timeout_seconds=self.default_timeout_seconds
+            executable=self.executable,
+            default_timeout_seconds=self.default_timeout_seconds,
+            max_capture_bytes_per_stream=self.max_capture_bytes_per_stream,
         )
 
 

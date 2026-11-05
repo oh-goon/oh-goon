@@ -5,6 +5,7 @@ import os
 import stat
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import cast
 
@@ -57,6 +58,8 @@ class GitService:
     default_timeout_seconds: float = 30.0
     command_runner: Callable[..., CommandResult] | None = None
     observation_runner: Callable[..., CommandResult] | None = None
+    # Scoped runners own their capture policy; native calls carry this resolved bound.
+    max_capture_bytes_per_stream: int | None = None
 
     def run(
         self,
@@ -67,8 +70,15 @@ class GitService:
         env: Mapping[str, str] | None = None,
         command_runner: Callable[..., CommandResult] | None = None,
     ) -> CommandResult:
+        runner = command_runner or self.command_runner
+        if runner is None:
+            if cancel_requested is not None and cancel_requested():
+                raise OperationCancelledError("Git command cancelled before process launch")
+            runner = partial(
+                run_command, max_capture_bytes_per_stream=self.max_capture_bytes_per_stream
+            )
         try:
-            return (command_runner or self.command_runner or run_command)(
+            return runner(
                 self.executable,
                 *args,
                 cwd=cwd,

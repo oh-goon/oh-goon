@@ -36,7 +36,7 @@ def foundation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Runt
     value = build_runtime_foundation(
         standard_local=True,
         startup_purpose="workflow",
-        git_service=GitService(default_timeout_seconds=13),
+        git_service=GitService(default_timeout_seconds=13, max_capture_bytes_per_stream=1024),
     )
     try:
         yield value
