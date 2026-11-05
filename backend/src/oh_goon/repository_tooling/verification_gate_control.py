@@ -789,6 +789,41 @@ def _independent_hashmarks_upgrade(
         observed_hashmarks_upgrade = hashmarks_upgrade_intent(before, after)
     if not observed_hashmarks_upgrade:
         raise ValueError("Hashmarks upgrade changes unrelated dependency or project intent")
+    if "backend/uv.lock" not in paths:
+        raise ValueError("Hashmarks upgrade requires a changed native uv lock")
+    # This module runs from the independently checked-out trusted base. The
+    # shared native uv adapter and captured input helper must come from that
+    # base, never from the candidate being evaluated.
+    from oh_goon.repository_tooling import development_verification as admission_owner
+
+    trusted_origin = Path(__file__).resolve().parents[1]
+    if (
+        admission_owner.__file__ is None
+        or not Path(admission_owner.__file__).resolve().is_relative_to(trusted_origin)
+    ):
+        raise ValueError("Native artifact comparison imported an untrusted owner")
+    native = admission_owner._native_hashmarks_artifact_comparison(root, base)
+    claimed = evidence.get("hashmarks_native_artifacts")
+    fields = (
+        "schema",
+        "authority",
+        "equivalent",
+        "before_artifact_sha256",
+        "after_artifact_sha256",
+        "before_artifact_bytes",
+        "after_artifact_bytes",
+        "excluded_packages",
+        "scope",
+    )
+    if (
+        native["equivalent"] is not True
+        or not isinstance(claimed, Mapping)
+        or any(claimed.get(field) != native[field] for field in fields)
+        or not isinstance(claimed.get("tool"), Mapping)
+        or claimed["tool"].get("name") != "uv"
+        or claimed["tool"].get("version") != native["tool"]["version"]
+    ):
+        raise ValueError("Native uv non-Hashmarks artifact equivalence is unverified")
     return True
 
 
