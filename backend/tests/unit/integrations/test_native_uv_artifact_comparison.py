@@ -35,7 +35,9 @@ def _package(name: str, version: str, mutation: tuple[str, str] | None) -> str:
         wheel_hash = "4" * 64
     if mutation == (name, "wheel-url"):
         wheel_path = "different-location"
-    dependencies = 'dependencies = [{name="hashmarks-child"}]\n' if name == "hashmarks" else ""
+    dependencies = (
+        'dependencies = [{name="hashmarks-child"}]\n' if name == "hashmarks" else ""
+    )
     return f'''[[package]]
 name = "{name}"
 version = "{version}"
