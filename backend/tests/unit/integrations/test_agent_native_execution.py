@@ -204,20 +204,30 @@ def test_interactive_codex_requires_managed_evidence_delivery(tmp_path: Path) ->
 
 @pytest.mark.parametrize(
     "agent,argument",
-    [("opencode", "--server=http://host"), ("pi", "--mode=rpc"), ("codex", "--remote")],
+    [
+        ("opencode", "--server=http://host"),
+        ("pi", "--mode=rpc"),
+        ("codex", "--remote"),
+        ("codex", "-C/tmp/PRIVATE_WORKSPACE"),
+    ],
 )
 def test_arguments_cannot_move_the_native_agent_outside_its_owned_transport(
     tmp_path: Path, agent: NativeAgentName, argument: str
 ) -> None:
     prompt = tmp_path / "prompt"
     prompt.write_text("context")
-    with pytest.raises(AgentProviderError, match="owned terminal"):
+    baseline = native_agent_command(
+        selection(agent), prompt_file=prompt, workspace=tmp_path, interactive=False
+    )
+    assert baseline.input_file == prompt
+    with pytest.raises(AgentProviderError, match="owned terminal") as rejected:
         native_agent_command(
             selection(agent, arguments=(argument,)),
             prompt_file=prompt,
             workspace=tmp_path,
             interactive=False,
         )
+    assert "PRIVATE_WORKSPACE" not in str(rejected.value)
 
 
 @pytest.mark.parametrize("arguments", [("--api-key", "PRIVATE-KEY"), ("--api-key=PRIVATE-KEY",)])

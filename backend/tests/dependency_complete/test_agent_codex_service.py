@@ -22,6 +22,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from oh_goon.core.models.agent_providers import AgentProviderError
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord
+from oh_goon.core.process_birth import observe_process_birth
 from oh_goon.integrations.agent_codex_service import (
     CodexServiceClient,
     NativeCodexCleanupIncomplete,
@@ -95,6 +96,46 @@ def test_connect_initializes_only_and_never_exposes_native_global_metadata(
     assert messages[0]["params"]["capabilities"] == {"experimentalApi": False}
     assert transports == [{"uds": str(advertised), "trust_env": False, "retries": 0}]
     assert closed == [True]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux native peer birth identity")
+def test_expected_peer_refuses_unknown_transport_before_native_initialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    methods: list[str] = []
+    closed: list[bool] = []
+
+    async def endpoint(websocket: WebSocket) -> None:
+        await websocket.accept()
+        try:
+            while True:
+                message = await websocket.receive_json()
+                methods.append(message["method"])
+                if "id" in message:
+                    await websocket.send_json({"id": message["id"], "result": _INITIAL})
+        except WebSocketDisconnect:
+            closed.append(True)
+
+    endpoint_transport(monkeypatch, endpoint)
+    expected = observe_process_birth()
+    assert expected is not None
+
+    async def check() -> None:
+        advertised = tmp_path / "explicit.sock"
+        async with CodexServiceClient(advertised) as readiness:
+            assert readiness.metadata["status"] == "connected_not_qualified"
+        assert methods == ["initialize", "initialized"]
+        methods.clear()
+        guarded = CodexServiceClient(advertised, expected_process=expected)
+        with pytest.raises(AgentProviderError):
+            await guarded.connect()
+        assert methods == []
+        assert guarded.metadata["status"] == "not_connected"
+        assert guarded.metadata["transport_cleanup"] == "complete"
+        await guarded.close()
+
+    asyncio.run(check())
+    assert closed == [True, True]
 
 
 def test_explicit_native_profiles_and_continuation_remain_on_the_selected_thread(
@@ -274,6 +315,162 @@ def _mcp_registration(name: str = "PRIVATE_OPAQUE_REGISTRATION") -> dict[str, An
         "toolsError": None,
         "serverInfo": {"description": "PRIVATE_NATIVE_INVENTORY"},
     }
+
+
+def test_overlapping_native_connections_keep_late_events_and_selection_scoped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages: list[tuple[int, dict[str, Any]]] = []
+    connections = 0
+    release_old = asyncio.Event()
+    # Native thread IDs may coincide at different explicitly selected endpoints.
+    thread = "native-thread"
+
+    async def endpoint(websocket: WebSocket) -> None:
+        nonlocal connections
+        connections += 1
+        generation = connections
+        profile = f"profile-{generation}"
+        await websocket.accept()
+        try:
+            while True:
+                message = await websocket.receive_json()
+                messages.append((generation, message))
+                method = message["method"]
+                if method == "initialized":
+                    continue
+                result: dict[str, Any] = {}
+                if method == "initialize":
+                    result = _INITIAL
+                elif method in {"thread/start", "thread/resume"}:
+                    result = {
+                        "thread": {"id": thread},
+                        "activePermissionProfile": {"id": profile},
+                    }
+                elif method == "turn/start":
+                    result = {"turn": {"id": f"turn-{generation}"}}
+                await websocket.send_json({"id": message["id"], "result": result})
+                if method == "turn/start":
+                    if generation == 1:
+                        await asyncio.wait_for(release_old.wait(), timeout=5)
+                    await websocket.send_json(
+                        {
+                            "method": "item/agentMessage/delta",
+                            "params": {
+                                "threadId": "foreign-thread",
+                                "delta": "PRIVATE_FOREIGN_PROGRESS",
+                            },
+                        }
+                    )
+                    await websocket.send_json(
+                        {
+                            "method": "item/agentMessage/delta",
+                            "params": {
+                                "threadId": thread,
+                                "turnId": f"turn-{generation}",
+                                "delta": f"generation-{generation}-progress",
+                            },
+                        }
+                    )
+        except WebSocketDisconnect:
+            pass
+
+    transports = endpoint_transport(monkeypatch, endpoint)
+
+    async def check() -> None:
+        old_selected = asyncio.Event()
+        new_selected = asyncio.Event()
+        new_consumed = asyncio.Event()
+        old_closed = asyncio.Event()
+
+        async def original_owner() -> None:
+            async with CodexServiceClient(tmp_path / "old.sock", experimental_api=True) as old:
+                await old.start_thread(
+                    cwd=tmp_path,
+                    permissions="profile-1",
+                    model="original-model",
+                    developer_instructions="original task, Skill and evidence",
+                )
+                await old.start_turn(thread, "original task", permissions="profile-1")
+                original_metadata = old.metadata
+                old_selected.set()
+                await new_selected.wait()
+                old_event = await old.next_notification(thread)
+                assert old_event["params"]["delta"] == "generation-1-progress"
+                assert "PRIVATE" not in json.dumps(old_event)
+                assert old.metadata == original_metadata
+                before = len(messages)
+                with pytest.raises(AgentProviderError, match="cannot replace"):
+                    await old.resume_thread(thread, permissions="profile-2")
+                assert len(messages) == before
+                await old.resume_thread(thread, permissions="profile-1")
+                await new_consumed.wait()
+            old_closed.set()
+
+        async def replacement_owner() -> None:
+            await old_selected.wait()
+            async with CodexServiceClient(tmp_path / "new.sock", experimental_api=True) as new:
+                await new.start_thread(
+                    cwd=tmp_path,
+                    permissions="profile-2",
+                    model="new-model",
+                    developer_instructions="new task, Skill and evidence",
+                )
+                await new.start_turn(thread, "new task", permissions="profile-2")
+                new_metadata = new.metadata
+                new_selected.set()
+                release_old.set()
+                new_event = await new.next_notification(thread)
+                assert new_event["params"]["delta"] == "generation-2-progress"
+                assert "PRIVATE" not in json.dumps(new_event)
+                before = len(messages)
+                with pytest.raises(AgentProviderError, match="cannot replace"):
+                    await new.resume_thread(
+                        thread,
+                        permissions="profile-2",
+                        developer_instructions="original task, Skill and evidence",
+                    )
+                assert len(messages) == before
+                await new.resume_thread(thread, permissions="profile-2")
+                new_consumed.set()
+                await old_closed.wait()
+                assert new.metadata == new_metadata
+                await new.start_turn(thread, "new follow-up", permissions="profile-2")
+                assert (await new.next_notification(thread))["params"][
+                    "delta"
+                ] == "generation-2-progress"
+
+        async with asyncio.timeout(5):
+            await asyncio.gather(original_owner(), replacement_owner())
+
+    asyncio.run(check())
+    assert connections == 2
+    assert [item["uds"] for item in transports] == [
+        str(tmp_path / "old.sock"),
+        str(tmp_path / "new.sock"),
+    ]
+    starts = [
+        (generation, message["params"])
+        for generation, message in messages
+        if message["method"] == "thread/start"
+    ]
+    assert [
+        (generation, params["model"], params["permissions"]) for generation, params in starts
+    ] == [
+        (1, "original-model", "profile-1"),
+        (2, "new-model", "profile-2"),
+    ]
+    resumes = [
+        (generation, message["params"])
+        for generation, message in messages
+        if message["method"] == "thread/resume"
+    ]
+    assert sorted(
+        (generation, params["developerInstructions"]) for generation, params in resumes
+    ) == [
+        (1, "original task, Skill and evidence"),
+        (2, "new task, Skill and evidence"),
+    ]
 
 
 @pytest.mark.parametrize("names", [(), ("opaque.native",), ('quoted."native"', "other/native")])
@@ -762,6 +959,101 @@ def test_lost_turn_response_is_not_replayed_or_inherited_after_native_restart(
         (2, [{"type": "text", "text": "new task"}]),
     ]
     assert all(message["method"] != "thread/resume" for _, message in messages)
+
+
+def test_refused_model_turn_preserves_the_selected_native_session_without_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages: list[dict[str, Any]] = []
+    turns = 0
+
+    async def endpoint(websocket: WebSocket) -> None:
+        nonlocal turns
+        await websocket.accept()
+        try:
+            while True:
+                message = await websocket.receive_json()
+                messages.append(message)
+                method = message["method"]
+                if method == "initialized":
+                    continue
+                if method == "turn/start":
+                    turns += 1
+                    if turns == 1:
+                        # The protocol declares no typed model-vs-thread absence
+                        # distinction. A refusal must not be reinterpreted as
+                        # native session loss or permission to choose a model.
+                        await websocket.send_json(
+                            {
+                                "id": message["id"],
+                                "error": {
+                                    "code": -32000,
+                                    "message": "PRIVATE_PROVIDER_REFUSAL",
+                                    "data": {"private": "PRIVATE_NATIVE_CONTEXT"},
+                                },
+                            }
+                        )
+                        continue
+                    result: dict[str, Any] = {"turn": {"id": "explicit-later-turn"}}
+                elif method == "initialize":
+                    result = _INITIAL
+                else:
+                    assert method in {"thread/start", "thread/resume"}
+                    result = {
+                        "thread": {"id": "original-thread"},
+                        "activePermissionProfile": {"id": "original-profile"},
+                    }
+                await websocket.send_json({"id": message["id"], "result": result})
+        except WebSocketDisconnect:
+            pass
+
+    endpoint_transport(monkeypatch, endpoint)
+
+    async def check() -> None:
+        async with CodexServiceClient(tmp_path / "model.sock", experimental_api=True) as client:
+            await client.start_thread(
+                cwd=tmp_path,
+                permissions="original-profile",
+                model="original-model",
+                developer_instructions="original frozen task, Skill and evidence",
+            )
+            with pytest.raises(AgentProviderError, match="refused the request") as refused:
+                await client.start_turn(
+                    "original-thread", "original task", permissions="original-profile"
+                )
+            assert "PRIVATE" not in str(refused.value)
+            assert not isinstance(refused.value, NativeCodexRequestUncertain)
+            assert turns == 1
+            # Explicit native resume confirms the session still exists. The
+            # original context must survive the prior model request refusal.
+            await client.resume_thread("original-thread", permissions="original-profile")
+            accepted = await client.start_turn(
+                "original-thread", "explicit later task", permissions="original-profile"
+            )
+            assert accepted["turn"]["id"] == "explicit-later-turn"
+            assert client.metadata["execution_admitted"] is False
+        before = len(messages)
+        async with CodexServiceClient(tmp_path / "cold.sock", experimental_api=True) as cold:
+            connected = len(messages)
+            with pytest.raises(AgentProviderError, match="original frozen instructions"):
+                await cold.resume_thread("original-thread", permissions="original-profile")
+            assert len(messages) == connected
+        assert len(messages) == before + 2  # Only initialization, no native resume.
+
+    asyncio.run(check())
+    assert [message["method"] for message in messages] == [
+        "initialize",
+        "initialized",
+        "thread/start",
+        "turn/start",
+        "thread/resume",
+        "turn/start",
+        "initialize",
+        "initialized",
+    ]
+    start = messages[2]["params"]
+    assert start["model"] == "original-model" and start["allowProviderModelFallback"] is False
+    assert messages[4]["params"]["developerInstructions"] == start["developerInstructions"]
 
 
 @pytest.mark.parametrize(

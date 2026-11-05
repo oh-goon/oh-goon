@@ -308,6 +308,70 @@ def test_whole_exchange_deadline_stops_a_trickle_before_buffered_output(monkeypa
     asyncio.run(exercise())
 
 
+def test_delayed_readiness_cannot_replace_another_selected_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        started = asyncio.Event()
+        release_old = asyncio.Event()
+        requests: list[tuple[str, str]] = []
+
+        class Delayed(TrackingStream):
+            async def __aiter__(self) -> AsyncIterator[bytes]:
+                started.set()
+                await asyncio.wait_for(release_old.wait(), timeout=5)
+                async for chunk in super().__aiter__():
+                    yield chunk
+
+        old_stream = Delayed((b'{"version":"2.1.2","pid":41}',))
+        new_endpoint = "http://127.0.0.2:49375"
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            requests.append((str(request.url), request.headers["Authorization"]))
+            if str(request.url) == _ENDPOINT + "/api/info":
+                return httpx2.Response(200, stream=old_stream)
+            assert str(request.url) == new_endpoint + "/api/info"
+            return httpx2.Response(200, json={"version": "2.1.2", "pid": 52})
+
+        _, clients = transport(monkeypatch, handler)
+        old = OpenCodeServiceClient(_ENDPOINT, password=SecretStr("old-private-password"))
+        new = OpenCodeServiceClient(new_endpoint, password=SecretStr("new-private-password"))
+        pending = asyncio.create_task(old.connect())
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            new_metadata = await new.connect()
+            assert new_metadata == OpenCodeServiceMetadata("2.1.2", 52)
+            assert old.metadata is None
+            release_old.set()
+            assert await pending == OpenCodeServiceMetadata("2.1.2", 41)
+            assert new.metadata == new_metadata
+            for selected in (old, new):
+                with pytest.raises(CapabilityUnavailable):
+                    selected.require_protected_execution()
+            await old.close()
+            assert clients[0].is_closed is True and clients[1].is_closed is False
+            assert await new.connect() == new_metadata
+            assert len(requests) == 2
+        finally:
+            release_old.set()
+            await asyncio.gather(pending, return_exceptions=True)
+            await old.close()
+            await new.close()
+        assert all(client.is_closed for client in clients) and old_stream.closed
+        assert requests == [
+            (
+                _ENDPOINT + "/api/info",
+                "Basic " + base64.b64encode(b"opencode:old-private-password").decode(),
+            ),
+            (
+                new_endpoint + "/api/info",
+                "Basic " + base64.b64encode(b"opencode:new-private-password").decode(),
+            ),
+        ]
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("close_fails", [False, True])
 def test_cancel_during_context_entry_closes_client_and_preserves_cancellation(
     monkeypatch, close_fails

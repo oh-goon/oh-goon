@@ -1,5 +1,7 @@
-"""Opt-in installed Codex service turns through the original durable Run.
+"""Codex service source admission and opt-in installed turns through original Runs.
 
+Portable cases protect private source refusal before Run admission.
+Installed cases separately exercise the selected native implementation.
 Only the bounded local Responses server is simulated. Native tools, automatic
 compaction, source admission, verification and process closure remain real.
 No real native authentication or configuration stores are used.
@@ -22,9 +24,9 @@ import pytest
 import yaml
 
 from oh_goon.application import ApplicationRuntime
+from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.models.agent_providers import (
-    AgentProviderError,
     CodexServiceConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
@@ -37,10 +39,11 @@ from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.product_identity import repository_id
 from oh_goon.core.projections.agent_campaign import project_agent_campaign
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
-from oh_goon.integrations.agent_codex_service import CodexServiceClient
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.services.execution_lock_persistence import write_execution_lock
+from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from tests.factories.agent_review import agent_review_case
 from tests.fakes.codex_responses import CodexResponsesFixture
 
@@ -624,30 +627,8 @@ def test_installed_codex_service_campaign_preserves_phase_authority(
     native_home.mkdir(mode=0o700)
     private = native_home / "private-canary"
     private.write_text("SYNTHETIC_NATIVE_PRIVATE_DATA")
-    refused_mcp_threads: list[str] = []
     mcp_configuration = ""
     if scenario == "configured_mcp":
-        original_exclusion_check = CodexServiceClient.require_mcp_servers_excluded
-
-        async def verify_native_tool_refusal(client: CodexServiceClient, thread_id: str) -> None:
-            await original_exclusion_check(client, thread_id)
-            # Use the native MCP RPC with its exact server/tool identity. The
-            # Code Mode helper spelling must not be the sole exclusion proof.
-            with pytest.raises(AgentProviderError, match="refused"):
-                await client._request(
-                    "mcpServer/tool/call",
-                    {
-                        "threadId": thread_id,
-                        "server": "registered",
-                        "tool": "escape",
-                        "arguments": {},
-                    },
-                )
-            refused_mcp_threads.append(thread_id)
-
-        monkeypatch.setattr(
-            CodexServiceClient, "require_mcp_servers_excluded", verify_native_tool_refusal
-        )
         public_mcp = tmp_path / "public-mcp"
         public_mcp.mkdir()
         mcp_trace = tmp_path / "mcp-startup-trace"
@@ -865,7 +846,15 @@ def test_installed_codex_service_campaign_preserves_phase_authority(
                 startup_trace = mcp_trace.read_text().splitlines()
                 assert startup_trace and set(startup_trace) == {"startup"}
                 assert len(endpoint.probed) == 10
-                assert len(refused_mcp_threads) == len(set(refused_mcp_threads)) == 10
+                # These facts come from the actual worker's original Step,
+                # rather than an inert parent-process client monkeypatch.
+                # Exact native MCP RPC refusal is separately exercised by the
+                # model-free installed native-policy test; Code Mode spelling
+                # is not the sole exclusion proof.
+                assert all(
+                    claim.execution is not None and claim.execution.mcp_catalog == "empty"
+                    for claim in native_claims
+                )
             invocation = project_agent_campaign(
                 result.repair_id, result.attempts, campaign=result.campaign_journal
             )
@@ -912,3 +901,176 @@ def test_installed_codex_service_campaign_preserves_phase_authority(
             finally:
                 reopened.shutdown(wait_for_runs=True)
             assert endpoint.request_count == inference_requests
+
+
+@pytest.mark.parametrize(
+    "private_source",
+    [
+        "repository_config",
+        "skill_inside_native_home",
+        "skill_alias_into_native_home",
+        "repository_hardlink",
+        "skill_hardlink",
+    ],
+)
+def test_codex_service_private_source_never_opens_or_creates_a_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, private_source: str
+) -> None:
+    repository = tmp_path / "repositories" / "app"
+    repository.mkdir(parents=True)
+    (repository / "main.py").write_text("SOURCE")
+    native_home = tmp_path / "native-owned"
+    native_home.mkdir()
+    skill: Path | None = None
+    alias: Path | None = None
+    if private_source == "repository_config":
+        sentinel = repository / ".codex" / "config.toml"
+        sentinel.parent.mkdir()
+    elif private_source in {"skill_inside_native_home", "skill_alias_into_native_home"}:
+        skill = native_home / "private-skill"
+        skill.mkdir()
+        sentinel = skill / "SKILL.md"
+        if private_source == "skill_alias_into_native_home":
+            alias = tmp_path / "public-skill-alias"
+            alias.symlink_to(skill, target_is_directory=True)
+            skill = alias
+    else:
+        sentinel = native_home / "auth.json"
+        if private_source == "repository_hardlink":
+            alias = repository / "ordinary-source.txt"
+        else:
+            skill = tmp_path / "public-skill"
+            skill.mkdir()
+            alias = skill / "SKILL.md"
+    sentinel.write_text("SYNTHETIC_PRIVATE_NATIVE_STATE")
+    if private_source.endswith("hardlink"):
+        assert alias is not None
+        os.link(sentinel, alias)
+    program = tmp_path / "public-runtime" / "codex"
+    program.parent.mkdir()
+    native_effect = tmp_path / "unexpected-native-start"
+    program.write_text(f"#!/bin/sh\ntouch '{native_effect}'\nexit 99\n")
+    program.chmod(0o700)
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="owned-service",
+        definition=NativeAgentDefinition(executable=str(program)),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(native_home), model="native-model", reasoning_effort="high"
+            )
+        ),
+        executable_sha256=native_executable_sha256(program),
+    )
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
+    runtime = ApplicationRuntime.build(standard_local=True)
+    original_open = os.open
+    attempted_private: list[object] = []
+    private_names = {sentinel.name}
+    if private_source.endswith("hardlink"):
+        assert alias is not None
+        private_names.add(alias.name)
+
+    def guarded_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if not flags & os.O_DIRECTORY and Path(path).name in private_names:
+            attempted_private.append(path)
+            pytest.fail("Private native source contents reached capture")
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", guarded_open)
+    try:
+        reason = (
+            "hardlink"
+            if private_source.endswith("hardlink")
+            else "native authentication/configuration state"
+        )
+        with pytest.raises(FleetPlanInvalid, match=reason):
+            runtime.plans.run_native_agent(
+                selected=selected, workspace=repository, skill=skill, task="Never run this task"
+            )
+        assert runtime.runs.history().items == ()
+        assert not native_effect.exists()
+        assert attempted_private == []
+        assert sentinel.read_text() == "SYNTHETIC_PRIVATE_NATIVE_STATE"
+    finally:
+        runtime.shutdown(wait_for_runs=True)
+
+
+@pytest.mark.parametrize("skill_selection", ["default", "public_alias"])
+def test_original_native_source_preflight_repeats_with_empty_native_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, skill_selection: str
+) -> None:
+    repository = tmp_path / "repositories" / "app"
+    repository.mkdir(parents=True)
+    (repository / "main.py").write_text("SOURCE")
+    native_home = tmp_path / "native-owned"
+    native_home.mkdir()
+    skill: Path | None = None
+    skill_bytes = b"# Public Skill\nUse only the selected captured repository.\n"
+    if skill_selection == "public_alias":
+        public_skill = tmp_path / "public-skill"
+        public_skill.mkdir()
+        (public_skill / "SKILL.md").write_bytes(skill_bytes)
+        skill = tmp_path / "selected-skill-alias"
+        skill.symlink_to(public_skill, target_is_directory=True)
+    program = tmp_path / "public-runtime" / "codex"
+    program.parent.mkdir()
+    native_effect = tmp_path / "unexpected-native-start"
+    program.write_text(f"#!/bin/sh\ntouch '{native_effect}'\nexit 99\n")
+    program.chmod(0o700)
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="owned-service",
+        definition=NativeAgentDefinition(executable=str(program)),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(native_home), model="native-model", reasoning_effort="high"
+            )
+        ),
+        executable_sha256=native_executable_sha256(program),
+    )
+    captured: list[object] = []
+    original_resolve = FleetPlanResolver.resolve_frozen_agents
+
+    def observe_source(self: FleetPlanResolver, *args: Any, **kwargs: Any) -> Any:
+        result = original_resolve(self, *args, **kwargs)
+        assert result[1], "valid source control must capture an actual Agent delivery"
+        captured.append(
+            tuple(
+                (handoff.source.repository, handoff.source.skill) for handoff in result[1].values()
+            )
+        )
+        if skill is not None:
+            assert all(
+                handoff.source.skill.members[0].path == "SKILL.md"
+                and handoff.source.skill.members[0].data == skill_bytes
+                for handoff in result[1].values()
+            )
+        return result
+
+    class SourcePreflightComplete(Exception):
+        pass
+
+    def stop_before_admission(*_args: Any, **_kwargs: Any) -> Any:
+        raise SourcePreflightComplete
+
+    monkeypatch.setattr(FleetPlanResolver, "resolve_frozen_agents", observe_source)
+    monkeypatch.setattr(FleetRunControlPlane, "start_prepared_plan", stop_before_admission)
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
+    runtime = ApplicationRuntime.build(standard_local=True)
+    try:
+        for attempt in range(2):
+            if attempt:
+                (repository / ".codex").mkdir()
+                (repository / "nested" / ".opencode").mkdir(parents=True)
+            with pytest.raises(SourcePreflightComplete):
+                runtime.plans.run_native_agent(
+                    selected=selected, workspace=repository, skill=skill, task="Inspect source"
+                )
+        assert len(captured) == 2 and captured[0] == captured[1]
+        assert runtime.runs.history().items == ()
+        assert not native_effect.exists()
+        assert list((repository / ".codex").iterdir()) == []
+        assert list((repository / "nested" / ".opencode").iterdir()) == []
+    finally:
+        runtime.shutdown(wait_for_runs=True)

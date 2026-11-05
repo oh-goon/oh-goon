@@ -68,6 +68,18 @@ Local, CI/CD, scheduled, agentic, ML and application-source Runs converge on thi
 same custody boundary. Spawn-to-claim and claimed-bootstrap timings are bounded
 diagnostic observations; they grant no execution or completion authority.
 
+Native ingress also captures the existing scoped Git command owner's exact
+workspace and resolved native selection. The worker restores that same owner
+with its admitted isolation backend and the canonical workspace pin; it never
+loads the provider catalog again or substitutes unrestricted Git. Only the
+owned native callable and its exact read-only observation binding are
+transportable. Arbitrary callbacks, altered observation bindings, termination
+callbacks and phase-specific repair contexts refuse before admission. Native
+ingress also refuses a workspace/profile that differs from that scoped Git
+owner before native preflight. Native
+session IDs and late service notifications cannot change this Run's worker
+custody or another Run's frozen selection.
+
 Live output and terminal transport stay nonblocking. Bounded loss counters and
 a best-effort final capture summary expose dropped observations; a missing final
 summary leaves capture completeness unavailable. These diagnostics carry no Run

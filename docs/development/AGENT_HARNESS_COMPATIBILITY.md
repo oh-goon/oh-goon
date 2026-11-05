@@ -89,6 +89,123 @@ workaround. No installed Anthropic/Ollama parity, OpenCode service execution,
 Pi persistent-session integration, live accounts, other hosts or Run-worker
 custody is qualified by these results. Native harnesses still own compaction.
 
+## Frozen selection and native session identity — 2026-11-05
+
+[HUG-28](https://linear.app/hugloss/issue/HUG-28) checks configuration changes
+through the [claimed Run-worker boundary](EXECUTION_SUPERVISOR.md). Native
+selection remains one captured catalog, resolved executable, profile and model
+connection. A later catalog/default/provider update requires a fresh selection
+and admission; it cannot replace an already running Step's configuration.
+The existing scoped Git command owner is transported as resolved facts and
+restored inside the worker. Arbitrary injected callbacks remain refused.
+
+Native service clients retain their original endpoint, thread and permission
+profile. Foreign-thread progress is filtered; wrong-turn observations cannot
+borrow an owned turn's terminal result. Closing one client closes its transport,
+without granting cancellation or cleanup authority over another client or an
+operator-owned server. These are separate accepting boundaries from physical
+transport-peer attestation, which was unqualified at that review. The later
+HUG-38 section below updates only the selected owned Linux peer-binding scope.
+
+Product cross-Run native-session adoption, persistent Pi sessions and OpenCode
+service-session execution remain unsupported. Cold resume cannot supply missing
+original instructions or silently change the model/profile. Native data is not
+patched, migrated or deleted to make continuation succeed. The native harness
+retains compaction and session storage; no generation manager, alternate worker
+or transcript interpreter is introduced.
+
+The selected Codex 0.164.0 generated protocol describes native RPC failures with
+an integer code, message and untyped data; it provides no exhaustive typed
+model-missing/session-missing distinction. Opaque native refusal remains
+unclassified, without inferring that a known thread disappeared. A model-turn
+refusal retains the original thread/instructions for explicit native resume;
+cold resume without original instructions refuses locally before an RPC. No
+model catalogue fallback or resumed-model migration is implemented.
+
+Focused evidence covers the following scopes; these rows do not replace the
+historical full requirements crosswalk:
+
+| Boundary | Executed proof |
+| --- | --- |
+| Catalog/default/provider/executable change (T09, T35–36) | The 60-case native selection owner passed, including catalog replacement after frozen selection and alias retarget with original-executable loss. |
+| Worker transport | The 17-case worker configuration owner and 28-case native isolation owner passed. Arbitrary callbacks, changed workspace pin/backend/observation and weakened transport bindings refuse. An equal-looking foreign callable cannot impersonate the canonical workspace pin. |
+| Actual Run selection (T09) | A controlled native process runs under a real claimed worker while its provider turn is held across catalog replacement. The old frozen connection remains selected; B uses its own newly selected runtime and fresh Run. Independent verification and physical cleanup remain separate. This preserves the one-active-Run limit. |
+| Native service identity (T10–12) | Fifteen focused portable service cases passed: interleaved original/new clients, foreign-thread filtering, stale-turn agent/tool/compaction rejection with valid controls, original cleanup, cold resume/restart refusal and diagnostic-sink invariance. OpenCode delayed readiness remains readiness-only. |
+| Existing refusal/identity contracts (T20, T35–36) | Ninety-six bounded existing CLI/native/core cases passed. Unsupported Pi continuation refuses before original native access; changed source/selection and old-cycle completion cannot acquire fresh authority. |
+| Context protection retained | All six ordinary context counterparts passed through the new worker. Their observer reads the actual bounded worker command input while the controlled request is live; task-free message history is unchanged. Erasing only broker task restoration still fails the original privileged-task assertion; restoring exact source passes. The real-CLI forged-handoff regression also passes. |
+| Installed native protocol | Codex 0.164.0 same-thread follow-up, explicit resume and compaction with absent reserved directories passed on Linux with synthetic state/provider in a loopback-only namespace. Original protected-state and process-quiescence checks remain required. This native protocol slice is distinct from the controlled Run-worker proof. |
+
+Disposition: **retain** the existing protocol, settlement and reserved-directory
+adaptations. This change selects no native upgrade or adaptation removal.
+Entrypoint-byte verification does not seal the complete imported native runtime,
+and this scoped identity proof does not qualify live accounts, arbitrary native
+reload, other hosts, strict custody or parallel mixed-harness Runs.
+
+## Protected native tools and owned peer binding — 2026-11-05
+
+[HUG-38](https://linear.app/hugloss/issue/HUG-38) binds the owned Linux Codex
+service connection to the daemon launched by its original Step command owner.
+The existing process lifecycle callback supplies a `ProcessBirthIdentity`; the
+client checks the actual WebSocket's Unix peer, matching birth and positive
+process liveness before initialization and every request, after receiving data
+and before returning queued notifications. A
+pathname, readiness reply or native-reported PID cannot substitute for that
+connection evidence. A zombie or unobservable process cannot retain authority
+from the kernel's connection-time credentials. This is not continuous
+per-message sender or descriptor-delegation attestation. Unknown introspection
+or changed identity refuses before model work; the original command owner still
+supplies cancellation and cleanup.
+Status-only connections remain explicitly unqualified.
+
+Controlled real-process peers reproduce replacement before connection and
+pathname rebind after readiness. A valid original connection keeps its peer;
+another process at the same pathname cannot inherit the old authority. Missing
+or unusable daemon-birth observations and missing socket introspection also
+refuse, with valid controls and the original process-quiescence receipt retained.
+No second probe socket, generic session lease or supervisor is introduced.
+
+The selected native Codex parser also accepts attached `-m`, `-c` and `-C`
+arguments. Existing managed-model/configuration and owned-workspace guards now
+reject those forms before producer/native work; ordinary native arguments and
+Pi's opaque option values retain their existing behavior. The framing evidence
+uses Codex 0.164.0 valid-help and unknown-option controls, not inference from
+OpenCode's different help behavior.
+
+Private repository/Skill hardlinks and a Skill-root alias into the selected
+native home refuse before private content opens or a Run is admitted. Public
+Skill aliases and ordinary source capture remain valid controls. Seven ordinary
+Run-entry privacy cases now live beside their actual service Run owner; the
+previous standalone file is removed with its case bodies and protection
+conserved. Native stores, plugins and MCP remain native-owned; no generic
+credential/configuration API is offered to model tools.
+
+Fresh focused proof is scoped as follows:
+
+| Boundary | Executed result and limit |
+| --- | --- |
+| Owned peer (SEC-04/T23) | Two real Unix-socket cases pass after reproducing the old replacement gap. Valid peers initialize and receive instructions; a foreign peer refuses before initialization, a rebound pathname preserves the original connection, and later birth or false/unknown liveness refuses without another RPC. Twelve existing native process-state cases and the unknown-introspection negative pass. Missing/invalid original daemon observations refuse with original cleanup receipts. |
+| Source privacy (SEC-01/T21) | All seven ordinary Run-entry privacy cases pass at their new owner, including hardlinks/native-home aliases and successful public-source controls. The old-to-new case census and source-preservation review retain the removed file's protection. |
+| Native argument authority (T24) | Attached Codex model/configuration/workspace forms each reproduced a missing refusal. Focused receiver/command checks pass after repair, with valid original inputs, opaque native options and non-echoing errors retained. |
+| Installed native phase/store policy | Codex 0.164.0 on Linux: three cases pass for the model-free review/repair policy and production-policy continuation with absent/populated reserved directories. All four synthetic store classes deny read/write/rename/delete and in-Run hardlink creation; allowed scratch/scoped repair and a scratch hardlink succeed. Traversal, private CWD, symlink/subprocess denial and unchanged canaries remain checked. A random canary exists in the exact owned daemon's synthetic environment, while each phase's tool environment omits its key and cannot read that daemon's `/proc/PID/environ`; the value is never supplied as a probe argument. The actual registered native MCP RPC is refused with an empty workload catalog and no tool call reaching the synthetic server. |
+| Installed original worker/tool paths | Two cases pass: protected managed Code Mode and the configured-MCP review/repair campaign. The latter retains ten original Step execution facts/empty catalogs and ten real Code Mode exclusion probes, unchanged synthetic native config and no MCP `CALLED` event. Exact RPC refusal is the separate model-free native proof, not an inert parent-process callback or an invented Code Mode API. |
+
+These five installed cases use the selected complete public runtime and
+synthetic state in a loopback-only namespace; inference uses local fixture
+providers. Worker-aware
+fixture observations consume existing wire data and bounded command input;
+they do not fill in missing Task/Skill/Hashmarks content or inject callbacks
+through the worker handoff. Source/typed-result, independent verification and
+original physical cleanup assertions remain in place. No live account or model
+reasoning quality is qualified by the fixtures.
+
+Disposition: **retain** the existing protocol, settlement and reserved-directory
+adaptations. This is peer/argument enforcement and scoped qualification, without
+a native upgrade or compatibility removal. Native MCP discovery may initialize
+registered servers before a workload thread; MCP-startup isolation remains
+unsupported under HUG-124. OpenCode service execution, Pi persistent sessions,
+cross-Run native-session adoption, live accounts, other hosts and strict custody
+remain outside this proof.
+
 ## Temporary adaptations and removal decisions
 
 ### OPENCODE-CLI-SETTLEMENT — retain pending installed replacement proof

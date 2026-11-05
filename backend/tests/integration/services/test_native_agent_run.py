@@ -41,7 +41,7 @@ from oh_goon.integrations.agent_native_execution import (
 )
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import (
-    MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
+    NativeProfileCommandRunner,
     native_profile_command_runner,
     native_runtime_read_only_mounts,
 )
@@ -353,13 +353,14 @@ def test_codex_login_uses_original_run_and_independent_verification(
         agent="codex", profile="signed-in", workspace=repo, config_file=catalog
     )
     assert isolation is None
-    assert git.command_runner is None and git.observation_runner is None
+    assert type(git.command_runner) is NativeProfileCommandRunner
+    assert git.observation_runner is None
     captured_git = WorkerGitConfiguration.capture(git)
     restored_git = WorkerGitConfiguration.model_validate_json(
         captured_git.model_dump_json()
     ).restore()
     assert restored_git == git
-    assert restored_git.max_capture_bytes_per_stream == MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM
+    assert captured_git.native_repository == repo and captured_git.native_agent == selected
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
@@ -584,22 +585,24 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
                 connection=connection,
                 backend_configuration_id=backend.configuration_identity(),
             )
-            if runtime is None:
-                runner = native_profile_command_runner(
-                    repository,
-                    selected,
-                    backend,
-                    RepositoryWorkspaceAuthority.pin_repository_subject,
-                )
-                runtime = ApplicationRuntime.build(
-                    standard_local=True,
-                    standard_process_isolation=backend,
-                    git_service=GitService(
-                        command_runner=runner,
-                        observation_runner=partial(runner, read_only_workspace=True),
-                    ),
-                )
-                runtime.locations.add(repository)
+            if runtime is not None:
+                runtime.shutdown(wait_for_runs=True)
+                runtime = None
+            runner = native_profile_command_runner(
+                repository,
+                selected,
+                backend,
+                RepositoryWorkspaceAuthority.pin_repository_subject,
+            )
+            runtime = ApplicationRuntime.build(
+                standard_local=True,
+                standard_process_isolation=backend,
+                git_service=GitService(
+                    command_runner=runner,
+                    observation_runner=partial(runner, read_only_workspace=True),
+                ),
+            )
+            runtime.locations.add(repository)
             admitted = runtime.plans.run_native_agent(
                 selected=selected,
                 workspace=repository,

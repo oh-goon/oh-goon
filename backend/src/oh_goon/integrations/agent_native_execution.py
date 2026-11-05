@@ -367,7 +367,10 @@ def validate_native_agent_arguments(
         "opencode": {"--server", "--attach", "--standalone", "--no-standalone", "--dir"},
         "codex": {"--remote", "--remote-auth-token-env", "--no-daemon", "--cd", "-C", "--worktree"},
     }[agent]
-    if any(argument.partition("=")[0] in reserved for argument in arguments):
+    if any(
+        argument.partition("=")[0] in reserved or (agent == "codex" and argument.startswith("-C"))
+        for argument in arguments
+    ):
         raise AgentProviderError(
             "Native arguments cannot replace the owned terminal/server/workspace transport"
         )

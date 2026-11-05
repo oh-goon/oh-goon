@@ -80,6 +80,7 @@ if TYPE_CHECKING:
 def _explicit_model_arguments(selected: ResolvedNativeAgent) -> bool:
     return any(
         argument.partition("=")[0] in {"--model", "-m", "--provider", "--models", "--config", "-c"}
+        or (selected.agent == "codex" and argument.startswith(("-m", "-c")))
         for argument in selected.definition.arguments
     )
 

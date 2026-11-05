@@ -113,6 +113,21 @@ implicit fallback or runtime/test deletion is justified by this review.
 Portable selection/refusal proof does not qualify installed tool/store isolation,
 real-account continuity, other hosts or the future Run-worker cutover.
 
+## Frozen native selection through the Run worker
+
+Native ingress freezes the selected executable, profile and connection before
+admission. The [worker configuration](../../backend/src/oh_goon/_application_worker_runtime.py)
+also transports the existing scoped Git command owner's resolved workspace and
+selection, restoring it with the same admitted isolation backend and canonical
+workspace pin. It does not reload a catalog or accept an arbitrary injected
+callback. A different workspace or selection cannot reuse that frozen Git
+owner; it refuses before native preflight or Run admission. A changed
+default/provider selects new work only through fresh
+admission; original native service clients keep their own thread/turn and
+permission bindings. The [dated HUG-28 qualification](AGENT_HARNESS_COMPATIBILITY.md#frozen-selection-and-native-session-identity--2026-11-05)
+records the exercised scopes and retained limitations. It does not qualify
+cross-Run native-session adoption or transport-peer attestation.
+
 ## Frozen context follow-up and compaction proof
 
 The [HUG-36 review](https://linear.app/hugloss/issue/HUG-36) reproduced a broker
@@ -653,7 +668,17 @@ abort acknowledgement is not physical teardown proof.
 
 [CodexServiceClient](../../backend/src/oh_goon/integrations/agent_codex_service.py)
 owns its native protocol transport and owned thread/turn continuation methods;
-the original owned Step consumes its narrow protocol. Non-secret native feature
+the original owned Step consumes its narrow protocol. The owned daemon's
+existing command lifecycle callback supplies its process birth identity. The
+client verifies that identity and positive process liveness against its actual
+connected Unix peer before initialization, requests and accepting received or
+queued evidence. Unknown
+socket introspection or changed process birth refuses; a rebound pathname does
+not select another server. Operator readiness without an owned process remains
+unqualified. This adds no process launcher, credential reader or session owner.
+The [HUG-38 qualification](AGENT_HARNESS_COMPATIBILITY.md#protected-native-tools-and-owned-peer-binding--2026-11-05)
+records the selected Linux scope separately from older baseline observations.
+Non-secret native feature
 booleans, bounded connection-private MCP IDs, effective workload-thread MCP
 exclusion and connection-private native-home path separation are checked before
 model work; no auth/config read or generic API route is exposed. Native threadless
@@ -977,7 +1002,7 @@ independent verification remain legitimate separate responsibilities.
 [census-handoff]: ../../backend/tests/unit/entrypoints/test_run5_original_handoff.py
 [census-native-run]: ../../backend/tests/integration/services/test_native_agent_run.py
 [census-repair]: ../../backend/tests/integration/services/test_agent_review_repair_loop.py
-[census-privacy]: ../../backend/tests/integration/services/test_codex_service_run_source_privacy.py
+[census-privacy]: ../../backend/tests/integration/services/test_native_codex_service_run.py
 [census-context]: ../../backend/tests/integration/services/test_native_codex_context.py
 [census-pi-probe]: ../../backend/tests/integration/services/test_native_pi_session_protocol.py
 [census-broker]: ../../backend/tests/dependency_complete/test_agent_inference_broker.py

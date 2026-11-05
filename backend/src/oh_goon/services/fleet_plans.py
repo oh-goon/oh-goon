@@ -342,7 +342,16 @@ class FleetPlanService:
         read_only_workspace: bool = False,
     ) -> ResolvedNativeAgent:
         """Bind and preflight the original backend before any native Run admission."""
+        from oh_goon.integrations.fleet_plan_bubblewrap_isolation import (
+            BubblewrapProcessIsolation,
+        )
         from oh_goon.integrations.fleet_plan_native_steps import require_native_agent_compatibility
+        from oh_goon.integrations.fleet_plan_process_isolation import (
+            NativeProfileCommandRunner,
+            StandardIsolatedProcessRequest,
+            native_runtime_read_only_mounts,
+        )
+        from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
         protected = selected.profile.sandbox_owner == "execution_backend"
         read_only_workspace = read_only_workspace or protected
@@ -395,6 +404,7 @@ class FleetPlanService:
             and selected.profile.codex_service is None
         ):
             raise FleetPlanInvalid("Native read-only phases require the selected isolated backend")
+        backend = self._standard_process_isolation
         if selected.profile.backend == "bubblewrap":
             if (
                 self._git_service is None
@@ -404,16 +414,6 @@ class FleetPlanService:
                 raise FleetPlanInvalid(
                     "Native isolation requires the runtime's scoped Git execution boundary"
                 )
-            from oh_goon.integrations.fleet_plan_bubblewrap_isolation import (
-                BubblewrapProcessIsolation,
-            )
-            from oh_goon.integrations.fleet_plan_process_isolation import (
-                StandardIsolatedProcessRequest,
-                native_runtime_read_only_mounts,
-            )
-            from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
-
-            backend = self._standard_process_isolation
             if not isinstance(backend, BubblewrapProcessIsolation):
                 raise FleetPlanInvalid("The selected ordinary isolation backend is unavailable")
             identity = backend.configuration_identity()
@@ -422,6 +422,17 @@ class FleetPlanService:
                     "Native selection differs from the resolved isolation backend"
                 )
             selected = replace(selected, backend_configuration_id=identity)
+        elif any(value is not None for value in selected.profile.resources.model_dump().values()):
+            raise FleetPlanInvalid("Local Agent resource caps require a capable isolated profile")
+        git_runner = self._git_service.command_runner if self._git_service is not None else None
+        if type(git_runner) is NativeProfileCommandRunner and (
+            git_runner.repository != workspace or git_runner.native_agent != selected
+        ):
+            raise FleetPlanInvalid(
+                "Native Git differs from the resolved workspace or agent selection"
+            )
+        if selected.profile.backend == "bubblewrap":
+            assert isinstance(backend, BubblewrapProcessIsolation)
             with RepositoryWorkspaceAuthority.pin_repository_subject(workspace) as require_current:
                 backend.require_standard_available(
                     StandardIsolatedProcessRequest(
@@ -442,8 +453,6 @@ class FleetPlanService:
                         ),
                     )
                 )
-        elif any(value is not None for value in selected.profile.resources.model_dump().values()):
-            raise FleetPlanInvalid("Local Agent resource caps require a capable isolated profile")
         return selected
 
     def require_plan_ingress_preparation(self, fleet_run_id: str | None) -> None:

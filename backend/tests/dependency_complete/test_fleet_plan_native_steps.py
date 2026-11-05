@@ -426,6 +426,60 @@ def test_native_receiver_refuses_missing_or_conflicting_authority_before_evidenc
         prepare_native_step_input(handoff.encode_prework_delivery(), step, runtime)
 
 
+@pytest.mark.parametrize("arguments", [("-mPRIVATE_MODEL",), ("-cmodel=PRIVATE_CONFIG",)])
+def test_managed_codex_attached_model_overrides_refuse_before_native_work(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    repository, handoff, step, runtime = _case(tmp_path, sandboxed=False)
+    assert step.workload.harness == "native"
+    selected = step.workload.native_agent
+    assert selected is not None and selected.definition.executable is not None
+    # No native binary or namespace is invoked by receiving-input validation.
+    # Use a real source delivery and the same explicit backend identity contract.
+    backend = BubblewrapProcessIsolation(selected.definition.executable)
+    connection = AgentConnection.select(
+        AgentProvidersConfig(
+            default_model="approved",
+            providers={
+                "company": AgentProvider(
+                    api="openai-responses", base_url="https://approved.test/v1"
+                )
+            },
+            models={"approved": AgentModel(provider="company", model="approved/model")},
+        )
+    )
+    selected = replace(
+        selected,
+        agent="codex",
+        definition=selected.definition.model_copy(update={"arguments": ()}),
+        profile=selected.profile.model_copy(update={"backend": "bubblewrap"}),
+        backend_configuration_id=backend.configuration_identity(),
+        connection=connection,
+    )
+    step = step.model_copy(
+        update={"workload": step.workload.model_copy(update={"native_agent": selected})}
+    )
+    runtime = replace(runtime, native_profile=selected, standard_process_isolation=backend)
+    prepared = prepare_native_step_input(handoff.encode_prework_delivery(), step, runtime)
+    assert prepared.source_identity == handoff.source.capture_identity
+    assert prepared.occurrence == step.step_id
+
+    conflicting = replace(
+        selected, definition=selected.definition.model_copy(update={"arguments": arguments})
+    )
+    rejected_step = step.model_copy(
+        update={"workload": step.workload.model_copy(update={"native_agent": conflicting})}
+    )
+    with pytest.raises(FleetPlanInvalid, match="Explicit native model arguments") as rejected:
+        prepare_native_step_input(
+            handoff.encode_prework_delivery(),
+            rejected_step,
+            replace(runtime, native_profile=conflicting),
+        )
+    assert "PRIVATE_" not in str(rejected.value)
+    assert not (repository / "native-write.txt").exists()
+
+
 @pytest.mark.parametrize(
     "arguments", [("--api-key", "private-key-canary"), ("--api-key=private-key-canary",)]
 )

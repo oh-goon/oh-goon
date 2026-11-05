@@ -160,10 +160,7 @@ def resolve_native_cli_selection(
     """Resolve a single catalog and native workload before application mutation."""
     from oh_goon.engine.git import GitService
     from oh_goon.integrations.fleet_plan_native_steps import require_native_agent_compatibility
-    from oh_goon.integrations.fleet_plan_process_isolation import (
-        MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
-        native_profile_command_runner,
-    )
+    from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
     from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
     config_path = agent_providers_path(os.environ, config_file)
@@ -184,16 +181,15 @@ def resolve_native_cli_selection(
     isolation = _isolation(selected)
     if isolation is not None:
         selected = replace(selected, backend_configuration_id=isolation.configuration_identity())
-    if selected.profile.backend == "local":
-        git = GitService(max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM)
-    else:
-        command_runner = native_profile_command_runner(
-            workspace, selected, isolation, RepositoryWorkspaceAuthority.pin_repository_subject
-        )
-        git = GitService(
-            command_runner=command_runner,
-            observation_runner=partial(command_runner, read_only_workspace=True),
-        )
+    command_runner = native_profile_command_runner(
+        workspace, selected, isolation, RepositoryWorkspaceAuthority.pin_repository_subject
+    )
+    git = GitService(
+        command_runner=command_runner,
+        observation_runner=partial(command_runner, read_only_workspace=True)
+        if isolation is not None
+        else None,
+    )
     if git.root(workspace) != workspace:
         raise AgentProviderError("Native workspace must be an existing Git repository root")
     return selected, isolation, git

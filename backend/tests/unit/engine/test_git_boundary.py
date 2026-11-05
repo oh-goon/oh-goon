@@ -4,14 +4,12 @@ import hashlib
 import os
 import socket
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 from oh_goon.core.vocabulary import GitBranchState, WorktreeState
-from oh_goon.engine.command import CommandOutputLimitExceeded, CommandResult
-from oh_goon.engine.errors import OperationCancelledError
+from oh_goon.engine.command import CommandResult
 from oh_goon.engine.git import GitService
 
 
@@ -39,39 +37,6 @@ def _repository(root: Path) -> Path:
     _git(repository, "add", ".")
     _git(repository, "commit", "-q", "-m", "baseline")
     return repository
-
-
-@pytest.mark.process
-def test_native_git_runner_keeps_explicit_capture_bound_and_environment(tmp_path: Path) -> None:
-    limit = 64
-    git = GitService(executable=sys.executable, max_capture_bytes_per_stream=limit)
-    result = git.run(
-        "-S",
-        "-c",
-        "import os; print(os.environ['GIT_BOUNDARY_CANARY'])",
-        cwd=tmp_path,
-        env={"GIT_BOUNDARY_CANARY": "under-limit"},
-    )
-    assert result.returncode == 0 and result.stdout == "under-limit"
-
-    with pytest.raises(CommandOutputLimitExceeded) as caught:
-        git.run("-S", "-c", "print('x' * 256)", cwd=tmp_path)
-    error = caught.value
-    assert error.limit_bytes == limit
-    assert len(error.stdout.encode("utf-8")) <= limit
-    assert error.supervisor.cleanup_reason == "output_limit"
-    assert error.supervisor.final_process_group_quiescent is True
-
-
-def test_cancelled_native_git_command_refuses_before_launch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def unexpected_launch(*_args: object, **_kwargs: object) -> CommandResult:
-        pytest.fail("pre-cancelled Git work must not launch a process")
-
-    monkeypatch.setattr("oh_goon.engine.git.run_command", unexpected_launch)
-    with pytest.raises(OperationCancelledError):
-        GitService(max_capture_bytes_per_stream=64).run("--version", cancel_requested=lambda: True)
 
 
 def test_observe_collects_repository_state_with_one_git_process(

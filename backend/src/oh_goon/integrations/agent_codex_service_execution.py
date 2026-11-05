@@ -26,8 +26,13 @@ from oh_goon.core.models.fleet_observation import (
     NativeServiceExecutionEvidence,
 )
 from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, PLAN_TIMEOUT_RETURN_CODE
+from oh_goon.core.process_birth import ProcessBirthIdentity, observe_process_birth
 from oh_goon.core.product_identity import stable_id
-from oh_goon.engine.command import CommandCancelledError, CommandResult
+from oh_goon.engine.command import (
+    CommandCancelledError,
+    CommandProcessLifecycleEvent,
+    CommandResult,
+)
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
@@ -401,6 +406,8 @@ def execute_codex_service_run(
         evidence_state=evidence_state,
     )
     stop = Event()
+    peer_ready = Event()
+    peer_process: ProcessBirthIdentity | None = None
     results: list[CommandResult | BaseException] = []
     protocol: NativeAgentEvents | None = None
     mcp_exclusion_identity: str | None = None
@@ -454,6 +461,16 @@ def execute_codex_service_run(
 
     _require_uncancelled(runtime)
 
+    def observe_owned_process(event: CommandProcessLifecycleEvent) -> None:
+        nonlocal peer_process
+        if event.kind != "PROCESS_STARTED":
+            return
+        if peer_ready.is_set() or type(event.pid) is not int or event.pid <= 0:
+            peer_process = None
+        else:
+            peer_process = observe_process_birth(event.pid)
+        peer_ready.set()
+
     def serve() -> None:
         try:
             results.append(
@@ -466,6 +483,7 @@ def execute_codex_service_run(
                     or (runtime.cancel_requested is not None and runtime.cancel_requested()),
                     input_data=b"",
                     retain_output_tail=True,
+                    process_observer=observe_owned_process,
                 )
             )
         except BaseException as error:
@@ -478,18 +496,23 @@ def execute_codex_service_run(
 
     async def execute() -> NativeAgentEvents:
         nonlocal mcp_exclusion_identity
-        while not socket.exists():
+        while not peer_ready.is_set() or not socket.exists():
             _require_uncancelled(runtime)
+            if peer_ready.is_set() and peer_process is None:
+                raise AgentProviderError("Owned Codex service process identity is unavailable")
             if not worker.is_alive():
                 raise AgentProviderError("Owned Codex service failed before readiness")
             if time.monotonic() >= deadline:
                 raise OperationDeadlineExpired("Codex service readiness deadline expired")
             await asyncio.sleep(0.02)
         _require_uncancelled(runtime)
+        if peer_process is None:
+            raise AgentProviderError("Owned Codex service process identity is unavailable")
         async with CodexServiceClient(
             socket,
             timeout_seconds=min(10, max(0.001, deadline - time.monotonic())),
             experimental_api=True,
+            expected_process=peer_process,
         ) as client:
             _require_uncancelled(runtime)
             client.require_native_home_separation(
