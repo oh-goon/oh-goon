@@ -21,6 +21,43 @@ dependency selection authority. See the [trusted merge contract](../CI_CD_CONTRA
 for source, native-lock and package-confinement checks.
 
 Changes to this independent admission control must be reviewed and merged before
-an upgrade can rely on them. Producer adoption still requires complete qualified
-consumer evidence and normal execution proof; matching package identity alone
-does not qualify an otherwise incomplete dependency change.
+an upgrade can rely on them. Producer adoption still requires the selected
+qualification checks and original native package validation; matching package
+identity alone does not prove that unrelated dependencies stayed unchanged.
+
+## Native uv equivalence for Hashmarks-only upgrades
+
+When the backend manifest changes only its Hashmarks requirement, the candidate
+must also change `backend/uv.lock`. The existing native uv adapter receives
+bounded, captured base and candidate manifest/lock bytes and exports each in
+a separate disposable **input-only** project:
+
+```text
+uv export --frozen --offline --no-config --no-python-downloads --no-build \
+  --format pylock.toml --all-groups --all-extras \
+  --no-emit-workspace --no-header --no-annotate \
+  --no-emit-package hashmarks
+```
+
+The two complete exports must match byte for byte. Omitting Hashmarks from
+emission does not prune its transitive dependencies. Therefore a changed
+non-Hashmarks package, selected transitive dependency, wheel/sdist URL, or
+artifact hash in the exported dependency scope makes this *Hashmarks-only*
+upgrade ineligible. Extra dependency groups and optional extras are included.
+The check is performed without resolving, installing, or executing candidate
+packages; native uv remains the sole artifact interpreter.
+
+Fast admission retains bounded hashes, byte counts, uv version and export scope,
+not multi-megabyte export contents. The independently checked-out **trusted
+base controller** repeats the native export from the candidate's committed
+inputs and compares the retained result, rather than accepting the candidate's
+claim. Missing uv, malformed locks, timeouts, truncated output or mismatched
+exports refuse the special upgrade path; there is no alternate lock parser,
+parallel evidence authority or green fallback.
+
+This proves the equivalence of **uv's exported locked artifact references**
+within the all-groups/all-extras scope. It does not claim that downloaded
+artifacts were fetched and byte-verified, that unused/orphan lock entries are
+covered, or that global runtime impact is complete. Changes outside that
+bounded scope need their own independently qualified dependency change, not
+a relaxed Hashmarks-only exception.
