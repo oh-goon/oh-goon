@@ -39,7 +39,7 @@ from oh_goon.core.vocabulary import (
 )
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
-from oh_goon.runtime.execution import ExecutionCoordinator, RunExecutionSupervisor
+from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
@@ -56,6 +56,7 @@ from tests.factories.fleet_plan_targets import structural_execution_identity
 from tests.factories.journal import start_run, terminalize_run
 from tests.factories.repository_state import baseline_for
 from tests.factories.schedules import persist_active_schedule, schedule_create, scheduled_plan
+from tests.fakes.fleet_worker import SimulatedRunWorker
 
 
 class _EmptyAdmission:
@@ -111,8 +112,27 @@ def _fleet_manager(
     *,
     supervisor: object | None = None,
 ) -> FleetRunControlPlane:
-    lifecycle = FleetRunLifecycle(database, journal, execution, FleetExecutorPool(database, None))
     live_output = GameTapeLiveOutputStore()
+
+    def worker_execution(
+        worker_database: LocalDatabase, worker: ExecutionCoordinator
+    ) -> FleetRunExecution:
+        worker_lifecycle = FleetRunLifecycle(
+            worker_database,
+            Journal(worker_database),
+            worker,
+            FleetExecutorPool(worker_database, None),
+        )
+        return FleetRunExecution(
+            worker_lifecycle,
+            FleetTargetScheduler(_UnusedExecutor()),  # type: ignore[arg-type]
+            live_output,
+        )
+
+    workers = SimulatedRunWorker(database, worker_execution)
+    if supervisor is None:
+        execution = ExecutionCoordinator(database, lease_environment=workers.parent_environment)
+    lifecycle = FleetRunLifecycle(database, journal, execution, FleetExecutorPool(database, None))
     run_execution = FleetRunExecution(
         lifecycle,
         FleetTargetScheduler(_UnusedExecutor()),  # type: ignore[arg-type]
@@ -123,8 +143,9 @@ def _fleet_manager(
         journal,
         lifecycle,
         run_execution,
-        supervisor or RunExecutionSupervisor(),  # type: ignore[arg-type]
+        supervisor or workers,  # type: ignore[arg-type]
         live_output,
+        worker_configuration=workers.configuration,
     )
 
 
@@ -567,18 +588,25 @@ def test_terminal_intents_are_serialized_to_one_terminal_fact(tmp_path: Path) ->
 
 
 def test_cancel_request_and_lease_flag_commit_or_rollback_together(tmp_path: Path) -> None:
+    class _LiveProcessPair(_DeadLeaseEnvironment):
+        def process_alive(self, pid: int) -> bool:
+            return pid in {4242, 4343}
+
     database = LocalDatabase(tmp_path / "cancel-atomic.db")
     journal = Journal(database)
-    execution = ExecutionCoordinator(database)
+    execution = ExecutionCoordinator(database, lease_environment=_LiveProcessPair())
     ticket = execution.reserve_fleet_with(
         "fleet-cancel-atomic",
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
     admit_test_run(journal, "fleet-cancel-atomic", OperationAction.INIT, [])
+    worker_database = LocalDatabase.open_worker(database.capture_worker_context())
+    worker_environment = _LiveProcessPair()
+    worker_environment.pid = 4343
+    worker = ExecutionCoordinator(worker_database, lease_environment=worker_environment)
+    session = worker.activate(worker.claim_fleet_worker(ticket))
     start_run(journal, "fleet-cancel-atomic")
-
-    session = execution.activate(ticket)
 
     lifecycle = FleetRunLifecycle(database, journal, execution, FleetExecutorPool(database, None))
     original_request_cancel = journal.request_cancel_in

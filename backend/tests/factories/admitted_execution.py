@@ -51,6 +51,7 @@ from oh_goon.services.repository_effect_settlement import RepositoryEffectSettle
 from tests.factories.cicd_repository import seed_cicd_repository
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
 from tests.factories.runtime_authority import authorized_command_result
+from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 DEFAULT_ADMITTED_PLAN = """execution: {purpose: cicd}
 steps:
@@ -225,6 +226,11 @@ def admitted_fleet_plan_execution(
         source=FleetRunSource.MANUAL,
         repository_admissions=(repository_plan_admission_evidence(repository, target.plan),),
     )
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    executor_pool = FleetExecutorPool(database, executor_configuration)
+    lifecycle = FleetRunLifecycle(database, journal, execution, executor_pool)
+    ticket = execution.claim_fleet_worker(ticket)
 
     git = GitService()
     plan_runner = FleetPlanRunner(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from oh_goon.engine.git import GitService
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
-from oh_goon.runtime.execution import ExecutionCoordinator, RunExecutionSupervisor
+from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
@@ -27,6 +27,7 @@ from oh_goon.services.runtime_safety import RuntimeSafetyService
 from oh_goon.services.target_selection import FleetTargetSelector
 from tests.factories.repository_effect_runtime import effect_execution
 from tests.fakes.capability_runners import CommandRunnerStub, fixed_capability_runners
+from tests.fakes.fleet_worker import SimulatedRunWorker
 
 
 def execution_stack(database: LocalDatabase, journal: Journal, runner: object):
@@ -81,12 +82,33 @@ def direct_operation_stack(
 
 def fleet_stack(state: LocalState, runner: object, *, faults: object | None = None):
     repositories = RepositoryService(state, RepositoryDiscoveryService())
-    execution = ExecutionCoordinator(state.database)
     adapter = CommandRunnerStub(runner)
     executor = CapabilityExecutor(
         fixed_capability_runners(adapter),
         faults=faults,  # type: ignore[arg-type]
     )
+    live_output = GameTapeLiveOutputStore()
+    git = GitService()
+
+    def worker_execution(
+        database: LocalDatabase, execution: ExecutionCoordinator
+    ) -> FleetRunExecution:
+        journal = Journal(database)
+        effects = effect_execution(
+            database,
+            executor,
+            journal,
+            RepositoryEffectAttemptStore(database),
+            git,
+            faults=faults,
+        )
+        lifecycle = FleetRunLifecycle(
+            database, journal, execution, FleetExecutorPool(database, None)
+        )
+        return FleetRunExecution(lifecycle, FleetTargetScheduler(effects), live_output)
+
+    workers = SimulatedRunWorker(state.database, worker_execution)
+    execution = ExecutionCoordinator(state.database, lease_environment=workers.parent_environment)
     migration = MigrationService(state, RepositoryDiscoveryService())
     fleet = FleetService(repositories, state)
     attempts = RepositoryEffectAttemptStore(state.database)
@@ -94,7 +116,6 @@ def fleet_stack(state: LocalState, runner: object, *, faults: object | None = No
     auditor = SystemInvariantAuditor(state.database, state.journal, execution, attempts, schedules)
     safety = RuntimeSafetyService(auditor, RuntimeSafetyGate())
     safety.refresh()
-    git = GitService()
     effects = effect_execution(
         state.database,
         executor,
@@ -109,15 +130,15 @@ def fleet_stack(state: LocalState, runner: object, *, faults: object | None = No
     )
     executor_pool = FleetExecutorPool(state.database, None)
     lifecycle = FleetRunLifecycle(state.database, state.journal, execution, executor_pool)
-    live_output = GameTapeLiveOutputStore()
     run_execution = FleetRunExecution(lifecycle, FleetTargetScheduler(effects), live_output)
     manager = FleetRunControlPlane(
         admission,
         state.journal,
         lifecycle,
         run_execution,
-        RunExecutionSupervisor(),
+        workers,
         live_output,
         schedule_executions=schedules,
+        worker_configuration=workers.configuration,
     )
     return fleet, manager, executor, execution

@@ -5,9 +5,9 @@ This document describes the current authoritative data flow. It is intentionally
 The Direct repository-effect operations below are existing operation semantics,
 not an alternate route for an Oh-Goon Plan or FleetRun. Local, strict CI/CD,
 scheduled, ML, application and agentic Runs share the Fleet path. The
-[execution boundary](execution-boundary.md) owns its current thread-based
-submission and the required HUG-180/HUG-181 claimed-worker cutover. That target
-adds physical custody below admission without a new resolver or durable Run
+[execution boundary](execution-boundary.md) owns its fresh-process submission
+and atomic worker claim. That boundary adds physical custody below admission
+without a new resolver or durable Run
 state owner; worker bootstrap consumes frozen facts and cannot reselect work.
 
 ## Direct repository effect
@@ -57,7 +57,8 @@ FleetRunRequest(fleet_run_id, intent, selection)
        + exact Fleet lease
        + RUN_ADMITTED in the same transaction
   -> RunExecutionSupervisor
-       current thread submission + bounded last-failure diagnostic only
+       fresh native process + bounded last-failure diagnostic only
+  -> atomic SQLite worker claim
   -> FleetRunExecution
        -> FleetRunLifecycle.begin
           -> exact-owner transaction decides cancellation-vs-RUN_STARTED
@@ -76,10 +77,10 @@ FleetRunRequest(fleet_run_id, intent, selection)
 
 If background submission itself is rejected after admission, `FleetRunControlPlane` delegates the exact admitted ticket to `FleetRunLifecycle.finish_admitted`, which resolves `RUN_FAILED + lease release` through one `ExecutionSession.finish` transaction. It never terminalizes and then separately abandons a lease. Dead-owner cancellation is likewise one lifecycle transaction: reclaim stale lease + terminalize orphan.
 
-The required process cutover inserts a fresh isolated worker and atomic
-single-use custody claim between `RunExecutionSupervisor` and
-`FleetRunExecution`. Existing ticket activation is not that claim, and current
-thread submission is not a supported future fallback. Process exit, native
+The [supervisor contract](development/EXECUTION_SUPERVISOR.md) inserts a fresh
+worker and atomic single-use custody claim between `RunExecutionSupervisor`
+and `FleetRunExecution`. Ticket activation requires that claimed custody.
+Process exit, native
 session status and Game Tape remain evidence or projections; the original
 Fleet lifecycle and SQLite/Journal own terminalization and recovery.
 
@@ -367,7 +368,9 @@ YAML plan/templates + TOML allowlist
               |
      Fleet admission + ExecutionTicket
               |
-  RunExecutionSupervisor (current thread)
+       RunExecutionSupervisor
+              |
+       claimed Run worker
               |
          FleetRunExecution
               |

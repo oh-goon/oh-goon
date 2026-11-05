@@ -18,6 +18,7 @@ from oh_goon.core.product_identity import schedule_repository_fleet_run_id
 from oh_goon.core.schedule_transitions import mark_repository_running
 from oh_goon.core.vocabulary import FleetRunSource, OperationAction
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.execution import RunWorkerLaunch
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
@@ -70,6 +71,9 @@ def _fixture(tmp_path: Path, *, store_wired: bool = True):
         object(),
         object(),
         schedule_executions=executions if store_wired else None,
+        worker_configuration=lambda run_id: lambda _ticket: RunWorkerLaunch(
+            argv=("unused-unit-worker", run_id), cwd=tmp_path, environment={}
+        ),
     )
     return database, executions, occurrence, journal, prework, planner, control
 

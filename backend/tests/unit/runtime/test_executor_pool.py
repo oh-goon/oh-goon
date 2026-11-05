@@ -54,6 +54,7 @@ from tests.factories.capabilities import resolved_intent
 from tests.factories.fleet_plan_targets import structural_fleet_plan_target
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
 from tests.factories.run_admission import repository_admission_for
+from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
 def _control_identity(pool: FleetExecutorPool, executor_id: str = "executor-a") -> tuple[int, int]:
@@ -281,15 +282,13 @@ def test_strict_admission_replays_exact_bundle_after_ambiguous_commit_response(
 ) -> None:
     database = _database(tmp_path)
     candidate = _candidate(tmp_path, "executor-ambiguous", priority=0)
-    pool = FleetExecutorPool(
-        database,
-        ExecutorPoolConfiguration(
-            placement_wait_seconds=0,
-            placement_queue_limit=64,
-            path_authority=TEST_PATH_AUTHORITY,
-            executors=(candidate,),
-        ),
+    configuration = ExecutorPoolConfiguration(
+        placement_wait_seconds=0,
+        placement_queue_limit=64,
+        path_authority=TEST_PATH_AUTHORITY,
+        executors=(candidate,),
     )
+    pool = FleetExecutorPool(database, configuration)
     journal = Journal(database)
     execution = ExecutionCoordinator(database)
     lifecycle = FleetRunLifecycle(database, journal, execution, pool)
@@ -326,7 +325,11 @@ def test_strict_admission_replays_exact_bundle_after_ambiguous_commit_response(
     )
     assert pool.placement_queue().entries == ()
 
-    session = lifecycle.activate(ticket)
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    pool = FleetExecutorPool(database, configuration)
+    lifecycle = FleetRunLifecycle(database, journal, execution, pool)
+    session = lifecycle.activate(execution.claim_fleet_worker(ticket))
 
     def reject_split_read(*_args, **_kwargs):
         raise AssertionError("execution authority opened a standalone durable read")

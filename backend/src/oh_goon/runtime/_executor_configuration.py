@@ -4,20 +4,27 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import ConfigDict, Field
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_environment import (
     ResolvedExecutionEnvironment,
     configured_environment_backend,
 )
+from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_executor import FleetExecutorIdentity
 from oh_goon.core.path_authority import StrictHostPathAuthority, require_absolute_host_path
 from oh_goon.core.strict_executor_authority import EXECUTORS_FILE_ENV
-from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+from oh_goon.integrations.fleet_plan_bubblewrap_isolation import (
+    BubblewrapProcessIsolation,
+    BubblewrapWorkerConfiguration,
+)
 from oh_goon.integrations.fleet_plan_opensandbox_isolation import (
     OpenSandboxProcessIsolation,
     OpenSandboxSettings,
+    OpenSandboxWorkerConfiguration,
 )
 from oh_goon.integrations.fleet_plan_process_isolation import (
     ProcessIsolationBackend,
@@ -81,6 +88,98 @@ class ExecutorPoolConfiguration:
     placement_queue_limit: int
     path_authority: StrictHostPathAuthority
     executors: tuple[ConfiguredFleetExecutor, ...]
+
+
+WorkerIsolationConfiguration = Annotated[
+    BubblewrapWorkerConfiguration | OpenSandboxWorkerConfiguration,
+    Field(discriminator="kind"),
+]
+
+
+class WorkerExecutorConfiguration(ImmutableModel):
+    priority: int = Field(ge=0)
+    capacity: ExecutorCapacitySettings
+    backend: WorkerIsolationConfiguration = Field(repr=False)
+
+
+class WorkerExecutorPoolConfiguration(ImmutableModel):
+    """Exact resolved inventory transport, never an input to a new placement decision."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+    placement_wait_seconds: int = Field(ge=0, le=3600)
+    placement_queue_limit: int = Field(ge=1, le=10000)
+    path_authority: StrictHostPathAuthority
+    executors: tuple[WorkerExecutorConfiguration, ...] = Field(repr=False, min_length=1)
+
+
+def capture_worker_isolation_configuration(
+    backend: ProcessIsolationBackend,
+) -> BubblewrapWorkerConfiguration | OpenSandboxWorkerConfiguration:
+    """Capture only supported concrete native owners before Run admission."""
+    if type(backend) is BubblewrapProcessIsolation:
+        return backend.capture_worker_configuration()
+    if type(backend) is OpenSandboxProcessIsolation:
+        return backend.capture_worker_configuration()
+    raise FleetPlanInvalid("Run worker does not support the injected process-isolation owner")
+
+
+def restore_worker_isolation_configuration(
+    configuration: WorkerIsolationConfiguration,
+) -> ProcessIsolationBackend:
+    if isinstance(configuration, BubblewrapWorkerConfiguration):
+        return BubblewrapProcessIsolation.from_worker_configuration(configuration)
+    return OpenSandboxProcessIsolation.from_worker_configuration(configuration)
+
+
+def capture_worker_executor_configuration(
+    configuration: ExecutorPoolConfiguration | None,
+) -> WorkerExecutorPoolConfiguration | None:
+    if configuration is None:
+        return None
+    if type(configuration) is not ExecutorPoolConfiguration:
+        raise FleetPlanInvalid("Run worker requires the resolved native executor configuration")
+    return WorkerExecutorPoolConfiguration(
+        placement_wait_seconds=configuration.placement_wait_seconds,
+        placement_queue_limit=configuration.placement_queue_limit,
+        path_authority=configuration.path_authority,
+        executors=tuple(
+            WorkerExecutorConfiguration(
+                priority=item.priority,
+                capacity=item.capacity,
+                backend=capture_worker_isolation_configuration(item.backend),
+            )
+            for item in configuration.executors
+        ),
+    )
+
+
+def restore_worker_executor_configuration(
+    configuration: WorkerExecutorPoolConfiguration | None,
+) -> ExecutorPoolConfiguration | None:
+    """Verify captured host paths and backend identities without inventory discovery."""
+    if configuration is None:
+        return None
+    authority = configuration.path_authority
+    verified = StrictHostPathAuthority.create(
+        trusted_roots=authority.trusted_roots,
+        tool_search_paths=authority.tool_search_paths,
+        runtime_inspector=authority.runtime_inspector,
+    )
+    if verified != authority:
+        raise FleetPlanInvalid("Run worker path authority changed after capture")
+    return ExecutorPoolConfiguration(
+        placement_wait_seconds=configuration.placement_wait_seconds,
+        placement_queue_limit=configuration.placement_queue_limit,
+        path_authority=verified,
+        executors=tuple(
+            ConfiguredFleetExecutor(
+                priority=item.priority,
+                capacity=item.capacity,
+                backend=restore_worker_isolation_configuration(item.backend),
+            )
+            for item in configuration.executors
+        ),
+    )
 
 
 def configured_executor_pool(

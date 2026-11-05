@@ -3,9 +3,9 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal, TypeVar
+from typing import Literal, TypeVar, cast
 from uuid import uuid4
 
 from oh_goon.core.errors import ExecutionBusy, OwnershipLost
@@ -15,13 +15,58 @@ from oh_goon.runtime.execution.lease_environment import LeaseEnvironment, System
 
 T = TypeVar("T")
 ExecutionKind = Literal["DIRECT", "FLEET"]
+ExecutionCustodyPhase = Literal[
+    "DIRECT_OWNED", "ADMITTED_UNCLAIMED", "WORKER_OWNED", "RECOVERY_OWNED"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionCustody:
+    """One exact process custodian, carried with the lease it is allowed to use."""
+
+    phase: ExecutionCustodyPhase
+    owner_session_id: str
+    owner_pid: int
+    owner_identity: str | None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.phase) is not str
+            or self.phase
+            not in {"DIRECT_OWNED", "ADMITTED_UNCLAIMED", "WORKER_OWNED", "RECOVERY_OWNED"}
+            or type(self.owner_session_id) is not str
+            or not self.owner_session_id
+            or type(self.owner_pid) is not int
+            or self.owner_pid < 1
+            or self.owner_identity is not None
+            and (type(self.owner_identity) is not str or not self.owner_identity)
+            or self.phase in {"WORKER_OWNED", "RECOVERY_OWNED"}
+            and self.owner_identity is None
+            or (self.phase == "RECOVERY_OWNED") != self.owner_session_id.startswith("recovery:")
+        ):
+            raise ValueError("invalid execution custody")
 
 
 @dataclass(frozen=True, slots=True)
 class ExecutionLease:
-    token: str
+    token: str = field(repr=False)
     kind: ExecutionKind
     fleet_run_id: str | None
+    custody: ExecutionCustody | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.token) is not str
+            or not self.token
+            or type(self.kind) is not str
+            or self.kind not in {"DIRECT", "FLEET"}
+            or (self.kind == "DIRECT") != (self.fleet_run_id is None)
+            or self.fleet_run_id is not None
+            and (type(self.fleet_run_id) is not str or not self.fleet_run_id)
+            or self.custody is not None
+            and (self.kind == "DIRECT") != (self.custody.phase == "DIRECT_OWNED")
+        ):
+            raise ValueError("invalid execution lease custody")
 
 
 def _new_lease(kind: ExecutionKind, fleet_run_id: str | None) -> ExecutionLease:
@@ -61,7 +106,7 @@ class SQLiteExecutionLeaseStore:
         lease = _new_lease("DIRECT", None)
         with self._database.transaction(write=True) as connection:
             require_durable_revision(connection, expected_durable_revision)
-            self._insert_lease(connection, lease)
+            lease = self._insert_lease(connection, lease)
             result = mutate(connection)
         return lease, result
 
@@ -75,7 +120,7 @@ class SQLiteExecutionLeaseStore:
         lease = _new_lease("FLEET", fleet_run_id)
         with self._database.transaction(write=True) as connection:
             require_durable_revision(connection, expected_durable_revision)
-            self._insert_lease(connection, lease)
+            lease = self._insert_lease(connection, lease)
             result = mutate(connection)
         return lease, result
 
@@ -89,8 +134,79 @@ class SQLiteExecutionLeaseStore:
         """Create the Fleet lease inside a caller-owned admission transaction."""
         require_durable_revision(connection, expected_durable_revision)
         lease = _new_lease("FLEET", fleet_run_id)
-        self._insert_lease(connection, lease)
-        return lease
+        return self._insert_lease(connection, lease)
+
+    def claim_fleet_worker(
+        self,
+        lease: ExecutionLease,
+        require_admitted: Callable[[sqlite3.Connection], None],
+    ) -> ExecutionLease:
+        """Consume one admission capability in the original SQLite writer cut.
+
+        The stable token remains the signed admission identity. Replacing its exact
+        custodian and phase revokes the predecessor's mutation authority instead.
+        """
+        expected = lease.custody
+        if (
+            lease.kind != "FLEET"
+            or lease.fleet_run_id is None
+            or expected is None
+            or expected.phase != "ADMITTED_UNCLAIMED"
+            or expected.owner_identity is None
+        ):
+            raise OwnershipLost("exact unclaimed Fleet admission required")
+        pid = self._environment.process_id()
+        if type(pid) is not int or pid < 1:
+            raise OwnershipLost("worker process identity is unproven")
+        birth = self._environment.process_identity(pid)
+        if (
+            pid == expected.owner_pid
+            or self._database.session_id == expected.owner_session_id
+            or type(birth) is not str
+            or not birth
+            or self._environment.process_alive(pid) is not True
+        ):
+            raise OwnershipLost("fresh worker process and database session required")
+        custody = ExecutionCustody("WORKER_OWNED", self._database.session_id, pid, birth)
+        with self._database.transaction(write=True) as connection:
+            self._database.require_atomic_write_cut(connection)
+            row = connection.execute("SELECT * FROM execution_lease WHERE singleton=1").fetchone()
+            if (
+                row is None
+                or _lease_from_row(row) != lease
+                or row["cancel_requested_at"] is not None
+            ):
+                raise OwnershipLost("Fleet admission changed before worker claim")
+            require_admitted(connection)
+            # Reobserve native claimant identity immediately before the durable CAS.
+            if (
+                self._environment.process_id() != pid
+                or self._environment.process_identity(pid) != birth
+                or self._environment.process_alive(pid) is not True
+            ):
+                raise OwnershipLost("worker process identity changed before claim")
+            cursor = connection.execute(
+                """UPDATE execution_lease
+                   SET custody_phase='WORKER_OWNED', owner_session_id=?, owner_pid=?,
+                       owner_identity=?
+                   WHERE singleton=1 AND lease_token=? AND kind='FLEET'
+                     AND fleet_run_id=? AND custody_phase='ADMITTED_UNCLAIMED'
+                     AND owner_session_id=? AND owner_pid=? AND owner_identity=?
+                     AND cancel_requested_at IS NULL""",
+                (
+                    custody.owner_session_id,
+                    custody.owner_pid,
+                    custody.owner_identity,
+                    lease.token,
+                    lease.fleet_run_id,
+                    expected.owner_session_id,
+                    expected.owner_pid,
+                    expected.owner_identity,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise OwnershipLost("Fleet admission was already claimed")
+        return replace(lease, custody=custody)
 
     def observe_as_owner(
         self, lease: ExecutionLease, observe: Callable[[sqlite3.Connection], T]
@@ -107,7 +223,7 @@ class SQLiteExecutionLeaseStore:
     ) -> T:
         """Run one ownership-critical durable mutation in the ownership-check transaction."""
         with self._database.transaction(write=True) as connection:
-            self.assert_owner_in(connection, lease)
+            self._assert_executable_owner_in(connection, lease)
             return mutate(connection)
 
     def mutate_recovery_as_owner(
@@ -131,7 +247,7 @@ class SQLiteExecutionLeaseStore:
     ) -> T:
         """Persist terminal lifecycle state and release ownership in one transaction."""
         with self._database.transaction(write=True) as connection:
-            self.assert_owner_in(connection, lease)
+            self._assert_executable_owner_in(connection, lease)
             result = mutate(connection)
             cursor = connection.execute(
                 "DELETE FROM execution_lease WHERE singleton = 1 AND lease_token = ?",
@@ -139,6 +255,28 @@ class SQLiteExecutionLeaseStore:
             )
             if cursor.rowcount != 1:
                 raise OwnershipLost("Execution lease was lost before terminal release")
+            return result
+
+    def assert_submission_owner(self, lease: ExecutionLease) -> None:
+        with self._database.transaction() as connection:
+            self._require_fleet_custody_in(connection, lease, "ADMITTED_UNCLAIMED")
+
+    def finish_submission_as_owner(
+        self,
+        lease: ExecutionLease,
+        mutate: Callable[[sqlite3.Connection], T],
+    ) -> T:
+        """Settle submission only while the original admission remains unclaimed."""
+        with self._database.transaction(write=True) as connection:
+            self._require_fleet_custody_in(connection, lease, "ADMITTED_UNCLAIMED")
+            result = mutate(connection)
+            cursor = connection.execute(
+                "DELETE FROM execution_lease WHERE singleton=1 AND lease_token=?"
+                " AND custody_phase='ADMITTED_UNCLAIMED'",
+                (lease.token,),
+            )
+            if cursor.rowcount != 1:
+                raise OwnershipLost("Fleet admission changed before submission settlement")
             return result
 
     def active_lease(self) -> ExecutionLease | None:
@@ -150,12 +288,7 @@ class SQLiteExecutionLeaseStore:
         row = self._active_lease_row(connection, remove_dead=False)
         if row is None:
             return None
-        kind = str(row["kind"])
-        return ExecutionLease(
-            token=str(row["lease_token"]),
-            kind="FLEET" if kind == "FLEET" else "DIRECT",
-            fleet_run_id=str(row["fleet_run_id"]) if row["fleet_run_id"] is not None else None,
-        )
+        return _lease_from_row(row)
 
     def owned_fleet_lease_in(
         self, connection: sqlite3.Connection, fleet_run_id: str
@@ -211,6 +344,9 @@ class SQLiteExecutionLeaseStore:
             or row["cancel_requested_at"] is not None
         ):
             raise OwnershipLost("predecessor lease missing, cancelled or already transferred")
+        predecessor_custody = _lease_from_row(row).custody
+        if predecessor_custody is None:
+            raise OwnershipLost("predecessor custody is unproven")
         old_session, old_pid, old_birth = (
             row["owner_session_id"],
             row["owner_pid"],
@@ -242,15 +378,20 @@ class SQLiteExecutionLeaseStore:
             or self._environment.process_alive(pid) is not True
         ):
             raise OwnershipLost("replacement process birth/liveness not proven")
-        successor = _new_lease("FLEET", run_id)
+        successor = replace(
+            _new_lease("FLEET", run_id),
+            custody=ExecutionCustody(
+                "RECOVERY_OWNED", f"recovery:{self._database.session_id}", pid, birth
+            ),
+        )
         now = self._environment.now().isoformat()
         updated = connection.execute(
             """UPDATE execution_lease
                SET lease_token=?, owner_session_id=?, owner_pid=?, owner_identity=?,
-                   acquired_at=?, cancel_requested_at=NULL
+                   acquired_at=?, cancel_requested_at=NULL, custody_phase='RECOVERY_OWNED'
                WHERE singleton=1 AND lease_token=? AND fleet_run_id=?
                  AND cancel_requested_at IS NULL AND owner_session_id=?
-                 AND owner_pid=? AND owner_identity=?""",
+                 AND owner_pid=? AND owner_identity=? AND custody_phase=?""",
             (
                 successor.token,
                 f"recovery:{self._database.session_id}",
@@ -262,6 +403,7 @@ class SQLiteExecutionLeaseStore:
                 old_session,
                 old_pid,
                 old_birth,
+                predecessor_custody.phase,
             ),
         )
         if updated.rowcount != 1:
@@ -281,24 +423,12 @@ class SQLiteExecutionLeaseStore:
         connection: sqlite3.Connection,
         lease: ExecutionLease,
     ) -> None:
-        self.assert_owner_in(connection, lease)
+        self._require_fleet_custody_in(connection, lease, "RECOVERY_OWNED")
         row = connection.execute(
-            "SELECT owner_session_id,owner_pid,owner_identity,cancel_requested_at"
-            " FROM execution_lease WHERE singleton=1"
+            "SELECT cancel_requested_at FROM execution_lease WHERE singleton=1"
         ).fetchone()
-        pid = self._environment.process_id()
-        birth = self._environment.process_identity(pid)
-        if (
-            row is None
-            or row[0] != f"recovery:{self._database.session_id}"
-            or row[1] != pid
-            or type(birth) is not str
-            or not birth
-            or row[2] != birth
-            or row[3] is not None
-            or self._environment.process_alive(pid) is not True
-        ):
-            raise OwnershipLost("recovery-only Fleet custody is not current")
+        if row is None or row[0] is not None:
+            raise OwnershipLost("recovery-only Fleet custody is cancelled")
 
     def request_fleet_cancel_in(
         self,
@@ -383,27 +513,62 @@ class SQLiteExecutionLeaseStore:
         connection: sqlite3.Connection,
         lease: ExecutionLease,
     ) -> None:
+        if lease.kind == "FLEET":
+            custody = lease.custody
+            if custody is None or custody.phase not in {"WORKER_OWNED", "RECOVERY_OWNED"}:
+                raise OwnershipLost("claimed Fleet process custody required")
+            self._require_fleet_custody_in(connection, lease, custody.phase)
+            return
         row = connection.execute(
-            "SELECT lease_token, kind, fleet_run_id FROM execution_lease WHERE singleton = 1"
+            "SELECT lease_token, kind, fleet_run_id, custody_phase"
+            " FROM execution_lease WHERE singleton = 1"
         ).fetchone()
         if row is None or str(row["lease_token"]) != lease.token:
             raise OwnershipLost("Execution lease was lost")
-        if str(row["kind"]) != lease.kind or row["fleet_run_id"] != lease.fleet_run_id:
+        if (
+            str(row["kind"]) != lease.kind
+            or row["fleet_run_id"] != lease.fleet_run_id
+            or row["custody_phase"] != "DIRECT_OWNED"
+        ):
             raise OwnershipLost("Execution lease identity changed")
-        custody = connection.execute(
-            "SELECT owner_session_id,owner_pid,owner_identity FROM execution_lease WHERE singleton=1"
-        ).fetchone()
-        if custody is not None and str(custody[0]).startswith("recovery:"):
-            pid = self._environment.process_id()
-            birth = self._environment.process_identity(pid)
-            if (
-                custody[0] != f"recovery:{self._database.session_id}"
-                or custody[1] != pid
-                or not birth
-                or custody[2] != birth
-                or self._environment.process_alive(pid) is not True
-            ):
-                raise OwnershipLost("recovery owner session/process identity changed")
+
+    def _require_fleet_custody_in(
+        self,
+        connection: sqlite3.Connection,
+        lease: ExecutionLease,
+        phase: ExecutionCustodyPhase,
+    ) -> None:
+        custody = lease.custody
+        if lease.kind != "FLEET" or custody is None or custody.phase != phase:
+            raise OwnershipLost("exact Fleet custody required")
+        row = connection.execute("SELECT * FROM execution_lease WHERE singleton=1").fetchone()
+        pid = self._environment.process_id()
+        birth = self._environment.process_identity(pid)
+        session_id = (
+            f"recovery:{self._database.session_id}"
+            if phase == "RECOVERY_OWNED"
+            else self._database.session_id
+        )
+        if (
+            row is None
+            or _lease_from_row(row) != lease
+            or custody.owner_session_id != session_id
+            or custody.owner_pid != pid
+            or not birth
+            or custody.owner_identity != birth
+            or self._environment.process_alive(pid) is not True
+        ):
+            raise OwnershipLost("Fleet owner session/process custody changed")
+
+    def _assert_executable_owner_in(
+        self, connection: sqlite3.Connection, lease: ExecutionLease
+    ) -> None:
+        if lease.kind == "FLEET":
+            if lease.custody is not None and lease.custody.phase == "RECOVERY_OWNED":
+                raise OwnershipLost("recovery custody is not executable admission")
+            self._require_fleet_custody_in(connection, lease, "WORKER_OWNED")
+        else:
+            self.assert_owner_in(connection, lease)
 
     def require_initial_fleet_control_in(
         self,
@@ -440,7 +605,7 @@ class SQLiteExecutionLeaseStore:
                 raise OwnershipLost("Control proof is not on the owner database")
             row = connection.execute(
                 """SELECT lease_token, kind, fleet_run_id, owner_session_id,
-                          owner_pid, owner_identity, cancel_requested_at
+                          owner_pid, owner_identity, cancel_requested_at, custody_phase
                    FROM execution_lease WHERE singleton = 1"""
             ).fetchone()
         except (OSError, sqlite3.Error, StopIteration) as exc:
@@ -452,6 +617,7 @@ class SQLiteExecutionLeaseStore:
             or row[2] != run_id
             or row[3] != self._database.session_id
             or row[6] is not None
+            or row[7] != "ADMITTED_UNCLAIMED"
         ):
             raise OwnershipLost("Fleet control lease missing, replaced or revoked")
 
@@ -491,12 +657,7 @@ class SQLiteExecutionLeaseStore:
 
     def assert_executable_owner(self, lease: ExecutionLease) -> None:
         with self._database.transaction() as connection:
-            self.assert_owner_in(connection, lease)
-            row = connection.execute(
-                "SELECT owner_session_id FROM execution_lease WHERE singleton=1"
-            ).fetchone()
-            if row is None or str(row[0]).startswith("recovery:"):
-                raise OwnershipLost("recovery custody is not executable admission")
+            self._assert_executable_owner_in(connection, lease)
 
     def assert_fleet_owner(self, lease: ExecutionLease, fleet_run_id: str) -> None:
         if lease.kind != "FLEET" or lease.fleet_run_id != fleet_run_id:
@@ -526,7 +687,9 @@ class SQLiteExecutionLeaseStore:
             f"Cannot change fleet scope while {owner} execution{suffix} ownership is retained"
         )
 
-    def _insert_lease(self, connection: sqlite3.Connection, lease: ExecutionLease) -> None:
+    def _insert_lease(
+        self, connection: sqlite3.Connection, lease: ExecutionLease
+    ) -> ExecutionLease:
         row = self._active_lease_row(connection, remove_dead=True)
         if row is not None:
             owner = str(row["kind"]).lower()
@@ -534,23 +697,32 @@ class SQLiteExecutionLeaseStore:
             suffix = f" {run}" if run else ""
             raise ExecutionBusy(f"{owner.capitalize()} execution{suffix} is already active")
         now = self._environment.now().isoformat()
+        pid = self._environment.process_id()
+        custody = ExecutionCustody(
+            "DIRECT_OWNED" if lease.kind == "DIRECT" else "ADMITTED_UNCLAIMED",
+            self._database.session_id,
+            pid,
+            self._environment.process_identity(pid),
+        )
         connection.execute(
             """
             INSERT INTO execution_lease(
                 singleton, lease_token, owner_session_id, owner_pid, owner_identity, kind,
-                fleet_run_id, acquired_at
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                fleet_run_id, acquired_at, custody_phase
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 lease.token,
-                self._database.session_id,
-                self._environment.process_id(),
-                self._environment.process_identity(self._environment.process_id()),
+                custody.owner_session_id,
+                custody.owner_pid,
+                custody.owner_identity,
                 lease.kind,
                 lease.fleet_run_id,
                 now,
+                custody.phase,
             ),
         )
+        return replace(lease, custody=custody) if lease.kind == "FLEET" else lease
 
     def _active_lease_row(
         self,
@@ -563,6 +735,7 @@ class SQLiteExecutionLeaseStore:
         ).fetchone()
         if row is None:
             return None
+        _lease_from_row(row)
         owner_pid = int(row["owner_pid"])
         owner_identity = str(row["owner_identity"]) if row["owner_identity"] is not None else None
         if self._environment.process_alive(owner_pid):
@@ -590,10 +763,20 @@ class SQLiteExecutionLeaseStore:
                 )
 
                 require_no_original_lace_intent_before_reclamation_in(connection, run_id)
-            connection.execute(
-                "DELETE FROM execution_lease WHERE singleton = 1 AND lease_token = ?",
-                (str(row["lease_token"]),),
+            cursor = connection.execute(
+                "DELETE FROM execution_lease WHERE singleton=1 AND lease_token=?"
+                " AND custody_phase=? AND owner_session_id=? AND owner_pid=?"
+                " AND owner_identity IS ?",
+                (
+                    row["lease_token"],
+                    row["custody_phase"],
+                    row["owner_session_id"],
+                    row["owner_pid"],
+                    row["owner_identity"],
+                ),
             )
+            if cursor.rowcount != 1:
+                raise OwnershipLost("dead execution predecessor changed before reclamation")
         return None
 
 
@@ -616,4 +799,24 @@ def _owned_fleet_lease_in(
         or str(row["owner_identity"]) != process_identity
     ):
         return None
-    return ExecutionLease(token=str(row["lease_token"]), kind="FLEET", fleet_run_id=fleet_run_id)
+    return _lease_from_row(row)
+
+
+def _lease_from_row(row: sqlite3.Row) -> ExecutionLease:
+    """Reject contradictory stored custody at its one decoding boundary."""
+    try:
+        custody = ExecutionCustody(
+            phase=cast(ExecutionCustodyPhase, row["custody_phase"]),
+            owner_session_id=row["owner_session_id"],
+            owner_pid=row["owner_pid"],
+            owner_identity=row["owner_identity"],
+        )
+        lease = ExecutionLease(
+            token=row["lease_token"],
+            kind=row["kind"],
+            fleet_run_id=row["fleet_run_id"],
+            custody=custody,
+        )
+        return replace(lease, custody=None) if lease.kind == "DIRECT" else lease
+    except (ValueError, TypeError, IndexError) as exc:
+        raise OwnershipLost("stored execution custody is invalid") from exc

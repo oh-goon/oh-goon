@@ -8,19 +8,19 @@ The separate normative owners are the [mandatory Hashmarks SSOT requirements](de
 and [canonical execution-lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md).
 Hashmarks is mandatory for repository intelligence, consumed through the public
 `oh_goon.integrations.hashmarks` API; missing producer precision never authorizes
-a local semantic replacement. The lifecycle requirements strengthen this same
-FleetRun path with isolated worker custody. At present `RunExecutionSupervisor`
-still submits the existing `FleetRunExecution` to a thread pool. The required
-fresh-process/atomic-claim cutover and its qualification belong to
-[HUG-180](https://linear.app/hugloss/issue/HUG-180) and
-[HUG-181](https://linear.app/hugloss/issue/HUG-181); the target diagram in the
-requirements is not a claim that those guarantees already exist.
+a local semantic replacement. The same FleetRun path now uses one fresh native
+Run-worker process per admission, with an atomic SQLite custody claim before
+the existing `FleetRunExecution` begins. This is the
+[HUG-180](https://linear.app/hugloss/issue/HUG-180) process-boundary cutover;
+the complete failure/drain matrix remains
+[HUG-181](https://linear.app/hugloss/issue/HUG-181), and the broader lifecycle
+audit remains [HUG-183](https://linear.app/hugloss/issue/HUG-183).
 
 Local, CI/CD, scheduled, ML, application and agentic Runs all enter that same
-admission. The required custody chain is:
+admission. The custody chain is:
 
 ```text
-FleetRun admission → ExecutionTicket → RunExecutionSupervisor
+FleetRunControlPlane → FleetRunLifecycle.admit → ExecutionTicket → RunExecutionSupervisor
   → claimed isolated Run worker → FleetRunExecution → ExecutionSession
   → FleetTargetScheduler → Step/Attempt → native harness or tool
 
@@ -28,12 +28,17 @@ Hashmarks → public oh_goon.integrations.hashmarks API → Oh-Goon admission/po
 ```
 
 The worker claim changes live physical custody only. It does not re-admit,
-re-place, re-resolve or reselect work. The current thread-owned submission is
-the implementation to replace, not a compatibility mode to keep after cutover.
-Future remote placement or broader concurrency must preserve this lifecycle.
+re-place, re-resolve or reselect work. The protected descriptor handoff carries
+captured configuration and one admitted ticket. The worker reopens the existing
+database with a fresh session, claims the exact unclaimed predecessor, and
+composes only the original execution owners. The claim supersedes exact parent
+custody; an admitted parent ticket cannot activate Fleet execution. While custody
+is unclaimed, the parent can settle submission failure through its finish-only session.
+The supervisor retains the conservative one-active-Run limit. Future remote
+placement or broader concurrency must preserve this lifecycle.
 The [execution boundary](execution-boundary.md) and
-[supervisor owner](development/EXECUTION_SUPERVISOR.md) distinguish current
-behavior from that target.
+[supervisor owner](development/EXECUTION_SUPERVISOR.md) describe the implemented
+boundary and the remaining qualification.
 
 Selected Agent Steps use this same execution lifecycle and a neutral immutable
 intent with explicit search, bounded model, provider and native workload variants.
@@ -69,7 +74,7 @@ explain their historical designs.
 | Fleet target parallelism | `FleetTargetScheduler` |
 | Fleet live lease + Journal lifecycle mutation | `FleetRunLifecycle` |
 | Fleet orchestration execution | `FleetRunExecution` |
-| live Run submission/lifetime supervision | `RunExecutionSupervisor`; currently thread-based, required claimed-process custody under HUG-180/HUG-181 |
+| live Run submission/lifetime supervision | `RunExecutionSupervisor`; fresh native process, atomic SQLite claim; failure/drain qualification remains HUG-181 |
 | Fleet admission policy | `FleetAdmissionPlanner` |
 | repository-intelligence meaning, identity/freshness and correlation | Hashmarks through the public `oh_goon.integrations.hashmarks` API |
 | native project manifest observation / engine policy inputs | `engine/project.py`; not an alternate repository-intelligence owner |

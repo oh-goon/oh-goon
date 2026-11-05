@@ -23,12 +23,10 @@ may bucket, count, filter and page these facts, but it must not invent another
 status vocabulary or persist another copy.
 
 Worker health, process exit, logs and diagnostic events cannot establish custody
-or terminal success. The required claimed-worker boundary remains
-[HUG-180](https://linear.app/hugloss/issue/HUG-180)/[HUG-181](https://linear.app/hugloss/issue/HUG-181)
-implementation and qualification work; the current supervisor is thread-owned.
-See the [execution-lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-for the target and [execution supervisor](development/EXECUTION_SUPERVISOR.md) for
-current process ownership. Observability does not create a second Run route.
+or terminal success. The [execution supervisor](development/EXECUTION_SUPERVISOR.md)
+owns fresh-worker process submission and the atomic SQLite claim. Complete
+failure/drain and broader lifecycle qualification remain HUG-181/HUG-183 work.
+Observability does not create a second Run route.
 
 An empty time-grid cell means there is no execution observation for that repository and bucket. It is absence of evidence, not a `NO_EXECUTION` status.
 

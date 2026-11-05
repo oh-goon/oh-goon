@@ -389,6 +389,35 @@ def verify_current_run_resource_scope(
     return evidence
 
 
+def verify_worker_run_resource_scope(
+    scope: ResolvedRunResourceScope,
+    expected: RunResourceEnvelopeEvidence,
+    *,
+    worker_birth: ProcessBirthIdentity,
+) -> None:
+    """Verify a claimed worker remains in the original admitted native envelope.
+
+    The launch observation continues to describe the original CLI process. A
+    fresh worker supplies its own positively observed birth; every native unit,
+    cgroup and control fact must still equal the original admission.
+    """
+    if (
+        type(worker_birth) is not ProcessBirthIdentity
+        or worker_birth == expected.process_birth
+        or scope.fleet_run_id != expected.fleet_run_id
+        or scope.unit_name != expected.unit_name
+        or scope.resources != expected.resources
+    ):
+        raise FleetPlanInvalid("Run worker resource scope or process binding is invalid")
+    observed = verify_current_run_resource_scope(scope, handoff_sha256=expected.handoff_sha256)
+    if observed.process_birth != worker_birth:
+        raise FleetPlanInvalid("Run worker process birth changed during resource verification")
+    if observed.model_dump(exclude={"process_birth"}) != expected.model_dump(
+        exclude={"process_birth"}
+    ):
+        raise FleetPlanInvalid("Run worker native resource envelope changed after admission")
+
+
 @dataclass(slots=True)
 class PinnedRunResourceScope:
     """Parent-owned readonly original kernel handles, acquired before ready ACK."""

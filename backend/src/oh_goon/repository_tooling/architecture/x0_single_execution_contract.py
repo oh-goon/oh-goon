@@ -520,6 +520,7 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
     issues.extend(_check_co_r3u2b2b1_host_effect_preconditions(package))
     issues.extend(_check_co_r3u2b2b2a_native_qualification_cut(root))
     issues.extend(_check_agent_workload_canonical_owner(root, package))
+    issues.extend(_check_run_worker_custody(package))
     issues.extend(_check_original_agent_mount_gate(package))
     issues.extend(_check_original_resource_intent_sequence(package))
     issues.extend(_check_original_signed_mount_consumption(package))
@@ -548,6 +549,180 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
     )
 
     issues.extend(check_canonical_database_owner(root))
+    return issues
+
+
+def _check_run_worker_custody(package: Path) -> list[Violation]:
+    """Keep the physical Run boundary in the existing admission/execution owners.
+
+    These are bounded structural edges, not process qualification or a second
+    runtime policy. Claim races, stale custody and failure settlement need their
+    native SQLite/process regressions as well.
+    """
+    issues: list[Violation] = []
+    relatives = (
+        "services/fleet_run_control_plane.py",
+        "runtime/execution/run_supervisor.py",
+        "runtime/execution/coordinator.py",
+        "services/fleet_run_lifecycle.py",
+        "_application_worker.py",
+        "_application_worker_runtime.py",
+        "_application_services.py",
+    )
+    trees: dict[str, ast.Module] = {}
+    for relative in relatives:
+        path = package / relative
+        try:
+            trees[relative] = python_ast(path)
+        except (OSError, SyntaxError):
+            issues.append(Violation(path, "X0 Run-worker custody owner missing or unreadable"))
+    if issues:
+        return issues
+
+    required_edges = (
+        (
+            "_application_worker.py",
+            None,
+            "execute_handoff",
+            (
+                "LocalDatabase.open_worker",
+                ".claim_fleet_worker",
+                "build_claimed_run_execution",
+                ".execute",
+            ),
+        ),
+        (
+            "_application_worker_runtime.py",
+            None,
+            "build_claimed_run_execution",
+            (
+                ".require_claimed_fleet_worker",
+                "_build_capability_runtime",
+                "FleetRunExecution",
+            ),
+        ),
+        (
+            "runtime/execution/coordinator.py",
+            "ExecutionCoordinator",
+            "activate",
+            (
+                ".assert_executable_owner",
+                "ExecutionSession",
+            ),
+        ),
+        ("services/fleet_run_lifecycle.py", "FleetRunLifecycle", "activate", (".activate",)),
+        (
+            "services/fleet_run_lifecycle.py",
+            "FleetRunLifecycle",
+            "finish_admitted",
+            (".activate_submission_failure",),
+        ),
+        ("runtime/execution/run_supervisor.py", "RunExecutionSupervisor", "_run", ("run_command",)),
+        (
+            "services/fleet_run_control_plane.py",
+            "FleetRunControlPlane",
+            "_submit",
+            (".submit",),
+        ),
+    )
+    for relative, owner, method, required in required_edges:
+        tree = trees[relative]
+        scope: list[ast.stmt] = list(tree.body)
+        if owner is not None:
+            classes = [
+                node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == owner
+            ]
+            scope = [child for node in classes for child in node.body]
+        definitions = [
+            node for node in scope if isinstance(node, ast.FunctionDef) and node.name == method
+        ]
+        if len(definitions) != 1:
+            issues.append(
+                Violation(
+                    package / relative,
+                    f"X0 canonical Run-worker method {method} missing or duplicated",
+                )
+            )
+            continue
+        calls = [node for node in ast.walk(definitions[0]) if isinstance(node, ast.Call)]
+        previous = -1
+        for suffix in required:
+            matching = [node for node in calls if _call_target(node, tree).endswith(suffix)]
+            # The claim/composition/activation cut must remain on the actual
+            # path to execution, not in a comment, string or unused import.
+            if not matching or min(node.lineno for node in matching) < previous:
+                issues.append(
+                    Violation(
+                        package / relative,
+                        f"X0 canonical Run-worker edge/order lost: {method} -> {suffix}",
+                    )
+                )
+                break
+            previous = min(node.lineno for node in matching)
+
+    control = trees["services/fleet_run_control_plane.py"]
+    for node in ast.walk(control):
+        if not isinstance(node, ast.Call):
+            continue
+        target = _call_target(node, control)
+        if target.endswith(".execute") or (
+            target.endswith(".submit")
+            and any(isinstance(argument, ast.Lambda) for argument in node.args)
+        ):
+            issues.append(
+                Violation(
+                    package / relatives[0],
+                    "X0 Run control plane may submit only a prepared physical worker, never execute Fleet work",
+                )
+            )
+    supervisor = trees["runtime/execution/run_supervisor.py"]
+    forbidden_pools = (
+        "concurrent.futures.ThreadPoolExecutor",
+        "concurrent.futures.ProcessPoolExecutor",
+    )
+    for node in ast.walk(supervisor):
+        if isinstance(node, ast.Call) and (
+            _call_target(node, supervisor) in forbidden_pools
+            or _call_target(node, supervisor).endswith(".execute")
+        ):
+            issues.append(
+                Violation(
+                    package / relatives[1],
+                    "X0 Run supervisor must spawn a fresh native worker, without callable/pool execution",
+                )
+            )
+    product = trees["_application_services.py"]
+    if not any(
+        isinstance(node, ast.Call)
+        and _call_target(node, product).endswith("FleetRunControlPlane")
+        and any(keyword.arg == "worker_configuration" for keyword in node.keywords)
+        for node in ast.walk(product)
+    ):
+        issues.append(
+            Violation(
+                package / "_application_services.py",
+                "X0 product Fleet admission requires captured Run-worker configuration",
+            )
+        )
+    bootstrap = trees["_application_worker.py"]
+    for node in ast.walk(bootstrap):
+        if isinstance(node, ast.Call) and _call_target(node, bootstrap).endswith(
+            (
+                "ApplicationRuntime.build",
+                "build_runtime_foundation",
+                "build_runtime_services",
+                "configured_executor_pool",
+                ".admit",
+                ".start_prepared_plan",
+                ".start_bound",
+            )
+        ):
+            issues.append(
+                Violation(
+                    package / "_application_worker.py",
+                    "X0 worker bootstrap may consume admitted work only, without application startup or readmission",
+                )
+            )
     return issues
 
 

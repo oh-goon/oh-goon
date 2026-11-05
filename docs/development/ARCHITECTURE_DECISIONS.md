@@ -26,28 +26,25 @@ The detailed normative change-review and anti-drift rules are in `FAIL_BEFORE_WO
 
 ## Execution and repository-effect ownership
 
-### One FleetRun path, with a required stronger custody boundary
+### One FleetRun path, with claimed process custody
 
 Normal Plan/Goon work, whether manual, CI/CD, scheduled, agentic, ML or selected
 application-source execution, uses the existing FleetRun admission/lifecycle
 and Step/Attempt owners. Direct maintenance effects retain their separate
 admission into the same repository-effect owner below; they are not a FleetRun
-execution shortcut. Current
-`RunExecutionSupervisor` submits `FleetRunExecution` through a thread pool. The
-[canonical lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-require that same supervisor to transfer an admitted ticket to one fresh isolated
-Run worker through an atomic custody claim. This physical cutover remains
-[HUG-180](https://linear.app/hugloss/issue/HUG-180) work, with failure/drain proof in
-[HUG-181](https://linear.app/hugloss/issue/HUG-181); the requirements do not certify
-that process custody already exists.
+execution shortcut. `RunExecutionSupervisor` transfers one admitted ticket to one
+fresh native Run worker through an atomic SQLite custody claim. The
+[supervisor contract](EXECUTION_SUPERVISOR.md) owns this HUG-180 cutover and its
+limits. Complete failure/drain qualification remains
+[HUG-181](https://linear.app/hugloss/issue/HUG-181); broader lifecycle auditing
+remains [HUG-183](https://linear.app/hugloss/issue/HUG-183).
 
 The claimed worker enters the existing `FleetRunExecution → ExecutionSession →
 FleetTargetScheduler → Step/Attempt → harness` path. It cannot re-admit, re-place,
 re-resolve or reselect work. SQLite/Journal and the existing lifecycle retain
 durable state and terminalization; worker exit, logs and Game Tape remain
-evidence/projections. The cutover removes direct thread-owned Run submission
-rather than retaining a second execution mode or parent fallback. Native session,
-Schedule and client identities never become Run custody or recovery authority.
+evidence/projections. Native session, Schedule and client identities never
+become Run custody or recovery authority.
 
 ### Repository effects have one owner-neutral durable lifecycle
 A repository effect is claimed, started, settled and reconciled through one durable lifecycle independent of which executor implementation performed it. Durable facts, not process memory, determine recovery.

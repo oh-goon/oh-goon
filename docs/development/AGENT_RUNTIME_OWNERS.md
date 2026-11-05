@@ -10,9 +10,8 @@ and [Hashmarks handoff](HASHMARKS_EXECUTION_LAYER.md) retain their authority.
 
 Agent CLI, Plan and campaign ingress reuse the same FleetRun admission,
 ExecutionTicket, RunExecutionSupervisor, FleetRunExecution and Step/Attempt
-owners. The current supervisor submits the admitted Run to a thread pool.
-The [canonical lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-require the following custody boundary beneath that same admission:
+owners. The [supervisor contract](EXECUTION_SUPERVISOR.md) owns the following
+fresh-process custody boundary beneath that same admission:
 
 ```text
 FleetRun admission → ExecutionTicket → RunExecutionSupervisor
@@ -20,8 +19,8 @@ FleetRun admission → ExecutionTicket → RunExecutionSupervisor
   → ExecutionSession → FleetTargetScheduler → Step/Attempt → harness
 ```
 
-The process cutover and its failure qualification remain HUG-180/HUG-181 work;
-this diagram is a requirement, not implemented worker support. Native profile,
+The complete failure/drain and broader lifecycle qualification remain
+HUG-181/HUG-183 work. Native profile,
 CLI/service transport, session, resume and compaction choices remain below
 Step/Attempt. An owned Codex app-server, OpenCode CLI server or inference relay
 is an admitted Step resource under the original command owner, never another

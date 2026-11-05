@@ -16,7 +16,7 @@ from oh_goon.core.vocabulary import (
     OperationAction,
 )
 from oh_goon.runtime.database import DatabasePathIdentityLost, LocalDatabase
-from oh_goon.runtime.execution import ExecutionCoordinator
+from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionTicket
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
@@ -24,6 +24,16 @@ from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from tests.factories.capabilities import admit_test_run
 from tests.factories.journal import start_run
+from tests.fakes.fleet_worker import simulated_worker_coordinator
+
+
+def _claimed_lifecycle(
+    database: LocalDatabase, ticket: ExecutionTicket
+) -> tuple[LocalDatabase, Journal, ExecutionCoordinator, FleetRunLifecycle, ExecutionTicket]:
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    lifecycle = FleetRunLifecycle(database, journal, execution, FleetExecutorPool(database, None))
+    return database, journal, execution, lifecycle, execution.claim_fleet_worker(ticket)
 
 
 class _NoFleetTargets:
@@ -55,6 +65,7 @@ def test_fleet_database_identity_loss_skips_durable_terminalization(
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
     finish_calls = 0
     original_finish = lifecycle.finish
 
@@ -170,6 +181,7 @@ def test_live_output_open_failure_never_blocks_fleet_execution(tmp_path: Path) -
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
     targets = _SuccessfulFleetTargets()
 
     FleetRunExecution(
@@ -198,6 +210,7 @@ def test_live_output_seal_failure_never_replaces_terminal_run(tmp_path: Path) ->
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
 
     FleetRunExecution(
         lifecycle,
@@ -225,6 +238,7 @@ def test_live_output_seals_before_durable_terminal_publication(tmp_path: Path) -
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
     observed: list[FleetRunStatus] = []
 
     def observe_before_terminal() -> None:
@@ -261,6 +275,7 @@ def test_fleet_worker_begin_failure_terminalizes_and_releases_live_owner(
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
 
     monkeypatch.setattr(
         lifecycle,
@@ -297,6 +312,7 @@ def test_fleet_begin_replays_exact_running_state_after_ambiguous_commit_response
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
 
     running = lifecycle.begin(
         _AmbiguousFleetMutateSession(lifecycle.activate(ticket))  # type: ignore[arg-type]
@@ -324,6 +340,7 @@ def test_fleet_begin_replay_rejects_later_cancellation_state(tmp_path: Path) -> 
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
     session = lifecycle.activate(ticket)
 
     with pytest.raises(RuntimeError, match="begin response lost after commit"):
@@ -353,6 +370,7 @@ def test_fleet_begin_does_not_replay_failure_before_transaction_body(tmp_path: P
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
     session = lifecycle.activate(ticket)
 
     with pytest.raises(RuntimeError, match="before commit"):
@@ -382,6 +400,7 @@ def test_fleet_terminal_settlement_replays_canonical_terminal_state_after_ambigu
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
     session = lifecycle.activate(ticket)
     lifecycle.begin(session)
 
@@ -416,6 +435,7 @@ def test_fleet_terminal_replay_rejects_different_terminal_fact(tmp_path: Path) -
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
     session = lifecycle.activate(ticket)
     lifecycle.begin(session)
 
@@ -451,6 +471,7 @@ def test_fleet_cancel_replays_canonical_request_after_ambiguous_commit_response(
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
     session = lifecycle.activate(ticket)
     lifecycle.begin(session)
     _lose_next_write_commit_response(database)
@@ -504,6 +525,7 @@ def test_fleet_worker_fails_closed_if_current_capability_no_longer_matches_admis
         repository_admissions=(),
         source=FleetRunSource.MANUAL,
     )
+    database, journal, execution, lifecycle, ticket = _claimed_lifecycle(database, ticket)
     targets = _NoFleetTargets()
     monkeypatch.setattr(
         fleet_run_execution_module,

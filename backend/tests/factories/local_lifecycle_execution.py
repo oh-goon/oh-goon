@@ -19,6 +19,7 @@ from oh_goon.integrations.fleet_plans import FleetPlanRunner
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionTicket
+from oh_goon.runtime.execution.lease_environment import LeaseEnvironment
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
@@ -33,11 +34,12 @@ from oh_goon.services.repository_effect_execution import RepositoryEffectExecuti
 from oh_goon.services.repository_effect_fence import RepositoryEffectFence
 from oh_goon.services.repository_effect_settlement import RepositoryEffectSettlement
 from tests.factories.cicd_repository import seed_cicd_repository
+from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
 @dataclass(slots=True)
 class LocalLifecycleExecution:
-    """Production-owner composition for one real local direct Fleet Plan lifecycle."""
+    """Real local Step owners with explicitly simulated Run-process custody."""
 
     root: Path
     repository: RepositoryIdentity
@@ -50,9 +52,14 @@ class LocalLifecycleExecution:
     ticket: ExecutionTicket
     attempts: RepositoryEffectAttemptStore
     fleet_run_id: str
+    coordinator: ExecutionCoordinator
+
+    def claim_worker(self) -> ExecutionTicket:
+        self.ticket = self.coordinator.claim_fleet_worker(self.ticket)
+        return self.ticket
 
     def execute(self) -> FleetRunDetail:
-        return self.execution.execute(self.ticket)
+        return self.execution.execute(self.claim_worker())
 
     def reconstructed_detail(self) -> FleetRunDetail:
         # Deliberately create new durable owners. The caller does not reuse this
@@ -122,7 +129,7 @@ def prepare_local_lifecycle_execution(
     fleet_run_id: str = "local-lifecycle-run",
     script_body: str | None = None,
     rerun_from_run_id: str | None = None,
-    lease_environment=None,
+    lease_environment: LeaseEnvironment | None = None,
 ) -> LocalLifecycleExecution:
     """Resolve, lock and admit a direct Plan through the real local execution owners."""
     repository, target = _prepare_repository_and_target(root, plan_text, script_body)
@@ -144,6 +151,13 @@ def prepare_local_lifecycle_execution(
         repository_admissions=(repository_plan_admission_evidence(repository, target.plan),),
         rerun_from_run_id=rerun_from_run_id,
     )
+    database, execution_coordinator = simulated_worker_coordinator(
+        database, source_environment=lease_environment
+    )
+    journal = Journal(database)
+    lifecycle = FleetRunLifecycle(
+        database, journal, execution_coordinator, FleetExecutorPool(database, None)
+    )
     run_execution, attempts = _compose_run_execution(root, database, journal, lifecycle)
     return LocalLifecycleExecution(
         root=root,
@@ -157,4 +171,5 @@ def prepare_local_lifecycle_execution(
         ticket=ticket,
         attempts=attempts,
         fleet_run_id=fleet_run_id,
+        coordinator=execution_coordinator,
     )

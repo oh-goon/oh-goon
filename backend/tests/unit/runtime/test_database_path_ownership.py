@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from oh_goon.core.errors import DatabaseSchemaMismatch
 from oh_goon.runtime.database import (
     DATABASE_SCHEMA_VERSION,
     SQLITE_JOURNAL_DELETE,
     SQLITE_JOURNAL_WAL,
     DatabasePathIdentityLost,
     LocalDatabase,
+    WorkerDatabaseContext,
     default_database_path,
     sqlite_journal_mode_for_path,
 )
@@ -509,3 +513,145 @@ def test_sqlite_access_economics_keep_observer_opens_separate_from_native_author
     assert observation.reproof_requested == 0
     assert observation.reproof_succeeded == 0
     assert observation.reproof_failed == 0
+
+
+def test_worker_reopens_canonical_state_with_new_session_and_independent_transactions(
+    tmp_path: Path,
+) -> None:
+    database = LocalDatabase(tmp_path / "state.db", journal_mode="DELETE")
+    context = database.capture_worker_context()
+    context = WorkerDatabaseContext.model_validate_json(context.model_dump_json())
+    assert "session_id" not in context.model_dump()
+
+    with database.execution_connection_scope():
+        with database.transaction(write=True) as parent:
+            parent.execute("INSERT INTO locations VALUES (?, 0, '2026-11-05')", (str(tmp_path),))
+            worker = LocalDatabase.open_worker(context)
+            assert worker.session_id != database.session_id
+            with worker.transaction() as reopened:
+                assert reopened is not parent
+                assert reopened.execute("SELECT COUNT(*) FROM locations").fetchone()[0] == 0
+
+    # A later canonical commit is allowed; the captured revision is a floor.
+    later_worker = LocalDatabase.open_worker(context)
+    assert later_worker.session_id not in {database.session_id, worker.session_id}
+    with later_worker.transaction(write=True) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM locations").fetchone()[0] == 1
+        connection.execute(
+            "INSERT INTO locations VALUES (?, 1, '2026-11-05')", (str(tmp_path / "second"),)
+        )
+    with database.transaction() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM locations").fetchone()[0] == 2
+    assert database.durable_revision() == later_worker.durable_revision() == 2
+
+
+def test_worker_reopen_preserves_database_bytes_and_explicit_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = LocalDatabase(tmp_path / "state.db", journal_mode="DELETE")
+    context = database.capture_worker_context()
+    before = database.path.read_bytes(), database.path.stat().st_mode
+
+    def reject_initialization(_database: LocalDatabase) -> None:
+        pytest.fail("Worker attempted database startup initialization")
+
+    monkeypatch.setattr(LocalDatabase, "_initialize", reject_initialization)
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "unselected.db"))
+    monkeypatch.setenv("OH_GOON_SQLITE_JOURNAL_MODE", "invalid ambient setting")
+    worker = LocalDatabase.open_worker(context)
+
+    assert worker.path == database.path
+    assert worker.journal_mode == "DELETE"
+    assert worker.initialized_new_state is False
+    assert (database.path.read_bytes(), database.path.stat().st_mode) == before
+    assert not (tmp_path / "unselected.db").exists()
+
+
+@pytest.mark.parametrize(
+    "change",
+    (
+        "file",
+        "symlink",
+        "parent_symlink",
+        "missing",
+        "filesystem",
+        "schema",
+        "version",
+        "instance",
+        "mode",
+        "revision",
+    ),
+)
+def test_worker_reopen_rejects_changed_database_authority_before_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    path = tmp_path / "state" / "state.db"
+    database = LocalDatabase(path, journal_mode="DELETE")
+    with database.transaction(write=True) as connection:
+        connection.execute("INSERT INTO locations VALUES ('original', 0, '2026-11-05')")
+    context = database.capture_worker_context()
+
+    if change == "file":
+        replacement = tmp_path / "replacement.db"
+        shutil.copyfile(path, replacement)
+        replacement.replace(path)
+    elif change == "symlink":
+        retained = tmp_path / "retained.db"
+        path.rename(retained)
+        path.symlink_to(retained)
+    elif change == "parent_symlink":
+        retained = tmp_path / "retained"
+        path.parent.rename(retained)
+        path.parent.symlink_to(retained, target_is_directory=True)
+    elif change == "missing":
+        path.unlink()
+    elif change == "filesystem":
+        monkeypatch.setattr("oh_goon.runtime.database.database_filesystem_type", lambda _: "other")
+    else:
+        with closing(sqlite3.connect(path)) as connection:
+            if change == "schema":
+                connection.execute(f"PRAGMA schema_version = {context.schema_cookie + 1}")
+            elif change == "version":
+                connection.execute(f"PRAGMA user_version = {DATABASE_SCHEMA_VERSION - 1}")
+            elif change == "instance":
+                cookie = context.database_identity_cookie
+                connection.execute(f"PRAGMA application_id = {1 if cookie != 1 else 2}")
+            elif change == "mode":
+                assert connection.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
+            else:
+                connection.execute("UPDATE state_metadata SET durable_revision = 0")
+                connection.commit()
+    before = path.read_bytes() if path.exists() else None
+
+    with pytest.raises((DatabasePathIdentityLost, DatabaseSchemaMismatch)):
+        LocalDatabase.open_worker(context)
+
+    assert (path.read_bytes() if path.exists() else None) == before
+    if change == "missing":
+        assert not path.exists()
+
+
+def test_observation_only_database_cannot_capture_worker_authority(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    LocalDatabase(path, journal_mode="DELETE")
+    observer = LocalDatabase(path, read_only=True)
+
+    with pytest.raises(RuntimeError, match="cannot admit a worker"):
+        observer.capture_worker_context()
+
+
+@pytest.mark.parametrize("change", ("relative", "schema", "session"))
+def test_worker_database_transport_rejects_invalid_authority_shape(
+    tmp_path: Path, change: str
+) -> None:
+    context = LocalDatabase(tmp_path / "state.db", journal_mode="DELETE").capture_worker_context()
+    payload = context.model_dump(mode="json")
+    if change == "relative":
+        payload["path"] = "state.db"
+    elif change == "schema":
+        payload["schema_version"] = DATABASE_SCHEMA_VERSION - 1
+    else:
+        payload["session_id"] = "parent-session"
+
+    with pytest.raises(ValidationError):
+        WorkerDatabaseContext.model_validate(payload)

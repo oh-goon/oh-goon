@@ -9,17 +9,30 @@ CREATE TABLE IF NOT EXISTS locations (
 
 CREATE TABLE IF NOT EXISTS execution_lease (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-    lease_token TEXT NOT NULL UNIQUE,
+    lease_token TEXT NOT NULL UNIQUE CHECK (length(lease_token) > 0),
     owner_session_id TEXT NOT NULL,
     owner_pid INTEGER NOT NULL,
     owner_identity TEXT,
+    custody_phase TEXT NOT NULL CHECK (
+        custody_phase IN ('DIRECT_OWNED', 'ADMITTED_UNCLAIMED', 'WORKER_OWNED', 'RECOVERY_OWNED')
+    ),
     kind TEXT NOT NULL CHECK (kind IN ('DIRECT', 'FLEET')),
     fleet_run_id TEXT,
     acquired_at TEXT NOT NULL,
     cancel_requested_at TEXT,
     CHECK (
-        (kind = 'DIRECT' AND fleet_run_id IS NULL)
-        OR (kind = 'FLEET' AND fleet_run_id IS NOT NULL)
+        (kind = 'DIRECT' AND fleet_run_id IS NULL AND custody_phase = 'DIRECT_OWNED')
+        OR (kind = 'FLEET' AND fleet_run_id IS NOT NULL AND length(fleet_run_id) > 0
+            AND custody_phase IN ('ADMITTED_UNCLAIMED', 'WORKER_OWNED', 'RECOVERY_OWNED'))
+    ),
+    CHECK (owner_pid > 0 AND length(owner_session_id) > 0),
+    CHECK (owner_identity IS NULL OR length(owner_identity) > 0),
+    CHECK (
+        custody_phase NOT IN ('WORKER_OWNED', 'RECOVERY_OWNED')
+        OR (owner_identity IS NOT NULL AND length(owner_identity) > 0)
+    ),
+    CHECK (
+        (custody_phase = 'RECOVERY_OWNED') = (substr(owner_session_id, 1, 9) = 'recovery:')
     )
 );
 

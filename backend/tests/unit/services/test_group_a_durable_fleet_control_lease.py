@@ -155,7 +155,9 @@ def test_stale_or_unprovable_owner_rejects_without_publication(tmp_path, attack)
     elif attack == "other_session":
         connection.execute("UPDATE execution_lease SET owner_session_id='other'")
     elif attack == "direct":
-        connection.execute("UPDATE execution_lease SET kind='DIRECT', fleet_run_id=NULL")
+        connection.execute(
+            "UPDATE execution_lease SET kind='DIRECT', fleet_run_id=NULL, custody_phase='DIRECT_OWNED'"
+        )
     elif attack == "owner_pid_changed":
         connection.execute("UPDATE execution_lease SET owner_pid=99999")
     with pytest.raises(OwnershipLost):

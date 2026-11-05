@@ -15,7 +15,7 @@ from oh_goon.core.models.runtime_safety import (
 from oh_goon.core.models.tool_health import ReadyToolHealth
 from oh_goon.core.vocabulary import OperationAction, RuntimeSafetyStatus, SystemHealthStatus
 from oh_goon.runtime.database import LocalDatabase
-from oh_goon.runtime.execution import ExecutionCoordinator, RunExecutionSupervisor
+from oh_goon.runtime.execution import ExecutionCoordinator, RunExecutionSupervisor, RunWorkerLaunch
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
@@ -206,6 +206,11 @@ def test_fleet_run_is_blocked_before_lease_or_journal_admission(tmp_path: Path) 
         run_execution,
         RunExecutionSupervisor(),
         live_output,
+        worker_configuration=lambda run_id: lambda ticket: RunWorkerLaunch(
+            argv=("unused-blocked-admission-worker", run_id),
+            cwd=tmp_path,
+            environment={},
+        ),
     )
 
     with pytest.raises(RuntimeSafetyBlocked):

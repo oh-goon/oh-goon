@@ -7,7 +7,7 @@ if TYPE_CHECKING:
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -30,6 +30,7 @@ from oh_goon.core.errors import (
     FleetPlanSourceStale,
     InvalidRunTransition,
     JournalConflict,
+    OwnershipLost,
     StateConflict,
 )
 from oh_goon.core.file_digest import sha256_file_with_size
@@ -114,7 +115,7 @@ from oh_goon.integrations.exact_file_write import (
     publish_prepared_file,
 )
 from oh_goon.integrations.fleet_content_store import FleetContentStore
-from oh_goon.runtime.execution import ExecutionTicket, RunExecutionSupervisor
+from oh_goon.runtime.execution import ExecutionTicket, RunExecutionSupervisor, RunWorkerLaunch
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal, RunResourceObservationContext
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
@@ -391,6 +392,8 @@ class FleetRunControlPlane:
         diagnostics: DiagnosticEmitter | None = None,
         schedule_executions: ScheduleExecutionStore | None = None,
         content_store: FleetContentStore | None = None,
+        worker_configuration: Callable[[str], Callable[[ExecutionTicket], RunWorkerLaunch]]
+        | None = None,
     ) -> None:
         self._admission = admission
         self._journal = journal
@@ -401,6 +404,7 @@ class FleetRunControlPlane:
         self._diagnostics = diagnostics
         self._schedule_executions = schedule_executions
         self._content_store = content_store
+        self._worker_configuration = worker_configuration
 
     def require_cli_plan_preparation(self, fleet_run_id: str | None) -> None:
         """Delegate CLI pre-resolution admission to the original Fleet lifecycle."""
@@ -720,6 +724,9 @@ class FleetRunControlPlane:
             )
             if existing is not None:
                 return existing
+            if self._worker_configuration is None:
+                raise FleetPlanInvalid("New FleetRun admission requires the Run worker launcher")
+            prepare_worker = self._worker_configuration(fleet_run_id)
             plan = self._admission.plan(
                 intent,
                 repository_scope=repository_scope,
@@ -786,7 +793,7 @@ class FleetRunControlPlane:
                         "Unadmitted Python Goon source cleanup failed"
                     ) from recovered
                 return recovered.state
-            self._submit(fleet_run_id, ticket)
+            self._submit(fleet_run_id, ticket, prepare_worker)
             return state
 
     def cancel(self, fleet_run_id: str) -> FleetRunState:
@@ -1189,7 +1196,10 @@ class FleetRunControlPlane:
         # The supervisor owns liveness and process-local failure only. Successful
         # completion is never copied into a second in-memory run representation:
         # terminal truth is reconstructed once from the durable Journal authority.
+        detail = self.get(fleet_run_id)
         failure = self._supervisor.take_failure(fleet_run_id)
+        if detail.run.status.terminal:
+            return detail
         if failure is not None:
             raise StateConflict(
                 f"Fleet run {fleet_run_id} background worker failed before durable terminal "
@@ -1198,9 +1208,6 @@ class FleetRunControlPlane:
         # A normal worker commits terminal state before the supervisor can publish
         # inactivity. Re-prove one fresh durable cut before declaring the invariant
         # broken; never spin/poll SQLite while execution is live.
-        detail = self.get(fleet_run_id)
-        if detail.run.status.terminal:
-            return detail
         raise StateConflict(
             f"Fleet run {fleet_run_id} is not active in this process, published no "
             "background failure, and did not reach a terminal state"
@@ -1228,24 +1235,47 @@ class FleetRunControlPlane:
         self,
         fleet_run_id: str,
         ticket: ExecutionTicket,
+        prepare_worker: Callable[[ExecutionTicket], RunWorkerLaunch],
     ) -> None:
+        launch: RunWorkerLaunch | None = None
+
+        def observe_exit(returncode: int | None) -> None:
+            # Exit is diagnostic. A committed result wins even after an abnormal
+            # exit; a claimed nonterminal Run belongs to canonical recovery.
+            if self.get(fleet_run_id).run.status.terminal:
+                return
+            try:
+                self._lifecycle.finish_admitted(
+                    ticket,
+                    FleetRunTerminalIntent.FAIL,
+                    FleetRunFailure.from_exception(
+                        StateConflict("Run worker exited before claiming its admission"),
+                        stage=FleetRunFailureStage.SUBMISSION,
+                    ),
+                )
+            except OwnershipLost:
+                # The exact ADMITTED_UNCLAIMED parent fence lost. Never steal
+                # claimed custody or manufacture a result from process death.
+                return
+
         try:
-            self._supervisor.submit(
-                fleet_run_id,
-                lambda: self._run_execution.execute(ticket),
-            )
+            launch = replace(prepare_worker(ticket), on_exit=observe_exit)
+            self._supervisor.submit(fleet_run_id, launch)
         except BaseException as exc:
             # Submission rejection happens after admission created both RUN_ADMITTED
             # and the exact Fleet lease.  Resolve both facts through the admitted
             # owner in one transaction; never terminalize and release separately.
-            self._lifecycle.finish_admitted(
-                ticket,
-                FleetRunTerminalIntent.FAIL,
-                FleetRunFailure.from_exception(
-                    exc,
-                    stage=FleetRunFailureStage.SUBMISSION,
-                ),
-            )
+            try:
+                self._lifecycle.finish_admitted(
+                    ticket,
+                    FleetRunTerminalIntent.FAIL,
+                    FleetRunFailure.from_exception(exc, stage=FleetRunFailureStage.SUBMISSION),
+                )
+            except OwnershipLost:
+                pass
+            finally:
+                if launch is not None and launch.cleanup is not None:
+                    launch.cleanup()
             raise
 
 

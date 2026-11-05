@@ -120,11 +120,9 @@ application is captured source for that Run, not permission to manufacture a
 repository-free execution subject. Native harnesses own session behavior below
 Step/Attempt; they do not own Run identity or recovery.
 
-The supervisor currently submits through a thread pool. The
-[canonical lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-require a fresh isolated Run worker and atomic custody claim before the existing
-execution path. That physical boundary remains HUG-180/HUG-181 implementation
-and qualification work. It must not add a second Plan resolver, Job model,
+The [supervisor contract](EXECUTION_SUPERVISOR.md) uses a fresh Run worker and
+atomic SQLite custody claim before the existing execution path. HUG-181/HUG-183
+retain broader qualification. The boundary adds no second Plan resolver, Job model,
 Schedule worker, agent runner, thread/process mode or parent fallback. Frozen
 Plan and repository-evidence membership travel unchanged; drift requires refusal
 or a new admission rather than worker-side reselection. See the

@@ -22,7 +22,10 @@ from oh_goon.core.enforcer_lace_issuer_evidence import AUTHORITY_FIELDS
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from oh_goon.native_issuer.enforcer_lace_execution_environment_issuer import _inventory_snapshot
 from oh_goon.native_issuer.enforcer_lace_signer_custody import deployment_signer_policy_snapshot
-from oh_goon.runtime._executor_configuration import configured_executor_pool
+from oh_goon.runtime._executor_configuration import (
+    ExecutorPoolConfiguration,
+    configured_executor_pool,
+)
 from oh_goon.runtime.enforcer_lace_issuer_keyring import (
     IssuerKeyReference,
     load_explicit_issuer_verifier,
@@ -225,6 +228,8 @@ class FleetPreworkProvisioner:
     issuer_references: Mapping[str, IssuerKeyReference]
     control_state_root: Path | None = None
     public_root_owner_uid: int | None = None
+    executor_configuration: ExecutorPoolConfiguration | None = None
+    executor_inventory_identity: tuple[object, ...] | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -259,6 +264,16 @@ class FleetPreworkProvisioner:
         ):
             raise TrustProtocolError("complete explicit Fleet deployment provisioning required")
         refs = dict(self.issuer_references)
+        if (self.executor_configuration is None) != (self.executor_inventory_identity is None):
+            raise TrustProtocolError("captured Fleet inventory and configuration must be paired")
+        if self.executor_configuration is not None and (
+            type(self.executor_configuration) is not ExecutorPoolConfiguration
+            or type(self.executor_inventory_identity) is not tuple
+            or len(self.executor_inventory_identity) != 8
+            or any(type(value) is not int for value in self.executor_inventory_identity[:7])
+            or type(self.executor_inventory_identity[7]) is not str
+        ):
+            raise TrustProtocolError("exact captured Fleet executor authority required")
         if any(type(r) is not IssuerKeyReference for r in refs.values()):
             raise TrustProtocolError("fixed issuer public-key references required")
         run_ids: set[str] = set()
@@ -390,13 +405,19 @@ class FleetPreworkProvisioner:
         from oh_goon.core.strict_executor_authority import EXECUTORS_FILE_ENV
 
         custody_before = self._require_separate_custody(binding)
-        configured_path = os.environ.get(EXECUTORS_FILE_ENV)
-        if configured_path != str(self.executor_inventory_file):
-            raise TrustProtocolError(
-                "deployment executor inventory differs from authoritative selection"
-            )
-        before = _inventory_snapshot()
-        inventory = configured_executor_pool(control_state_root=self.control_state_root)
+        if self.executor_configuration is None:
+            configured_path = os.environ.get(EXECUTORS_FILE_ENV)
+            if configured_path != str(self.executor_inventory_file):
+                raise TrustProtocolError(
+                    "deployment executor inventory differs from authoritative selection"
+                )
+            before = _inventory_snapshot()
+            inventory = configured_executor_pool(control_state_root=self.control_state_root)
+        else:
+            before = _inventory_snapshot(self.executor_inventory_file)
+            if before[1] != self.executor_inventory_identity:
+                raise TrustProtocolError("captured Fleet executor inventory changed")
+            inventory = self.executor_configuration
         if inventory is None:
             raise TrustProtocolError("deployment executor inventory is missing")
         if (
@@ -448,7 +469,11 @@ class FleetPreworkProvisioner:
         policy = json.loads(snapshot[2])
         if any(item["state"] != "active" for item in policy["issuers"].values()):
             raise TrustProtocolError("Fleet Run signing authority is revoked")
-        after = _inventory_snapshot()
+        after = (
+            _inventory_snapshot()
+            if self.executor_configuration is None
+            else _inventory_snapshot(self.executor_inventory_file)
+        )
         custody_after = self._require_separate_custody(binding)
         if before != after or custody_before != custody_after:
             raise TrustProtocolError("Fleet executor inventory changed during provisioning")
