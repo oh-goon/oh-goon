@@ -516,6 +516,8 @@ def test_ai_admission_refusal_preserves_typed_reason_without_private_payload(
     failure = failure_type("PRIVATE_EXCEPTION_PATH /private/auth/token")
     failure.add_note("PRIVATE_EXCEPTION_NOTE")
     monkeypatch.setattr(failure, "code", "PRIVATE_INSTANCE_CODE", raising=False)
+    monkeypatch.setattr(failure, "reason", "BUBBLEWRAP_UNAVAILABLE", raising=False)
+    monkeypatch.setattr(failure, "missing_capability", "bwrap", raising=False)
     native_cli.runtime.plans.run_native_agent.side_effect = failure
 
     assert main([*native_cli.argv, *(["--json"] if as_json else [])]) == 2
@@ -534,6 +536,10 @@ def test_ai_admission_refusal_preserves_typed_reason_without_private_payload(
         assert result["schema"] == "oh-goon.native-run-error/v1"
         assert result["status"] == "error"
         assert result["code"] == expected_code
+        assert result["harness"] == "pi"
+        assert result["requested_mode"] == "headless"
+        assert result["reason"] == "not-established"
+        assert result["missing_capability"] == "not-established"
         assert result["_cli"]["exit_code"] == 2
         assert captured.err == ""
         action = result["safe_next_action"]
@@ -609,8 +615,13 @@ def test_ai_invalid_verification_fails_before_application_state(
 
 
 @pytest.mark.parametrize("missing", ["systemd-run", "systemctl"])
+@pytest.mark.parametrize("as_json", [False, True])
 def test_isolated_resource_caps_require_native_resource_boundary_before_application_state(
-    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, missing: str
+    native_cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    missing: str,
+    as_json: bool,
 ) -> None:
     payload = json.loads(native_cli.config.read_text())
     payload["native_profiles"]["isolated"]["resources"] = {"memory_mib": 128}
@@ -619,8 +630,22 @@ def test_isolated_resource_caps_require_native_resource_boundary_before_applicat
     monkeypatch.setattr(
         "oh_goon.cli_ai.shutil.which", lambda name: None if name == missing else f"/native/{name}"
     )
-    assert main([*native_cli.argv, "--profile", "isolated"]) == 2
+    assert main([*native_cli.argv, "--profile", "isolated", *(["--json"] if as_json else [])]) == 2
+    captured = capsys.readouterr()
+    if as_json:
+        report = json.loads(captured.out)
+        assert report["harness"] == "pi"
+        assert report["requested_mode"] == "headless"
+        assert report["missing_capability"] == missing
+        assert missing in report["safe_next_action"]
+        assert captured.err == ""
+    else:
+        assert "Harness: pi" in captured.err
+        assert "Requested mode: headless" in captured.err
+        assert f"Missing capability: {missing}" in captured.err
+    assert str(native_cli.config) not in captured.out + captured.err
     native_cli.build.assert_not_called()
+    native_cli.runtime.plans.run_native_agent.assert_not_called()
 
 
 def test_ai_loads_selected_catalog_once(
@@ -660,8 +685,12 @@ def test_ai_absent_default_catalog_does_not_infer_native_model_connection(
     native_cli.build.assert_not_called()
 
 
+@pytest.mark.parametrize("as_json", [False, True])
 def test_ai_isolated_profile_requires_native_backend_before_state(
-    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    native_cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    as_json: bool,
 ) -> None:
     lookup = shutil.which
     monkeypatch.setattr(cli_ai, "_isolation", native_cli.isolation_factory)
@@ -670,9 +699,24 @@ def test_ai_isolated_profile_requires_native_backend_before_state(
         return None if name == "bwrap" else lookup(name, path=path)
 
     monkeypatch.setattr("oh_goon.cli_ai.shutil.which", selected_lookup)
-    assert main([*native_cli.argv, "--profile", "isolated"]) == 2
-    assert "AGENT_PROVIDER_ERROR" in capsys.readouterr().err
+    assert main([*native_cli.argv, "--profile", "isolated", *(["--json"] if as_json else [])]) == 2
+    captured = capsys.readouterr()
+    if as_json:
+        report = json.loads(captured.out)
+        assert report["code"] == "AGENT_PROVIDER_ERROR"
+        assert report["harness"] == "pi"
+        assert report["requested_mode"] == "headless"
+        assert report["reason"] == "BUBBLEWRAP_UNAVAILABLE"
+        assert report["missing_capability"] == "bwrap"
+        assert "bwrap" in report["safe_next_action"]
+        assert captured.err == ""
+    else:
+        assert "AGENT_PROVIDER_ERROR" in captured.err
+        assert "Harness: pi" in captured.err
+        assert "Missing capability: bwrap" in captured.err
+    assert str(native_cli.config) not in captured.out + captured.err
     native_cli.build.assert_not_called()
+    native_cli.runtime.plans.run_native_agent.assert_not_called()
 
 
 def test_ai_owned_transport_replacement_rejects_before_state(native_cli: SimpleNamespace) -> None:
@@ -728,10 +772,38 @@ def test_native_task_character_limit_precedes_application_mutation(
 
 def test_ai_interactive_json_conflict_fails_before_application_state(
     native_cli: SimpleNamespace,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     argv = [argument for argument in native_cli.argv if argument != "--headless"]
     assert main([*argv, "--interactive", "--json"]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["harness"] == "pi"
+    assert report["requested_mode"] == "interactive"
+    assert report["reason"] == "INTERACTIVE_JSON_UNSUPPORTED"
+    assert report["missing_capability"] == "interactive_json_transport"
+    assert "--headless" in report["safe_next_action"]
     native_cli.build.assert_not_called()
+    native_cli.runtime.plans.run_native_agent.assert_not_called()
+
+
+@pytest.mark.parametrize("agent", ["pi", "opencode", "codex"])
+def test_native_interactive_refusal_names_requested_harness_and_terminal_capability(
+    native_cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    agent: str,
+) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    assert main(["ai", "--agent", agent, "--interactive", "--prompt", "PRIVATE_TASK_CANARY"]) == 2
+    captured = capsys.readouterr()
+    assert f"Harness: {agent}" in captured.err
+    assert "Requested mode: interactive" in captured.err
+    assert "Missing capability: posix_terminal" in captured.err
+    assert "--headless" in captured.err
+    assert "PRIVATE_TASK_CANARY" not in captured.out + captured.err
+    native_cli.build.assert_not_called()
+    native_cli.runtime.plans.run_native_agent.assert_not_called()
 
 
 def test_ai_entrypoint_is_the_original_cli_frontdoor(monkeypatch: pytest.MonkeyPatch) -> None:
