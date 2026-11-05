@@ -54,8 +54,7 @@ def _export_environment() -> dict[str, str]:
     environment = {
         name: value
         for name, value in os.environ.items()
-        if not name.startswith(("UV_", "PYTHON"))
-        and name not in {"VIRTUAL_ENV", "CONDA_PREFIX"}
+        if not name.startswith(("UV_", "PYTHON")) and name not in {"VIRTUAL_ENV", "CONDA_PREFIX"}
     }
     return environment
 
@@ -109,11 +108,7 @@ def _native_artifact_export(
         "--no-emit-workspace",
         "--no-header",
         "--no-annotate",
-        *(
-            argument
-            for name in excluded_packages
-            for argument in ("--no-emit-package", name)
-        ),
+        *(argument for name in excluded_packages for argument in ("--no-emit-package", name)),
         cwd=project,
         env=environment,
         timeout=30,
@@ -122,17 +117,13 @@ def _native_artifact_export(
         parent_death_signal=True,
     )
     if result.returncode:
-        raise ValueError(
-            f"Native uv artifact export failed: {result.stderr.strip()[:2048]}"
-        )
+        raise ValueError(f"Native uv artifact export failed: {result.stderr.strip()[:2048]}")
     if (
         result.stdout_truncated
         or not result.stdout.strip()
         or len(result.stdout.encode("utf-8")) > _MAX_EXPORT_BYTES
     ):
-        raise ValueError(
-            "Native uv artifact export is unavailable or exceeds its byte bound"
-        )
+        raise ValueError("Native uv artifact export is unavailable or exceeds its byte bound")
     if (project / "pyproject.toml").read_bytes() != manifest or (
         project / "uv.lock"
     ).read_bytes() != lock:
@@ -160,9 +151,7 @@ def compare_native_uv_dependency_artifacts(
         not isinstance(value, bytes) or not value or len(value) > _MAX_CAPTURED_INPUT_BYTES
         for value in (before_manifest, before_lock, after_manifest, after_lock)
     ):
-        raise ValueError(
-            "Native uv artifact comparison requires bounded captured input bytes"
-        )
+        raise ValueError("Native uv artifact comparison requires bounded captured input bytes")
     if (
         not isinstance(excluded_packages, tuple)
         or len(excluded_packages) > 64
@@ -172,9 +161,7 @@ def compare_native_uv_dependency_artifacts(
         )
         or len(set(excluded_packages)) != len(excluded_packages)
     ):
-        raise ValueError(
-            "Native uv export exclusions must be unique explicit package names"
-        )
+        raise ValueError("Native uv export exclusions must be unique explicit package names")
     environment = _export_environment()
     executable = shutil.which("uv", path=environment.get("PATH"))
     if executable is None:
