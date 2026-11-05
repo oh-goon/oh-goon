@@ -1403,6 +1403,77 @@ def test_hashmarks_upgrade_requires_native_non_target_artifact_equivalence(
     _validate_declared(plan, result, tmp_path)
 
 
+def test_hashmarks_upgrade_keeps_pytest_configuration_role_without_an_extra_consumer(
+    tmp_path: Path,
+) -> None:
+    plan, result = _hashmarks_upgrade_proof(tmp_path)
+    row = plan["evidence"]["observations"][0]
+    row.update(
+        state="LINKED",
+        qualification={
+            "completeness": "incomplete",
+            "negative_evidence_admissible": False,
+        },
+        changed_set={
+            "changed_paths": ["backend/pyproject.toml"],
+            "changes": [
+                {
+                    "path": "backend/pyproject.toml",
+                    "classification": {
+                        "kind": "verification-support",
+                        "reason": "pytest-configuration",
+                    },
+                }
+            ],
+        },
+    )
+    original = copy.deepcopy(row)
+    result["plan"] = copy.deepcopy(plan)
+
+    _validate_declared(plan, result, tmp_path)
+
+    assert row == original
+    assert "verification_support_admission" not in plan["evidence"]
+    assert gate.VERIFICATION_SUPPORT_OBLIGATION not in plan["obligations"]
+
+
+def test_hashmarks_upgrade_does_not_exempt_unrelated_verification_support(
+    tmp_path: Path,
+) -> None:
+    plan, result = _hashmarks_upgrade_proof(tmp_path)
+    _validate_declared(plan, result, tmp_path)
+    support = "backend/tests/factories/unrelated.py"
+    plan["changed_paths"].append(support)
+    plan["evidence"]["observations"].append(
+        {
+            "changed_path": support,
+            "state": "LINKED",
+            "qualification": {"completeness": "incomplete"},
+            "changed_set": {
+                "changed_paths": [support],
+                "changes": [
+                    {
+                        "path": support,
+                        "classification": {"kind": "verification-support"},
+                    }
+                ],
+            },
+            "nominations": [
+                {
+                    "nomination": {
+                        "available": True,
+                        "verification_target": {"path": HASHMARKS_UPGRADE_TESTS[0]},
+                    }
+                }
+            ],
+        }
+    )
+    result["plan"] = copy.deepcopy(plan)
+
+    with pytest.raises(ValueError, match="executed qualified consumer"):
+        _validate_declared(plan, result, tmp_path)
+
+
 @pytest.mark.parametrize("changed", ("wheel", "new-transitive"))
 def test_hashmarks_upgrade_cannot_claim_equivalence_when_uv_exports_differ(
     tmp_path: Path, changed: str

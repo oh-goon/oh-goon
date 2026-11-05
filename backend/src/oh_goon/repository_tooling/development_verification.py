@@ -814,6 +814,18 @@ def require_current_plan(root: Path, plan: ChangeVerificationPlan) -> None:
         plan.model_dump(mode="json", by_alias=True),
         plan.evidence,
         {path.split("::", 1)[0] for path in plan.pytest} | set(plan.frontend),
+        admitted_hashmarks_upgrade=(
+            plan.evidence.get("hashmarks_upgrade")
+            == {
+                "authority": "oh-goon-execution-policy",
+                "scope": "mandatory-hashmarks-upgrade",
+                "consumer_coverage": "not-claimed",
+            }
+            and isinstance(plan.evidence.get("hashmarks_native_artifacts"), Mapping)
+            and plan.evidence["hashmarks_native_artifacts"].get("equivalent") is True
+            and HASHMARKS_UPGRADE_OBLIGATION in plan.obligations
+            and set(HASHMARKS_UPGRADE_TESTS) <= set(plan.pytest)
+        ),
     )
 
 
