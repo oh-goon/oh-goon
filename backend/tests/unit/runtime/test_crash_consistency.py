@@ -19,6 +19,7 @@ from oh_goon.core.vocabulary import (
     OperationAction,
 )
 from oh_goon.core.vocabulary.fleet import FleetScope
+from oh_goon.engine.command import CommandProcessLifecycleEvent, observe_command_processes
 from oh_goon.engine.git import GitService
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
@@ -238,6 +239,24 @@ def test_restart_after_effect_start_marks_fleet_failed_and_reconciles_one_generi
     admit_test_run(journal, "fleet-unknown", OperationAction.UPDATE, [identity])
     start_run(journal, "fleet-unknown")
     operation_id = repository_attempt_operation_id("fleet-unknown", identity.repository_id)
+
+    def observe(event: CommandProcessLifecycleEvent) -> None:
+        journal.record_execution_lifecycle(
+            fleet_run_id="fleet-unknown",
+            repository_id=identity.repository_id,
+            operation_id=operation_id,
+            event_type=FleetRunEventType(event.kind),
+            physical_execution_id=event.physical_execution_id,
+            pid=event.pid,
+            process_identity=event.process_identity,
+            returncode=event.returncode,
+            termination_reason=event.termination_reason,
+        )
+
+    # This recovery-policy fixture loses the effect result after real native
+    # preparation has settled; it does not model surviving native children.
+    with observe_command_processes(observe):
+        baseline = baseline_for(repository)
     with database.transaction(write=True) as connection:
         attempts.begin_fleet_in(
             connection,
@@ -246,7 +265,7 @@ def test_restart_after_effect_start_marks_fleet_failed_and_reconciles_one_generi
             fleet_run_id="fleet-unknown",
             operation_id=operation_id,
             target=None,
-            baseline=baseline_for(repository),
+            baseline=baseline,
             effect_boundary=EffectBoundaryKind.EXTERNAL,
         )
         attempts.start_effect_in(connection, operation_id)

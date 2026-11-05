@@ -90,8 +90,11 @@ class ExecutorPlacementAdmission:
         repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...] | None = None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
         commit: Callable[[sqlite3.Connection, FleetExecutorPlacement], T],
+        admission_check: Callable[[], None] | None = None,
     ) -> tuple[FleetExecutorPlacement, T]:
         """Wait/probe outside SQLite, then atomically reserve placement and commit Fleet admission."""
+        if admission_check is not None:
+            admission_check()
         execution = plan.execution
         if not isinstance(execution, CicdExecutionPolicy):
             raise FleetPlanInvalid("Executor placement is only valid for strict CI/CD plans")
@@ -124,6 +127,8 @@ class ExecutorPlacementAdmission:
         committed = False
         try:
             while True:
+                if admission_check is not None:
+                    admission_check()
                 self._require_not_all_compatible_candidates_blocked(execution, candidates)
                 ready = self._currently_eligible(
                     plan=plan, execution=execution, target_count=target_count, candidates=candidates

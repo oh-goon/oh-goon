@@ -116,9 +116,10 @@ from oh_goon.integrations.exact_file_write import (
 )
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.runtime.execution import ExecutionTicket, RunExecutionSupervisor
-from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
+from oh_goon.runtime.execution.run_supervisor import RunWorkerAdmission, RunWorkerLaunch
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal, RunResourceObservationContext
+from oh_goon.runtime.lifecycle import RuntimeDrainPolicy
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
 from oh_goon.services.fleet_caller_file_freshness import require_target_caller_file_fresh
@@ -134,6 +135,14 @@ class _RecoveredRunSourceConflict(Exception):
     def __init__(self, state: FleetRunState) -> None:
         super().__init__("Original Run retained different source delivery references")
         self.state = state
+
+
+@dataclass(frozen=True, slots=True)
+class FleetRunShutdownObservation:
+    """Process-local recovery scope and remaining native containment deadline."""
+
+    run_ids: tuple[str, ...]
+    containment_deadline: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,6 +415,7 @@ class FleetRunControlPlane:
         self._schedule_executions = schedule_executions
         self._content_store = content_store
         self._worker_configuration = worker_configuration
+        self._drain_runs: tuple[str, ...] = ()
 
     def require_cli_plan_preparation(self, fleet_run_id: str | None) -> None:
         """Delegate CLI pre-resolution admission to the original Fleet lifecycle."""
@@ -448,6 +458,7 @@ class FleetRunControlPlane:
 
     def require_plan_ingress_preparation(self, fleet_run_id: str | None) -> None:
         """Delegate CLI/HTTP identity membership to one original lifecycle owner."""
+        self._supervisor.require_accepting()
         self._lifecycle.require_plan_ingress_preparation(fleet_run_id)
 
     def capture_run_resource_observation_context(
@@ -725,6 +736,7 @@ class FleetRunControlPlane:
             )
             if existing is not None:
                 return existing
+            self._supervisor.require_accepting()
             if self._worker_configuration is None:
                 raise FleetPlanInvalid("New FleetRun admission requires the Run worker launcher")
             prepare_worker = self._worker_configuration(fleet_run_id)
@@ -749,53 +761,68 @@ class FleetRunControlPlane:
                 )
                 else nullcontext(intent)
             )
-            original_intent = intent
+            admission: RunWorkerAdmission | None = None
+
+            def register_admission(selected_run_id: str) -> None:
+                nonlocal admission
+                if selected_run_id != fleet_run_id:
+                    raise StateConflict("Run admission callback changed its identity")
+                if admission is None:
+                    admission = self._supervisor.register_admission(selected_run_id)
+
             try:
-                with transport as intent:
-                    try:
-                        ticket, state = self._lifecycle.admit(
-                            fleet_run_id,
-                            intent,
-                            repository_scope,
-                            [entry.repository for entry in plan.targets],
-                            expected_durable_revision=plan.durable_revision,
-                            repository_admissions=plan.repository_admissions,
-                            source=source,
-                            readmitted_from_run_id=readmitted_from_run_id,
-                            rerun_from_run_id=rerun_from_run_id,
-                            requested_priority=requested_priority,
-                            schedule_run_id=schedule_run_id,
-                        )
-                    except JournalConflict:
-                        existing = _matching_existing_run(
-                            self._journal,
-                            fleet_run_id,
-                            original_intent,
-                            repository_scope=repository_scope,
-                            source=source,
-                            readmitted_from_run_id=readmitted_from_run_id,
-                            rerun_from_run_id=rerun_from_run_id,
-                            requested_priority=requested_priority,
-                        )
-                        if existing is None:
-                            raise
-                        if (
-                            existing.target is not None
-                            and intent.target is not None
-                            and existing.target.model_dump(exclude_computed_fields=True)
-                            != intent.target.model_dump(exclude_computed_fields=True)
-                        ):
-                            raise _RecoveredRunSourceConflict(existing) from None
-                        # A lost ACK for this exact target must retain its committed inputs.
-                        return existing
-            except _RecoveredRunSourceConflict as recovered:
-                if getattr(recovered, "__notes__", ()):
-                    raise FleetPlanInvalid(
-                        "Unadmitted Python Goon source cleanup failed"
-                    ) from recovered
-                return recovered.state
-            self._submit(fleet_run_id, ticket, prepare_worker)
-            return state
+                original_intent = intent
+                try:
+                    with transport as intent:
+                        try:
+                            ticket, state = self._lifecycle.admit(
+                                fleet_run_id,
+                                intent,
+                                repository_scope,
+                                [entry.repository for entry in plan.targets],
+                                expected_durable_revision=plan.durable_revision,
+                                repository_admissions=plan.repository_admissions,
+                                source=source,
+                                readmitted_from_run_id=readmitted_from_run_id,
+                                rerun_from_run_id=rerun_from_run_id,
+                                requested_priority=requested_priority,
+                                schedule_run_id=schedule_run_id,
+                                admission_check=self._supervisor.require_accepting,
+                                before_admission=register_admission,
+                            )
+                        except JournalConflict:
+                            existing = _matching_existing_run(
+                                self._journal,
+                                fleet_run_id,
+                                original_intent,
+                                repository_scope=repository_scope,
+                                source=source,
+                                readmitted_from_run_id=readmitted_from_run_id,
+                                rerun_from_run_id=rerun_from_run_id,
+                                requested_priority=requested_priority,
+                            )
+                            if existing is None:
+                                raise
+                            if (
+                                existing.target is not None
+                                and intent.target is not None
+                                and existing.target.model_dump(exclude_computed_fields=True)
+                                != intent.target.model_dump(exclude_computed_fields=True)
+                            ):
+                                raise _RecoveredRunSourceConflict(existing) from None
+                            # A lost ACK for this exact target must retain its committed inputs.
+                            return existing
+                except _RecoveredRunSourceConflict as recovered:
+                    if getattr(recovered, "__notes__", ()):
+                        raise FleetPlanInvalid(
+                            "Unadmitted Python Goon source cleanup failed"
+                        ) from recovered
+                    return recovered.state
+                self._submit(fleet_run_id, ticket, prepare_worker, admission=admission)
+                return state
+            finally:
+                if admission is not None:
+                    self._supervisor.abandon_admission(admission)
 
     def cancel(self, fleet_run_id: str) -> FleetRunState:
         return self._lifecycle.cancel(fleet_run_id)
@@ -1215,7 +1242,27 @@ class FleetRunControlPlane:
         )
 
     def quiesce(self) -> None:
-        self._supervisor.quiesce()
+        observed = self._supervisor.quiesce()
+        self._drain_runs = tuple(dict.fromkeys((*self._drain_runs, *observed)))
+
+    def _finish_shutdown_observation(
+        self, cancellation_error: BaseException | None, *, containment_deadline: float
+    ) -> FleetRunShutdownObservation:
+        try:
+            self._supervisor.require_containment_complete()
+            self._supervisor.shutdown(wait=False)
+        except BaseException as exc:
+            if cancellation_error is not None:
+                cancellation_error.add_note(
+                    f"Native Run worker containment remains unverified: {type(exc).__name__}"
+                )
+                raise cancellation_error from None
+            raise
+        if cancellation_error is not None:
+            raise cancellation_error
+        # A durable terminal result can precede native resource retirement.
+        # Recovery preserves that result while checking the original scope.
+        return FleetRunShutdownObservation(self._drain_runs, containment_deadline)
 
     def cancel_active_for_shutdown(self) -> FleetRunState | None:
         """Cancel only work submitted to this runtime's original supervisor."""
@@ -1229,14 +1276,59 @@ class FleetRunControlPlane:
         except InvalidRunTransition:
             return self.get(active.fleet_run_id).run
 
-    def shutdown(self, *, wait: bool = True) -> None:
-        self._supervisor.shutdown(wait=wait)
+    def shutdown(
+        self, *, wait: bool = True, policy: RuntimeDrainPolicy | None = None
+    ) -> FleetRunShutdownObservation:
+        """Drain, request durable cancellation, then ask the native owner for containment.
+
+        Returned identities need the existing canonical recovery owner. Neither
+        process retirement nor this process-local observation terminalizes a Run.
+        """
+        if type(wait) is not bool:
+            raise ValueError("Run shutdown wait selection must be boolean")
+        selected = RuntimeDrainPolicy() if policy is None else policy
+        if type(selected) is not RuntimeDrainPolicy:
+            raise ValueError("Run shutdown requires a resolved runtime drain policy")
+        self.quiesce()
+        if not wait:
+            self._supervisor.shutdown(wait=False)
+            return FleetRunShutdownObservation((), monotonic())
+        if self._supervisor.wait_until_idle(timeout=selected.drain_seconds):
+            return self._finish_shutdown_observation(
+                None, containment_deadline=monotonic() + selected.containment_timeout_seconds
+            )
+        cancellation_error: BaseException | None = None
+        try:
+            self.cancel_active_for_shutdown()
+        except BaseException as exc:
+            # A failed durable cancellation cannot become a cancelled Run. The
+            # native lifetime owner must still contain its own process safely.
+            cancellation_error = exc
+        if self._supervisor.wait_until_idle(timeout=selected.cancel_grace_seconds):
+            return self._finish_shutdown_observation(
+                cancellation_error,
+                containment_deadline=monotonic() + selected.containment_timeout_seconds,
+            )
+        containment_deadline = monotonic() + selected.containment_timeout_seconds
+        self._supervisor.request_containment(grace_seconds=selected.termination_grace_seconds)
+        if not self._supervisor.wait_until_idle(
+            timeout=max(0.0, containment_deadline - monotonic())
+        ):
+            if cancellation_error is not None:
+                cancellation_error.add_note("Native Run worker containment remains unverified")
+                raise cancellation_error
+            raise StateConflict("Native Run worker containment did not complete within its budget")
+        return self._finish_shutdown_observation(
+            cancellation_error, containment_deadline=containment_deadline
+        )
 
     def _submit(
         self,
         fleet_run_id: str,
         ticket: ExecutionTicket,
         prepare_worker: Callable[[ExecutionTicket], RunWorkerLaunch],
+        *,
+        admission: RunWorkerAdmission | None = None,
     ) -> None:
         launch: RunWorkerLaunch | None = None
 
@@ -1260,7 +1352,7 @@ class FleetRunControlPlane:
                 return
 
         try:
-            launch = replace(prepare_worker(ticket), on_exit=observe_exit)
+            launch = replace(prepare_worker(ticket), on_exit=observe_exit, admission=admission)
             self._supervisor.submit(fleet_run_id, launch)
         except BaseException as exc:
             # Submission rejection happens after admission created both RUN_ADMITTED

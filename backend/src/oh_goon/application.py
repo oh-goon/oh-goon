@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from time import monotonic
 from typing import TYPE_CHECKING
 
 from oh_goon.core.errors import RuntimeQuiescing
-from oh_goon.runtime.lifecycle import RuntimeLifecycleState
+from oh_goon.runtime.lifecycle import RuntimeDrainPolicy, RuntimeLifecycleState
 
 if TYPE_CHECKING:
     from oh_goon._application_foundation import RuntimeStartupPurpose
@@ -115,17 +116,61 @@ class ApplicationRuntime:
     def start_background(self) -> None:
         if self._startup_purpose != "application":
             raise RuntimeQuiescing("Selected startup purpose cannot start background work")
-        state = self._lifecycle.mark_running()
-        if state is not RuntimeLifecycleState.RUNNING:
-            raise RuntimeQuiescing(f"Runtime cannot restart background work from {state.value}")
-        self._schedule_scheduler.start()
+        if self._lifecycle.state in {RuntimeLifecycleState.QUIESCING, RuntimeLifecycleState.CLOSED}:
+            raise RuntimeQuiescing("Runtime is quiescing or closed")
+        with self._lifecycle.shutdown_scope(timeout=0):
+            state = self._lifecycle.mark_running()
+            if state is not RuntimeLifecycleState.RUNNING:
+                raise RuntimeQuiescing(f"Runtime cannot restart background work from {state.value}")
+            self._schedule_scheduler.start()
 
-    def shutdown(self, *, wait_for_runs: bool = False) -> None:
-        if not self._lifecycle.begin_quiesce():
-            return
-        self._schedule_scheduler.stop()
-        self.runs.quiesce()
-        if not wait_for_runs and self._startup_purpose != "observation":
-            self.runs.cancel_active_for_shutdown()
-        self.runs.shutdown(wait=True)
-        self._lifecycle.close()
+    def shutdown(
+        self,
+        *,
+        wait_for_runs: bool = True,
+        drain_timeout_seconds: float | None = 30.0,
+        cancel_grace_seconds: float = 5.0,
+        termination_grace_seconds: float = 1.0,
+        containment_timeout_seconds: float = 10.0,
+    ) -> None:
+        if type(wait_for_runs) is not bool:
+            raise ValueError("Runtime shutdown wait selection must be boolean")
+        policy = RuntimeDrainPolicy(
+            drain_seconds=drain_timeout_seconds,
+            cancel_grace_seconds=cancel_grace_seconds,
+            termination_grace_seconds=termination_grace_seconds,
+            containment_timeout_seconds=containment_timeout_seconds,
+        )
+        if not wait_for_runs:
+            policy = replace(policy, drain_seconds=0.0)
+        with self._lifecycle.shutdown_scope(timeout=policy.join_timeout_seconds):
+            if self._lifecycle.state is RuntimeLifecycleState.CLOSED:
+                return
+            self._lifecycle.begin_quiesce()
+            # Fence final admission before joining an in-flight scheduler tick; its
+            # existing placement wait can now refuse promptly and retire its queue.
+            self.runs.quiesce()
+            scheduler_error: BaseException | None = None
+            try:
+                self._schedule_scheduler.stop()
+            except BaseException as exc:
+                scheduler_error = exc
+            try:
+                contained = self.runs.shutdown(wait=True, policy=policy)
+                for run_id in contained.run_ids:
+                    self.recovery.recover_worker_exit(
+                        run_id,
+                        quiescence_timeout_seconds=max(
+                            0.0, contained.containment_deadline - monotonic()
+                        ),
+                    )
+            except BaseException as exc:
+                if scheduler_error is not None:
+                    scheduler_error.add_note(
+                        f"Run drain/containment also failed: {type(exc).__name__}"
+                    )
+                    raise scheduler_error from None
+                raise
+            if scheduler_error is not None:
+                raise scheduler_error
+            self._lifecycle.close()

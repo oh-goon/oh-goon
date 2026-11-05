@@ -38,6 +38,7 @@ def baseline(tmp_path: Path) -> Path:
     [
         ("_application_worker.py", "LocalDatabase.open_worker(", "LocalDatabase("),
         ("_application_worker.py", ".claim_fleet_worker(", ".activate("),
+        ("_application_worker.py", "bind_process_child_custody()", "None"),
         (
             "_application_worker.py",
             "execution.execute(claimed)",

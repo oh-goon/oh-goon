@@ -9,18 +9,21 @@ from oh_goon.core.errors import ExecutorPlacementLost
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.vocabulary import (
     EffectBoundaryKind,
+    FleetRunEventType,
     FleetRunTerminalIntent,
     FleetScope,
     OperationAction,
 )
+from oh_goon.engine.git import GitService
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.journal import Journal
+from oh_goon.services.repository_effect_execution import RepositoryEffectExecution
+from oh_goon.services.repository_effect_fence import RepositoryEffectFence
+from oh_goon.services.repository_effect_settlement import RepositoryEffectSettlement
 from tests.factories.capabilities import admit_test_run, capability_snapshot
 from tests.factories.journal import start_run
-from tests.factories.repository_effect_runtime import effect_execution
-from tests.factories.repository_state import baseline_for
 from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
@@ -47,20 +50,18 @@ def test_fleet_preclaim_activity_localizes_identity_and_claim_boundaries(
     attempts = RepositoryEffectAttemptStore(database)
     start_run(journal, "fleet-progress")
 
-    class GitStub:
-        def fingerprint(self, path, _cancel_requested):
-            return baseline_for(path)
-
     class ExecutorStub:
         def effect_boundary(self, _intent):
             return EffectBoundaryKind.EXTERNAL
 
-    effects = effect_execution(
-        database,
+    git = GitService()
+    effects = RepositoryEffectExecution(
         ExecutorStub(),  # type: ignore[arg-type]
         journal,
         attempts,
-        GitStub(),  # type: ignore[arg-type]
+        git,
+        effect_fence=RepositoryEffectFence(git),
+        settlement=RepositoryEffectSettlement(database, journal, attempts),
     )
     session = execution.activate(ticket)
     activity: list[str] = []
@@ -88,3 +89,9 @@ def test_fleet_preclaim_activity_localizes_identity_and_claim_boundaries(
         "Repository identity observed for repo",
         "Claiming repository execution attempt for repo",
     ]
+    physical = [
+        event
+        for event in journal.read_view().run_events("fleet-progress").events
+        if event.event_type is FleetRunEventType.PROCESS_STARTED
+    ]
+    assert physical and all(event.step_id is None for event in physical)

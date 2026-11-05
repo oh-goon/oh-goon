@@ -28,6 +28,7 @@ from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest, Pre
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import EffectBoundaryKind, FleetRunEventType
+from oh_goon.engine.command import CommandProcessLifecycleEvent, observe_command_processes
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
 from oh_goon.runtime.database import DatabasePathIdentityLost
@@ -108,6 +109,57 @@ class RepositoryEffectExecution:
         admitted_run: FleetRunDetail | None = None,
     ) -> OperationExecution:
         """Execute one Fleet target under the already-admitted Fleet owner."""
+        fleet_run_id = session.require_fleet_run_id()
+        operation_id = repository_attempt_operation_id(fleet_run_id, entry.repository.repository_id)
+
+        def observe(event: CommandProcessLifecycleEvent) -> None:
+            session.mutate(
+                lambda connection: self._journal.record_execution_lifecycle_in(
+                    connection,
+                    fleet_run_id=fleet_run_id,
+                    repository_id=entry.repository.repository_id,
+                    operation_id=operation_id,
+                    event_type=FleetRunEventType(event.kind),
+                    physical_execution_id=event.physical_execution_id,
+                    pid=event.pid,
+                    process_identity=event.process_identity,
+                    returncode=event.returncode,
+                    termination_reason=event.termination_reason,
+                )
+            )
+
+        # Native preparation (including the first Git fingerprint) belongs to
+        # this admitted operation too. Explicit Step observers take precedence.
+        with observe_command_processes(observe):
+            return self._execute_fleet_target(
+                intent,
+                capability,
+                entry,
+                session,
+                isolation_backend,
+                operation_id=operation_id,
+                repository_admission=repository_admission,
+                validate_authority_in=validate_authority_in,
+                activity=activity,
+                local_lace_intent_for=local_lace_intent_for,
+                admitted_run=admitted_run,
+            )
+
+    def _execute_fleet_target(
+        self,
+        intent: ResolvedCapabilityIntent,
+        capability: CapabilitySnapshot,
+        entry: IncludedRepositoryCatalogEntry,
+        session: ExecutionSession,
+        isolation_backend: PlanIsolationBackendEvidence | None,
+        *,
+        operation_id: str,
+        repository_admission: PlanRepositoryAdmissionEvidence | None,
+        validate_authority_in: Callable[[sqlite3.Connection], None] | None,
+        activity: Callable[[str], None] | None,
+        local_lace_intent_for: Callable[..., LocalLaceIntentReservation] | None,
+        admitted_run: FleetRunDetail | None,
+    ) -> OperationExecution:
         if session.cancel_requested():
             raise OperationCancelledError("Fleet run cancellation requested")
         fleet_run_id = session.require_fleet_run_id()
@@ -117,10 +169,6 @@ class RepositoryEffectExecution:
         baseline = self._git.fingerprint(repository, session.cancel_requested)
         if activity is not None:
             activity(f"Repository identity observed for {repository.name}")
-        operation_id = repository_attempt_operation_id(
-            fleet_run_id,
-            entry.repository.repository_id,
-        )
 
         def claim(connection: sqlite3.Connection) -> ClaimedRepositoryEffectAttempt:
             if session.cancel_requested_in(connection):

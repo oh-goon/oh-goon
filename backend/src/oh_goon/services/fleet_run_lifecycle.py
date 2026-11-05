@@ -428,7 +428,11 @@ class FleetRunLifecycle:
         rerun_from_run_id: str | None = None,
         requested_priority: SchedulingPriority = SchedulingPriority.NORMAL,
         schedule_run_id: str | None = None,
+        admission_check: Callable[[], None] | None = None,
+        before_admission: Callable[[str], None] | None = None,
     ) -> tuple[ExecutionTicket, FleetRunState]:
+        if admission_check is not None:
+            admission_check()
         if isinstance(intent.target, FleetPlanTarget) and not repository_admissions:
             raise StateConflict(
                 "Fleet Plan admission is missing repository/Plan evidence before RUN_ADMITTED"
@@ -485,6 +489,7 @@ class FleetRunLifecycle:
                     targets=tuple(targets),
                     repository_admissions=repository_admissions,
                     requested_priority=requested_priority,
+                    admission_check=admission_check,
                     commit=lambda connection, placement: self._admit_authenticated_strict_in(
                         connection,
                         placement,
@@ -498,6 +503,7 @@ class FleetRunLifecycle:
                         source=source,
                         application_launch=application_launch,
                         schedule_run_id=schedule_run_id,
+                        before_admission=before_admission,
                     ),
                 )
                 return admitted
@@ -537,6 +543,7 @@ class FleetRunLifecycle:
                     key_directory=binding.key_directory,
                     trusted_public_roots=binding.trusted_public_roots,
                     control_state_root=binding.control_state_root,
+                    before_admission=before_admission,
                 )
             assert isinstance(binding, FleetPreworkComposition)
             return FleetAdmissionPlanner.reserve_atomic_fleet_prework_ingress(
@@ -557,6 +564,7 @@ class FleetRunLifecycle:
                 deployment_policy=(
                     binding.deployment_policy if self._require_compiled_fleet_contract else None
                 ),
+                before_admission=before_admission,
             )
         if isinstance(target, FleetPlanTarget) and isinstance(
             target.plan.execution, CicdExecutionPolicy
@@ -569,6 +577,7 @@ class FleetRunLifecycle:
                     targets=tuple(targets),
                     repository_admissions=repository_admissions,
                     requested_priority=requested_priority,
+                    admission_check=admission_check,
                     commit=lambda connection, placement: self._admit_strict_in(
                         connection,
                         fleet_run_id,
@@ -583,6 +592,7 @@ class FleetRunLifecycle:
                         rerun_from_run_id=rerun_from_run_id,
                         application_launch=application_launch,
                         schedule_run_id=schedule_run_id,
+                        before_admission=before_admission,
                     ),
                 )
                 return admitted
@@ -617,13 +627,19 @@ class FleetRunLifecycle:
             application_launch=application_launch,
             schedule_run_id=schedule_run_id,
         )
+
+        def admit_direct_in(connection: sqlite3.Connection) -> FleetRunState:
+            if before_admission is not None:
+                before_admission(fleet_run_id)
+            return self._journal.admit_run_in(
+                connection, fleet_run_id, admitted_intent, repository_scope, targets
+            )
+
         try:
             return self._execution.reserve_fleet_with(
                 fleet_run_id,
                 expected_durable_revision=expected_durable_revision,
-                mutate=lambda connection: self._journal.admit_run_in(
-                    connection, fleet_run_id, admitted_intent, repository_scope, targets
-                ),
+                mutate=admit_direct_in,
             )
         except BaseException:
             replay = _replay_admission(
@@ -694,7 +710,10 @@ class FleetRunLifecycle:
         rerun_from_run_id: str | None,
         application_launch: ApplicationLaunchReceipt,
         schedule_run_id: str | None = None,
+        before_admission: Callable[[str], None] | None = None,
     ) -> tuple[ExecutionTicket, FleetRunState]:
+        if before_admission is not None:
+            before_admission(fleet_run_id)
         ticket = self._execution.reserve_fleet_in(
             connection,
             fleet_run_id,
@@ -737,6 +756,7 @@ class FleetRunLifecycle:
         source: FleetRunSource,
         application_launch: ApplicationLaunchReceipt,
         schedule_run_id: str | None = None,
+        before_admission: Callable[[str], None] | None = None,
     ) -> tuple[ExecutionTicket, FleetRunState]:
         """M176: strict scheduler's original capacity+lease+Run+causal write cut."""
         from oh_goon.services.fleet_admission import FleetAdmissionPlanner
@@ -744,6 +764,8 @@ class FleetRunLifecycle:
         target = intent.target
         assert isinstance(target, FleetPlanTarget)
 
+        if before_admission is not None:
+            before_admission(fleet_run_id)
         ticket = self._execution.reserve_fleet_in(
             connection,
             fleet_run_id,

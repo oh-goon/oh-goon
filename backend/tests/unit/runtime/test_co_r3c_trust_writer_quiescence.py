@@ -29,8 +29,14 @@ def test_partial_proc_inventory_never_asserts_absent(
     good.mkdir()
     (good / "stat").write_text("101 (unrelated) S 1 991 0 0\n", encoding="ascii")
     missing = tmp_path / "102"
-    missing.mkdir()  # Permission-denied/raced entry: group cannot be excluded.
+    missing.mkdir()
     monkeypatch.setattr(original_observer, "Path", lambda _root: tmp_path)
+
+    def unavailable_membership(pid: int) -> int:
+        assert pid == 102
+        raise PermissionError("native membership unavailable for raced entry")
+
+    monkeypatch.setattr(original_observer.os, "getpgid", unavailable_membership)
     assert original_observer._linux_process_group_has_live_member(772) is None
     probes = []
 

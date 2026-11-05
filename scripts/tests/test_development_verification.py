@@ -6,7 +6,7 @@ import stat
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -24,6 +24,7 @@ from oh_goon.repository_tooling.verification_gate_control import (
     DOCUMENTATION_PROOF_TEST,
     HASHMARKS_UPGRADE_OBLIGATION,
     HASHMARKS_UPGRADE_TESTS,
+    STATIC_PROJECT_OBLIGATION,
     VERIFICATION_POLICY_TESTS,
     VERIFICATION_SUPPORT_OBLIGATION,
     bounded_verification_support_targets,
@@ -225,6 +226,7 @@ def test_plan_cli_publishes_after_actual_source_admission(
     assert (
         outputs.read_text(encoding="utf-8")
         == "python=false\nfrontend=false\nstatic_project=false\npytest=true\nnative_resources=false\n"
+        "static_phase=true\nbehavioral_phase=true\n"
     )
     assert (
         json.loads(target.read_text())["candidate"]
@@ -805,7 +807,8 @@ def test_plan_cli_rejects_ineligible_merge_before_capability_outputs(
         assert outputs.read_text(encoding="utf-8") == (
             previous
             + f"python=true\nfrontend=false\nstatic_project=false\npytest={'true' if plan.pytest else 'false'}\n"
-            + "native_resources=false\n"
+            + "native_resources=false\nstatic_phase=true\n"
+            + f"behavioral_phase={'true' if plan.pytest else 'false'}\n"
         )
 
 
@@ -850,6 +853,8 @@ def test_merge_plan_cli_keeps_qualified_behavior_and_generated_contract_paths(
         "static_project=false\n"
         f"pytest={'true' if plan.pytest else 'false'}\n"
         "native_resources=false\n"
+        "static_phase=true\n"
+        f"behavioral_phase={'true' if plan.pytest else 'false'}\n"
     )
 
 
@@ -868,8 +873,11 @@ def test_source_change_invalidates_admitted_plan_before_work(
         owner.require_current_plan(repository, plan)
 
 
+@pytest.mark.parametrize("phase", ("all", "static"))
 def test_source_change_stops_before_a_later_command_can_restore_old_bytes(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: Literal["all", "static"],
 ) -> None:
     document = repository / "LICENSE"
     document.write_text("Changed explanation.\n", encoding="utf-8")
@@ -901,13 +909,17 @@ def test_source_change_stops_before_a_later_command_can_restore_old_bytes(
 
     monkeypatch.setattr(owner, "run_command", command)
     assert (
-        owner.execute_change(repository, plan, mode="focused", workers=1)["status"]
+        owner.execute_change(repository, plan, mode="focused", workers=1, phase=phase)[
+            "status"
+        ]
         == "CHECKS_PASSED"
     )
     calls.clear()
     state["mutate"] = True
     assert (
-        owner.execute_change(repository, plan, mode="focused", workers=1)["status"]
+        owner.execute_change(repository, plan, mode="focused", workers=1, phase=phase)[
+            "status"
+        ]
         == "INCOMPLETE"
     )
     assert calls == ["first"]
@@ -1030,10 +1042,12 @@ def test_selected_pytest_requests_compact_exact_membership_proof(
     assert result["outcomes"][0]["native_report"] == native
 
 
+@pytest.mark.parametrize("phase", ("all", "behavioral"))
 def test_long_native_batch_diagnostics_preserve_failure_receipt_and_bounded_summary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    phase: str,
 ) -> None:
     source = tmp_path / "source"
     source.mkdir()
@@ -1090,6 +1104,8 @@ def test_long_native_batch_diagnostics_preserve_failure_receipt_and_bounded_summ
                 str(source),
                 "--execute",
                 str(plan_path),
+                "--phase",
+                phase,
                 "--report",
                 str(result_path),
             ]
@@ -3103,3 +3119,402 @@ def test_native_base_lock_transport_never_relabels_normalized_newlines_as_origin
 
     with pytest.raises(ValueError, match="exact source bytes"):
         owner.admit_change(repository, base=base, nominator=forbidden)
+
+
+def _phase_test_plan() -> owner.ChangeVerificationPlan:
+    return owner.ChangeVerificationPlan(
+        base="a" * 40,
+        candidate="b" * 40,
+        source_identity="sha256:" + "c" * 64,
+        changed_paths=("backend/src/behavior.py",),
+        static=("architecture", "generated"),
+        pytest=("backend/tests/unit/test_behavior.py::test_behavior",),
+        frontend=("frontend/src/behavior.test.ts",),
+        unverified=(),
+        evidence={},
+        behavioral_status="REQUIRED",
+        policy_status="ORDINARY",
+    )
+
+
+def _phase_test_parts(plan: owner.ChangeVerificationPlan) -> list[dict[str, Any]]:
+    node = plan.pytest[0] if plan.pytest else "unused.py::test_unused"
+    native = {
+        "status": "PASS",
+        "source_identity": plan.source_identity,
+        "native_collection": {"discovered": [node], "deselected": []},
+        "membership_receipt": {
+            "selected": [node],
+            "passed": [node],
+            "terminal_success": True,
+            "effective_pytest_outcomes": [
+                {
+                    "member": node,
+                    "status": "PASSED",
+                    "attempt_identity": "original-native-attempt",
+                    "pytest_outcomes": [{"nodeid": node, "outcome": "PASSED"}],
+                }
+            ],
+        },
+        "original_native_provenance": {"retained": "unchanged"},
+    }
+    frontend = {
+        "success": True,
+        "numTotalTests": 1,
+        "numPassedTests": 1,
+        "numFailedTests": 0,
+        "numPendingTests": 0,
+        "numTodoTests": 0,
+        "numTotalTestSuites": 1,
+        "numPassedTestSuites": 1,
+        "numFailedTestSuites": 0,
+        "numPendingTestSuites": 0,
+        "testResults": [
+            {
+                "name": "src/behavior.test.ts",
+                "assertionResults": [
+                    {"status": "passed", "title": "original behavior"}
+                ],
+            }
+        ],
+    }
+    return [
+        {
+            "plan": plan.model_dump(mode="json"),
+            "phase": "static",
+            "status": "CHECKS_PASSED",
+            "outcomes": [
+                {"owner": "Architecture", "returncode": 0},
+                {"owner": "Generated contracts", "returncode": 0},
+            ],
+        },
+        {
+            "plan": plan.model_dump(mode="json"),
+            "phase": "behavioral",
+            "status": "CHECKS_PASSED",
+            "outcomes": [
+                {
+                    "owner": "Frontend behavior",
+                    "returncode": 0,
+                    "native_project_root": "/native/frontend",
+                    "native_report": frontend,
+                },
+                {"owner": "Native pytest", "returncode": 0, "native_report": native},
+            ],
+        },
+    ]
+
+
+def test_split_execution_preserves_full_selection_commands_and_native_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Declared native-result fixture: execution/membership owners retain their
+    # own physical qualification tests; this checks transport without rerunning them.
+    plan = _phase_test_plan().model_copy(
+        update={"obligations": (STATIC_PROJECT_OBLIGATION,)}
+    )
+    parts = _phase_test_parts(plan)
+    original = plan.model_dump(mode="json")
+    commands: list[tuple[str, ...]] = []
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+    context = {
+        "source_identity": plan.source_identity,
+        "native_tools": "original context",
+    }
+    monkeypatch.setattr(
+        owner, "admitted_static_projects", lambda *_args: {"frontend": {}}
+    )
+    monkeypatch.setattr(owner, "static_project_context", lambda *_args: context)
+
+    def execute(*argv: str, **_options: Any) -> Any:
+        commands.append(argv)
+        if argv[:3] == ("npm", "run", "test"):
+            report = next(
+                value.split("=", 1)[1]
+                for value in argv
+                if value.startswith("--outputFile=")
+            )
+            Path(report).write_text(
+                json.dumps(parts[1]["outcomes"][0]["native_report"])
+            )
+        elif "oh_goon.repository_tooling.test_batches" in argv:
+            assert argv[-1:] == plan.pytest
+            assert argv[argv.index("--report-projection") + 1] == "verification"
+            Path(argv[argv.index("--report-path") + 1]).write_text(
+                json.dumps(parts[1]["outcomes"][1]["native_report"])
+            )
+        return SimpleNamespace(
+            returncode=0,
+            argv=argv,
+            supervisor=SimpleNamespace(final_process_group_quiescent=True),
+        )
+
+    monkeypatch.setattr(owner, "run_command", execute)
+    results: dict[str, dict[str, Any]] = {}
+    executions: dict[str, list[tuple[str, ...]]] = {}
+    for phase in ("all", "static", "behavioral"):
+        commands.clear()
+        results[phase] = owner.execute_change(
+            tmp_path,
+            plan,
+            mode="merge",
+            workers=1,
+            phase=phase,  # type: ignore[arg-type]
+        )
+        # Native temporary report paths differ; their presence and receipts do not.
+        executions[phase] = [
+            tuple(
+                "REPORT" if value.startswith("--outputFile=") else value
+                for value in command
+            )
+            for command in commands
+        ]
+    assert [row["owner"] for row in results["static"]["outcomes"]] == [
+        "Architecture",
+        "Generated contracts",
+    ]
+    assert [row["owner"] for row in results["behavioral"]["outcomes"]] == [
+        "Frontend behavior",
+        "Native pytest",
+    ]
+    assert len(executions["all"]) == len(executions["static"]) + len(
+        executions["behavioral"]
+    )
+    assert executions["all"][:2] == executions["static"]
+    for phase in ("static", "behavioral"):
+        parts[0 if phase == "static" else 1].update(results[phase])
+    joined = owner.aggregate_change(tmp_path, plan, list(reversed(parts)), mode="merge")
+    assert joined == results["all"]
+    assert joined["outcomes"][1]["static_project_context"] == context
+    assert (
+        joined["outcomes"][-1]["native_report"]
+        == parts[1]["outcomes"][-1]["native_report"]
+    )
+    assert plan.model_dump(mode="json") == original
+
+
+def test_phase_cli_is_non_merge_ready_until_exact_original_parts_are_aggregated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    control = tmp_path / "control"
+    control.mkdir(mode=0o700)
+    plan = _phase_test_plan()
+    parts = _phase_test_parts(plan)
+    selected = control / "plan.json"
+    owner._write_transport(selected, plan.model_dump(mode="json"), source)
+    calls: list[str] = []
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+
+    def execute(
+        _root: Path, original: owner.ChangeVerificationPlan, **options: Any
+    ) -> Any:
+        assert original == plan
+        phase = options["phase"]
+        calls.append(phase)
+        assert phase in {"static", "behavioral"}, "Aggregation must never execute work"
+        part = parts[0 if phase == "static" else 1]
+        return {"status": part["status"], "outcomes": part["outcomes"]}
+
+    monkeypatch.setattr(owner, "execute_change", execute)
+    monkeypatch.setattr(
+        owner, "admit_change", lambda *_args, **_options: pytest.fail("No readmission")
+    )
+    reports: list[Path] = []
+    for phase in ("static", "behavioral"):
+        report = control / f"part-{phase}.json"
+        reports.append(report)
+        assert (
+            owner.main(
+                [
+                    "--root",
+                    str(source),
+                    "--execute",
+                    str(selected),
+                    "--mode",
+                    "merge",
+                    "--phase",
+                    phase,
+                    "--report",
+                    str(report),
+                ]
+            )
+            == 0
+        )
+        partial = owner._read_json(report)
+        assert partial["status"] == "CHECKS_PASSED" and partial["phase"] == phase
+        assert partial["plan"] == plan.model_dump(mode="json")
+        assert "merge_authority" not in partial
+    result_path = control / "result.json"
+    assert (
+        owner.main(
+            [
+                "--root",
+                str(source),
+                "--execute",
+                str(selected),
+                "--mode",
+                "merge",
+                "--aggregate",
+                "--aggregate-part",
+                str(reports[1]),
+                "--aggregate-part",
+                str(reports[0]),
+                "--report",
+                str(result_path),
+            ]
+        )
+        == 0
+    )
+    result = owner._read_json(result_path)
+    assert result["status"] == "MERGE_PROOF_READY"
+    assert result["plan"] == plan.model_dump(mode="json")
+    assert result["outcomes"] == parts[0]["outcomes"] + parts[1]["outcomes"]
+    assert "phase" not in result and calls == ["static", "behavioral"]
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "missing",
+        "duplicate-phase",
+        "extra-phase",
+        "foreign-candidate",
+        "foreign-source",
+        "foreign-selection",
+        "failed",
+        "cancelled",
+        "incomplete",
+        "failed-owner",
+        "missing-owner",
+        "duplicate-owner",
+        "extra-owner",
+        "reordered-owner",
+        "owner-cancelled",
+        "foreign-native",
+        "missing-native",
+        "incomplete-native",
+    ),
+)
+def test_phase_aggregation_refuses_missing_foreign_or_non_pass_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    plan = _phase_test_plan()
+    parts = _phase_test_parts(plan)
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+    assert (
+        owner.aggregate_change(tmp_path, plan, parts, mode="merge")["status"]
+        == "CHECKS_PASSED"
+    )
+    invalid = copy.deepcopy(parts)
+    if mutation == "missing":
+        invalid.pop()
+    elif mutation == "duplicate-phase":
+        invalid.append(copy.deepcopy(invalid[0]))
+    elif mutation == "extra-phase":
+        invalid.append({**invalid[0], "phase": "daily"})
+    elif mutation == "foreign-candidate":
+        invalid[1]["plan"]["candidate"] = "d" * 40
+    elif mutation == "foreign-source":
+        invalid[1]["plan"]["source_identity"] = "sha256:" + "d" * 64
+    elif mutation == "foreign-selection":
+        invalid[1]["plan"]["pytest"] = ["another.py::test_other"]
+    elif mutation in {"failed", "cancelled", "incomplete"}:
+        invalid[1]["status"] = mutation.upper()
+    elif mutation == "failed-owner":
+        invalid[0]["outcomes"][0]["returncode"] = 1
+    elif mutation == "missing-owner":
+        invalid[0]["outcomes"].pop()
+    elif mutation == "duplicate-owner":
+        invalid[0]["outcomes"].append(copy.deepcopy(invalid[0]["outcomes"][0]))
+    elif mutation == "extra-owner":
+        invalid[0]["outcomes"].append({"owner": "Daily proof", "returncode": 0})
+    elif mutation == "reordered-owner":
+        invalid[0]["outcomes"].reverse()
+    elif mutation == "owner-cancelled":
+        invalid[0]["outcomes"][0]["status"] = "CANCELLED"
+    elif mutation == "foreign-native":
+        invalid[1]["outcomes"][-1]["native_report"]["source_identity"] = (
+            "sha256:" + "d" * 64
+        )
+    elif mutation == "missing-native":
+        invalid[1]["outcomes"][-1].pop("native_report")
+    else:
+        invalid[1]["outcomes"][-1]["native_report"]["membership_receipt"]["passed"] = []
+    with pytest.raises(ValueError):
+        owner.aggregate_change(tmp_path, plan, invalid, mode="merge")
+
+
+@pytest.mark.parametrize("applicable", ("static", "behavioral", "none"))
+def test_only_applicable_phases_are_expected_without_dummy_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, applicable: str
+) -> None:
+    plan = _phase_test_plan()
+    if applicable == "static":
+        plan = plan.model_copy(
+            update={"pytest": (), "frontend": (), "behavioral_status": "NOT_APPLICABLE"}
+        )
+    elif applicable == "behavioral":
+        plan = plan.model_copy(update={"static": ()})
+    else:
+        plan = plan.model_copy(
+            update={
+                "static": (),
+                "pytest": (),
+                "frontend": (),
+                "behavioral_status": "NOT_APPLICABLE",
+            }
+        )
+    parts = _phase_test_parts(plan)
+    selected = (
+        [parts[0]]
+        if applicable == "static"
+        else [parts[1]]
+        if applicable == "behavioral"
+        else []
+    )
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+    result = owner.aggregate_change(tmp_path, plan, selected, mode="merge")
+    assert result["status"] == "CHECKS_PASSED"
+    assert result["outcomes"] == (
+        [row for part in selected for row in part["outcomes"]]
+    )
+    if applicable != "none":
+        other = "behavioral" if applicable == "static" else "static"
+        with pytest.raises(ValueError, match="no admitted owners"):
+            owner.execute_change(tmp_path, plan, mode="merge", workers=1, phase=other)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="extra"):
+            owner.aggregate_change(tmp_path, plan, parts, mode="merge")
+
+
+def test_explicit_empty_aggregation_does_not_fall_back_to_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    control = tmp_path / "control"
+    control.mkdir(mode=0o700)
+    plan = _phase_test_plan().model_copy(
+        update={
+            "static": (),
+            "pytest": (),
+            "frontend": (),
+            "behavioral_status": "NOT_APPLICABLE",
+        }
+    )
+    selected = control / "plan.json"
+    owner._write_transport(selected, plan.model_dump(mode="json"), source)
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+    monkeypatch.setattr(
+        owner, "execute_change", lambda *_args, **_options: pytest.fail("No execution")
+    )
+    assert (
+        owner.main(["--root", str(source), "--execute", str(selected), "--aggregate"])
+        == 0
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert (
+        result["status"] == "FOCUSED / NOT_FULLY_VERIFIED" and result["outcomes"] == []
+    )

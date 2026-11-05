@@ -8,6 +8,7 @@ from threading import Thread
 
 from oh_goon.core.models.runtime_supervision import WatchdogDecision
 from oh_goon.engine.command_process_tree import (
+    CommandParentGuard,
     _finish_process_output,
     _process_group_exists,
     terminate_owned_process_tree,
@@ -34,6 +35,7 @@ def evaluate_owned_process_watchdog(
     readers: tuple[Thread, Thread],
     *,
     termination_requested: Callable[[str], None],
+    parent_guard: CommandParentGuard | None = None,
 ) -> WatchdogTermination | None:
     """Evaluate policy and, when required, terminate the owned tree after intent is recorded."""
     decision = watchdog.evaluate(process_alive=True)
@@ -46,12 +48,15 @@ def evaluate_owned_process_watchdog(
     if request is None:
         return None
     termination_requested(request.reason)
-    receipt = terminate_owned_process_tree(process, request)
-    forced = _finish_process_output(process, readers) or receipt.escalated_to_kill
+    receipt = terminate_owned_process_tree(process, request, parent_guard=parent_guard)
+    forced = (
+        _finish_process_output(process, readers, parent_guard=parent_guard)
+        or receipt.escalated_to_kill
+    )
     return WatchdogTermination(
         decision=decision,
         receipt=receipt,
         forced_termination=forced,
         final_quiescent=receipt.quiescent
-        and (os.name == "nt" or not _process_group_exists(process.pid)),
+        and (os.name == "nt" or not _process_group_exists(process.pid, parent_guard=parent_guard)),
     )

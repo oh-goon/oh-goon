@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import array
 import codecs
 import errno
 import hashlib
@@ -7,10 +8,13 @@ import io
 import json
 import os
 import select
+import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,9 +29,13 @@ from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.product_identity import new_physical_execution_id
 from oh_goon.engine.command_capture import CommandCapture, TextCapture
 from oh_goon.engine.command_process_tree import (
+    CommandParentGuard,
     _finish_process_output,
     _process_group_exists,
     _terminate_process_group,
+    enable_native_child_reaping,
+    native_child_reaping_supported,
+    owns_native_child_reaping,
     terminate_owned_process_tree,
 )
 from oh_goon.engine.command_runtime_authority import (
@@ -58,6 +66,82 @@ OUTPUT_DRAIN_TIMEOUT_SECONDS = 5.0
 MAX_COMMAND_INPUT_BYTES = 1024 * 1024
 _TERMINAL_CHUNK_BYTES = 64 * 1024
 _EXEC_GUARD_PATH = Path(__file__).resolve().parents[1] / "runtime" / "exec_guard.py"
+_child_custody_owner_pid: int | None = None
+_command_process_observer: ContextVar[CommandProcessObserver | None] = ContextVar(
+    "oh_goon_command_process_observer", default=None
+)
+
+
+@contextmanager
+def observe_command_processes(observer: CommandProcessObserver) -> Generator[None, None, None]:
+    """Transport one existing effect owner's observer through its target thread."""
+    if not callable(observer):
+        raise ValueError("Command process observation requires a callable owner")
+    token = _command_process_observer.set(observer)
+    try:
+        yield
+    finally:
+        _command_process_observer.reset(token)
+
+
+def native_child_custody_supported() -> bool:
+    """Probe the unprivileged native handles required by this command owner."""
+    if (
+        not sys.platform.startswith("linux")
+        or not hasattr(os, "pidfd_open")
+        or not native_child_reaping_supported()
+    ):
+        return False
+    descriptor: int | None = None
+    parent = child = None
+    received: list[int] = []
+    try:
+        descriptor = os.pidfd_open(os.getpid())
+        try:
+            os.waitid(os.P_PIDFD, descriptor, os.WEXITED | os.WNOHANG)
+        except ChildProcessError:
+            pass  # P_PIDFD is supported; this process is intentionally not its own child.
+        parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        parent.sendmsg(
+            [b"P"], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [descriptor]))]
+        )
+        packet, ancillary, flags, _ = child.recvmsg(
+            1, socket.CMSG_SPACE(array.array("i").itemsize), socket.MSG_CMSG_CLOEXEC
+        )
+        for level, kind, data in ancillary:
+            if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                values = array.array("i")
+                values.frombytes(data)
+                received.extend(values)
+        return (
+            packet == b"P"
+            and not flags & (socket.MSG_TRUNC | socket.MSG_CTRUNC)
+            and len(received) == 1
+        )
+    except (OSError, AttributeError, ValueError):
+        return False
+    finally:
+        for value in received:
+            os.close(value)
+        if descriptor is not None:
+            os.close(descriptor)
+        if parent is not None:
+            parent.close()
+        if child is not None:
+            child.close()
+
+
+def bind_process_child_custody() -> None:
+    """Bind native child lifetime to this already claimed, single-Run process.
+
+    This is a process-local command default, not execution or Run authority.
+    An inherited marker never silently configures another forked process.
+    """
+    global _child_custody_owner_pid
+    if not native_child_custody_supported():
+        raise RuntimeError("Native command child custody is unavailable")
+    enable_native_child_reaping()
+    _child_custody_owner_pid = os.getpid()
 
 
 def _sha_identity(payload: object) -> str:
@@ -299,6 +383,27 @@ def _popen_pass_fds(pass_fds: tuple[int, ...]) -> tuple[int, ...]:
     return pass_fds
 
 
+def _cleanup_failed_command_start(
+    process: subprocess.Popen[str],
+    parent_guard: CommandParentGuard | None,
+    failure: BaseException,
+) -> None:
+    """Retire an already-born command without replacing its original failure."""
+    try:
+        _terminate_process_group(process, parent_guard=parent_guard)
+    except BaseException as cleanup_error:
+        failure.add_note(f"Command startup cleanup failed: {type(cleanup_error).__name__}")
+    finally:
+        if parent_guard is not None:
+            try:
+                if parent_guard.group is not None:
+                    parent_guard.finish_quiescent()
+            except BaseException as cleanup_error:
+                failure.add_note(f"Command guard cleanup failed: {type(cleanup_error).__name__}")
+            finally:
+                parent_guard.close()
+
+
 def _spawn_command_process(
     argv: tuple[str, ...],
     *,
@@ -311,7 +416,7 @@ def _spawn_command_process(
     terminal_slave: int | None = None,
     input_data: bytes | None = None,
     preserve_native_executable_path: bool = False,
-) -> tuple[subprocess.Popen[str], RuntimeAuthorityReceipt]:
+) -> tuple[subprocess.Popen[str], RuntimeAuthorityReceipt, CommandParentGuard | None]:
     """Bind exact runtime authority and transfer it into one owned process birth."""
 
     try:
@@ -328,13 +433,16 @@ def _spawn_command_process(
     popen_executable = (
         lease.receipt.executable_path if preserve_native_executable_path else lease.execution_path
     )
-    guarded_parent_death = os.name != "nt" and (parent_death_signal or terminal_slave is not None)
+    kill_on_owner_death = parent_death_signal or terminal_slave is not None
+    guarded_parent_death = os.name != "nt" and (kill_on_owner_death or owns_native_child_reaping())
+    parent_guard: CommandParentGuard | None = None
     if guarded_parent_death:
         # The guard imports only its trusted script directory and stdlib. Ignore
         # Python startup variables here while preserving them for the workload.
         popen_argv = (sys.executable, "-E", "-S", str(_EXEC_GUARD_PATH), *lease.launch_argv)
         popen_executable = None
         child_env[exec_guard_protocol.PARENT_PID_ENV] = str(os.getpid())
+        child_env[exec_guard_protocol.OWNER_DEATH_ENV] = "1" if kill_on_owner_death else "0"
         if lease.execution_descriptor is not None:
             child_env[exec_guard_protocol.EXEC_FD_ENV] = str(lease.execution_descriptor)
         elif lease.receipt.execution_materialization_identity is None:
@@ -344,9 +452,25 @@ def _spawn_command_process(
         else:
             lease.close()
             raise ValueError("atomic command authority lacks its execution descriptor")
+        if sys.platform.startswith("linux"):
+            try:
+                parent_guard = CommandParentGuard.create()
+            except BaseException:
+                lease.close()
+                raise
+            child_env[exec_guard_protocol.GUARD_CHANNEL_ENV] = str(parent_guard.child_descriptor)
         if terminal_slave is not None:
             child_env[exec_guard_protocol.CONTROLLING_TERMINAL_ENV] = "1"
-    inherited_fds = tuple(dict.fromkeys((*pass_fds, *lease.pass_fds)))
+    inherited_fds = tuple(
+        dict.fromkeys(
+            (
+                *pass_fds,
+                *lease.pass_fds,
+                *((parent_guard.child_descriptor,) if parent_guard is not None else ()),
+            )
+        )
+    )
+    process: subprocess.Popen[str] | None = None
     try:
         try:
             process = subprocess.Popen(
@@ -370,11 +494,22 @@ def _spawn_command_process(
                 ),
                 pass_fds=_popen_pass_fds(inherited_fds),
             )
+            if parent_guard is not None:
+                try:
+                    parent_guard.accept(process)
+                except BaseException as failure:
+                    _cleanup_failed_command_start(process, parent_guard, failure)
+                    raise
         except OSError as exc:
+            if parent_guard is not None:
+                parent_guard.close()
             raise OSError(exc.errno, exc.strerror, argv[0]) from exc
     finally:
         lease.close()
-    return process, lease.receipt
+        if process is None and parent_guard is not None:
+            parent_guard.close()
+    assert process is not None
+    return process, lease.receipt, parent_guard
 
 
 @dataclass(frozen=True, slots=True)
@@ -387,6 +522,7 @@ class _StartedCommand:
     readers: tuple[Thread, Thread]
     terminal_master: int | None
     output_errors: list[BaseException]
+    parent_guard: CommandParentGuard | None
 
 
 def _start_supervised_command(
@@ -420,7 +556,7 @@ def _start_supervised_command(
             terminal_master, terminal_slave = os.openpty()
             _resize_terminal(terminal_slave, terminal.initial_size)
             os.set_blocking(terminal_master, False)
-        process, authority_receipt = _spawn_command_process(
+        process, authority_receipt, parent_guard = _spawn_command_process(
             argv,
             cwd=cwd,
             child_env=child_env,
@@ -444,8 +580,8 @@ def _start_supervised_command(
             process.stdout = os.fdopen(terminal_master, "r", encoding="utf-8", errors="replace")
         if process.stdin is not None:
             os.set_blocking(process.stdin.fileno(), False)
-    except BaseException:
-        _terminate_process_group(process)
+    except BaseException as failure:
+        _cleanup_failed_command_start(process, parent_guard, failure)
         if terminal_master is not None and process.stdout is None:
             os.close(terminal_master)
         raise
@@ -461,8 +597,8 @@ def _start_supervised_command(
                     process_identity=process_identity,
                 )
             )
-        except BaseException:
-            _terminate_process_group(process)
+        except BaseException as failure:
+            _cleanup_failed_command_start(process, parent_guard, failure)
             raise
     capture = CommandCapture(
         max_capture_bytes_per_stream,
@@ -510,6 +646,7 @@ def _start_supervised_command(
         readers,
         terminal_master,
         output_errors,
+        parent_guard,
     )
 
 
@@ -524,7 +661,7 @@ def run_command(
     process_observer: CommandProcessObserver | None = None,
     merge_stderr: bool = False,
     require_process_group_quiescence: bool = False,
-    parent_death_signal: bool = False,
+    parent_death_signal: bool | None = None,
     runtime_authority: RuntimeAuthorityBinding | None = None,
     pass_fds: tuple[int, ...] = (),
     max_capture_bytes_per_stream: int | None = None,
@@ -545,6 +682,12 @@ def run_command(
     """
 
     argv = tuple(args)
+    if process_observer is None:
+        process_observer = _command_process_observer.get()
+    if parent_death_signal is None:
+        parent_death_signal = _child_custody_owner_pid == os.getpid()
+    elif type(parent_death_signal) is not bool:
+        raise ValueError("command parent-death selection must be a boolean")
     if type(preserve_native_executable_path) is not bool:
         raise ValueError("native executable path preservation must be a boolean")
     if type(retain_output_tail) is not bool:
@@ -580,6 +723,7 @@ def run_command(
         retain_output_tail=retain_output_tail,
     )
     process = started_command.process
+    parent_guard = started_command.parent_guard
     authority_receipt = started_command.authority_receipt
     physical_execution_id = started_command.physical_execution_id
     process_identity = started_command.process_identity
@@ -601,6 +745,8 @@ def run_command(
     failure: BaseException | None = None
     try:
         while True:
+            if parent_guard is not None:
+                parent_guard.require_live()
             if started_command.output_errors:
                 raise started_command.output_errors[0]
             if termination_requested is not None:
@@ -621,6 +767,7 @@ def run_command(
                         request=request,
                         process_identity=process_identity,
                         process_observer=process_observer,
+                        parent_guard=parent_guard,
                     )
             if cancel_requested is not None and cancel_requested():
                 raise _cancel_command(
@@ -631,8 +778,11 @@ def run_command(
                     physical_execution_id=physical_execution_id,
                     process_identity=process_identity,
                     process_observer=process_observer,
+                    parent_guard=parent_guard,
                 )
-            _raise_if_output_limited(process, readers, capture, authority_receipt, argv=argv)
+            _raise_if_output_limited(
+                process, readers, capture, authority_receipt, argv=argv, parent_guard=parent_guard
+            )
             leader_running = process.poll() is None
             if leader_running and input_data is not None and process.stdin is not None:
                 if not process.stdin.closed:
@@ -672,6 +822,7 @@ def run_command(
                             physical_execution_id=physical_execution_id,
                             process_identity=process_identity,
                             process_observer=process_observer,
+                            parent_guard=parent_guard,
                         )
                     pending_terminal_input = available or b""
                 if pending_terminal_input:
@@ -691,12 +842,13 @@ def run_command(
                             physical_execution_id=physical_execution_id,
                             process_identity=process_identity,
                             process_observer=process_observer,
+                            parent_guard=parent_guard,
                         ) from exc
             descendants_running = (
                 not leader_running
                 and require_process_group_quiescence
                 and os.name != "nt"
-                and _process_group_exists(process.pid)
+                and _process_group_exists(process.pid, parent_guard=parent_guard)
             )
             if not leader_running:
                 # The admitted command has finished. Any process still in its owned
@@ -722,6 +874,7 @@ def run_command(
                 process_identity,
                 process_observer,
                 leader_exited_before_group_quiescence,
+                parent_guard=parent_guard,
             )
             if supervision_error is not None:
                 raise supervision_error
@@ -743,11 +896,17 @@ def run_command(
                             termination_reason=request.reason,
                         )
                     )
-                termination_receipt = terminate_owned_process_tree(process, request)
+                termination_receipt = terminate_owned_process_tree(
+                    process, request, parent_guard=parent_guard
+                )
                 forced_termination = termination_receipt.escalated_to_kill
-                forced_termination = _finish_process_output(process, readers) or forced_termination
+                forced_termination = (
+                    _finish_process_output(process, readers, parent_guard=parent_guard)
+                    or forced_termination
+                )
                 final_quiescent = termination_receipt.quiescent and (
-                    os.name == "nt" or not _process_group_exists(process.pid)
+                    os.name == "nt"
+                    or not _process_group_exists(process.pid, parent_guard=parent_guard)
                 )
                 raise CommandTimeoutExpired(
                     args,
@@ -785,13 +944,23 @@ def run_command(
                     continue
             else:
                 time.sleep(wait)
-        forced_termination = _finish_process_output(process, readers)
+        forced_termination = _finish_process_output(process, readers, parent_guard=parent_guard)
+        guard_cleanup = parent_guard is not None and parent_guard.cleanup_forced
+        completion_cleanup_requested = completion_cleanup_requested or guard_cleanup
         if started_command.output_errors:
             raise started_command.output_errors[0]
         _raise_if_output_limited(
-            process, readers, capture, authority_receipt, argv=argv, already_finished=True
+            process,
+            readers,
+            capture,
+            authority_receipt,
+            argv=argv,
+            already_finished=True,
+            parent_guard=parent_guard,
         )
-        final_quiescent = os.name == "nt" or not _process_group_exists(process.pid)
+        final_quiescent = os.name == "nt" or not _process_group_exists(
+            process.pid, parent_guard=parent_guard
+        )
         return CommandResult(
             argv=tuple(args),
             returncode=process.returncode,
@@ -812,6 +981,15 @@ def run_command(
                 final_process_group_quiescent=final_quiescent,
                 recovery_events=(
                     (
+                        ExecutionRecoveryEvent(
+                            kind="process_group_cleanup",
+                            action="retire_parent_guard",
+                            reason_code="guard_ack_unavailable",
+                            outcome="succeeded",
+                        ),
+                    )
+                    if guard_cleanup
+                    else (
                         ExecutionRecoveryEvent(
                             kind="process_group_cleanup",
                             action="terminate_process_group",
@@ -835,12 +1013,35 @@ def run_command(
                 exc.stdout = stdout_capture.text
             exc.stderr = stderr_capture.text
         if process.poll() is None:
-            _terminate_process_group(process)
+            try:
+                _terminate_process_group(process, parent_guard=parent_guard)
+            except BaseException:
+                exc.add_note("Native process termination cleanup remains unverified")
         raise
     finally:
-        if any(reader.is_alive() for reader in readers):
-            _terminate_process_group(process)
-            _finish_process_output(process, readers)
+        try:
+            if any(reader.is_alive() for reader in readers) or (
+                parent_guard is not None and not parent_guard.settled
+            ):
+                try:
+                    _terminate_process_group(process, parent_guard=parent_guard)
+                finally:
+                    # Even a failed termination observation must retire native
+                    # output/control handles when actual work is now absent.
+                    _finish_process_output(process, readers, parent_guard=parent_guard)
+        except BaseException:
+            if failure is None:
+                raise
+            failure.add_note("Native command cleanup remains unverified")
+            if isinstance(failure, (CommandTimeoutExpired, CommandCancelledError)):
+                from dataclasses import replace
+
+                failure.supervisor = replace(
+                    failure.supervisor, final_process_group_quiescent=False
+                )
+        finally:
+            if parent_guard is not None:
+                parent_guard.close()
         if (terminal is not None or retain_output_tail) and isinstance(
             failure, (CommandTimeoutExpired, CommandCancelledError)
         ):
@@ -855,7 +1056,11 @@ def run_command(
         if process.stdin is not None and not process.stdin.closed:
             process.stdin.close()
         _report_terminal_process_state(
-            process, process_observer, physical_execution_id, process_identity
+            process,
+            process_observer,
+            physical_execution_id,
+            process_identity,
+            parent_guard=parent_guard,
         )
 
 
@@ -870,6 +1075,7 @@ def _runtime_supervision_error(
     process_identity: str | None,
     process_observer: CommandProcessObserver | None,
     leader_exited_before_group_quiescence: bool,
+    parent_guard: CommandParentGuard | None = None,
 ) -> BaseException | None:
     if watchdog is None or supervision is None:
         return None
@@ -887,7 +1093,12 @@ def _runtime_supervision_error(
             )
 
     termination = evaluate_owned_process_watchdog(
-        watchdog, supervision, process, readers, termination_requested=record_termination
+        watchdog,
+        supervision,
+        process,
+        readers,
+        termination_requested=record_termination,
+        parent_guard=parent_guard,
     )
     if termination is None:
         return None
@@ -927,6 +1138,7 @@ def _report_terminal_process_state(
     observer: CommandProcessObserver | None,
     physical_execution_id: str,
     process_identity: str | None,
+    parent_guard: CommandParentGuard | None = None,
 ) -> None:
     if observer is None or process.poll() is None:
         return
@@ -939,7 +1151,7 @@ def _report_terminal_process_state(
             returncode=process.returncode,
         )
     )
-    if os.name == "nt" or not _process_group_exists(process.pid):
+    if os.name == "nt" or not _process_group_exists(process.pid, parent_guard=parent_guard):
         observer(
             CommandProcessLifecycleEvent(
                 kind="DESCENDANTS_QUIESCENT",
@@ -959,6 +1171,7 @@ def _cancel_command(
     physical_execution_id: str,
     process_identity: str | None,
     process_observer: CommandProcessObserver | None,
+    parent_guard: CommandParentGuard | None = None,
 ) -> CommandCancelledError:
     request = TerminationRequest(
         execution_id=physical_execution_id,
@@ -977,12 +1190,13 @@ def _cancel_command(
                 termination_reason=request.reason,
             )
         )
-    termination_receipt = terminate_owned_process_tree(process, request)
+    termination_receipt = terminate_owned_process_tree(process, request, parent_guard=parent_guard)
     forced_termination = (
-        _finish_process_output(process, readers) or termination_receipt.escalated_to_kill
+        _finish_process_output(process, readers, parent_guard=parent_guard)
+        or termination_receipt.escalated_to_kill
     )
     final_quiescent = termination_receipt.quiescent and (
-        os.name == "nt" or not _process_group_exists(process.pid)
+        os.name == "nt" or not _process_group_exists(process.pid, parent_guard=parent_guard)
     )
     return CommandCancelledError(
         f"Command cancelled: {' '.join(args)}",
@@ -1014,6 +1228,7 @@ def _terminate_for_authority_loss(
     request: TerminationRequest,
     process_identity: str | None,
     process_observer: CommandProcessObserver | None,
+    parent_guard: CommandParentGuard | None = None,
 ) -> CommandAuthorityTerminatedError:
     if process_observer is not None:
         process_observer(
@@ -1025,12 +1240,13 @@ def _terminate_for_authority_loss(
                 termination_reason=request.reason,
             )
         )
-    termination_receipt = terminate_owned_process_tree(process, request)
+    termination_receipt = terminate_owned_process_tree(process, request, parent_guard=parent_guard)
     forced_termination = (
-        _finish_process_output(process, readers) or termination_receipt.escalated_to_kill
+        _finish_process_output(process, readers, parent_guard=parent_guard)
+        or termination_receipt.escalated_to_kill
     )
     final_quiescent = termination_receipt.quiescent and (
-        os.name == "nt" or not _process_group_exists(process.pid)
+        os.name == "nt" or not _process_group_exists(process.pid, parent_guard=parent_guard)
     )
     return CommandAuthorityTerminatedError(
         f"Command authority terminated: {' '.join(args)}",
@@ -1062,6 +1278,7 @@ def _raise_if_output_limited(
     *,
     argv: tuple[str, ...],
     already_finished: bool = False,
+    parent_guard: CommandParentGuard | None = None,
 ) -> None:
     if not capture.overflow.is_set():
         return
@@ -1073,6 +1290,7 @@ def _raise_if_output_limited(
         runtime_authority,
         argv=argv,
         already_finished=already_finished,
+        parent_guard=parent_guard,
     )
 
 
@@ -1085,11 +1303,17 @@ def _output_limit_error(
     *,
     argv: tuple[str, ...],
     already_finished: bool = False,
+    parent_guard: CommandParentGuard | None = None,
 ) -> CommandOutputLimitExceeded:
     forced_termination = False
     if not already_finished:
-        forced_termination = _terminate_process_group(process, close_pipes=False)
-        forced_termination = _finish_process_output(process, readers) or forced_termination
+        forced_termination = _terminate_process_group(
+            process, close_pipes=False, parent_guard=parent_guard
+        )
+        forced_termination = (
+            _finish_process_output(process, readers, parent_guard=parent_guard)
+            or forced_termination
+        )
     stream = stdout_capture.overflow_stream or stderr_capture.overflow_stream or "stdout"
     capture = stdout_capture if stream == "stdout" else stderr_capture
     assert capture.limit_bytes is not None
@@ -1105,7 +1329,7 @@ def _output_limit_error(
             cleanup_reason="output_limit",
             forced_termination=forced_termination,
             final_process_group_quiescent=(
-                os.name == "nt" or not _process_group_exists(process.pid)
+                os.name == "nt" or not _process_group_exists(process.pid, parent_guard=parent_guard)
             ),
             recovery_events=(
                 ExecutionRecoveryEvent(

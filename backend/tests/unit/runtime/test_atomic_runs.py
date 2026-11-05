@@ -39,7 +39,8 @@ from oh_goon.core.vocabulary import (
 )
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
-from oh_goon.runtime.execution import ExecutionCoordinator
+from oh_goon.runtime.execution import ExecutionCoordinator, RunExecutionSupervisor
+from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
@@ -374,31 +375,20 @@ def test_fixed_fleet_run_identity_is_idempotent_after_first_admission(tmp_path: 
     assert sum(event.event_type is FleetRunEventType.RUN_COMPLETED for event in events) == 1
 
 
-class _RejectingSupervisor:
-    def submit(self, fleet_run_id: str, work: object) -> None:
-        del fleet_run_id, work
+class _RejectingSupervisor(RunExecutionSupervisor):
+    def submit(self, fleet_run_id: str, launch: RunWorkerLaunch) -> None:
+        del fleet_run_id, launch
         raise RuntimeError("submission failed")
 
-    def shutdown(self, *, wait: bool = False) -> None:
-        del wait
 
-    def snapshot(self, fleet_run_id: str) -> None:
-        del fleet_run_id
-
-
-class _InterruptingSupervisor:
+class _InterruptingSupervisor(RunExecutionSupervisor):
     def __init__(self, error: BaseException) -> None:
+        super().__init__()
         self._error = error
 
-    def submit(self, fleet_run_id: str, work: object) -> None:
-        del fleet_run_id, work
+    def submit(self, fleet_run_id: str, launch: RunWorkerLaunch) -> None:
+        del fleet_run_id, launch
         raise self._error
-
-    def shutdown(self, *, wait: bool = False) -> None:
-        del wait
-
-    def snapshot(self, fleet_run_id: str) -> None:
-        del fleet_run_id
 
 
 def test_fixed_fleet_run_identity_rejects_different_operation_intent(tmp_path: Path) -> None:

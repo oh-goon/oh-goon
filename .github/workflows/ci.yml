@@ -21,14 +21,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: selected-proof
+  admit:
+    name: admit-selected-plan
     if: github.event_name != 'push'
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     outputs:
-      proof_artifact_id: ${{ steps.proof.outputs.artifact-id }}
+      plan_artifact_id: ${{ steps.plan-proof.outputs.artifact-id }}
       static_project: ${{ steps.selection.outputs.static_project }}
+      static_phase: ${{ steps.selection.outputs.static_phase }}
+      behavioral_phase: ${{ steps.selection.outputs.behavioral_phase }}
+      python: ${{ steps.selection.outputs.python }}
+      frontend: ${{ steps.selection.outputs.frontend }}
+      pytest: ${{ steps.selection.outputs.pytest }}
+      native_resources: ${{ steps.selection.outputs.native_resources }}
     env:
       UV_PYTHON: "3.12"
       OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
@@ -95,31 +101,191 @@ jobs:
             uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \
             --base "$BASE_SHA" --candidate "$GITHUB_SHA" --head "$REQUESTED_HEAD" \
             --mode "$VERIFY_MODE" --plan "$CONTROL_DIR/plan.json" --github-output "$GITHUB_OUTPUT"
-      - name: Prepare the host required by admitted native resource tests
-        if: steps.selection.outputs.native_resources == 'true' && env.OH_GOON_TEST_CPUS == '0'
+      - name: Retain the single admitted plan
+        id: plan-proof
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admitted-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.CONTROL_DIR }}/plan.json
+          if-no-files-found: error
+          retention-days: 7
+  static:
+    name: selected-static
+    needs: admit
+    if: github.event_name != 'push' && needs.admit.outputs.static_phase == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    outputs:
+      part_artifact_id: ${{ steps.part.outputs.artifact-id }}
+    env:
+      UV_PYTHON: "3.12"
+      OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
+      OH_GOON_NATIVE_QUALIFICATION_PROFILE: shared-user-manager
+      OH_GOON_REQUIRE_NATIVE_ISOLATION: '1'
+      OH_GOON_REQUIRE_NATIVE_RUN_RESOURCES: '1'
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || inputs.base }}
+      REQUESTED_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+      VERIFY_MODE: ${{ github.event.pull_request.draft && 'focused' || 'merge' }}
+    steps:
+      - name: Require the admitted plan transport
+        env:
+          PLAN_ARTIFACT_ID: ${{ needs.admit.outputs.plan_artifact_id }}
+        run: '[[ "$PLAN_ARTIFACT_ID" =~ ^[0-9]+$ ]]'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+          cache-suffix: py312-dev-quality-build
+      - name: Materialize only the Python verification and build environment
+        run: uv sync --project backend --frozen --group dev --group quality --group build
+      - name: Resolve the native verification context before collection
+        run: |
+          runner_uid=$(id -u)
+          runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$runner_uid}"
+          printf 'OH_GOON_CI_RUNNER_UID=%s\n' "$runner_uid" >> "$GITHUB_ENV"
+          printf 'XDG_RUNTIME_DIR=%s\n' "$runtime_dir" >> "$GITHUB_ENV"
+          printf 'DBUS_SESSION_BUS_ADDRESS=%s\n' "${DBUS_SESSION_BUS_ADDRESS:-unix:path=$runtime_dir/bus}" >> "$GITHUB_ENV"
+      - name: Prepare optional native test CPU control
+        if: env.OH_GOON_TEST_CPUS != '0'
         run: |
           test "${RUNNER_ENVIRONMENT:-}" = github-hosted
-          sudo loginctl enable-linger "$OH_GOON_CI_RUNNER_UID"
-          sudo systemctl start "user@$OH_GOON_CI_RUNNER_UID.service"
+          runner_uid="$OH_GOON_CI_RUNNER_UID"
+          sudo loginctl enable-linger "$runner_uid"
+          sudo systemctl start "user@$runner_uid.service"
           test -S "$XDG_RUNTIME_DIR/bus"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: needs.admit.outputs.frontend == 'true'
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Materialize the selected frontend toolchain
+        if: needs.admit.outputs.frontend == 'true'
+        run: make frontend-install
+      - name: Resolve private proof transport
+        run: |
+          control_dir=$(mktemp -d "$RUNNER_TEMP/oh-goon-relevant.XXXXXX")
+          printf 'CONTROL_DIR=%s\n' "$control_dir" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.admit.outputs.plan_artifact_id }}
+          path: ${{ env.CONTROL_DIR }}
+          digest-mismatch: error
       - name: Restore native mypy analysis
-        if: steps.selection.outputs.python == 'true'
+        if: needs.admit.outputs.python == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: backend/.mypy_cache
           key: mypy-v1-${{ runner.os }}-${{ runner.arch }}-py${{ env.UV_PYTHON }}-${{ hashFiles('backend/uv.lock', 'backend/pyproject.toml') }}-${{ github.sha }}
           restore-keys: |
             mypy-v1-${{ runner.os }}-${{ runner.arch }}-py${{ env.UV_PYTHON }}-${{ hashFiles('backend/uv.lock', 'backend/pyproject.toml') }}-
+      - name: Execute admitted static proof through existing owners
+        run: |
+          exec bash scripts/development_test_resources.sh \
+            uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \
+            --execute "$CONTROL_DIR/plan.json" --mode "$VERIFY_MODE" --phase static --workers 4 \
+            --report "$CONTROL_DIR/part-static.json"
+      - name: Retain bounded phase receipt
+        id: part
+        if: always() && env.CONTROL_DIR != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relevant-static-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.CONTROL_DIR }}/part-static.json
+          if-no-files-found: error
+          retention-days: 7
+  behavioral:
+    name: selected-behavioral
+    needs: admit
+    if: github.event_name != 'push' && needs.admit.outputs.behavioral_phase == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    outputs:
+      part_artifact_id: ${{ steps.part.outputs.artifact-id }}
+    env:
+      UV_PYTHON: "3.12"
+      OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
+      OH_GOON_NATIVE_QUALIFICATION_PROFILE: shared-user-manager
+      OH_GOON_REQUIRE_NATIVE_ISOLATION: '1'
+      OH_GOON_REQUIRE_NATIVE_RUN_RESOURCES: '1'
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || inputs.base }}
+      REQUESTED_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+      VERIFY_MODE: ${{ github.event.pull_request.draft && 'focused' || 'merge' }}
+    steps:
+      - name: Require the admitted plan transport
+        env:
+          PLAN_ARTIFACT_ID: ${{ needs.admit.outputs.plan_artifact_id }}
+        run: '[[ "$PLAN_ARTIFACT_ID" =~ ^[0-9]+$ ]]'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+          cache-suffix: py312-dev-quality-build
+      - name: Materialize only the Python verification and build environment
+        run: uv sync --project backend --frozen --group dev --group quality --group build
+      - name: Resolve the native verification context before collection
+        run: |
+          runner_uid=$(id -u)
+          runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$runner_uid}"
+          printf 'OH_GOON_CI_RUNNER_UID=%s\n' "$runner_uid" >> "$GITHUB_ENV"
+          printf 'XDG_RUNTIME_DIR=%s\n' "$runtime_dir" >> "$GITHUB_ENV"
+          printf 'DBUS_SESSION_BUS_ADDRESS=%s\n' "${DBUS_SESSION_BUS_ADDRESS:-unix:path=$runtime_dir/bus}" >> "$GITHUB_ENV"
+      - name: Prepare optional native test CPU control
+        if: env.OH_GOON_TEST_CPUS != '0'
+        run: |
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          runner_uid="$OH_GOON_CI_RUNNER_UID"
+          sudo loginctl enable-linger "$runner_uid"
+          sudo systemctl start "user@$runner_uid.service"
+          test -S "$XDG_RUNTIME_DIR/bus"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: needs.admit.outputs.frontend == 'true'
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Materialize the selected frontend toolchain
+        if: needs.admit.outputs.frontend == 'true'
+        run: make frontend-install
+      - name: Resolve private proof transport
+        run: |
+          control_dir=$(mktemp -d "$RUNNER_TEMP/oh-goon-relevant.XXXXXX")
+          printf 'CONTROL_DIR=%s\n' "$control_dir" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.admit.outputs.plan_artifact_id }}
+          path: ${{ env.CONTROL_DIR }}
+          digest-mismatch: error
+      - name: Prepare the host required by admitted native resource tests
+        if: needs.admit.outputs.native_resources == 'true' && env.OH_GOON_TEST_CPUS == '0'
+        run: |
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          sudo loginctl enable-linger "$OH_GOON_CI_RUNNER_UID"
+          sudo systemctl start "user@$OH_GOON_CI_RUNNER_UID.service"
+          test -S "$XDG_RUNTIME_DIR/bus"
       - name: Prepare capabilities consumed by selected Python tests
-        if: steps.selection.outputs.pytest == 'true'
+        if: needs.admit.outputs.pytest == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends bubblewrap ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Execute admitted proof through existing owners
+      - name: Execute admitted behavioral proof through existing owners
         env:
-          SELECTED_PYTEST: ${{ steps.selection.outputs.pytest }}
-          SELECTED_NATIVE_RESOURCES: ${{ steps.selection.outputs.native_resources }}
+          SELECTED_PYTEST: ${{ needs.admit.outputs.pytest }}
+          SELECTED_NATIVE_RESOURCES: ${{ needs.admit.outputs.native_resources }}
         run: |
           native_view=()
           if [ "$SELECTED_PYTEST" = true ]; then
@@ -129,29 +295,131 @@ jobs:
           exec "${native_view[@]}" \
           bash scripts/development_test_resources.sh \
             uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \
-            --execute "$CONTROL_DIR/plan.json" --mode "$VERIFY_MODE" --workers 4 \
-            --report "$CONTROL_DIR/result.json"
+            --execute "$CONTROL_DIR/plan.json" --mode "$VERIFY_MODE" --phase behavioral --workers 4 \
+            --report "$CONTROL_DIR/part-behavioral.json"
+      - name: Retain bounded phase receipt
+        id: part
+        if: always() && env.CONTROL_DIR != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relevant-behavioral-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.CONTROL_DIR }}/part-behavioral.json
+            ${{ env.CONTROL_DIR }}/native-host.json
+          if-no-files-found: error
+          retention-days: 7
+  verify:
+    name: selected-proof
+    if: always() && github.event_name != 'push'
+    needs: [admit, static, behavioral]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      proof_artifact_id: ${{ steps.proof.outputs.artifact-id }}
+      static_project: ${{ needs.admit.outputs.static_project }}
+    env:
+      UV_PYTHON: "3.12"
+      OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
+      OH_GOON_NATIVE_QUALIFICATION_PROFILE: shared-user-manager
+      OH_GOON_REQUIRE_NATIVE_ISOLATION: '1'
+      OH_GOON_REQUIRE_NATIVE_RUN_RESOURCES: '1'
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || inputs.base }}
+      REQUESTED_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+      VERIFY_MODE: ${{ github.event.pull_request.draft && 'focused' || 'merge' }}
+    steps:
+      - name: Require completed applicable proof jobs
+        env:
+          ADMIT_RESULT: ${{ needs.admit.result }}
+          PLAN_ARTIFACT_ID: ${{ needs.admit.outputs.plan_artifact_id }}
+          STATIC_REQUIRED: ${{ needs.admit.outputs.static_phase }}
+          STATIC_RESULT: ${{ needs.static.result }}
+          STATIC_ARTIFACT_ID: ${{ needs.static.outputs.part_artifact_id }}
+          BEHAVIORAL_REQUIRED: ${{ needs.admit.outputs.behavioral_phase }}
+          BEHAVIORAL_RESULT: ${{ needs.behavioral.result }}
+          BEHAVIORAL_ARTIFACT_ID: ${{ needs.behavioral.outputs.part_artifact_id }}
+        run: |
+          test "$ADMIT_RESULT" = success
+          [[ "$PLAN_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          case "$STATIC_REQUIRED" in
+            true) test "$STATIC_RESULT" = success; [[ "$STATIC_ARTIFACT_ID" =~ ^[0-9]+$ ]] ;;
+            false) ;;
+            *) exit 1 ;;
+          esac
+          case "$BEHAVIORAL_REQUIRED" in
+            true) test "$BEHAVIORAL_RESULT" = success; [[ "$BEHAVIORAL_ARTIFACT_ID" =~ ^[0-9]+$ ]] ;;
+            false) ;;
+            *) exit 1 ;;
+          esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+          cache-suffix: py312-base-control
+      - name: Materialize the existing aggregation owner
+        run: uv sync --project backend --frozen --no-default-groups
+      - name: Resolve private proof transport
+        run: |
+          control_dir=$(mktemp -d "$RUNNER_TEMP/oh-goon-relevant.XXXXXX")
+          printf 'CONTROL_DIR=%s\n' "$control_dir" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.admit.outputs.plan_artifact_id }}
+          path: ${{ env.CONTROL_DIR }}
+          digest-mismatch: error
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.admit.outputs.static_phase == 'true'
+        with:
+          artifact-ids: ${{ needs.static.outputs.part_artifact_id }}
+          path: ${{ env.CONTROL_DIR }}/static
+          digest-mismatch: error
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.admit.outputs.behavioral_phase == 'true'
+        with:
+          artifact-ids: ${{ needs.behavioral.outputs.part_artifact_id }}
+          path: ${{ env.CONTROL_DIR }}/behavioral
+          digest-mismatch: error
+      - name: Aggregate the exact admitted proof
+        env:
+          STATIC_REQUIRED: ${{ needs.admit.outputs.static_phase }}
+          BEHAVIORAL_REQUIRED: ${{ needs.admit.outputs.behavioral_phase }}
+        run: |
+          parts=()
+          if [ "$STATIC_REQUIRED" = true ]; then
+            parts+=(--aggregate-part "$CONTROL_DIR/static/part-static.json")
+          fi
+          if [ "$BEHAVIORAL_REQUIRED" = true ]; then
+            parts+=(--aggregate-part "$CONTROL_DIR/behavioral/part-behavioral.json")
+          fi
+          exec uv run --offline --frozen --no-sync --project backend oh-goon-verify-change \
+            --execute "$CONTROL_DIR/plan.json" --mode "$VERIFY_MODE" --aggregate \
+            "${parts[@]}" --report "$CONTROL_DIR/result.json"
       - name: Retain bounded selection and native receipts
         id: proof
         if: always() && env.CONTROL_DIR != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: relevant-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.CONTROL_DIR }}/*.json
+          path: |
+            ${{ env.CONTROL_DIR }}/plan.json
+            ${{ env.CONTROL_DIR }}/result.json
           if-no-files-found: error
           retention-days: 7
       - name: Explain scope and next action
         if: always()
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          Relevant checks use the exact effective checkout and its supplied base.
-          Draft feedback is **FOCUSED / NOT_FULLY_VERIFIED**. A ready candidate requires
-          complete selected proof and trusted-base control before **MERGE_VERIFIED**.
-          Missing, failed, skipped, cancelled or stale proof cannot qualify.
-          Full unrelated/exhaustive regression runs daily; it is not claimed here.
-          Inspect the bounded JSON artifact for identities, selected tests and reasons.
-          Run `make check` for focused local feedback. Run `make merge-check` for the
-          same admitted merge policy. Timing remains PROVISIONAL until measured.
+          One frozen plan feeds independent static and behavioral jobs, each with its own budget.
+          Native test batching retains the complete selected membership. Phase receipts alone
+          never qualify a merge; missing, cancelled, failed, stale or duplicate proof refuses.
+          The existing independent trusted-base merge-gate validates the combined receipt.
+          Rerun failed jobs for the same source to retain successful job evidence.
+          Full unrelated/exhaustive regression remains daily, not claimed by this proof.
           EOF
   merge-gate:
     name: ${{ github.event_name == 'push' && 'merge-not-applicable' || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}

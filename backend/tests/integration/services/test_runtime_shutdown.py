@@ -42,6 +42,7 @@ def test_observer_shutdown_preserves_foreign_run_and_owner_shutdown_cancels_its_
     observer = None
     try:
         owner.locations.add(repository.parent)
+        owner.plans.lock(repository / "goon.yml")
         target = owner.plans.prepare_execution_target(repository / "goon.yml")
         admitted = owner.runs.start_prepared_plan(
             target, repository_ids={repository_id(repository)}, fleet_run_id="owned-process"

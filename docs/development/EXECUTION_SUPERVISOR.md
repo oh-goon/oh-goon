@@ -41,19 +41,53 @@ channel or supervisor diagnostic cannot manufacture a
 terminal Run result. Native harness sessions remain below Step/Attempt and do
 not own Run admission, recovery or durable truth.
 
-Current application shutdown stops Schedule production and quiesces submission.
-`ApplicationRuntime.shutdown(wait_for_runs=False)` requests cancellation of its
-own active Run in application mode before waiting for supervisor shutdown;
-`wait_for_runs=True` waits without that request. This is not proof of the required isolated-worker
-parent-death, drain-deadline or containment behavior.
+### Controlled shutdown
+
+`ApplicationRuntime.shutdown()` first quiesces admission, then stops Schedule
+production and lets already-admitted work finish. The default drain budget is
+30 seconds, followed by durable Run cancellation and a five-second cancellation
+grace. Remaining work is contained by the existing native command owner, with
+one-second TERM grace and a ten-second containment wait. Callers may pass
+explicit shutdown budgets; `drain_timeout_seconds=None` explicitly selects an
+unbounded drain. `wait_for_runs=False` skips the initial drain, while preserving
+durable cancellation, grace, containment and recovery.
+
+Final admission registers a process-local pending submission inside the original
+SQLite writer cut. It can launch after quiescing if admission won the ordering;
+later admissions roll back. Capacity waits only probe the same supervisor and
+never retain its lock. Runtime drain and an executor's `DRAINING` admission mode
+remain separate: draining an executor preserves its existing placement.
+
+Shutdown callers serialize through the existing runtime lifecycle. An incomplete
+shutdown remains `QUIESCING`, reports its failure, and can be retried. Native
+worker-group retirement does not establish Step-group quiescence. The original
+recovery owner checks retained custody, positive predecessor death and known
+native process scopes before reconciliation. Native session retirement may use
+the remaining containment budget outside SQLite; the canonical recovery writer
+then revalidates custody and quiescence before mutation. A terminal Run still
+needs its original resource proof before runtime closure. Database or containment uncertainty
+cannot become a fresh database, fabricated cancellation or `CLOSED` runtime.
+Unsettled external effects remain unknown or quarantined; a forced process exit
+never proves rollback.
+
+Worker bootstrap reports distinct, fixed diagnostic cuts for handoff refusal,
+runtime identity, database authority, claim refusal, composition, execution and
+observed cancellation. Supervision separately reports spawn, abnormal exit and
+containment failures. Safe Run/PID/birth correlation does not expose claim
+material. Cleanup and display failures remain separate from the original Run
+outcome; the bounded failure mailbox is diagnostic, while the Journal retains
+durable truth.
 
 ## Frozen work and remaining qualification
 
 The [canonical lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
 define the same supervisor's fresh-process boundary and single-use custody claim.
 [HUG-180](https://linear.app/hugloss/issue/HUG-180) implements that cutover;
-[HUG-181](https://linear.app/hugloss/issue/HUG-181) owns crash, drain, cancellation
-and recovery qualification. The broader lifecycle audit remains
+[HUG-181](https://linear.app/hugloss/issue/HUG-181) owns the native worker
+crash, drain, cancellation and recovery matrix. Qualification is specific to the
+actual OS, filesystem mode and workload exercised; installed-harness, privileged
+provider and deployment guarantees do not follow from portable process tests.
+The broader lifecycle audit remains
 [HUG-183](https://linear.app/hugloss/issue/HUG-183). This process-boundary change
 does not certify the complete normative matrix or a physical deployment host.
 
@@ -89,6 +123,32 @@ EOF or cancellation.
 ## Common command owner
 
 `oh_goon.engine.command.run_command` is the common process owner. It owns process-group creation, output draining, cancellation, timeout cleanup, and non-exportable control environment.
+
+After its canonical claim, the fresh Run worker explicitly binds this command
+owner's child-custody default. Native Git, uv, preparation and Step commands all
+receive that lifetime; an explicit independent lifetime remains explicit. A
+forked process does not inherit a binding for another PID. The Run worker itself
+keeps `parent_death_signal=False`, so loss of the control parent does not kill
+healthy admitted work.
+
+On supported Linux hosts, the existing exec guard owns a passive native
+guardian using pidfds. It preserves the actual command PID, process group,
+invocation, environment, terminal and child-wait semantics. The guardian retains
+only kernel custody handles, with no workload environment or stdio. While the
+original command owner lives, that owner alone performs cleanup and acknowledges
+quiescence. Positive owner death
+lets the guardian contain its original group. This is an emergency lifetime
+boundary, not an effect-result authority or a second Run executor. Arbitrary
+detached work and separately owned services require their actual native owner;
+process-group evidence cannot certify a container or remote provider.
+
+The existing operation lifecycle observer also captures native preparation and
+generic operation commands. Operation-scoped process events have no Step
+identity; Step-scoped events retain their complete canonical attempt binding.
+An explicit Step observer takes precedence. No synthetic Step or parallel
+process history is introduced. Proven resource quiescence may follow an unknown
+process result, but cannot invent an exit code, finalize unknown output or make
+an unknown Step successful.
 
 This narrower owner remains responsible for its admitted command even beneath
 the required Run-worker boundary. A worker supervisor contains the Run lifetime;

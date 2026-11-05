@@ -24,6 +24,7 @@ from oh_goon.runtime.execution.lease_environment import LeaseEnvironment, System
 from oh_goon.runtime.execution.run_supervisor import (
     RunExecutionSupervisorSnapshot,
     RunSupervisorState,
+    RunWorkerAdmission,
     RunWorkerLaunch,
 )
 from oh_goon.services.fleet_run_execution import FleetRunExecution
@@ -108,6 +109,7 @@ class SimulatedRunWorker(RunExecutionSupervisor):
         self._unit_condition = Condition()
         self._unit_phase = RunSupervisorState.ACCEPTING
         self._unit_active: set[str] = set()
+        self._unit_pending: dict[str, RunWorkerAdmission] = {}
         self._unit_failures: dict[str, BackgroundFailure] = {}
         self._unit_last_failure: BackgroundFailure | None = None
 
@@ -146,12 +148,49 @@ class SimulatedRunWorker(RunExecutionSupervisor):
         with self._unit_condition:
             return self._unit_phase
 
+    def require_accepting(self) -> None:
+        with self._unit_condition:
+            if self._unit_phase is not RunSupervisorState.ACCEPTING:
+                raise RuntimeQuiescing("Simulated worker is quiescing")
+
+    def register_admission(self, fleet_run_id: str) -> RunWorkerAdmission:
+        with self._unit_condition:
+            self.require_accepting()
+            if self._unit_active or self._unit_pending:
+                raise ExecutionBusy("Simulated worker already has active work")
+            admission = RunWorkerAdmission(fleet_run_id)
+            self._unit_pending[fleet_run_id] = admission
+            return admission
+
+    def abandon_admission(self, admission: RunWorkerAdmission) -> None:
+        with self._unit_condition:
+            if self._unit_pending.get(admission.fleet_run_id) is admission:
+                self._unit_pending.pop(admission.fleet_run_id)
+                self._unit_condition.notify_all()
+
+    def wait_until_idle(self, *, timeout: float | None = None) -> bool:
+        with self._unit_condition:
+            return self._unit_condition.wait_for(
+                lambda: not self._unit_active and not self._unit_pending, timeout=timeout
+            )
+
+    def require_containment_complete(self) -> None:
+        if self._unit_active or self._unit_pending:
+            raise AssertionError("Simulated worker has not retired")
+
+    def request_containment(self, *, grace_seconds: float = 1.0) -> tuple[str, ...]:
+        raise AssertionError("Simulated worker cannot establish native containment")
+
     def submit(self, fleet_run_id: str, launch: RunWorkerLaunch) -> None:
         if launch.argv != ("simulated-unit-run-worker", fleet_run_id):
             raise AssertionError("unit worker double cannot consume a native launch")
         with self._unit_condition:
-            if self._unit_phase is not RunSupervisorState.ACCEPTING:
+            if launch.admission is None and self._unit_phase is not RunSupervisorState.ACCEPTING:
                 raise RuntimeQuiescing("Simulated worker is quiescing")
+            if launch.admission is not None:
+                if self._unit_pending.get(fleet_run_id) is not launch.admission:
+                    raise RuntimeQuiescing("Simulated admission no longer owns submission")
+                self._unit_pending.pop(fleet_run_id)
             if self._unit_active:
                 raise ExecutionBusy("Simulated worker already has active work")
             self._unit_active.add(fleet_run_id)
@@ -187,7 +226,7 @@ class SimulatedRunWorker(RunExecutionSupervisor):
 
     def is_active(self, fleet_run_id: str) -> bool:
         with self._unit_condition:
-            return fleet_run_id in self._unit_active
+            return fleet_run_id in self._unit_active or fleet_run_id in self._unit_pending
 
     def wait_until_inactive(self, fleet_run_id: str, *, timeout: float | None = None) -> bool:
         with self._unit_condition:
@@ -207,10 +246,11 @@ class SimulatedRunWorker(RunExecutionSupervisor):
                 last_failure=self._unit_last_failure,
             )
 
-    def quiesce(self) -> None:
+    def quiesce(self) -> tuple[str, ...]:
         with self._unit_condition:
             if self._unit_phase is RunSupervisorState.ACCEPTING:
                 self._unit_phase = RunSupervisorState.QUIESCING
+            return tuple((*self._unit_active, *self._unit_pending))
 
     def shutdown(self, *, wait: bool = True) -> None:
         self.quiesce()

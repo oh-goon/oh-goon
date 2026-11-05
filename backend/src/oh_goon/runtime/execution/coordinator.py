@@ -416,5 +416,15 @@ class ExecutionCoordinator:
     def assert_idle(self, connection: sqlite3.Connection) -> None:
         self._leases.assert_idle(connection)
 
+    def assert_dead_fleet_worker_in(
+        self, connection: sqlite3.Connection, fleet_run_id: str
+    ) -> None:
+        """Require exact retained worker custody and native positive-death proof."""
+        self._leases.assert_dead_fleet_worker_in(connection, fleet_run_id)
+
+    def retained_lease_in(self, connection: sqlite3.Connection) -> ExecutionLease | None:
+        """Observe retained custody for recovery, never activate a stale owner."""
+        return self._leases.retained_lease_in(connection)
+
     def assert_scope_idle(self, connection: sqlite3.Connection) -> None:
         self._leases.assert_scope_idle(connection)

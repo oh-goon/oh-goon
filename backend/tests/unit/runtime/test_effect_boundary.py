@@ -18,6 +18,12 @@ from oh_goon.core.errors import (
 )
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
+from oh_goon.core.models.run_events import (
+    DescendantsQuiescentEvent,
+    ProcessExitedEvent,
+    ProcessStartedEvent,
+    ProcessStartingEvent,
+)
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
 from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import (
@@ -168,6 +174,33 @@ def _begin_direct_attempt(
             baseline=baseline_for(repository),
             effect_boundary=EffectBoundaryKind.EXTERNAL,
         )
+
+
+def _events_after_settled_native_preparation(
+    journal: Journal, run_id: str
+) -> list[FleetRunEventType]:
+    events = journal.read_view().required_run_detail(run_id).lifecycle_events
+    processes = [event for event in events if isinstance(event, ProcessStartingEvent)]
+    assert processes, "The original Git baseline must retain its actual native resource receipt"
+    assert all(
+        event.step_id is None and event.step_attempt_id is None and event.attempt_number is None
+        for event in processes
+    )
+    for physical_id in {event.physical_execution_id for event in processes}:
+        observed = [event for event in processes if event.physical_execution_id == physical_id]
+        assert [event.event_type for event in observed] == [
+            FleetRunEventType.PROCESS_STARTING,
+            FleetRunEventType.PROCESS_STARTED,
+            FleetRunEventType.PROCESS_EXITED,
+            FleetRunEventType.DESCENDANTS_QUIESCENT,
+        ]
+        started, exited, quiescent = observed[1:]
+        assert isinstance(started, ProcessStartedEvent)
+        assert isinstance(exited, ProcessExitedEvent)
+        assert isinstance(quiescent, DescendantsQuiescentEvent)
+        assert started.pid == exited.pid == quiescent.pid
+        assert started.process_identity == exited.process_identity == quiescent.process_identity
+    return [event.event_type for event in events if not isinstance(event, ProcessStartingEvent)]
 
 
 def test_direct_repository_change_after_claim_never_reaches_adapter(tmp_path: Path) -> None:
@@ -379,7 +412,7 @@ def test_fleet_authority_is_revalidated_at_last_pre_effect_cut(tmp_path: Path) -
     assert adapter.calls == 0
     with pytest.raises(OperationNotFound):
         attempts.get(operation_id)
-    assert [event.event_type for event in journal.run_events(run_id).events] == [
+    assert _events_after_settled_native_preparation(journal, run_id) == [
         FleetRunEventType.RUN_ADMITTED,
         FleetRunEventType.RUN_STARTED,
     ]
@@ -562,7 +595,7 @@ def test_fleet_repository_change_after_claim_blocks_effect_start_and_adapter(
     assert [
         item for item in attempts.recovery_candidates() if item.fleet_run_id == "fleet-fence"
     ] == []
-    assert [event.event_type for event in journal.run_events("fleet-fence").events] == [
+    assert _events_after_settled_native_preparation(journal, "fleet-fence") == [
         FleetRunEventType.RUN_ADMITTED,
         FleetRunEventType.RUN_STARTED,
     ]
@@ -612,7 +645,7 @@ def test_fleet_effect_start_and_repository_lifecycle_commit_atomically(
 
     operation_id = repository_attempt_operation_id(run_id, identity.repository_id)
     assert attempts.get(operation_id).status is EffectAttemptStatus.OUTCOME_UNKNOWN
-    assert [event.event_type for event in journal.run_events(run_id).events] == [
+    assert _events_after_settled_native_preparation(journal, run_id) == [
         FleetRunEventType.RUN_ADMITTED,
         FleetRunEventType.RUN_STARTED,
         FleetRunEventType.REPOSITORY_STARTED,

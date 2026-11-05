@@ -72,9 +72,10 @@ unless the task explicitly changes them. Current owner decisions are in
 The normative [Hashmarks SSOT requirements](docs/development/OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md)
 and [canonical execution lifecycle requirements](docs/development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
 own the repository-intelligence boundary and required Run-worker custody model.
-Normal Runs use the claimed fresh-process worker path; crash, drain and containment
-qualification remains HUG-181 work, with the complete cross-repository audit in
-HUG-183. Requirements alone do not establish those qualifications. Local, CI,
+Normal Runs use the claimed fresh-process worker path and the bounded shutdown
+contract in `docs/development/EXECUTION_SUPERVISOR.md`. HUG-181's native lifetime
+qualification is specific to its actual environment; the complete cross-repository
+audit remains HUG-183. Requirements alone do not establish those qualifications. Local, CI,
 scheduled, ML, application and agent work must extend the same FleetRun lifecycle.
 Update the owning current documentation when a contract changes; do not create
 phase/status files or runtime prose gates. See

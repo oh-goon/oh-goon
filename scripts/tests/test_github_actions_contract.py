@@ -80,12 +80,13 @@ def _cpu_preparation(job: dict[str, Any]) -> str:
 
 @pytest.mark.process
 @pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize("job_name", ["admit", "static", "behavioral"])
 def test_collection_resolves_manager_context_without_preparing_unneeded_capabilities(
-    tmp_path: Path, configured: bool
+    tmp_path: Path, configured: bool, job_name: str
 ) -> None:
     bash = shutil.which("bash", path=os.defpath)
     assert bash is not None
-    steps = _workflow()["jobs"]["verify"]["steps"]
+    steps = _workflow()["jobs"][job_name]["steps"]
     resolution = next(
         step for step in steps if "OH_GOON_CI_RUNNER_UID=" in step.get("run", "")
     )
@@ -135,17 +136,20 @@ def test_collection_resolves_manager_context_without_preparing_unneeded_capabili
         ),
     }
     assert not mutations.exists()
-    assert steps.index(resolution) < next(
-        index for index, step in enumerate(steps) if step.get("id") == "selection"
+    effect = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("id") == "selection"
+        or "--execute" in shlex.split(step.get("run", ""))
     )
+    assert steps.index(resolution) < effect
 
 
 def test_native_host_setup_uses_only_admitted_capability_without_new_required_checks() -> (
     None
 ):
     workflow = _workflow()
-    assert set(workflow["jobs"]) == {"verify", "merge-gate", "main-health"}
-    job = workflow["jobs"]["verify"]
+    job = workflow["jobs"]["behavioral"]
     preparations = [
         step
         for step in job["steps"]
@@ -153,41 +157,52 @@ def test_native_host_setup_uses_only_admitted_capability_without_new_required_ch
     ]
     (preparation,) = preparations
     assert preparation["if"] == (
-        "steps.selection.outputs.native_resources == 'true' && env.OH_GOON_TEST_CPUS == '0'"
+        "needs.admit.outputs.native_resources == 'true' && env.OH_GOON_TEST_CPUS == '0'"
     )
     assert job["env"]["OH_GOON_NATIVE_QUALIFICATION_PROFILE"] == "shared-user-manager"
     assert job["env"]["OH_GOON_REQUIRE_NATIVE_RUN_RESOURCES"] == "1"
     assert job["env"]["OH_GOON_REQUIRE_NATIVE_ISOLATION"] == "1"
     steps = job["steps"]
-    assert next(
-        index for index, step in enumerate(steps) if step.get("id") == "selection"
-    ) < steps.index(preparation)
+    admission = workflow["jobs"]["admit"]
+    assert job["needs"] == "admit"
+    assert (
+        admission["outputs"]["native_resources"]
+        == "${{ steps.selection.outputs.native_resources }}"
+    )
+    download = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("uses", "").startswith("actions/download-artifact@")
+    )
+    assert download < steps.index(preparation)
+    assert not any(
+        "outputs.native_resources" in step.get("if", "")
+        for name, other in workflow["jobs"].items()
+        if name != "behavioral"
+        for step in other["steps"]
+    )
 
 
 @pytest.mark.process
 @pytest.mark.parametrize(
-    "workflow_name",
-    ["ci.yml", "release-validation.yml", "focused-feedback.yml"],
+    "workflow_name,job_name",
+    [
+        ("ci.yml", "admit"),
+        ("ci.yml", "static"),
+        ("ci.yml", "behavioral"),
+        ("release-validation.yml", "full-regression"),
+        ("focused-feedback.yml", "focused-behavior"),
+    ],
 )
 @pytest.mark.parametrize("manager_status", [0, 17])
 def test_native_cpu_preparation_proves_user_bus_before_make_without_opting_out(
-    tmp_path: Path, workflow_name: str, manager_status: int
+    tmp_path: Path, workflow_name: str, job_name: str, manager_status: int
 ) -> None:
     bash = shutil.which("bash", path=os.defpath)
     if bash is None:
         pytest.skip("native Bash is unavailable")
     workflow = yaml.safe_load((ROOT / ".github/workflows" / workflow_name).read_text())
-    jobs = [
-        job
-        for job in workflow["jobs"].values()
-        if any(
-            {"loginctl", "systemctl"}
-            <= set(shlex.split(step.get("run", ""), comments=True))
-            for step in job.get("steps", [])
-        )
-    ]
-    assert len(jobs) == 1
-    preparation = _cpu_preparation(jobs[0])
+    preparation = _cpu_preparation(workflow["jobs"][job_name])
     commands = tmp_path / "commands"
     commands.mkdir()
     events = tmp_path / "events"
@@ -875,6 +890,210 @@ def test_gate_retry_consumes_the_native_artifact_from_its_producer_job() -> None
     assert guard["env"]["PROOF_ARTIFACT_ID"] == download["with"]["artifact-ids"]
 
 
+def test_independent_jobs_execute_one_plan_before_the_existing_proof_aggregate() -> (
+    None
+):
+    jobs = _workflow()["jobs"]
+    admission = jobs["admit"]
+    admission_commands = [
+        (job_name, shlex.split(step.get("run", "")))
+        for job_name, job in jobs.items()
+        for step in job["steps"]
+        if "oh-goon-verify-change" in shlex.split(step.get("run", ""))
+        and "--plan" in shlex.split(step.get("run", ""))
+    ]
+    assert len(admission_commands) == 1 and admission_commands[0][0] == "admit"
+    admitted_upload = next(
+        step
+        for step in admission["steps"]
+        if step.get("uses", "").startswith("actions/upload-artifact@")
+    )
+    assert admission["outputs"]["plan_artifact_id"] == (
+        "${{ steps." + admitted_upload["id"] + ".outputs.artifact-id }}"
+    )
+    for phase in ("static", "behavioral"):
+        job = jobs[phase]
+        assert job["needs"] == "admit"
+        assert job["if"] == (
+            "github.event_name != 'push' && needs.admit.outputs."
+            + phase
+            + "_phase == 'true'"
+        )
+        assert isinstance(job["timeout-minutes"], int) and job["timeout-minutes"] > 0
+        execution = next(
+            shlex.split(step["run"])
+            for step in job["steps"]
+            if "--execute" in shlex.split(step.get("run", ""))
+        )
+        assert execution[execution.index("--phase") + 1] == phase
+        assert execution[execution.index("--execute") + 1] == "$CONTROL_DIR/plan.json"
+        download = next(
+            step
+            for step in job["steps"]
+            if step.get("uses", "").startswith("actions/download-artifact@")
+        )
+        assert (
+            download["with"]["artifact-ids"]
+            == "${{ needs.admit.outputs.plan_artifact_id }}"
+        )
+        assert not {"name", "pattern", "run-id", "repository"} & download["with"].keys()
+        assert download["with"]["digest-mismatch"] == "error"
+    proof = jobs["verify"]
+    assert proof["name"] == "selected-proof" and "always()" in proof["if"]
+    assert set(proof["needs"]) == {"admit", "static", "behavioral"}
+    assert _merge_aggregate()["needs"] == "verify"
+    downloads = [
+        step
+        for step in proof["steps"]
+        if step.get("uses", "").startswith("actions/download-artifact@")
+    ]
+    assert sorted(step["with"]["artifact-ids"] for step in downloads) == sorted(
+        [
+            "${{ needs.admit.outputs.plan_artifact_id }}",
+            "${{ needs.static.outputs.part_artifact_id }}",
+            "${{ needs.behavioral.outputs.part_artifact_id }}",
+        ]
+    )
+    assert all(step["with"]["digest-mismatch"] == "error" for step in downloads)
+    assert all(
+        not {"name", "pattern", "run-id", "repository"} & step["with"].keys()
+        for step in downloads
+    )
+    aggregation = next(
+        step
+        for step in proof["steps"]
+        if "--aggregate" in shlex.split(step.get("run", ""))
+    )
+    assert "--aggregate-part" in aggregation["run"]
+    assert "--phase" not in shlex.split(aggregation["run"])
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("job_name", ["static", "behavioral"])
+@pytest.mark.parametrize("artifact_id", ["", "named-artifact", "1,2", "12345"])
+def test_phase_rejects_missing_or_ambiguous_admission_before_checkout(
+    tmp_path: Path, job_name: str, artifact_id: str
+) -> None:
+    job = _workflow()["jobs"][job_name]
+    guard = job["steps"][0]
+    assert guard["env"] == {
+        "PLAN_ARTIFACT_ID": "${{ needs.admit.outputs.plan_artifact_id }}"
+    }
+    assert "if" not in guard and "continue-on-error" not in guard
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    effect = tmp_path / "checkout-started"
+    observed = subprocess.run(
+        [
+            bash,
+            "--noprofile",
+            "--norc",
+            "-e",
+            "-o",
+            "pipefail",
+            "-c",
+            guard["run"] + '\nprintf started > "$EFFECT"\n',
+        ],
+        env={
+            "PATH": os.defpath,
+            "PLAN_ARTIFACT_ID": artifact_id,
+            "EFFECT": str(effect),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert observed.returncode == (0 if artifact_id == "12345" else 1), observed.stderr
+    assert effect.exists() is (artifact_id == "12345")
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "changed,value",
+    [
+        ("ADMIT_RESULT", "failure"),
+        ("PLAN_ARTIFACT_ID", ""),
+        ("STATIC_REQUIRED", ""),
+        ("BEHAVIORAL_REQUIRED", "invalid"),
+        ("STATIC_RESULT", "cancelled"),
+        ("BEHAVIORAL_RESULT", "failure"),
+        ("STATIC_ARTIFACT_ID", ""),
+        ("BEHAVIORAL_ARTIFACT_ID", "1,2"),
+        (None, None),
+    ],
+)
+def test_selected_proof_refuses_incomplete_applicable_parts_before_download(
+    tmp_path: Path, changed: str | None, value: str | None
+) -> None:
+    guard = _workflow()["jobs"]["verify"]["steps"][0]
+    assert "if" not in guard and "continue-on-error" not in guard
+    environment = {
+        "PATH": os.defpath,
+        "ADMIT_RESULT": "success",
+        "PLAN_ARTIFACT_ID": "100",
+        "STATIC_REQUIRED": "true",
+        "STATIC_RESULT": "success",
+        "STATIC_ARTIFACT_ID": "200",
+        "BEHAVIORAL_REQUIRED": "true",
+        "BEHAVIORAL_RESULT": "success",
+        "BEHAVIORAL_ARTIFACT_ID": "300",
+    }
+    if changed is not None:
+        assert value is not None
+        environment[changed] = value
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    effect = tmp_path / "download-started"
+    observed = subprocess.run(
+        [
+            bash,
+            "--noprofile",
+            "--norc",
+            "-e",
+            "-o",
+            "pipefail",
+            "-c",
+            guard["run"] + '\nprintf started > "$EFFECT"\n',
+        ],
+        env={**environment, "EFFECT": str(effect)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert observed.returncode == (0 if changed is None else 1), observed.stderr
+    assert effect.exists() is (changed is None)
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "static_needed,behavior_needed", [(True, False), (False, True), (False, False)]
+)
+def test_not_applicable_phase_does_not_become_an_extra_proof_prerequisite(
+    tmp_path: Path, static_needed: bool, behavior_needed: bool
+) -> None:
+    guard = _workflow()["jobs"]["verify"]["steps"][0]
+    environment = {
+        "PATH": os.defpath,
+        "ADMIT_RESULT": "success",
+        "PLAN_ARTIFACT_ID": "100",
+    }
+    for label, required in (("STATIC", static_needed), ("BEHAVIORAL", behavior_needed)):
+        environment[label + "_REQUIRED"] = str(required).lower()
+        environment[label + "_RESULT"] = "success" if required else "skipped"
+        environment[label + "_ARTIFACT_ID"] = "200" if required else ""
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    observed = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", guard["run"]],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert observed.returncode == 0, observed.stderr
+
+
 @pytest.mark.process
 @pytest.mark.parametrize("workflow_name", ["ci.yml", "focused-feedback.yml"])
 @pytest.mark.parametrize("native_view", [False, True])
@@ -882,7 +1101,11 @@ def test_workflow_hands_its_entry_pid_to_the_selected_command_owner(
     tmp_path: Path, workflow_name: str, native_view: bool
 ) -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows" / workflow_name).read_text())
-    job = next(iter(workflow["jobs"].values()))
+    job = (
+        workflow["jobs"]["behavioral"]
+        if workflow_name == "ci.yml"
+        else next(iter(workflow["jobs"].values()))
+    )
     execution = next(
         step
         for step in job["steps"]
@@ -1028,7 +1251,7 @@ def test_relevant_events_keep_merge_candidates_and_main_health_distinct() -> Non
     )
     assert workflow["concurrency"]["cancel-in-progress"] is True
 
-    proof = workflow["jobs"]["verify"]
+    proof = workflow["jobs"]["admit"]
     assert proof["if"] == "github.event_name != 'push'"
     assert _merge_aggregate()["if"] == "always() && github.event_name != 'push'"
     assert "github.event.pull_request.base.sha" in proof["env"]["BASE_SHA"]
@@ -1066,7 +1289,9 @@ def test_fast_paths_have_no_hidden_complete_gate_or_unconditional_frontend_setup
             ]:
                 assert step["if"] == (
                     "steps.capabilities.outputs.frontend == 'true'"
-                    if job_name == "verify"
+                    if job_name == "admit"
+                    else "needs.admit.outputs.frontend == 'true'"
+                    if job_name in {"static", "behavioral"}
                     else "github.event.pull_request.draft != true && steps.static-capability.outputs.frontend == 'true'"
                 )
     for command in _make_commands(["check", "merge-check"]):
@@ -1077,7 +1302,7 @@ def test_static_project_preparation_precedes_observation_without_granting_proof(
     None
 ):
     workflow = _workflow()
-    steps = workflow["jobs"]["verify"]["steps"]
+    steps = workflow["jobs"]["admit"]["steps"]
     capabilities = next(step for step in steps if step.get("id") == "capabilities")
     setup = next(
         step for step in steps if step.get("uses", "").startswith("actions/setup-node@")
@@ -1125,13 +1350,16 @@ def test_static_project_preparation_precedes_observation_without_granting_proof(
     assert setup["with"]["node-version"] == gate_setup["with"]["node-version"]
 
 
-def test_selected_proof_prepares_the_original_native_python_build_environment() -> None:
+@pytest.mark.parametrize("job_name", ["admit", "static", "behavioral"])
+def test_selected_proof_prepares_the_original_native_python_build_environment(
+    job_name: str,
+) -> None:
     native = next(
         command
         for command in _make_commands(["backend-install"])
         if command[:2] == ["uv", "sync"]
     )
-    steps = _workflow()["jobs"]["verify"]["steps"]
+    steps = _workflow()["jobs"][job_name]["steps"]
     preparations = [
         (index, step, shlex.split(step.get("run", "")))
         for index, step in enumerate(steps)
@@ -1153,9 +1381,13 @@ def test_selected_proof_prepares_the_original_native_python_build_environment() 
         hosted[hosted.index("--project") + 1] == native[native.index("--project") + 1]
     )
     assert "--frozen" in hosted and "if" not in preparation
-    assert index < next(
-        position for position, step in enumerate(steps) if step.get("id") == "selection"
-    )
+    if job_name == "admit":
+        assert index < next(
+            position
+            for position, step in enumerate(steps)
+            if step.get("id") == "selection"
+        )
+        return
     assert index < next(
         position
         for position, step in enumerate(steps)
@@ -1228,7 +1460,7 @@ def test_candidate_admission_passes_mode_and_stops_setup_after_rejection(
     runner_temp.mkdir(mode=0o700)
     recorded, environment_file = tmp_path / "arguments", tmp_path / "github-env"
     post_admission = tmp_path / "post-admission-setup"
-    proof = _workflow()["jobs"]["verify"]
+    proof = _workflow()["jobs"]["admit"]
     step = next(value for value in proof["steps"] if value.get("id") == "selection")
     assert "if" not in step and "continue-on-error" not in step
     # A later setup effect must not start after this real admission step fails.

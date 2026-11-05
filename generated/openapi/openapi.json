@@ -4802,9 +4802,16 @@
         "additionalProperties": false,
         "properties": {
           "attempt_number": {
-            "minimum": 1.0,
-            "title": "Attempt Number",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Number"
           },
           "event_type": {
             "const": "DESCENDANTS_QUIESCENT",
@@ -4859,19 +4866,40 @@
             "type": "integer"
           },
           "step_attempt_id": {
-            "minLength": 1,
-            "title": "Step Attempt Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Attempt Id"
           },
           "step_id": {
-            "minLength": 1,
-            "title": "Step Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
           },
           "step_order": {
-            "minimum": 1.0,
-            "title": "Step Order",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Order"
           }
         },
         "required": [
@@ -4880,10 +4908,6 @@
           "event_type",
           "repository_id",
           "operation_id",
-          "step_id",
-          "step_order",
-          "attempt_number",
-          "step_attempt_id",
           "physical_execution_id",
           "pid"
         ],
@@ -17719,9 +17743,16 @@
         "additionalProperties": false,
         "properties": {
           "attempt_number": {
-            "minimum": 1.0,
-            "title": "Attempt Number",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Number"
           },
           "event_type": {
             "const": "OUTPUT_ABANDONED",
@@ -17764,19 +17795,40 @@
             "type": "integer"
           },
           "step_attempt_id": {
-            "minLength": 1,
-            "title": "Step Attempt Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Attempt Id"
           },
           "step_id": {
-            "minLength": 1,
-            "title": "Step Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
           },
           "step_order": {
-            "minimum": 1.0,
-            "title": "Step Order",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Order"
           }
         },
         "required": [
@@ -17785,10 +17837,6 @@
           "event_type",
           "repository_id",
           "operation_id",
-          "step_id",
-          "step_order",
-          "attempt_number",
-          "step_attempt_id",
           "physical_execution_id",
           "reason"
         ],
@@ -17799,9 +17847,16 @@
         "additionalProperties": false,
         "properties": {
           "attempt_number": {
-            "minimum": 1.0,
-            "title": "Attempt Number",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Number"
           },
           "event_type": {
             "const": "OUTPUT_FINALIZED",
@@ -17844,19 +17899,40 @@
             "type": "integer"
           },
           "step_attempt_id": {
-            "minLength": 1,
-            "title": "Step Attempt Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Attempt Id"
           },
           "step_id": {
-            "minLength": 1,
-            "title": "Step Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
           },
           "step_order": {
-            "minimum": 1.0,
-            "title": "Step Order",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Order"
           }
         },
         "required": [
@@ -17865,10 +17941,6 @@
           "event_type",
           "repository_id",
           "operation_id",
-          "step_id",
-          "step_order",
-          "attempt_number",
-          "step_attempt_id",
           "physical_execution_id",
           "output_count"
         ],
@@ -17879,9 +17951,16 @@
         "additionalProperties": false,
         "properties": {
           "attempt_number": {
-            "minimum": 1.0,
-            "title": "Attempt Number",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Number"
           },
           "event_type": {
             "const": "OUTPUT_QUARANTINED",
@@ -17924,19 +18003,40 @@
             "type": "integer"
           },
           "step_attempt_id": {
-            "minLength": 1,
-            "title": "Step Attempt Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Attempt Id"
           },
           "step_id": {
-            "minLength": 1,
-            "title": "Step Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
           },
           "step_order": {
-            "minimum": 1.0,
-            "title": "Step Order",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Order"
           }
         },
         "required": [
@@ -17945,10 +18045,6 @@
           "event_type",
           "repository_id",
           "operation_id",
-          "step_id",
-          "step_order",
-          "attempt_number",
-          "step_attempt_id",
           "physical_execution_id",
           "reason"
         ],
@@ -21354,9 +21450,16 @@
         "additionalProperties": false,
         "properties": {
           "attempt_number": {
-            "minimum": 1.0,
-            "title": "Attempt Number",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Number"
           },
           "event_type": {
             "const": "PROCESS_EXITED",
@@ -21415,19 +21518,40 @@
             "type": "integer"
           },
           "step_attempt_id": {
-            "minLength": 1,
-            "title": "Step Attempt Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Attempt Id"
           },
           "step_id": {
-            "minLength": 1,
-            "title": "Step Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
           },
           "step_order": {
-            "minimum": 1.0,
-            "title": "Step Order",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Order"
           }
         },
         "required": [
@@ -21436,10 +21560,6 @@
           "event_type",
           "repository_id",
           "operation_id",
-          "step_id",
-          "step_order",
-          "attempt_number",
-          "step_attempt_id",
           "physical_execution_id",
           "pid",
           "returncode"
@@ -21451,9 +21571,16 @@
         "additionalProperties": false,
         "properties": {
           "attempt_number": {
-            "minimum": 1.0,
-            "title": "Attempt Number",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Number"
           },
           "event_type": {
             "const": "PROCESS_STARTED",
@@ -21508,19 +21635,40 @@
             "type": "integer"
           },
           "step_attempt_id": {
-            "minLength": 1,
-            "title": "Step Attempt Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Attempt Id"
           },
           "step_id": {
-            "minLength": 1,
-            "title": "Step Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
           },
           "step_order": {
-            "minimum": 1.0,
-            "title": "Step Order",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Order"
           }
         },
         "required": [
@@ -21529,10 +21677,6 @@
           "event_type",
           "repository_id",
           "operation_id",
-          "step_id",
-          "step_order",
-          "attempt_number",
-          "step_attempt_id",
           "physical_execution_id",
           "pid"
         ],
@@ -21543,9 +21687,16 @@
         "additionalProperties": false,
         "properties": {
           "attempt_number": {
-            "minimum": 1.0,
-            "title": "Attempt Number",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Number"
           },
           "event_type": {
             "const": "PROCESS_STARTING",
@@ -21583,19 +21734,40 @@
             "type": "integer"
           },
           "step_attempt_id": {
-            "minLength": 1,
-            "title": "Step Attempt Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Attempt Id"
           },
           "step_id": {
-            "minLength": 1,
-            "title": "Step Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
           },
           "step_order": {
-            "minimum": 1.0,
-            "title": "Step Order",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Order"
           }
         },
         "required": [
@@ -21604,10 +21776,6 @@
           "event_type",
           "repository_id",
           "operation_id",
-          "step_id",
-          "step_order",
-          "attempt_number",
-          "step_attempt_id",
           "physical_execution_id"
         ],
         "title": "ProcessStartingEvent",
@@ -21617,9 +21785,16 @@
         "additionalProperties": false,
         "properties": {
           "attempt_number": {
-            "minimum": 1.0,
-            "title": "Attempt Number",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Number"
           },
           "event_type": {
             "const": "PROCESS_STATE_UNKNOWN",
@@ -21679,19 +21854,40 @@
             "type": "integer"
           },
           "step_attempt_id": {
-            "minLength": 1,
-            "title": "Step Attempt Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Attempt Id"
           },
           "step_id": {
-            "minLength": 1,
-            "title": "Step Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
           },
           "step_order": {
-            "minimum": 1.0,
-            "title": "Step Order",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Order"
           }
         },
         "required": [
@@ -21700,10 +21896,6 @@
           "event_type",
           "repository_id",
           "operation_id",
-          "step_id",
-          "step_order",
-          "attempt_number",
-          "step_attempt_id",
           "physical_execution_id",
           "pid",
           "reason"
@@ -32336,9 +32528,16 @@
         "additionalProperties": false,
         "properties": {
           "attempt_number": {
-            "minimum": 1.0,
-            "title": "Attempt Number",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Number"
           },
           "event_type": {
             "const": "TERMINATION_REQUESTED",
@@ -32398,19 +32597,40 @@
             "type": "integer"
           },
           "step_attempt_id": {
-            "minLength": 1,
-            "title": "Step Attempt Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Attempt Id"
           },
           "step_id": {
-            "minLength": 1,
-            "title": "Step Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Id"
           },
           "step_order": {
-            "minimum": 1.0,
-            "title": "Step Order",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Order"
           }
         },
         "required": [
@@ -32419,10 +32639,6 @@
           "event_type",
           "repository_id",
           "operation_id",
-          "step_id",
-          "step_order",
-          "attempt_number",
-          "step_attempt_id",
           "physical_execution_id",
           "pid",
           "reason"
