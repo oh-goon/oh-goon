@@ -36,10 +36,9 @@ def test_original_x0_retains_original_supervisor_and_negative_writer_control(
         ),
         (
             _PROCESS_GROUP_OWNER,
-            "return False if inspected and not incomplete else None",
-            "return False if inspected else None",
+            "os.killpg(",
+            "os.kill(",
         ),
-        (_PROCESS_GROUP_OWNER, "incomplete = True", "incomplete = False"),
         (_R3C_TEST, "start_new_session=True", "start_new_session=False"),
         (
             _R3C_TEST,

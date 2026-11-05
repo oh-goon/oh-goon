@@ -726,12 +726,15 @@ def check_co_r01_lifecycle_edges(root: Path = ROOT) -> list[Violation]:
         )
         scanner = _method(owner_tree, None, "_linux_process_group_has_live_member")
         probe = _method(owner_tree, None, "process_group_exists")
+        # Architecture retains the original observer and native group-probe
+        # edge. The runtime partial/malformed-inventory witnesses below own
+        # conservative absence behavior; a count of private flag assignments
+        # cannot distinguish an unknown scan from kernel-proven disappearance.
         require(
             _PROCESS_GROUP_OWNER,
             scanner is not None
             and probe is not None
-            and co_r3c_owner.count("incomplete = True") == 3
-            and "return False if inspected and not incomplete else None" in co_r3c_owner
+            and bool(_calls(probe, "_linux_process_group_has_live_member"))
             and bool(_calls(probe, "os.killpg")),
             "CO-R3C incomplete Linux proc scan must fall back to original kernel probe",
         )
