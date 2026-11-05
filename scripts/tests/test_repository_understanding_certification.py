@@ -3650,26 +3650,69 @@ def test_differential_recertification_invalidates_only_concept_whose_declared_ev
     assert len(plan["preserved_concepts"]) == 10
 
 
+@pytest.mark.parametrize(
+    "semantic_field", ("expected_claim", "critical_contradiction", "public_prompt")
+)
 def test_differential_recertification_semantic_claim_change_invalidates_owning_concept(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    semantic_field: str,
 ) -> None:
     from copy import deepcopy
     from oh_goon.repository_tooling.repository_understanding_recertification import (
         differential_recertification_plan,
     )
 
-    _certificate, certificate_path, results = _recertification_fixture(tmp_path)
+    certificate, certificate_path, results = _recertification_fixture(tmp_path)
+    prior = json.loads(results[0].read_text(encoding="utf-8"))
     current = deepcopy(material.exam_snapshot())
-    target = current["questions"][5]
+    unchanged = differential_recertification_plan(
+        certificate_path, results[0], current_snapshot=current
+    )
+    assert certificate["certificate_status"] == "AUTHORIZED"
+    assert unchanged["status"] == "NO_RECERTIFICATION_REQUIRED"
+    assert unchanged["capability_state"] == "AUTHORIZED"
+
+    target = next(
+        question for question in current["questions"] if question["id"] == "Q91"
+    )
     concept = target["public"]["blueprint"]["concept_family"]
-    target["secret"]["expected_claims"][0]["statement"] += " changed"
+    if semantic_field == "expected_claim":
+        target["secret"]["expected_claims"][0]["statement"] += " corrected"
+    elif semantic_field == "critical_contradiction":
+        contradiction = next(
+            item
+            for item in target["secret"]["contradictions"]
+            if item["severity"] == "critical"
+        )
+        contradiction["statement"] += " corrected"
+    else:
+        assert semantic_field == "public_prompt"
+        target["public"]["prompt"] += " corrected"
     current["repository_identity"] = "sha256:" + "5" * 64
     _resign_snapshot(current)
     plan = differential_recertification_plan(
         certificate_path, results[0], current_snapshot=current
     )
+    assert plan["status"] == "DIFFERENTIAL_RECERTIFICATION_REQUIRED"
+    assert plan["capability_state"] == "SUSPENDED_SOURCE_CHANGED"
+    assert plan["reissue_required"] is True
     assert plan["affected_concepts"] == [concept]
+    assert plan["recertification_concepts"] == [concept]
     assert target["id"] in plan["recertification_question_ids"]
+    assert concept not in plan["preserved_concepts"]
+    assert set(plan["preserved_concepts"]) == set(unchanged["preserved_concepts"]) - {
+        concept
+    }
+
+    def unavailable_material() -> None:
+        raise AssertionError("offline regrading must use the retained exam snapshot")
+
+    for owner in (material, exam_module):
+        monkeypatch.setattr(owner, "exam_snapshot", unavailable_material)
+        monkeypatch.setattr(owner, "load_exam", unavailable_material)
+    regraded = exam_module.score(results[0])
+    assert regraded == {**prior, "regraded": True}
 
 
 def test_differential_recertification_unmapped_source_change_is_diagnostic_not_silent_authority(
