@@ -797,10 +797,9 @@ def _independent_hashmarks_upgrade(
     from oh_goon.repository_tooling import development_verification as admission_owner
 
     trusted_origin = Path(__file__).resolve().parents[1]
-    if (
-        admission_owner.__file__ is None
-        or not Path(admission_owner.__file__).resolve().is_relative_to(trusted_origin)
-    ):
+    if admission_owner.__file__ is None or not Path(
+        admission_owner.__file__
+    ).resolve().is_relative_to(trusted_origin):
         raise ValueError("Native artifact comparison imported an untrusted owner")
     native = admission_owner._native_hashmarks_artifact_comparison(root, base)
     claimed = evidence.get("hashmarks_native_artifacts")
