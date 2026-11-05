@@ -28,6 +28,7 @@ from oh_goon.integrations.agent_inference_relay import model_inference_relay
 
 EVIDENCE = "Exact Hashmarks packet: qualified=true; coverage=bounded; freshness=captured; π"
 SKILL = "# Native Skill\nPreserve complete scope and report evidence."
+TASK = "HUG-36: inspect the admitted source, preserve α, and report the original task scope."
 STREAM = b'data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"edit","arguments":"{}"}}]}}]}\n\ndata: [DONE]\n\n'
 HOSTED_PROMPT_ID = "pmpt-fixture-private-identifier"
 HOSTED_PROMPT_SECRET = "fixture-private-prompt-variable"
@@ -181,7 +182,11 @@ def test_exact_native_stream_tools_settings_and_frozen_context_reach_only_select
     if api == "openai-responses":
         native["background"] = False
     with approved_model_broker(
-        directory, _selected(provider, api), repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory,
+        _selected(provider, api),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
     ) as broker:
         assert stat.S_IMODE(broker.socket_path.parent.stat().st_mode) == 0o700
         assert stat.S_IMODE(broker.socket_path.stat().st_mode) == 0o600
@@ -228,13 +233,114 @@ def test_exact_native_stream_tools_settings_and_frozen_context_reach_only_select
             assert forwarded["messages"][1:] == native["messages"]
 
 
+@pytest.mark.parametrize(
+    ("api", "route"),
+    (
+        ("openai-chat-completions", "/v1/chat/completions"),
+        ("openai-responses", "/v1/responses"),
+        ("anthropic-messages", "/v1/messages"),
+        ("ollama", "/api/chat"),
+    ),
+)
+def test_task_free_native_followup_and_compaction_keep_the_original_frozen_context(
+    directory: Path, provider: _Provider, api: str, route: str
+) -> None:
+    initial = _body(api)
+    content_key = "input" if api == "openai-responses" else "messages"
+    initial[content_key] = [{"role": "user", "content": TASK}]
+    followup = _body(api)
+    if api == "openai-responses":
+        followup[content_key] = [
+            {"type": "function_call", "name": "inspect", "call_id": "call-1", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call-1", "output": "Source read."},
+        ]
+    elif api == "anthropic-messages":
+        followup[content_key] = [
+            {
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "call-1", "name": "inspect", "input": {}}],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "call-1", "content": "Source read."}
+                ],
+            },
+        ]
+    else:
+        followup[content_key] = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "inspect", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call-1", "content": "Source read."},
+        ]
+    compaction = _body(api)
+    compaction[content_key] = [
+        {"role": "user", "content": "Summarize recent tool work into a native session checkpoint."}
+    ]
+    with approved_model_broker(
+        directory,
+        _selected(provider, api),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
+    ) as broker:
+        with _client(broker.socket_path) as client:
+            assert client.post(route, json=initial).status_code == 200
+            first = json.loads(provider.requests[-1][2])
+            assert TASK in json.dumps(first, ensure_ascii=False)
+            for phase, native in (("tool follow-up", followup), ("compaction", compaction)):
+                assert TASK not in json.dumps(native, ensure_ascii=False)
+                assert client.post(route, json=native).status_code == 200
+                forwarded = json.loads(provider.requests[-1][2])
+                context = (
+                    forwarded["system"][0]["text"]
+                    if api == "anthropic-messages"
+                    else forwarded[content_key][0]["content"]
+                )
+                assert EVIDENCE in context and SKILL in context
+                task_context = context.replace(EVIDENCE, "").replace(SKILL, "")
+                assert TASK in task_context, f"Original admitted task was dropped during {phase}"
+    assert len(provider.requests) == 3
+
+
+@pytest.mark.parametrize("field", ("task", "repository_evidence", "skill_instructions"))
+@pytest.mark.parametrize("invalid", ("", " \n", None))
+def test_incomplete_frozen_context_refuses_before_socket_or_provider_work(
+    directory: Path, provider: _Provider, field: str, invalid: object
+) -> None:
+    context: dict[str, Any] = {
+        "task": TASK,
+        "repository_evidence": EVIDENCE,
+        "skill_instructions": SKILL,
+    }
+    context[field] = invalid
+    unstarted = directory / "unstarted"
+    with pytest.raises(AgentProviderError, match="complete frozen context"):
+        with approved_model_broker(unstarted, _selected(provider), **context):
+            pytest.fail("incomplete context created an inference channel")
+    assert not unstarted.exists() and not provider.requests
+
+
 def test_stream_is_delivered_before_provider_completion(
     directory: Path, provider: _Provider
 ) -> None:
     provider.chunks = (b'data: {"delta":"first"}\n\n', b"data: [DONE]\n\n")
     provider.hold_after_first = True
     with approved_model_broker(
-        directory, _selected(provider), repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory,
+        _selected(provider),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
     ) as broker:
         with _client(broker.socket_path) as client:
             with client.stream("POST", "/v1/chat/completions", json=_body()) as response:
@@ -323,9 +429,14 @@ def test_malformed_or_expanded_authority_never_reaches_provider(
         raw = raw[:-1] + b',"temperature":NaN}'
     selection = _selected(provider, max_request_bytes=1024)
     with approved_model_broker(
-        directory, selection, repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory, selection, task=TASK, repository_evidence=EVIDENCE, skill_instructions=SKILL
     ) as broker:
         with _client(broker.socket_path) as client:
+            fresh_body = _body()
+            baseline = client.post("/v1/chat/completions", json=fresh_body)
+            assert baseline.status_code == 200 and baseline.content == STREAM
+            assert len(provider.requests) == 1
+            provider.requests.clear()
             response = client.post(route, content=raw, headers=headers)
             assert response.status_code >= 400
     assert provider.requests == []
@@ -340,6 +451,7 @@ def test_background_execution_rejects_before_provider_work(
     with approved_model_broker(
         directory,
         _selected(provider, "openai-responses"),
+        task=TASK,
         repository_evidence=EVIDENCE,
         skill_instructions=SKILL,
     ) as broker:
@@ -384,6 +496,7 @@ def test_responses_hosted_prompt_rejects_before_provider_work(
     with approved_model_broker(
         directory,
         _selected(provider, "openai-responses"),
+        task=TASK,
         repository_evidence=EVIDENCE,
         skill_instructions=SKILL,
     ) as broker:
@@ -440,6 +553,7 @@ def test_responses_prompt_data_and_causal_fields_remain_native_transport(
     with approved_model_broker(
         directory,
         _selected(provider, "openai-responses"),
+        task=TASK,
         repository_evidence=EVIDENCE,
         skill_instructions=SKILL,
     ) as broker:
@@ -566,6 +680,7 @@ def test_optional_managed_history_remains_provider_owned_across_broker_lifetimes
     with approved_model_broker(
         directory,
         selected,
+        task=TASK,
         repository_evidence=evidence_a,
         skill_instructions=skill_a,
         cancel_requested=lambda: False,
@@ -595,6 +710,7 @@ def test_optional_managed_history_remains_provider_owned_across_broker_lifetimes
     with approved_model_broker(
         directory,
         selected,
+        task=TASK,
         repository_evidence=evidence_b,
         skill_instructions=skill_b,
         cancel_requested=lambda: False,
@@ -639,7 +755,11 @@ def test_other_protocol_prompt_data_does_not_override_the_selected_api(
     body["prompt"] = {"id": "ordinary-protocol-data"}
     body["api"] = "openai-responses"
     with approved_model_broker(
-        directory, _selected(provider, api), repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory,
+        _selected(provider, api),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
     ) as broker:
         with _client(broker.socket_path) as client:
             response = client.post(route, json=body)
@@ -715,7 +835,11 @@ def test_provider_attachment_ids_reject_before_provider_work(
         attachment,
     ]
     with approved_model_broker(
-        directory, _selected(provider, api), repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory,
+        _selected(provider, api),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
     ) as broker:
         with _client(broker.socket_path) as client:
             response = client.post(route, json=body)
@@ -733,7 +857,11 @@ def test_top_level_web_search_options_reject_before_provider_work(
     if not native_tools:
         body.pop("tools")
     with approved_model_broker(
-        directory, _selected(provider), repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory,
+        _selected(provider),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
     ) as broker:
         with _client(broker.socket_path) as client:
             response = client.post("/v1/chat/completions", json=body)
@@ -828,7 +956,11 @@ def test_inline_attachments_and_native_function_data_keep_stream_and_frozen_cont
     body[content_key][0]["content"] = content
     body[content_key].append(invocation)
     with approved_model_broker(
-        directory, _selected(provider, api), repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory,
+        _selected(provider, api),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
     ) as broker:
         with _client(broker.socket_path) as client:
             response = client.post(route, json=body)
@@ -863,7 +995,11 @@ def test_namespace_custom_tools_and_inline_images_remain_native_data(
         {"type": "image_url", "image_url": {"url": "data:image/png;base64,YQ=="}}
     ]
     with approved_model_broker(
-        directory, _selected(provider), repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory,
+        _selected(provider),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
     ) as broker:
         with _client(broker.socket_path) as client:
             assert client.post("/v1/chat/completions", json=body).status_code == 200
@@ -886,6 +1022,7 @@ def test_provider_redirects_and_response_expansion_fail_closed(
     with approved_model_broker(
         directory,
         _selected(provider, max_response_bytes=1024),
+        task=TASK,
         repository_evidence=EVIDENCE,
         skill_instructions=SKILL,
     ) as broker:
@@ -904,7 +1041,11 @@ def test_selected_model_catalog_and_raw_loopback_relay(
     directory: Path, provider: _Provider
 ) -> None:
     with approved_model_broker(
-        directory, _selected(provider), repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory,
+        _selected(provider),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
     ) as broker:
         with model_inference_relay(broker.socket_path, port=0) as relay:
             with httpx2.Client(trust_env=False) as client:
@@ -989,6 +1130,7 @@ def test_cancellation_closes_inflight_http_and_private_socket(
     with approved_model_broker(
         directory,
         _selected(provider),
+        task=TASK,
         repository_evidence=EVIDENCE,
         skill_instructions=SKILL,
         cancel_requested=cancelled.is_set,
@@ -1020,7 +1162,11 @@ def test_partial_http_request_does_not_prevent_broker_cleanup(
     directory: Path, provider: _Provider
 ) -> None:
     with approved_model_broker(
-        directory, _selected(provider), repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory,
+        _selected(provider),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
     ) as broker:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.connect(str(broker.socket_path))
@@ -1036,7 +1182,7 @@ def test_only_explicit_provider_proxy_is_used(directory: Path, provider: _Provid
         provider, base_url="http://provider.invalid/v1", proxy_url=provider.base_url
     )
     with approved_model_broker(
-        directory, selected, repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory, selected, task=TASK, repository_evidence=EVIDENCE, skill_instructions=SKILL
     ) as broker:
         with _client(broker.socket_path) as client:
             assert client.post("/v1/chat/completions", json=_body()).content == STREAM
@@ -1053,6 +1199,7 @@ def test_cancellation_after_first_stream_chunk_reports_incomplete_transport(
     with approved_model_broker(
         directory,
         _selected(provider),
+        task=TASK,
         repository_evidence=EVIDENCE,
         skill_instructions=SKILL,
         cancel_requested=cancelled.is_set,
@@ -1075,6 +1222,7 @@ def test_cancelled_or_oversized_context_rejects_before_socket_creation(
         with approved_model_broker(
             target,
             selected,
+            task=TASK,
             repository_evidence=EVIDENCE,
             skill_instructions=SKILL,
             cancel_requested=lambda: True,
@@ -1084,6 +1232,7 @@ def test_cancelled_or_oversized_context_rejects_before_socket_creation(
         with approved_model_broker(
             target,
             selected,
+            task=TASK,
             repository_evidence=EVIDENCE,
             skill_instructions="x" * 1025,
         ):
@@ -1109,7 +1258,11 @@ def test_relay_cli_preserves_native_stdin_response_and_exit_status(
         "sys.stdout.buffer.flush(); response.close(); sys.exit(7)"
     )
     with approved_model_broker(
-        directory, _selected(provider), repository_evidence=EVIDENCE, skill_instructions=SKILL
+        directory,
+        _selected(provider),
+        task=TASK,
+        repository_evidence=EVIDENCE,
+        skill_instructions=SKILL,
     ) as broker:
         result = run_command(
             sys.executable,

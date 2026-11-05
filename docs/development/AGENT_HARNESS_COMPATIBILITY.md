@@ -1,6 +1,7 @@
 # Native Agent harness compatibility
 
-Source review: **2026-10-26**. This is the canonical maintenance inventory of
+Baseline source review: **2026-10-26**; later scoped observations are dated
+separately below. This is the canonical maintenance inventory of
 native compatibility adaptations and the conformance tests that can establish
 their replacement. It does not resolve capabilities, select versions or admit
 execution. The [runtime owner map](AGENT_RUNTIME_OWNERS.md),
@@ -9,8 +10,9 @@ retain those responsibilities.
 
 The tables map existing source and tests; a test reference is not a passing test
 result. Installed qualification is scoped to the exact selected implementation,
-mode, policy and environment. The bounded checks below ran on 2026-10-26; other
-installed cases remain **NOT_RUN** in this review. Native executable facts remain
+mode, policy and environment. The first installed table retains the 2026-10-26
+observations; later dated observations update only their stated scopes. Other
+installed cases remain **NOT_RUN** in those reviews. Native executable facts remain
 in the frozen selection and original execution evidence, never in a second
 version database here.
 
@@ -42,6 +44,50 @@ boundary does not replace their protocols or qualify another harness context.
 | Codex 0.164.0, [CLI context][codex-context-tests] | **PASS**, five local-fixture cases: synthetic API-key/ChatGPT authentication × HTTP/WebSocket context follow-up and compaction, plus protected managed Code Mode. The headless sign-in path sends exact task-only stdin and retains the complete frozen privileged payload. Its separate eight-case baseline/candidate comparison also preserves native tools, response chains and compaction resets. No live-account or model-quality qualification from these fixtures. |
 | Codex 0.164.0, GPT-6.1 Sol at low effort, [live coding][codex-live-tests] | **PASS**, one full-stdin baseline and one task-only candidate through the original local Run and existing native sign-in. Both edit the inclusive-range sample and pass two unchanged independent verifiers with verified cleanup. Privileged payloads remain intact; stdin changes from 8,109 to 530 bytes. This is bounded coding equivalence, without a token-cost, refresh, private-store or universal model-quality claim. See [issue #22](https://github.com/oh-goon/oh-goon/issues/22). |
 | Codex 0.164.0, [managed review][codex-managed-tests] | **PASS**, three local-fixture entrypoints: original native Run, initialized catalog Plan and initialized catalog Goon, preserving the selected source/tool boundary and complete typed review. No live-account or model-quality qualification. |
+
+## Frozen context continuity — 2026-11-05
+
+[HUG-36](https://linear.app/hugloss/issue/HUG-36) requalified the context paths
+with Codex 0.164.0, OpenCode 2.1.2 and Pi 1.3.0 on Linux, using explicit public
+runtime roots and synthetic local model providers. The complete source/candidate,
+native identity, commands and per-mode results are recorded with that issue's PR.
+These observations supersede the older context rows only within these scopes:
+
+| Selected context path | Fresh proof and limit |
+| --- | --- |
+| Pi/OpenCode managed CLI, Chat Completions | Four installed cases passed: read-only native tool follow-up and actual overflow compaction for each implementation. Every upstream privileged context retains the exact original task outside the complete Skill/producer packet; independent verification and original cleanup remain required. Pi uses its exact public release entrypoint, not its user launcher. |
+| Codex CLI, Responses | Five installed cases passed: synthetic API-key/ChatGPT authentication × HTTP/WebSocket follow-up and compaction, plus protected managed HTTP Code Mode. HTTP fallback and native tool controls remain scoped to the exercised modes. |
+| Codex service | Four installed cases passed: original Run automatic compaction with successful and failed independent verification, plus native same-thread resume/explicit compaction with absent/populated reserved directories. Native protocol resume does not qualify product cross-Run session adoption. |
+
+The managed broker previously restored Skill/evidence while relying on native
+history for the task. Four protocol regressions reproduced task loss after a
+task-free follow-up; the receiver now supplies the frozen task explicitly and
+the broker restores all three components on every request. Missing task, Skill
+or evidence refuses before channel creation. The full 95-case broker owner
+passed, including 13 new task-free/invalid-context cases. A separate real-CLI
+handoff case keeps forged success/permission/configuration claims untrusted and
+still executes the failing independent verifier.
+
+The same context owners retain six ordinary controlled-process counterparts
+through the real receiving Step and broker. The four existing report/verifier
+controls were moved from the general native Run tests and strengthened, with
+two read-only role controls added. Dropping task restoration is detected even
+when the native fixture and independent verification otherwise succeed. These
+bounded A-level cases preserve ordinary merge proof without changing the
+installed certification markers or claiming a compaction implementation.
+
+The first strengthened protected Codex case exposed a fixture comparison to the
+old whole-message wording. Its replacement checks exact full evidence/Skill and
+the task in the privileged channel; the isolated rerun passed. The other eight
+CLI cases and four service cases passed. This is eventual scoped qualification,
+not a claim that every initial invocation passed.
+
+Disposition: **retain** the existing protocol, settlement and reserved-directory
+adaptations. Their removal gates were not selected or satisfied by this task.
+Task delivery is a permanent product responsibility, not a new version-specific
+workaround. No installed Anthropic/Ollama parity, OpenCode service execution,
+Pi persistent-session integration, live accounts, other hosts or Run-worker
+custody is qualified by these results. Native harnesses still own compaction.
 
 ## Temporary adaptations and removal decisions
 
@@ -130,7 +176,7 @@ implementation; they do not erase their invariants.
 | Permanent Pi CLI protocol mapping | [Native parser][native] requires `agent_settled`, rather than `agent_end`, after the latest message, tool or compaction activity, and permits recovery after a tool error. A prior settlement cannot authorize a later assistant payload; its error/abort/length stop reason remains failure even if a fresh terminal event is missing. Aborted settlement also fails. Pi 1.3.0 emits `compaction_start`/`compaction_end` for manual, threshold and overflow compaction; retired `auto_compaction_*` mappings are removed. [Native tests][native-tests] prove compaction cannot establish settlement; [installed compaction][cli-compaction-tests] proves actual overflow recovery and retained context. |
 | Permanent Codex CLI protocol mapping | [Native parser][native] distinguishes recoverable `error` diagnostics from `turn.failed` and `turn.completed`. A terminal claim must follow the latest item activity; later message/tool items cannot borrow an earlier turn's completion. Duplicate terminal frames add no result authority. Bounded tool observations retain recognized native command statuses, including `declined`, as untrusted claims. [Native tests][native-tests] cover command dispositions, recovered diagnostics, missing completion, explicit failure and nonzero physical exit. Command status does not determine Step success. |
 | Permanent Codex service transport and session mapping | [CodexServiceClient][codex-service] binds requests, notifications, permission profile and frozen instructions to one native thread. Uncertain acceptance is nonretryable; cold resume requires explicit original instructions. [Transport tests][codex-service-tests] cover wrong thread/profile, replacement configuration, lost response/restart, cancellation, deadlines and cleanup. The native profile ID does not attest effective grants or a configuration generation. |
-| Permanent instruction-delivery requirement | [Native receiver][receiver] consumes the frozen handoff and mandatory qualified Hashmarks/Skill context. [Native Step tests][receiver-tests] cover the receiver; [installed Codex context][codex-context-tests] and [service Run tests][codex-run-tests] cover selected real follow-up/compaction paths using local providers. This is required task delivery, not a temporary workaround. |
+| Permanent instruction-delivery requirement | [Native receiver][receiver] consumes the frozen handoff. For broker-managed native modes, the existing broker receives the original task, complete selected Skill and qualified Hashmarks evidence from that input and restores them in a privileged channel on every request, independent of native history. Missing context fails before socket creation; request bounds include the complete context. [Broker negatives][broker-tests] cover task-free tool follow-up/compaction and incomplete context; [installed Codex context][codex-context-tests], [CLI compaction][cli-compaction-tests] and [service Run tests][codex-run-tests] cover selected real native paths. Codex sign-in/service modes retain their complete frozen native base instructions. This is required delivery, not a temporary workaround or another compaction owner. |
 | Product-owned service settlement | [Codex execution][codex-execution] combines native terminal-turn evidence with the original daemon's actual requested-shutdown receipt. **Retain** the original Step cancellation predicate before daemon birth, between preflight RPCs and before accepting notifications. [Service execution tests][codex-execution-tests] cover cancellation at preflight, turn/tool/compaction/terminal and shutdown boundaries with actual command-owner cleanup; [canonical settlement tests][settlement-tests] reject missing closure and failed turns. Normal daemon shutdown normalization stays outside campaign policy. These controlled boundaries do not extend installed-version or other-host qualification. |
 | Product-owned execution and evidence | The [runtime owner map](AGENT_RUNTIME_OWNERS.md) retains admission, source custody, process supervision, deadlines, cancellation, typed acceptance, independent verification, Journal and Game Tape. Harness-owned sessions, credentials, tools, reasoning and compaction do not acquire those authorities. |
 | Obsolete implementation, already withdrawn | The [native-store contract](../AGENT_PROVIDERS.md#native-owned-authentication-and-configuration) rejects the former protected credential-file mount route. [Native tests][native-tests] and [resolver tests][resolver-tests] check refusal before native state/source access. Do not retain aliases or restore the removed refresh helper as compatibility. |
@@ -337,6 +383,7 @@ environment-specific and privileged qualification runs only when selected.
 [resolver-tests]: ../../backend/tests/unit/runtime/test_agent_native_providers.py
 [receiver]: ../../backend/src/oh_goon/integrations/fleet_plan_native_steps.py
 [receiver-tests]: ../../backend/tests/dependency_complete/test_fleet_plan_native_steps.py
+[broker-tests]: ../../backend/tests/dependency_complete/test_agent_inference_broker.py
 [native-run-tests]: ../../backend/tests/integration/services/test_native_agent_run.py
 [settlement-tests]: ../../backend/tests/unit/integrations/test_fleet_step_settlement.py
 [command-tests]: ../../backend/tests/unit/engine/test_commands.py
