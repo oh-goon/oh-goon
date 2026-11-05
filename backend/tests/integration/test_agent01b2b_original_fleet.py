@@ -2,20 +2,33 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
+import select
 import shutil
+import signal
 import subprocess
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
+from threading import Event
+from time import monotonic
 
 import pytest
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution
+from oh_goon.core.models.operation import FleetPlanOperationEvidence
+from oh_goon.core.models.run_events import (
+    DescendantsQuiescentEvent,
+    ProcessExitedEvent,
+    ProcessStartedEvent,
+    StepAttemptCreatedEvent,
+)
+from oh_goon.core.process_birth import observe_process_birth, observe_process_state
 from oh_goon.core.product_identity import repository_id
-from oh_goon.integrations.hashmarks import identity as external_identity
 from oh_goon.runtime import goon_templates
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -63,25 +76,6 @@ goons: [agent/search]
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
 
-    # External Hashmarks producer is not installed on this hosted test machine.
-    # Replace only its leaf adapter; all Fleet admission, execution and Game Tape are real.
-    def supply_hashmarks(path: Path, **_kwargs):
-        if path.is_file():
-            payload = path.read_bytes()
-            return external_identity.HashmarksTreeIdentity(
-                sha256=hashlib.sha256(payload).hexdigest(),
-                byte_count=len(payload),
-                entry_count=1,
-            )
-        files = sorted(p for p in path.rglob("*") if p.is_file() and ".git" not in p.parts)
-        payload = b"".join(p.relative_to(path).as_posix().encode() + p.read_bytes() for p in files)
-        return external_identity.HashmarksTreeIdentity(
-            sha256=hashlib.sha256(payload).hexdigest(),
-            byte_count=len(payload),
-            entry_count=len(files),
-        )
-
-    monkeypatch.setattr(external_identity, "_identify_one", supply_hashmarks)
     opts = dict(
         inputs={"repo": "local:team/app", "skill": "local:team/search", "acceptance": "review"},
         agent_repository_root=tmp_path / "repositories",
@@ -104,6 +98,74 @@ def _lock(plan: Path, opts):
     )
     write_execution_lock(plan.parent / "goon.lock", build_execution_lock(frozen))
     return frozen, handoff
+
+
+@contextmanager
+def _stopped_agent_process(
+    runtime: ApplicationRuntime, run_id: str, step_id: str, *, ordinal: int = 1
+) -> Generator[tuple[ProcessStartedEvent, int], None, None]:
+    """Stop only a live native process bound to the original Journal attempt."""
+    deadline = monotonic() + 12
+    while True:
+        events = runtime.runs.events(run_id).events
+        attempts = [
+            event
+            for event in events
+            if isinstance(event, StepAttemptCreatedEvent) and event.step_id == step_id
+        ]
+        assert len(attempts) <= 1, "test cut requires one original Step attempt"
+        started = [
+            event
+            for event in events
+            if type(event) is ProcessStartedEvent
+            and event.step_id == step_id
+            and attempts
+            and event.step_attempt_id == attempts[0].step_attempt_id
+        ]
+        if len(started) >= ordinal:
+            target = started[ordinal - 1]
+            break
+        if monotonic() >= deadline:
+            pytest.fail("native process cut not reached in the original Journal")
+        Event().wait(0.001)
+
+    try:
+        descriptor = os.pidfd_open(target.pid)
+    except ProcessLookupError:
+        pytest.fail("native process cut not reached: selected process already exited")
+    stop_requested = False
+    try:
+        birth = observe_process_birth(target.pid)
+        assert birth is not None, "native process cut not reached: birth unavailable"
+        assert target.process_identity == f"{birth.boot_id}:{birth.start_ticks}", (
+            "native process cut not reached: original process identity changed"
+        )
+        assert not select.select([descriptor], [], [], 0)[0], (
+            "native process cut not reached: selected process already exited"
+        )
+        try:
+            signal.pidfd_send_signal(descriptor, signal.SIGSTOP)
+        except ProcessLookupError:
+            pytest.fail("native process cut not reached: selected process exited before stop")
+        stop_requested = True
+        deadline = monotonic() + 3
+        while observe_process_state(target.pid) != "T":
+            assert not select.select([descriptor], [], [], 0)[0], (
+                "native process cut not reached: selected process exited before stop"
+            )
+            assert monotonic() < deadline, "native process cut not reached: stop unacknowledged"
+            Event().wait(0.001)
+        assert observe_process_birth(target.pid) == birth
+        yield target, descriptor
+    finally:
+        try:
+            if stop_requested and not select.select([descriptor], [], [], 0)[0]:
+                try:
+                    signal.pidfd_send_signal(descriptor, signal.SIGCONT)
+                except ProcessLookupError:
+                    pass
+        finally:
+            os.close(descriptor)
 
 
 def test_original_fleet_admits_real_read_only_agent_and_persists_tape(tmp_path, monkeypatch):
@@ -263,80 +325,65 @@ def test_agent_delivery_reference_must_match_resolved_identity(tmp_path, monkeyp
 
 
 def test_original_agent_fleet_cancel_is_durably_recorded(tmp_path, monkeypatch):
-    import threading
-
-    import oh_goon.integrations.fleet_plan_step_execution as steps
-
     plan, repo, opts = _case(tmp_path, monkeypatch)
-    _lock(plan, opts)
-    entered, release = threading.Event(), threading.Event()
-    real_step = steps._execute_command_step
-
-    def original_supervised_launch(*args, **kwargs):
-        entered.set()
-        assert release.wait(timeout=12), "test cancellation handshake timed out"
-        return real_step(*args, **kwargs)
-
-    monkeypatch.setattr(steps, "_execute_command_step", original_supervised_launch)
+    frozen, _ = _lock(plan, opts)
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent.parent)
         started = runtime.plans.run(
             plan, repository_ids={repository_id(repo)}, fleet_run_id="agent01b2b-cancel", **opts
         )
-        assert entered.wait(timeout=15), "Agent attempt did not reach original Step supervisor"
-        runtime.runs.cancel(started.fleet_run_id)
-        release.set()
-        detail = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
+        with _stopped_agent_process(runtime, started.fleet_run_id, frozen.steps[0].step_id) as (
+            target,
+            descriptor,
+        ):
+            runtime.runs.cancel(started.fleet_run_id)
+            signal.pidfd_send_signal(descriptor, signal.SIGCONT)
+            detail = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
         persisted = runtime.runs.get(started.fleet_run_id)
         assert detail.outcome.value != "SUCCESS"
         assert persisted.game_tape.status.value != "PASSED"
+        assert persisted.run.status.value == "CANCELLED"
+        assert any(
+            type(event) is DescendantsQuiescentEvent
+            and event.physical_execution_id == target.physical_execution_id
+            for event in persisted.lifecycle_events
+        )
     finally:
-        release.set()
         runtime.shutdown(wait_for_runs=True)
 
 
 def test_original_agent_fleet_process_failure_is_durably_recorded(tmp_path, monkeypatch):
     plan, repo, opts = _case(tmp_path, monkeypatch)
-    _lock(plan, opts)
-    # Fault-inject the prepared tool implementation while retaining the real
-    # original Fleet supervisor, process launch, journal and Game Tape.
-    import sys
-    from contextlib import contextmanager
-
-    from oh_goon.integrations import fleet_plan_step_execution as execution
-
-    native_prepare = execution.prepare_frozen_readonly_skill_search
-
-    @contextmanager
-    def failing_tool(*args, **kwargs):
-        with native_prepare(*args, **kwargs) as (root, tool):
-            yield (
-                root,
-                tool.model_copy(
-                    update={
-                        "argv": (
-                            sys.executable,
-                            "-c",
-                            "import sys; print('injected-tool-failure', file=sys.stderr); sys.exit(17)",
-                        )
-                    }
-                ),
-            )
-
-    monkeypatch.setattr(execution, "prepare_frozen_readonly_skill_search", failing_tool)
+    frozen, _ = _lock(plan, opts)
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent.parent)
         started = runtime.plans.run(
             plan, repository_ids={repository_id(repo)}, fleet_run_id="agent01b2b-failure", **opts
         )
-        terminal = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
+        with _stopped_agent_process(runtime, started.fleet_run_id, frozen.steps[0].step_id) as (
+            target,
+            descriptor,
+        ):
+            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            terminal = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
         persisted = runtime.runs.get(started.fleet_run_id)
         assert terminal.outcome.value != "SUCCESS"
         assert persisted.game_tape.status.value != "PASSED"
-        failure = persisted.operations[0].evidence.plan.steps[0]
+        evidence = persisted.operations[0].evidence
+        assert isinstance(evidence, FleetPlanOperationEvidence)
+        failure = evidence.plan.steps[0]
+        assert isinstance(failure, FailedPlanStepExecution)
         assert failure.kind == "agent"
-        assert failure.returncode == 17
+        assert failure.returncode == -signal.SIGKILL
+        assert failure.settlement.outcome == "FAILED"
+        assert failure.settlement.cleanup == "VERIFIED"
+        assert any(
+            type(event) is ProcessExitedEvent
+            and event.physical_execution_id == target.physical_execution_id
+            and event.returncode == -signal.SIGKILL
+            for event in persisted.lifecycle_events
+        )
     finally:
         runtime.shutdown(wait_for_runs=True)

@@ -49,6 +49,7 @@ def test_dependency_discovery_does_not_scan_repository_files_without_observed_ev
     coverage = client.get("/api/dependencies/coverage")
     assert coverage.status_code == 200
     assert coverage.json() == {
+        "ecosystem": "pypi",
         "repository_total": 1,
         "current_dependency_evidence": 0,
         "unknown_dependency_evidence": 0,

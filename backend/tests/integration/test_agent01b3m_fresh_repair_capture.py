@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import shlex
-import shutil
-import threading
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,9 +12,13 @@ import pytest
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
+from oh_goon.core.models.run_events import ProcessStartingEvent
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.product_identity import repository_id
 from oh_goon.integrations.fleet_content_store import FleetContentStore
+from oh_goon.runtime.execution import RunExecutionSupervisor
+from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -180,38 +182,27 @@ def test_stale_selected_capture_refused_before_native_effect(tmp_path, monkeypat
 
 
 def test_selected_capture_cancelled_before_subsequent_native_launch(tmp_path, monkeypatch):
-    import oh_goon.integrations.fleet_plan_step_execution as steps
-
     plan, repository, options = _case(tmp_path, monkeypatch)
-    _, first = _lock(plan, options)
+    frozen, first = _lock(plan, options)
     (repository / "code.txt").write_text("needle after authorized repair\n")
     second = _recapture(plan, options, first)
-    native_rg = shutil.which("rg")
-    assert native_rg is not None
-    binary = tmp_path / "bin/rg"
-    binary.parent.mkdir()
-    marker = tmp_path / "tool-started"
-    binary.write_text(
-        "#!/bin/sh\n"
-        + 'if [ "$1" = --no-heading ]; then printf started > '
-        + shlex.quote(str(marker))
-        + "; fi\n"
-        + "exec "
-        + shlex.quote(native_rg)
-        + ' "$@"\n'
-    )
-    binary.chmod(0o755)
-    monkeypatch.setenv("PATH", str(binary.parent) + ":" + os.environ["PATH"])
-    entered, release = threading.Event(), threading.Event()
-    original = steps._execute_command_step
-
-    def pause_before_launch(*args, **kwargs):
-        entered.set()
-        assert release.wait(timeout=15), "native launch handshake timed out"
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(steps, "_execute_command_step", pause_before_launch)
     runtime = ApplicationRuntime.build(standard_local=True)
+    original_submit = RunExecutionSupervisor.submit
+    cancelled_at_start: list[str] = []
+
+    def cancel_before_work(
+        supervisor: RunExecutionSupervisor, run_id: str, launch: RunWorkerLaunch
+    ) -> None:
+        def started() -> None:
+            if launch.on_started is not None:
+                launch.on_started()
+            cancellation = runtime.runs.cancel(run_id)
+            assert cancellation.status.cancel_request_satisfied
+            cancelled_at_start.append(run_id)
+
+        original_submit(supervisor, run_id, replace(launch, on_started=started))
+
+    monkeypatch.setattr(RunExecutionSupervisor, "submit", cancel_before_work)
     try:
         runtime.locations.add(repository.parent.parent)
         started = runtime.plans.run(
@@ -221,13 +212,23 @@ def test_selected_capture_cancelled_before_subsequent_native_launch(tmp_path, mo
             agent_handoff=second,
             **options,
         )
-        assert entered.wait(timeout=15), "selected capture never reached original supervisor"
-        runtime.runs.cancel(started.fleet_run_id)
-        release.set()
         detail = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
+        assert cancelled_at_start == [started.fleet_run_id]
         assert detail.run.status.value == "CANCELLED"
         assert runtime.runs.get(started.fleet_run_id).run.status.value == "CANCELLED"
-        assert not marker.exists()
+        target = detail.run.target
+        assert isinstance(target, FleetPlanTarget)
+        references = target.agent_deliveries
+        assert len(references) == 1
+        assert references[0].handoff_identity == second.handoff_identity
+        assert (
+            references[0].delivery_sha256
+            == hashlib.sha256(second.encode_prework_delivery()).hexdigest()
+        )
+        assert detail.operations == ()
+        assert not any(
+            isinstance(event, ProcessStartingEvent) and event.step_id == frozen.steps[0].step_id
+            for event in detail.lifecycle_events
+        )
     finally:
-        release.set()
         runtime.shutdown(wait_for_runs=True)

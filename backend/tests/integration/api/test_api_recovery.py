@@ -37,13 +37,27 @@ def test_recovery_status_and_reconciliation_api(tmp_path: Path) -> None:
             json={"expected_record_version": current["record_version"]},
         )
         after = client.get("/api/recovery")
+        unresolved = reconciled.json()["effect_quarantines"][0]
+        acknowledged = client.post(
+            f"/api/recovery/effects/{attempt.operation_id}/acknowledge",
+            json={
+                "note": "Inspected the external effect whose outcome remains unknown",
+                "expected_record_version": unresolved["record_version"],
+            },
+        )
+        final = client.get("/api/recovery")
 
     assert before.status_code == 200
     assert before.json()["effect_quarantines"]
     assert reconciled.status_code == 200
-    assert reconciled.json()["effect_quarantines"] == []
+    assert unresolved["operation_id"] == attempt.operation_id
+    assert unresolved["status"] == "INDETERMINATE"
     assert after.status_code == 200
-    assert after.json()["effect_quarantines"] == []
+    assert after.json()["effect_quarantines"] == [unresolved]
+    assert acknowledged.status_code == 200
+    assert acknowledged.json()["effect_quarantines"] == []
+    assert final.status_code == 200
+    assert final.json()["effect_quarantines"] == []
 
 
 def test_recovery_acknowledgement_requires_reconciliation(tmp_path: Path) -> None:

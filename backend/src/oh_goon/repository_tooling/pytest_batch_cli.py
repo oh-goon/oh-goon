@@ -54,6 +54,13 @@ def parse_batch_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--batch-timeout", type=int, default=120)
     parser.add_argument(
+        "--member-timeout",
+        action="append",
+        default=[],
+        metavar="NATIVE_SELECTOR=SECONDS",
+        help="set an exact native-collected test's positive deadline when it is selected",
+    )
+    parser.add_argument(
         "--suite-timeout",
         type=int,
         default=None,
@@ -114,13 +121,29 @@ def parse_batch_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         help="retry only classified host process/thread exhaustion this many times",
     )
     args = parser.parse_args()
-    _validate_batch_args(parser, args)
     if any("::" in str(path) for path in args.paths):
         args.granularity = "tests"
+    _validate_batch_args(parser, args)
     return parser, args
 
 
 def _validate_batch_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    args.member_timeouts = {}
+    for specification in args.member_timeout:
+        selector, separator, raw_timeout = specification.rpartition("=")
+        try:
+            seconds = int(raw_timeout)
+        except ValueError:
+            parser.error("member-timeout requires NATIVE_SELECTOR=positive integer seconds")
+        if not separator or "::" not in selector or selector != selector.strip() or seconds < 1:
+            parser.error(
+                "member-timeout requires an exact native test selector and positive seconds"
+            )
+        if selector in args.member_timeouts:
+            parser.error("member-timeout selectors must be unique")
+        args.member_timeouts[selector] = seconds
+    if args.member_timeouts and args.granularity != "tests":
+        parser.error("member-timeout requires tests granularity")
     if args.focused:
         if not args.paths:
             parser.error("--focused requires explicit test paths or native pytest node IDs")

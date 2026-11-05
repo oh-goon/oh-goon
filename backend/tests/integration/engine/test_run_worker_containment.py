@@ -6,6 +6,7 @@ untrusted workload that escapes its declared group/provider boundary.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import select
@@ -21,6 +22,7 @@ from time import monotonic
 import pytest
 
 from oh_goon.core.process_birth import ProcessBirthIdentity, observe_process_birth
+from oh_goon.engine import command
 from oh_goon.engine.atomic_execution_bytes import atomic_execution_bytes_supported
 from oh_goon.engine.command import (
     CommandProcessLifecycleEvent,
@@ -28,6 +30,7 @@ from oh_goon.engine.command import (
     run_command,
 )
 from oh_goon.engine.command_process_tree import CommandParentGuard, _terminate_process_group
+from oh_goon.runtime import exec_guard_protocol
 from oh_goon.runtime.exec_guard_protocol import GUARD_CHANNEL_ENV, GUARD_QUIESCENT
 from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor, RunWorkerLaunch
 from oh_goon.runtime.process_group import (
@@ -465,6 +468,86 @@ def test_startup_failure_retires_the_owned_session_before_reraising(
     finally:
         for _, descriptor in owned:
             os.close(descriptor)
+
+
+@pytest.mark.process
+@pytest.mark.skipif(not atomic_execution_bytes_supported(), reason="native Linux Run transport")
+@pytest.mark.parametrize("fault", ("native-errno", "withheld", "malformed", "zero-errno"))
+def test_exec_startup_failure_closes_pipes_and_reaps_the_exact_owned_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    baseline = run_command(
+        sys.executable, "-I", "-c", "print('native control')", parent_death_signal=True
+    )
+    assert baseline.returncode == 0 and baseline.stdout == "native control"
+    assert baseline.supervisor.final_process_group_quiescent
+
+    marker = tmp_path / "unexecuted-target"
+    executable = tmp_path / "invalid-exec"
+    executable.write_text("not a native executable format\n")
+    executable.chmod(0o700)
+    argv: tuple[str, ...] = (str(executable),)
+    if fault != "native-errno":
+        original_guard = command._EXEC_GUARD_PATH
+        fake = tmp_path / "withheld-exec-guard.py"
+        packet = {"withheld": b"", "malformed": b"error", "zero-errno": bytes(4)}[fault]
+        fake.write_text(
+            "import os,runpy,sys,time\n"
+            f"sys.path.insert(0, {str(original_guard.parent)!r})\n"
+            f"descriptor=int(os.environ[{exec_guard_protocol.EXEC_ERROR_FD_ENV!r}])\n"
+            "def interrupted_exec(*args, **kwargs):\n"
+            f"    packet={packet!r}\n"
+            "    if packet: os.write(descriptor, packet)\n"
+            "    time.sleep(30)\n"
+            "os.execvpe=interrupted_exec\n"
+            f"runpy.run_path({str(original_guard)!r},run_name='__main__')\n"
+        )
+        monkeypatch.setattr(command, "_EXEC_GUARD_PATH", fake)
+        monkeypatch.setattr(exec_guard_protocol, "STARTUP_TIMEOUT_SECONDS", 0.75)
+        argv = (
+            sys.executable,
+            "-I",
+            "-c",
+            f"from pathlib import Path; Path({str(marker)!r}).touch()",
+        )
+
+    owned: list[tuple[subprocess.Popen[str], int, int]] = []
+    original_accept = CommandParentGuard.accept
+
+    def accept(guard: CommandParentGuard, process: subprocess.Popen[str]) -> None:
+        original_accept(guard, process)
+        assert guard.guardian_pidfd is not None
+        owned.append((process, os.pidfd_open(process.pid), os.dup(guard.guardian_pidfd)))
+
+    monkeypatch.setattr(CommandParentGuard, "accept", accept)
+    started = monotonic()
+    try:
+        if fault == "native-errno":
+            with pytest.raises(OSError) as failure:
+                run_command(*argv, input_data=b"owned input", parent_death_signal=True)
+            assert failure.value.errno == errno.ENOEXEC
+            assert failure.value.filename == str(executable)
+        else:
+            expected = "confirmation is unavailable" if fault == "withheld" else "error is invalid"
+            with pytest.raises(RuntimeError, match=expected):
+                run_command(*argv, input_data=b"owned input", parent_death_signal=True)
+        assert monotonic() - started < 5
+        assert not marker.exists()
+        assert len(owned) == 1
+        process, leader, guardian = owned[0]
+        assert process.returncode is not None
+        assert all(
+            pipe is None or pipe.closed for pipe in (process.stdin, process.stdout, process.stderr)
+        )
+        assert select.select([leader, guardian], [], [], 0)[0] == [leader, guardian]
+        assert wait_for_process_session_quiescence(process.pid, timeout=1)
+        for descriptor in (leader, guardian):
+            with pytest.raises(ChildProcessError):
+                os.waitid(os.P_PIDFD, descriptor, os.WEXITED | os.WNOHANG)
+    finally:
+        for _, leader, guardian in owned:
+            os.close(leader)
+            os.close(guardian)
 
 
 @pytest.mark.process
