@@ -156,7 +156,7 @@ def test_dependency_source_preparation_reuses_one_inventory_before_composite_rea
     base = {"lock": _lock("1.0"), "base_revision": "a" * 40, "lock_path": _LOCK_PATH}
     with CodeMap(root) as native:
 
-        def selected_map(workspace: Path) -> AbstractContextManager[CodeMap]:
+        def selected_map(workspace: Path, **_options: object) -> AbstractContextManager[CodeMap]:
             assert workspace == root
             return nullcontext(native)
 

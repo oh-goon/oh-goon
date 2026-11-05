@@ -12,15 +12,22 @@ def test_repository_understanding_qualification_boundary_current_tree() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "import_statement",
+    [
+        "from oh_goon.repository_tooling.repository_understanding_policy import grade_candidate\n",
+        "from oh_goon.repository_tooling.repository_understanding_material import load_exam\n",
+    ],
+)
 def test_hashmarks_adapter_cannot_import_ru_grading_authority(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, import_statement: str
 ) -> None:
     package = tmp_path / "oh_goon"
     integrations = package / "integrations" / "hashmarks"
     integrations.mkdir(parents=True)
     adapter = integrations / "banana.py"
     adapter.write_text(
-        "from oh_goon.repository_tooling.repository_understanding_policy import grade_candidate\n",
+        import_statement,
         encoding="utf-8",
     )
     repository_tooling = package / "repository_tooling"

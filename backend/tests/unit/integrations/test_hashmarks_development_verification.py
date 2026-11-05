@@ -211,7 +211,7 @@ def test_native_task_preparation_refreshes_contributors_before_composite_observa
             observed.append((task, depth, before, native.index.is_current(source)))
             return result
 
-        def selected_map(workspace: Path) -> AbstractContextManager[CodeMap]:
+        def selected_map(workspace: Path, **_options: object) -> AbstractContextManager[CodeMap]:
             assert workspace == nested_repository
             return nullcontext(native)
 

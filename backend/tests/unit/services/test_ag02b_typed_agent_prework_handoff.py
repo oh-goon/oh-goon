@@ -179,6 +179,137 @@ def test_ag02b2a_lossless_prework_delivery_never_rereads_disk(tmp_path, monkeypa
     assert received.authority == "PREWORK_NOT_ADMITTED"
 
 
+@pytest.mark.parametrize(
+    "private", ("repository-member", "skill-member", "repository-reference", "skill-reference")
+)
+def test_retained_identity_valid_grader_delivery_cannot_be_replayed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, private: str
+) -> None:
+    from dataclasses import replace
+
+    from oh_goon.core.models import agent_source
+    from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+    from oh_goon.core.product_identity import stable_id
+
+    resolver, plan, options, _, _ = _case(tmp_path)
+    safe = resolver.prepare_agent_step_handoff(plan, **options)
+    role = "repository" if private.startswith("repository") else "skill"
+    if private.endswith("member"):
+        tree = getattr(safe.source, role)
+        private_member = replace(tree.members[0], path="docs/certification/answers/synthetic.txt")
+        members = tuple(sorted((*tree.members, private_member), key=lambda m: m.path))
+        private_tree = replace(
+            tree,
+            members=members,
+            content_identity=stable_id(
+                "agent-source-closure-v1",
+                {
+                    "members": [
+                        {"path": m.path, "sha256": m.sha256, "bytes": len(m.data)} for m in members
+                    ]
+                },
+            ),
+        )
+        source = replace(safe.source, **{role: private_tree})
+    else:
+        field = "repository_reference" if role == "repository" else "resolved_skill_reference"
+        source = replace(safe.source, **{field: "local:docs/certification/answers"})
+    unsafe = replace(safe, source=source)
+    # Construct a fully identity-valid retained delivery under the old privacy
+    # rules. The current decoder must reject it even when all digests match.
+    with monkeypatch.context() as old_policy:
+        old_policy.setattr(agent_source, "is_grader_private_source_path", lambda _path: False)
+        packet = unsafe.encode_prework_delivery()
+        expected = unsafe.handoff_identity
+        assert (
+            FrozenAgentStepHandoff.decode_prework_delivery(
+                packet, expected_handoff_identity=expected
+            ).handoff_identity
+            == expected
+        )
+    with pytest.raises(FleetPlanInvalid, match="grader-only"):
+        FrozenAgentStepHandoff.decode_prework_delivery(packet, expected_handoff_identity=expected)
+    with pytest.raises(FleetPlanInvalid, match="grader-only"):
+        unsafe.verify()
+
+
+@pytest.mark.parametrize("private_workspace", (False, True), ids=("blind-source", "grader-source"))
+def test_native_resolver_requires_current_source_without_grader_namespace_before_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, private_workspace: bool
+) -> None:
+    import os
+    import subprocess
+    from typing import Any
+
+    from oh_goon.core.models.agent_providers import (
+        AgentConnection,
+        AgentModel,
+        AgentProvider,
+        AgentProvidersConfig,
+        NativeAgentDefinition,
+        NativeAgentProfile,
+        ResolvedNativeAgent,
+    )
+
+    resolver, source, options, _, repository = _case(
+        tmp_path,
+        "- uses: agent\n  harness: native\n  task: Inspect the supplied source\n"
+        "  requested_effects:\n    recipients: [configured_model]\n",
+    )
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="native-source-prework",
+        definition=NativeAgentDefinition(executable=str(tmp_path / "never-executed-native")),
+        profile=NativeAgentProfile(backend="bubblewrap", inference_profile="fixture"),
+        executable_sha256="a" * 64,
+        connection=AgentConnection.select(
+            AgentProvidersConfig(
+                default_model="fixture",
+                providers={
+                    "fixture": AgentProvider(
+                        api="openai-chat-completions", base_url="http://127.0.0.1:12345"
+                    )
+                },
+                models={"fixture": AgentModel(provider="fixture", model="fixture")},
+            )
+        ),
+    )
+    if private_workspace:
+        private = repository / "docs/certification/answers"
+        private.mkdir(parents=True)
+        (private / "synthetic.json").write_text("SYNTHETIC_GRADER_ONLY_MATERIAL")
+    native_stat = os.stat
+
+    def no_private_stat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        assert str(path) != "answers", "native source privacy entered the grader subtree"
+        return native_stat(path, *args, **kwargs)
+
+    def no_process(*_args: Any, **_kwargs: Any) -> Any:
+        pytest.fail("native source prework launched a provider, worker or workload")
+
+    monkeypatch.setattr(os, "stat", no_private_stat)
+    monkeypatch.setattr(subprocess, "Popen", no_process)
+    options = {key: value for key, value in options.items() if key != "expected_source_sha256"}
+    # This is original native resolver prework, with its real workspace binding;
+    # it is not installed-harness or filesystem-denial qualification. The scope
+    # is the current reserved namespace, not arbitrary copies or Git history.
+    if private_workspace:
+        with pytest.raises(FleetPlanInvalid, match="Native Agent workspace contains grader-only"):
+            resolver.resolve_frozen_agents(
+                source, native_agent=selected, repository=repository, **options
+            )
+    else:
+        plan, deliveries, _ = resolver.resolve_frozen_agents(
+            source, native_agent=selected, repository=repository, **options
+        )
+        assert deliveries
+        assert all(handoff.harness == "native" for handoff in deliveries.values())
+        assert all(
+            step.kind == "agent" and step.workload.harness == "native" for step in plan.steps
+        )
+    assert not (tmp_path / "state.sqlite").exists()
+
+
 def test_ag02b2a_packet_tampering_and_forged_authority_fail_before_work(tmp_path, monkeypatch):
     import json
 
@@ -258,3 +389,54 @@ def test_ag02b2a_transport_rejects_inconsistent_source_tree_before_encoding(tmp_
         replace(
             handoff, source=replace(handoff.source, repository=changed)
         ).encode_prework_delivery()
+
+
+def test_public_capture_delivery_and_native_evidence_keep_grader_material_out(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+    from oh_goon.integrations.hashmarks import (
+        prepare_agent_evidence,
+        prompt_observation,
+        repository_observation,
+    )
+
+    resolver, plan, options, _, repository = _case(tmp_path)
+    public_marker = "public_scope_canary_42e8b71"
+    private_marker = "grader_scope_canary_763f1da"
+    (repository / "public.py").write_text(f'PUBLIC_VALUE = "{public_marker}"\n')
+    private = repository / "docs/certification/answers/canary.yml"
+    private.parent.mkdir(parents=True)
+    private.write_text(f"expected_claims:\n- {private_marker}\n")
+
+    handoff = resolver.prepare_agent_step_handoff(plan, **options)
+    received = FrozenAgentStepHandoff.decode_prework_delivery(
+        handoff.encode_prework_delivery(), expected_handoff_identity=handoff.handoff_identity
+    )
+    assert received.handoff_identity == handoff.handoff_identity
+    assert all(
+        member.path != "docs/certification/answers/canary.yml"
+        for member in received.source.repository.members
+    )
+    with prepare_agent_evidence(received) as evidence:
+        assert not (evidence.root / "repo/docs/certification/answers").exists()
+        for query in ("expected_claims", public_marker):
+            packet = repository_observation(
+                evidence.root,
+                tool="search_text",
+                query=query,
+                capture_identity=received.source.capture_identity,
+            )
+            raw = json.dumps(packet)
+            prompt = prompt_observation(
+                raw, expected_capture_identity=received.source.capture_identity
+            )
+            assert private_marker not in raw
+            assert private_marker not in prompt
+            assert packet["repository_absence"] == "not-claimed"
+            if query == public_marker:
+                assert any(row["path"] == "public.py" for row in packet["retrieval"]["results"])
+                assert public_marker in json.dumps(packet["source"])
+                assert public_marker in prompt

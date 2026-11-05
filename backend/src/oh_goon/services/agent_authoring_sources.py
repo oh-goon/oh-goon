@@ -24,7 +24,10 @@ from oh_goon.core.models.fleet_plan_composition import (
     validate_domain_input_value,
 )
 from oh_goon.core.product_identity import stable_id
-from oh_goon.core.source_tree_policy import is_transient_source_path
+from oh_goon.core.source_tree_policy import (
+    is_grader_private_source_path,
+    is_transient_source_path,
+)
 from oh_goon.engine.errors import OperationCancelledError
 
 if TYPE_CHECKING:
@@ -193,6 +196,12 @@ def explain_agent_sources(
     if not skill_ref.startswith("local:"):
         raise FleetPlanInvalid("AG-01 skill must use a bounded, immutable source reference")
 
+    for root, reference in (
+        (repository_root, repo_ref),
+        (prepared.root if prepared else skill_root, skill_ref),
+    ):
+        _require_public_agent_source_selection(root, reference)
+
     if private_native_roots:
         # Reject both source selections before the first fd-anchored byte read.
         # Native homes are explicit directory scopes; no store files are opened.
@@ -271,6 +280,15 @@ def _require_native_project_source_privacy(relative: PurePosixPath) -> None:
         raise FleetPlanInvalid("Agent source includes native authentication/configuration state")
 
 
+def _require_public_agent_source_selection(root: Path, reference: str) -> None:
+    selected = root / reference.removeprefix("local:")
+    if any(
+        is_grader_private_source_path(path)
+        for path in (root, reference, selected, selected.resolve())
+    ):
+        raise FleetPlanInvalid("Agent source selects grader-only material")
+
+
 def _snapshot_authorized_tree(
     root: Path,
     reference: str,
@@ -291,6 +309,7 @@ def _snapshot_authorized_tree(
     """
     if cancel_requested is not None and cancel_requested():
         raise OperationCancelledError("Agent source capture cancelled")
+    _require_public_agent_source_selection(root, reference)
     if (
         expected_directory is not None
         and (root / reference.removeprefix("local:")).resolve(strict=True) != expected_directory
@@ -302,9 +321,16 @@ def _snapshot_authorized_tree(
         _require_private_native_source_separation(
             private_native_roots, (root / reference.removeprefix("local:"),)
         )
-    cache_key = (label, str(root) + "\0" + reference)
+    # A public evidence capture may omit grader material; it cannot prove that
+    # the native tool's original working directory contains no such material.
+    # Keep that stronger initial inspection in its own operation-local scope.
+    cache_scope = str(root) + "\0" + reference
+    if expected_directory is not None:
+        cache_scope += "\0native-workspace:" + str(expected_directory)
+    cache_key = (label, cache_scope)
     if tree_cache is not None and cache_key in tree_cache:
         frozen = tree_cache[cache_key]
+        frozen.verify()
         if private_native_roots:
             for member in frozen.members:
                 _require_native_project_source_privacy(PurePosixPath(member.path))
@@ -375,6 +401,13 @@ def _snapshot_authorized_tree(
             if cancel_requested is not None and cancel_requested():
                 raise OperationCancelledError("Agent source capture cancelled")
             rel = subpath / entry.name
+            if is_grader_private_source_path(rel):
+                if label == "repository" and expected_directory is not None:
+                    raise FleetPlanInvalid(
+                        "Native Agent workspace contains grader-only material; "
+                        "select a blind checkout"
+                    )
+                continue
             if ".git" in rel.parts or (label == "repository" and is_transient_source_path(rel)):
                 continue
             before = os.stat(entry.name, dir_fd=dir_fd, follow_symlinks=False)
