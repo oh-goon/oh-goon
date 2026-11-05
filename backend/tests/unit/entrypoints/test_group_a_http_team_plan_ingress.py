@@ -20,6 +20,7 @@ from oh_goon.core.models.goon_plan_source import TeamGoonSource
 from oh_goon.core.models.league import ConfiguredTeamPipeline, LeagueTeam
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.scheduling import SchedulingPriority
+from oh_goon.runtime.execution import RunExecutionSupervisor
 from oh_goon.services.fleet_plans import FleetPlanService
 from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
@@ -58,8 +59,9 @@ def service(*, enrolled: FleetPreworkProvisioner | None, authenticated=True):
         require_authenticated_fleet=authenticated,
         fleet_provisioner=enrolled,
     )
-    control = object.__new__(FleetRunControlPlane)
-    control._lifecycle = owner
+    control = FleetRunControlPlane(
+        forbidden, forbidden, owner, forbidden, RunExecutionSupervisor(), forbidden
+    )
     plans = FleetPlanService(object(), control, object(), object(), object())
     plans.run = Mock(return_value=object())
     league = SimpleNamespace(

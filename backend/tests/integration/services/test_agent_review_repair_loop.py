@@ -1337,15 +1337,14 @@ selected = json.loads(sys.argv[1])
 # cuts explicitly lose both execution owner and controller; ordinary control
 # loss alone must leave a healthy claimed worker running.
 if selected["cut"] == "admission":
-    from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
+    from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor
 
-    start_phase = FleetRunControlPlane.start_prepared_plan
-
-    def crash_after_admission(self, *args, **kwargs):
-        start_phase(self, *args, **kwargs)
+    def crash_before_worker_launch(self, *args, **kwargs):
+        # The original ticket and Run are durable before submit is entered.
+        # No healthy worker is launched by this prelaunch crash cut.
         os._exit(84)
 
-    FleetRunControlPlane.start_prepared_plan = crash_after_admission
+    RunExecutionSupervisor.submit = crash_before_worker_launch
 elif selected["cut"] in {"process", "apply"}:
     from dataclasses import replace
     from threading import Thread
@@ -1818,6 +1817,8 @@ def test_controller_death_during_admission_process_and_applied_effect(
                 )
                 # Host observation does not manufacture the missing owner cleanup receipt.
                 assert details[-1].game_tape.status.value != "PASSED"
+            if cut == "admission":
+                assert not started and not observed
             if cut == "apply":
                 assert len(observed) == 6
                 assert (repo / "code.txt").read_text() == "repaired\n"
