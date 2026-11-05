@@ -1315,10 +1315,29 @@ def test_documentation_route_keeps_policy_and_certification_sources_protected() 
 
 
 _BEFORE_HASHMARKS = (
-    '[project]\nname = "proof"\nversion = "1"\n'
+    '[project]\nname = "proof"\nversion = "1"\nrequires-python = ">=3.12"\n'
     'dependencies = ["hashmarks @ https://example.invalid/old.whl", "stable>=1"]\n'
 )
 _AFTER_HASHMARKS = _BEFORE_HASHMARKS.replace("old.whl", "new.whl")
+
+
+_HASHMARKS_BASE_LOCK = """version = 1
+revision = 3
+requires-python = ">=3.12"
+[[package]]
+name = "proof"
+version = "1"
+source = { editable = "." }
+dependencies = [{ name = "hashmarks" }, { name = "stable" }]
+[[package]]
+name = "hashmarks"
+version = "1"
+source = { url = "https://example.invalid/old.whl" }
+[[package]]
+name = "stable"
+version = "1"
+source = { registry = "https://pypi.org/simple" }
+"""
 
 
 def _hashmarks_upgrade_proof(
@@ -1326,9 +1345,10 @@ def _hashmarks_upgrade_proof(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     (root / "backend").mkdir()
     (root / "backend/pyproject.toml").write_text(before)
+    (root / "backend/uv.lock").write_text(_HASHMARKS_BASE_LOCK)
     for argv in (
         ("init", "-q"),
-        ("add", "backend/pyproject.toml"),
+        ("add", "backend/pyproject.toml", "backend/uv.lock"),
         (
             "-c",
             "user.name=Proof",
@@ -1347,7 +1367,7 @@ def _hashmarks_upgrade_proof(
     ).stdout.strip()
     (root / "backend/pyproject.toml").write_text(after)
     (root / "backend/uv.lock").write_text(
-        'version = 1\n[[package]]\nname = "opaque-new-transitive"\nversion = "anything"\n'
+        _HASHMARKS_BASE_LOCK.replace("old.whl", "new.whl")
     )
     plan, result = _proof(
         source="backend/pyproject.toml",
@@ -1372,16 +1392,46 @@ def _hashmarks_upgrade_proof(
             for path in plan["changed_paths"]
         ],
     )
+    plan["evidence"]["hashmarks_native_artifacts"] = (
+        admission_owner._native_hashmarks_artifact_comparison(root, base)
+    )
     result["outcomes"].append({"owner": "Native package", "returncode": 0})
     result["plan"] = copy.deepcopy(plan)
     return plan, result
 
 
-def test_hashmarks_upgrade_uses_native_intent_despite_opaque_lock_transitives(
+def test_hashmarks_upgrade_requires_native_non_target_artifact_equivalence(
     tmp_path: Path,
 ) -> None:
     plan, result = _hashmarks_upgrade_proof(tmp_path)
     _validate_declared(plan, result, tmp_path)
+
+
+@pytest.mark.parametrize("changed", ("wheel", "new-transitive"))
+def test_hashmarks_upgrade_cannot_claim_equivalence_when_uv_exports_differ(
+    tmp_path: Path, changed: str
+) -> None:
+    plan, result = _hashmarks_upgrade_proof(tmp_path)
+    lock_path = tmp_path / "backend/uv.lock"
+    lock = lock_path.read_text()
+    if changed == "wheel":
+        lock += (
+            'wheels = [{ url = "https://example.invalid/stable-1-py3-none-any.whl", '
+            'hash = "sha256:' + "1" * 64 + '" }]\n'
+        )
+    else:
+        lock = lock.replace(
+            'source = { url = "https://example.invalid/new.whl" }\n',
+            'source = { url = "https://example.invalid/new.whl" }\n'
+            'dependencies = [{ name = "new-transitive" }]\n',
+        )
+        lock += (
+            '[[package]]\nname = "new-transitive"\nversion = "1"\n'
+            'source = { registry = "https://pypi.org/simple" }\n'
+        )
+    lock_path.write_text(lock)
+    with pytest.raises(ValueError, match="non-Hashmarks artifact equivalence"):
+        _validate_declared(plan, result, tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -3299,6 +3349,24 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
             "scope": "mandatory-hashmarks-upgrade",
             "consumer_coverage": "not-claimed",
         }
+        plan["evidence"]["hashmarks_native_artifacts"] = {
+            "schema": "oh-goon.native-uv-artifact-comparison/v1",
+            "authority": "native-uv-export",
+            "equivalent": True,
+            "before_artifact_sha256": "a" * 64,
+            "after_artifact_sha256": "a" * 64,
+            "before_artifact_bytes": 25,
+            "after_artifact_bytes": 25,
+            "excluded_packages": ["hashmarks"],
+            "scope": {
+                "format": "pylock.toml",
+                "groups": "all",
+                "extras": "all",
+                "workspace": "not-emitted",
+                "exclusion": "native-no-emit-package",
+            },
+            "tool": {"name": "uv", "version": "uv synthetic", "executable": "/native/uv"},
+        }
     elif fault in {"generic-dependency-update", "unclaimed-hashmarks-upgrade"}:
         plan["changed_paths"].append("backend/uv.lock")
         plan["evidence"]["observations"].append(
@@ -3455,6 +3523,12 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
     monkeypatch.setattr(package_slim, "canonical_source_identity", source_identity)
     monkeypatch.setattr(command_owner, "run_command", git)
     monkeypatch.setattr(admission_owner, "run_command", git)
+    if "hashmarks_native_artifacts" in plan["evidence"]:
+        monkeypatch.setattr(
+            admission_owner,
+            "_native_hashmarks_artifact_comparison",
+            lambda _root, _base: plan["evidence"]["hashmarks_native_artifacts"],
+        )
 
     status = gate.main()
 
