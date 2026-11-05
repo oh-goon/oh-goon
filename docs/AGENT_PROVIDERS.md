@@ -79,6 +79,11 @@ JSON and TOML catalogs, so TOML may still be authored manually.
 Provider and setup refusals publish typed codes and safe next actions. Native
 exception text, notes and validation context are not public diagnostics. JSON
 refusals use a single versioned stdout object, with operator hints on stderr.
+Native CLI failures also retain the allowlisted harness and requested mode.
+Terminal/JSON and native isolation-tool refusals identify a fixed missing
+capability and its next action; causes not established by that owner remain
+`not-established`. These fields do not infer a cause from private exception
+text or imply qualification from an installed executable.
 
 Compatibility disposition: retain `NATIVE-CLI-SELECTION` and
 `CODEX-SERVICE-PROTOCOL` from the [harness inventory](development/AGENT_HARNESS_COMPATIBILITY.md).

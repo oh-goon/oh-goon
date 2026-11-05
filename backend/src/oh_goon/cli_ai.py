@@ -44,6 +44,43 @@ _MAX_TASK_BYTES = 65536
 _MAX_TERMINAL_CHUNK_BYTES = 65536
 _MAX_FAILURE_STDERR_BYTES = 16384
 
+# Fixed presentation data for this CLI's existing checks, never tool discovery
+# or a classification of arbitrary downstream exception text.
+_NATIVE_SETUP_REQUIREMENTS = {
+    "INTERACTIVE_JSON_UNSUPPORTED": (
+        "interactive_json_transport",
+        "Use --headless with --json, or select --interactive without --json in a POSIX terminal.",
+    ),
+    "INTERACTIVE_TERMINAL_REQUIRED": (
+        "posix_terminal",
+        "Interactive mode requires a POSIX terminal; select --headless for non-terminal execution.",
+    ),
+    "RESOURCE_ISOLATION_REQUIRED": (
+        "isolated_resource_limits",
+        "Resource caps require a native isolated execution profile; select a supported isolated profile.",
+    ),
+    "BUBBLEWRAP_UNAVAILABLE": (
+        "bwrap",
+        "The selected isolated profile requires installed Bubblewrap (bwrap); make that native tool available before retrying.",
+    ),
+    "SYSTEMD_RUN_UNAVAILABLE": (
+        "systemd-run",
+        "Selected resource caps require installed systemd-run; make that native tool available before retrying.",
+    ),
+    "SYSTEMCTL_UNAVAILABLE": (
+        "systemctl",
+        "Selected resource caps require installed systemctl; make that native tool available before retrying.",
+    ),
+}
+
+
+class _NativeCliRequirementError(AgentProviderError):
+    """A fixed CLI-owned prerequisite, without caller/native exception detail."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(_NATIVE_SETUP_REQUIREMENTS[reason][1])
+
 
 def add_ai_command[_Parser: argparse.ArgumentParser](
     subparsers: argparse._SubParsersAction[_Parser],
@@ -111,8 +148,10 @@ def _task(args: argparse.Namespace) -> str:
 
 def _interactive(args: argparse.Namespace) -> bool | None:
     terminal = sys.stdin.isatty() and sys.stdout.isatty()
-    if args.interactive and (args.as_json or not terminal or os.name == "nt"):
-        raise AgentProviderError("Interactive mode requires a POSIX terminal and cannot use --json")
+    if args.interactive and args.as_json:
+        raise _NativeCliRequirementError("INTERACTIVE_JSON_UNSUPPORTED")
+    if args.interactive and (not terminal or os.name == "nt"):
+        raise _NativeCliRequirementError("INTERACTIVE_TERMINAL_REQUIRED")
     if args.interactive:
         return True
     return (
@@ -129,19 +168,17 @@ def _isolation(selected: ResolvedNativeAgent) -> ProcessIsolationBackend | None:
     )
     if selected.profile.backend == "local":
         if requested:
-            raise AgentProviderError("Resource caps require a native isolated execution profile")
+            raise _NativeCliRequirementError("RESOURCE_ISOLATION_REQUIRED")
         return None
     executable = shutil.which("bwrap")
     if executable is None:
-        raise AgentProviderError(
-            "The selected isolated profile requires installed Bubblewrap (bwrap)"
-        )
+        raise _NativeCliRequirementError("BUBBLEWRAP_UNAVAILABLE")
     resource_executable = shutil.which("systemd-run") if requested else None
     resource_query_executable = shutil.which("systemctl") if requested else None
     if requested and resource_executable is None:
-        raise AgentProviderError("Selected resource caps require installed systemd-run")
+        raise _NativeCliRequirementError("SYSTEMD_RUN_UNAVAILABLE")
     if requested and resource_query_executable is None:
-        raise AgentProviderError("Selected resource caps require installed systemctl")
+        raise _NativeCliRequirementError("SYSTEMCTL_UNAVAILABLE")
     return BubblewrapProcessIsolation(
         executable,
         standard_resource_executable=resource_executable,
@@ -273,6 +310,26 @@ def run_ai_command(args: argparse.Namespace) -> int:
     except (FleetDomainError, OSError, ValueError, UnicodeError) as exc:
         code = type(exc).code if isinstance(exc, FleetDomainError) else "NATIVE_COMMAND_ERROR"
         action = "Review the selected native profile, workspace policy, installed tools and model connection. Inspect retained Run evidence before retrying; this diagnostic grants no repair or replay authority."
+        reason = exc.reason if isinstance(exc, _NativeCliRequirementError) else None
+        requirement = _NATIVE_SETUP_REQUIREMENTS.get(reason) if isinstance(reason, str) else None
+        if requirement is not None:
+            action = (
+                requirement[1] + " This refusal grants no execution, repair or replay authority."
+            )
+        harness = args.agent if args.agent in {"opencode", "pi", "codex"} else "unknown"
+        requested_mode = (
+            "interactive"
+            if args.interactive
+            else "headless"
+            if args.headless or args.as_json
+            else "automatic"
+        )
+        context = {
+            "harness": harness,
+            "requested_mode": requested_mode,
+            "reason": reason if requirement is not None else "not-established",
+            "missing_capability": requirement[0] if requirement is not None else "not-established",
+        }
         if isinstance(exc, RepositoryEffectQuarantined):
             action = (
                 "Preserve the selected state. Run 'oh-goon doctor --runtime' with the "
@@ -287,11 +344,17 @@ def run_ai_command(args: argparse.Namespace) -> int:
                         "status": "error",
                         "code": code,
                         "safe_next_action": action,
+                        **context,
                     }
                 )
             )
         else:
             print(f"{code}: {action}", file=sys.stderr)
+            print(
+                f"Harness: {harness} | Requested mode: {requested_mode} | "
+                f"Missing capability: {context['missing_capability']} | Reason: {context['reason']}",
+                file=sys.stderr,
+            )
         return 2
 
 

@@ -6,11 +6,15 @@ and model demonstrations remain separate evidence of actual native behavior.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
+import tempfile
+from contextlib import closing
 from dataclasses import replace
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +24,8 @@ from typing import Any
 import pytest
 
 from oh_goon._application_worker_runtime import WorkerGitConfiguration
+from oh_goon.api import dependencies
+from oh_goon.api.app import create_app
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.cli_plan_run_readback import run_handoff_projection
@@ -48,6 +54,7 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
 )
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
+from tests.integration.api.client import authenticated_api_client
 
 
 @pytest.mark.parametrize(
@@ -493,6 +500,117 @@ def test_public_native_configuration_is_preflighted_before_run_admission(
         runtime.shutdown(wait_for_runs=True)
 
 
+def _native_run_cli_readback(run_id: str, view: str, *, expected: int = 0) -> dict[str, Any]:
+    arguments = [sys.executable, "-I", "-m", "oh_goon", "runs", view, run_id, "--json"]
+    if view == "events":
+        arguments.extend(("--after", "0", "--limit", "1"))
+    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+        completed = subprocess.run(
+            arguments,
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=errors,
+            timeout=45,
+        )
+        output.seek(0)
+        errors.seek(0)
+        stdout, stderr = output.read(1_048_577), errors.read(65_537)
+    assert len(stdout) <= 1_048_576 and len(stderr) <= 65_536
+    assert completed.returncode == expected, (stdout, stderr)
+    payload: dict[str, Any] = json.loads(stdout)
+    payload.pop("_cli", None)  # Global CLI publication metadata is not a Run fact.
+    return payload
+
+
+def _native_readback_state(database: Path) -> str:
+    """Observe all durable tables, including worker claims, through native SQLite."""
+    digest = hashlib.sha256()
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
+        connection.execute("BEGIN")
+        for statement in connection.iterdump():
+            digest.update(statement.encode("utf-8"))
+            digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _assert_native_run_surfaces(runtime: ApplicationRuntime, run_id: str) -> None:
+    """Read one original native Run through actual CLI and authenticated API transport."""
+    detail = runtime.runs.get(run_id)
+    tape = detail.game_tape
+    app = create_app(local_access_token="synthetic-native-readback-token")
+    app.dependency_overrides[dependencies.fleet_run_control_plane] = lambda: runtime.runs
+    # Do not enter the application lifespan: this is an observer, not another
+    # application startup/recovery/scheduler against the selected state root.
+    with closing(authenticated_api_client(app)) as client:
+        response = client.get(f"/api/fleet/runs/{run_id}")
+        assert response.status_code == 200
+        assert response.json() == detail.model_dump(mode="json")
+        assert _native_run_cli_readback(run_id, "tape") == response.json()["game_tape"]
+        handoff = _native_run_cli_readback(run_id, "handoff")
+        assert handoff == run_handoff_projection(detail)
+        assert handoff["outcome"] == detail.outcome.value
+        assert handoff["recorded_steps"]["omitted_steps"] == 0
+        steps = (step for repository in tape.repositories for step in repository.steps)
+        for step, retained in zip(steps, handoff["recorded_steps"]["steps"], strict=True):
+            assert retained["step_execution_id"] == step.step_execution_id
+            assert retained["status"] == step.status.value
+            assert retained["settlement"] == step.settlement.model_dump(mode="json")
+            if step.native_agent_observations:
+                original = step.native_agent_observations[-1]
+                claim = retained["native_claims"][0]
+                assert claim["authority"] == "UNTRUSTED_HARNESS_CLAIM"
+                assert claim["input_identity"] == original.input_identity
+                assert claim["source_identity"] == original.source_identity
+                assert claim["occurrence"] == original.occurrence
+                assert claim["settled_claim"] is original.settled
+                assert claim["failed_claim"] is original.failed
+                assert claim["omitted_events"] == (
+                    max(0, len(original.events) - len(claim["events"]))
+                    + original.omitted_observations
+                )
+            else:
+                assert retained["native_claims"] == []
+                assert retained["native_claim_availability"] == "unavailable"
+
+        event_response = client.get(
+            f"/api/fleet/runs/{run_id}/events", params={"after": 0, "limit": 1}
+        )
+        assert event_response.status_code == 200
+        page = event_response.json()
+        assert page == runtime.runs.events(run_id, 0, limit=1).model_dump(mode="json")
+        assert _native_run_cli_readback(run_id, "events") == page
+        assert len(page["events"]) == 1 and page["has_more"]
+        assert page["next_sequence"] == page["events"][-1]["sequence"]
+
+        # Process-local output is gone, while accepted output evidence remains.
+        logs = client.get(f"/api/fleet/runs/{run_id}/live-output")
+        assert logs.status_code == 200
+        assert _native_run_cli_readback(run_id, "logs", expected=3) == logs.json()
+        assert logs.json()["state"] == "UNAVAILABLE"
+        assert logs.json()["available"] is False and logs.json()["chunks"] == []
+        assert logs.json()["failure_navigation_state"] == "UNAVAILABLE"
+
+        outputs = _native_run_cli_readback(run_id, "outputs")
+        assert outputs["fleet_run_id"] == run_id
+        assert outputs["artifact_observation"] is None  # Unobserved is not known absent.
+        for repository, projected in zip(tape.repositories, outputs["repositories"], strict=True):
+            assert projected["repository_execution_id"] == repository.repository_execution_id
+            for step, output in zip(repository.steps, projected["steps"], strict=True):
+                assert output["step_execution_id"] == step.step_execution_id
+                assert output["outputs"] == [item.model_dump(mode="json") for item in step.outputs]
+                assert output["artifacts"] == [
+                    item.model_dump(mode="json") for item in step.artifacts
+                ]
+                for name in ("stdout_evidence", "stderr_evidence"):
+                    evidence = getattr(step, name)
+                    assert output[name] == (
+                        evidence.model_dump(mode="json") if evidence is not None else None
+                    )
+
+    # Reads did not rewrite the accepted outcome, native claims, or verification.
+    assert runtime.runs.get(run_id).model_dump(mode="json") == detail.model_dump(mode="json")
+
+
 @pytest.mark.skipif(
     sys.platform != "linux" or shutil.which("bwrap") is None, reason="Bubblewrap required"
 )
@@ -642,8 +760,13 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
         if runtime is not None:
             runtime.shutdown(wait_for_runs=True)
 
-    # A new application instance reads the original Journal; no native session is reopened.
-    reloaded = ApplicationRuntime.build(standard_local=True)
+    # Retire the fixture executables before any fresh observer opens the original
+    # Journal. Readback cannot need a live harness or silently rerun its work.
+    for agent in ("codex", "pi", "opencode"):
+        (tmp_path / f"native-{agent}").unlink()
+    database = tmp_path / "state" / "app.sqlite"
+    before_readback = _native_readback_state(database)
+    reloaded = ApplicationRuntime.build(startup_purpose="observation")
     try:
         observations = []
         snapshots = []
@@ -662,6 +785,10 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
             assert steps[1].status is (
                 GameTapeStatus.FAILED if agent == "codex" else GameTapeStatus.PASSED
             )
+            assert observations[-1].authority == "UNTRUSTED_HARNESS_CLAIM"
+            assert observations[-1].settled and not observations[-1].failed
+            assert steps[0].stdout_evidence is not None
+            _assert_native_run_surfaces(reloaded, run_id)
         assert len({item.input_identity for item in observations}) == 3
         assert len({item.source_identity for item in observations}) == 3
         assert snapshots[0] == snapshots[1]
@@ -669,6 +796,7 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
         assert (repository / "code.py").read_text() == "VALUE = 42\n"
     finally:
         reloaded.shutdown(wait_for_runs=True)
+    assert _native_readback_state(database) == before_readback
 
 
 @pytest.mark.parametrize("mode", ["failure", "malformed", "timeout", "output_limit"])

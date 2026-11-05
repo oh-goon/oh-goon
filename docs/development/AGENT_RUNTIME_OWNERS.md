@@ -859,8 +859,8 @@ support bit, scheduler or qualification gate is added.
 | EVI-02 | Frozen selection, original receipts, Step/attempt identity and result accounting | Evidence owners implemented. Only the exact selected portable corpus below is a fresh result; installed suites and mere linked test names are not. |
 | EVI-03 | Native byte/observation bounds and durable omissions | Implemented; event/contract/settlement fixtures preserve limits and unknown output. Bounded text is not complete-stream or verification authority. |
 | EVI-04 | Original Run/Step/attempt and fresh source/occurrence binding | Implemented; contract mutants and real-child handoff retain separate identities and earlier failed verification. |
-| EVI-05 | Original Journal/Game Tape plus CLI/API projections | Implemented shared read owners; complete same-native-Run cross-surface comparison is partial. Current public readback is `runs outputs/events/handoff`; retired `plan` command spelling in the requirements is historical. |
-| EVI-06 | Safe version/capability/endpoint refusal | Implemented selected safe diagnostics; complete harness/mode/actionable-next-step diagnostic acceptance remains unqualified. |
+| EVI-05 | Original Journal/Game Tape plus CLI/API projections | Shared read owners; the [controlled cross-harness case][census-native-run] compares each original claimed-worker Run through fresh CLI outputs/events/handoff/tape/logs and authenticated API detail/events/live-output. It retains failed independent verification, bounded claims and unavailable transient output after the harness binaries are removed, and checks durable state is unchanged by reads. Current public spelling is `runs`, not the historical `plan`. This A-level fixture does not qualify installed upstream implementations. |
+| EVI-06 | Safe version/capability/endpoint refusal | CLI-owned terminal/isolation refusals retain bounded harness, requested mode, missing capability and safe next action. Unclassified downstream causes remain explicitly unestablished rather than inferred from exception prose. Complete installed harness/mode diagnostic acceptance remains unqualified. |
 | EVI-07 | Existing subtraction policy and retained negative tests | Implemented maintenance obligation. No adaptation/test deletion occurs here, so replacement A+B evidence is N/A to this change. |
 
 #### Adversarial vectors
@@ -899,7 +899,7 @@ support bit, scheduler or qualification gate is added.
 | T30 | Owned service execution version refusal; existing registry | Constraint/review evidence exists; no installed upgrade experiment selected. |
 | T31 | Existing removal gates and negative tests | N/A to this documentation change; no deliberate test-disable experiment or adaptation removal is claimed. |
 | T32 | Backend installed-suite selection guards; original native outcome accounting | An all-skipped/empty installed invocation remains unqualified even if raw pytest exits zero; selection guards are not an installed-result gate. Current B/C NOT_RUN; this corpus has zero skipped/deselected/resumed cases. |
-| T33 | Original CLI readback, API/Game Tape projections and lifecycle tests | Component A evidence; complete same-native-Run comparison across all surfaces remains partial. |
+| T33 | Original CLI readback, API/Game Tape projections and lifecycle tests | The controlled Codex → Pi → OpenCode claimed-worker case compares actual fresh-process CLI and authenticated API against the same original Game Tape cut for each Run; later success cannot erase the first failed verifier. Installed cross-surface qualification remains separate. |
 | T34 | [X0][census-x0], retired-input refusal and registry retirement records | Retained source/refusal evidence; no removal in this change, so replacement proof N/A. |
 | T35 | Frozen provider snapshot; command stream and service diagnostic invariance tests | The frozen-provider subset ran. Command-stream and service diagnostic-invariance cases are mapped existing A cases, NOT_RUN here; no universal formatting-invariance claim. |
 | T36 | Executable-byte verification; contract source/execution identity mutants | A fixtures. Entrypoint hashing does not seal an entire imported native package. |
@@ -959,7 +959,7 @@ support bit, scheduler or qualification gate is added.
 | D07 | Frozen identity, replay refusal and selected crash cases mapped | Full live generation/reload/crash matrix remains partial. |
 | D08 | Scoped canaries and explicit unsupported-mode refusals | Universal native-store/tool/peer qualification not complete. |
 | D09 | Fresh separate-Run handoff; no transcript migration | Current real-child A case passes; installed combined chain remains unqualified. |
-| D10 | Original Journal/Game Tape/read projections | Component evidence exists; complete native cross-surface matrix remains partial. |
+| D10 | Original Journal/Game Tape/read projections | Maintained same-Run A-level cross-surface fixture, including lost transient stdout and unchanged durable state. Installed and other-environment matrices remain unqualified. |
 | D11 | Protective tests retained | No deletion/disable experiment; replacement proof N/A to this change. |
 | D12 | Focused meaningful boundary checks; complete portfolios daily | Current root policy and merge marker include necessary affected process proof. The test-guide sentence saying the fast loop excludes all process/scale work is stale; HUG-93 owns that guidance gap. |
 | D13 | Behavioral source review/portable proof bound to 82900fce; documentation checks apply after this edit | The baseline result is not relabeled as installed or whole-final-source qualification. Final PR checks are reported in the PR. |
