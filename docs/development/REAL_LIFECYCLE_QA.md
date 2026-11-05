@@ -21,6 +21,57 @@ Keep two questions separate in review and issue updates:
    or receipt owner. Unrun, blocked, incomplete and historical results cannot
    establish a current PASS.
 
+### Five-question QA for repository findings
+
+Before turning an agent's SSOT, quality, or performance claim into a task or
+refactor, answer these five questions in order. This is short-context review
+guidance, **not** a new proof registry, release gate, or extra PR prerequisite.
+
+1. **What does this exact revision do?** Record the inspected commit, file,
+   function, callers, and relevant tests. Read the code, not just grep output
+   or a stale sweep. A failing test must have an actual run receipt.
+2. **Which fact, scope, and authority?** Hashmarks owns authored source
+   declarations, repository/source relationships, freshness, relevance and
+   verification nominations. Native uv owns effective resolution and runtime
+   selection; native Git and Oh-Goon own worktree commands, mutation safety,
+   execution custody and result authority. Show two *accepted* producers for
+   the same semantic fact before calling it an SSOT violation.
+3. **Where does an accepted fact become wrong?** Trace entrypoint -> producer
+   observation -> adapter -> accepting consumer/policy -> observable decision.
+   Check that Oh-Goon retains producer unknown/ambiguous/stale, incomplete,
+   truncated and negative-evidence qualifications; a bounded projection is
+   not permission to reconstruct a missing relationship or assert absence.
+4. **What existing behavior disproves the suspicion?** Inspect the closest
+   safe control and regressions before proposing a replacement. For example,
+   `GitService` is a native execution witness (not automatically a second
+   CodeMap); `git status --porcelain=v2 -z` has explicit parsing tests;
+   `os.walk` prunes `directories` before descending; and repeated SHA-256
+   calls may bind different execution/custody facts. Check actual consumers
+   and measurements rather than inferring fragility or slow discovery.
+5. **What result is proved, and what is the least change?** `FINDING`
+   requires a reachable contract violation and consequence; `LEAVE ALONE`
+   means the behavior is intentional/safe; `INSUFFICIENT EVIDENCE` means
+   the decisive contract, path, test or measurement was not established.
+   `CLEAN` applies only to a completed declared scope. For a finding, name
+   one existing owner and a focused regression; do not add another manager,
+   scanner, evidence plane or merge gate without a separate proven need.
+
+For Hashmarks declarations and relationships, inspect the
+[public integration exports](../../backend/src/oh_goon/integrations/hashmarks/__init__.py)
+and their actual consumers. In particular,
+[`engine/project.py::project_python`](../../backend/src/oh_goon/engine/project.py)
+consumes authored Python declarations, whereas native uv still decides
+effective compatibility;
+[`integrations/hashmarks/development_verification.py`](../../backend/src/oh_goon/integrations/hashmarks/development_verification.py)
+projects producer changed-set relationships and nominations, and
+[`repository_tooling/development_verification.py`](../../backend/src/oh_goon/repository_tooling/development_verification.py)
+admits their use under Oh-Goon policy. Ask whether these preserve the producer's
+typed meaning and coverage under a *legitimate richer or less precise* result;
+do not describe a candidate as a defect without a reproducer. Start with the
+[existing source-fact tests](../../backend/tests/unit/integrations/test_hashmarks_source_facts.py)
+and [development-verification tests](../../backend/tests/unit/integrations/test_hashmarks_development_verification.py),
+then add the smallest missing consumer-level case if evidence warrants one.
+
 These worked examples point to existing owners rather than define another
 capability or result registry:
 
