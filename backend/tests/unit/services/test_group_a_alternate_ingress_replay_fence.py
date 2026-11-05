@@ -12,7 +12,7 @@ import pytest
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from oh_goon.core.vocabulary import OperationAction
-from oh_goon.runtime.execution import RunWorkerLaunch
+from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from tests.unit.services.test_group_a_atomic_fleet_prework_ingress import facts

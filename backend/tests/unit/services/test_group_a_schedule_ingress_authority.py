@@ -18,7 +18,7 @@ from oh_goon.core.product_identity import schedule_repository_fleet_run_id
 from oh_goon.core.schedule_transitions import mark_repository_running
 from oh_goon.core.vocabulary import FleetRunSource, OperationAction
 from oh_goon.runtime.database import LocalDatabase
-from oh_goon.runtime.execution import RunWorkerLaunch
+from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore

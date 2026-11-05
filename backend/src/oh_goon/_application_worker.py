@@ -31,7 +31,8 @@ from oh_goon.engine.atomic_execution_bytes import (
 )
 from oh_goon.integrations.hashmarks import require_loaded_hashmarks_runtime
 from oh_goon.runtime.database import LocalDatabase, WorkerDatabaseContext
-from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionTicket, RunWorkerLaunch
+from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionTicket
+from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.runtime.execution.worker_observation import (
     ParentRunObservations,
     WorkerRunObservations,

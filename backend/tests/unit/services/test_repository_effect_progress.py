@@ -7,7 +7,12 @@ import pytest
 from oh_goon.core.capability_registry import resolve_capability_intent
 from oh_goon.core.errors import ExecutorPlacementLost
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
-from oh_goon.core.vocabulary import EffectBoundaryKind, FleetScope, OperationAction
+from oh_goon.core.vocabulary import (
+    EffectBoundaryKind,
+    FleetRunTerminalIntent,
+    FleetScope,
+    OperationAction,
+)
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator
@@ -16,6 +21,7 @@ from tests.factories.capabilities import admit_test_run, capability_snapshot
 from tests.factories.journal import start_run
 from tests.factories.repository_effect_runtime import effect_execution
 from tests.factories.repository_state import baseline_for
+from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
 def test_fleet_preclaim_activity_localizes_identity_and_claim_boundaries(
@@ -23,7 +29,6 @@ def test_fleet_preclaim_activity_localizes_identity_and_claim_boundaries(
 ) -> None:
     database = LocalDatabase(tmp_path / "state.db")
     journal = Journal(database)
-    attempts = RepositoryEffectAttemptStore(database)
     execution = ExecutionCoordinator(database)
     repository = tmp_path / "repo"
     repository.mkdir()
@@ -31,12 +36,16 @@ def test_fleet_preclaim_activity_localizes_identity_and_claim_boundaries(
     identity = RepositoryIdentity(name=repository.name, path=repository)
     entry = IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=identity)
     admit_test_run(journal, "fleet-progress", OperationAction.UPDATE, [identity])
-    start_run(journal, "fleet-progress")
     ticket = execution.reserve_fleet_with(
         "fleet-progress",
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    database, execution = simulated_worker_coordinator(database)
+    ticket = execution.claim_fleet_worker(ticket)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    start_run(journal, "fleet-progress")
 
     class GitStub:
         def fingerprint(self, path, _cancel_requested):
@@ -68,7 +77,11 @@ def test_fleet_preclaim_activity_localizes_identity_and_claim_boundaries(
             validate_authority_in=reject_placement,
             activity=activity.append,
         )
-    session.finish(lambda _connection: None)
+    session.finish(
+        lambda connection: journal.terminalize_run_in(
+            connection, "fleet-progress", FleetRunTerminalIntent.CANCEL
+        )
+    )
 
     assert activity == [
         "Observing repository identity for repo",

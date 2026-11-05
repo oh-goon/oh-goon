@@ -30,6 +30,7 @@ from tests.factories.journal import commit_operation, start_repository, start_ru
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.repository_effect_runtime import effect_execution, effect_recovery
 from tests.factories.repository_state import baseline_for
+from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
 def _recovery(
@@ -404,12 +405,16 @@ def test_fleet_repository_effect_uses_generic_attempt_identity_and_retires_it_wi
     identity = RepositoryIdentity(name="api", path=repository)
     entry = IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=identity)
     admit_test_run(journal, "fleet-forward", OperationAction.INIT, [identity])
-    start_run(journal, "fleet-forward")
     ticket = execution.reserve_fleet_with(
         "fleet-forward",
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    database, execution = simulated_worker_coordinator(database)
+    ticket = execution.claim_fleet_worker(ticket)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    start_run(journal, "fleet-forward")
     captured: list[str] = []
 
     class _Prepared:

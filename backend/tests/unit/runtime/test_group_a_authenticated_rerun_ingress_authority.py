@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock
@@ -211,6 +212,7 @@ def test_budgeted_history_rerun_requires_fresh_native_envelope_before_new_work(
 def test_native_resource_scope_activation_keeps_the_original_run_identity(
     monkeypatch: pytest.MonkeyPatch, foreign: bool
 ) -> None:
+    import oh_goon.core.process_birth as process_birth
     import oh_goon.integrations.run_resource_envelope as native_resources
 
     evidence = run_resource_envelope()
@@ -221,9 +223,14 @@ def test_native_resource_scope_activation_keeps_the_original_run_identity(
     lifecycle._run_resource_envelope = evidence
     # Native scope conformance is tested by its owner. This seam exercises the
     # actual activation consumer's comparison with the opaque owner's Run ID.
-    monkeypatch.setattr(
-        native_resources, "verify_current_run_resource_scope", lambda *a, **kw: evidence
+    worker_birth = replace(
+        evidence.process_birth,
+        pid=evidence.process_birth.pid + 1,
+        start_ticks=evidence.process_birth.start_ticks + 1,
     )
+    monkeypatch.setattr(process_birth, "observe_process_birth", lambda: worker_birth)
+    verify_member = Mock()
+    monkeypatch.setattr(native_resources, "verify_worker_run_resource_scope", verify_member)
     session = cast(
         ExecutionSession,
         SimpleNamespace(
@@ -236,8 +243,12 @@ def test_native_resource_scope_activation_keeps_the_original_run_identity(
     if foreign:
         with pytest.raises(StateConflict, match="cannot activate another Run"):
             lifecycle.activate(ticket)
+        verify_member.assert_not_called()
     else:
         assert lifecycle.activate(ticket) is session
+        verify_member.assert_called_once_with(
+            lifecycle._run_resource_scope, evidence, worker_birth=worker_birth
+        )
     activate.assert_called_once_with(ticket)
 
 

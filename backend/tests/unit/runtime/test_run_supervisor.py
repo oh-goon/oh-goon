@@ -12,8 +12,8 @@ import pytest
 from oh_goon.core.errors import ExecutionBusy, RuntimeQuiescing
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.vocabulary import BackgroundFailureStage
-from oh_goon.runtime.execution import RunExecutionSupervisor, RunWorkerLaunch
-from oh_goon.runtime.execution.run_supervisor import RunSupervisorState
+from oh_goon.runtime.execution import RunExecutionSupervisor
+from oh_goon.runtime.execution.run_supervisor import RunSupervisorState, RunWorkerLaunch
 
 
 class _Diagnostics:

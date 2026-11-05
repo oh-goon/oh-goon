@@ -30,7 +30,8 @@ from oh_goon.core.vocabulary import (
     ResultFreshness,
 )
 from oh_goon.engine.atomic_execution_bytes import atomic_execution_bytes_supported
-from oh_goon.runtime.execution import ExecutionTicket, RunWorkerLaunch
+from oh_goon.runtime.execution import ExecutionTicket
+from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from tests.factories.capabilities import capability_snapshot
 
 

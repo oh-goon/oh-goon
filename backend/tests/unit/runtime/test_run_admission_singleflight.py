@@ -47,7 +47,8 @@ from oh_goon.core.vocabulary import (
 )
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
-from oh_goon.runtime.execution import ExecutionCoordinator, RunWorkerLaunch
+from oh_goon.runtime.execution import ExecutionCoordinator
+from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
 from oh_goon.services.fleet_admission import FleetAdmissionPlan

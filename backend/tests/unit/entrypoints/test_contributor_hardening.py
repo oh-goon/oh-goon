@@ -15,6 +15,7 @@ from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.journal import Journal
 from tests.factories.capabilities import admit_test_run
 from tests.factories.journal import start_run, terminalize_run
+from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
 def test_repository_identity_is_stable_for_equivalent_canonical_paths(tmp_path: Path) -> None:
@@ -49,13 +50,15 @@ def test_execution_coordinator_never_implicitly_releases_admitted_work(tmp_path:
 def test_execution_session_treats_lost_sqlite_lease_as_cancellation(tmp_path: Path) -> None:
     database = LocalDatabase(tmp_path / "state.db")
     coordinator = ExecutionCoordinator(database)
+    admit_test_run(Journal(database), "fleet-test", OperationAction.INIT, [])
     ticket = coordinator.reserve_fleet_with(
         "fleet-test",
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
 
-    session = coordinator.activate(ticket)
+    database, coordinator = simulated_worker_coordinator(database)
+    session = coordinator.activate(coordinator.claim_fleet_worker(ticket))
     with database.transaction(write=True) as connection:
         connection.execute("DELETE FROM execution_lease WHERE singleton = 1")
     assert session.cancel_requested() is True

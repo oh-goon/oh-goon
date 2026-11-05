@@ -46,6 +46,7 @@ from tests.factories.operation_reports import make_operation_report
 from tests.factories.repository_effect_runtime import effect_execution, effect_recovery
 from tests.factories.repository_state import baseline_for
 from tests.fakes.capability_runners import ExternalRunnerStub, fixed_capability_runners
+from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
 def _repo(root: Path, name: str = "api") -> Path:
@@ -122,17 +123,21 @@ def test_fleet_cancel_race_stops_before_repository_claim(tmp_path: Path) -> None
     journal = Journal(database)
     attempts = RepositoryEffectAttemptStore(database)
     execution = ExecutionCoordinator(database)
-    lifecycle = FleetRunLifecycle(database, journal, execution, FleetExecutorPool(database, None))
     repository = _repo(tmp_path / "cancel-race")
     identity = RepositoryIdentity(name=repository.name, path=repository)
     entry = IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=identity)
     admit_test_run(journal, "fleet-cancel-race", OperationAction.UPDATE, [identity])
-    start_run(journal, "fleet-cancel-race")
     ticket = execution.reserve_fleet_with(
         "fleet-cancel-race",
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    database, execution = simulated_worker_coordinator(database)
+    ticket = execution.claim_fleet_worker(ticket)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    lifecycle = FleetRunLifecycle(database, journal, execution, FleetExecutorPool(database, None))
+    start_run(journal, "fleet-cancel-race")
     underlying = execution.activate(ticket)
 
     class CancelBeforeClaimSession:
@@ -505,12 +510,16 @@ def test_fleet_claim_replays_exact_attempt_after_ambiguous_commit_response(tmp_p
     identity = RepositoryIdentity(name=repository.name, path=repository)
     entry = IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=identity)
     admit_test_run(journal, "fleet-claim-replay", OperationAction.UPDATE, [identity])
-    start_run(journal, "fleet-claim-replay")
     ticket = execution.reserve_fleet_with(
         "fleet-claim-replay",
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    database, execution = simulated_worker_coordinator(database)
+    ticket = execution.claim_fleet_worker(ticket)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    start_run(journal, "fleet-claim-replay")
     runner = _CountingEffectRunner()
     effects = effect_execution(
         database,
