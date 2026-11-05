@@ -2032,7 +2032,9 @@ def _hashmarks_upgrade(repository: Path) -> str:
     manifest = manifest.replace(
         "hashmarks==1", "hashmarks @ https://example.invalid/hashmarks-1.whl"
     )
-    lock = lock.replace(b"revision = 1\n", b'revision = 1\nrequires-python = ">=3.12"\n')
+    lock = lock.replace(
+        b"revision = 1\n", b'revision = 1\nrequires-python = ">=3.12"\n'
+    )
     (repository / "backend/pyproject.toml").write_text(manifest, encoding="utf-8")
     (repository / "backend/uv.lock").write_bytes(lock)
     owner._git(repository, "add", "backend")
@@ -2090,7 +2092,9 @@ def test_mandatory_hashmarks_upgrade_requires_unchanged_native_non_target_artifa
     owner.require_current_plan(repository, plan)
     assert not plan.unverified
     assert plan.evidence["hashmarks_native_artifacts"]["equivalent"] is True
-    assert plan.evidence["hashmarks_native_artifacts"]["authority"] == "native-uv-export"
+    assert (
+        plan.evidence["hashmarks_native_artifacts"]["authority"] == "native-uv-export"
+    )
     assert plan.evidence["observations"] == observations
     assert "dependency_changes" not in plan.evidence
     assert "dependency_admission" not in plan.evidence
@@ -2151,7 +2155,9 @@ def test_hashmarks_upgrade_without_changed_lock_cannot_claim_equivalence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     base = _hashmarks_upgrade(repository)
-    (repository / "backend/uv.lock").write_bytes(owner._base_lock_bytes(repository, base))
+    (repository / "backend/uv.lock").write_bytes(
+        owner._base_lock_bytes(repository, base)
+    )
     monkeypatch.setattr(
         owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
     )
