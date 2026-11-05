@@ -3,12 +3,13 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from oh_goon.core.source_tree_policy import GRADER_PRIVATE_SOURCE_ROOT
 from oh_goon.repository_tooling.architecture.common import Violation, python_ast
 from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT
 
 HASHMARKS_INTEGRATION_ROOT = BACKEND_PACKAGE_ROOT / "integrations" / "hashmarks"
 REPOSITORY_TOOLING_ROOT = BACKEND_PACKAGE_ROOT / "repository_tooling"
-SECRET_ANSWER_PATH = "docs/certification/answers"
+SECRET_ANSWER_PATH = GRADER_PRIVATE_SOURCE_ROOT.as_posix()
 
 # These modules own Repository Understanding qualification truth.  Repository evidence
 # may be consumed by qualification, but Hashmarks-facing adapters must never import
@@ -16,6 +17,7 @@ SECRET_ANSWER_PATH = "docs/certification/answers"
 QUALIFICATION_AUTHORITY_MODULES = frozenset(
     {
         "oh_goon.repository_tooling.repository_understanding_integrity",
+        "oh_goon.repository_tooling.repository_understanding_material",
         "oh_goon.repository_tooling.repository_understanding_policy",
         "oh_goon.repository_tooling.repository_understanding_exam",
         "oh_goon.repository_tooling.repository_understanding_capability",

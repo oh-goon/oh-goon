@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from oh_goon.integrations.hashmarks.repository_scope import repository_evidence_scope
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 
 if TYPE_CHECKING:
@@ -48,6 +49,7 @@ class _SourceScope:
     root: Path
     native: CodeMap
     producer: str
+    verify_policy: Callable[[], None]
     active: bool = True
 
 
@@ -59,13 +61,15 @@ def hashmarks_source_scope(root: Path) -> Iterator[object]:
     Source supports unindexed member reads; no repository indexing read session
     is required or claimed. Hashmarks owns admission, parsing and freshness.
     """
-    from hashmarks import CodeMap
-
     producer = require_loaded_hashmarks_runtime()
     with tempfile.TemporaryDirectory(prefix="oh-goon-source-facts-") as directory:
         state = Path(directory)
-        with CodeMap(root, state_dir=state, artifact_db=state / "artifacts.sqlite3") as native:
-            scope = _SourceScope(root.resolve(), native, producer)
+        with repository_evidence_scope(
+            root, state_dir=state, artifact_db=state / "artifacts.sqlite3"
+        ) as repository_scope:
+            scope = _SourceScope(
+                root.resolve(), repository_scope.native, producer, repository_scope.verify_policy
+            )
             try:
                 yield scope
             finally:
@@ -82,7 +86,9 @@ def _selected_scope(root: Path, scope: object | None) -> Iterator[_SourceScope]:
         raise ValueError("Source observation requires its active exact-root lifetime")
     if require_loaded_hashmarks_runtime() != scope.producer:
         raise ValueError("Source observation producer changed during its lifetime")
+    scope.verify_policy()
     yield scope
+    scope.verify_policy()
 
 
 def _evidence(
@@ -90,6 +96,7 @@ def _evidence(
 ) -> HashmarksSourceEvidence:
     if require_loaded_hashmarks_runtime() != scope.producer:
         raise ValueError("Source observation producer changed during observation")
+    scope.verify_policy()
     return HashmarksSourceEvidence(
         producer_implementation_identity=scope.producer,
         canonical_packet_json=json.dumps(

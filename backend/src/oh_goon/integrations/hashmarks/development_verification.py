@@ -12,6 +12,7 @@ from oh_goon.integrations.hashmarks.dependencies import (
     revalidate_changed_dependency_consumers,
     validate_required_dependency_introductions,
 )
+from oh_goon.integrations.hashmarks.repository_scope import repository_evidence_scope
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 
 if TYPE_CHECKING:
@@ -136,14 +137,14 @@ def nominate_changed_verification(
     root/lifetime. Workspace context and remaining scope uncertainty stay with
     the producer; the consumer retains explicit execution-policy obligations.
     """
-    from hashmarks import CodeMap
     from hashmarks.operation_contract import validate_operation_response
     from hashmarks.verification_nomination_validation import validate_verification_nomination
 
     implementation = require_loaded_hashmarks_runtime()
     if not set(asset_paths) <= set(paths):
         raise ValueError("Asset observation must use the admitted repository change scope")
-    with CodeMap(root) as native:
+    with repository_evidence_scope(root) as scope:
+        native = scope.native
         # Reconcile discovery once, including newly added verifiers. The native
         # operation rechecks contributors but does not invent a fresh inventory.
         native.index.sync()
@@ -245,11 +246,11 @@ def observe_repository_assets(
     This public-producer boundary returns evidence only. It does not run candidate
     code, acquire LFS objects or decide whether a documentation exemption applies.
     """
-    from hashmarks import CodeMap
     from hashmarks.operation_contract import validate_operation_response
 
     require_loaded_hashmarks_runtime()
-    with CodeMap(root) as native:
+    with repository_evidence_scope(root) as scope:
+        native = scope.native
         native.index.sync()
         packet = native.verification.changed_set(paths, limit=limit)
         validate_operation_response("changed_set_verification", packet)

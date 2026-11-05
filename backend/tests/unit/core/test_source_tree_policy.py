@@ -4,9 +4,33 @@ import pytest
 
 from oh_goon.core.source_tree_policy import (
     canonical_repository_relative_path,
+    is_grader_private_source_path,
     is_package_manager_materialization_path,
     is_transient_source_path,
 )
+
+
+@pytest.mark.parametrize(
+    ("path", "private"),
+    (
+        ("docs/certification/answers", True),
+        ("docs/certification/answers/fixture.json", True),
+        ("nested/docs/certification/answers/fixture.json", True),
+        ("local:team/docs/certification/answers", True),
+        ("/workspace/docs/certification/answers/selected", True),
+        ("docs/certification/public/../answers/fixture.json", True),
+        (r"docs\certification\answers\fixture.json", True),
+        ("docs/certification/answers-example/fixture.json", False),
+        ("docs/certification/questions/fixture.json", False),
+        ("src/answers.py", False),
+    ),
+)
+def test_grader_privacy_is_a_reserved_namespace_independent_of_source_identity(
+    path: str, private: bool
+) -> None:
+    assert is_grader_private_source_path(path) is private
+    if path == "docs/certification/answers/fixture.json":
+        assert not is_transient_source_path(path)
 
 
 def test_canonical_repository_relative_path_binds_working_directory_lexically() -> None:

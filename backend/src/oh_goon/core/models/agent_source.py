@@ -19,6 +19,7 @@ from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import AgentStepRequestedEffects
 from oh_goon.core.product_identity import stable_id
+from oh_goon.core.source_tree_policy import is_grader_private_source_path
 
 MAX_SOURCE_ENTRIES = 4096
 MAX_REPOSITORY_BYTES = 64 * 1024 * 1024
@@ -123,6 +124,8 @@ class FrozenSourceTree:
         paths = tuple(item.path for item in self.members)
         if paths != tuple(sorted(set(paths))):
             raise FleetPlanInvalid("AG-02 captured tree contains duplicate/unordered paths")
+        if any(is_grader_private_source_path(path) for path in paths):
+            raise FleetPlanInvalid("Agent source includes grader-only material")
         total = sum(len(item.data) for item in self.members)
         if total > (MAX_REPOSITORY_BYTES if self.kind == "repository" else MAX_SKILL_BYTES):
             raise FleetPlanInvalid("AG-02 captured tree exceeds byte budget")
@@ -161,6 +164,15 @@ class FrozenAgentSourceCapture:
             )
         if self.repository.kind != "repository" or self.skill.kind != "skill":
             raise FleetPlanInvalid("AG-02 source trees are in the wrong roles")
+        if any(
+            is_grader_private_source_path(reference)
+            for reference in (
+                self.repository_reference,
+                self.resolved_skill_reference,
+                self.authored_skill_reference,
+            )
+        ):
+            raise FleetPlanInvalid("Agent source selects grader-only material")
         self.repository.verify()
         self.skill.verify()
         if not any(item.path == "SKILL.md" for item in self.skill.members):

@@ -10,6 +10,7 @@ CANONICAL_CERTIFICATION_FIXTURE_ROOT = PurePosixPath("template-certification/fix
 CANONICAL_EXAMPLES_ROOT = PurePosixPath("examples")
 CANONICAL_FRONTEND_LOCK = PurePosixPath("frontend/package-lock.json")
 CANONICAL_BACKEND_VENV = PurePosixPath("backend/.venv")
+GRADER_PRIVATE_SOURCE_ROOT = PurePosixPath("docs/certification/answers")
 PACKAGE_MANAGER_MATERIALIZATION_DIRECTORY_NAMES: frozenset[str] = frozenset(
     {".venv", "node_modules"}
 )
@@ -117,6 +118,30 @@ def is_live_dotenv_state(path: Path | PurePosixPath | str) -> bool:
         part == ".env" or part.startswith(".env.") and part not in templates
         for part in repository_relative_path(path).parts
     )
+
+
+def is_grader_private_source_path(path: Path | PurePosixPath | str) -> bool:
+    """Recognize the grader-only namespace in members or selected source ancestry.
+
+    This is caller-owned source privacy, independent of repository intelligence
+    and transient-file policy. Re-rooting a local selection cannot erase a
+    reserved namespace already present in its path.
+    """
+
+    raw = str(path).removeprefix("local:").replace("\\", "/")
+    parts: list[str] = []
+    for part in PurePosixPath(raw).parts:
+        if part in {"", ".", "/"}:
+            continue
+        if part == "..":
+            if parts and parts[-1] != "..":
+                parts.pop()
+            else:
+                parts.append(part)
+        else:
+            parts.append(part)
+    private = GRADER_PRIVATE_SOURCE_ROOT.parts
+    return any(tuple(parts[index : index + len(private)]) == private for index in range(len(parts)))
 
 
 def is_transient_source_path(

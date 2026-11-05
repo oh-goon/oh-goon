@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from oh_goon.integrations.hashmarks.repository_scope import repository_evidence_scope
 from oh_goon.integrations.hashmarks.runtime_contract import (
     loaded_hashmarks_version,
     require_loaded_hashmarks_runtime,
@@ -54,11 +55,13 @@ def repository_observation(
     capture_identity: str,
     state_directory: Path | None = None,
 ) -> dict[str, Any]:
-    from hashmarks import CodeMap
     from hashmarks.evidence_presentation import present_repository_evidence
 
     state = state_directory if state_directory is not None else root / "evidence-state"
-    with CodeMap(root / "repo", state_dir=state, artifact_db=state / "artifacts.sqlite3") as native:
+    with repository_evidence_scope(
+        root / "repo", state_dir=state, artifact_db=state / "artifacts.sqlite3"
+    ) as scope:
+        native = scope.native
         with native.reads.session():
             envelope = {
                 "producer": "Hashmarks",

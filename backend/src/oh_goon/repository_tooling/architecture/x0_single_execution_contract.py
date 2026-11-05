@@ -8,6 +8,7 @@ operator-scoped observer and makes the diagnostic CLI's ownership explicit.
 from __future__ import annotations
 
 import ast
+from importlib.util import resolve_name
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture.common import (
@@ -15,7 +16,11 @@ from oh_goon.repository_tooling.architecture.common import (
     project_scripts_from_text,
     python_ast,
     python_semantic_facts,
+    python_source_snapshot,
     source_import_spelling,
+)
+from oh_goon.repository_tooling.architecture.hashmarks_harness_boundary_contract import (
+    _literal_dynamic_imports,
 )
 from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 
@@ -554,6 +559,11 @@ def check_x0_single_execution_path(root: Path = ROOT) -> list[Violation]:
 
 
 def _check_run_worker_custody(package: Path) -> list[Violation]:
+    with python_source_snapshot(package):
+        return _check_run_worker_custody_sources(package)
+
+
+def _check_run_worker_custody_sources(package: Path) -> list[Violation]:
     """Keep the physical Run boundary in the existing admission/execution owners.
 
     These are bounded structural edges, not process qualification or a second
@@ -725,6 +735,57 @@ def _check_run_worker_custody(package: Path) -> list[Violation]:
                     "X0 worker bootstrap may consume admitted work only, without application startup or readmission",
                 )
             )
+
+    # Import/reference ownership protects the rest of production as well as the
+    # canonical edges above. The parent composition retains the execution object
+    # for the control plane's recovery-only delegate; normal execution remains
+    # callable only from the claimed worker. This is authored boundary policy,
+    # not an inference that an arbitrary receiver is an executable Run owner.
+    authority_owners = {
+        "oh_goon.services.fleet_run_execution": {
+            "services/fleet_run_execution.py",
+            "services/fleet_run_control_plane.py",
+            "_application_services.py",
+            "_application_worker_runtime.py",
+        },
+        "oh_goon._application_worker_runtime": {"_application_worker.py"},
+    }
+    for path in package.rglob("*.py"):
+        relative = path.relative_to(package).as_posix()
+        try:
+            facts = python_semantic_facts(path, imported_only=True, tree=trees.get(relative))
+        except (OSError, SyntaxError, ValueError):
+            issues.append(Violation(path, "X0 Run-worker authority source cannot be inspected"))
+            continue
+        references = set(facts.imports | facts.references)
+        references.update(_literal_dynamic_imports(facts))
+        references.update(
+            source_import_spelling(fact["target"])
+            for fact in facts.evidence.packet()["facts"]
+            if fact.get("kind") in {"alias-binding", "reference", "call-site"}
+            and fact.get("qualification") == "conditional"
+            and isinstance(fact.get("target"), dict)
+            and fact["target"].get("kind") == "import"
+        )
+        owner_package = ".".join(path.parent.relative_to(package.parent).parts)
+        for reference in sorted(references):
+            try:
+                # Python owns relative import spelling. This compares an authored
+                # package boundary without resolving or importing another member.
+                imported = resolve_name(reference, owner_package)
+            except (ImportError, ValueError):
+                continue
+            for authority, allowed in authority_owners.items():
+                if relative not in allowed and (
+                    imported == authority or imported.startswith(authority + ".")
+                ):
+                    issues.append(
+                        Violation(
+                            path,
+                            "X0 Run execution authority outside canonical composition/recovery owner: "
+                            + imported,
+                        )
+                    )
     return issues
 
 
