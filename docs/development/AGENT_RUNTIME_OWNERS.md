@@ -132,6 +132,15 @@ model/profile and source/Skill claims cannot replace fresh authority or skip the
 independent failing verifier. This is controlled A-level protocol/authority
 proof, not installed native security or model-obedience proof.
 
+Six ordinary controlled-native cases in the CLI read-only, CLI compaction and
+Codex context owners also exercise the real receiving Step, broker, process,
+cleanup and independent verification. Four report/verifier controls were moved
+from the general native Run file, with two read-only typed/generic-role controls
+added through their shared test fixture. They send task/history-free requests;
+they do not emulate native compaction. A Task-erasure mutation still completed
+its Run but failed the privileged-task assertion; restoring the production bytes
+restores the valid baseline. The installed cases remain separate opt-in proof.
+
 Thirteen installed Linux context cases passed for the exact Codex/OpenCode/Pi
 versions and modes in the [dated compatibility observation](AGENT_HARNESS_COMPATIBILITY.md#frozen-context-continuity--2026-11-05).
 They cover real tool follow-up, native compaction and supported native protocol

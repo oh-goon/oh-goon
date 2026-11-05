@@ -68,6 +68,14 @@ passed, including 13 new task-free/invalid-context cases. A separate real-CLI
 handoff case keeps forged success/permission/configuration claims untrusted and
 still executes the failing independent verifier.
 
+The same context owners retain six ordinary controlled-process counterparts
+through the real receiving Step and broker. The four existing report/verifier
+controls were moved from the general native Run tests and strengthened, with
+two read-only role controls added. Dropping task restoration is detected even
+when the native fixture and independent verification otherwise succeed. These
+bounded A-level cases preserve ordinary merge proof without changing the
+installed certification markers or claiming a compaction implementation.
+
 The first strengthened protected Codex case exposed a fixture comparison to the
 old whole-message wording. Its replacement checks exact full evidence/Skill and
 the task in the privileged channel; the isolated rerun passed. The other eight

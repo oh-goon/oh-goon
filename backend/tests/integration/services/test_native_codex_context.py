@@ -1,7 +1,8 @@
-"""Opt-in installed Codex context transport through the original managed Run.
+"""Codex context transport through the original managed Run.
 
-A bounded local Responses fixture drives real native tools and automatic
-compaction. It proves instruction delivery, not remote model reasoning quality.
+A controlled-process counterpart protects ordinary receiver/broker delivery.
+Opt-in installed cases drive actual native tools and automatic compaction with
+a bounded local Responses fixture. Neither proves remote model reasoning quality.
 """
 
 from __future__ import annotations
@@ -44,6 +45,75 @@ from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashm
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from tests.fakes.codex_auth import prepare_codex_auth
 from tests.fakes.codex_responses import CodexResponsesFixture
+
+
+@pytest.mark.process
+@pytest.mark.skipif(
+    sys.platform != "linux" or shutil.which("bwrap") is None, reason="Bubblewrap required"
+)
+@pytest.mark.parametrize("verification_value", [42, 43])
+def test_controlled_codex_keeps_prepared_context_when_native_requests_drop_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verification_value: int
+) -> None:
+    """The original receiving Step supplies context that native history omits."""
+    from tests.fakes.native_context import controlled_native_context
+
+    with controlled_native_context(
+        tmp_path, monkeypatch, agent="codex", verification_value=verification_value
+    ) as case:
+        detail = case.detail
+        assert detail.outcome is (
+            FleetRunOutcome.SUCCESS
+            if verification_value == 42
+            else FleetRunOutcome.ATTENTION_REQUIRED
+        )
+        assert len(case.requests) == 3
+        evidence_text = case.prompt["repository_evidence"]
+        evidence = json.loads(evidence_text)
+        assert evidence["producer_implementation_identity"] == require_loaded_hashmarks_runtime()
+        assert evidence["capture_identity"] == case.prompt["identity"]["candidate_identity"]
+        assert case.prompt["task"] == case.task
+        assert case.prompt["skill_instructions"] == case.skill_text
+        assert case.selected.connection is not None
+        for request in case.requests:
+            assert request["model"] == case.selected.connection.selection.model
+            assert "host-only-key" not in json.dumps(request)
+            context, *native = request["input"]
+            assert context["role"] == "developer"
+            # None of these native requests carries the original task/history.
+            # In particular, the producer's echoed query cannot satisfy delivery.
+            assert case.task not in json.dumps(native, ensure_ascii=False)
+            privileged = context["content"]
+            assert privileged.count(evidence_text) == 1
+            without_evidence = privileged.replace(evidence_text, "")
+            assert without_evidence.count(case.skill_text) == 1
+            assert case.task in without_evidence.replace(case.skill_text, "")
+        steps = detail.game_tape.repositories[0].steps
+        assert len(steps) == 2
+        assert steps[0].status is GameTapeStatus.PASSED
+        assert steps[1].status is (
+            GameTapeStatus.PASSED if verification_value == 42 else GameTapeStatus.FAILED
+        )
+        assert len(steps[0].native_agent_observations) == 1
+        native_claim = steps[0].native_agent_observations[0]
+        assert native_claim.agent == "codex" and native_claim.profile == case.selected.profile_name
+        assert native_claim.occurrence == case.prompt["identity"]["reviewer"]
+        assert native_claim.authority == "UNTRUSTED_HARNESS_CLAIM"
+        assert native_claim.settled and not native_claim.failed
+        assert any(event.kind == "agent" for event in native_claim.events)
+        assert steps[1].native_agent_observations == ()
+        for step in steps:
+            assert step.settlement.cleanup == "VERIFIED"
+            assert step.attempts[0].supervisor is not None
+            assert step.attempts[0].supervisor.final_process_group_quiescent is True
+            isolation = step.attempts[0].standard_isolation
+            assert isolation is not None
+            assert isolation.backend.configuration_id == case.selected.backend_configuration_id
+            assert isolation.host_and_external_ip_networking == "denied"
+        assert case.source.read_text() == "VALUE = 42\n"
+        assert "host-only-key" not in detail.model_dump_json()
+        retained = case.runtime.runs.get(detail.run.fleet_run_id)
+        assert retained.outcome is detail.outcome and retained.operations == detail.operations
 
 
 @pytest.mark.certification
