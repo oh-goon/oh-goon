@@ -2053,14 +2053,12 @@ def _hashmarks_upgrade(repository: Path) -> str:
     )
     (repository / "backend/uv.lock").write_bytes(
         lock.replace(b'version = "1"', b'version = "2"')
-        + b'[[package]]\nname = "new-transitive-component"\nversion = "1"\n'
-        + b'source = { registry = "https://pypi.org/simple" }\n'
     )
     return base
 
 
 @pytest.mark.parametrize("producer_rows", ("unavailable", "missing"))
-def test_mandatory_hashmarks_upgrade_admits_new_transitive_components_without_consumer_graph(
+def test_mandatory_hashmarks_upgrade_requires_unchanged_native_non_target_artifacts(
     repository: Path,
     monkeypatch: pytest.MonkeyPatch,
     producer_rows: str,
@@ -2090,6 +2088,8 @@ def test_mandatory_hashmarks_upgrade_admits_new_transitive_components_without_co
     owner.require_merge_selection(repository, plan)
     owner.require_current_plan(repository, plan)
     assert not plan.unverified
+    assert plan.evidence["hashmarks_native_artifacts"]["equivalent"] is True
+    assert plan.evidence["hashmarks_native_artifacts"]["authority"] == "native-uv-export"
     assert plan.evidence["observations"] == observations
     assert "dependency_changes" not in plan.evidence
     assert "dependency_admission" not in plan.evidence
@@ -2112,6 +2112,58 @@ def test_mandatory_hashmarks_upgrade_admits_new_transitive_components_without_co
         "backend-python-capability-check",
         "backend-package-build-check",
     )
+
+
+def test_hashmarks_upgrade_rejects_native_non_target_artifact_change(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _hashmarks_upgrade(repository)
+    lock_path = repository / "backend/uv.lock"
+    lock = lock_path.read_bytes()
+    lock_path.write_bytes(
+        lock.replace(
+            b'source = { registry = "https://pypi.org/simple" }\n',
+            b'source = { registry = "https://pypi.org/simple" }\n'
+            b'dependencies = [{ name = "new-transitive-component" }]\n',
+            1,
+        )
+        + b'[[package]]\nname = "new-transitive-component"\nversion = "1"\n'
+        + b'source = { registry = "https://pypi.org/simple" }\n'
+    )
+    monkeypatch.setattr(
+        owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
+    )
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        return _dependency_evidence(paths, dependency_base=None, **options)
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+    assert plan.evidence["hashmarks_native_artifacts"]["equivalent"] is False
+    assert "HASHMARKS_NON_TARGET_ARTIFACT_CHANGED" in plan.unverified
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
+
+
+def test_hashmarks_upgrade_without_changed_lock_cannot_claim_equivalence(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _hashmarks_upgrade(repository)
+    (repository / "backend/uv.lock").write_bytes(owner._base_lock_bytes(repository, base))
+    monkeypatch.setattr(
+        owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
+    )
+    plan = owner.admit_change(
+        repository,
+        base=base,
+        nominator=lambda _root, paths, **options: _dependency_evidence(
+            paths, dependency_base=None, **options
+        ),
+    )
+    assert "HASHMARKS_ARTIFACT_EQUIVALENCE_UNVERIFIED" in plan.unverified
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
 
 
 @pytest.mark.parametrize("extra", ("manifest", "source"))
