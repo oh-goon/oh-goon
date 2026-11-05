@@ -605,6 +605,7 @@ def admit_change(
     executable = tuple(path for path in executable if path not in accepted_assets)
     static = cast(set[_STATIC], required_static_obligations(executable))
     pytest: set[str] = {DOCUMENTATION_PROOF_TEST} if documents else set()
+    unverified: list[str] = []
     if hashmarks_upgrade:
         pytest.update(HASHMARKS_UPGRADE_TESTS)
         if "backend/uv.lock" not in executable:
@@ -620,7 +621,6 @@ def admit_change(
                 if native_artifacts["equivalent"] is not True:
                     unverified.append("HASHMARKS_NON_TARGET_ARTIFACT_CHANGED")
     frontend: set[str] = set()
-    unverified: list[str] = []
     dependency_qualified = (
         "backend/uv.lock" in executable
         and not hashmarks_upgrade
