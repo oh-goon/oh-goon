@@ -54,6 +54,8 @@ def test_local_wait_reconstructs_terminal_truth_from_fresh_sqlite_after_worker_r
 
     started = manager.start(OperationAction.INIT)
     assert runner.entered.wait(timeout=2)
+    runner.release.set()
+    assert manager._supervisor.wait_until_inactive(started.fleet_run_id, timeout=2)
 
     original_connect = database._connect
     reconnects = 0
@@ -64,7 +66,6 @@ def test_local_wait_reconstructs_terminal_truth_from_fresh_sqlite_after_worker_r
         return original_connect()
 
     monkeypatch.setattr(database, "_connect", observe_fresh_connect)
-    runner.release.set()
     detail = manager.wait_for_terminal(started.fleet_run_id, timeout=2)
 
     assert detail.run.status is FleetRunStatus.COMPLETED

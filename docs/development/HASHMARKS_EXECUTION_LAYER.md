@@ -103,11 +103,9 @@ Hashmarks owns selected membership, not physical shards. Oh-Goon applies its own
 
 Local, CI, scheduled, agentic and ML work use the existing FleetRun admission and
 `FleetRunExecution` → `ExecutionSession` → `FleetTargetScheduler` → Step/Attempt
-path. The current `RunExecutionSupervisor` submits that work to a thread pool.
-The required isolated Run worker and atomic ExecutionTicket custody claim belong
-to [HUG-180](https://linear.app/hugloss/issue/HUG-180), with failure/drain proof in
-[HUG-181](https://linear.app/hugloss/issue/HUG-181). They strengthen this same path;
-they are not an implemented alternative mode or a Hashmarks executor. The claimed
+path. The [supervisor contract](EXECUTION_SUPERVISOR.md) owns its fresh Run
+process and atomic ExecutionTicket custody claim; HUG-181/HUG-183 retain broader
+qualification. This strengthens the same execution path without a Hashmarks executor. The claimed
 worker must consume frozen admitted facts without re-resolving or reselecting
 logical work; source drift requires the original invalidation/admission handling.
 

@@ -43,6 +43,7 @@ from tests.factories.repository_effect_runtime import effect_execution, effect_r
 from tests.factories.repository_state import baseline_for
 from tests.factories.runtime_stack import direct_operation_stack
 from tests.fakes.capability_runners import ExternalRunnerStub, fixed_capability_runners
+from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
 class _CountingAdapter(ExternalRunnerStub):
@@ -281,12 +282,16 @@ def test_fleet_authority_revalidation_precedes_repository_claim(tmp_path: Path) 
     identity = RepositoryIdentity(name=repository.name, path=repository)
     entry = IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=identity)
     admit_test_run(journal, "fleet-placement-fence", OperationAction.UPDATE, [identity])
-    start_run(journal, "fleet-placement-fence")
     ticket = execution.reserve_fleet_with(
         "fleet-placement-fence",
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    ticket = execution.claim_fleet_worker(ticket)
+    start_run(journal, "fleet-placement-fence")
 
     class ExecutorStub:
         def effect_boundary(self, _intent):
@@ -332,12 +337,16 @@ def test_fleet_authority_is_revalidated_at_last_pre_effect_cut(tmp_path: Path) -
     run_id = "fleet-pre-effect-authority"
     intent = resolve_capability_intent(OperationAction.UPDATE)
     admit_test_run(journal, run_id, OperationAction.UPDATE, [identity])
-    start_run(journal, run_id)
     ticket = execution.reserve_fleet_with(
         run_id,
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    ticket = execution.claim_fleet_worker(ticket)
+    start_run(journal, run_id)
     adapter = _CountingAdapter()
     effects = effect_execution(
         database,
@@ -387,12 +396,16 @@ def test_fleet_authority_is_revalidated_before_canonical_success(tmp_path: Path)
     run_id = "fleet-success-authority"
     intent = resolve_capability_intent(OperationAction.UPDATE)
     admit_test_run(journal, run_id, OperationAction.UPDATE, [identity])
-    start_run(journal, run_id)
     ticket = execution.reserve_fleet_with(
         run_id,
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    ticket = execution.claim_fleet_worker(ticket)
+    start_run(journal, run_id)
     adapter = _CountingAdapter()
     effects = effect_execution(
         database,
@@ -443,12 +456,16 @@ def test_live_executor_authority_loss_terminates_owned_physical_execution(
     run_id = "fleet-live-authority"
     intent = resolve_capability_intent(OperationAction.UPDATE)
     admit_test_run(journal, run_id, OperationAction.UPDATE, [identity])
-    start_run(journal, run_id)
     ticket = execution.reserve_fleet_with(
         run_id,
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    ticket = execution.claim_fleet_worker(ticket)
+    start_run(journal, run_id)
     revoked = False
 
     def revoke() -> None:
@@ -497,12 +514,16 @@ def test_fleet_repository_change_after_claim_blocks_effect_start_and_adapter(
     identity = RepositoryIdentity(name=repository.name, path=repository)
     entry = IncludedRepositoryCatalogEntry(scope=FleetScope.INCLUDED, repository=identity)
     admit_test_run(journal, "fleet-fence", OperationAction.UPDATE, [identity])
-    start_run(journal, "fleet-fence")
     ticket = execution.reserve_fleet_with(
         "fleet-fence",
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    ticket = execution.claim_fleet_worker(ticket)
+    start_run(journal, "fleet-fence")
 
     class ExecutorStub:
         calls = 0
@@ -560,12 +581,16 @@ def test_fleet_effect_start_and_repository_lifecycle_commit_atomically(
     run_id = "fleet-atomic-start"
     intent = resolve_capability_intent(OperationAction.UPDATE)
     admit_test_run(journal, run_id, OperationAction.UPDATE, [identity])
-    start_run(journal, run_id)
     ticket = execution.reserve_fleet_with(
         run_id,
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    ticket = execution.claim_fleet_worker(ticket)
+    start_run(journal, run_id)
     effects = effect_execution(
         database,
         CapabilityExecutor(fixed_capability_runners(_CountingAdapter())),

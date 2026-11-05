@@ -1468,8 +1468,6 @@ class FleetRunLifecycle:
 
     def activate(self, ticket: ExecutionTicket) -> ExecutionSession:
         """Materialize and validate the exact admitted Fleet owner."""
-        if self._run_resource_scope is not None:
-            self._require_run_resource_envelope(self._run_resource_scope.fleet_run_id)
         session = self._execution.activate(ticket)
         fleet_run_id = session.require_fleet_run_id()
         if (
@@ -1477,6 +1475,16 @@ class FleetRunLifecycle:
             and fleet_run_id != self._run_resource_scope.fleet_run_id
         ):
             raise StateConflict("Native resource scope cannot activate another Run")
+        if self._run_resource_scope is not None:
+            from oh_goon.core.process_birth import observe_process_birth
+            from oh_goon.integrations.run_resource_envelope import verify_worker_run_resource_scope
+
+            birth = observe_process_birth()
+            if birth is None or self._run_resource_envelope is None:
+                raise StateConflict("Run worker resource membership cannot be established")
+            verify_worker_run_resource_scope(
+                self._run_resource_scope, self._run_resource_envelope, worker_birth=birth
+            )
         return session
 
     def execution_authority(
@@ -1642,7 +1650,7 @@ class FleetRunLifecycle:
         intent: FleetRunTerminalIntent,
         failure: FleetRunFailure | None = None,
     ) -> FleetRunState:
-        return self.finish(self.activate(ticket), intent, failure)
+        return self.finish(self._execution.activate_submission_failure(ticket), intent, failure)
 
 
 def _execution_authority_in(

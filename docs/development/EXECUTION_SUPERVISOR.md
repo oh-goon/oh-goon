@@ -8,18 +8,36 @@ batch's process supervision is not another product FleetRun admission route.
 ## Run submission and durable authority
 
 [`FleetRunControlPlane`](../../backend/src/oh_goon/services/fleet_run_control_plane.py)
-submits the exact admitted `ExecutionTicket` through
+captures explicit worker configuration before admission, then submits the exact admitted `ExecutionTicket` through
 [`RunExecutionSupervisor`](../../backend/src/oh_goon/runtime/execution/run_supervisor.py)
-to the existing `FleetRunExecution`. The supervisor currently owns a
-`ThreadPoolExecutor`, a bounded set of active Run IDs and process-local failure
-reporting. Its `ACCEPTING → QUIESCING → CLOSED` states control local submission;
-they are not durable Run status. `FleetRunExecution` activates the original
-`ExecutionSession`, schedules targets/Steps and delegates terminalization to
-`FleetRunLifecycle`. SQLite leases and Journal facts remain authoritative.
+to one fresh native Run-worker process. The supervisor owns bounded active Run
+observations and process-local failure reporting; its observer thread runs only
+the existing native command owner. It accepts a prepared `RunWorkerLaunch`,
+never a Fleet execution callable or a reusable worker pool. The conservative
+one-active-Run limit remains in force. Its `ACCEPTING → QUIESCING → CLOSED`
+states control local submission; they are not durable Run status.
+
+The internal [`_application_worker`](../../backend/src/oh_goon/_application_worker.py)
+entrypoint verifies a bounded sealed-descriptor handoff, establishes the loaded
+Hashmarks identity, and reopens the existing SQLite database with a fresh
+process-local session. `ExecutionCoordinator.claim_fleet_worker` atomically
+checks the exact Run/token/predecessor/session/PID/birth and transfers
+`ADMITTED_UNCLAIMED` custody to `WORKER_OWNED`. Only then does minimal worker
+composition construct the existing `FleetRunExecution`. It activates the
+original `ExecutionSession`, schedules targets/Steps and delegates
+terminalization to `FleetRunLifecycle`. SQLite leases and Journal facts remain
+authoritative; a stale parent or replayed ticket cannot activate executable work.
+
+Accepted Fleet operation reports remain current for their original admitting
+control session and their actual worker writer. The Journal derives that
+freshness context from the exact accepted Run binding; durable fact provenance
+still records the worker's fresh session. A restarted runtime gets a new session
+and sees those results as stale, and later operation invalidation still applies.
 
 Submission failure after admission is settled through the admitted lifecycle
-owner, coupling terminal state and lease/capacity settlement. An inactive thread,
-returned callable, process exit or supervisor diagnostic cannot manufacture a
+owner's restricted finish-only session, coupling terminal state and lease/capacity
+settlement while custody remains unclaimed. A process exit, lost observation
+channel or supervisor diagnostic cannot manufacture a
 terminal Run result. Native harness sessions remain below Step/Attempt and do
 not own Run admission, recovery or durable truth.
 
@@ -29,23 +47,32 @@ own active Run in application mode before waiting for supervisor shutdown;
 `wait_for_runs=True` waits without that request. This is not proof of the required isolated-worker
 parent-death, drain-deadline or containment behavior.
 
-## Required isolated-worker evolution
+## Frozen work and remaining qualification
 
 The [canonical lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-require the same supervisor to spawn one fresh Run worker, transfer live custody
-through an atomic single-use claim and enter the existing Fleet execution path.
-[HUG-180](https://linear.app/hugloss/issue/HUG-180) owns that cutover;
+define the same supervisor's fresh-process boundary and single-use custody claim.
+[HUG-180](https://linear.app/hugloss/issue/HUG-180) implements that cutover;
 [HUG-181](https://linear.app/hugloss/issue/HUG-181) owns crash, drain, cancellation
-and recovery qualification. This target is not yet the supervisor implementation.
+and recovery qualification. The broader lifecycle audit remains
+[HUG-183](https://linear.app/hugloss/issue/HUG-183). This process-boundary change
+does not certify the complete normative matrix or a physical deployment host.
 
 The worker consumes frozen admitted work and opens its own valid runtime/SQLite
 resources. It does not resolve Plans, reselect Hashmarks evidence, place work or
-reserve capacity. Claim/spawn failure must settle through the existing lifecycle
-without parent-execution fallback. Worker exit and IPC are observations;
+reserve capacity. Spawn failure and exit before claim settle through the existing lifecycle.
+After claim, a nonterminal dead worker remains visible to canonical recovery;
+the original parent cannot steal its custody. Worker exit and IPC are observations;
 SQLite/Journal remain durable truth. Drain, cancellation and forced containment
 must reuse existing effect/result owners, without competing command cleanup.
 Local, CI/CD, scheduled, agentic, ML and application-source Runs converge on this
-same custody boundary at cutover; there is no thread/process compatibility mode.
+same custody boundary. Spawn-to-claim and claimed-bootstrap timings are bounded
+diagnostic observations; they grant no execution or completion authority.
+
+Live output and terminal transport stay nonblocking. Bounded loss counters and
+a best-effort final capture summary expose dropped observations; a missing final
+summary leaves capture completeness unavailable. These diagnostics carry no Run
+result or custody authority, and parent/display loss does not synthesize terminal
+EOF or cancellation.
 
 ## Common command owner
 

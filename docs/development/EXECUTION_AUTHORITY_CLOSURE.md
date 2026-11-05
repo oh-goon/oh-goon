@@ -6,13 +6,11 @@ This document describes tool permission, materialization and selected strict
 physical-attempt contracts. These checks share the original Fleet admission
 and execution owners; they are not another Run lifecycle or a requirement to select privileged
 custody for ordinary trusted-local verification. The current owner path is
-`FleetRunControlPlane → RunExecutionSupervisor → FleetRunExecution →
+`FleetRunControlPlane → RunExecutionSupervisor → claimed Run worker → FleetRunExecution →
 ExecutionSession → FleetTargetScheduler → Step/Attempt`.
-The supervisor currently submits through a thread pool. The
-[required isolated Run-worker claim](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-is inserted between supervisor submission and `FleetRunExecution` and remains
-HUG-180/HUG-181 implementation/qualification work. A strict executable receipt cannot prove
-that the separate Run-worker custody boundary already exists.
+The [supervisor contract](EXECUTION_SUPERVISOR.md) owns that fresh-process/atomic-claim
+boundary. HUG-181/HUG-183 retain complete failure/drain and broader lifecycle qualification.
+A strict Step executable receipt does not qualify that separate Run boundary.
 
 Reusable repository meaning belongs to mandatory Hashmarks through the public
 `oh_goon.integrations.hashmarks` API; private integration modules and producer

@@ -12,7 +12,7 @@ from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import fleet_readmission_parent
-from oh_goon.core.models.run_events import FleetRunEvent
+from oh_goon.core.models.run_events import FleetRunEvent, RepositoryCompletedEvent
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.product_identity import operation_intent_key, repository_id
 from oh_goon.core.result_lifecycle import result_freshness
@@ -131,6 +131,7 @@ class JournalIndex:
     ordered_run_ids: tuple[str, ...]
     active_run_ids: tuple[str, ...]
     admitted_revisions: tuple[tuple[int, str], ...]
+    admitting_sessions_by_operation: Mapping[str, str]
     readmission_child_by_parent: Mapping[str, str]
     current_fleet_plan_operations: Mapping[tuple[str, tuple[str, str]], CurrentFleetPlanOperation]
 
@@ -147,6 +148,7 @@ class JournalIndex:
         acknowledgements_by_operation: dict[str, EffectAcknowledgementCommitted] = {}
         run_events: dict[str, list[FleetRunEvent]] = {}
         admitted: list[tuple[int, str]] = []
+        admission_sessions: dict[str, str] = {}
         current_fleet_plan_operations: dict[
             tuple[str, tuple[str, str]], CurrentFleetPlanOperation
         ] = {}
@@ -191,6 +193,8 @@ class JournalIndex:
                 )
             if entry.event.event_type is FleetRunEventType.RUN_ADMITTED:
                 admitted.append((entry.revision, entry.event.fleet_run_id))
+                if isinstance(entry, RunEventCommitted):
+                    admission_sessions[entry.event.fleet_run_id] = entry.session_id
 
         events_by_run = {run_id: tuple(items) for run_id, items in run_events.items()}
         run_details_by_id: dict[str, FleetRunDetail] = {}
@@ -213,6 +217,19 @@ class JournalIndex:
                 run_details_by_id[run_id] = project_fleet_run_detail(
                     events_for_run, operations_by_id.get
                 )
+        # The validated Run fold above owns report/Run/capability/repository
+        # binding. An accepted worker report is fresh for its original control
+        # session as well as its actual writer; opening a new runtime still
+        # invalidates both contexts. Never rewrite the worker's fact provenance.
+        admitting_sessions_by_operation = {
+            entry.report.provenance.operation_id: admission_sessions[entry.event.fleet_run_id]
+            for entry in operation_facts
+            if isinstance(entry, FleetOperationCommitted)
+            and isinstance(entry.event, RepositoryCompletedEvent)
+            and entry.event.fleet_run_id in admission_sessions
+            and entry.event.operation_id == entry.report.provenance.operation_id
+            and operations_by_id.get(entry.event.operation_id) == entry.report
+        }
         ordered_states = sorted(
             (detail.run for detail in run_details_by_id.values()),
             key=lambda state: (state.accepted_at, state.fleet_run_id),
@@ -248,6 +265,7 @@ class JournalIndex:
                 state.fleet_run_id for state in ordered_states if not state.status.terminal
             ),
             admitted_revisions=tuple(admitted),
+            admitting_sessions_by_operation=MappingProxyType(admitting_sessions_by_operation),
             readmission_child_by_parent=readmission_child_by_parent,
             current_fleet_plan_operations=MappingProxyType(current_fleet_plan_operations),
         )
@@ -296,7 +314,11 @@ class JournalIndex:
             if item.revision > entry.revision and item.evidence.invalidates_prior_results
         )
         freshness = result_freshness(entry.report, later_invalidators)
-        if entry.session_id != session_id:
+        if (
+            entry.session_id != session_id
+            and self.admitting_sessions_by_operation.get(entry.report.provenance.operation_id)
+            != session_id
+        ):
             freshness = ResultFreshness.STALE
         return OperationState(report=entry.report, freshness=freshness)
 

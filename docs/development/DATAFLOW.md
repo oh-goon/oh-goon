@@ -2,10 +2,10 @@
 
 This owner describes prepared source, environment and Step dataflow beneath the
 same FleetRun admission used by local, CI/CD, scheduled, ML, application and
-agentic work. [The execution boundary](../execution-boundary.md) distinguishes
-current thread submission from HUG-180/HUG-181's required claimed Run worker.
-Worker custody will consume these already-admitted facts, not resolve sources
-again or create a second pipeline runner.
+agentic work. [The execution boundary](../execution-boundary.md) describes its
+fresh Run worker and atomic custody claim, with broader HUG-181/HUG-183 qualification pending.
+Worker custody consumes these already-admitted facts without resolving sources
+again or creating a second pipeline runner.
 
 Hashmarks establishes repository/content observation identity through the
 public `oh_goon.integrations.hashmarks` API. Oh-Goon custody, delivery and

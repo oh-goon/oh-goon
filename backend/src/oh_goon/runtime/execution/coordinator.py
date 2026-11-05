@@ -8,10 +8,16 @@ from threading import Lock
 from time import monotonic
 from typing import TypeVar
 
+from pydantic import JsonValue
+
 from oh_goon.core.errors import OwnershipLost
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution.lease_environment import LeaseEnvironment
-from oh_goon.runtime.execution.sqlite_lease import ExecutionLease, SQLiteExecutionLeaseStore
+from oh_goon.runtime.execution.sqlite_lease import (
+    ExecutionCustody,
+    ExecutionLease,
+    SQLiteExecutionLeaseStore,
+)
 
 T = TypeVar("T")
 
@@ -61,8 +67,90 @@ class _BoundedCancellationProbe:
 class ExecutionTicket:
     """Opaque admission token passed from request admission to the worker."""
 
-    _lease: ExecutionLease
+    _lease: ExecutionLease = field(repr=False)
     recovery_only: bool = False
+
+    def require_fleet_run_id(self) -> str:
+        """Read the ticket's exact Run binding without granting execution authority."""
+        if self._lease.kind != "FLEET" or self._lease.fleet_run_id is None:
+            raise OwnershipLost("Execution ticket is not a Fleet run admission")
+        return self._lease.fleet_run_id
+
+    def export_worker_handoff(self) -> dict[str, JsonValue]:
+        """Export one unclaimed capability only for the protected worker transport.
+
+        This representation is secret capability material, never diagnostic output.
+        Export does not grant execution: the receiver must still win the original
+        SQLite custody claim before acquiring an executable session.
+        """
+        custody = self._lease.custody
+        if (
+            type(self) is not ExecutionTicket
+            or self.recovery_only is not False
+            or self._lease.kind != "FLEET"
+            or self._lease.fleet_run_id is None
+            or custody is None
+            or custody.phase != "ADMITTED_UNCLAIMED"
+            or custody.owner_identity is None
+        ):
+            raise OwnershipLost("exact unclaimed Fleet capability required for worker handoff")
+        return {
+            "version": 1,
+            "fleet_run_id": self._lease.fleet_run_id,
+            "lease_token": self._lease.token,
+            "predecessor": {
+                "phase": custody.phase,
+                "owner_session_id": custody.owner_session_id,
+                "owner_pid": custody.owner_pid,
+                "owner_identity": custody.owner_identity,
+            },
+        }
+
+    @classmethod
+    def from_worker_handoff(cls, payload: dict[str, JsonValue]) -> ExecutionTicket:
+        """Decode only the original admission shape, without widening its authority."""
+        invalid = "invalid protected Fleet worker capability"
+        if (
+            type(payload) is not dict
+            or set(payload) != {"version", "fleet_run_id", "lease_token", "predecessor"}
+            or type(payload.get("version")) is not int
+            or payload["version"] != 1
+        ):
+            raise OwnershipLost(invalid)
+        run_id = payload["fleet_run_id"]
+        token = payload["lease_token"]
+        predecessor = payload["predecessor"]
+        if (
+            not isinstance(run_id, str)
+            or not run_id
+            or not isinstance(token, str)
+            or not token
+            or not isinstance(predecessor, dict)
+            or set(predecessor) != {"phase", "owner_session_id", "owner_pid", "owner_identity"}
+            or predecessor["phase"] != "ADMITTED_UNCLAIMED"
+        ):
+            raise OwnershipLost(invalid)
+        session = predecessor["owner_session_id"]
+        pid = predecessor["owner_pid"]
+        birth = predecessor["owner_identity"]
+        if (
+            not isinstance(session, str)
+            or not session
+            or session.startswith("recovery:")
+            or type(pid) is not int
+            or pid < 1
+            or not isinstance(birth, str)
+            or not birth
+        ):
+            raise OwnershipLost(invalid)
+        return ExecutionTicket(
+            ExecutionLease(
+                token=token,
+                kind="FLEET",
+                fleet_run_id=run_id,
+                custody=ExecutionCustody("ADMITTED_UNCLAIMED", session, pid, birth),
+            )
+        )
 
 
 @dataclass(slots=True)
@@ -72,7 +160,12 @@ class ExecutionSession:
     _leases: SQLiteExecutionLeaseStore
     _lease: ExecutionLease
     recovery_only: bool = False
+    _submission_only: bool = False
     _finished: bool = field(default=False, init=False)
+
+    def __post_init__(self) -> None:
+        if self.recovery_only and self._submission_only:
+            raise ValueError("execution session cannot combine custody capabilities")
 
     @property
     def fleet_run_id(self) -> str | None:
@@ -81,7 +174,7 @@ class ExecutionSession:
     def original_fleet_lease_token(self) -> str:
         """Return only this bound Fleet session token; mutation verifies its live owner."""
         self.require_fleet_run_id()
-        if self._finished:
+        if self._finished or self._submission_only:
             raise OwnershipLost("Fleet execution session has already finished")
         return self._lease.token
 
@@ -98,12 +191,14 @@ class ExecutionSession:
     @contextmanager
     def execution_connection_scope(self) -> Generator[None, None, None]:
         """Own one admitted SQLite handle for this execution thread's durable cuts."""
-        if self._finished:
+        if self._finished or self._submission_only:
             raise OwnershipLost("Execution session already released its ownership")
         with self._leases.execution_connection_scope():
             yield
 
     def cancel_requested(self) -> bool:
+        if self._submission_only:
+            raise OwnershipLost("submission settlement has no execution observation authority")
         try:
             return self._leases.cancellation_requested(self._lease)
         except OwnershipLost:
@@ -111,6 +206,8 @@ class ExecutionSession:
 
     def cancel_requested_in(self, connection: sqlite3.Connection) -> bool:
         """Read cancellation from the caller's already owner-bound SQLite cut."""
+        if self._submission_only:
+            raise OwnershipLost("submission settlement has no execution observation authority")
         return self._leases.cancellation_requested_in(connection, self._lease)
 
     @contextmanager
@@ -123,7 +220,7 @@ class ExecutionSession:
         writes/effect fences never use this observer path.
         """
 
-        if self._finished:
+        if self._finished or self._submission_only:
             raise OwnershipLost("Execution session already released its ownership")
         with self._leases.preparation_cancellation_observer(self._lease) as observe:
             yield _BoundedCancellationProbe(
@@ -132,14 +229,18 @@ class ExecutionSession:
             )
 
     def assert_owner(self) -> None:
+        if self._submission_only:
+            raise OwnershipLost("submission settlement has no execution authority")
         self._leases.assert_owner(self._lease)
 
     def assert_fleet_owner(self, fleet_run_id: str) -> None:
+        if self._submission_only:
+            raise OwnershipLost("submission settlement has no execution authority")
         self._leases.assert_fleet_owner(self._lease, fleet_run_id)
 
     def observe(self, observe: Callable[[sqlite3.Connection], T]) -> T:
         """Read one durable authority cut only while this exact owner is valid."""
-        if self._finished:
+        if self._finished or self._submission_only:
             raise OwnershipLost("Execution session already released its ownership")
         return self._leases.observe_as_owner(self._lease, observe)
 
@@ -151,7 +252,7 @@ class ExecutionSession:
 
     def mutate(self, mutate: Callable[[sqlite3.Connection], T]) -> T:
         """Run a durable mutation only if this exact owner is valid in that transaction."""
-        if self._finished or self.recovery_only:
+        if self._finished or self.recovery_only or self._submission_only:
             raise OwnershipLost("recovery-only custody cannot mutate executable work")
         return self._leases.mutate_as_owner(self._lease, mutate)
 
@@ -159,7 +260,12 @@ class ExecutionSession:
         """Persist terminal state and release the lease atomically."""
         if self._finished or self.recovery_only:
             raise OwnershipLost("recovery-only custody cannot terminalize Fleet work")
-        result = self._leases.finish_as_owner(self._lease, mutate)
+        finish = (
+            self._leases.finish_submission_as_owner
+            if self._submission_only
+            else self._leases.finish_as_owner
+        )
+        result = finish(self._lease, mutate)
         self._finished = True
         return result
 
@@ -173,6 +279,7 @@ class ExecutionCoordinator:
         *,
         lease_environment: LeaseEnvironment | None = None,
     ) -> None:
+        self._database = database
         self._leases = SQLiteExecutionLeaseStore(database, environment=lease_environment)
 
     def reserve_direct_with(
@@ -224,13 +331,44 @@ class ExecutionCoordinator:
         ownership for restart recovery instead of manufacturing an ownerless active
         lifecycle state.
         """
-        if ticket.recovery_only:
+        if type(ticket) is not ExecutionTicket or ticket.recovery_only:
             raise OwnershipLost("recovery custody cannot activate executable Fleet session")
-        session = ExecutionSession(self._leases, ticket._lease)
         # Recovered custody may not be re-labelled as normal Run/Step admission.
-        session.assert_owner()
         self._leases.assert_executable_owner(ticket._lease)
-        return session
+        return ExecutionSession(self._leases, ticket._lease)
+
+    def require_claimed_fleet_worker(self, ticket: ExecutionTicket) -> None:
+        """Verify current worker custody without creating an executable session."""
+        if type(ticket) is not ExecutionTicket or ticket.recovery_only:
+            raise OwnershipLost("claimed Fleet worker ticket required")
+        ticket.require_fleet_run_id()
+        self._leases.assert_executable_owner(ticket._lease)
+
+    def claim_fleet_worker(self, ticket: ExecutionTicket) -> ExecutionTicket:
+        """Claim an already admitted Run; never create or rediscover its work."""
+        from oh_goon.core.vocabulary import FleetRunStatus
+        from oh_goon.runtime.journal import Journal
+
+        if type(ticket) is not ExecutionTicket or ticket.recovery_only:
+            raise OwnershipLost("original unclaimed Fleet ticket required")
+        fleet_run_id = ticket._lease.fleet_run_id
+        if fleet_run_id is None:
+            raise OwnershipLost("worker claim requires an admitted Fleet run")
+        journal = Journal(self._database)
+
+        def require_admitted(connection: sqlite3.Connection) -> None:
+            detail = journal.read_view_from_connection(connection).run_detail(fleet_run_id)
+            if detail is None or detail.run.status is not FleetRunStatus.QUEUED:
+                raise OwnershipLost("Fleet run is no longer awaiting worker claim")
+
+        return ExecutionTicket(self._leases.claim_fleet_worker(ticket._lease, require_admitted))
+
+    def activate_submission_failure(self, ticket: ExecutionTicket) -> ExecutionSession:
+        """Give the original unclaimed admission only atomic terminal settlement."""
+        if type(ticket) is not ExecutionTicket or ticket.recovery_only:
+            raise OwnershipLost("original unclaimed Fleet ticket required")
+        self._leases.assert_submission_owner(ticket._lease)
+        return ExecutionSession(self._leases, ticket._lease, _submission_only=True)
 
     def transfer_dead_fleet_to_recovery_in(
         self,

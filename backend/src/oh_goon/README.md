@@ -84,6 +84,14 @@ PTY transport and cancellation still use the original engine command owner.
 
 Durable/local process state and coordination: database/journal stores, executor capacity/placement, leases, lifecycle, schedulers, safety cuts and template stores. `runtime/workspaces.py::RepositoryWorkspaceAuthority` owns durable candidate/source workspace identity, lifecycle state, and the one persistent managed-workspace path resolver; `RunPathLayout`/`AttemptPathLayout` continue to own disposable execution scratch. For `READ_SNAPSHOT`, the same owner materializes the canonical clean source snapshot, persists its source-content proof, and re-proves it before the process-isolation layer may expose it; Bubblewrap uses a physical read-only bind and backends without an explicit read-only-workspace guarantee fail closed. Runtime may persist/coordinate canonical decisions but should not reinterpret them independently.
 
+`runtime/execution/run_supervisor.py` owns fresh Run-worker process submission;
+`ExecutionCoordinator` and its SQLite lease owner own atomic worker custody.
+`_application_worker.py` and `_application_worker_runtime.py` are minimal claimed-worker
+composition, separate from full application startup. They enter the existing
+`FleetRunExecution` and consume frozen Journal authority. Start at the
+[supervisor contract](../../../docs/development/EXECUTION_SUPERVISOR.md) for
+the physical boundary and remaining HUG-181/HUG-183 qualification.
+
 The existing X0 and lifecycle architecture checks always validate current
 execution owners, SQLite transaction durability and backup boundaries. These
 source checks apply to clean Git checkouts and full working copies equally;

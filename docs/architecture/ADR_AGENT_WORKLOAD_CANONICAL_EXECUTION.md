@@ -28,11 +28,10 @@ The historical gate/status and cost statements below do not add privileged
 qualification prerequisites to ordinary local use. See the
 [execution-first decision](ADR_EXECUTION_FIRST_PROPORTIONAL_SECURITY.md).
 
-The current FleetRun supervisor submits this common execution chain to a thread
-pool. HUG-180/HUG-181's required claimed-worker boundary strengthens physical
-custody beneath the same admission; it is not implemented or qualified by this
-ADR. [The execution boundary](../execution-boundary.md) locates that target and
-its existing semantic owners.
+The current FleetRun supervisor places a fresh, atomically claimed Run worker
+beneath the same admission. [The execution boundary](../execution-boundary.md)
+locates that implemented boundary and the remaining HUG-181/HUG-183 qualification;
+this historical ADR does not qualify the process cutover.
 
 The enduring constraint is one canonical execution, recovery and result path.
 Current authority belongs to the [contributor contract](../../AGENTS.md) and

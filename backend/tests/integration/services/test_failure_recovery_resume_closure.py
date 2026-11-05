@@ -228,7 +228,7 @@ def test_interrupted_parent_can_only_continue_as_fresh_rerun_with_explicit_linea
         fleet_run_id="recovery-rerun-parent",
         lease_environment=environment,
     )
-    session = parent.lifecycle.activate(parent.ticket)
+    session = parent.lifecycle.activate(parent.claim_worker())
     parent.lifecycle.begin(session)
     environment.alive = False
     _database, journal, _attempts, _coordinator, _recovery_service = _recover(parent, environment)

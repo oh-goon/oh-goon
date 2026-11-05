@@ -12,6 +12,7 @@ from oh_goon.core.models.run import FleetRunStatus
 from oh_goon.core.vocabulary import FleetRunEventType, FleetRunSource, OperationAction
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.services.fleet_run_execution import FleetRunExecution
 from tests.factories.local_state import local_state
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.runtime_stack import fleet_stack
@@ -367,10 +368,10 @@ def test_wait_for_terminal_surfaces_exact_run_scoped_background_failure(
     state.add_location(root)
     _, manager, _, _ = fleet_stack(state, PartiallyFailingRunner())
 
-    def fail_before_lifecycle(_ticket) -> None:
+    def fail_before_lifecycle(_execution, _ticket) -> None:
         raise RuntimeError("injected worker publication failure")
 
-    monkeypatch.setattr(manager._run_execution, "execute", fail_before_lifecycle)
+    monkeypatch.setattr(FleetRunExecution, "execute", fail_before_lifecycle)
     started = manager.start(OperationAction.INIT, fleet_run_id="fleet-worker-failure")
 
     with pytest.raises(

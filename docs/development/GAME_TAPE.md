@@ -15,7 +15,7 @@ Plan / Goons
   -> ResolvedFleetPlan
   -> FleetPlanTarget (frozen prepared target)
   -> FleetRun admission + ExecutionTicket
-  -> RunExecutionSupervisor (current thread-owned execution)
+  -> RunExecutionSupervisor -> fresh Run worker / atomic custody claim
   -> existing FleetRunExecution / Step / Attempt
   -> FleetPlanResult / OperationReport
   -> accepted Journal / Fleet lifecycle facts
@@ -28,11 +28,9 @@ Game Tape never schedules work. A Flow node is not schedulable, a Flow edge is n
 
 The browser owns no parallel execution model. `FleetRunDetail.game_tape` is the API projection consumed by every Game Tape view.
 
-The [canonical lifecycle requirements](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-insert an isolated Run worker and atomic custody claim between the supervisor and
-the existing execution path. This is the
-[HUG-180](https://linear.app/hugloss/issue/HUG-180)/[HUG-181](https://linear.app/hugloss/issue/HUG-181)
-target, not implemented worker support advertised by this view. It applies to
+The [supervisor contract](EXECUTION_SUPERVISOR.md) puts a fresh Run worker and
+atomic custody claim between the supervisor and the existing execution path.
+HUG-181/HUG-183 retain broader qualification. This boundary applies to
 local, CI, scheduled, ML, application and native-agent Runs through one admission
 path. Worker exit, heartbeat and native session events remain execution or
 diagnostic evidence; they cannot replace the original Journal/Fleet outcome.

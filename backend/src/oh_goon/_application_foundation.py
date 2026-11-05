@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
+    from oh_goon.native_issuer.enforcer_lace_execution_environment_issuer import (
+        InventorySnapshotIdentity,
+    )
 
 from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.capability_registry import capability_definitions
@@ -14,6 +17,7 @@ from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.ports.capability_runner import CapabilityRunner
+from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
@@ -94,6 +98,8 @@ class RuntimeFoundation:
     startup_purpose: RuntimeStartupPurpose = "application"
     run_resource_scope: ResolvedRunResourceScope | None = None
     run_resource_envelope: RunResourceEnvelopeEvidence | None = None
+    executor_configuration: ExecutorPoolConfiguration | None = None
+    executor_inventory_identity: InventorySnapshotIdentity | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +121,7 @@ def _build_capability_runtime(
     content_store_root: Path,
     run_parent: Path,
     live_output: GameTapeLiveOutputStore,
-    diagnostics: DiagnosticRouter,
+    diagnostics: DiagnosticEmitter,
     terminal: CommandTerminal | None = None,
     standard_process_isolation: ProcessIsolationBackend | None = None,
     startup_purpose: RuntimeStartupPurpose = "application",
@@ -321,11 +327,22 @@ def build_runtime_foundation(
         )
     )
     supervisor = RunExecutionSupervisor(diagnostics=diagnostics)
+    inventory_identity: InventorySnapshotIdentity | None = None
+    if fleet_provisioner is not None:
+        from oh_goon.native_issuer.enforcer_lace_execution_environment_issuer import (
+            _inventory_snapshot,
+        )
+
+        _, inventory_identity = _inventory_snapshot(fleet_provisioner.executor_inventory_file)
     configuration = (
         None
         if startup_purpose == "observation"
         else configured_executor_pool(control_state_root=state_paths.executor_control)
     )
+    if fleet_provisioner is not None:
+        _, current_identity = _inventory_snapshot(fleet_provisioner.executor_inventory_file)
+        if current_identity != inventory_identity:
+            raise TrustProtocolError("Executor inventory changed during runtime construction")
     path_authority = configuration.path_authority if configuration is not None else None
     extension_store = FleetExtensionStore(state_paths.extensions, path_authority=path_authority)
     tool_store = FleetToolStore(state_paths.plan_tools, path_authority=path_authority)
@@ -390,4 +407,6 @@ def build_runtime_foundation(
         startup_purpose=startup_purpose,
         run_resource_scope=run_resource_scope,
         run_resource_envelope=run_resource_envelope,
+        executor_configuration=configuration,
+        executor_inventory_identity=inventory_identity,
     )

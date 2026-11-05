@@ -24,7 +24,6 @@ from oh_goon.engine.git import GitService
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator
-from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor, RunSupervisorState
 from oh_goon.runtime.journal import Journal
 from oh_goon.services.effect_quarantine import (
     effect_quarantines,
@@ -69,30 +68,6 @@ def _begin_direct(
             baseline=baseline_for(repository),
             effect_boundary=EffectBoundaryKind.EXTERNAL,
         )
-
-
-def test_supervisor_quiesce_preserves_already_queued_work() -> None:
-    supervisor = RunExecutionSupervisor(max_active_runs=1)
-    first_entered = Event()
-    release_first = Event()
-    second_finished = Event()
-
-    def first() -> None:
-        first_entered.set()
-        release_first.wait(timeout=2)
-
-    supervisor.submit("run-1", first)
-    assert first_entered.wait(timeout=2)
-    supervisor.submit("run-2", second_finished.set)
-    supervisor.quiesce()
-
-    with pytest.raises(RuntimeQuiescing):
-        supervisor.submit("run-3", lambda: None)
-
-    release_first.set()
-    supervisor.shutdown(wait=True)
-    assert second_finished.is_set()
-    assert supervisor.state is RunSupervisorState.CLOSED
 
 
 def test_unknown_mutating_effect_recovery_quarantines_repository(tmp_path: Path) -> None:
@@ -149,22 +124,6 @@ def test_committed_report_retires_coordination_state_instead_of_storing_complete
     with pytest.raises(OperationNotFound):
         attempts.get(operation_id)
     assert attempts.all() == []
-
-
-def test_supervisor_shutdown_does_not_cancel_pending_future() -> None:
-    supervisor = RunExecutionSupervisor(max_active_runs=1)
-    entered = Event()
-    release = Event()
-    pending_ran = Event()
-
-    supervisor.submit("active", lambda: (entered.set(), release.wait(timeout=2)))
-    assert entered.wait(timeout=2)
-    supervisor.submit("pending", pending_ran.set)
-    supervisor.quiesce()
-    release.set()
-    supervisor.shutdown(wait=True)
-
-    assert pending_ran.is_set()
 
 
 class _CancellableRunner:

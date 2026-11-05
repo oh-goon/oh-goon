@@ -131,7 +131,7 @@ def test_fleet_cancel_rejects_different_active_fleet_owner(tmp_path: Path) -> No
         with database.transaction(write=True) as connection:
             leases.request_fleet_cancel_in(connection, "fleet-b")
 
-    leases.finish_as_owner(lease, lambda _connection: None)
+    leases.finish_submission_as_owner(lease, lambda _connection: None)
 
 
 def test_same_token_with_changed_lease_identity_is_rejected(tmp_path: Path) -> None:
@@ -148,8 +148,8 @@ def test_same_token_with_changed_lease_identity_is_rejected(tmp_path: Path) -> N
             ("fleet-replaced",),
         )
 
-    with pytest.raises(OwnershipLost, match="identity changed"):
-        leases.assert_owner(lease)
+    with pytest.raises(OwnershipLost, match="custody changed"):
+        leases.assert_submission_owner(lease)
 
     with database.transaction(write=True) as connection:
         connection.execute("DELETE FROM execution_lease WHERE singleton = 1")
@@ -169,10 +169,10 @@ def test_caller_owned_fleet_admission_transaction_mints_exact_lease(tmp_path: Pa
 
     assert lease.kind == "FLEET"
     assert lease.fleet_run_id == "fleet-caller-owned"
-    leases.assert_fleet_owner(lease, "fleet-caller-owned")
+    leases.assert_submission_owner(lease)
     with pytest.raises(OwnershipLost, match="does not own"):
         leases.assert_fleet_owner(lease, "fleet-other")
-    leases.finish_as_owner(lease, lambda _connection: None)
+    leases.finish_submission_as_owner(lease, lambda _connection: None)
 
 
 def test_scoped_transaction_reproof_error_does_not_destroy_connection_scope(

@@ -24,9 +24,8 @@ There is no generic `release`/`abandon` cleanup for admitted work. A process cra
 
 `CapabilityExecutor` performs no durable mutation.
 
-`RunExecutionSupervisor` currently submits the original FleetRun execution to a
-thread pool. The [required Run-worker cutover](OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-under HUG-180/HUG-181 transfers live process custody by an atomic claim beneath
+The [Run-worker boundary](EXECUTION_SUPERVISOR.md) transfers live process custody
+to a fresh native process by an atomic SQLite claim beneath
 the same admission and SQLite authority; it adds no durable Job/worker store or
 second local, CI, scheduled, ML, application or agent path. A PID, native session,
 worker exit or Game Tape view cannot establish custody or terminal truth.

@@ -18,6 +18,7 @@ from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
     EffectBoundaryKind,
     FleetRunEventType,
+    FleetRunTerminalIntent,
     OperationAction,
     RuntimeSafetyStatus,
 )
@@ -33,6 +34,7 @@ from oh_goon.services.runtime_safety import RuntimeSafetyService
 from tests.factories.capabilities import resolved_intent
 from tests.factories.local_state import local_state
 from tests.factories.schedules import schedule_create, scheduled_fleet_run_intent
+from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
 def _safety_stack(database: LocalDatabase) -> tuple[RuntimeSafetyService, SystemInvariantAuditor]:
@@ -183,7 +185,11 @@ def test_fleet_lease_and_run_admission_commit_or_rollback_together(tmp_path: Pat
     assert execution.active_lease() is not None
     events = journal.run_events("fleet-atomic-admission").events
     assert [event.event_type for event in events] == [FleetRunEventType.RUN_ADMITTED]
-    execution.activate(ticket).finish(lambda _connection: None)
+    execution.activate_submission_failure(ticket).finish(
+        lambda connection: journal.terminalize_run_in(
+            connection, "fleet-atomic-admission", FleetRunTerminalIntent.CANCEL
+        )
+    )
 
 
 def test_schedule_admission_cas_rejects_definition_cut_that_became_stale(tmp_path: Path) -> None:
@@ -325,6 +331,12 @@ def test_invariant_auditor_accepts_parallel_owned_fleet_attempts(tmp_path: Path)
             connection, fleet_run_id, admission, fleet_repository_scope(None), targets
         ),
     )
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    schedules = ScheduleExecutionStore(database)
+    auditor = SystemInvariantAuditor(database, journal, execution, attempts, schedules)
+    ticket = execution.claim_fleet_worker(ticket)
     session = execution.activate(ticket)
     session.mutate(lambda connection: journal.start_run_in(connection, fleet_run_id))
     created = []
@@ -388,6 +400,12 @@ def test_invariant_auditor_rejects_corrupt_fleet_attempt_structure(tmp_path: Pat
             connection, fleet_run_id, admission, fleet_repository_scope(None), [target]
         ),
     )
+    database, execution = simulated_worker_coordinator(database)
+    journal = Journal(database)
+    attempts = RepositoryEffectAttemptStore(database)
+    schedules = ScheduleExecutionStore(database)
+    auditor = SystemInvariantAuditor(database, journal, execution, attempts, schedules)
+    ticket = execution.claim_fleet_worker(ticket)
     session = execution.activate(ticket)
     session.mutate(lambda connection: journal.start_run_in(connection, fleet_run_id))
     attempt = session.mutate(

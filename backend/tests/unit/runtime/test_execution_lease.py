@@ -60,7 +60,7 @@ def test_execution_lease_serializes_independent_process_sessions(tmp_path: Path)
         expected_durable_revision=second_database.durable_revision(),
         mutate=lambda _connection: None,
     )
-    second.finish_as_owner(fleet, lambda _connection: None)
+    second.finish_submission_as_owner(fleet, lambda _connection: None)
 
 
 def test_fleet_admission_replay_never_adopts_another_runtime_session(
@@ -83,7 +83,7 @@ def test_fleet_admission_replay_never_adopts_another_runtime_session(
     with second_database.transaction() as connection:
         assert second.owned_fleet_lease_in(connection, "fleet-owned") is None
 
-    first.finish_as_owner(lease, lambda _connection: None)
+    first.finish_submission_as_owner(lease, lambda _connection: None)
 
 
 def test_scope_mutation_is_blocked_by_direct_execution_lease(tmp_path: Path) -> None:
@@ -160,6 +160,7 @@ def test_dead_owner_pid_allows_immediate_lease_recovery(tmp_path: Path) -> None:
     environment.alive.clear()
     environment.pid = 2002
     environment.alive.add(2002)
+    environment.identities[2002] = "birth-2002-1"
 
     replacement_database = LocalDatabase(database.path)
     replacement_store = SQLiteExecutionLeaseStore(replacement_database, environment=environment)
@@ -170,7 +171,7 @@ def test_dead_owner_pid_allows_immediate_lease_recovery(tmp_path: Path) -> None:
     )
 
     assert replacement.fleet_run_id == "fleet-recovered"
-    replacement_store.finish_as_owner(replacement, lambda _connection: None)
+    replacement_store.finish_submission_as_owner(replacement, lambda _connection: None)
     # The dead owner's stale row was reclaimed during replacement admission.
     with pytest.raises(OwnershipLost):
         leases.finish_as_owner(abandoned, lambda _connection: None)
@@ -214,7 +215,7 @@ def test_ownership_transitions_advance_durable_revision_without_heartbeat_state(
         mutate=lambda _connection: None,
     )
     assert database.durable_revision() == before + 1
-    leases.finish_as_owner(lease, lambda _connection: None)
+    leases.finish_submission_as_owner(lease, lambda _connection: None)
     assert database.durable_revision() == before + 2
 
     with database.transaction() as connection:
@@ -246,7 +247,7 @@ def test_reused_live_pid_with_different_birth_identity_reclaims_stale_lease(
     )
 
     assert lease.fleet_run_id == "fleet-after-pid-reuse"
-    replacement.finish_as_owner(lease, lambda _connection: None)
+    replacement.finish_submission_as_owner(lease, lambda _connection: None)
     with pytest.raises(OwnershipLost):
         first.finish_as_owner(stale, lambda _connection: None)
 
