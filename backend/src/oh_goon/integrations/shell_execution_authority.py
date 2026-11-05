@@ -1,38 +1,57 @@
+"""Execution need from producer source candidates and explicit original argv."""
+
 from __future__ import annotations
 
-import shlex
+import hashlib
+import re
+from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from oh_goon.integrations._shell_authority_flow import commands_from_script_lines
+from oh_goon.core.source_tree_policy import is_package_manager_materialization_path
 from oh_goon.integrations._shell_authority_syntax import (
     CONTROL_WORDS,
     SHELLS,
-    SIMPLE_TOOL,
-    command_index,
-    env_assignments,
-    env_child_index,
     external_tool,
-    extract_command_substitutions,
-    find_exec_child_words,
-    forward_position,
-    function_names,
-    literal_cwd_forwarded_argv,
-    logical_lines,
-    mask_noncommand_expansions,
     materialized_executable_identity,
-    materialized_executables_in_shell,
-    prefix_environment,
     project_path,
-    segments,
-    shebang_tools,
-    shell_child_words,
+)
+from oh_goon.integrations.hashmarks import (
+    HashmarksSourceEvidence,
+    hashmarks_source_scope,
+    observe_make_shell_declarations,
+    observe_make_shell_declarations_text,
+    verify_source_scope,
 )
 from oh_goon.integrations.package_script_execution_authority import (
+    NpmSourceObservations,
     PackageExecutableAuthority,
     derive_npm_run_authority,
     npm_run_script,
 )
+
+_FORWARD_DECLARATION = re.compile(r"# OH_GOON_FORWARD_ARGV_FROM: ([1-9][0-9]*)")
+_OPAQUE_LAUNCHERS = frozenset(
+    {"env", "xargs", "find", "timeout", "nice", "nohup", "stdbuf", "setsid"}
+)
+
+_Candidate = tuple[str | None, ...]
+
+
+@dataclass(slots=True)
+class ShellSourceObservations:
+    """Captured source facts for one original caller-owned source lifetime."""
+
+    root: Path
+    scope: object
+    scripts: dict[str, HashmarksSourceEvidence] = field(default_factory=dict)
+    npm: NpmSourceObservations = field(init=False)
+    work_remaining: int = 4096
+
+    def __post_init__(self) -> None:
+        self.npm = NpmSourceObservations(self.root, self.scope)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,12 +64,17 @@ class ShellAuthority:
     package_provenance: tuple[tuple[str, str], ...]
     package_sources: tuple[str, ...]
     materialized_executables: tuple[str, ...]
+    repository_evidence: tuple[HashmarksSourceEvidence, ...] = ()
+    source_identities: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(slots=True)
 class _Builder:
     root: Path
+    scope: object
     working_directory: str = "."
+    environment: dict[str, str] = field(default_factory=dict, repr=False)
+    context_known: bool = True
     tools: set[str] = field(default_factory=set)
     provenance: set[tuple[str, str]] = field(default_factory=set)
     unresolved: set[str] = field(default_factory=set)
@@ -59,332 +83,160 @@ class _Builder:
     package_provenance: set[tuple[str, str]] = field(default_factory=set)
     package_sources: set[str] = field(default_factory=set)
     materialized_executables: set[str] = field(default_factory=set)
+    observations: list[HashmarksSourceEvidence] = field(default_factory=list)
+    source_cache: dict[str, HashmarksSourceEvidence] = field(default_factory=dict)
     visiting: list[str] = field(default_factory=list)
-    argv_forwarding_proven: bool = False
+    observation_bytes: int = 0
+    retained: set[int] = field(default_factory=set)
+    npm_observations: NpmSourceObservations | None = None
+    source_observations: ShellSourceObservations | None = None
+    metadata_bytes: int = 0
+    source_identities: dict[str, str] = field(default_factory=dict)
 
     def require(self, tool: str, chain: tuple[str, ...]) -> None:
-        self.tools.add(tool)
-        self.provenance.add((tool, " -> ".join((*chain, tool))))
+        path = " -> ".join((*chain, tool))
+        if self._reserve_metadata(path):
+            self.tools.add(tool)
+            self.provenance.add((tool, path))
 
-    def reject(self, message: str, chain: tuple[str, ...]) -> None:
-        self.unresolved.add(" -> ".join(chain) + ": " + message)
+    def reject(self, reason: str, chain: tuple[str, ...]) -> None:
+        value = " -> ".join(chain) + ": " + reason
+        if self._reserve_metadata(value):
+            self.unresolved.add(value)
+
+    def _reserve_metadata(self, value: str) -> bool:
+        if self.metadata_bytes + len(value.encode("utf-8")) > 4 * 1024 * 1024:
+            self.unresolved.add("Execution source metadata transport bound exhausted")
+            if self.source_observations is not None:
+                self.source_observations.work_remaining = 0
+            return False
+        self.metadata_bytes += len(value.encode("utf-8"))
+        return True
+
+    def visit(self) -> bool:
+        if self.source_observations is None or self.source_observations.work_remaining <= 0:
+            self.unresolved.add("Execution source observation work bound exhausted")
+            return False
+        self.source_observations.work_remaining -= 1
+        return True
+
+    def retain(self, evidence: HashmarksSourceEvidence) -> None:
+        if id(evidence) in self.retained:
+            return
+        size = len(evidence.canonical_packet_json.encode("utf-8")) + len(
+            evidence.source_bytes or b""
+        )
+        if len(self.observations) >= 128 or self.observation_bytes + size > 4 * 1024 * 1024:
+            raise ValueError("Execution source evidence exceeds its bounded transport")
+        self.observation_bytes += size
+        self.observations.append(evidence)
+        self.retained.add(id(evidence))
 
 
-def _scan_forwarded_argv(
-    builder: _Builder,
-    argv: tuple[str, ...],
-    position: int | None,
-    chain: tuple[str, ...],
-    environment: dict[str, str],
+def _file_observation(evidence: HashmarksSourceEvidence) -> dict[str, Any]:
+    packet = evidence.packet()
+    providers = packet.get("providers", [])
+    groups = packet.get("declarations", {}).get("groups", [])
+    if len(providers) != 1 or providers[0].get("state") != "collected" or len(groups) != 1:
+        raise ValueError("Execution source observation is unavailable")
+    value = groups[0]["declarations"][0]["value"]
+    if (
+        value.get("facts_completeness") != "complete-supported-subset"
+        or value.get("facts_truncation") != "not-truncated"
+    ):
+        raise ValueError("Execution source observation is incomplete")
+    return dict(value)
+
+
+def _forward_declaration(evidence: HashmarksSourceEvidence) -> int | None:
+    if evidence.source_bytes is None:
+        raise ValueError("Declared forwarding requires original captured source bytes")
+    positions = [
+        int(match.group(1))
+        for line in evidence.source_bytes.decode("utf-8").split("\n")
+        if (match := _FORWARD_DECLARATION.fullmatch(line)) is not None
+    ]
+    if len(positions) > 1:
+        raise ValueError("OH_GOON_FORWARD_ARGV_FROM must be unique")
+    return positions[0] if positions else None
+
+
+def _owned_script(
+    builder: _Builder, operand: str, arguments: _Candidate, chain: tuple[str, ...]
 ) -> None:
-    if position is None:
+    if not builder.visit():
         return
-    index = position - 1
-    if len(argv) <= index:
-        builder.reject(f"forwarded argv position {position} is absent", chain)
+    path = project_path(builder.root, operand, working_directory=builder.working_directory)
+    if path is None:
+        builder.reject("unproven owned script operand: " + operand, chain)
         return
-    _scan_words(builder, tuple(argv[index:]), chain, frozenset(), environment)
-
-
-def _relative_script(builder: _Builder, path: Path, chain: tuple[str, ...]) -> str | None:
-    try:
-        return path.resolve().relative_to(builder.root).as_posix()
-    except (OSError, ValueError):
-        builder.reject(f"script escapes repository: {path}", chain)
-        return None
-
-
-def _read_script(
-    builder: _Builder, path: Path, relative: str, chain: tuple[str, ...]
-) -> str | None:
-    try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        builder.reject(f"cannot read owned script {relative}: {exc}", chain)
-        return None
-
-
-def _scan_script_body(
-    builder: _Builder,
-    *,
-    relative: str,
-    lines: tuple[str, ...],
-    argv: tuple[str, ...],
-    chain: tuple[str, ...],
-    environment: dict[str, str],
-) -> None:
-    functions = function_names(lines)
-    position = forward_position(lines, relative)
-    _scan_forwarded_argv(
-        builder,
-        argv,
-        position,
-        (*chain, "<argv-forward>"),
-        environment,
-    )
-    previous = builder.argv_forwarding_proven
-    builder.argv_forwarding_proven = position is not None
-    try:
-        for command in commands_from_script_lines(lines, environment):
-            _scan_fragment(builder, command, chain, functions, environment)
-    finally:
-        builder.argv_forwarding_proven = previous
-
-
-def _scan_owned_script(
-    builder: _Builder,
-    path: Path,
-    argv: tuple[str, ...],
-    chain: tuple[str, ...],
-    environment: dict[str, str],
-    *,
-    direct: bool,
-) -> None:
-    relative = _relative_script(builder, path, chain)
-    if relative is None:
+    relative = path.relative_to(builder.root).as_posix()
+    if is_package_manager_materialization_path(Path(relative)):
+        builder.materialized_executables.add(relative)
         return
     if relative in builder.visiting:
         builder.reject("owned script cycle: " + " -> ".join((*builder.visiting, relative)), chain)
         return
-    text = _read_script(builder, path, relative, chain)
-    if text is None:
-        return
-    script_chain = (*chain, relative)
+    evidence = builder.source_cache.get(relative)
+    if evidence is None:
+        if len(builder.source_cache) >= 128:
+            raise ValueError("Owned execution source inventory exceeds its transport bound")
+        evidence = observe_make_shell_declarations(
+            builder.root,
+            shell_paths=(relative,),
+            layout="file",
+            scope=builder.scope,
+            include_source_bytes=True,
+        )
+        builder.source_cache[relative] = evidence
+    builder.retain(evidence)
+    if evidence.source_bytes is None:
+        raise ValueError("Owned script byte custody is unavailable")
+    builder.source_identities[relative] = (
+        "sha256:" + hashlib.sha256(evidence.source_bytes).hexdigest()
+    )
     builder.scripts.add(relative)
-    if direct:
-        for tool in shebang_tools(path):
-            builder.require(tool, (*script_chain, "<shebang>"))
+    position = _forward_declaration(evidence)
+    if position is not None:
+        # The product declaration supplies conservative child input intent.
+        # It does not prove that this script actually forwards those operands.
+        builder.reject("declared forwarding does not establish native behavior", chain)
+        if position <= len(arguments):
+            _supplied_argv(
+                builder, arguments[position - 1 :], (*chain, relative, "<declared-child-argv>")
+            )
+        else:
+            builder.reject("declared child argv is unavailable", chain)
     builder.visiting.append(relative)
     try:
-        _scan_script_body(
-            builder,
-            relative=relative,
-            lines=logical_lines(text),
-            argv=argv,
-            chain=script_chain,
-            environment=environment,
-        )
+        _scan_observation(builder, evidence, (*chain, relative))
     finally:
         builder.visiting.pop()
 
 
-def _shell_command_operand(words: tuple[str, ...], index: int) -> tuple[str | None, int]:
-    cursor = index + 1
-    while cursor < len(words) and words[cursor].startswith("-") and words[cursor] != "-":
-        option = words[cursor]
-        cursor += 1
-        if option == "-c":
-            return "-c", cursor
-    return None, cursor
-
-
-def _scan_shell_command(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> None:
-    shell = words[index]
-    builder.require(shell, chain)
-    mode, cursor = _shell_command_operand(words, index)
-    if mode == "-c":
-        if cursor >= len(words):
-            builder.reject(f"{shell} -c command is missing", chain)
-            return
-        shell_chain = (*chain, f"{shell} -c")
-        forwarded = literal_cwd_forwarded_argv(
-            words[cursor], tuple(words[cursor + 1 :]), working_directory=builder.working_directory
-        )
-        if forwarded is not None:
-            child_cwd, child = forwarded
-            previous_cwd = builder.working_directory
-            previous_forwarding = builder.argv_forwarding_proven
-            builder.working_directory = child_cwd
-            builder.argv_forwarding_proven = False
-            try:
-                builder.materialized_executables.update(
-                    materialized_executables_in_shell(
-                        shlex.join(child), working_directory=child_cwd
-                    )
-                )
-                _scan_words(
-                    builder, child, (*shell_chain, "<argv-forward>"), functions, environment
-                )
-            finally:
-                builder.working_directory = previous_cwd
-                builder.argv_forwarding_proven = previous_forwarding
-            return
-        previous = builder.argv_forwarding_proven
-        builder.argv_forwarding_proven = False
-        try:
-            _scan_fragment(builder, words[cursor], shell_chain, functions, environment)
-        finally:
-            builder.argv_forwarding_proven = previous
-        return
-    if cursor >= len(words):
-        return
-    script = project_path(builder.root, words[cursor], working_directory=builder.working_directory)
-    if script is None:
-        _reject_unresolved_shell_operand(builder, shell, words[cursor], chain)
-        return
-    _scan_owned_script(
-        builder, script, tuple(words[cursor + 1 :]), chain, environment, direct=False
-    )
-
-
-def _reject_unresolved_shell_operand(
-    builder: _Builder, shell: str, operand: str, chain: tuple[str, ...]
-) -> None:
-    if operand.endswith(".sh") or operand.startswith(("$", "${")):
-        builder.reject(f"unresolved {shell} script operand: {operand}", chain)
-
-
-def _scan_find_exec(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> None:
-    children = find_exec_child_words(words, index)
-    markers = sum(word in {"-exec", "-execdir"} for word in words[index + 1 :])
-    if markers and len(children) != markers:
-        builder.reject("find -exec command is missing", chain)
-    for child in children:
-        _scan_words(builder, child, (*chain, "find -exec"), functions, environment)
-
-
-def _skip_command(command: str, functions: frozenset[str]) -> bool:
-    return not command or command in CONTROL_WORDS or command in functions or command.endswith(")")
-
-
-def _scan_command_wrapper(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    command: str,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> bool:
-    if command not in {"command", "builtin"}:
-        return False
-    cursor = index + 1
-    while cursor < len(words) and words[cursor].startswith("-"):
-        cursor += 1
-    if cursor < len(words) and words[cursor] not in {"-v", "-V"}:
-        _scan_words(builder, tuple(words[cursor:]), (*chain, command), functions, environment)
-    return True
-
-
-def _scan_exec(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> None:
-    if index + 1 >= len(words):
-        builder.reject("exec target is missing", chain)
-        return
-    _scan_words(builder, tuple(words[index + 1 :]), (*chain, "exec"), functions, environment)
-
-
-def _scan_trap(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> None:
-    if index + 1 < len(words) and words[index + 1] not in {"-", "''", '""'}:
-        _scan_fragment(builder, words[index + 1], (*chain, "trap"), functions, environment)
-
-
-def _scan_env(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> None:
-    builder.require("env", chain)
-    child = env_child_index(words, index)
-    if child is None:
-        return
-    child_environment = dict(environment)
-    child_environment.update(env_assignments(words, index + 1, child))
-    _scan_words(builder, tuple(words[child:]), (*chain, "env"), functions, child_environment)
-
-
-def _scan_xargs(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> None:
-    builder.require("xargs", chain)
-    child = shell_child_words(words, index)
-    if child is None:
-        builder.reject("xargs command is implicit", chain)
-        return
-    _scan_words(builder, child, (*chain, "xargs"), functions, environment)
-
-
-def _scan_process_launcher(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    command: str,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> None:
-    builder.require(command, chain)
-    child = shell_child_words(words, index)
-    if child is None:
-        builder.reject(f"{command} child command is unprovable", chain)
-        return
-    _scan_words(builder, child, (*chain, command), functions, environment)
-
-
-def _scan_find(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> None:
-    builder.require("find", chain)
-    _scan_find_exec(builder, words, index, chain, functions, environment)
-
-
-def _scan_npm(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    chain: tuple[str, ...],
-) -> None:
+def _npm(builder: _Builder, words: _Candidate, chain: tuple[str, ...]) -> None:
     builder.require("npm", chain)
-    script = npm_run_script(words, index)
+    known: list[str] = []
+    for word in words:
+        if word is None:
+            break
+        known.append(word)
+    try:
+        script = npm_run_script(tuple(known), 0)
+    except ValueError as exc:
+        builder.reject(str(exc), chain)
+        return
     if script is None:
         return
-    if "$" in script or "`" in script:
-        builder.reject(f"dynamic npm script name: {script}", chain)
+    if any(marker in script for marker in ("$", "`")):
+        builder.reject("dynamic npm script name is unproven", chain)
         return
     authority = derive_npm_run_authority(
         builder.root,
         script,
         chain=(*chain, f"npm run {script}"),
+        observations=builder.npm_observations,
+        package_dir=builder.root / builder.working_directory if builder.context_known else None,
     )
     builder.tools.update(authority.host_tools)
     builder.provenance.update(authority.host_provenance)
@@ -392,159 +244,209 @@ def _scan_npm(
     builder.package_provenance.update(authority.package_provenance)
     builder.package_sources.update(authority.sources)
     builder.unresolved.update(authority.unresolved)
+    builder.source_identities.update(authority.source_identities)
+    for evidence in authority.repository_evidence:
+        builder.retain(evidence)
 
 
-def _scan_dynamic_command(builder: _Builder, command: str, chain: tuple[str, ...]) -> bool:
-    if command == "__OH_GOON_PARAM__":
-        builder.reject("unresolved executable parameter expansion", chain)
-        return True
-    if command == "__OH_GOON_SUBSTITUTION__":
-        builder.reject("unresolved executable command substitution", chain)
-        return True
-    if not command.startswith(("$", "${")):
-        return False
-    if command not in {'"$@"', "$@", '"${@}"', "${@}"} or not builder.argv_forwarding_proven:
-        builder.reject(f"unresolved executable variable: {command}", chain)
-    return True
-
-
-def _scan_owned_command(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    command: str,
-    chain: tuple[str, ...],
-    environment: dict[str, str],
-) -> bool:
-    if (
-        materialized_executable_identity(command, working_directory=builder.working_directory)
-        is not None
-    ):
-        # uv/npm own these generated executable wrappers. Treating a materialized
-        # Python console entry point as shell made authority depend on whether
-        # `make init` had already run (e.g. `__name__` became a fake host tool).
-        # Canonical dependency identity is collected by the cwd-aware shell pass
-        # before this owned-source guard runs.
-        return True
-    owned = project_path(builder.root, command, working_directory=builder.working_directory)
-    if owned is None or owned.suffix not in {".sh", ""} or not owned.is_file():
-        return False
-    _scan_owned_script(builder, owned, tuple(words[index + 1 :]), chain, environment, direct=True)
-    return True
-
-
-def _scan_external_command(builder: _Builder, command: str, chain: tuple[str, ...]) -> None:
-    tool = external_tool(builder.root, command, working_directory=builder.working_directory)
-    if tool is not None:
-        builder.require(tool, chain)
-        return
-    if SIMPLE_TOOL.fullmatch(command) is None and "/" not in command:
-        builder.reject(f"unresolved executable token: {command!r}", chain)
-
-
-def _scan_special_command(
-    builder: _Builder,
-    words: tuple[str, ...],
-    index: int,
-    command: str,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> bool:
-    if command == "eval":
-        builder.reject("dynamic eval execution is unprovable", chain)
-        return True
-    if _scan_command_wrapper(builder, words, index, command, chain, functions, environment):
-        return True
-    if command == "exec":
-        _scan_exec(builder, words, index, chain, functions, environment)
-        return True
-    if command == "trap":
-        _scan_trap(builder, words, index, chain, functions, environment)
-        return True
-    if command in SHELLS:
-        _scan_shell_command(builder, words, index, chain, functions, environment)
-        return True
-    if command == "env":
-        _scan_env(builder, words, index, chain, functions, environment)
-        return True
-    if command == "xargs":
-        _scan_xargs(builder, words, index, chain, functions, environment)
-        return True
-    if command == "find":
-        _scan_find(builder, words, index, chain, functions, environment)
-        return True
-    if command in {"timeout", "nice", "nohup", "stdbuf", "setsid"}:
-        _scan_process_launcher(builder, words, index, command, chain, functions, environment)
-        return True
-    if command == "npm":
-        _scan_npm(builder, words, index, chain)
-        return True
+def _positional_command_observed(observed: dict[str, Any]) -> bool:
+    for fact in observed["facts"]:
+        if fact["kind"] != "shell-command-expression":
+            continue
+        words = fact["value"].get("words", [])
+        operands = words[1:] if words and words[0].get("literal") == "exec" else words[:1]
+        if any(word.get("reference", {}).get("name") == "@" for word in operands):
+            return True
     return False
 
 
-def _scan_words(
-    builder: _Builder,
-    words: tuple[str, ...],
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
+def _supplied_argv(builder: _Builder, words: _Candidate, chain: tuple[str, ...]) -> None:
+    original_context = builder.context_known
+    builder.context_known = False
+    try:
+        _scan_argv(builder, words, chain, source_command=False)
+    finally:
+        builder.context_known = original_context
+
+
+def _shell(builder: _Builder, words: _Candidate, chain: tuple[str, ...]) -> None:
+    program = words[0]
+    if program is None:
+        builder.reject("shell program is unproven", chain)
+        return
+    builder.require(Path(program).name, chain)
+    if len(words) == 1:
+        return
+    if words[1] == "-c" and len(words) >= 3:
+        if words[2] is None:
+            builder.reject("shell command source is unproven", chain)
+            if len(words) > 4:
+                _supplied_argv(builder, words[4:], (*chain, "<conditional-supplied-argv>"))
+            return
+        evidence = observe_make_shell_declarations_text(
+            words[2], path="command.sh", language="shell", layout="file"
+        )
+        builder.retain(evidence)
+        _scan_observation(builder, evidence, (*chain, "<shell-command-source>"))
+        if len(words) > 4 and _positional_command_observed(_file_observation(evidence)):
+            # $0 remains separate under the native shell ABI. Original supplied
+            # operands are conservative intent, never proof that a branch runs.
+            _supplied_argv(builder, words[4:], (*chain, "<supplied-shell-argv>"))
+        return
+    if words[1] is None or words[1].startswith("-"):
+        builder.reject("shell option/operand binding is unproven", chain)
+        return
+    _owned_script(builder, words[1], words[2:], chain)
+
+
+def _scan_argv(
+    builder: _Builder, words: _Candidate, chain: tuple[str, ...], *, source_command: bool = True
 ) -> None:
+    if not builder.visit():
+        return
     if not words:
         return
-    index = command_index(words)
-    if index >= len(words):
+    command = words[0]
+    if command is None:
+        builder.reject("source command head is unproven", chain)
         return
-    local_environment = prefix_environment(words, index, environment)
-    command = words[index].lstrip("({").rstrip(")}")
-    if _skip_command(command, functions):
+    if Path(command).is_absolute() and Path(command).name in SHELLS:
+        builder.reject("absolute shell requires original admitted native tool role", chain)
         return
-    if _scan_special_command(builder, words, index, command, chain, functions, local_environment):
+    if any(word is None for word in words):
+        builder.reject("source argv contains unresolved operands", chain)
+    if source_command and command == "exec":
+        if (
+            len(words) > 1
+            and words[1] is not None
+            and words[1] != "exec"
+            and not words[1].startswith("-")
+        ):
+            _scan_argv(builder, words[1:], (*chain, "exec"), source_command=False)
+        else:
+            builder.reject("native exec operand is unproven", chain)
         return
-    if _scan_dynamic_command(builder, command, chain):
+    if source_command and command in {"command", "builtin", "trap"}:
+        builder.reject("native builtin operand binding is unproven: " + command, chain)
         return
-    if _scan_owned_command(builder, words, index, command, chain, local_environment):
+    if source_command and command in {".", "source", "cd", "eval"}:
+        builder.reject("native source/environment change is unproven: " + command, chain)
         return
-    _scan_external_command(builder, command, chain)
-
-
-def _scan_fragment(
-    builder: _Builder,
-    fragment: str,
-    chain: tuple[str, ...],
-    functions: frozenset[str],
-    environment: dict[str, str],
-) -> None:
-    builder.materialized_executables.update(
-        materialized_executables_in_shell(
-            fragment,
-            working_directory=builder.working_directory,
-        )
+    if source_command and command in CONTROL_WORDS:
+        return
+    materialized = materialized_executable_identity(
+        command, working_directory=builder.working_directory
     )
-    cleaned, substitutions = extract_command_substitutions(fragment)
-    for substitution in substitutions:
-        _scan_fragment(
-            builder, substitution, (*chain, "<command-substitution>"), functions, environment
-        )
-    masked = mask_noncommand_expansions(cleaned)
-    parsed = segments(masked) if masked is not None else None
-    if parsed is None:
-        builder.reject(f"unparseable shell fragment: {fragment}", chain)
+    if materialized is not None:
+        builder.materialized_executables.add(materialized)
         return
-    for words in parsed:
-        _scan_words(builder, words, chain, functions, environment)
+    tool = (
+        command
+        if not source_command and command in CONTROL_WORDS
+        else external_tool(builder.root, command, working_directory=builder.working_directory)
+    )
+    if tool in SHELLS:
+        _shell(builder, words, chain)
+    elif tool == "npm":
+        _npm(builder, words, chain)
+    elif tool is not None:
+        builder.require(tool, chain)
+        if tool in _OPAQUE_LAUNCHERS:
+            builder.reject("native child operand binding is unproven: " + tool, chain)
+    elif (
+        project_path(builder.root, command, working_directory=builder.working_directory) is not None
+    ):
+        builder.reject("direct script interpreter requires original execution authority", chain)
+        _owned_script(builder, command, words[1:], chain)
+    else:
+        builder.reject("unproven executable source candidate: " + command, chain)
 
 
-def derive_shell_fragment_authority(
-    root: Path,
-    fragment: str,
-    *,
+def _authored_words(value: dict[str, Any]) -> _Candidate:
+    """Keep opaque operand slots; never synthesize a runtime expansion."""
+    words = value.get("authored_words", value.get("words", []))
+    return tuple(word.get("literal") for word in words) if isinstance(words, list) else ()
+
+
+def _command_candidates(value: dict[str, Any]) -> tuple[_Candidate, ...]:
+    candidates: list[_Candidate] = []
+    literal = value.get("literal_argv")
+    if isinstance(literal, list):
+        candidates.append(tuple(literal))
+    else:
+        observed = value.get("static_binding_observation", {})
+        words = observed.get("words")
+        candidates.append(
+            tuple(words) if isinstance(words, list) else _authored_words(observed or value)
+        )
+    for invocation in value.get("invocation_binding_observation", {}).get("candidates", []):
+        words = invocation.get("observation", {}).get("words")
+        if isinstance(words, list):
+            candidates.append(tuple(words))
+    return tuple(candidates)
+
+
+def _scan_observation(
+    builder: _Builder,
+    evidence: HashmarksSourceEvidence,
     chain: tuple[str, ...],
-    environment: dict[str, str] | None = None,
-    working_directory: str = ".",
-) -> ShellAuthority:
-    builder = _Builder(root=root.resolve(), working_directory=working_directory)
-    _scan_fragment(builder, fragment, chain, frozenset(), dict(environment or {}))
+    indices: Sequence[int] | None = None,
+) -> None:
+    if not builder.visit():
+        return
+    observed = _file_observation(evidence)
+    facts = observed["facts"]
+    selected_indices = tuple(range(len(facts))) if indices is None else tuple(indices)
+    original_context = builder.context_known
+    if any(
+        facts[index]["kind"] != "shell-command-expression"
+        or (facts[index]["value"].get("literal_argv") or [None])[0:1]
+        in (["cd"], ["source"], ["."], ["eval"])
+        or facts[index]["value"].get("command_local_environment")
+        for index in selected_indices
+    ):
+        builder.context_known = False
+    try:
+        for index in selected_indices:
+            if (
+                builder.source_observations is None
+                or builder.source_observations.work_remaining <= 0
+            ):
+                builder.unresolved.add("Execution source observation work bound exhausted")
+                break
+            fact = facts[index]
+            value = fact["value"]
+            if fact["kind"] != "shell-command-expression":
+                if fact["kind"] not in {
+                    "shell-function-declaration",
+                    "shell-heredoc-data",
+                }:
+                    builder.reject("unproven authored source syntax: " + fact["kind"], chain)
+                continue
+            if value.get("command_declaration_candidates"):
+                builder.reject("source helper binding is conditional", chain)
+                continue
+            if value.get("command_local_environment"):
+                builder.reject("source environment binding is unproven", chain)
+            if (
+                value.get("source_language") == "make"
+                and (value.get("literal_argv") or [None])[0] in CONTROL_WORDS
+            ):
+                builder.reject("native Make recipe command binding is unproven", chain)
+            if value.get("literal_argv") is None or any(
+                not context.startswith("make-recipe:") for context in value.get("context", [])
+            ):
+                builder.reject("conditional or unresolved source command binding", chain)
+            for words in _command_candidates(value):
+                if words:
+                    _scan_argv(builder, words, chain)
+                else:
+                    builder.reject("source command head is unproven", chain)
+    finally:
+        builder.context_known = original_context
+
+
+def _result(builder: _Builder) -> ShellAuthority:
     return ShellAuthority(
         tools=tuple(sorted(builder.tools)),
         provenance=tuple(sorted(builder.provenance)),
@@ -554,4 +456,91 @@ def derive_shell_fragment_authority(
         package_provenance=tuple(sorted(builder.package_provenance)),
         package_sources=tuple(sorted(builder.package_sources)),
         materialized_executables=tuple(sorted(builder.materialized_executables)),
+        repository_evidence=tuple(builder.observations),
+        source_identities=tuple(sorted(builder.source_identities.items())),
     )
+
+
+def derive_shell_observation_authority(
+    root: Path,
+    evidence: HashmarksSourceEvidence,
+    indices: Sequence[int],
+    *,
+    chain: tuple[str, ...],
+    working_directory: str = ".",
+    candidate_paths: Mapping[str, Sequence[Sequence[str]]] | None = None,
+    source_observations: ShellSourceObservations | None = None,
+) -> ShellAuthority:
+    root = root.resolve()
+    if source_observations is not None and source_observations.root != root:
+        raise ValueError("Shell source observations belong to another repository")
+    with (
+        hashmarks_source_scope(root)
+        if source_observations is None
+        else nullcontext(source_observations.scope)
+    ) as scope:
+        captured = source_observations or ShellSourceObservations(root, scope)
+        builder = _Builder(
+            root=root,
+            scope=scope,
+            working_directory=working_directory,
+            source_cache=captured.scripts,
+            npm_observations=captured.npm,
+            source_observations=captured,
+            context_known=False,
+        )
+        try:
+            verify_source_scope(root, scope)
+            builder.retain(evidence)
+            if candidate_paths is None:
+                _scan_observation(builder, evidence, chain, indices)
+            else:
+                for index in indices:
+                    for path in candidate_paths[str(index)]:
+                        _scan_observation(builder, evidence, tuple(path), (index,))
+        except (OSError, ValueError) as exc:
+            builder.reject(str(exc), chain)
+        return _result(builder)
+
+
+def derive_shell_fragment_authority(
+    root: Path,
+    fragment: str,
+    *,
+    chain: tuple[str, ...],
+    environment: dict[str, str] | None = None,
+    working_directory: str = ".",
+    argv: tuple[str, ...] | None = None,
+    source_observations: ShellSourceObservations | None = None,
+) -> ShellAuthority:
+    root = root.resolve()
+    if source_observations is not None and source_observations.root != root:
+        raise ValueError("Shell source observations belong to another repository")
+    with (
+        hashmarks_source_scope(root)
+        if source_observations is None
+        else nullcontext(source_observations.scope)
+    ) as scope:
+        captured = source_observations or ShellSourceObservations(root, scope)
+        builder = _Builder(
+            root=root.resolve(),
+            scope=scope,
+            working_directory=working_directory,
+            environment=dict(environment or {}),
+            source_cache=captured.scripts,
+            npm_observations=captured.npm,
+            source_observations=captured,
+        )
+        try:
+            verify_source_scope(root, scope)
+            if argv is not None:
+                _scan_argv(builder, argv, chain, source_command=False)
+            else:
+                evidence = observe_make_shell_declarations_text(
+                    fragment, path="command.sh", language="shell", layout="file"
+                )
+                builder.retain(evidence)
+                _scan_observation(builder, evidence, chain)
+        except (OSError, ValueError) as exc:
+            builder.reject(str(exc), chain)
+        return _result(builder)

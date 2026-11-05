@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Iterable
+from importlib.util import resolve_name
 from pathlib import Path
 
-from oh_goon.repository_tooling.architecture.common import Violation, python_ast
+from oh_goon.repository_tooling.architecture.common import (
+    Violation,
+    python_ast,
+    python_semantic_facts,
+    python_source_snapshot,
+    source_import_spelling,
+)
 from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT
 
 RUNTIME = BACKEND_PACKAGE_ROOT / "runtime/execution/shards.py"
@@ -160,24 +167,6 @@ def _require_unique_structural_field_owner(
         )
 
 
-def _dotted_name(node: ast.expr) -> str | None:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        prefix = _dotted_name(node.value)
-        return f"{prefix}.{node.attr}" if prefix else None
-    return None
-
-
-def _resolved_expression_name(path: Path, node: ast.expr) -> str | None:
-    dotted = _dotted_name(node)
-    if dotted is None:
-        return None
-    root, *rest = dotted.split(".")
-    resolved_root = _import_targets(path).get(root, root)
-    return ".".join((resolved_root, *rest)) if rest else resolved_root
-
-
 def _literal_schema_value(path: Path, node: ast.AnnAssign) -> str | None:
     if not isinstance(node.value, ast.Constant) or not isinstance(node.value.value, str):
         return None
@@ -185,7 +174,7 @@ def _literal_schema_value(path: Path, node: ast.AnnAssign) -> str | None:
         child
         for child in ast.walk(node.annotation)
         if isinstance(child, ast.Subscript)
-        and _resolved_expression_name(path, child.value) == "typing.Literal"
+        and "typing.Literal" in _annotation_references(path, child.value)
     ]
     if len(literal_annotations) != 1:
         return None
@@ -211,35 +200,36 @@ def _require_canonical_schema_owner(violations: list[Violation]) -> None:
         )
 
 
-def _import_targets(path: Path) -> dict[str, str]:
-    if not path.is_file():
-        return {}
-    targets: dict[str, str] = {}
-    for node in ast.walk(python_ast(path)):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            for alias in node.names:
-                local = alias.asname or alias.name
-                targets[local] = f"{node.module}.{alias.name}"
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                local = alias.asname or alias.name.split(".")[0]
-                targets[local] = alias.name
-    return targets
-
-
 def _annotation_references(path: Path, annotation: ast.expr) -> set[str]:
-    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
-        try:
-            annotation = ast.parse(annotation.value, mode="eval").body
-        except SyntaxError:
-            return set()
-    resolved: set[str] = set()
-    for node in ast.walk(annotation):
-        if isinstance(node, (ast.Name, ast.Attribute)):
-            name = _resolved_expression_name(path, node)
-            if name is not None:
-                resolved.add(name)
-    return resolved
+    """Inspect producer-authored type references within this exact source span.
+
+    ``type-syntax`` is the declared scope of this relationship, never a claim
+    that an annotation was evaluated or its imported runtime type resolved.
+    Other conditions, unknown bindings and unsupported strings stay unproven.
+    """
+    facts = python_semantic_facts(path, imported_only=True, tree=python_ast(path))
+    raw = facts.evidence.source_bytes
+    if raw is None:
+        raise ValueError("Shard annotation source bytes are unavailable")
+    offsets = [0]
+    for line in raw.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    if annotation.end_lineno is None or annotation.end_col_offset is None:
+        raise ValueError("Shard annotation source range is unavailable")
+    start = offsets[annotation.lineno - 1] + annotation.col_offset
+    end = offsets[annotation.end_lineno - 1] + annotation.end_col_offset
+    return {
+        source_import_spelling(target)
+        for fact in facts.evidence.packet()["facts"]
+        if fact.get("kind") in {"reference", "forward-annotation-reference"}
+        and fact.get("qualification") in {"qualified", "conditional"}
+        and set(fact.get("conditions", ())) <= {"type-syntax"}
+        and not fact.get("reasons")
+        and isinstance(target := fact.get("target"), dict)
+        and target.get("kind") == "import"
+        and start <= fact["range"]["start_byte"]
+        and fact["range"]["end_byte"] <= end
+    }
 
 
 def _require_field_type_reference(
@@ -268,18 +258,30 @@ def _require_field_type_reference(
         )
 
 
-def _imports(path: Path) -> set[str]:
-    tree = python_ast(path)
-    imports: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imports.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imports.add(node.module)
-    return imports
+def _imports(path: Path, *, package: str) -> set[str]:
+    facts = python_semantic_facts(path, imported_only=True, tree=python_ast(path))
+    return {
+        resolve_name("." * syntax.get("level", 0) + syntax.get("module", ""), package)
+        for fact in facts.evidence.packet()["facts"]
+        if fact.get("kind") == "import-binding"
+        and isinstance(syntax := fact.get("import_syntax"), dict)
+    }
 
 
 def check_shard_execution_contract() -> list[Violation]:
+    with python_source_snapshot():
+        try:
+            return _check_shard_execution_sources()
+        except (OSError, SyntaxError, ValueError, ImportError) as error:
+            return [
+                Violation(
+                    BACKEND_PACKAGE_ROOT,
+                    f"Shard source observations cannot be inspected: {error}",
+                )
+            ]
+
+
+def _check_shard_execution_sources() -> list[Violation]:
     """Protect shard ownership structurally; executable tests own execution choreography."""
 
     violations: list[Violation] = []
@@ -348,7 +350,7 @@ def check_shard_execution_contract() -> list[Violation]:
         allowed_runtime = {"oh_goon.runtime.execution.shards"}
         forbidden = sorted(
             module
-            for module in _imports(DIAGNOSTIC_CLI)
+            for module in _imports(DIAGNOSTIC_CLI, package="oh_goon.repository_tooling")
             if (module.startswith("oh_goon.runtime.") and module not in allowed_runtime)
             or module.startswith("oh_goon.services.")
             or module.startswith("oh_goon.core.models.run")

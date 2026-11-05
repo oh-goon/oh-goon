@@ -12,6 +12,7 @@ from importlib.util import resolve_name
 from pathlib import Path
 
 from oh_goon.repository_tooling.architecture.common import (
+    PythonSemanticFacts,
     Violation,
     project_scripts_from_text,
     python_ast,
@@ -30,27 +31,24 @@ CONTROL_DIRS = ("services", "runtime", "integrations", "core", "api")
 CONTROL_FILES = ("_application_services.py", "cli.py", "container_entrypoint.py")
 
 
-def _call_target(call: ast.Call, tree: ast.AST) -> str:
-    """Resolve an explicit imported call without depending on local aliases."""
-    aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                aliases[alias.asname or alias.name.split(".")[0]] = (
-                    alias.name if alias.asname else alias.name.split(".")[0]
-                )
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            for alias in node.names:
-                aliases[alias.asname or alias.name] = node.module + "." + alias.name
+def _source_call_names(
+    facts: PythonSemanticFacts,
+) -> tuple[dict[ast.Call, str], dict[ast.Call, str]]:
+    """Keep qualified imported origins separate from observed call syntax.
 
-    def qualified(node: ast.expr) -> str:
-        if isinstance(node, ast.Name):
-            return aliases.get(node.id, node.id)
-        if isinstance(node, ast.Attribute):
-            return qualified(node.value) + "." + node.attr
-        return ""
-
-    return qualified(call.func)
+    A Name or Attribute expression's producer spelling supports explicit local
+    API-shape policy, even when its binding is unknown. It cannot satisfy a
+    required imported origin or establish a runtime target.
+    """
+    targets = {call: name for name, call in facts.calls}
+    shapes = {
+        call: expression["name"]
+        for fact, call in facts.call_observations
+        if isinstance(expression := fact.get("expression"), dict)
+        and expression.get("syntax_type") in {"Name", "Attribute"}
+        and isinstance(expression.get("name"), str)
+    }
+    return targets, shapes
 
 
 def _module_reference(tree: ast.AST) -> bool:
@@ -159,6 +157,11 @@ def _check_diagnostic_observer_ownership(root: Path = ROOT) -> list[Violation]:
 
 
 def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Violation]:
+    with python_source_snapshot(root):
+        return _check_original_physical_observation_sources(root)
+
+
+def _check_original_physical_observation_sources(root: Path) -> list[Violation]:
     """Inspect the original sampler, shared port and diagnostic projection only."""
     package = root / "backend/src/oh_goon"
     preflight = package / "repository_tooling/local_lace_physical_preflight.py"
@@ -188,10 +191,12 @@ def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Vi
             )
         else:
             try:
-                shared_tree = ast.parse(shared.read_text(encoding="utf-8"))
-                cli_tree = ast.parse(preflight.read_text(encoding="utf-8"))
-                port_tree = ast.parse(contract.read_text(encoding="utf-8"))
-            except (OSError, SyntaxError):
+                shared_tree = python_ast(shared)
+                cli_tree = python_ast(preflight)
+                port_tree = python_ast(contract)
+                cli_facts = python_semantic_facts(preflight, imported_only=True, tree=cli_tree)
+                cli_calls, _ = _source_call_names(cli_facts)
+            except (OSError, SyntaxError, ValueError):
                 issues.append(Violation(shared, "X0 shared observation owner unreadable"))
             else:
                 functions = [
@@ -236,7 +241,7 @@ def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Vi
                     )
                 if not any(
                     isinstance(n, ast.Call)
-                    and _call_target(n, cli_tree)
+                    and cli_calls.get(n, "")
                     == "oh_goon.integrations.linux_physical_observer.observe_kernel"
                     for n in ast.walk(cli_tree)
                 ):
@@ -247,8 +252,7 @@ def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Vi
                     )
                 if any(
                     isinstance(n, ast.Call)
-                    and _call_target(n, cli_tree)
-                    in ("os.scandir", "os.readlink", "os.open", "os.fstat")
+                    and cli_calls.get(n, "") in ("os.scandir", "os.readlink", "os.open", "os.fstat")
                     for n in ast.walk(cli_tree)
                 ):
                     issues.append(
@@ -260,9 +264,11 @@ def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Vi
     original_owner = package / "runtime/enforcer_lace_fleet_resource_owner.py"
     if sampler.is_file():
         try:
-            bind_tree = ast.parse(sampler.read_text(encoding="utf-8"))
-            owner_tree = ast.parse(original_owner.read_text(encoding="utf-8"))
-        except (OSError, SyntaxError):
+            bind_tree = python_ast(sampler)
+            owner_tree = python_ast(original_owner)
+            owner_facts = python_semantic_facts(original_owner, imported_only=True, tree=owner_tree)
+            owner_calls, _ = _source_call_names(owner_facts)
+        except (OSError, SyntaxError, ValueError):
             issues.append(Violation(sampler, "X0 original-owner physical sampling not inspectable"))
             return issues
         else:
@@ -277,7 +283,7 @@ def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Vi
                     n
                     for n in ast.walk(owner_methods[0])
                     if isinstance(n, ast.Call)
-                    and _call_target(n, owner_tree)
+                    and owner_calls.get(n, "")
                     == "oh_goon.integrations.linux_physical_observer.observe_kernel"
                 ]
                 if len(owner_methods) == 1
@@ -320,12 +326,9 @@ def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Vi
         package / "runtime/enforcer_lace_original_physical_sampling.py"
     ).is_file() and mount_port.is_file():
         try:
-            bound_source = (
-                package / "runtime/enforcer_lace_original_physical_sampling.py"
-            ).read_text(encoding="utf-8")
-            port_tree = ast.parse(mount_port.read_text(encoding="utf-8"))
-            source_tree = ast.parse(bound_source)
-        except (OSError, SyntaxError):
+            port_tree = python_ast(mount_port)
+            source_tree = python_ast(sampler)
+        except (OSError, SyntaxError, ValueError):
             issues.append(
                 Violation(mount_port, "X0 signed original mount provenance not inspectable")
             )
@@ -408,15 +411,17 @@ def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Vi
     # read-only projections. No second kernel digest, parser, or publisher.
     contract = package / "core/ports/physical_observation.py"
     try:
-        port_tree = ast.parse(contract.read_text(encoding="utf-8"))
-        cli_tree = ast.parse(preflight.read_text(encoding="utf-8"))
+        port_tree = python_ast(contract)
+        cli_tree = python_ast(preflight)
+        cli_facts = python_semantic_facts(preflight, imported_only=True, tree=cli_tree)
+        cli_calls, _ = _source_call_names(cli_facts)
 
         snapshot_bindings = {
             target.id
             for node in ast.walk(cli_tree)
             if isinstance(node, ast.Assign)
             and isinstance(node.value, ast.Call)
-            and _call_target(node.value, cli_tree)
+            and cli_calls.get(node.value, "")
             == "oh_goon.integrations.linux_physical_observer.observe_kernel"
             for target in node.targets
             if isinstance(target, ast.Name)
@@ -466,16 +471,14 @@ def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Vi
                     "X0 B25 original sample must project the same shared snapshot identity",
                 )
             )
-    except (OSError, SyntaxError):
+    except (OSError, SyntaxError, ValueError):
         issues.append(Violation(contract, "X0 B25 snapshot identity contract not inspectable"))
     # B26 original observed-native process roster is constructed by the SAME
     # original signed inventory binding. No CLI, independent roster loader,
     # physical-fact publisher or second /proc scan may substitute for it.
     try:
-        binder_tree = ast.parse(sampler.read_text(encoding="utf-8"))
-        port_tree = ast.parse(
-            (package / "core/ports/physical_observation.py").read_text(encoding="utf-8")
-        )
+        binder_tree = python_ast(sampler)
+        port_tree = python_ast(package / "core/ports/physical_observation.py")
         constructors = [
             n
             for n in ast.walk(binder_tree)
@@ -511,7 +514,7 @@ def _check_original_physical_observation_ownership(root: Path = ROOT) -> list[Vi
             issues.append(
                 Violation(sampler, "X0 B26 sampled native process membership must remain checked")
             )
-    except (OSError, SyntaxError):
+    except (OSError, SyntaxError, ValueError):
         issues.append(Violation(sampler, "X0 B26 native roster owner not inspectable"))
     return issues
 
@@ -581,26 +584,35 @@ def _check_run_worker_custody_sources(package: Path) -> list[Violation]:
         "_application_services.py",
     )
     trees: dict[str, ast.Module] = {}
+    source_facts: dict[str, PythonSemanticFacts] = {}
+    call_targets: dict[str, dict[ast.Call, str]] = {}
+    call_shapes: dict[str, dict[ast.Call, str]] = {}
     for relative in relatives:
         path = package / relative
         try:
-            trees[relative] = python_ast(path)
-        except (OSError, SyntaxError):
+            tree = python_ast(path)
+            trees[relative] = tree
+            facts = python_semantic_facts(path, imported_only=True, tree=tree)
+            source_facts[relative] = facts
+            call_targets[relative], call_shapes[relative] = _source_call_names(facts)
+        except (OSError, SyntaxError, ValueError):
             issues.append(Violation(path, "X0 Run-worker custody owner missing or unreadable"))
     if issues:
         return issues
 
+    # The flag selects an explicit call-spelling rule; every other edge requires
+    # a qualified imported origin. Neither mode establishes a runtime target.
     required_edges = (
         (
             "_application_worker.py",
             None,
             "execute_handoff",
             (
-                "LocalDatabase.open_worker",
-                ".claim_fleet_worker",
-                "bind_process_child_custody",
-                "build_claimed_run_execution",
-                ".execute",
+                ("LocalDatabase.open_worker", False),
+                ("claim_fleet_worker", True),
+                ("bind_process_child_custody", False),
+                ("build_claimed_run_execution", False),
+                ("execute", True),
             ),
         ),
         (
@@ -608,9 +620,9 @@ def _check_run_worker_custody_sources(package: Path) -> list[Violation]:
             None,
             "build_claimed_run_execution",
             (
-                ".require_claimed_fleet_worker",
-                "_build_capability_runtime",
-                "FleetRunExecution",
+                ("require_claimed_fleet_worker", True),
+                ("_build_capability_runtime", False),
+                ("FleetRunExecution", False),
             ),
         ),
         (
@@ -618,27 +630,39 @@ def _check_run_worker_custody_sources(package: Path) -> list[Violation]:
             "ExecutionCoordinator",
             "activate",
             (
-                ".assert_executable_owner",
-                "ExecutionSession",
+                ("assert_executable_owner", True),
+                ("ExecutionSession", True),
             ),
         ),
-        ("services/fleet_run_lifecycle.py", "FleetRunLifecycle", "activate", (".activate",)),
+        (
+            "services/fleet_run_lifecycle.py",
+            "FleetRunLifecycle",
+            "activate",
+            (("activate", True),),
+        ),
         (
             "services/fleet_run_lifecycle.py",
             "FleetRunLifecycle",
             "finish_admitted",
-            (".activate_submission_failure",),
+            (("activate_submission_failure", True),),
         ),
-        ("runtime/execution/run_supervisor.py", "RunExecutionSupervisor", "_run", ("run_command",)),
+        (
+            "runtime/execution/run_supervisor.py",
+            "RunExecutionSupervisor",
+            "_run",
+            (("run_command", False),),
+        ),
         (
             "services/fleet_run_control_plane.py",
             "FleetRunControlPlane",
             "_submit",
-            (".submit",),
+            (("submit", True),),
         ),
     )
     for relative, owner, method, required in required_edges:
         tree = trees[relative]
+        targets = call_targets[relative]
+        shapes = call_shapes[relative]
         scope: list[ast.stmt] = list(tree.body)
         if owner is not None:
             classes = [
@@ -658,28 +682,36 @@ def _check_run_worker_custody_sources(package: Path) -> list[Violation]:
             continue
         calls = [node for node in ast.walk(definitions[0]) if isinstance(node, ast.Call)]
         previous = -1
-        for suffix in required:
-            matching = [node for node in calls if _call_target(node, tree).endswith(suffix)]
+        for name, syntax_only in required:
+            matching = [
+                node
+                for node in calls
+                if (
+                    shapes.get(node) == name
+                    if syntax_only
+                    else targets.get(node, "").endswith(name)
+                )
+            ]
             # The claim/composition/activation cut must remain on the actual
             # path to execution, not in a comment, string or unused import.
             if not matching or min(node.lineno for node in matching) < previous:
                 issues.append(
                     Violation(
                         package / relative,
-                        f"X0 canonical Run-worker edge/order lost: {method} -> {suffix}",
+                        f"X0 canonical Run-worker edge/order lost: {method} -> {name}",
                     )
                 )
                 break
             previous = min(node.lineno for node in matching)
 
     control = trees["services/fleet_run_control_plane.py"]
+    control_calls = call_shapes["services/fleet_run_control_plane.py"]
     for node in ast.walk(control):
         if not isinstance(node, ast.Call):
             continue
-        target = _call_target(node, control)
-        if target.endswith(".execute") or (
-            target.endswith(".submit")
-            and any(isinstance(argument, ast.Lambda) for argument in node.args)
+        target = control_calls.get(node, "")
+        if target == "execute" or (
+            target == "submit" and any(isinstance(argument, ast.Lambda) for argument in node.args)
         ):
             issues.append(
                 Violation(
@@ -687,16 +719,37 @@ def _check_run_worker_custody_sources(package: Path) -> list[Violation]:
                     "X0 Run control plane may submit only a prepared physical worker, never execute Fleet work",
                 )
             )
-    supervisor = trees["runtime/execution/run_supervisor.py"]
+    supervisor_facts = source_facts["runtime/execution/run_supervisor.py"]
+    supervisor_shapes = call_shapes["runtime/execution/run_supervisor.py"]
     forbidden_pools = (
         "concurrent.futures.ThreadPoolExecutor",
         "concurrent.futures.ProcessPoolExecutor",
     )
-    for node in ast.walk(supervisor):
-        if isinstance(node, ast.Call) and (
-            _call_target(node, supervisor) in forbidden_pools
-            or _call_target(node, supervisor).endswith(".execute")
-        ):
+    pool_capability_imported = any(
+        pool == imported or pool.startswith(imported + ".")
+        for imported in supervisor_facts.imports
+        for pool in forbidden_pools
+    )
+    if pool_capability_imported and any(
+        fact.get("qualification") in {"unknown", "conditional"}
+        for fact, _ in supervisor_facts.call_observations
+    ):
+        issues.append(
+            Violation(
+                package / relatives[1],
+                "X0 Run supervisor pool exclusion is unproven: producer call origins are unknown",
+            )
+        )
+    for fact, node in supervisor_facts.call_observations:
+        origin = fact.get("target")
+        # An admitted conditional possibility suffices for this absence rule;
+        # it never becomes an unconditional origin for a required edge.
+        possible_pool = (
+            isinstance(origin, dict)
+            and origin.get("kind") == "import"
+            and source_import_spelling(origin) in forbidden_pools
+        )
+        if possible_pool or supervisor_shapes.get(node) == "execute":
             issues.append(
                 Violation(
                     package / relatives[1],
@@ -704,9 +757,10 @@ def _check_run_worker_custody_sources(package: Path) -> list[Violation]:
                 )
             )
     product = trees["_application_services.py"]
+    product_calls = call_targets["_application_services.py"]
     if not any(
         isinstance(node, ast.Call)
-        and _call_target(node, product).endswith("FleetRunControlPlane")
+        and product_calls.get(node, "").endswith("FleetRunControlPlane")
         and any(keyword.arg == "worker_configuration" for keyword in node.keywords)
         for node in ast.walk(product)
     ):
@@ -717,17 +771,19 @@ def _check_run_worker_custody_sources(package: Path) -> list[Violation]:
             )
         )
     bootstrap = trees["_application_worker.py"]
+    bootstrap_calls = call_targets["_application_worker.py"]
+    bootstrap_shapes = call_shapes["_application_worker.py"]
     for node in ast.walk(bootstrap):
-        if isinstance(node, ast.Call) and _call_target(node, bootstrap).endswith(
-            (
-                "ApplicationRuntime.build",
-                "build_runtime_foundation",
-                "build_runtime_services",
-                "configured_executor_pool",
-                ".admit",
-                ".start_prepared_plan",
-                ".start_bound",
+        if isinstance(node, ast.Call) and (
+            bootstrap_calls.get(node, "").endswith(
+                (
+                    "ApplicationRuntime.build",
+                    "build_runtime_foundation",
+                    "build_runtime_services",
+                    "configured_executor_pool",
+                )
             )
+            or bootstrap_shapes.get(node) in {"admit", "start_prepared_plan", "start_bound"}
         ):
             issues.append(
                 Violation(
@@ -2677,6 +2733,11 @@ def _check_p1b27b2b3b2b3b_fd_argv_boundary(package: Path) -> list[Violation]:
 
 
 def _check_p1p2b1_causal_kernel_ledger(package: Path) -> list[Violation]:
+    with python_source_snapshot(package):
+        return _check_p1p2b1_causal_kernel_ledger_sources(package)
+
+
+def _check_p1p2b1_causal_kernel_ledger_sources(package: Path) -> list[Violation]:
     """The original owner transports the public causal identity and journal event.
 
     Signed-ledger validation, two-cut races and journal semantics are exercised
@@ -2686,9 +2747,15 @@ def _check_p1p2b1_causal_kernel_ledger(package: Path) -> list[Violation]:
     port = package / "core/ports/physical_observation.py"
     owner = package / "runtime/enforcer_lace_fleet_resource_owner.py"
     try:
-        source = ast.parse(sampler.read_text(encoding="utf-8"))
-        typed = ast.parse(port.read_text(encoding="utf-8"))
-        fleet = ast.parse(owner.read_text(encoding="utf-8"))
+        source = python_ast(sampler)
+        typed = python_ast(port)
+        fleet = python_ast(owner)
+        typed_calls, _ = _source_call_names(
+            python_semantic_facts(port, imported_only=True, tree=typed)
+        )
+        fleet_calls, _ = _source_call_names(
+            python_semantic_facts(owner, imported_only=True, tree=fleet)
+        )
         guards = [
             node
             for node in source.body
@@ -2713,7 +2780,7 @@ def _check_p1p2b1_causal_kernel_ledger(package: Path) -> list[Violation]:
         returned = returns[0].value if len(returns) == 1 else None
         if (
             not isinstance(returned, ast.Call)
-            or _call_target(returned, typed) != "oh_goon.core.enforcer_lace_trust.digest"
+            or typed_calls.get(returned, "") != "oh_goon.core.enforcer_lace_trust.digest"
             or len(returned.args) != 2
             or returned.keywords
             or not isinstance(returned.args[0], ast.Constant)
@@ -2723,7 +2790,7 @@ def _check_p1p2b1_causal_kernel_ledger(package: Path) -> list[Violation]:
         payload = returned.args[1]
         if (
             not isinstance(payload, ast.Call)
-            or _call_target(payload, typed) != "oh_goon.core.enforcer_lace_trust.canonical_bytes"
+            or typed_calls.get(payload, "") != "oh_goon.core.enforcer_lace_trust.canonical_bytes"
             or len(payload.args) != 1
             or payload.keywords
             or not isinstance(payload.args[0], ast.Dict)
@@ -2756,7 +2823,7 @@ def _check_p1p2b1_causal_kernel_ledger(package: Path) -> list[Violation]:
             raise ValueError("original Fleet sampling owner missing")
         if (
             sum(
-                _call_target(node, fleet)
+                fleet_calls.get(node, "")
                 == "oh_goon.runtime.enforcer_lace_original_physical_sampling.require_original_sample_kernel_identity"
                 for node in ast.walk(methods[0])
                 if isinstance(node, ast.Call)
@@ -2783,21 +2850,27 @@ def _check_p1p2b1_causal_kernel_ledger(package: Path) -> list[Violation]:
 
 
 def _check_runtime_root_ownership(package: Path) -> list[Violation]:
+    with python_source_snapshot(package):
+        return _check_runtime_root_ownership_sources(package)
+
+
+def _check_runtime_root_ownership_sources(package: Path) -> list[Violation]:
     """The production capture and verifier retain native snapshot authority."""
     owner = package / "integrations/_fleet_plan_runtime_root.py"
     try:
-        tree = ast.parse(owner.read_text(encoding="utf-8"))
+        tree = python_ast(owner)
+        targets, _ = _source_call_names(python_semantic_facts(owner, imported_only=True, tree=tree))
         functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
         capture = functions["capture_runtime_root"]
         verify = functions["verify_runtime_root"]
         if not any(
-            _call_target(node, tree) == "oh_goon.integrations.content_snapshot.snapshot_identity"
+            targets.get(node, "") == "oh_goon.integrations.content_snapshot.snapshot_identity"
             for node in ast.walk(capture)
             if isinstance(node, ast.Call)
         ):
             raise ValueError("runtime capture must bind the native snapshot identity")
         if not any(
-            _call_target(node, tree) == "oh_goon.integrations.content_snapshot.verify_snapshot"
+            targets.get(node, "") == "oh_goon.integrations.content_snapshot.verify_snapshot"
             for node in ast.walk(verify)
             if isinstance(node, ast.Call)
         ):

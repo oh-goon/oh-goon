@@ -351,3 +351,40 @@ def verify_runtime_root(binding):
         issues = _check_runtime_root_ownership(package)
         assert len(issues) == 1
         assert "native snapshot" in issues[0].message
+
+
+@pytest.mark.parametrize(
+    "capture",
+    [
+        "def capture_runtime_root(destination, identify):\n    return identify(destination)\n",
+        "def capture_runtime_root(destination):\n"
+        "    identify = lambda value: value\n    return identify(destination)\n",
+        "def unrelated():\n"
+        "    from oh_goon.integrations.content_snapshot import snapshot_identity as elsewhere\n"
+        "def capture_runtime_root(destination):\n    return elsewhere(destination)\n",
+    ],
+)
+def test_runtime_snapshot_requires_the_call_sites_imported_origin(
+    tmp_path: Path, capture: str
+) -> None:
+    target = PACKAGE + RUNTIME_ROOT
+    native = (
+        "from oh_goon.integrations.content_snapshot import snapshot_identity as identify, "
+        "verify_snapshot as verify\n"
+    )
+    verifier = "def verify_runtime_root(binding):\n    verify(binding.root, binding.identity)\n"
+    package = write_x0_rule_sources(
+        tmp_path,
+        {
+            target: native
+            + "def capture_runtime_root(destination):\n    return identify(destination)\n"
+            + verifier
+        },
+    )
+    assert _check_runtime_root_ownership(package) == []
+
+    (package / RUNTIME_ROOT).write_text(native + capture + verifier)
+
+    issues = _check_runtime_root_ownership(package)
+    assert len(issues) == 1
+    assert "runtime capture must bind the native snapshot identity" in issues[0].message

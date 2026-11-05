@@ -203,6 +203,110 @@ def test_fleet_shard_evidence_annotation_alias_is_refactor_tolerant(
     assert contract.check_shard_execution_contract() == []
 
 
+@pytest.mark.parametrize(
+    "annotation", ['"ShardEvidence | None"', "'ShardEvidence | None'"]
+)
+def test_quoted_fleet_shard_annotation_uses_the_producers_type_relationship(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, annotation: str
+) -> None:
+    evidence = tmp_path / "fleet_plan_evidence.py"
+    original = contract.FLEET_EVIDENCE.read_text(encoding="utf-8")
+    evidence.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(contract, "FLEET_EVIDENCE", evidence)
+    assert contract.check_shard_execution_contract() == []
+
+    evidence.write_text(
+        original.replace(
+            "from oh_goon.core.models.shard_execution import CanonicalShardExecutionEvidence",
+            "from oh_goon.core.models.shard_execution import CanonicalShardExecutionEvidence as ShardEvidence",
+        ).replace(
+            "shard_execution: CanonicalShardExecutionEvidence | None = None",
+            f"shard_execution: {annotation} = None",
+        ),
+        encoding="utf-8",
+    )
+
+    assert contract.check_shard_execution_contract() == []
+
+
+@pytest.mark.parametrize("quoted", [False, True])
+def test_class_local_rebinding_cannot_supply_the_canonical_shard_type(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, quoted: bool
+) -> None:
+    evidence = tmp_path / "fleet_plan_evidence.py"
+    original = contract.FLEET_EVIDENCE.read_text(encoding="utf-8")
+    evidence.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(contract, "FLEET_EVIDENCE", evidence)
+    assert contract.check_shard_execution_contract() == []
+    annotation = "CanonicalShardExecutionEvidence | None"
+    if quoted:
+        annotation = repr(annotation)
+    evidence.write_text(
+        original.replace(
+            "    shard_execution: CanonicalShardExecutionEvidence | None = None",
+            "    CanonicalShardExecutionEvidence = object\n"
+            f"    shard_execution: {annotation} = None",
+        ),
+        encoding="utf-8",
+    )
+
+    violations = contract.check_shard_execution_contract()
+
+    assert any(
+        "must structurally carry canonical shard execution evidence" in issue.message
+        for issue in violations
+    )
+
+
+def test_import_in_an_unrelated_function_cannot_supply_the_shard_field_type(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    evidence = tmp_path / "fleet_plan_evidence.py"
+    original = contract.FLEET_EVIDENCE.read_text(encoding="utf-8")
+    evidence.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(contract, "FLEET_EVIDENCE", evidence)
+    assert contract.check_shard_execution_contract() == []
+    evidence.write_text(
+        original.replace(
+            "from oh_goon.core.models.shard_execution import CanonicalShardExecutionEvidence",
+            "def unrelated():\n"
+            "    from oh_goon.core.models.shard_execution import CanonicalShardExecutionEvidence",
+        ),
+        encoding="utf-8",
+    )
+
+    violations = contract.check_shard_execution_contract()
+
+    assert any(
+        "must structurally carry canonical shard execution evidence" in issue.message
+        for issue in violations
+    )
+
+
+def test_invalid_quoted_shard_annotation_remains_unproven(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    evidence = tmp_path / "fleet_plan_evidence.py"
+    original = contract.FLEET_EVIDENCE.read_text(encoding="utf-8")
+    evidence.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(contract, "FLEET_EVIDENCE", evidence)
+    assert contract.check_shard_execution_contract() == []
+    evidence.write_text(
+        original.replace(
+            "shard_execution: CanonicalShardExecutionEvidence | None = None",
+            'shard_execution: "CanonicalShardExecutionEvidence[" = None',
+        ),
+        encoding="utf-8",
+    )
+
+    violations = contract.check_shard_execution_contract()
+
+    assert any(
+        "must structurally carry canonical shard execution evidence" in issue.message
+        for issue in violations
+    )
+
+
 def test_fleet_shard_evidence_relationship_cannot_be_removed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

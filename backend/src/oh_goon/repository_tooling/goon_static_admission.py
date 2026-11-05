@@ -47,16 +47,19 @@ def _print_human(payload: CanonicalGoonAdmissionPayload) -> None:
     print(f"Requirements: {payload['requirements_identity']}")
     print(f"Execution authority: {payload['execution_authority_identity']}")
     print(
-        "Authority closures: "
-        f"{payload['authority_closures_proven']}/{payload['authority_closure_count']} proven"
+        "Source scopes without unresolved edges: "
+        f"{payload['authority_closures_proven']}/{payload['authority_closure_count']}"
     )
     print(f"Unresolved execution edges: {payload['unresolved_execution_edge_count']}")
     print(
-        f"Locked package-local executables: {payload['package_executable_authority_count']} proven"
+        "Declared package-local executable candidates: "
+        f"{payload['package_executable_authority_count']}"
     )
     issues = payload["issues"]
     if not issues:
-        print("All canonical Goons compile with closed declared execution authority.")
+        print("All canonical Goons compile within declared tool permissions.")
+        if payload["unresolved_execution_edge_count"]:
+            print("Source execution edges remain unresolved.")
         return
     print("Issues:")
     for issue in issues:

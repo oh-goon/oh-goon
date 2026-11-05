@@ -95,6 +95,70 @@ def test_original_source_has_one_classified_sqlite_census() -> None:
     assert check_canonical_database_owner(ROOT) == []
 
 
+def test_connection_census_follows_producer_alias_and_parameter_scope(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "backend/src/oh_goon"
+    package.mkdir(parents=True)
+    source = package / "candidate.py"
+    source.write_text(
+        "import sqlite3 as native\n"
+        "open_database = native.connect\n"
+        "def writer(path):\n"
+        "    return open_database(path)\n"
+        "def unrelated(open_database, path):\n"
+        "    return open_database(path)\n",
+        encoding="utf-8",
+    )
+    assert database_authority_census(tmp_path) == [("candidate.py", 4, "connection")]
+
+
+def test_connection_census_does_not_recreate_rebound_import_authority(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "backend/src/oh_goon"
+    package.mkdir(parents=True)
+    source = package / "candidate.py"
+    source.write_text(
+        "from sqlite3 import connect as dial\n"
+        "def writer(path):\n"
+        "    return dial(path)\n",
+        encoding="utf-8",
+    )
+    assert database_authority_census(tmp_path) == [("candidate.py", 3, "connection")]
+    source.write_text(
+        "from sqlite3 import connect as dial\n"
+        "def writer(dial, path):\n"
+        "    return dial(path)\n",
+        encoding="utf-8",
+    )
+    assert database_authority_census(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "conditional_source",
+    [
+        "if True:\n import sqlite3 as native\ndef writer(path):\n return native.connect(path)\n",
+        "if True:\n from sqlite3 import connect as dial\ndef writer(path):\n return dial(path)\n",
+    ],
+)
+def test_unknown_connection_origin_cannot_certify_sqlite_absence(
+    tmp_path: Path, conditional_source: str
+) -> None:
+    package = tmp_path / "backend/src/oh_goon"
+    package.mkdir(parents=True)
+    source = package / "candidate.py"
+    source.write_text(
+        "import sqlite3\ndef writer(path):\n return sqlite3.connect(path)\n",
+        encoding="utf-8",
+    )
+    assert database_authority_census(tmp_path) == [("candidate.py", 3, "connection")]
+    source.write_text(conditional_source, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="SQLite connection exclusion is unproven"):
+        database_authority_census(tmp_path)
+
+
 @pytest.mark.parametrize(
     "mutation,diagnostic",
     [

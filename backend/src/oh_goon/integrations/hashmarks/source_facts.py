@@ -126,11 +126,33 @@ def observe_source_bindings(
             )
             raw = None
             if packet["availability"] == "observed":
-                member, raw = selected.native.source.member(path, include_bytes=True)
+                member, raw = selected.native.source.member(
+                    path, include_bytes=True, max_bytes=max_bytes
+                )
                 if member != packet["member"] or raw is None or len(raw) > max_bytes:
                     raise ValueError("Source bytes differ from their producer binding observation")
             result[path] = _evidence(packet, selected, source_bytes=raw)
         return result
+
+
+def capture_source_member(
+    root: Path, path: str, *, scope: object | None = None, max_bytes: int = _SOURCE_BYTES
+) -> HashmarksSourceEvidence:
+    """Transfer one bounded original source member for consumer-owned input syntax."""
+    with _selected_scope(root, scope) as selected:
+        member, raw = selected.native.source.member(path, include_bytes=True, max_bytes=max_bytes)
+        if member.get("state") != "known-present" or raw is None:
+            raise HashmarksSourceInputError(
+                "Selected source input is unavailable: " + path,
+                producer_implementation_identity=selected.producer,
+            )
+        return _evidence(cast(dict[str, Any], member), selected, source_bytes=raw)
+
+
+def verify_source_scope(root: Path, scope: object) -> None:
+    """Verify the original source lifetime without rediscovery or new observations."""
+    with _selected_scope(root, scope):
+        pass
 
 
 def observe_make_shell_declarations(
@@ -140,19 +162,56 @@ def observe_make_shell_declarations(
     shell_paths: Sequence[str] = (),
     scope: object | None = None,
     layout: Literal["groups", "file"] = "groups",
+    selected_targets: Sequence[str] = (),
+    include_source_bytes: bool = False,
+    source_capture: HashmarksSourceEvidence | None = None,
 ) -> HashmarksSourceEvidence:
     """Keep native authored bindings separate from effective Make/shell execution."""
     from hashmarks.codemap import MakeShellDeclarations
 
+    paths = (*make_paths, *shell_paths)
+    if (include_source_bytes or source_capture is not None) and len(paths) != 1:
+        raise ValueError("Source byte delivery requires one selected Make/shell member")
     provider = MakeShellDeclarations(
-        make_paths=tuple(make_paths), shell_paths=tuple(shell_paths), layout=layout
+        make_paths=tuple(make_paths),
+        shell_paths=tuple(shell_paths),
+        layout=layout,
+        selected_targets=tuple(selected_targets),
     )
     with _selected_scope(root, scope) as selected:
         selected.native.index.sync((*make_paths, *shell_paths))
-        packet = selected.native.declarations.operation(
-            [], result_mode="discovery", providers=[provider]
+        packet = cast(
+            dict[str, Any],
+            selected.native.declarations.operation(
+                [], result_mode="discovery", providers=[provider]
+            ),
         )
-        return _evidence(cast(dict[str, Any], packet), selected)
+        raw = None
+        if include_source_bytes or source_capture is not None:
+            inputs = [
+                row
+                for provider in packet["providers"]
+                for row in provider["inputs"]
+                if row["path"] == paths[0] and row.get("observation_kind") == "content"
+            ]
+            if len(inputs) != 1:
+                raise ValueError("Make/shell source byte authority is unavailable")
+            if source_capture is not None:
+                member, raw = source_capture.packet(), source_capture.source_bytes
+                if (
+                    source_capture.producer_implementation_identity != selected.producer
+                    or member.get("path") != paths[0]
+                ):
+                    raise ValueError("Make/shell source capture has foreign authority")
+            else:
+                member, raw = selected.native.source.member(
+                    paths[0],
+                    include_bytes=True,
+                    max_bytes=min(inputs[0].get("max_bytes", _SOURCE_BYTES), _SOURCE_BYTES),
+                )
+            if raw is None or member["member_revision"] != inputs[0]["member_revision"]:
+                raise ValueError("Make/shell bytes differ from their producer observation")
+        return _evidence(packet, selected, source_bytes=raw)
 
 
 def observe_python_project_declarations(
@@ -171,6 +230,56 @@ def observe_python_project_declarations(
                 [],
                 result_mode="discovery",
                 providers=[PythonUvManifestDeclarations(paths=("pyproject.toml",))],
+            )
+        except RepositoryDeclarationProviderError as error:
+            raise HashmarksSourceInputError(
+                str(error), producer_implementation_identity=selected.producer
+            ) from error
+        return _evidence(cast(dict[str, Any], packet), selected)
+
+
+def observe_npm_project_declarations(
+    root: Path,
+    paths: Sequence[str] | None = None,
+    *,
+    fields: Sequence[str] = (),
+    scope: object | None = None,
+) -> HashmarksSourceEvidence:
+    """Observe selected npm syntax, or admitted source manifest candidates.
+
+    Discovery chooses source inputs only; missing or unsupported declarations do
+    not become an empty complete package catalog. Extra selected JSON fields are
+    opaque consumer configuration, never producer execution policy.
+    """
+    from hashmarks.codemap import NpmManifestDeclarations, RepositoryDeclarationProviderError
+
+    if isinstance(fields, str):
+        raise ValueError("Npm opaque field selection requires explicit names")
+    if paths is not None and (isinstance(paths, str) or len(set(paths)) != len(paths)):
+        raise ValueError("Npm declarations require distinct explicit member paths")
+    with _selected_scope(root, scope) as selected:
+        if paths is None:
+            admitted: list[str] = []
+            for member in selected.native.files.iter_files():
+                if (
+                    PurePosixPath(member.rel).name == "package.json"
+                    and "node_modules" not in PurePosixPath(member.rel).parts
+                    and member.visibility.value == "source"
+                ):
+                    admitted.append(member.rel)
+                    if len(admitted) > 16:
+                        raise ValueError(
+                            "Npm source manifest inventory exceeds its observation bound"
+                        )
+            paths = tuple(sorted(admitted))
+            if not paths:
+                raise ValueError("Npm source context is unproven: no admitted manifest candidate")
+        selected.native.index.sync(tuple(paths))
+        try:
+            packet = selected.native.declarations.operation(
+                [],
+                result_mode="discovery",
+                providers=[NpmManifestDeclarations(tuple(paths), fields=tuple(fields))],
             )
         except RepositoryDeclarationProviderError as error:
             raise HashmarksSourceInputError(
@@ -215,6 +324,7 @@ def observe_make_shell_declarations_text(
     path: str,
     language: Literal["make", "shell"],
     layout: Literal["groups", "file"] = "groups",
+    selected_targets: Sequence[str] = (),
 ) -> HashmarksSourceEvidence:
     """Capture authored text; the producer alone interprets its selected language."""
     if language not in {"make", "shell"}:
@@ -225,6 +335,7 @@ def observe_make_shell_declarations_text(
             make_paths=(path,) if language == "make" else (),
             shell_paths=(path,) if language == "shell" else (),
             layout=layout,
+            selected_targets=selected_targets,
         )
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Never, cast
 
 import pytest
 
@@ -14,7 +15,14 @@ from oh_goon.integrations.executable_materialization_authority import (
     logical_step_execution_authority,
     verify_step_executable_materialization,
 )
-from oh_goon.integrations.package_script_execution_authority import derive_npm_run_authority
+from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
+from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
+from oh_goon.integrations.hashmarks import hashmarks_source_scope
+from oh_goon.integrations.package_script_execution_authority import (
+    NpmSourceObservations,
+    PackageExecutableAuthority,
+    derive_npm_run_authority,
+)
 
 
 def _materialize_package(
@@ -24,7 +32,7 @@ def _materialize_package(
     version: str = "1.0.0",
     bin_name: str = "tsc",
     bin_target: str = "bin/tsc",
-) -> tuple[Path, object]:
+) -> tuple[Path, PackageExecutableAuthority]:
     frontend = root / "frontend"
     frontend.mkdir(parents=True)
     package_json = {
@@ -104,13 +112,89 @@ def test_logical_explicit_shell_authority_rejects_unresolved_executable_before_m
     with pytest.raises(FleetPlanInvalid, match="execution authority.*unproven") as exc:
         logical_step_execution_authority(tmp_path, step)
 
-    assert "unresolved executable variable" in str(exc.value)
+    assert "unproven" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("npm", "--prefix", "frontend", "run", "typecheck"),
+        ("npm", "--unknown-option", "run", "typecheck"),
+        ("npm", "run", "--workspace", "other", "typecheck"),
+    ],
+)
+def test_unproven_npm_option_operands_refuse_before_materialization(
+    tmp_path: Path, argv: tuple[str, ...]
+) -> None:
+    _materialize_package(tmp_path)
+    baseline = ResolvedCommandStep(
+        timeout_seconds=30,
+        step_id="npm-source",
+        argv=("npm", "--version"),
+        working_directory="frontend",
+    )
+    assert logical_step_execution_authority(tmp_path, baseline) == LogicalStepExecutionAuthority()
+    candidate = baseline.model_copy(update={"argv": argv, "working_directory": "."})
+    with pytest.raises(FleetPlanInvalid, match="npm execution authority is unproven"):
+        logical_step_execution_authority(tmp_path, candidate)
+
+
+@pytest.mark.parametrize(
+    "program",
+    ["sh", "/bin/sh", "/bin/bash", "/bin/dash"],
+    ids=["plain", "absolute-sh", "absolute-bash", "absolute-dash"],
+)
+def test_plain_and_absolute_shell_forms_cannot_bypass_unproven_source(
+    tmp_path: Path, program: str
+) -> None:
+    step = ResolvedCommandStep(
+        timeout_seconds=1, step_id="unproven-shell", argv=(program, "-c", 'exec "$unresolved"')
+    )
+    with pytest.raises(FleetPlanInvalid, match="unproven"):
+        logical_step_execution_authority(tmp_path, step)
 
 
 def test_package_authority_remembers_owning_package_directory(tmp_path: Path) -> None:
     _frontend, authority = _materialize_package(tmp_path)
 
     assert authority.package_directory == "frontend"
+
+
+def test_cached_npm_facts_keep_original_byte_custody_and_refuse_later_source(
+    tmp_path: Path,
+) -> None:
+    frontend, _authority = _materialize_package(tmp_path)
+    with hashmarks_source_scope(tmp_path) as scope:
+        captured = NpmSourceObservations(tmp_path, scope)
+        original = derive_npm_run_authority(
+            tmp_path, "typecheck", chain=("step",), package_dir=frontend, observations=captured
+        )
+        assert original.unresolved
+        assert original.package_executables
+        admitted = LogicalStepExecutionAuthority(
+            source_identities=original.source_identities,
+            package_executables=original.package_executables,
+        )
+        bind_step_executable_materialization(
+            tmp_path, _step(), admitted, allowed_host_tools=("make",)
+        )
+        manifest = frontend / "package.json"
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["scripts"]["typecheck"] = "curl different-source"
+        manifest.write_text(json.dumps(payload), encoding="utf-8")
+        retained = derive_npm_run_authority(
+            tmp_path, "typecheck", chain=("step",), package_dir=frontend, observations=captured
+        )
+        assert retained.source_identities == original.source_identities
+        assert retained.package_executables == original.package_executables
+        logical = LogicalStepExecutionAuthority(
+            source_identities=retained.source_identities,
+            package_executables=retained.package_executables,
+        )
+        with pytest.raises(FleetPlanInvalid, match="no longer matches admitted identity"):
+            bind_step_executable_materialization(
+                tmp_path, _step(), logical, allowed_host_tools=("make",)
+            )
 
 
 def test_materialized_package_bin_binds_locked_provider_and_verifies(tmp_path: Path) -> None:
@@ -301,7 +385,7 @@ def test_materialization_refusal_occurs_before_process_backend_launch(tmp_path: 
     class Backend:
         called = False
 
-        def execute(self, *args, **kwargs):
+        def execute(self, *args: object, **kwargs: object) -> Never:
             self.called = True
             raise AssertionError("process backend must not be called after authority refusal")
 
@@ -310,7 +394,14 @@ def test_materialization_refusal_occurs_before_process_backend_launch(tmp_path: 
         paths=SimpleNamespace(workspace=tmp_path),
         executable_materialization=receipt,
     )
-    runner = _isolated_command_runner(attempt, step, backend, termination_requested=None)
+    # Deliberately supply only fields available at this early refusal cut. No
+    # backend request or later attempt state may be read before the byte fence.
+    runner = _isolated_command_runner(
+        cast(FleetPlanStepAttempt, attempt),
+        step,
+        cast(ProcessIsolationBackend, backend),
+        termination_requested=None,
+    )
 
     with pytest.raises(FleetPlanInvalid, match="changed after materialization binding"):
         runner("make", "typecheck", cwd=tmp_path, env={})

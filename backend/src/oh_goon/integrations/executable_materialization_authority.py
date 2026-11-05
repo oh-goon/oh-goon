@@ -13,7 +13,7 @@ from oh_goon.core.models.execution_authority_economics import (
     ExecutionAuthorityEconomicsReceipt,
 )
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedPlanStep
-from oh_goon.integrations._shell_authority_syntax import materialized_executable_identity
+from oh_goon.integrations._shell_authority_syntax import SHELLS, materialized_executable_identity
 from oh_goon.integrations.content_snapshot import SnapshotIdentity, snapshot_identity
 from oh_goon.integrations.make_execution_authority import derive_make_target_authority
 from oh_goon.integrations.package_script_execution_authority import (
@@ -24,7 +24,16 @@ from oh_goon.integrations.package_script_execution_authority import (
 from oh_goon.integrations.shell_execution_authority import derive_shell_fragment_authority
 from oh_goon.integrations.workload_execution_requirements import make_target_owner
 
-_SHELL_EXECUTABLES = frozenset({"bash", "dash", "sh"})
+
+def _requires_shell_source(step: ResolvedCommandStep) -> bool:
+    executable = step.argv[0]
+    if Path(executable).is_absolute() and Path(executable).name in SHELLS:
+        # A basename may trigger refusal, never establish an arbitrary binary's
+        # native role. This owner has no admitted role binding for absolute sh.
+        raise FleetPlanInvalid(
+            "Absolute shell execution source authority is unproven without an admitted native tool role"
+        )
+    return executable in SHELLS
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +121,12 @@ def logical_step_execution_authority(
             materialized_executables=authority.materialized_executables,
         )
     if step.argv and step.argv[0] == "npm":
-        script = npm_run_script(step.argv, 0)
+        try:
+            script = npm_run_script(step.argv, 0)
+        except ValueError as exc:
+            raise FleetPlanInvalid(
+                f"Fleet plan step {step.step_id} npm execution authority is unproven: {exc}"
+            ) from exc
         if script is None:
             return LogicalStepExecutionAuthority()
         package_dir = _step_working_directory(root, step)
@@ -123,21 +137,29 @@ def logical_step_execution_authority(
             package_dir=package_dir,
         )
         _require_resolved(step, npm_authority.unresolved, f"npm run {script}")
+        if {path for path, _digest in npm_authority.source_identities} != set(
+            npm_authority.sources
+        ):
+            raise FleetPlanInvalid("Npm execution source byte custody is incomplete")
         return LogicalStepExecutionAuthority(
-            source_identities=tuple(
-                (relative, _sha256_file(root / relative)[0]) for relative in npm_authority.sources
-            ),
+            source_identities=npm_authority.source_identities,
             package_executables=npm_authority.package_executables,
         )
-    if step.argv and step.argv[0] in _SHELL_EXECUTABLES:
+    if step.argv and _requires_shell_source(step):
         shell_authority = derive_shell_fragment_authority(
             root,
             shlex.join(step.argv),
             chain=(f"step:{step.step_id}",),
             working_directory=step.working_directory,
+            argv=step.argv,
         )
         _require_resolved(step, shell_authority.unresolved, "explicit shell command")
+        if {path for path, _digest in shell_authority.source_identities} != set(
+            shell_authority.scripts
+        ) | set(shell_authority.package_sources):
+            raise FleetPlanInvalid("Shell execution source byte custody is incomplete")
         return LogicalStepExecutionAuthority(
+            source_identities=shell_authority.source_identities,
             materialized_executables=shell_authority.materialized_executables,
         )
     materialized = (
@@ -275,13 +297,14 @@ def _bind_explicit_shell_authority(
     *,
     allowed_host_tools: tuple[str, ...],
 ) -> tuple[tuple[PackageExecutableAuthority, ...], tuple[FileMaterializationReceipt, ...]]:
-    if not step.argv or step.argv[0] not in _SHELL_EXECUTABLES:
+    if not step.argv or not _requires_shell_source(step):
         return (), ()
     authority = derive_shell_fragment_authority(
         workspace,
         shlex.join(step.argv),
         chain=(f"step:{step.step_id}",),
         working_directory=step.working_directory,
+        argv=step.argv,
     )
     _require_resolved(step, authority.unresolved, "explicit shell command")
     missing = tuple(sorted(set(authority.tools) - set(allowed_host_tools)))

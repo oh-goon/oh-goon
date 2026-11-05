@@ -91,6 +91,12 @@ def test_removed_canonical_boundary_rejected(
             "def bypass():\n    return pools.ProcessPoolExecutor(max_workers=1)\n",
         ),
         (
+            "runtime/execution/run_supervisor.py",
+            "if enabled:\n"
+            "    from concurrent.futures import ThreadPoolExecutor as WorkerPool\n"
+            "def bypass():\n    return WorkerPool(max_workers=1)\n",
+        ),
+        (
             "_application_worker.py",
             "from oh_goon.application import ApplicationRuntime\n"
             "def bypass():\n    return ApplicationRuntime.build()\n",
@@ -163,6 +169,29 @@ def test_comments_and_private_renames_do_not_decide_custody(baseline: Path) -> N
             + "\n"
         )
     assert _check_run_worker_custody(baseline) == []
+
+
+def test_worker_import_origin_cannot_be_replaced_by_a_same_named_parameter(
+    baseline: Path,
+) -> None:
+    path = baseline / "_application_worker.py"
+    tree = ast.parse(path.read_text())
+    handoff = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "execute_handoff"
+    )
+    handoff.args.kwonlyargs.append(ast.arg(arg="bind_process_child_custody"))
+    handoff.args.kw_defaults.append(None)
+    path.write_text(ast.unparse(ast.fix_missing_locations(tree)) + "\n")
+
+    issues = _check_run_worker_custody(baseline)
+
+    assert any(
+        issue.path == path
+        and "execute_handoff -> bind_process_child_custody" in issue.message
+        for issue in issues
+    )
 
 
 @pytest.mark.parametrize(

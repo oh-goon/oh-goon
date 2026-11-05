@@ -70,12 +70,10 @@ def test_release_prerequisites_do_not_redecide_native_lock_freshness(
             "release version authoring must not run dependency lock qualification"
         )
 
-    # This deliberately shadows the M88 imported helper. M89 must not consult it.
     monkeypatch.setattr(
-        stamp_release_version,
-        "dependency_lock_issues",
+        stamp_release_version.subprocess,
+        "run",
         forbidden_native_lock_redecision,
-        raising=False,
     )
 
     receipt = stamp_release_version._assert_release_authoring_prerequisites()
@@ -106,12 +104,10 @@ def test_release_post_authoring_receipt_does_not_revalidate_frontend_lock_with_n
             "post-authoring receipt must not rerun npm lock qualification"
         )
 
-    # This deliberately shadows the M88 imported helper. M89 must not consult it.
     monkeypatch.setattr(
-        stamp_release_version,
-        "frontend_dependency_lock_issues",
+        stamp_release_version.subprocess,
+        "run",
         forbidden_native_lock_redecision,
-        raising=False,
     )
 
     package_lock.write_text(
@@ -127,17 +123,34 @@ def test_release_post_authoring_receipt_does_not_revalidate_frontend_lock_with_n
     )
 
 
+def test_release_authoring_transports_lock_bytes_without_interpreting_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _version, _pyproject, backend_lock, _package, package_lock = _release_tree(
+        tmp_path, monkeypatch
+    )
+    backend_lock.write_bytes(b"opaque native backend resolution\n")
+    package_lock.write_bytes(b"opaque native frontend resolution\n")
+
+    incoming = stamp_release_version._assert_release_authoring_prerequisites()
+    current = stamp_release_version._post_authoring_dependency_receipt(incoming)
+
+    assert current == incoming
+    assert (
+        incoming.backend_lock_sha256
+        == hashlib.sha256(backend_lock.read_bytes()).hexdigest()
+    )
+    assert (
+        incoming.frontend_lock_sha256
+        == hashlib.sha256(package_lock.read_bytes()).hexdigest()
+    )
+
+
 def test_release_native_version_owner_failure_still_rolls_back_transition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     version, pyproject, backend_lock, package, package_lock = _release_tree(
         tmp_path, monkeypatch
-    )
-    monkeypatch.setattr(
-        stamp_release_version,
-        "dependency_lock_issues",
-        lambda _root: (),
-        raising=False,
     )
     originals = {
         path: path.read_bytes()
@@ -157,3 +170,30 @@ def test_release_native_version_owner_failure_still_rolls_back_transition(
         stamp_release_version.set_version("2.0.0")
 
     assert {path: path.read_bytes() for path in originals} == originals
+
+
+def test_version_authoring_invokes_native_owners_and_preserves_backend_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _version, _pyproject, backend_lock, _package, _package_lock = _release_tree(
+        tmp_path, monkeypatch
+    )
+    original_lock = backend_lock.read_bytes()
+    calls: list[tuple[tuple[str, ...], Path]] = []
+
+    def native(command: tuple[str, ...], *, cwd: Path) -> str:
+        calls.append((command, cwd))
+        return ""
+
+    monkeypatch.setattr(stamp_release_version, "_run", native)
+
+    stamp_release_version._stamp_native("2.0.0")
+
+    assert calls == [
+        (("uv", "version", "--frozen", "2.0.0"), tmp_path / "backend"),
+        (
+            ("npm", "version", "2.0.0", "--no-git-tag-version", "--allow-same-version"),
+            tmp_path / "frontend",
+        ),
+    ]
+    assert backend_lock.read_bytes() == original_lock
