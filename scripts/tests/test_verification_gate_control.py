@@ -3365,7 +3365,11 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
                 "workspace": "not-emitted",
                 "exclusion": "native-no-emit-package",
             },
-            "tool": {"name": "uv", "version": "uv synthetic", "executable": "/native/uv"},
+            "tool": {
+                "name": "uv",
+                "version": "uv synthetic",
+                "executable": "/native/uv",
+            },
         }
     elif fault in {"generic-dependency-update", "unclaimed-hashmarks-upgrade"}:
         plan["changed_paths"].append("backend/uv.lock")
