@@ -9,6 +9,10 @@ import pytest
 
 from oh_goon.core.errors import OperationNotFound, RepositoryEffectQuarantined, StateConflict
 from oh_goon.core.models.operation import OperationExecution
+from oh_goon.core.models.reconciliation import (
+    ConfirmedNotAppliedRepositoryReconciliation,
+    RepositoryEffectReconciliationEvidence,
+)
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
 from oh_goon.core.vocabulary import (
     CommandSafety,
@@ -84,13 +88,17 @@ def _repository(tmp_path: Path) -> Path:
 
 
 def _unknown_attempt(
-    database: LocalDatabase, attempts: RepositoryEffectAttemptStore, repository: Path
+    database: LocalDatabase,
+    attempts: RepositoryEffectAttemptStore,
+    repository: Path,
+    *,
+    action: OperationAction = OperationAction.UPDATE,
 ):
     with database.transaction(write=True) as connection:
         attempt = attempts.begin_direct_in(
             connection,
             repository,
-            capability_snapshot(OperationAction.UPDATE),
+            capability_snapshot(action),
             target=None,
             baseline=baseline_for(repository),
             effect_boundary=EffectBoundaryKind.EXTERNAL,
@@ -143,7 +151,7 @@ def test_startup_recovery_never_reclassifies_a_live_execution_attempt(tmp_path: 
     )
 
 
-def test_unchanged_worktree_effect_is_confirmed_safe_to_retry(tmp_path: Path) -> None:
+def test_unchanged_worktree_fingerprint_cannot_confirm_safe_replay(tmp_path: Path) -> None:
     database = LocalDatabase(tmp_path / "state.db")
     attempts = RepositoryEffectAttemptStore(database)
     journal = Journal(database)
@@ -152,10 +160,22 @@ def test_unchanged_worktree_effect_is_confirmed_safe_to_retry(tmp_path: Path) ->
 
     recovered = _recovery(database, journal, attempts).reconcile(attempt.operation_id)
 
-    assert recovered.reconciliation.outcome is ReconciliationOutcome.CONFIRMED_NOT_APPLIED
-    assert recovered.reconciliation.retry_safe
-    with pytest.raises(OperationNotFound):
-        attempts.get(attempt.operation_id)
+    assert recovered.reconciliation.outcome is ReconciliationOutcome.INDETERMINATE
+    assert not recovered.reconciliation.retry_safe
+    assert attempts.get(attempt.operation_id).status is EffectAttemptStatus.INDETERMINATE
+    with pytest.raises(RepositoryEffectQuarantined):
+        require_effects_allowed_for_repositories(
+            CommandSafety.WORKTREE_MUTATION,
+            [recovered.effect.repository.repository_id],
+            effect_quarantines(attempts.all()),
+        )
+    revision = journal.read_view().revision
+    reopened = LocalDatabase(tmp_path / "state.db")
+    replayed = _recovery(
+        reopened, Journal(reopened), RepositoryEffectAttemptStore(reopened)
+    ).reconcile(attempt.operation_id)
+    assert replayed == recovered
+    assert Journal(reopened).read_view().revision == revision
 
 
 def test_startup_recovery_leaves_operator_required_quarantine_stable(tmp_path: Path) -> None:
@@ -204,7 +224,7 @@ def test_terminal_reconciliation_replays_existing_journal_evidence(tmp_path: Pat
     attempts = RepositoryEffectAttemptStore(database)
     journal = Journal(database)
     repository = _repository(tmp_path)
-    attempt = _unknown_attempt(database, attempts, repository)
+    attempt = _unknown_attempt(database, attempts, repository, action=OperationAction.PLAN)
     recovery = _recovery(database, journal, attempts)
 
     first = recovery.reconcile(attempt.operation_id)
@@ -214,6 +234,42 @@ def test_terminal_reconciliation_replays_existing_journal_evidence(tmp_path: Pat
     assert first.reconciliation.outcome is ReconciliationOutcome.CONFIRMED_NOT_APPLIED
     assert replayed == first
     assert journal.read_view().revision == first_revision
+
+
+def test_historical_not_applied_reconciliation_replays_without_requalification(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "historical-reconcile.db"
+    database = LocalDatabase(path)
+    attempts = RepositoryEffectAttemptStore(database)
+    journal = Journal(database)
+    repository = _repository(tmp_path)
+    attempt = _unknown_attempt(database, attempts, repository)
+    historical = RepositoryEffectReconciliationEvidence(
+        effect=attempt.identity,
+        reconciliation=ConfirmedNotAppliedRepositoryReconciliation(
+            outcome=ReconciliationOutcome.CONFIRMED_NOT_APPLIED,
+            reason="Repository fingerprint is unchanged from the durable pre-effect baseline",
+            baseline=attempt.baseline,
+            current=attempt.baseline,
+        ),
+    )
+    with database.transaction(write=True) as connection:
+        journal.commit_effect_reconciliation_in(connection, historical)
+        attempts.apply_reconciliation_in(
+            connection,
+            attempt.operation_id,
+            historical.reconciliation,
+            expected_revision=attempt.record_version,
+        )
+    revision = journal.read_view().revision
+    reopened = LocalDatabase(path)
+    replayed = _recovery(
+        reopened, Journal(reopened), RepositoryEffectAttemptStore(reopened)
+    ).reconcile(attempt.operation_id)
+    assert replayed == historical
+    assert replayed.reconciliation.baseline.state_id == attempt.baseline.state_id
+    assert Journal(reopened).read_view().revision == revision
 
 
 def test_changed_worktree_effect_remains_quarantined(tmp_path: Path) -> None:
@@ -504,7 +560,7 @@ def test_confirmed_not_applied_recovery_evidence_does_not_invalidate_prior_resul
             fleet_run_id=None,
         ),
     )
-    attempt = _unknown_attempt(database, attempts, repository)
+    attempt = _unknown_attempt(database, attempts, repository, action=OperationAction.PLAN)
 
     recovered = _recovery(database, journal, attempts).reconcile(attempt.operation_id)
 

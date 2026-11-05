@@ -1,9 +1,9 @@
 """EXEC-01B: actual standard FleetRun worker and Game Tape with explicit host consent.
 
-External Hashmarks dependency is NOT available in hosted CI. For these tests ONLY,
-replace its leaf identity producer. Fleet admission, repository execution, subprocess,
-SQLite Journal, Enforcer lifecycle and Game Tape remain production implementations.
-A real installed-Hashmarks host qualification is still required and never inferred.
+Admission and the fresh worker use the installed required Hashmarks producer.
+Fleet admission, repository execution, subprocess, SQLite Journal, Enforcer
+lifecycle and Game Tape remain production implementations. This ordinary local
+proof does not establish privileged execution qualification.
 """
 
 from __future__ import annotations
@@ -24,9 +24,9 @@ from oh_goon.core.models.fleet_plan_execution_policy import (
     CicdExecutionPolicy,
 )
 from oh_goon.core.product_identity import repository_id, repository_subject_instance_id
-from oh_goon.integrations.hashmarks import identity as external_identity
 
-EXAMPLE = Path(__file__).resolve().parents[3] / "examples" / "standard-atomic"
+ROOT = Path(__file__).resolve().parents[3]
+EXAMPLE = ROOT / "examples" / "standard-atomic"
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="Linux/WSL host process tests")
 
 
@@ -49,30 +49,6 @@ def _repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, script: str | None
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     return repo
-
-
-@pytest.fixture
-def simulated_external_identity(monkeypatch: pytest.MonkeyPatch):
-    # NOT a Hashmarks substitute in production; deterministic external adapter
-    # at the one published leaf boundary while exercising the real Fleet code.
-    def supplied_identity(path: Path, **_kwargs):
-        files = (
-            sorted(p for p in path.rglob("*") if p.is_file() and ".git" not in p.parts)
-            if path.is_dir()
-            else [path]
-        )
-        payload = (
-            b"".join(p.relative_to(path).as_posix().encode() + p.read_bytes() for p in files)
-            if path.is_dir()
-            else path.read_bytes()
-        )
-        return external_identity.HashmarksTreeIdentity(
-            sha256=hashlib.sha256(payload).hexdigest(),
-            byte_count=len(payload),
-            entry_count=len(files),
-        )
-
-    monkeypatch.setattr(external_identity, "_identify_one", supplied_identity)
 
 
 def _run(repo: Path, *, run_id: str):
@@ -98,8 +74,9 @@ def _run(repo: Path, *, run_id: str):
 
 
 def test_durable_standard_fleet_run_executes_real_atomic_and_publishes_tape(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, simulated_external_identity
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    shipped_lock = (ROOT / "examples/standard-atomic/goon.lock").read_bytes()
     repo = _repo(tmp_path, monkeypatch)
     detail, persisted = _run(repo, run_id="exec01b-pass")
     assert detail.outcome.value == "SUCCESS"
@@ -110,10 +87,11 @@ def test_durable_standard_fleet_run_executes_real_atomic_and_publishes_tape(
     assert step.step_id == "hello"
     assert step.stdout_evidence.sha256 == hashlib.sha256(b"oh-goon-atomic-ok").hexdigest()
     assert persisted.game_tape.status.value == "PASSED"
+    assert (repo / "goon.lock").read_bytes() == shipped_lock
 
 
 def test_durable_standard_fleet_run_records_nonzero_real_process(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, simulated_external_identity
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     repo = _repo(tmp_path, monkeypatch, script="#!/bin/sh\necho real-failure\nexit 17\n")
     detail, persisted = _run(repo, run_id="exec01b-fail")
@@ -201,7 +179,7 @@ def test_missing_hashmarks_is_actionable_admission_error(tmp_path: Path, monkeyp
 
 
 def test_cli_explicit_standard_local_wait_runs_and_prints_terminal_tape(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, simulated_external_identity, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ):
     import json
 
@@ -255,7 +233,7 @@ def test_local_cli_rejects_background_invocation_before_runtime(
 
 
 def test_durable_standard_fleet_cancel_owned_process(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, simulated_external_identity
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     repo = _repo(tmp_path, monkeypatch, script="#!/bin/sh\nsleep 30\n")
     runtime = ApplicationRuntime.build(standard_local=True)

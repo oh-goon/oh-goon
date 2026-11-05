@@ -9,6 +9,29 @@ from oh_goon.integrations.content_snapshot import snapshot_identity
 from oh_goon.integrations.hashmarks.identity import identify_path, identify_tree_and_children
 
 
+def test_file_identity_retains_the_producers_hashed_byte_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashmarks
+
+    path = tmp_path / "payload"
+    path.write_bytes(b"captured")
+    native_hash_file = hashmarks.hash_file
+    captured = native_hash_file(path)
+
+    def observe_then_replace(source: Path) -> hashmarks.Digest:
+        digest = native_hash_file(source)
+        source.write_bytes(b"a later, longer revision")
+        return digest
+
+    monkeypatch.setattr(hashmarks, "hash_file", observe_then_replace)
+    observed = identify_path(path)
+
+    assert observed.sha256 == captured.hash
+    assert observed.byte_count == captured.size == len(b"captured")
+    assert path.stat().st_size != observed.byte_count
+
+
 def test_write_permission_changes_do_not_change_content_identity(tmp_path: Path) -> None:
     path = tmp_path / "tree"
     path.mkdir()

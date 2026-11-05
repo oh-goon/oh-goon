@@ -118,7 +118,7 @@ def _identify_one(
         _check_cancel(cancel_requested, path)
         return HashmarksTreeIdentity(
             sha256=digest.hash,
-            byte_count=int(path.stat().st_size),
+            byte_count=digest.size,
             entry_count=1,
         )
 

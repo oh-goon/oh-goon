@@ -13,7 +13,13 @@ from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.target import MigrationTarget, OperationTarget
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
 from oh_goon.core.time import utc_now
-from oh_goon.core.vocabulary import EffectBoundaryKind, MigrationReadiness, MigrationSource, Verdict
+from oh_goon.core.vocabulary import (
+    EffectBoundaryKind,
+    MigrationReadiness,
+    MigrationSource,
+    Verdict,
+    WorktreeState,
+)
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.migration_execution import execute_migration_plan
 from oh_goon.integrations.migration_git import publish_migration_commit
@@ -68,7 +74,9 @@ class MigrationRunner:
                 ReasonCode.OPERATION_FAILED,
             )
 
-        changed = list(self._git.observe(repository, request.cancel_requested).changed_files)
+        observation = self._git.observe(repository, request.cancel_requested)
+        observation.require_repository()
+        changed = list(observation.changed_files)
         unexpected = sorted(set(changed) - plan.allowed_changed_files)
         if unexpected or not changed:
             reason = (
@@ -174,6 +182,6 @@ def _require_safe_candidate(
         raise MigrationPreconditionFailed(
             f"Repository is not safe for automatic Adopt UV migration: {candidate.readiness.value}"
         )
-    if git.observe(repository, cancel_requested).changed_files:
+    if git.observe(repository, cancel_requested).worktree_state is not WorktreeState.CLEAN:
         raise MigrationPreconditionFailed("Adopt UV requires a clean Git worktree")
     return candidate

@@ -9,8 +9,8 @@ from threading import Event
 
 import pytest
 
-from oh_goon.core.errors import ExecutionBusy, OperationNotFound, RuntimeSafetyStale, StateConflict
-from oh_goon.core.vocabulary import EffectBoundaryKind, OperationAction
+from oh_goon.core.errors import ExecutionBusy, RuntimeSafetyStale, StateConflict
+from oh_goon.core.vocabulary import EffectAttemptStatus, EffectBoundaryKind, OperationAction
 from oh_goon.engine.git import GitService
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
@@ -147,10 +147,9 @@ def test_native_recovery_observation_pins_original_read_cut_until_finished(
         evidence = reconciled.result(timeout=6)
         with pytest.raises(RuntimeSafetyStale):
             admission.result(timeout=6)
-    assert evidence.reconciliation.retry_safe
+    assert not evidence.reconciliation.retry_safe
     assert journal.read_view().latest_effect_reconciliation(attempt.operation_id) == evidence
-    with pytest.raises(OperationNotFound):
-        attempts.get(attempt.operation_id)
+    assert attempts.get(attempt.operation_id).status is EffectAttemptStatus.INDETERMINATE
     ticket, _ = execution.reserve_direct_with(
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,

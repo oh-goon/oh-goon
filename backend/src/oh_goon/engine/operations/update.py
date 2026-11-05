@@ -27,6 +27,7 @@ def run(context: OperationContext) -> OperationExecution:
     before_observation = context.git.observe(
         context.attempt.repository.path, context.cancel_requested
     )
+    before_observation.require_repository()
     before = before_observation.fingerprint
     policy = policy_snapshot(context.attempt.repository.path)
     lock_path = context.attempt.repository.path / "uv.lock"
@@ -44,13 +45,9 @@ def run(context: OperationContext) -> OperationExecution:
     validation_out = ""
     validation_err = ""
     if resolved.returncode == 0:
-        unexpected = [
-            name
-            for name in context.git.observe(
-                context.attempt.repository.path, context.cancel_requested
-            ).changed_files
-            if name != "uv.lock"
-        ]
+        observation = context.git.observe(context.attempt.repository.path, context.cancel_requested)
+        observation.require_repository()
+        unexpected = [name for name in observation.changed_files if name != "uv.lock"]
         if not unexpected:
             validation, validation_out, validation_err = validate_repository(
                 context.attempt.repository.path, policy, context.cancel_requested
@@ -87,6 +84,7 @@ def _finish(
     after_observation = context.git.observe(
         context.attempt.repository.path, context.cancel_requested
     )
+    after_observation.require_repository()
     after = after_observation.fingerprint
     unexpected = [name for name in after_observation.changed_files if name != "uv.lock"]
     git = mutation_git_result(
