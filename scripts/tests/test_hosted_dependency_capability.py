@@ -7,7 +7,6 @@ import importlib.metadata
 
 import argparse
 import json
-import tomllib
 import os
 import subprocess
 import sys
@@ -496,10 +495,10 @@ def test_native_only_policy_changes_once_without_capability_code_change(
 ) -> None:
     original = (ROOT / "backend/pyproject.toml").read_text(encoding="utf-8")
     pyproject = tmp_path / "pyproject.toml"
-    declared = tomllib.loads(original)["project"]["dependencies"]
-    native_requirement = next(
-        value for value in declared if value.partition("@")[0].strip() == "hashmarks"
+    declared, _requirements, _requires_python, _native_only = (
+        capability._project_contract(ROOT / "backend/pyproject.toml")
     )
+    native_requirement = declared["hashmarks"]
     pyproject.write_text(
         original.replace(
             native_requirement,

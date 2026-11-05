@@ -919,6 +919,8 @@ def test_github_shell_records_failure_and_refuses_unknown_or_changed_source(
     )
     for directory in (workspace, tools, runner):
         directory.mkdir()
+    evidence = runner / "full-owner"
+    evidence.mkdir(mode=0o700)
     environment = {
         "PATH": str(tools) + os.pathsep + os.defpath,
         "HOME": str(tmp_path),
@@ -970,6 +972,7 @@ def test_github_shell_records_failure_and_refuses_unknown_or_changed_source(
             "FROZEN_SHA": sha,
             "FULL_TARGET": "unknown" if case == "unknown" else "architecture",
             "RUNNER_TEMP": str(runner),
+            "FULL_OWNER_EVIDENCE": str(evidence),
             "FULL_SLOT": SLOT,
             "GITHUB_RUN_ID": "11",
             "GITHUB_RUN_ATTEMPT": "1",

@@ -1,28 +1,118 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
 from oh_goon.application import ApplicationRuntime
-from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_events import ProcessStartingEvent
 from oh_goon.core.product_identity import repository_id
 from oh_goon.core.vocabulary import FleetRunEventType, FleetRunOutcome, FleetRunStatus
-from oh_goon.engine.command import (
-    CommandProcessLifecycleEvent,
-    CommandProcessObserver,
-    CommandResult,
-    run_command,
-)
+from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor, RunWorkerLaunch
+
+_OBSERVED_JOURNAL_WORKER = r"""
+import json, os, runpy, sys
+from pathlib import Path
+
+from oh_goon import _application_worker_runtime as worker_runtime
+from oh_goon.integrations import fleet_plan_step_execution as step_owner
+from oh_goon.core.models.run_events import ProcessStartingEvent
 from oh_goon.runtime._sqlite_authority_gate import sqlite_authority_gate
-from oh_goon.runtime.journal_codec import JournalFactCodec, JournalFactKind
-from oh_goon.runtime.journal_facts import JournalEntry
+from oh_goon.runtime.journal_codec import JournalFactCodec
+
+header, database_path, observation_path, run_id = sys.argv[1:]
+decodes = verifications = 0
+original_decode = JournalFactCodec.decode
+original_verify = JournalFactCodec.verify
+original_build = worker_runtime.build_claimed_run_execution
+original_journal = worker_runtime.Journal
+original_command = step_owner.run_command
+
+def counted_decode(**fields):
+    global decodes
+    decodes += 1
+    return original_decode(**fields)
+
+def counted_verify(**fields):
+    global verifications
+    verifications += 1
+    return original_verify(**fields)
+
+JournalFactCodec.decode = staticmethod(counted_decode)
+JournalFactCodec.verify = staticmethod(counted_verify)
+
+def observed_build(database, claimed_ticket, configuration, **options):
+    assert claimed_ticket.require_fleet_run_id() == run_id
+    journals = []
+
+    def observe_journal(selected_database):
+        assert selected_database is database
+        journal = original_journal(selected_database)
+        journals.append(journal)
+        return journal
+
+    # Keep the original composition and its exact cache-bearing Journal.
+    worker_runtime.Journal = observe_journal
+    try:
+        execution = original_build(database, claimed_ticket, configuration, **options)
+    finally:
+        worker_runtime.Journal = original_journal
+    assert len(journals) == 1
+    journal = journals[0]
+
+    def observed_command(*argv, **command_options):
+        observer = command_options['process_observer']
+
+        def observe(event):
+            if event.kind != 'PROCESS_STARTING':
+                observer(event)
+                return
+            with sqlite_authority_gate(Path(database_path), write=True):
+                before = journal.read_view().required_run_detail(run_id)
+                warmed_counts = (decodes, verifications)
+                observer(event)
+                callback_counts = (decodes, verifications)
+                after = journal.read_view().required_run_detail(run_id)
+                refreshed_counts = (decodes, verifications)
+                payload = {
+                    'run_id': run_id,
+                    'worker_pid': os.getpid(),
+                    'physical_execution_id': event.physical_execution_id,
+                    'before_status': before.run.status,
+                    'after_status': after.run.status,
+                    'before_revision': before.journal_revision,
+                    'after_revision': after.journal_revision,
+                    'before_process_starts': [
+                        item.model_dump(mode='json') for item in before.lifecycle_events
+                        if type(item) is ProcessStartingEvent
+                    ],
+                    'after_process_starts': [
+                        item.model_dump(mode='json') for item in after.lifecycle_events
+                        if type(item) is ProcessStartingEvent
+                    ],
+                    'read_counts': (warmed_counts, callback_counts, refreshed_counts),
+                }
+                encoded = json.dumps(payload).encode('utf-8')
+                assert len(encoded) <= 64 * 1024
+                descriptor = os.open(observation_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, 'wb') as stream:
+                    stream.write(encoded)
+
+        return original_command(*argv, **(command_options | {'process_observer': observe}))
+
+    step_owner.run_command = observed_command
+    return execution
+
+worker_runtime.build_claimed_run_execution = observed_build
+sys.argv = ['oh_goon._application_worker', '--handoff', header]
+runpy.run_module('oh_goon._application_worker', run_name='__main__', alter_sys=True)
+"""
 
 
 @pytest.mark.process
@@ -51,51 +141,36 @@ def test_step_lifecycle_reuses_publicly_warmed_journal_cut_and_refreshes_after_a
     ):
         monkeypatch.setenv(name, str(tmp_path / directory))
 
-    decodes = 0
-    verifications = 0
-    original_decode = JournalFactCodec.decode
-    original_verify = JournalFactCodec.verify
-
-    def counted_decode(**fields: Any) -> JournalEntry:
-        nonlocal decodes
-        decodes += 1
-        return original_decode(**fields)
-
-    def counted_verify(**fields: Any) -> JournalFactKind:
-        nonlocal verifications
-        verifications += 1
-        return original_verify(**fields)
-
-    monkeypatch.setattr(JournalFactCodec, "decode", staticmethod(counted_decode))
-    monkeypatch.setattr(JournalFactCodec, "verify", staticmethod(counted_verify))
-    runtime = ApplicationRuntime.build(standard_local=True)
     run_id = "application-journal-reuse"
-    readbacks: list[tuple[FleetRunDetail, FleetRunDetail]] = []
-    read_counts: list[tuple[tuple[int, int], tuple[int, int], tuple[int, int]]] = []
-    process_ids: list[str] = []
+    observation_root = tmp_path / "worker-observation"
+    observation_root.mkdir(mode=0o700)
+    observation_path = observation_root / "journal.json"
+    original_submit = RunExecutionSupervisor.submit
 
-    def observed_command(*argv: str, **options: Any) -> CommandResult:
-        observer = cast(CommandProcessObserver, options["process_observer"])
+    def observed_submit(
+        supervisor: RunExecutionSupervisor, fleet_run_id: str, launch: RunWorkerLaunch
+    ) -> None:
+        assert fleet_run_id == run_id
+        original_submit(
+            supervisor,
+            fleet_run_id,
+            replace(
+                launch,
+                argv=(
+                    launch.argv[0],
+                    "-I",
+                    "-c",
+                    _OBSERVED_JOURNAL_WORKER,
+                    launch.argv[-1],
+                    str(database_path),
+                    str(observation_path),
+                    run_id,
+                ),
+            ),
+        )
 
-        def observe(event: CommandProcessLifecycleEvent) -> None:
-            if event.kind != "PROCESS_STARTING":
-                observer(event)
-                return
-            with sqlite_authority_gate(database_path, write=True):
-                before = runtime.runs.get(run_id)
-                warmed_counts = (decodes, verifications)
-                observer(event)
-                callback_counts = (decodes, verifications)
-                after = runtime.runs.get(run_id)
-                readbacks.append((before, after))
-                read_counts.append((warmed_counts, callback_counts, (decodes, verifications)))
-                process_ids.append(event.physical_execution_id)
-
-        return run_command(*argv, **(options | {"process_observer": observe}))
-
-    monkeypatch.setattr(
-        "oh_goon.integrations.fleet_plan_step_execution.run_command", observed_command
-    )
+    monkeypatch.setattr(RunExecutionSupervisor, "submit", observed_submit)
+    runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repository.parent)
         runtime.plans.lock(source)
@@ -116,24 +191,28 @@ def test_step_lifecycle_reuses_publicly_warmed_journal_cut_and_refreshes_after_a
         ):
             assert any(event.event_type is event_type for event in events)
 
-        assert len(readbacks) == len(read_counts) == len(process_ids) == 1
-        before, after = readbacks[0]
-        assert before.run.status is after.run.status is FleetRunStatus.RUNNING
-        assert before.journal_revision is not None and after.journal_revision is not None
-        assert after.journal_revision == before.journal_revision + 1
-        assert not any(
-            isinstance(event, ProcessStartingEvent)
-            and event.physical_execution_id == process_ids[0]
-            for event in before.lifecycle_events
-        )
-        assert any(
-            isinstance(event, ProcessStartingEvent)
-            and event.physical_execution_id == process_ids[0]
-            for event in after.lifecycle_events
-        )
-        warmed_counts, callback_counts, refreshed_counts = read_counts[0]
+        with observation_path.open("rb") as stream:
+            encoded = stream.read(64 * 1024 + 1)
+        assert len(encoded) <= 64 * 1024
+        observed = json.loads(encoded)
+        assert observed["run_id"] == run_id
+        assert observed["worker_pid"] > 0 and observed["worker_pid"] != os.getpid()
+        assert observed["before_status"] == observed["after_status"] == FleetRunStatus.RUNNING
+        assert observed["before_revision"] is not None and observed["after_revision"] is not None
+        assert observed["after_revision"] == observed["before_revision"] + 1
+        process_id = observed["physical_execution_id"]
+        before = [
+            ProcessStartingEvent.model_validate(item) for item in observed["before_process_starts"]
+        ]
+        after = [
+            ProcessStartingEvent.model_validate(item) for item in observed["after_process_starts"]
+        ]
+        assert not any(event.physical_execution_id == process_id for event in before)
+        appended = [event for event in after if event.physical_execution_id == process_id]
+        assert len(appended) == 1 and appended[0] in detail.lifecycle_events
+        warmed_counts, callback_counts, refreshed_counts = observed["read_counts"]
         assert callback_counts == warmed_counts
         assert refreshed_counts[0] == callback_counts[0] + 1
-        assert refreshed_counts[1] - callback_counts[1] == after.journal_revision
+        assert refreshed_counts[1] - callback_counts[1] == observed["after_revision"]
     finally:
         runtime.shutdown(wait_for_runs=True)

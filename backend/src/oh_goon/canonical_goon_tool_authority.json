@@ -219,6 +219,7 @@
         "git",
         "node",
         "sh",
+        "systemctl",
         "systemd-run",
         "uv"
       ]

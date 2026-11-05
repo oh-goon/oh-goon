@@ -651,9 +651,7 @@ def test_static_context_binds_selected_tool_bytes_and_detects_compiler_drift(
         path = root / "frontend" / name
         path.write_text(f"selected {name} entry\n")
         binaries[name] = str(path)
-    monkeypatch.setattr(
-        gate.shutil, "which", lambda name, **_options: binaries.get(name)
-    )
+    monkeypatch.setattr(shutil, "which", lambda name, **_options: binaries.get(name))
     monkeypatch.setattr(
         command_owner,
         "run_command",
@@ -710,7 +708,7 @@ def test_static_context_native_tool_observation_fails_closed(
     selected = root / "frontend/node"
     selected.write_text("selected native tool entry\n")
     monkeypatch.setattr(
-        gate.shutil,
+        shutil,
         "which",
         lambda _name, **_options: None if fault == "missing" else str(selected),
     )
@@ -759,9 +757,7 @@ def test_independent_static_observation_fences_actual_selected_tool_bytes(
         path = tool_root / name
         path.write_text(f"selected {name} entry\n")
         binaries[name] = str(path)
-    monkeypatch.setattr(
-        gate.shutil, "which", lambda name, **_options: binaries.get(name)
-    )
+    monkeypatch.setattr(shutil, "which", lambda name, **_options: binaries.get(name))
     monkeypatch.setattr(
         command_owner,
         "run_command",

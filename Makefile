@@ -581,7 +581,7 @@ a1-native-kernel-custody-test:
 
 # Complete repository-tooling qualification uses the same generic scheduling authority.
 # Certification-marked recursive tests remain owned by APP certification.
-# OH_GOON_OPAQUE_TOOLS: bash dd git node uv
+# OH_GOON_OPAQUE_TOOLS: bash dd git node systemctl uv
 test-tooling-complete:
 	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --granularity files --batch-size 4 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker "$(TOOLING_COMPLETE_TEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
 

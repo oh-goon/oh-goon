@@ -351,6 +351,7 @@ def launch(root: Path, cpus: int, report: Path | None, command: Sequence[str]) -
                 require_process_group_quiescence=True,
                 parent_death_signal=True,
                 max_capture_bytes_per_stream=64 * 1024,
+                retain_output_tail=True,
                 stream_output=lambda stream, text: print(
                     text, end="", file=sys.stdout if stream == "stdout" else sys.stderr, flush=True
                 ),

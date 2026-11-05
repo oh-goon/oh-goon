@@ -18,6 +18,7 @@ from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from oh_goon.core.models.goon_plan_source import PlanFileSource
 from oh_goon.core.vocabulary import FleetRunStatus
+from oh_goon.runtime.execution import RunExecutionSupervisor
 from oh_goon.services.fleet_plans import FleetPlanService
 from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
@@ -69,8 +70,10 @@ def provisioner(run_ids: tuple[str, ...]) -> FleetPreworkProvisioner:
 
 
 def plans(owner) -> FleetPlanService:
-    control = object.__new__(FleetRunControlPlane)
-    control._lifecycle = owner
+    forbidden = Mock(spec_set=(), side_effect=AssertionError("effect before CLI ingress"))
+    control = FleetRunControlPlane(
+        forbidden, forbidden, owner, forbidden, RunExecutionSupervisor(), forbidden
+    )
     return FleetPlanService(object(), control, object(), object(), object())
 
 

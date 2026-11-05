@@ -41,7 +41,10 @@ from oh_goon.engine.command import (
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
 from oh_goon.integrations import agent_codex_service_execution as execution
-from oh_goon.integrations.agent_codex_service import NativeCodexCleanupIncomplete
+from oh_goon.integrations.agent_codex_service import (
+    NativeCodexCleanupIncomplete,
+    NativeCodexRequestUncertain,
+)
 from oh_goon.integrations.fleet_plan_step_execution import (
     StepRuntime,
     _StepProcess,
@@ -293,6 +296,11 @@ def execute_fixture(
             assert thread == "owned-thread" and task == "Captured task"
             assert _kwargs["output_schema"] == output_schema
             events.append("model_turn")
+            if fault == "turn_ack_lost":
+                events.append("turn_ack_lost")
+                raise NativeCodexRequestUncertain(
+                    "Native turn acceptance is unknown; automatic replay is unsafe"
+                )
             if fault == "turn_missing":
                 return {}
             completed_boundary("turn")
@@ -338,6 +346,11 @@ def execute_fixture(
                         "item": {"type": "agentMessage", "text": "Native final report"},
                     },
                 }
+            if fault == "terminal_lost":
+                events.append("terminal_lost")
+                raise NativeCodexRequestUncertain(
+                    "Native turn terminal state is unavailable; request acceptance is unknown"
+                )
             return {
                 "method": "turn/completed",
                 "params": {
@@ -430,6 +443,40 @@ def test_service_turn_success_retains_actual_owned_daemon_cancellation_receipt(
     assert "PRIVATE_NATIVE_REGISTRATION" not in result.execution.model_dump_json()
     assert events.index("sandbox_qualification") < events.index("model_turn")
     assert events.index("disconnect") < events.index("process_closed")
+
+
+@pytest.mark.parametrize("fault", ("turn_ack_lost", "terminal_lost"))
+def test_uncertain_native_turn_is_not_replayed_or_promoted_to_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    invoke, events, physical = execute_fixture(tmp_path, monkeypatch, fault=fault)
+
+    with pytest.raises(execution.CodexServiceExecutionFailure) as failure:
+        invoke()
+
+    assert fault in events
+    assert (
+        events.count("connect") == events.count("thread_start") == events.count("model_turn") == 1
+    )
+    assert events.count("process_birth") == 1
+    assert events.index("disconnect") < events.index("process_closed")
+    assert len(physical) == 1 and isinstance(physical[0], CommandCancelledError)
+    shutdown = physical[0]
+    outcome = failure.value.outcome
+    assert outcome.returncode != 0 and outcome.stdout == ""
+    assert outcome.observed_returncode is None
+    assert outcome.supervisor is shutdown.supervisor
+    assert outcome.runtime_authority is shutdown.runtime_authority
+    assert outcome.physical_execution_id == shutdown.physical_execution_id
+    assert shutdown.supervisor.cleanup_reason == "cancel"
+    assert shutdown.supervisor.process_group_cleanup_requested is True
+    assert shutdown.supervisor.final_process_group_quiescent is True
+    assert shutdown.supervisor.termination_receipt is not None
+    assert failure.value.native_event_count == (1 if fault == "terminal_lost" else 0)
+    visible_claims = [item for item in failure.value.safe_diagnostics if item.kind == "agent"]
+    assert bool(visible_claims) is (fault == "terminal_lost")
+    if visible_claims:
+        assert "Native final report" in visible_claims[0].summary
 
 
 @pytest.mark.parametrize("fault", ("missing_process_birth", "invalid_process_birth"))

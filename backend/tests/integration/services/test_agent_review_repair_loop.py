@@ -49,8 +49,6 @@ from tests.factories.agent_review import agent_review_case
 from tests.factories.python_goon_projects import write_isolated_build_project
 from tests.integration.api.client import authenticated_api_client
 
-pytestmark = pytest.mark.daily
-
 
 @pytest.fixture
 def installed_cli(monkeypatch):
@@ -59,6 +57,7 @@ def installed_cli(monkeypatch):
     monkeypatch.setenv("PATH", str(cli.parent) + os.pathsep + os.environ.get("PATH", ""))
 
 
+@pytest.mark.daily
 @pytest.mark.parametrize("ingress", ["cli", "shared_http"])
 def test_single_review_uses_normal_lock_and_run_without_loop_limits(
     tmp_path, monkeypatch, capsys, ingress
@@ -199,6 +198,7 @@ model = "synthetic/reviewer"
             worker.join(timeout=5)
 
 
+@pytest.mark.daily
 @pytest.mark.parametrize("template_key", ["agents/agentic-review-repair-loop"])
 @pytest.mark.parametrize(
     "scenario,passes,expected,expected_phases,calls",
@@ -1073,6 +1073,7 @@ print(json.dumps(dict(type='turn.completed')))
 """
 
 
+@pytest.mark.daily
 @pytest.mark.process
 @pytest.mark.skipif(
     sys.platform != "linux" or shutil.which("bwrap") is None, reason="Linux Bubblewrap required"
@@ -1332,19 +1333,36 @@ from oh_goon.core.product_identity import repository_id
 
 selected = json.loads(sys.argv[1])
 
-# Keep original product admission, process publication and effect execution;
-# inject only a real controller death at an existing owner boundary.
+# Keep original admission, claimed workers and execution. The process/effect
+# cuts explicitly lose both execution owner and controller; ordinary control
+# loss alone must leave a healthy claimed worker running.
 if selected["cut"] == "admission":
-    from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
+    from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor
 
-    start_phase = FleetRunControlPlane.start_prepared_plan
-
-    def crash_after_admission(self, *args, **kwargs):
-        start_phase(self, *args, **kwargs)
+    def crash_before_worker_launch(self, *args, **kwargs):
+        # The original ticket and Run are durable before submit is entered.
+        # No healthy worker is launched by this prelaunch crash cut.
         os._exit(84)
 
-    FleetRunControlPlane.start_prepared_plan = crash_after_admission
-elif selected["cut"] == "process":
+    RunExecutionSupervisor.submit = crash_before_worker_launch
+elif selected["cut"] in {"process", "apply"}:
+    from dataclasses import replace
+    from threading import Thread
+    from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor
+
+    worker_cut = r'''
+import json, os, runpy, sys
+from pathlib import Path
+header, ready, released = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+selected = json.loads(sys.argv[4])
+
+def crash_at_cut(code):
+    os.write(ready, b'R')
+    # EOF proves the controller closed its only release writer by exiting.
+    assert os.read(released, 1) == b''
+    os._exit(code)
+
+if selected['cut'] == 'process':
     from oh_goon.core.vocabulary import FleetRunEventType
     from oh_goon.runtime.journal import Journal
 
@@ -1353,10 +1371,10 @@ elif selected["cut"] == "process":
     def crash_after_process_publication(self, *args, **kwargs):
         record_process(self, *args, **kwargs)
         if kwargs["event_type"] is FleetRunEventType.PROCESS_STARTED:
-            os._exit(85)
+            crash_at_cut(85)
 
     Journal.record_execution_lifecycle = crash_after_process_publication
-elif selected["cut"] == "apply":
+else:
     from oh_goon.runtime.fault_injection import FaultPoint
     from oh_goon.services.repository_effect_execution import RepositoryEffectExecution
 
@@ -1368,7 +1386,7 @@ elif selected["cut"] == "apply":
                 and (repository / "code.txt").read_text() == "repaired\n"
                 and (repository / "regression.txt").is_file()
             ):
-                os._exit(86)
+                crash_at_cut(86)
 
     initialize_effects = RepositoryEffectExecution.__init__
 
@@ -1377,6 +1395,32 @@ elif selected["cut"] == "apply":
         initialize_effects(self, *args, **kwargs)
 
     RepositoryEffectExecution.__init__ = initialize_crashing_effects
+
+sys.argv = ['oh_goon._application_worker', '--handoff', header]
+runpy.run_module('oh_goon._application_worker', run_name='__main__', alter_sys=True)
+'''
+    ready_read, ready_write = os.pipe2(os.O_CLOEXEC)
+    release_read, release_write = os.pipe2(os.O_CLOEXEC)
+    submit = RunExecutionSupervisor.submit
+
+    def submit_with_crash_cut(self, run_id, launch):
+        return submit(self, run_id, replace(
+            launch,
+            argv=(launch.argv[0], '-I', '-c', worker_cut, launch.argv[-1],
+                  str(ready_write), str(release_read), json.dumps(selected)),
+            pass_fds=(*launch.pass_fds, ready_write, release_read),
+        ))
+
+    RunExecutionSupervisor.submit = submit_with_crash_cut
+
+    def exit_at_worker_cut():
+        import select
+        if not select.select([ready_read], [], [], 55)[0]:
+            os._exit(83)  # A missed cut cannot masquerade as injected death.
+        assert os.read(ready_read, 1) == b'R'
+        os._exit(85 if selected['cut'] == 'process' else 86)
+
+    Thread(target=exit_at_worker_cut, daemon=True).start()
 
 runtime = ApplicationRuntime.build(standard_local=True)
 runtime.locations.add(Path(selected["repository_root"]))
@@ -1390,7 +1434,7 @@ def crash_at_publication(decision):
     return commit(decision)
 
 runtime.runs.commit_agent_campaign_decision = crash_at_publication
-result = result = runtime.plans.repair(
+result = runtime.plans.repair(
     Path(selected["plan"]), repository_id=repository_id(Path(selected["repository"])),
     budget=AgentRepairBudget(max_attempts=2, timeout_seconds=45, step_timeout_seconds=10),
     inputs=selected["inputs"], agent_repository_root=Path(selected["repository_root"]),
@@ -1567,7 +1611,11 @@ def test_controller_death_during_admission_process_and_applied_effect(
     cut,
     exit_code,
 ):
-    """Retain actual effects and unresolved lineage without replay or invented success."""
+    """Lose admission control or both worker/control at a published execution cut.
+
+    Native barriers reach the actual fresh worker; source effects and unresolved
+    campaign lineage survive without replay or invented success.
+    """
     from oh_goon.core.errors import (
         JournalConflict,
         RepositoryEffectQuarantined,
@@ -1754,13 +1802,23 @@ def test_controller_death_during_admission_process_and_applied_effect(
                 )
                 started = _assert_started_crash_processes_exited(details)
             if cut == "process":
-                assert len(started) == 1
-                assert not any(
-                    isinstance(event, DescendantsQuiescentEvent)
+                interrupted = [event for event in started if event.step_id is not None]
+                assert len(interrupted) == 1
+                settled = {
+                    event.physical_execution_id
                     for event in details[-1].lifecycle_events
+                    if isinstance(event, DescendantsQuiescentEvent)
+                }
+                assert interrupted[0].physical_execution_id not in settled
+                assert all(
+                    event.physical_execution_id in settled
+                    for event in started
+                    if event is not interrupted[0]
                 )
                 # Host observation does not manufacture the missing owner cleanup receipt.
                 assert details[-1].game_tape.status.value != "PASSED"
+            if cut == "admission":
+                assert not started and not observed
             if cut == "apply":
                 assert len(observed) == 6
                 assert (repo / "code.txt").read_text() == "repaired\n"
@@ -1793,6 +1851,10 @@ def test_controller_death_during_admission_process_and_applied_effect(
                 # explicit original reconciliation/acknowledgement before mutation.
                 reopened = ApplicationRuntime.build(standard_local=True)
                 try:
+                    for run_id in admitted_ids:
+                        transient = reopened.runs.game_tape_live_output(run_id)
+                        assert transient.state == "UNAVAILABLE"
+                        assert not transient.available and not transient.chunks
                     assert (
                         tuple(
                             detail.run.fleet_run_id for detail in journal.read_view().run_details()

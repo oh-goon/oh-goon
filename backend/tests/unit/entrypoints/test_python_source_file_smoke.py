@@ -55,6 +55,8 @@ def _file_declared_names(tree: ast.AST) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             declared.add(node.name)
+        elif isinstance(node, (ast.TypeVar, ast.TypeVarTuple, ast.ParamSpec)):
+            declared.add(node.name)
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 declared.add(alias.asname or alias.name.split(".", 1)[0])
@@ -113,6 +115,34 @@ def test_annotation_binding_smoke_rejects_a_never_declared_annotation_name() -> 
     ]
 
 
+@pytest.mark.parametrize(
+    "source",
+    (
+        "def example[_Parser: object](value: _Parser) -> _Parser:\n    return value\n",
+        "class Example[*Values]:\n    values: tuple[*Values]\n",
+        "from collections.abc import Callable\n"
+        "async def example[**Parameters](callback: Callable[Parameters, int], "
+        "*args: Parameters.args, **kwargs: Parameters.kwargs) -> int:\n"
+        "    return callback(*args, **kwargs)\n",
+    ),
+    ids=("bounded-type-variable", "type-variable-tuple", "parameter-specification"),
+)
+def test_annotation_binding_smoke_accepts_declared_type_parameters(source: str) -> None:
+    compile(source, "<generic-annotation-control>", "exec")
+
+    assert _undeclared_annotation_names(ast.parse(source)) == []
+
+
+def test_annotation_binding_smoke_rejects_undeclared_names_in_generic_annotations() -> None:
+    tree = ast.parse(
+        "def example[Value](value: Value, other: MissingType) -> Value:\n    return value\n"
+    )
+
+    assert _undeclared_annotation_names(tree) == [
+        "line 1: annotation 'MissingType' uses undeclared ['MissingType']"
+    ]
+
+
 @pytest.mark.parametrize("python_file", _OWNED_PYTHON_FILES, ids=_relative_project_python_file)
 def test_each_owned_python_file_compiles_and_annotation_names_are_declared(
     python_file: Path,
@@ -165,14 +195,14 @@ def _class_functions(cls: type[object]) -> Iterator[tuple[str, object]]:
                 yield f"{name}.{nested_name}", function
 
 
-def _module_functions(module: object) -> Iterator[tuple[str, object]]:
+def _module_functions(module: types.ModuleType) -> Iterator[tuple[str, types.FunctionType]]:
     module_name = module.__name__
     for name, value in vars(module).items():
         if inspect.isfunction(value) and value.__module__ == module_name:
             yield name, value
         elif inspect.isclass(value) and value.__module__ == module_name:
             for nested_name, function in _class_functions(value):
-                if getattr(function, "__module__", None) == module_name:
+                if inspect.isfunction(function) and function.__module__ == module_name:
                     yield f"{name}.{nested_name}", function
 
 

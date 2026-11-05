@@ -16,6 +16,7 @@ from oh_goon.api.routes.league import run_shared_plan
 from oh_goon.api.schemas.league import SharedPlanRunRequest
 from oh_goon.core.enforcer_lace_trust import TrustProtocolError
 from oh_goon.core.errors import FleetPlanInvalid, StateConflict
+from oh_goon.runtime.execution import RunExecutionSupervisor
 from oh_goon.services.fleet_plans import FleetPlanService
 from oh_goon.services.fleet_prework_provisioner import FleetPreworkProvisioner
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
@@ -48,8 +49,9 @@ def service(*, provisioned: FleetPreworkProvisioner | None, authenticated=True, 
         require_authenticated_fleet=authenticated,
         fleet_provisioner=provisioned,
     )
-    control = object.__new__(FleetRunControlPlane)
-    control._lifecycle = owner
+    control = FleetRunControlPlane(
+        forbidden, forbidden, owner, forbidden, RunExecutionSupervisor(), forbidden
+    )
     plans = FleetPlanService(object(), control, object(), object(), object())
     plans.run_reviewed = Mock(side_effect=AssertionError("no execution before source is reviewed"))
     return SharedPlanService(

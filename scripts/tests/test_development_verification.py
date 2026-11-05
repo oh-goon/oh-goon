@@ -390,7 +390,7 @@ def test_type_only_project_admission_retains_native_fact_without_runtime_nominat
     assert not plan.pytest and not plan.frontend
     assert plan.behavioral_status == "REQUIRED"
     assert set(plan.static) == {"frontend", "architecture"}
-    assert (owner.STATIC_PROJECT_OBLIGATION in plan.obligations) == qualified
+    assert (STATIC_PROJECT_OBLIGATION in plan.obligations) == qualified
     if qualified:
         assert not plan.unverified
         owner.require_merge_selection(repository, plan)
@@ -3318,7 +3318,7 @@ def test_split_execution_preserves_full_selection_commands_and_native_receipts(
             plan,
             mode="merge",
             workers=1,
-            phase=phase,  # type: ignore[arg-type]
+            phase=phase,
         )
         # Native temporary report paths differ; their presence and receipts do not.
         executions[phase] = [
@@ -3464,7 +3464,7 @@ def test_phase_aggregation_refuses_missing_foreign_or_non_pass_evidence(
     parts = _phase_test_parts(plan)
     monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
     assert (
-        owner.aggregate_change(tmp_path, plan, parts, mode="merge")["status"]
+        owner.aggregate_change(tmp_path, plan, [*parts], mode="merge")["status"]
         == "CHECKS_PASSED"
     )
     invalid = copy.deepcopy(parts)
@@ -3503,7 +3503,7 @@ def test_phase_aggregation_refuses_missing_foreign_or_non_pass_evidence(
     else:
         invalid[1]["outcomes"][-1]["native_report"]["membership_receipt"]["passed"] = []
     with pytest.raises(ValueError):
-        owner.aggregate_change(tmp_path, plan, invalid, mode="merge")
+        owner.aggregate_change(tmp_path, plan, [*invalid], mode="merge")
 
 
 @pytest.mark.parametrize("applicable", ("static", "behavioral", "none"))
@@ -3535,7 +3535,7 @@ def test_only_applicable_phases_are_expected_without_dummy_receipts(
         else []
     )
     monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
-    result = owner.aggregate_change(tmp_path, plan, selected, mode="merge")
+    result = owner.aggregate_change(tmp_path, plan, [*selected], mode="merge")
     assert result["status"] == "CHECKS_PASSED"
     assert result["outcomes"] == (
         [row for part in selected for row in part["outcomes"]]
@@ -3545,7 +3545,7 @@ def test_only_applicable_phases_are_expected_without_dummy_receipts(
         with pytest.raises(ValueError, match="no admitted owners"):
             owner.execute_change(tmp_path, plan, mode="merge", workers=1, phase=other)  # type: ignore[arg-type]
         with pytest.raises(ValueError, match="extra"):
-            owner.aggregate_change(tmp_path, plan, parts, mode="merge")
+            owner.aggregate_change(tmp_path, plan, [*parts], mode="merge")
 
 
 def test_explicit_empty_aggregation_does_not_fall_back_to_execution(

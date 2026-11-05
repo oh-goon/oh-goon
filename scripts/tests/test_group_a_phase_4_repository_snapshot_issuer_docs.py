@@ -38,10 +38,13 @@ def test_issuer_uses_existing_native_owner_and_no_second_hash_engine() -> None:
         "repository_subject_instance_id",
     ) in imports
     assert "hashlib" not in source and "identify_path" not in source
-    assert (
-        "from oh_goon.integrations.hashmarks.identity import identify_path"
-        in OWNER.read_text()
-    )
+    owner_imports = {
+        (node.module, alias.name)
+        for node in ast.walk(ast.parse(OWNER.read_text()))
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    assert ("oh_goon.integrations.hashmarks", "identify_path") in owner_imports
 
 
 def test_private_signer_is_not_imported_into_runtime_or_enforcer() -> None:

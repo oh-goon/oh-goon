@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import signal
 import subprocess
 import sys
@@ -141,8 +142,13 @@ def test_selected_plan_without_native_members_keeps_original_context(
 @pytest.mark.process
 @pytest.mark.native_resources
 @pytest.mark.no_resume
+@pytest.mark.parametrize(
+    "output_bytes,exit_code", [(0, 17), (80 * 1024, 0), (80 * 1024, 17)]
+)
 def test_explicit_worker_preserves_literal_arguments_output_and_nonzero_result(
     tmp_path: Path,
+    output_bytes: int,
+    exit_code: int,
 ) -> None:
     report = tmp_path / "context.json"
     original = Path("/proc/self/cgroup").read_text()
@@ -153,8 +159,13 @@ def test_explicit_worker_preserves_literal_arguments_output_and_nonzero_result(
             sys.executable,
             "-I",
             "-c",
-            "import sys; print(sys.argv[1]); raise SystemExit(17)",
+            "import sys; "
+            "sys.stdout.write('x' * int(sys.argv[2])); "
+            "sys.stderr.write('y' * int(sys.argv[2]) + 'stderr-complete\\n'); "
+            "print(sys.argv[1]); raise SystemExit(int(sys.argv[3]))",
             "$NATIVE_WORKER_LITERAL",
+            str(output_bytes),
+            str(exit_code),
         ],
         env=_environment(
             "shared-user-manager",
@@ -165,8 +176,11 @@ def test_explicit_worker_preserves_literal_arguments_output_and_nonzero_result(
         timeout=30,
         check=False,
     )
-    assert result.returncode == 17, result.stderr.decode(errors="replace")
-    assert result.stdout == b"$NATIVE_WORKER_LITERAL\n"
+    assert result.returncode == exit_code, result.stderr[-2048:].decode(
+        errors="replace"
+    )
+    assert result.stdout == b"x" * output_bytes + b"$NATIVE_WORKER_LITERAL\n"
+    assert b"y" * output_bytes + b"stderr-complete\n" in result.stderr
     assert Path("/proc/self/cgroup").read_text() == original
     context = json.loads(report.read_text())
     assert context["profile"] == "shared-user-manager"
@@ -343,17 +357,14 @@ def test_cancelled_worker_closes_its_scope_and_a_detached_child(tmp_path: Path) 
                 time.sleep(0.02)
             assert ready.exists(), "Native worker never reached its original command"
             child_handle = os.pidfd_open(json.loads(ready.read_text())["pid"])
+            assert not select.select([child_handle], [], [], 0)[0]
             process.send_signal(signal.SIGTERM)
             assert process.wait(timeout=30) == 143
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline:
-                try:
-                    signal.pidfd_send_signal(child_handle, 0)
-                except ProcessLookupError:
-                    break
-                time.sleep(0.02)
-            else:
-                pytest.fail("Detached child survived native worker cleanup")
+            # Kernel exit readiness also covers an unreaped adopted child.
+            # signal(0) alone would misclassify that dead process as live.
+            assert select.select([child_handle], [], [], 5)[0], (
+                "Detached child survived native worker cleanup"
+            )
             assert Path("/proc/self/cgroup").read_text() == original
             context = json.loads(report.read_text())
             observed = subprocess.run(
@@ -388,4 +399,9 @@ def test_cancelled_worker_closes_its_scope_and_a_detached_child(tmp_path: Path) 
                     signal.pidfd_send_signal(child_handle, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+                if select.select([child_handle], [], [], 5)[0]:
+                    try:
+                        os.waitid(os.P_PIDFD, child_handle, os.WEXITED)
+                    except ChildProcessError:
+                        pass  # Another native reaper owns this exact child.
                 os.close(child_handle)
