@@ -32,6 +32,7 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.engine.command import run_command
 from oh_goon.engine.git import GitService
@@ -510,6 +511,7 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
     backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")
     runtime: ApplicationRuntime | None = None
     run_ids: list[str] = []
+    recorded: list[FleetRunDetail] = []
     handoff: dict[str, Any] | None = None
     try:
         for agent in ("codex", "pi", "opencode"):
@@ -621,6 +623,19 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
             assert steps[0].status is GameTapeStatus.PASSED
             assert steps[0].native_agent_observations[0].agent == agent
             assert steps[1].native_agent_observations == ()
+            recorded.append(detail)
+            for original in recorded:
+                retained = runtime.runs.get(original.run.fleet_run_id)
+                assert retained.run == original.run
+                for old, current in zip(
+                    original.game_tape.repositories[0].steps,
+                    retained.game_tape.repositories[0].steps,
+                    strict=True,
+                ):
+                    assert current.status is old.status
+                    assert current.exit_code == old.exit_code
+                    assert current.settlement == old.settlement
+                    assert current.native_agent_observations == old.native_agent_observations
             handoff = run_handoff_projection(detail)
         assert len(set(run_ids)) == 3
     finally:

@@ -955,6 +955,31 @@ def test_native_command_rejects_configuration_files_before_prepared_source_acces
         )
 
 
+def test_pi_public_configuration_stays_an_opaque_native_input(tmp_path: Path) -> None:
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Captured task and evidence")
+    public_configuration = tmp_path / "public-pi"
+    public_configuration.mkdir()
+    (public_configuration / "models.json").write_text("Native-owned configuration, not JSON")
+    original = selection("pi", arguments=("--model", "native/model"))
+    baseline = native_agent_command(
+        original, prompt_file=prompt, workspace=tmp_path, interactive=False
+    )
+    selected = replace(
+        original,
+        definition=original.definition.model_copy(
+            update={"configuration_directory": str(public_configuration)}
+        ),
+    )
+    command = native_agent_command(
+        selected, prompt_file=prompt, workspace=tmp_path, interactive=False
+    )
+    assert command.argv == baseline.argv
+    assert command.input_file == prompt
+    assert dict(command.environment) == {"PI_CODING_AGENT_DIR": str(public_configuration)}
+    assert "PI_CODING_AGENT_DIR" not in dict(baseline.environment)
+
+
 def test_managed_codex_delegates_only_when_explicitly_selected(tmp_path: Path) -> None:
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("full task")
