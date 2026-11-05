@@ -209,6 +209,7 @@ def execution_plan_identity(
     reused_members: tuple[str, ...],
     resource_budget: dict[str, object] | None = None,
     fail_fast: bool = False,
+    member_timeouts: tuple[tuple[str, int], ...] = (),
 ) -> str:
     """Bind actual execution/performance provenance separately from correctness."""
 
@@ -228,6 +229,8 @@ def execution_plan_identity(
     }
     if resource_budget is not None:
         payload["resource_budget"] = resource_budget
+    if member_timeouts:
+        payload["member_timeouts"] = dict(member_timeouts)
     return _canonical_identity(payload)
 
 

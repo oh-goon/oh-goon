@@ -562,13 +562,18 @@ def test_lost_admission_response_and_missing_run_observation_never_replays_work(
         assert result.admitted_run_ids == tuple(selected)
         assert result.campaign_journal.phases[0].fleet_run_id == selected[0]
         assert result.campaign_journal.terminal_decision.unstarted_selection is None
-        assert result.unresolved_run_ids == ()
-        assert runtime.runs.get(selected[0]).run.status.terminal
+        assert result.unresolved_run_ids == tuple(selected)
+        # Lost observation cannot certify worker settlement. Restored reads use
+        # the original Run, without replacing the retained unknown decision.
+        detail = runtime.runs.get(selected[0])
+        assert detail.run.fleet_run_id == selected[0]
+        assert detail.outcome.value != "SUCCESS"
         assert "campaign-private-canary" not in result.message
         assert not (tmp_path / "calls").exists()
         retained = runtime.runs.agent_campaign_result(result.repair_id)
         assert retained.committed_decision_id == result.committed_decision_id
         assert retained.stop_reason == result.stop_reason
+        assert retained.unresolved_run_ids == tuple(selected)
         assert len(retained.admitted_run_ids) == 1
     finally:
         runtime.shutdown(wait_for_runs=True)

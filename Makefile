@@ -583,7 +583,7 @@ a1-native-kernel-custody-test:
 # Certification-marked recursive tests remain owned by APP certification.
 # OH_GOON_OPAQUE_TOOLS: bash dd git node systemctl uv
 test-tooling-complete:
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches scripts/tests --granularity files --batch-size 4 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker "$(TOOLING_COMPLETE_TEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'TOOLING COMPLETE TESTS' 'Owner: Oh-Goon pytest batches | complete non-certification qualification' -- backend/.venv/bin/oh-goon-test-batches --qualified --pytest-config backend/pyproject.toml scripts/tests --granularity tests --batch-size 64 --workers 2 --batch-timeout 180 --suite-timeout 1800 --marker "$(TOOLING_COMPLETE_TEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
 
 test-frontend:
 	$(DEVELOPMENT_RESOURCE_RUNNER) sh -c 'cd frontend && exec "$$@"' sh npm run test
@@ -600,7 +600,7 @@ frontend-build:
 test-integration: test-backend-integration test-cross-owner-integration
 
 test-backend-integration:
-	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualified native pytest batches | complete ordinary selection' -- sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
+	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'BACKEND INTEGRATION TESTS' 'Owner: qualified native pytest batches | complete ordinary selection' -- sh -c 'cd backend && exec "$$@"' sh .venv/bin/oh-goon-test-batches --qualified --show-output --pytest-config pyproject.toml tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --member-timeout tests/integration/services/test_run_storage_retention.py::test_one_hundred_real_run_storage_retention=900 --marker "$(CHECK_PYTEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)
 
 test-cross-owner-integration:
 	@$(DEVELOPMENT_RESOURCE_RUNNER) $(RUN_STEP) 'CROSS-OWNER INTEGRATION TESTS' 'Owner: qualified native pytest batches' -- backend/.venv/bin/oh-goon-test-batches --qualified --show-output tests/integration --granularity tests --workers $(INTEGRATION_TEST_WORKERS) --batch-size 8 --batch-timeout 180 --marker "$(CHECK_PYTEST_MARKER)" $(PYTEST_REPORT_ARGUMENT)

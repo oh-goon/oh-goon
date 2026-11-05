@@ -71,6 +71,7 @@ def test_execution_report_projection_follows_schema_owner_mutation(
         granularity="files",
         marker="not certification and not daily",
         batch_timeout=10,
+        member_timeouts={},
         suite_timeout=20,
         no_timeout_bisection=False,
         environment_retries=1,

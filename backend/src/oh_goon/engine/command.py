@@ -404,6 +404,22 @@ def _cleanup_failed_command_start(
                 parent_guard.close()
 
 
+def _require_guard_exec_start(descriptor: int, executable: str, deadline: float) -> None:
+    """Read only the guard's private kernel-exec error, never workload output."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0 or not select.select([descriptor], [], [], remaining)[0]:
+        raise RuntimeError("Command exec guard startup confirmation is unavailable")
+    packet = os.read(descriptor, exec_guard_protocol.EXEC_ERROR_BYTES + 1)
+    if not packet:
+        return
+    if len(packet) != exec_guard_protocol.EXEC_ERROR_BYTES:
+        raise RuntimeError("Command exec guard startup error is invalid")
+    error_number = int.from_bytes(packet, "big")
+    if error_number <= 0:
+        raise RuntimeError("Command exec guard startup error is invalid")
+    raise OSError(error_number, os.strerror(error_number), executable)
+
+
 def _spawn_command_process(
     argv: tuple[str, ...],
     *,
@@ -436,6 +452,8 @@ def _spawn_command_process(
     kill_on_owner_death = parent_death_signal or terminal_slave is not None
     guarded_parent_death = os.name != "nt" and (kill_on_owner_death or owns_native_child_reaping())
     parent_guard: CommandParentGuard | None = None
+    exec_error_read: int | None = None
+    exec_error_write: int | None = None
     if guarded_parent_death:
         # The guard imports only its trusted script directory and stdlib. Ignore
         # Python startup variables here while preserving them for the workload.
@@ -461,16 +479,26 @@ def _spawn_command_process(
             child_env[exec_guard_protocol.GUARD_CHANNEL_ENV] = str(parent_guard.child_descriptor)
         if terminal_slave is not None:
             child_env[exec_guard_protocol.CONTROLLING_TERMINAL_ENV] = "1"
+        try:
+            exec_error_read, exec_error_write = os.pipe()
+        except BaseException:
+            lease.close()
+            if parent_guard is not None:
+                parent_guard.close()
+            raise
+        child_env[exec_guard_protocol.EXEC_ERROR_FD_ENV] = str(exec_error_write)
     inherited_fds = tuple(
         dict.fromkeys(
             (
                 *pass_fds,
                 *lease.pass_fds,
                 *((parent_guard.child_descriptor,) if parent_guard is not None else ()),
+                *((exec_error_write,) if exec_error_write is not None else ()),
             )
         )
     )
     process: subprocess.Popen[str] | None = None
+    startup_deadline = time.monotonic() + exec_guard_protocol.STARTUP_TIMEOUT_SECONDS
     try:
         try:
             process = subprocess.Popen(
@@ -494,18 +522,27 @@ def _spawn_command_process(
                 ),
                 pass_fds=_popen_pass_fds(inherited_fds),
             )
-            if parent_guard is not None:
-                try:
+            try:
+                if exec_error_write is not None:
+                    os.close(exec_error_write)
+                    exec_error_write = None
+                if parent_guard is not None:
                     parent_guard.accept(process)
-                except BaseException as failure:
-                    _cleanup_failed_command_start(process, parent_guard, failure)
-                    raise
+                if exec_error_read is not None:
+                    _require_guard_exec_start(exec_error_read, argv[0], startup_deadline)
+            except BaseException as failure:
+                _cleanup_failed_command_start(process, parent_guard, failure)
+                raise
         except OSError as exc:
             if parent_guard is not None:
                 parent_guard.close()
             raise OSError(exc.errno, exc.strerror, argv[0]) from exc
     finally:
         lease.close()
+        if exec_error_read is not None:
+            os.close(exec_error_read)
+        if exec_error_write is not None:
+            os.close(exec_error_write)
         if process is None and parent_guard is not None:
             parent_guard.close()
     assert process is not None

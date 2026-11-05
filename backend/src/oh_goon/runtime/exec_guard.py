@@ -221,6 +221,13 @@ def _start_parent_guard(expected_parent_pid: int, *, kill_on_owner_death: bool) 
             os.close(ready_write)
 
 
+def _report_exec_error(descriptor: int, error: OSError) -> int:
+    if error.errno is None or error.errno <= 0:
+        raise error
+    os.write(descriptor, error.errno.to_bytes(exec_guard_protocol.EXEC_ERROR_BYTES, "big"))
+    return 125
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
@@ -240,6 +247,18 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("exec guard parent identity is invalid") from None
     if expected_parent_pid <= 0:
         raise SystemExit("exec guard parent identity is invalid")
+    raw_error_fd = os.environ.pop(exec_guard_protocol.EXEC_ERROR_FD_ENV, None)
+    if raw_error_fd is None:
+        raise SystemExit("exec guard startup error channel is missing")
+    try:
+        error_fd = int(raw_error_fd)
+    except ValueError:
+        raise SystemExit("exec guard startup error channel is invalid") from None
+    if error_fd < 3:
+        raise SystemExit("exec guard startup error channel is invalid")
+    # Popen pass_fds makes this descriptor inheritable. A successful kernel
+    # exec closes it before the target runs; the guardian closes it separately.
+    os.set_inheritable(error_fd, False)
     owner_death = os.environ.pop(exec_guard_protocol.OWNER_DEATH_ENV, "1")
     if owner_death not in {"0", "1"}:
         raise SystemExit("exec guard owner-death policy is invalid")
@@ -256,7 +275,10 @@ def main(argv: list[str] | None = None) -> int:
         # native /usr/bin/env retain shebang/PATH semantics; this is not atomic
         # execution or a second interpreter resolver.
         _start_parent_guard(expected_parent_pid, kill_on_owner_death=kill_on_owner_death)
-        os.execvpe(observed_path, args, os.environ)
+        try:
+            os.execvpe(observed_path, args, os.environ)
+        except OSError as error:
+            return _report_exec_error(error_fd, error)
         raise AssertionError("os.execvpe returned")  # pragma: no cover
     if sys.platform.startswith("linux") and raw_exec_fd is None:
         raise SystemExit("exec guard execution descriptor is missing")
@@ -268,9 +290,15 @@ def main(argv: list[str] | None = None) -> int:
         if exec_fd < 0:
             raise SystemExit("exec guard execution descriptor is invalid")
         _start_parent_guard(expected_parent_pid, kill_on_owner_death=kill_on_owner_death)
-        os.execve(exec_fd, args, os.environ)
+        try:
+            os.execve(exec_fd, args, os.environ)
+        except OSError as error:
+            return _report_exec_error(error_fd, error)
         raise AssertionError("os.execve returned")  # pragma: no cover
-    os.execvpe(args[0], args, os.environ)
+    try:
+        os.execvpe(args[0], args, os.environ)
+    except OSError as error:
+        return _report_exec_error(error_fd, error)
     raise AssertionError("os.execvpe returned")  # pragma: no cover
 
 

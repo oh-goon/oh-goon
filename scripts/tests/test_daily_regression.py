@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -437,6 +438,33 @@ def _plan() -> list[str]:
         check=True,
     )
     return cast(list[str], json.loads(result.stdout))
+
+
+def test_complete_tooling_make_uses_qualified_native_case_scheduling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
+
+    result = subprocess.run(
+        ["make", "--no-print-directory", "-n", "test-tooling-complete"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+    command = shlex.split(result.stdout)
+    entrypoint = command.index("backend/.venv/bin/oh-goon-test-batches")
+    monkeypatch.setattr(sys, "argv", command[entrypoint:])
+    _, arguments = parse_batch_args()
+    assert arguments.paths == [Path("scripts/tests")]
+    assert arguments.qualified and arguments.pytest_config == Path(
+        "backend/pyproject.toml"
+    )
+    assert arguments.granularity == "tests" and arguments.batch_size == 64
+    assert arguments.workers == 2
+    assert arguments.batch_timeout == 180 and arguments.suite_timeout == 1800
+    assert arguments.marker == "not certification" and not arguments.member_timeouts
 
 
 @pytest.mark.process

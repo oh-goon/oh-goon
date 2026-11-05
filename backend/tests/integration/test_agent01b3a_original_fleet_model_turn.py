@@ -12,6 +12,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.core.agent_model_selection import parse_one_local_model_query
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.product_identity import repository_id
+from oh_goon.core.vocabulary import FleetRunEventType
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.integration.test_agent01b2b_original_fleet import _case, _lock
@@ -135,19 +136,7 @@ def test_bad_or_unavailable_model_does_not_dispatch_search_or_pass_game_tape(
     plan, repository, opts = _case_model(
         tmp_path, monkeypatch, reply=reply, show_status=show_status
     )
-    _lock(plan, opts)
-    import oh_goon.integrations.fleet_plan_step_execution as steps
-
-    original = steps._execute_command_step
-    initial_observations = []
-
-    def reject_tool(repository, step, process, runtime):
-        if "--tool" in step.argv and step.argv[step.argv.index("--tool") + 1] == "task_evidence":
-            initial_observations.append(step.argv)
-            return original(repository, step, process, runtime)
-        pytest.fail("bad model launched a follow-up repository tool")
-
-    monkeypatch.setattr(steps, "_execute_command_step", reject_tool)
+    frozen, _ = _lock(plan, opts)
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repository.parent.parent)
@@ -159,14 +148,32 @@ def test_bad_or_unavailable_model_does_not_dispatch_search_or_pass_game_tape(
         )
         ended = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
         assert ended.game_tape.status.value != "PASSED"
-        assert len(initial_observations) == 1
+        events = runtime.runs.events(started.fleet_run_id).events
+        physical = [
+            event
+            for event in events
+            if event.event_type is FleetRunEventType.PROCESS_STARTED
+            and event.step_id == frozen.steps[0].step_id
+        ]
+        # Required producer evidence, model availability and (only when
+        # available) model selection. No follow-up repository tool is born.
+        assert len(physical) == (2 if show_status else 3)
+        identities = {event.physical_execution_id for event in physical}
+        for kind in (
+            FleetRunEventType.PROCESS_EXITED,
+            FleetRunEventType.DESCENDANTS_QUIESCENT,
+        ):
+            assert identities == {
+                event.physical_execution_id
+                for event in events
+                if event.event_type is kind and event.step_id == frozen.steps[0].step_id
+            }
         assert runtime.runs.get(started.fleet_run_id).game_tape.status.value != "PASSED"
         assert (tmp_path / "model-calls.log").read_text().splitlines() == (
             ["show"] if show_status else ["show", "run"]
         )
     finally:
         runtime.shutdown(wait_for_runs=True)
-        monkeypatch.setattr(steps, "_execute_command_step", original)
 
 
 def test_recipient_missing_and_model_malformed_refuse_before_launch(tmp_path, monkeypatch):

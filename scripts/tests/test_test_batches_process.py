@@ -881,3 +881,143 @@ def test_timeout_bisection_reuses_completed_member_without_duplicate_coverage(
     assert native_membership(payload)[:2] == (True, True)
     assert len(membership["retry_bisection_lineage"]) == 1
     assert membership["retry_bisection_lineage"][0]["action"] == "bisect_shard"
+
+
+def _member_deadline_case(tmp_path: Path, *, delay: float = 0.0) -> tuple[Path, Path]:
+    test_file = tmp_path / "test_member_deadline.py"
+    calls = tmp_path / "calls.txt"
+    test_file.write_text(
+        "import time\nimport pytest\nfrom pathlib import Path\n"
+        f"calls = Path({str(calls)!r})\n"
+        "def record(name):\n"
+        "    with calls.open('a') as stream: stream.write(name+'\\n')\n"
+        "def test_quick_first(): record('first')\n"
+        "@pytest.mark.daily\n"
+        "def test_slow():\n"
+        f"    record('slow'); time.sleep({delay!r})\n"
+        "def test_quick_last(): record('last')\n"
+    )
+    return test_file, calls
+
+
+def _run_member_deadline_case(
+    test_file: Path, report: Path, *options: str
+) -> tuple[int, str]:
+    import subprocess
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "oh_goon.repository_tooling.test_batches",
+            str(test_file),
+            "--qualified",
+            "--granularity=tests",
+            "--workers=1",
+            "--batch-size=8",
+            "--batch-timeout=3",
+            "--no-timeout-bisection",
+            "--marker=",
+            "--report-path",
+            str(report),
+            *options,
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=35,
+        check=False,
+    )
+    return result.returncode, result.stdout
+
+
+def test_exact_member_deadline_isolates_slow_native_work_without_changing_membership(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    test_file, calls = _member_deadline_case(tmp_path, delay=3.2)
+    report = tmp_path / "report.json"
+    rc, output = _run_member_deadline_case(test_file, report)
+    assert rc != 0 and "BATCH TIMEOUT after 3s" in output
+    assert calls.read_text().splitlines() == ["first", "slow"]
+    calls.unlink()
+    slow = str(test_file) + "::test_slow"
+    rc, output = _run_member_deadline_case(
+        test_file, report, "--member-timeout=" + slow + "=8"
+    )
+    assert rc == 0, output
+    assert calls.read_text().splitlines() == ["first", "slow", "last"]
+    payload = json.loads(report.read_text())
+    members = [
+        str(test_file) + "::test_" + name
+        for name in ("quick_first", "slow", "quick_last")
+    ]
+    assert [batch["members"] for batch in payload["batches"]] == [
+        [member] for member in members
+    ]
+    assert [batch["timeout_seconds"] for batch in payload["batches"]] == [3, 8, 3]
+    assert payload["membership_receipt"]["selected"] == sorted(members)
+    assert payload["membership_receipt"]["passed"] == sorted(members)
+    assert payload["membership_receipt"]["terminal_success"] is True
+    assert all(
+        payload["membership_receipt"][key] == []
+        for key in ("missing", "duplicates", "extras")
+    )
+
+
+@pytest.mark.parametrize(
+    "fault", ("unknown", "duplicate", "deselected", "files", "suite-budget")
+)
+def test_invalid_member_deadline_refuses_before_any_native_test_body(
+    tmp_path: Path, fault: str
+) -> None:
+    test_file, calls = _member_deadline_case(tmp_path)
+    report = tmp_path / "report.json"
+    slow = str(test_file) + "::test_slow"
+    valid = "--member-timeout=" + slow + "=8"
+    rc, output = _run_member_deadline_case(test_file, report, valid)
+    assert rc == 0, output
+    assert calls.read_text().splitlines() == ["first", "slow", "last"]
+    calls.unlink()
+    report.unlink()
+    options = {
+        "unknown": ("--member-timeout=" + str(test_file) + "::test_missing=8",),
+        "duplicate": (valid, valid),
+        "deselected": (valid, "--marker=not daily"),
+        "files": (valid, "--granularity=files"),
+        "suite-budget": (valid, "--suite-timeout=8"),
+    }[fault]
+    rc, output = _run_member_deadline_case(test_file, report, *options)
+    assert rc == 2, output
+    assert not calls.exists() and not report.exists()
+
+
+def test_removing_member_deadline_does_not_reuse_its_native_pass_receipts(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    test_file, calls = _member_deadline_case(tmp_path)
+    report = tmp_path / "report.json"
+    slow = str(test_file) + "::test_slow"
+    resume = ("--resume", "--resume-state-root=" + str(tmp_path / "receipts"))
+    exception = "--member-timeout=" + slow + "=8"
+    rc, output = _run_member_deadline_case(test_file, report, *resume, exception)
+    assert rc == 0, output
+    first = json.loads(report.read_text())
+    rc, output = _run_member_deadline_case(test_file, report, *resume, exception)
+    assert rc == 0, output
+    reused = json.loads(report.read_text())
+    assert reused["reused_member_count"] == 3 and reused["executed_member_count"] == 0
+    assert calls.read_text().splitlines() == ["first", "slow", "last"]
+    rc, output = _run_member_deadline_case(test_file, report, *resume)
+    assert rc == 0, output
+    ordinary = json.loads(report.read_text())
+    assert (
+        ordinary["reused_member_count"] == 0 and ordinary["executed_member_count"] == 3
+    )
+    assert ordinary["resume_suite_identity"] != first["resume_suite_identity"]
+    assert ordinary["execution_plan_identity"] != first["execution_plan_identity"]
+    assert calls.read_text().splitlines() == ["first", "slow", "last"] * 2

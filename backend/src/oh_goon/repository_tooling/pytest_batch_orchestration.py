@@ -83,6 +83,7 @@ class BatchExecutionReport(TypedDict):
     attempt_count: int
     returncode: int
     duration_ms: int
+    timeout_seconds: int
     environment_retry_count: int
     timeout_refinements: list[str]
     recovery_events: list[dict[str, object]]
@@ -130,8 +131,24 @@ class RefinementHistory:
             self._children[identity] = children
 
 
-def _chunks(members: tuple[str, ...], size: int) -> tuple[Batch, ...]:
-    chunks = [members[i : i + size] for i in range(0, len(members), size)]
+def _chunks(
+    members: tuple[str, ...], size: int, *, isolated: frozenset[str] = frozenset()
+) -> tuple[Batch, ...]:
+    chunks: list[tuple[str, ...]] = []
+    pending: list[str] = []
+    for member in members:
+        if member in isolated:
+            if pending:
+                chunks.append(tuple(pending))
+                pending = []
+            chunks.append((member,))
+        else:
+            pending.append(member)
+            if len(pending) == size:
+                chunks.append(tuple(pending))
+                pending = []
+    if pending:
+        chunks.append(tuple(pending))
     return tuple(Batch(i + 1, len(chunks), tuple(chunk)) for i, chunk in enumerate(chunks))
 
 
@@ -202,6 +219,8 @@ def _discover_runnable_members(
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     if not collection.selected:
+        if args.member_timeouts:
+            parser.error("member-timeout selector is not selected by native pytest")
         if invocation.qualified:
             print("Native pytest selected no tests (exit 5).", file=sys.stderr)
             raise SystemExit(5)
@@ -212,7 +231,10 @@ def _discover_runnable_members(
 def _select_batches(
     parser: argparse.ArgumentParser, args: argparse.Namespace, members: tuple[str, ...]
 ) -> tuple[Batch, ...]:
-    batches = _chunks(members, args.batch_size)
+    for selector in args.member_timeouts:
+        if selector not in members:
+            parser.error(f"member-timeout selector is not selected by native pytest: {selector}")
+    batches = _chunks(members, args.batch_size, isolated=frozenset(args.member_timeouts))
     if args.batch is None:
         return batches
     if args.batch < 1 or args.batch > len(batches):
@@ -270,6 +292,7 @@ def _execution_authority(
         reused_members=tuple(sorted(reusable)),
         resource_budget=resource_budget.execution_policy(),
         fail_fast=args.fail_fast,
+        member_timeouts=tuple(sorted(args.member_timeouts.items())),
     )
     run_identity = execution_run_identity(
         suite_identity=resume_context.suite_identity,
@@ -314,6 +337,14 @@ def _build_batch_plan(
         marker=args.marker,
         extra_context=(
             *args.resume_context,
+            *(
+                (
+                    "native-pytest-member-timeouts:"
+                    + json.dumps(args.member_timeouts, sort_keys=True, separators=(",", ":")),
+                )
+                if args.member_timeouts
+                else ()
+            ),
             "native-pytest-collection:" + collection_identity,
             invocation.correctness_context(),
         ),
@@ -386,6 +417,11 @@ def _print_batch_plan(args: argparse.Namespace, plan: _BatchPlan) -> None:
         "initial worker ceiling; native OS owns process-tree CPU quotas",
         flush=True,
     )
+    if args.member_timeouts:
+        print(
+            "=== PYTEST MEMBER DEADLINES === " + json.dumps(args.member_timeouts, sort_keys=True),
+            flush=True,
+        )
     if args.resume:
         _print_resume_plan(args, plan)
     if plan.native_deselected:
@@ -427,6 +463,13 @@ def _new_run_state(args: argparse.Namespace, plan: _BatchPlan) -> _BatchRunState
     )
 
 
+def _batch_timeout(args: argparse.Namespace, batch: Batch) -> int:
+    timeout: int = args.batch_timeout
+    if len(batch.members) == 1:
+        timeout = args.member_timeouts.get(batch.members[0], timeout)
+    return timeout
+
+
 def _submit_next(
     pool: concurrent.futures.ThreadPoolExecutor,
     args: argparse.Namespace,
@@ -447,7 +490,7 @@ def _submit_next(
         pool.submit(
             callbacks.run_batch,
             batch,
-            timeout=args.batch_timeout,
+            timeout=_batch_timeout(args, batch),
             marker=args.marker,
             deadline=state.deadline,
             timeout_bisection=not args.no_timeout_bisection,
@@ -486,6 +529,7 @@ def _record_batch_report(
     output: str,
     elapsed: float,
     events: tuple[ExecutionRecoveryEvent, ...],
+    timeout: int,
 ) -> None:
     refinements = tuple(
         line for line in output.splitlines() if line.startswith("BATCH TIMEOUT RECOVERY:")
@@ -497,6 +541,7 @@ def _record_batch_report(
             "attempt_count": attempt,
             "returncode": rc,
             "duration_ms": int(elapsed * 1000),
+            "timeout_seconds": timeout,
             "environment_retry_count": max(0, attempt - 1),
             "timeout_refinements": list(refinements),
             "recovery_events": [event.as_dict() for event in events],
@@ -593,7 +638,9 @@ def _consume_future(
         )
         return False
     state.selected_batches += 1
-    _record_batch_report(state, batch, attempt, rc, output, elapsed, events)
+    _record_batch_report(
+        state, batch, attempt, rc, output, elapsed, events, _batch_timeout(args, batch)
+    )
     if rc != 0:
         _print_batch_failure(batch, rc, output, elapsed, callbacks, show_output=args.show_output)
     elif args.show_output and output:
@@ -811,6 +858,8 @@ def _execution_report(
     }
     if diagnostics is not None:
         payload["diagnostics"] = diagnostics
+    if args.member_timeouts:
+        payload["member_timeouts_seconds"] = dict(args.member_timeouts)
     if getattr(args, "focused", False):
         payload["feedback"] = {
             "scope": "FOCUSED",

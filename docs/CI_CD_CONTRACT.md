@@ -533,6 +533,18 @@ variants and expensive ordinary `daily` journeys remain included. Dependency
 downloads may use native uv/npm caches; environments and project code are
 materialized for the current checkout.
 
+Backend integration keeps its 180-second batch deadline. The exact native-collected
+`test_one_hundred_real_run_storage_retention` member runs alone with a 900-second
+deadline: the unchanged 100-worker journey measured 529 seconds and includes Iris,
+cancellation, live-lease pruning, retained history, exports and CLI readback.
+The existing batch owner's repeatable `--member-timeout NATIVE_SELECTOR=SECONDS`
+option admits only unique selected test members, preserves their flat order and
+binds the override to resume and execution identity. It adds no members or skips;
+all other batches retain their original deadline and timeout refinement.
+Complete tooling uses the same qualified native case collection with 64-case
+batches, retaining all `scripts/tests` members, its two workers and 1800-second
+suite budget; a large test file does not become an indivisible timeout unit.
+
 The explicit native test worker streams complete stdout/stderr through the
 original command owner while retaining only a bounded 64 KiB diagnostic tail
 per stream. Output volume does not terminate an otherwise valid owner or
