@@ -61,7 +61,7 @@ export function OverviewPage({ navigate }: Props) {
       <div className="section-heading"><div><span className="eyebrow">{t("executionOverview.observedEvidenceEyebrow")}</span><h2>{t("executionOverview.observedEvidenceTitle")}</h2><p>{t("executionOverview.observedEvidenceDescription")}</p></div></div>
       <div className="observed-evidence-entry__body">
         <div className="observed-evidence-entry__facts">
-          <span><strong>{dependencyCoverage.data.no_current_dependency_evidence.toLocaleString()}</strong><small>{t("executionOverview.noCurrentDependencyEvidence")}</small></span>
+          <span><strong>{dependencyCoverage.data.no_current_dependency_evidence.toLocaleString()}</strong><small>{t("executionOverview.noCurrentDependencyEvidence")} {dependencyCoverage.data.ecosystem}</small></span>
         </div>
         <button className="button button--secondary" type="button" onClick={() => navigate("dependencies")}>{t("executionOverview.exploreDependencies")}</button>
       </div>

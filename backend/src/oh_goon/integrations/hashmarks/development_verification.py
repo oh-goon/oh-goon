@@ -18,45 +18,36 @@ if TYPE_CHECKING:
     from hashmarks import CodeMap
 
 
-def _linked_verification(
-    native: CodeMap, relative: str, prefix: str
+def _changed_verification(
+    native: CodeMap, relative: str, *, retain_relationships: bool = False
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     from hashmarks.operation_contract import validate_operation_response
     from hashmarks.verification_nomination_validation import validate_verification_nomination
 
-    ownership = cast(
-        dict[str, Any],
-        native.tasks.verification_ownership_graph(
-            # The producer retains its canonical selection and first ranked
-            # reference within this pair. Keep its source authority and residual
-            # bounds; complete unrelated verification remains daily.
-            f"Verify {relative}",
-            limit=20,
-            candidate_limit=2,
-        ),
-    )
-    validate_operation_response("verification_ownership", ownership)
+    # This is the producer's operation-native bound, not a locally ranked pair.
+    # One per-path packet avoids a global target cap dropping another changed
+    # path while retaining every native scope/omission qualification.
+    packet = cast(dict[str, Any], native.verification.changed_set((relative,), limit=2))
+    validate_operation_response("changed_set_verification", packet)
+    changes = packet["changes"]
+    if packet["changed_paths"] != [relative] or len(changes) != 1 or changes[0]["path"] != relative:
+        raise ValueError("Hashmarks changed-set scope differs from the supplied member")
+    change = changes[0]
     nominations: list[dict[str, Any]] = []
-    for row in ownership.get("verification_owners", []):
-        if relative not in row.get("covers_edit_candidates", []) or row.get(
-            "coverage_evidence"
-        ) not in {"direct-reference", "bounded-indirect-reference"}:
-            continue
-        # Shared factory/helper modules are source dependencies, not test targets.
-        # Never execute them as direct pytest selections on a test_* symbol.
-        if str(row["path"]).startswith("backend/tests/factories/"):
-            continue
-        nomination = native.verification.nomination(row["path"])
+    for target in packet["targets"]:
+        nomination = target["nomination"]
         if validate_verification_nomination(nomination).get("valid") is not True:
-            raise ValueError("Hashmarks rejected its linked verifier nomination")
-        nominations.append(
-            {
-                "nomination": nomination,
-                "relationship": row["coverage_evidence"],
-                "workspace_prefix": prefix,
-            }
-        )
-    return ownership, nominations
+            raise ValueError("Hashmarks rejected its changed-set verifier nomination")
+        relationships = [row for row in change["relationships"] if row["target"] == target["path"]]
+        if not relationships:
+            raise ValueError("Hashmarks target has no changed-source relationship")
+        projected: dict[str, Any] = {"nomination": nomination, "workspace_prefix": ""}
+        # The intact packet already owns all relationships and contexts. Only
+        # the support/dependency admission owners consume a relationship copy.
+        if retain_relationships or change["classification"]["kind"] == "verification-support":
+            projected["relationships"] = relationships
+        nominations.append(projected)
+    return packet, nominations
 
 
 def _dependency_verification(
@@ -78,7 +69,7 @@ def _dependency_verification(
         "consumer_completeness": "not-claimed",
     }
     introduced = validate_required_dependency_introductions(evidence)
-    graphs: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+    changes: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
     chains: list[dict[str, Any]] = []
     nominations: dict[str, dict[str, Any]] = {}
     chain_keys: set[tuple[str, str, str]] = set()
@@ -87,9 +78,9 @@ def _dependency_verification(
             if consumer.get("distribution_state") != "resolved-unique":
                 continue
             source = consumer["source_path"]
-            if source not in graphs:
-                graphs[source] = _linked_verification(native, source, "")
-            ownership, projected_nominations = graphs[source]
+            if source not in changes:
+                changes[source] = _changed_verification(native, source, retain_relationships=True)
+            changed, projected_nominations = changes[source]
             for node_id in consumer["distribution_nodes"]:
                 if node_id not in evidence["changed_node_ids"]:
                     continue
@@ -111,7 +102,7 @@ def _dependency_verification(
                             "node_id": supported,
                             "source_path": source,
                             "consumer": consumer,
-                            "ownership": ownership,
+                            "changed_verification": changed,
                             "nomination": projected,
                         }
                         if supported != node_id:
@@ -124,16 +115,7 @@ def _dependency_verification(
         "changed_path": base["lock_path"],
         "state": "LINKED" if chains else "UNAVAILABLE",
         "dependency_chain": chains,
-        # Preserve the graph's actual source owners. The lock is connected by
-        # its native dependency delta and metadata, never an invented graph edge.
-        "edit_candidates": sorted(
-            {
-                path
-                for ownership, _nominations in graphs.values()
-                for path in ownership.get("edit_candidates", [])
-            }
-        ),
-        "stale": any(ownership.get("stale") is True for ownership, _ in graphs.values()),
+        "stale": any(packet.get("freshness") == "stale" for packet, _ in changes.values()),
         "qualification": {"consumer_scope": evidence["consumer_scope"]},
         "nominations": list(nominations.values()),
     }
@@ -148,181 +130,116 @@ def nominate_changed_verification(
     dependency_base: Mapping[str, Any] | None = None,
     asset_paths: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Keep producer relations and qualifications; never turn them into owner coverage.
+    """Transport native changed-set packets without reconstructing ownership.
 
-    One native map/read session serves the complete supplied change set. The
-    consumer applies cadence later; Hashmarks retains repository relevance.
+    Each member uses the producer's two-target operation bound within one native
+    root/lifetime. Workspace context and remaining scope uncertainty stay with
+    the producer; the consumer retains explicit execution-policy obligations.
     """
     from hashmarks import CodeMap
     from hashmarks.operation_contract import validate_operation_response
     from hashmarks.verification_nomination_validation import validate_verification_nomination
 
     implementation = require_loaded_hashmarks_runtime()
-    if not set(asset_paths) <= set(paths) or any(
-        path.startswith("frontend/") for path in asset_paths
-    ):
+    if not set(asset_paths) <= set(paths):
         raise ValueError("Asset observation must use the admitted repository change scope")
-    observations: list[dict[str, Any]] = []
-    required_checks: list[dict[str, Any]] = []
-    dependency_changes: dict[str, Any] | None = None
-    asset_evidence: dict[str, Any] | None = None
-    # The frontend's native package/tsconfig authority is its project root.
-    # All other paths retain the repository map, including cross-owner Python refs.
-    for prefix in ("", "frontend/"):
-        selected_paths = tuple(
-            path for path in paths if path.startswith("frontend/") == bool(prefix)
-        )
-        if not selected_paths and (prefix or not required):
-            continue
-        workspace = root / prefix
-        # Hashmarks owns this derived index and revalidates it natively. CI does
-        # not transport/cache this mutable database as verification authority.
-        with CodeMap(workspace) as native:
-            if not prefix and asset_paths:
-                # Reconcile discovery once, including newly added consumers.
-                # Member rereads alone cannot discover a new indexed source.
-                native.index.sync()
-            else:
-                # Let the producer establish cold or changed analysis scope
-                # before any path-scoped preparation publishes a generation.
-                native.reads.ready()
+    with CodeMap(root) as native:
+        # Reconcile discovery once, including newly added verifiers. The native
+        # operation rechecks contributors but does not invent a fresh inventory.
+        native.index.sync()
+        dependency_sources: tuple[str, ...] = ()
+        if dependency_base and dependency_base["lock_path"] in paths:
+            sources: list[str] = []
+            for item in native.files.iter_files(prefix="backend/src"):
+                if item.rel.endswith(".py") and item.visibility.value != "deny":
+                    sources.append(item.rel)
+                    if len(sources) > 4096:
+                        raise ValueError("Dependency source inventory exceeds its transport bound")
+            dependency_sources = tuple(sorted(sources))
+        for member in dict.fromkeys((*paths, *required)):
+            if dependency_base and member == dependency_base["lock_path"]:
+                continue
+            observed, _ = native.source.member(member)
+            if observed.get("state") == "known-present":
+                native.tasks.prepare(f"Verify {member}", 20)
 
-            dependency_sources: tuple[str, ...] = ()
-            if not prefix and dependency_base and dependency_base["lock_path"] in selected_paths:
-                # Capture the caller's explicit source scope once. Reconcile
-                # these same contributors through the producer before entering
-                # the read scope; member mismatches remain unavailable inside it.
-                sources: list[str] = []
-                for item in native.files.iter_files(prefix="backend/src"):
-                    if item.rel.endswith(".py") and item.visibility.value != "deny":
-                        sources.append(item.rel)
-                        if len(sources) > 4096:
-                            raise ValueError(
-                                "Dependency source inventory exceeds its transport bound"
-                            )
-                dependency_sources = tuple(sorted(sources))
-                if dependency_sources and not asset_paths:
-                    native.index.sync(dependency_sources)
-
-            preparation_paths = (*selected_paths, *(() if prefix else required))
-            for path in dict.fromkeys(preparation_paths):
-                if not (root / path).is_file():
-                    continue
-                if not prefix and dependency_base and path == dependency_base["lock_path"]:
-                    continue
-                # Public task decisions prepare their contributors before their
-                # read scope. Preserve that phase outside our composite read.
-                native.tasks.prepare(f"Verify {path.removeprefix(prefix)}", 20)
-
-            def nominate_workspace(
-                _scope: object,
-                *,
-                prefix: str = prefix,
-                selected_paths: tuple[str, ...] = selected_paths,
-                dependency_sources: tuple[str, ...] = dependency_sources,
-            ) -> tuple[
-                list[dict[str, Any]],
-                list[dict[str, Any]],
-                dict[str, Any] | None,
-                dict[str, Any] | None,
-            ]:
-                # Native observe may reconcile a contributor and recompute the
-                # whole operation. Retain only rows from its accepted attempt.
-                observed: list[dict[str, Any]] = []
-                checks: list[dict[str, Any]] = []
-                dependencies: dict[str, Any] | None = None
-                assets = None
-                if not prefix and asset_paths:
-                    assets = native.verification.changed_set(asset_paths)
-                    validate_operation_response("changed_set_verification", assets)
-                if not prefix:
-                    for path in required:
-                        nomination = native.verification.nomination(path)
-                        if validate_verification_nomination(nomination).get("valid") is not True:
-                            raise ValueError("Hashmarks rejected a required policy proof")
-                        checks.append({"nomination": nomination, "workspace_prefix": ""})
-                for path in selected_paths:
-                    relative = path.removeprefix(prefix)
-                    if not (root / path).is_file():
-                        observed.append(
-                            {
-                                "changed_path": path,
-                                "state": "UNAVAILABLE",
-                                "reason": "source-absent",
-                            }
-                        )
-                        continue
-                    if not prefix and dependency_base and path == dependency_base["lock_path"]:
-                        try:
-                            dependencies, observation = _dependency_verification(
-                                native, root, dependency_base, dependency_sources
-                            )
-                        except (OSError, ValueError) as exc:
-                            dependencies = {"unavailable": str(exc)}
-                            observation = {
-                                "changed_path": path,
-                                "state": "UNAVAILABLE",
-                                "reason": "dependency-evidence-unavailable",
-                            }
-                        observed.append(observation)
-                        continue
-                    nominated = native.verification.nomination(relative)
-                    validation = validate_verification_nomination(nominated)
-                    if validation.get("valid") is not True:
-                        raise ValueError("Hashmarks rejected its changed-source nomination")
-                    if nominated.get("available") is True:
-                        observed.append(
-                            {
-                                "changed_path": path,
-                                "state": "CHANGED_TEST",
-                                "nominations": [
-                                    {"nomination": nominated, "workspace_prefix": prefix}
-                                ],
-                            }
-                        )
-                        continue
-                    ownership, nominations = _linked_verification(native, relative, prefix)
-                    observed.append(
-                        {
-                            "changed_path": path,
-                            "state": "LINKED" if nominations else "UNAVAILABLE",
-                            "edit_candidates": [
-                                prefix + value for value in ownership.get("edit_candidates", [])
-                            ],
-                            "stale": ownership.get("stale"),
-                            "qualification": ownership.get("verification_qualification", {}),
-                            "nominations": nominations,
-                        }
-                    )
-                if dependencies and "after_observation" in dependencies:
-                    dependencies["after_assessment"] = revalidate_changed_dependency_consumers(
-                        native, dependencies, root=root
-                    )
-                return observed, checks, dependencies, assets
-
-            observed, checks, dependencies, assets = native.reads.observe(nominate_workspace)
-            observations.extend(observed)
-            required_checks.extend(checks)
-            if dependencies is not None:
-                dependency_changes = dependencies
+        def nominate_root(_scope: object) -> dict[str, Any]:
+            # A native reconciliation retries this complete composition; partial
+            # observations from a previous generation are never accumulated.
+            observations: list[dict[str, Any]] = []
+            checks: list[dict[str, Any]] = []
+            dependencies: dict[str, Any] | None = None
+            assets = native.verification.changed_set(asset_paths) if asset_paths else None
             if assets is not None:
-                asset_evidence = assets
-    packet: dict[str, Any] = {
-        "schema": "oh-goon.hashmarks-development-nominations/v1",
-        "producer_implementation_identity": implementation,
-        "observations": observations,
-        "required_checks": required_checks,
-        "owner_coverage": "not-claimed",
-        "asset_evidence": asset_evidence,
-    }
-    if dependency_changes is not None:
-        packet["dependency_changes"] = dependency_changes
+                validate_operation_response("changed_set_verification", assets)
+            for member in required:
+                nomination = native.verification.nomination(member)
+                if validate_verification_nomination(nomination).get("valid") is not True:
+                    raise ValueError("Hashmarks rejected a required policy proof")
+                checks.append({"nomination": nomination, "workspace_prefix": ""})
+            for member in paths:
+                if dependency_base and member == dependency_base["lock_path"]:
+                    try:
+                        dependencies, observation = _dependency_verification(
+                            native, root, dependency_base, dependency_sources
+                        )
+                    except (OSError, ValueError) as exc:
+                        dependencies = {"unavailable": str(exc)}
+                        observation = {
+                            "changed_path": member,
+                            "state": "UNAVAILABLE",
+                            "reason": "dependency-evidence-unavailable",
+                        }
+                else:
+                    changed, nominations = _changed_verification(native, member)
+                    change = changed["changes"][0]
+                    observation = {
+                        "changed_path": member,
+                        "state": "CHANGED_TEST"
+                        if change["classification"]["kind"] == "verifier"
+                        and any(
+                            row["nomination"].get("available") is True
+                            and row["nomination"].get("verification_target", {}).get("path")
+                            == member
+                            and row["nomination"].get("runner_evidence") in {"pytest", "vitest"}
+                            for row in nominations
+                        )
+                        else "LINKED"
+                        if any(row["nomination"]["available"] for row in nominations)
+                        else "UNAVAILABLE",
+                        "stale": changed["freshness"] == "stale",
+                        "qualification": change["consumer_scope"],
+                        "changed_set": changed,
+                        "nominations": nominations,
+                    }
+                observations.append(observation)
+            if dependencies and "after_observation" in dependencies:
+                dependencies["after_assessment"] = revalidate_changed_dependency_consumers(
+                    native, dependencies, root=root
+                )
+            packet: dict[str, Any] = {
+                "schema": "oh-goon.hashmarks-development-nominations/v1",
+                "producer_implementation_identity": implementation,
+                "observations": observations,
+                "required_checks": checks,
+                "owner_coverage": "not-claimed",
+                "asset_evidence": assets,
+            }
+            if dependencies is not None:
+                packet["dependency_changes"] = dependencies
+            return packet
+
+        packet = native.reads.observe(nominate_root)
+    if require_loaded_hashmarks_runtime() != implementation:
+        raise ValueError("Hashmarks implementation changed during nomination")
     if len(json.dumps(packet).encode("utf-8")) > 4 * 1024 * 1024:
         raise ValueError("Hashmarks development evidence exceeds the bounded transport")
     return packet
 
 
-def observe_repository_assets(root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+def observe_repository_assets(
+    root: Path, paths: tuple[str, ...], *, limit: int = 100
+) -> dict[str, Any]:
     """Reobserve candidate bytes with the caller's installed, trusted producer.
 
     This public-producer boundary returns evidence only. It does not run candidate
@@ -334,6 +251,6 @@ def observe_repository_assets(root: Path, paths: tuple[str, ...]) -> dict[str, A
     require_loaded_hashmarks_runtime()
     with CodeMap(root) as native:
         native.index.sync()
-        packet = native.verification.changed_set(paths)
+        packet = native.verification.changed_set(paths, limit=limit)
         validate_operation_response("changed_set_verification", packet)
         return cast(dict[str, Any], packet)

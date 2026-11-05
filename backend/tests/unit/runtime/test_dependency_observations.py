@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from oh_goon.core.models.fleet_observation import ObservationSourceEvidence
+from oh_goon.core.models.fleet_observation import (
+    DependencyObservationSnapshot,
+    ObservationSourceEvidence,
+)
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.integrations.hashmarks import assess_locked_dependencies
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.dependency_observations import DependencyObservationStore
 from oh_goon.runtime.journal import Journal
@@ -70,3 +74,22 @@ def test_manifest_edits_do_not_expand_lock_inventory_claims(tmp_path: Path) -> N
     assert assessment.scope == "locked-inventory"
     (repository.path / "uv.lock").unlink()
     assert not store.assessment(store.package_rows("mlflow")[0]).absence_admissible
+
+
+def test_historical_snapshot_remains_readable_without_fabricating_producer_identity(
+    tmp_path: Path,
+) -> None:
+    current = dependency_snapshot(tmp_path / "repo", ("shared", "1.2.0"))
+    retained = current.model_dump(mode="json")
+    retained["schema_version"] = 2
+    retained.pop("producer_projection")
+    retained["evidence"].pop("producer_assessment")
+    for row in retained["dependencies"]:
+        row.pop("component_id")
+        row.pop("producer_package")
+    historical = DependencyObservationSnapshot.model_validate(retained)
+    assert historical.model_dump(mode="json") == retained
+    assert historical.dependencies[0].component_id is None
+    result = assess_locked_dependencies(tmp_path / "repo", historical)
+    assert result.evidence.freshness == "unknown"
+    assert result.evidence.availability == "unsupported" and not result.evidence.absence_admissible

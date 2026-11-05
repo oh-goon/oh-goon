@@ -3625,10 +3625,14 @@
             "type": "integer"
           },
           "affected_specifier": {
-            "maxLength": 200,
+            "maxLength": 4096,
             "minLength": 1,
             "title": "Affected Specifier",
             "type": "string"
+          },
+          "ecosystem": {
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
           },
           "no_current_evidence": {
             "minimum": 0.0,
@@ -3649,6 +3653,25 @@
             "minLength": 1,
             "title": "Package Name",
             "type": "string"
+          },
+          "producer_predicates": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Producer Predicates",
+            "type": "array"
+          },
+          "query_identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DependencyQueryIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "stale": {
             "minimum": 0.0,
@@ -3691,6 +3714,10 @@
             ],
             "title": "Coverage",
             "type": "string"
+          },
+          "ecosystem": {
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
           },
           "evidence": {
             "$ref": "#/components/schemas/DependencyEvidenceAssessment"
@@ -3786,6 +3813,10 @@
             "title": "Coverage",
             "type": "string"
           },
+          "ecosystem": {
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/DependencyCoverageRepository"
@@ -3815,6 +3846,16 @@
             "title": "Population Id",
             "type": "string"
           },
+          "query_identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DependencyQueryIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "total": {
             "minimum": 0.0,
             "title": "Total",
@@ -3831,6 +3872,13 @@
         ],
         "title": "DependencyCoverageRepositoryPage",
         "type": "object"
+      },
+      "DependencyEcosystem": {
+        "enum": [
+          "pypi",
+          "npm"
+        ],
+        "type": "string"
       },
       "DependencyEvidence": {
         "additionalProperties": false,
@@ -3893,6 +3941,11 @@
             "title": "Freshness",
             "type": "string"
           },
+          "producer_assessment": {
+            "additionalProperties": true,
+            "title": "Producer Assessment",
+            "type": "object"
+          },
           "reason": {
             "anyOf": [
               {
@@ -3921,6 +3974,10 @@
             "minimum": 0.0,
             "title": "Current Dependency Evidence",
             "type": "integer"
+          },
+          "ecosystem": {
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
           },
           "missing_dependency_evidence": {
             "minimum": 0.0,
@@ -4002,6 +4059,18 @@
         "additionalProperties": false,
         "description": "One producer-selected package in a resolved lock inventory.",
         "properties": {
+          "component_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Component Id"
+          },
           "contexts": {
             "items": {
               "type": "string"
@@ -4011,10 +4080,8 @@
             "type": "array"
           },
           "ecosystem": {
-            "const": "pypi",
-            "default": "pypi",
-            "title": "Ecosystem",
-            "type": "string"
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
           },
           "node_id": {
             "minLength": 1,
@@ -4022,7 +4089,7 @@
             "type": "string"
           },
           "package_name": {
-            "maxLength": 200,
+            "maxLength": 4096,
             "minLength": 1,
             "title": "Package Name",
             "type": "string"
@@ -4031,6 +4098,11 @@
             "minLength": 1,
             "title": "Package Source",
             "type": "string"
+          },
+          "producer_package": {
+            "additionalProperties": true,
+            "title": "Producer Package",
+            "type": "object"
           },
           "relationships": {
             "default": [],
@@ -4042,13 +4114,13 @@
             "type": "array"
           },
           "resolved_source": {
-            "const": "uv.lock",
             "default": "uv.lock",
+            "minLength": 1,
             "title": "Resolved Source",
             "type": "string"
           },
           "resolved_version": {
-            "maxLength": 200,
+            "maxLength": 4096,
             "minLength": 1,
             "title": "Resolved Version",
             "type": "string"
@@ -4083,10 +4155,8 @@
             "type": "array"
           },
           "ecosystem": {
-            "const": "pypi",
-            "default": "pypi",
-            "title": "Ecosystem",
-            "type": "string"
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
           },
           "evidence": {
             "$ref": "#/components/schemas/DependencyEvidenceAssessment"
@@ -4113,9 +4183,17 @@
             "title": "Producer Observation",
             "type": "object"
           },
+          "producer_projection": {
+            "additionalProperties": true,
+            "title": "Producer Projection",
+            "type": "object"
+          },
           "schema_version": {
-            "const": 2,
-            "default": 2,
+            "default": 3,
+            "enum": [
+              2,
+              3
+            ],
             "title": "Schema Version",
             "type": "integer"
           },
@@ -4139,10 +4217,8 @@
         "additionalProperties": false,
         "properties": {
           "ecosystem": {
-            "const": "pypi",
-            "default": "pypi",
-            "title": "Ecosystem",
-            "type": "string"
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
           },
           "freshness": {
             "$ref": "#/components/schemas/DependencyFreshnessSummary"
@@ -4168,6 +4244,16 @@
             "minLength": 1,
             "title": "Package Name",
             "type": "string"
+          },
+          "query_identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DependencyQueryIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "versions": {
             "items": {
@@ -4216,9 +4302,57 @@
         "title": "DependencyPlanFailed",
         "type": "object"
       },
+      "DependencyQueryIdentity": {
+        "additionalProperties": false,
+        "description": "Producer-qualified correspondence between caller spelling and query identity.",
+        "properties": {
+          "canonical_name": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Canonical Name",
+            "type": "string"
+          },
+          "ecosystem": {
+            "$ref": "#/components/schemas/DependencyEcosystem"
+          },
+          "producer_evidence": {
+            "additionalProperties": true,
+            "title": "Producer Evidence",
+            "type": "object"
+          },
+          "producer_implementation_identity": {
+            "minLength": 1,
+            "title": "Producer Implementation Identity",
+            "type": "string"
+          },
+          "requested_name": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Requested Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "requested_name",
+          "canonical_name",
+          "producer_implementation_identity",
+          "producer_evidence"
+        ],
+        "title": "DependencyQueryIdentity",
+        "type": "object"
+      },
       "DependencyRepositoryMatch": {
         "additionalProperties": false,
         "properties": {
+          "component_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Component Ids",
+            "type": "array"
+          },
           "contexts": {
             "default": [],
             "items": {
@@ -4228,10 +4362,8 @@
             "type": "array"
           },
           "ecosystem": {
-            "const": "pypi",
-            "default": "pypi",
-            "title": "Ecosystem",
-            "type": "string"
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
           },
           "evidence": {
             "$ref": "#/components/schemas/DependencyEvidenceAssessment"
@@ -4268,6 +4400,12 @@
             ],
             "title": "Producer Goon"
           },
+          "producer_projection": {
+            "additionalProperties": true,
+            "description": "Producer package facts and qualifiers; disclosure records raw inventory domains retained only in the original Step.",
+            "title": "Producer Projection",
+            "type": "object"
+          },
           "repository": {
             "$ref": "#/components/schemas/RepositoryIdentity"
           },
@@ -4276,6 +4414,14 @@
               "type": "string"
             },
             "title": "Resolved Versions",
+            "type": "array"
+          },
+          "selection_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Selection Ids",
             "type": "array"
           },
           "sources": {
@@ -4308,6 +4454,10 @@
       "DependencyRepositoryPage": {
         "additionalProperties": false,
         "properties": {
+          "ecosystem": {
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/DependencyRepositoryMatch"
@@ -4337,6 +4487,16 @@
             "title": "Population Id",
             "type": "string"
           },
+          "query_identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DependencyQueryIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "total": {
             "minimum": 0.0,
             "title": "Total",
@@ -4357,10 +4517,8 @@
         "additionalProperties": false,
         "properties": {
           "ecosystem": {
-            "const": "pypi",
-            "default": "pypi",
-            "title": "Ecosystem",
-            "type": "string"
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
           },
           "package_name": {
             "minLength": 1,
@@ -4389,6 +4547,16 @@
       "DependencySearchResult": {
         "additionalProperties": false,
         "properties": {
+          "ecosystem": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DependencyEcosystem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/DependencySearchItem"
@@ -4412,6 +4580,14 @@
             "minLength": 1,
             "title": "Query",
             "type": "string"
+          },
+          "query_identities": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DependencyQueryIdentity"
+            },
+            "title": "Query Identities",
+            "type": "array"
           },
           "total": {
             "minimum": 0.0,
@@ -4454,6 +4630,10 @@
             "title": "Coverage",
             "type": "string"
           },
+          "ecosystem": {
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
+          },
           "evidence": {
             "default": "all",
             "enum": [
@@ -4473,7 +4653,7 @@
           "resolved_version": {
             "anyOf": [
               {
-                "maxLength": 200,
+                "maxLength": 4096,
                 "minLength": 1,
                 "type": "string"
               },
@@ -4486,7 +4666,7 @@
           "version_prefix": {
             "anyOf": [
               {
-                "maxLength": 200,
+                "maxLength": 4096,
                 "minLength": 1,
                 "type": "string"
               },
@@ -4499,7 +4679,7 @@
           "version_specifier": {
             "anyOf": [
               {
-                "maxLength": 200,
+                "maxLength": 4096,
                 "minLength": 1,
                 "type": "string"
               },
@@ -21531,6 +21711,93 @@
         "title": "ProcessStateUnknownEvent",
         "type": "object"
       },
+      "ProjectDeclarationEvidence": {
+        "additionalProperties": false,
+        "description": "Producer metadata disclosure; it does not resolve the environment.",
+        "properties": {
+          "availability": {
+            "const": "observed",
+            "default": "observed",
+            "title": "Availability",
+            "type": "string"
+          },
+          "declaration_group": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declaration Group"
+          },
+          "disclosure": {
+            "const": "python-project-declaration-only",
+            "default": "python-project-declaration-only",
+            "title": "Disclosure",
+            "type": "string"
+          },
+          "observation_identity": {
+            "minLength": 1,
+            "title": "Observation Identity",
+            "type": "string"
+          },
+          "producer_implementation_identity": {
+            "minLength": 1,
+            "title": "Producer Implementation Identity",
+            "type": "string"
+          },
+          "provider": {
+            "additionalProperties": true,
+            "title": "Provider",
+            "type": "object"
+          },
+          "repository": {
+            "additionalProperties": true,
+            "title": "Repository",
+            "type": "object"
+          }
+        },
+        "required": [
+          "producer_implementation_identity",
+          "observation_identity",
+          "repository",
+          "provider",
+          "declaration_group"
+        ],
+        "title": "ProjectDeclarationEvidence",
+        "type": "object"
+      },
+      "ProjectDeclarationUnavailable": {
+        "additionalProperties": false,
+        "description": "A producer input failure, without fabricated observation or absence.",
+        "properties": {
+          "availability": {
+            "const": "unavailable",
+            "default": "unavailable",
+            "title": "Availability",
+            "type": "string"
+          },
+          "producer_implementation_identity": {
+            "minLength": 1,
+            "title": "Producer Implementation Identity",
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "producer_implementation_identity",
+          "reason"
+        ],
+        "title": "ProjectDeclarationUnavailable",
+        "type": "object"
+      },
       "ProvenRuntimeSafetyProof": {
         "additionalProperties": false,
         "properties": {
@@ -21699,6 +21966,31 @@
               }
             ],
             "title": "Pin"
+          },
+          "project_declaration": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "observed": "#/components/schemas/ProjectDeclarationEvidence",
+                    "unavailable": "#/components/schemas/ProjectDeclarationUnavailable"
+                  },
+                  "propertyName": "availability"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ProjectDeclarationEvidence"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ProjectDeclarationUnavailable"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Declaration"
           },
           "requires": {
             "anyOf": [
@@ -23791,10 +24083,8 @@
             "$ref": "#/components/schemas/PlanStepCapabilities"
           },
           "ecosystem": {
-            "const": "pypi",
-            "default": "pypi",
-            "title": "Ecosystem",
-            "type": "string"
+            "$ref": "#/components/schemas/DependencyEcosystem",
+            "default": "pypi"
           },
           "environment": {
             "items": {
@@ -23816,6 +24106,19 @@
           "lifecycle": {
             "$ref": "#/components/schemas/StepLifecycle",
             "default": "normal"
+          },
+          "lock_path": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lock Path"
           },
           "on_failure": {
             "$ref": "#/components/schemas/StepFailurePolicy",
@@ -24180,8 +24483,8 @@
             ]
           },
           "contract_version": {
-            "const": 47,
-            "default": 47,
+            "const": 48,
+            "default": 48,
             "title": "Contract Version",
             "type": "integer"
           },
@@ -33212,6 +33515,22 @@
     "/api/dependencies/coverage": {
       "get": {
         "operationId": "dependency_fleet_coverage",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ecosystem",
+            "required": false,
+            "schema": {
+              "default": "pypi",
+              "enum": [
+                "pypi",
+                "npm"
+              ],
+              "title": "Ecosystem",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -33394,10 +33713,26 @@
             "name": "q",
             "required": true,
             "schema": {
-              "maxLength": 120,
+              "maxLength": 4096,
               "minLength": 1,
               "title": "Q",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ecosystem",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DependencyEcosystem"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ecosystem"
             }
           },
           {
@@ -33667,6 +34002,20 @@
               "title": "Package Name",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "ecosystem",
+            "required": false,
+            "schema": {
+              "default": "pypi",
+              "enum": [
+                "pypi",
+                "npm"
+              ],
+              "title": "Ecosystem",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -33766,9 +34115,23 @@
             "name": "affected_specifier",
             "required": true,
             "schema": {
-              "maxLength": 200,
+              "maxLength": 4096,
               "minLength": 1,
               "title": "Affected Specifier",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ecosystem",
+            "required": false,
+            "schema": {
+              "default": "pypi",
+              "enum": [
+                "pypi",
+                "npm"
+              ],
+              "title": "Ecosystem",
               "type": "string"
             }
           }
@@ -33864,6 +34227,20 @@
                 "no_current_evidence"
               ],
               "title": "Coverage",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ecosystem",
+            "required": false,
+            "schema": {
+              "default": "pypi",
+              "enum": [
+                "pypi",
+                "npm"
+              ],
+              "title": "Ecosystem",
               "type": "string"
             }
           },
@@ -33974,12 +34351,26 @@
           },
           {
             "in": "query",
+            "name": "ecosystem",
+            "required": false,
+            "schema": {
+              "default": "pypi",
+              "enum": [
+                "pypi",
+                "npm"
+              ],
+              "title": "Ecosystem",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "resolved_version",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 200,
+                  "maxLength": 4096,
                   "minLength": 1,
                   "type": "string"
                 },
@@ -33997,7 +34388,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 200,
+                  "maxLength": 4096,
                   "minLength": 1,
                   "type": "string"
                 },
@@ -34015,7 +34406,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 200,
+                  "maxLength": 4096,
                   "minLength": 1,
                   "type": "string"
                 },

@@ -4,17 +4,96 @@ import subprocess
 import sys
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
+from oh_goon.repository_tooling import pytest_member_selection as collection_owner
 from oh_goon.repository_tooling.pytest_process_environment import (
     resolve_pytest_invocation,
 )
 
 pytestmark = pytest.mark.process
+
+
+@pytest.mark.parametrize("quiescent", [None, False])
+def test_collection_json_cannot_override_missing_native_process_settlement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quiescent: bool | None
+) -> None:
+    config = tmp_path / "pyproject.toml"
+    config.write_text("[tool.pytest.ini_options]\n")
+
+    def unsettled(*args: Any, **options: Any) -> Any:
+        collection_owner.write_native_collection(
+            Path(options["env"]["OH_GOON_PYTEST_COLLECTION_OUTPUT"]),
+            {"selected": [], "deselected": []},
+        )
+        return SimpleNamespace(
+            returncode=0,
+            stdout="",
+            stdout_truncated=False,
+            stdout_evidence=None,
+            supervisor=None
+            if quiescent is None
+            else SimpleNamespace(final_process_group_quiescent=quiescent),
+        )
+
+    monkeypatch.setattr(collection_owner, "run_command", unsettled)
+    with pytest.raises(ValueError, match="Native pytest collection failed"):
+        collect_native_pytest(
+            (), invocation=resolve_pytest_invocation(pytest_config=config)
+        )
+
+
+def test_base_collector_uses_native_default_scope_and_preserves_cadence_without_execution(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "backend"
+    checks = project / "checks"
+    checks.mkdir(parents=True)
+    config = project / "pyproject.toml"
+    config.write_text(
+        '[tool.pytest.ini_options]\ntestpaths=["checks"]\n'
+        'python_files=["behavior_*.py"]\npython_functions=["check_*"]\n'
+        'markers=["daily: separately selected journey"]\n'
+    )
+    trace = tmp_path / "executed"
+    (checks / "behavior_cases.py").write_text(
+        "import pytest\nfrom pathlib import Path\n"
+        f'def check_fast():\n Path({str(trace)!r}).write_text("executed")\n'
+        '@pytest.mark.daily\ndef check_journey():\n raise AssertionError("not executed")\n'
+    )
+    (checks / "behavior_helper.py").write_text(
+        '__test__=False\ndef check_helper():\n raise AssertionError("not a test")\n'
+    )
+    collector = Path(collection_owner.__file__).resolve()
+    invocation = replace(
+        resolve_pytest_invocation(qualified=True, pytest_config=config),
+        cwd=project,
+        source_root=tmp_path,
+        command_prefix=(sys.executable, "-I", str(collector)),
+    )
+    observed = collect_native_pytest(
+        (), marker="not daily", invocation=invocation, plugin_module="__main__"
+    )
+    membership = observed.relative_to_source(cwd=project, source_root=tmp_path)
+    assert [row["selector"] for row in membership.selected] == [
+        "backend/checks/behavior_cases.py::check_fast"
+    ]
+    assert [row["selector"] for row in membership.deselected] == [
+        "backend/checks/behavior_cases.py::check_journey"
+    ]
+    assert not trace.exists()
+    assert membership.request is not None
+    assert membership.request["paths"] == []
+    assert membership.request["marker"] == "not daily"
+    assert membership.request["cwd"] == str(project)
+    assert membership.request["config_file"] == str(config)
+    assert membership.request["plugin_module"] == "__main__"
 
 
 def test_resume_tracks_unqualified_native_python_import_path(tmp_path: Path) -> None:
@@ -324,9 +403,12 @@ def test_qualified_empty_paths_match_native_defaults_flags_plugins_and_cwd(
         check=False,
     )
     assert native.returncode == 0, native.stdout + native.stderr
-    assert collect_native_pytest(
-        (), marker="wanted", invocation=invocation
-    ).payload() == json.loads(native_packet.read_text(encoding="utf-8"))
+    observed = collect_native_pytest((), marker="wanted", invocation=invocation)
+    native_payload = json.loads(native_packet.read_text(encoding="utf-8"))
+    assert observed.payload() == {
+        name: native_payload[name] for name in ("selected", "deselected")
+    }
+    assert observed.runtime == native_payload["runtime"]
     report = tmp_path / "report.json"
     execution = subprocess.run(
         [

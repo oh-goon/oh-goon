@@ -24,6 +24,9 @@ from oh_goon.repository_tooling.verification_gate_control import (
     HASHMARKS_UPGRADE_OBLIGATION,
     HASHMARKS_UPGRADE_TESTS,
     VERIFICATION_POLICY_TESTS,
+    VERIFICATION_SUPPORT_OBLIGATION,
+    bounded_verification_support_targets,
+    require_verification_support_proof,
 )
 
 
@@ -264,7 +267,7 @@ def _evidence(paths: tuple[str, ...], *, stale: bool = False) -> dict[str, Any]:
             {
                 "changed_path": path,
                 "state": "LINKED",
-                "edit_candidates": [path],
+                "changed_set": {"changed_paths": [path]},
                 "stale": stale,
                 "qualification": {
                     "completeness": "incomplete",
@@ -363,17 +366,18 @@ def test_type_only_project_admission_retains_native_fact_without_runtime_nominat
     if not qualified:
         packet["changes"][0]["classification"].pop("static_project")
     observed: list[tuple[Path, tuple[str, ...]]] = []
-
-    def observe(root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
-        observed.append((root, paths))
-        return packet
-
-    monkeypatch.setattr(owner, "observe_repository_assets", observe)
+    monkeypatch.setattr(
+        "oh_goon.integrations.hashmarks.observe_repository_assets",
+        lambda *_args: pytest.fail(
+            "reuse the captured per-member packet without a second query"
+        ),
+    )
 
     def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        observed.append((_root, paths))
         evidence = _evidence(paths)
         for row in evidence["observations"]:
-            row.update(state="UNAVAILABLE", nominations=[])
+            row.update(state="UNAVAILABLE", nominations=[], changed_set=packet)
         return evidence
 
     plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
@@ -407,8 +411,7 @@ def test_frontend_capability_preparation_uses_existing_requirements_before_admis
         lambda *_args, **_kwargs: pytest.fail("preparation must not claim admission"),
     )
     monkeypatch.setattr(
-        owner,
-        "observe_repository_assets",
+        "oh_goon.integrations.hashmarks.observe_repository_assets",
         lambda *_args: pytest.fail("no compiler observation before preparation"),
     )
     output = tmp_path_factory.mktemp("frontend-capability") / "output"
@@ -430,7 +433,7 @@ def test_frontend_capability_preparation_uses_existing_requirements_before_admis
 
 
 def test_static_project_admission_keeps_unrelated_runtime_sources_unverified(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
+    repository: Path,
 ) -> None:
     path = "frontend/src/contracts.ts"
     source = repository / path
@@ -439,16 +442,13 @@ def test_static_project_admission_keeps_unrelated_runtime_sources_unverified(
     (repository / "runtime_model.py").write_text(
         "from pydantic import BaseModel\nclass Model(BaseModel):\n    value: str\n"
     )
-    monkeypatch.setattr(
-        owner,
-        "observe_repository_assets",
-        lambda *_args: _static_project_evidence(path),
-    )
 
     def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
         evidence = _evidence(paths)
         for row in evidence["observations"]:
             row.update(state="UNAVAILABLE", nominations=[])
+            if row["changed_path"] == path:
+                row["changed_set"] = _static_project_evidence(path)
         return evidence
 
     plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
@@ -716,7 +716,7 @@ def test_unproven_selection_refuses_merge_before_commands(
         elif cause == "stale":
             row["stale"] = True
         elif cause == "other-owner":
-            row["edit_candidates"] = ["different.py"]
+            row["changed_set"]["changed_paths"] = ["different.py"]
         else:
             row["nominations"] = []
         return evidence
@@ -1052,7 +1052,12 @@ def test_supported_hashmarks_adapter_returns_real_source_qualified_links(
     assert changed["tests/test_feature.py"]["state"] == "CHANGED_TEST"
     assert changed["feature.py"]["state"] == "LINKED"
     linked = changed["feature.py"]["nominations"]
-    assert any(row["relationship"] == "direct-reference" for row in linked)
+    assert any(
+        relation["relation_kind"] == "direct-reference"
+        for relation in changed["feature.py"]["changed_set"]["changes"][0][
+            "relationships"
+        ]
+    )
     assert any(
         row["nomination"]["verification_target"]["path"] == "tests/test_feature.py"
         for row in linked
@@ -1404,6 +1409,269 @@ def test_qa_policy_protection_does_not_qualify_other_unknown_scope(
     assert f"{reason}:{relative}" in plan.unverified
 
 
+def _support_evidence(paths: tuple[str, ...]) -> dict[str, Any]:
+    evidence = _evidence(paths)
+    for row in evidence["observations"]:
+        source = row["changed_path"]
+        revision = "c" * 64
+        member = {"path": source, "state": "known-present", "member_revision": revision}
+        relationships = []
+        targets = []
+        for index, projected in enumerate(row["nominations"]):
+            nomination = projected["nomination"]
+            if source.startswith("frontend/"):
+                nomination.update(
+                    runner_evidence="vitest",
+                    verification_target={
+                        "path": f"frontend/src/support{index}.test.ts"
+                    },
+                )
+            nomination["source_member_revision"] = "d" * 64
+            target = nomination["verification_target"]["path"]
+            relationship = {
+                "source": source,
+                "target": target,
+                "relation_kind": "direct-reference",
+                "reference_evidence": {"direct_reference": True},
+                "supporting_source_members": [
+                    member,
+                    {
+                        "path": target,
+                        "state": "known-present",
+                        "member_revision": "d" * 64,
+                    },
+                ],
+            }
+            projected.pop("relationship")
+            projected["relationships"] = [relationship]
+            relationships.append(relationship)
+            targets.append({"path": target, "nomination": nomination})
+        row["changed_set"] = {
+            "changed_paths": [source],
+            "freshness": "unknown",
+            "negative_evidence_admissible": False,
+            "changes": [
+                {
+                    "path": source,
+                    "classification": {
+                        "kind": "verification-support",
+                        "source_member_revision": revision,
+                    },
+                    "source": {"member": member},
+                    "consumer_scope": row["qualification"],
+                    "relationships": relationships,
+                }
+            ],
+            "targets": targets,
+        }
+    return evidence
+
+
+@pytest.mark.parametrize(
+    "relative",
+    ("backend/tests/factories/support.py", "frontend/e2e/fixtures/support.ts"),
+)
+def test_bounded_support_admission_preserves_unknown_scope_and_requires_real_consumers(
+    repository: Path, relative: str
+) -> None:
+    support = repository / relative
+    support.parent.mkdir(parents=True)
+    support.write_text(
+        "export const value = 42;\n"
+        if relative.endswith(".ts")
+        else "def value():\n    return 42\n"
+    )
+
+    plan = owner.admit_change(
+        repository, base="HEAD", nominator=lambda _root, paths: _support_evidence(paths)
+    )
+
+    assert not plan.unverified
+    assert VERIFICATION_SUPPORT_OBLIGATION in plan.obligations
+    observation = plan.evidence["observations"][0]
+    assert observation["qualification"]["completeness"] == "incomplete"
+    assert observation["qualification"]["negative_evidence_admissible"] is False
+    assert plan.evidence["owner_coverage"] == "not-claimed"
+    selected_files = {path.split("::", 1)[0] for path in plan.pytest} | set(
+        plan.frontend
+    )
+    require_verification_support_proof(
+        plan.model_dump(mode="json"), plan.evidence, selected_files
+    )
+    with pytest.raises(ValueError, match="executed qualified consumer"):
+        require_verification_support_proof(
+            plan.model_dump(mode="json"), plan.evidence, set()
+        )
+    missing_obligation = plan.model_dump(mode="json")
+    missing_obligation["obligations"] = []
+    with pytest.raises(ValueError, match="executed qualified consumer"):
+        require_verification_support_proof(
+            missing_obligation, plan.evidence, selected_files
+        )
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "unknown-role",
+        "stale",
+        "source-revision",
+        "target-revision",
+        "unqualified-reference",
+        "missing-relationship",
+        "unrelated-target",
+        "overclaimed-scope",
+    ),
+)
+def test_bounded_support_proof_rejects_unknown_or_rebound_relationships(
+    fault: str,
+) -> None:
+    row = _support_evidence(("backend/tests/factories/support.py",))["observations"][0]
+    assert bounded_verification_support_targets(row)
+    change = row["changed_set"]["changes"][0]
+    if fault == "unknown-role":
+        change["classification"]["kind"] = "unknown"
+    elif fault == "stale":
+        row["changed_set"]["freshness"] = "stale"
+    elif fault == "source-revision":
+        change["classification"]["source_member_revision"] = "e" * 64
+    elif fault == "target-revision":
+        row["nominations"][0]["nomination"]["source_member_revision"] = "e" * 64
+    elif fault == "unqualified-reference":
+        change["relationships"][0]["reference_evidence"]["direct_reference"] = False
+    elif fault == "missing-relationship":
+        change["relationships"].clear()
+    elif fault == "unrelated-target":
+        row["nominations"][0]["nomination"]["verification_target"]["path"] = "other.py"
+    else:
+        row["qualification"] = {"completeness": "complete"}
+    assert not bounded_verification_support_targets(row)
+
+
+def test_bounded_support_without_native_selected_consumers_stays_unverified(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    relative = "backend/tests/factories/support.py"
+    support = repository / relative
+    support.parent.mkdir(parents=True)
+    support.write_text("def value():\n    return 42\n")
+    monkeypatch.setattr(
+        owner,
+        "collect_native_pytest",
+        lambda _paths, **_options: NativePytestCollection((), ()),
+    )
+
+    plan = owner.admit_change(
+        repository, base="HEAD", nominator=lambda _root, paths: _support_evidence(paths)
+    )
+
+    assert f"SHARED_FIXTURE_CONSUMER_SCOPE_UNVERIFIED:{relative}" in plan.unverified
+    assert not plan.pytest
+
+
+@pytest.mark.parametrize("cadence", ("selected", "empty", "deselected"))
+def test_mixed_changed_tests_keep_their_native_runner_execution_obligations(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, cadence: str
+) -> None:
+    python = "backend/tests/unit/test_value.py"
+    frontend = "frontend/src/value.test.ts"
+    for relative, text in (
+        (python, "def test_value():\n    assert True\n"),
+        (frontend, "it('value', () => expect(true).toBe(true));\n"),
+    ):
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    if cadence != "selected":
+
+        def without_selected(
+            paths: tuple[Path, ...], **options: Any
+        ) -> NativePytestCollection:
+            collection = _synthetic_pytest_collection(paths, [], **options)
+            return NativePytestCollection(
+                (), collection.selected if cadence == "deselected" else ()
+            )
+
+        monkeypatch.setattr(owner, "collect_native_pytest", without_selected)
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            row.update(
+                state="CHANGED_TEST",
+                nominations=[
+                    {
+                        "nomination": {
+                            "available": True,
+                            "runner_evidence": "pytest"
+                            if row["changed_path"] == python
+                            else "vitest",
+                            "verification_target": {"path": row["changed_path"]},
+                        },
+                        "workspace_prefix": "",
+                    }
+                ],
+            )
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+
+    assert plan.frontend == (frontend,)
+    assert f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{frontend}" not in plan.unverified
+    if cadence != "selected":
+        assert f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{python}" in plan.unverified
+        assert not plan.pytest
+    else:
+        assert not plan.unverified
+        assert plan.pytest == (python,)
+
+
+@pytest.mark.parametrize("self_authority", ("missing", "unavailable"))
+def test_related_pytest_cannot_discharge_a_changed_test_without_self_authority(
+    repository: Path, self_authority: str
+) -> None:
+    changed = "backend/tests/unit/test_value.py"
+    related = "backend/tests/unit/test_related.py"
+    source = repository / changed
+    source.parent.mkdir(parents=True)
+    source.write_text("def test_value():\n    assert True\n")
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            row.update(
+                state="CHANGED_TEST",
+                nominations=[
+                    {
+                        "nomination": {
+                            "available": True,
+                            "runner_evidence": "pytest",
+                            "verification_target": {"path": related},
+                        },
+                        "workspace_prefix": "",
+                    }
+                ],
+            )
+            if self_authority == "unavailable":
+                row["nominations"].append(
+                    {
+                        "nomination": {
+                            "available": False,
+                            "runner_evidence": "pytest",
+                            "verification_target": {"path": changed},
+                        },
+                        "workspace_prefix": "",
+                    }
+                )
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+
+    assert related in plan.pytest
+    assert f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{changed}" in plan.unverified
+    assert changed not in plan.pytest
+
+
 def _dependency_update(
     repository: Path, packages: tuple[str, ...] = ("ordinary-library",)
 ) -> tuple[str, bytes, str]:
@@ -1496,9 +1764,15 @@ def _dependency_evidence(
             "distribution_nodes": [node],
             "import_claim_authority": "source-observed-static-import",
         }
+        relationship = {
+            "source": source,
+            "target": target,
+            "relation_kind": "direct-reference",
+            "evidence_identity": "native-relationship",
+        }
         projected = {
             "workspace_prefix": "",
-            "relationship": "direct-reference",
+            "relationships": [relationship],
             "nomination": {
                 "available": True,
                 "runner_evidence": "pytest",
@@ -1506,30 +1780,29 @@ def _dependency_evidence(
                 "verification_target": {"path": target},
             },
         }
-        ownership = {
-            "stale": False,
-            "edit_candidates": [source],
-            "verification_owners": [
+        changed_verification = {
+            "freshness": "unknown",
+            "changed_paths": [source],
+            "targets": [{"path": target, "nomination": projected["nomination"]}],
+            "changes": [
                 {
-                    "path": target,
-                    "covers_edit_candidates": [source],
-                    "coverage_evidence": "direct-reference",
+                    "path": source,
+                    "relationships": [relationship],
+                    "consumer_scope": {
+                        "completeness": "incomplete",
+                        "truncated": True,
+                        "qualified_identity_ambiguous": True,
+                        "negative_evidence_admissible": False,
+                    },
                 }
             ],
-            "verification_qualification": {
-                "completeness": "incomplete",
-                "truncation": "truncated",
-                "qualified_identity_ambiguous": True,
-                "verifier_identity_ambiguous": True,
-                "search_bound_reasons": ["indirect-symbol-limit"],
-            },
         }
         chains.append(
             {
                 "node_id": node,
                 "source_path": source,
                 "consumer": consumer,
-                "ownership": ownership,
+                "changed_verification": changed_verification,
                 "nomination": projected,
             }
         )
@@ -1639,7 +1912,6 @@ def _dependency_evidence(
         if row["changed_path"] == "backend/uv.lock":
             row.update(
                 dependency_chain=chains,
-                edit_candidates=source_paths,
                 nominations=[chain["nomination"] for chain in chains],
             )
         elif row["changed_path"] == "backend/pyproject.toml":
@@ -2127,15 +2399,14 @@ def test_dependency_admission_preserves_incomplete_scope_and_native_base_provena
         bundle["before_assessment"]["source_scope"]["source_equivalence"] == "mismatch"
     )
     assert (
-        bundle["chains"][0]["ownership"]["verification_qualification"]["truncation"]
-        == "truncated"
+        bundle["chains"][0]["changed_verification"]["changes"][0]["consumer_scope"][
+            "truncated"
+        ]
+        is True
     )
-    lock = next(
-        row
-        for row in plan.evidence["observations"]
-        if row["changed_path"] == "backend/uv.lock"
-    )
-    assert lock["edit_candidates"] == ["backend/src/oh_goon/dependency_user_0.py"]
+    assert bundle["chains"][0]["changed_verification"]["changed_paths"] == [
+        "backend/src/oh_goon/dependency_user_0.py"
+    ]
     assert (
         plan.evidence["dependency_admission"]["authority"] == "oh-goon-execution-policy"
     )
@@ -2402,11 +2673,9 @@ def test_dependency_admission_refuses_unqualified_evidence_before_native_collect
             chain["consumer"]["distribution_state"] = "resolved-ambiguous"
             chain["consumer"]["distribution_nodes"].append("another-node")
         elif fault == "stale-verifier":
-            chain["ownership"]["stale"] = True
+            chain["changed_verification"]["freshness"] = "stale"
         elif fault == "unrelated-verifier":
-            chain["ownership"]["verification_owners"][0]["covers_edit_candidates"] = [
-                "different.py"
-            ]
+            chain["changed_verification"]["changed_paths"] = ["different.py"]
         elif fault == "missing-nomination":
             next(
                 row
@@ -2489,7 +2758,8 @@ def _add_dependency_target(evidence: dict[str, Any], target: str) -> None:
     bundle = evidence["dependency_changes"]
     chain = copy.deepcopy(bundle["chains"][0])
     chain["nomination"]["nomination"]["verification_target"]["path"] = target
-    chain["ownership"]["verification_owners"][0]["path"] = target
+    chain["changed_verification"]["targets"][0]["path"] = target
+    chain["changed_verification"]["changes"][0]["relationships"][0]["target"] = target
     bundle["chains"].append(chain)
     lock = next(
         row
@@ -2706,11 +2976,11 @@ def test_dependency_policy_does_not_weaken_unrelated_source_owner_selection(
             row
             for row in evidence["observations"]
             if row["changed_path"] == "behavior.py"
-        )["edit_candidates"] = ["another.py"]
+        )["changed_set"]["changed_paths"] = ["another.py"]
         return evidence
 
     plan = owner.admit_change(repository, base=base, nominator=nominate)
-    assert "PRODUCER_SELECTED_ANOTHER_OWNER:behavior.py" in plan.unverified
+    assert "PRODUCER_CHANGE_SCOPE_UNVERIFIED:behavior.py" in plan.unverified
     assert dependency_collection == []
 
 

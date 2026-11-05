@@ -30,7 +30,7 @@ def check_frontend_local_only() -> list[Violation]:
     violations: list[Violation] = []
     for path in _source_files():
         text = path.read_text(encoding="utf-8")
-        facts = project_typescript(text)
+        facts = project_typescript(text, path=path.name)
         relative = path.relative_to(FRONTEND_SOURCE_ROOT).as_posix()
         for token in FORBIDDEN_BROWSER_APIS:
             if facts.uses(token):

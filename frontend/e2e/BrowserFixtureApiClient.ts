@@ -1,8 +1,8 @@
-import type { ApiClient, ReadRequestOptions } from "@/domain/api/ApiClient";
+import type { ApiClient, DependencyEcosystem, DependencyPackageIdentity, ReadRequestOptions } from "@/domain/api/ApiClient";
 import type { WriteCommandResult } from "@/domain/mutations/WriteCommandResult";
 import { createIncludedFleet, createScaleFleet, createScaleLeague, createScaleRepositories, scaleDependencyMatches as scaleDependencyFixtureMatches } from "./BrowserScaleFixture";
 import { FixtureRunRegistry } from "./fixtures/FixtureRunRegistry";
-import { dependencyMatches, emptyDependencyOverview } from "./fixtures/dependencies";
+import { dependencyMatches, dependencyPopulationId, emptyDependencyOverview } from "./fixtures/dependencies";
 import { fixtureLockDriftDiagnostic } from "./fixtures/diagnostics";
 import { defaultFailureGroup, requireFailureGroup, scaleFailureGroups, scaleFailureRunId } from "./fixtures/failures";
 import { fixtureArtifactReadback, fixtureCampaignReadback, fixtureCampaignResultForId, fixtureFailureHistory, fixtureLiveOutput, fixtureRunDiff } from "./fixtures/gameTape";
@@ -118,22 +118,6 @@ const league: LeagueMap = {
 const plans = FIXTURE_PLANS.catalog();
 
 const SCALE_FAILURE_REPOSITORY_INDEX = 92;
-
-function normalizedDependencyFilter(filter: DependencyTargetFilter): DependencyTargetFilter {
-  return {
-    package_name: filter.package_name,
-    coverage: filter.coverage ?? "matching",
-    resolved_version: filter.resolved_version ?? null,
-    version_prefix: filter.version_prefix ?? null,
-    evidence: filter.evidence ?? "all",
-    version_specifier: filter.version_specifier ?? null,
-    advisory_id: filter.advisory_id ?? null,
-  };
-}
-
-function dependencyPopulationId(filter: DependencyTargetFilter, repoIds: readonly string[]): string {
-  return JSON.stringify({ filter: normalizedDependencyFilter(filter), repo_ids: [...repoIds].sort() });
-}
 
 export class BrowserFixtureApiClient extends InMemoryApiClient {
   private revision = 200;
@@ -322,22 +306,25 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
   }
 
   override async dependencySearch(...args: Parameters<ApiClient["dependencySearch"]>): Promise<DependencySearchResult> {
-    const [query, offset = 0, limit = 20] = args;
+    const [query, offset = 0, limit = 20, ecosystem] = args;
     const normalized = query.trim().toLowerCase();
     const items = normalized && "mlflow".includes(normalized)
       ? [{ ecosystem: "pypi" as const, package_name: "mlflow", repositories: this.scenario === "scale" ? 137 : 5, resolved_versions: this.scenario === "scale" ? 2 : 4 }]
       : this.scenario === "scale" && normalized && "package".startsWith(normalized)
         ? Array.from({ length: 65 }, (_, index) => ({ ecosystem: "pypi" as const, package_name: `package-${String(index + 1).padStart(3, "0")}`, repositories: 1 + (index % 50), resolved_versions: 1 + (index % 4) }))
         : [];
-    return { query: query.trim(), total: items.length, offset, limit, items: items.slice(offset, offset + limit) };
+    const scopedItems = ecosystem === undefined ? items : items.filter((item) => item.ecosystem === ecosystem);
+    return { query: query.trim(), ecosystem, total: scopedItems.length, offset, limit, items: scopedItems.slice(offset, offset + limit) };
   }
 
-  override async dependencyFleetCoverage(_options?: ReadRequestOptions): Promise<DependencyFleetCoverageOverview> {
-    if (this.scenario === "scale") return { repository_total: 5000, current_dependency_evidence: 4848, unknown_dependency_evidence: 0, stale_dependency_evidence: 0, missing_dependency_evidence: 152, no_current_dependency_evidence: 152 };
-    return { repository_total: 7, current_dependency_evidence: 5, unknown_dependency_evidence: 1, stale_dependency_evidence: 0, missing_dependency_evidence: 1, no_current_dependency_evidence: 2 };
+  override async dependencyFleetCoverage(ecosystem?: DependencyEcosystem, _options?: ReadRequestOptions): Promise<DependencyFleetCoverageOverview> {
+    if (ecosystem === "npm") throw new Error("This browser scenario has no npm dependency observations");
+    if (this.scenario === "scale") return { ecosystem: "pypi", repository_total: 5000, current_dependency_evidence: 4848, unknown_dependency_evidence: 0, stale_dependency_evidence: 0, missing_dependency_evidence: 152, no_current_dependency_evidence: 152 };
+    return { ecosystem: "pypi", repository_total: 7, current_dependency_evidence: 5, unknown_dependency_evidence: 1, stale_dependency_evidence: 0, missing_dependency_evidence: 1, no_current_dependency_evidence: 2 };
   }
 
-  override async dependencyOverview(packageName: string, _options?: ReadRequestOptions): Promise<DependencyPackageOverview> {
+  override async dependencyOverview({ packageName, ecosystem }: DependencyPackageIdentity, _options?: ReadRequestOptions): Promise<DependencyPackageOverview> {
+    if (ecosystem === "npm") throw new Error("This browser scenario has no npm dependency observations");
     if (packageName.toLowerCase() !== "mlflow") return emptyDependencyOverview(packageName, repositories);
     if (this.scenario === "scale") return {
       ecosystem: "pypi", package_name: "mlflow", observed_repositories: 137, latest_observed_at: NOW,
@@ -360,15 +347,17 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
     };
   }
 
-  override async dependencyAdvisory(packageName: string, advisoryId: string, affectedSpecifier: string, _options?: ReadRequestOptions): Promise<DependencyAdvisoryOverview> {
+  override async dependencyAdvisory({ packageName, ecosystem }: DependencyPackageIdentity, advisoryId: string, affectedSpecifier: string, _options?: ReadRequestOptions): Promise<DependencyAdvisoryOverview> {
+    if (ecosystem === "npm") throw new Error("This browser scenario has no npm dependency observations");
     if (this.scenario === "scale") return {
-      package_name: packageName, advisory_id: advisoryId, affected_specifier: affectedSpecifier,
+      ecosystem: "pypi", package_name: packageName, advisory_id: advisoryId, affected_specifier: affectedSpecifier,
       affected_repositories: packageName.toLowerCase() === "mlflow" && affectedSpecifier === "<2.18.0" ? 92 : 0,
       observed_not_affected: packageName.toLowerCase() === "mlflow" && affectedSpecifier === "<2.18.0" ? 45 : 0,
       version_unclassified: 0, unknown: 0, stale: 0, no_matching_dependency: packageName.toLowerCase() === "mlflow" ? 4711 : 0, no_current_evidence: packageName.toLowerCase() === "mlflow" ? 152 : 5000,
     };
     return {
       package_name: packageName,
+      ecosystem: "pypi",
       advisory_id: advisoryId,
       affected_specifier: affectedSpecifier,
       affected_repositories: packageName.toLowerCase() === "mlflow" && affectedSpecifier === "<2.18.0" ? 2 : 0,
@@ -382,7 +371,7 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
   }
 
   override async dependencyRepositories(
-    packageName: string,
+    { packageName, ecosystem }: DependencyPackageIdentity,
     resolvedVersion?: string,
     _versionPrefix?: string,
     evidence: "all" | "current" | "unknown" | "stale" = "all",
@@ -392,31 +381,33 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
     _advisoryId?: string,
     _options?: ReadRequestOptions,
   ): Promise<DependencyRepositoryPage> {
+    if (ecosystem === "npm") throw new Error("This browser scenario has no npm dependency observations");
     let items = this.scenario === "scale" ? scaleDependencyFixtureMatches(scaleRepositories, packageName, NOW, DEFAULT_RUN_ID) : dependencyMatches(packageName);
     if (resolvedVersion) items = items.filter((item) => (item.resolved_versions ?? []).includes(resolvedVersion));
     if (evidence !== "all") items = items.filter((item) => item.evidence.freshness === evidence);
     if (versionSpecifier === "<2.18.0") items = items.filter((item) => item.evidence.freshness === "current" && ["2.17.2", "2.17.1"].some((version) => (item.resolved_versions ?? []).includes(version)));
-    const filter: DependencyTargetFilter = { package_name: packageName, coverage: "matching", resolved_version: resolvedVersion ?? null, version_prefix: _versionPrefix ?? null,
+    const filter: DependencyTargetFilter = { ecosystem: "pypi", package_name: packageName, coverage: "matching", resolved_version: resolvedVersion ?? null, version_prefix: _versionPrefix ?? null,
       evidence, version_specifier: versionSpecifier ?? null, advisory_id: _advisoryId ?? null };
     const repoIds = items.map((item) => item.repository.repository_id);
-    return { package_name: packageName, population_id: dependencyPopulationId(filter, repoIds), total: items.length, offset, limit, items: items.slice(offset, offset + limit) };
+    return { ecosystem: "pypi", package_name: packageName, population_id: dependencyPopulationId(filter, repoIds), total: items.length, offset, limit, items: items.slice(offset, offset + limit) };
   }
 
   override async dependencyCoverageRepositories(
-    packageName: string,
+    { packageName, ecosystem }: DependencyPackageIdentity,
     coverage: "absent_from_lock" | "no_current_evidence",
     offset = 0,
     limit = 20,
     _options?: ReadRequestOptions,
   ): Promise<DependencyCoverageRepositoryPage> {
+    if (ecosystem === "npm") throw new Error("This browser scenario has no npm dependency observations");
     if (this.scenario === "scale" && packageName.toLowerCase() === "mlflow") {
       const start = coverage === "absent_from_lock" ? 137 : 4848;
       const total = coverage === "absent_from_lock" ? 4711 : 152;
       const pageRepositories = scaleRepositories.slice(start + offset, start + Math.min(total, offset + limit));
       const items = pageRepositories.map((repositoryIdentity, index) => ({ repository: repositoryIdentity, coverage, evidence: { scope: "locked-inventory" as const, freshness: coverage === "absent_from_lock" ? "current" as const : "unknown" as const, completeness: coverage === "absent_from_lock" ? "complete" as const : "unknown" as const, availability: coverage === "absent_from_lock" ? "available" as const : "missing" as const, absence_admissible: coverage === "absent_from_lock" }, sources: coverage === "absent_from_lock" ? ["uv.lock"] : [], observed_at: coverage === "absent_from_lock" ? NOW : undefined, fleet_run_id: coverage === "absent_from_lock" ? DEFAULT_RUN_ID : undefined, operation_id: coverage === "absent_from_lock" ? `operation-scale-coverage-${offset + index}` : undefined, producer_goon: coverage === "absent_from_lock" ? "python/dependency-inventory" : undefined, step_id: coverage === "absent_from_lock" ? "dependency-inventory" : undefined }));
-      const filter: DependencyTargetFilter = { package_name: packageName, coverage, evidence: "all" };
+      const filter: DependencyTargetFilter = { ecosystem: "pypi", package_name: packageName, coverage, evidence: "all" };
       const repoIds = scaleRepositories.slice(start, start + total).map((item) => item.repository_id);
-      return { package_name: packageName, coverage, population_id: dependencyPopulationId(filter, repoIds), total, offset, limit, items };
+      return { ecosystem: "pypi", package_name: packageName, coverage, population_id: dependencyPopulationId(filter, repoIds), total, offset, limit, items };
     }
     const items = packageName.toLowerCase() !== "mlflow" ? [] : coverage === "absent_from_lock"
       ? [{ repository: FIXTURE_REPOSITORIES.notify, coverage, evidence: { freshness: "current" as const, completeness: "complete" as const, availability: "available" as const, absence_admissible: true }, sources: ["uv.lock"], observed_at: NOW, fleet_run_id: DEFAULT_RUN_ID, operation_id: "operation-dependency-notify", producer_goon: "python/dependency-inventory", step_id: "dependency-inventory" }]
@@ -424,9 +415,9 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
           { repository: FIXTURE_REPOSITORIES.catalog, coverage, evidence: { freshness: "unknown" as const, completeness: "unknown" as const, availability: "available" as const, absence_admissible: false }, sources: ["uv.lock"], observed_at: "2026-08-10T12:00:00Z", fleet_run_id: DEFAULT_RUN_ID, operation_id: "operation-dependency-catalog", producer_goon: "python/dependency-inventory", step_id: "dependency-inventory" },
           { repository: FIXTURE_REPOSITORIES.report, coverage, evidence: { freshness: "unknown" as const, completeness: "unknown" as const, availability: "missing" as const, absence_admissible: false }, sources: [] },
         ];
-    const filter: DependencyTargetFilter = { package_name: packageName, coverage, evidence: "all" };
+    const filter: DependencyTargetFilter = { ecosystem: "pypi", package_name: packageName, coverage, evidence: "all" };
     const repoIds = items.map((item) => item.repository.repository_id);
-    return { package_name: packageName, coverage, population_id: dependencyPopulationId(filter, repoIds), total: items.length, offset, limit, items: items.slice(offset, offset + limit) };
+    return { ecosystem: "pypi", package_name: packageName, coverage, population_id: dependencyPopulationId(filter, repoIds), total: items.length, offset, limit, items: items.slice(offset, offset + limit) };
   }
 
   override async repositoryDependencies(repositoryId: string, offset = 0, limit = 20, _options?: ReadRequestOptions): Promise<RepositoryDependencyPage> {
@@ -452,6 +443,7 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
 
   override async materializeDependencyTargets(request: DependencyTargetMaterializeRequest): Promise<WriteCommandResult<DependencyTargetMaterialization>> {
     const filter = request.filter;
+    if (filter.ecosystem === "npm") throw new Error("This browser scenario has no npm dependency observations");
     const repoIds = this.scenario === "scale"
       ? filter.coverage === "no_current_evidence"
         ? scaleRepositories.slice(4848).map((item) => item.repository_id)

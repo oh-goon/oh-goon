@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import ast
 import re
-import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from oh_goon.repository_tooling.architecture.common import (
     Violation,
     dependency_policy_bootstrap_source_path,
 )
 from oh_goon.repository_tooling.architecture.shell_semantics import (
+    ShellCommand,
+    ShellSourceFacts,
     make_semantic_facts,
     shell_semantic_commands,
+    shell_source_facts,
 )
 
 
@@ -235,6 +238,7 @@ _EXPECTED_PYTEST_TESTPATHS = (
 
 
 def _check_pytest_testpaths(pyproject: Path) -> list[Violation]:
+    """Enforce authored CI configuration, without claiming native test membership."""
     if not pyproject.is_file():
         return []
     try:
@@ -251,12 +255,12 @@ def _check_pytest_testpaths(pyproject: Path) -> list[Violation]:
     pytest_cfg = tool.get("pytest") if isinstance(tool, dict) else None
     ini_options = pytest_cfg.get("ini_options") if isinstance(pytest_cfg, dict) else None
     testpaths = ini_options.get("testpaths") if isinstance(ini_options, dict) else None
-    semantic_testpaths = (
+    authored_testpaths = (
         tuple(item for item in testpaths if isinstance(item, str))
         if isinstance(testpaths, list) and all(isinstance(item, str) for item in testpaths)
         else ()
     )
-    if semantic_testpaths == _EXPECTED_PYTEST_TESTPATHS:
+    if authored_testpaths == _EXPECTED_PYTEST_TESTPATHS:
         return []
     return [
         Violation(
@@ -290,176 +294,8 @@ class _HostedDiagnosticAction:
     order: tuple[int, int]
     kind: str
     argv: tuple[str, ...]
-    environment: dict[str, str]
-
-
-def _strip_shell_comment(line: str) -> str:
-    """Remove an unquoted shell comment without interpreting shell syntax."""
-    quote: str | None = None
-    escaped = False
-    for index, char in enumerate(line):
-        if escaped:
-            escaped = False
-            continue
-        if char == "\\" and quote != "'":
-            escaped = True
-            continue
-        if quote is not None:
-            if char == quote:
-                quote = None
-            continue
-        if char in {"'", '"'}:
-            quote = char
-            continue
-        if char == "#" and (index == 0 or line[index - 1].isspace()):
-            return line[:index]
-    return line
-
-
-def _join_shell_lines(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    joined: list[tuple[int, str]] = []
-    pending = ""
-    pending_line = 0
-    for line_number, raw in lines:
-        line = _strip_shell_comment(raw).rstrip()
-        if not line and not pending:
-            continue
-        if not pending:
-            pending_line = line_number
-        if line.endswith("\\"):
-            pending += line[:-1].rstrip() + " "
-            continue
-        pending += line
-        if pending.strip():
-            joined.append((pending_line, pending.strip()))
-        pending = ""
-    if pending.strip():
-        joined.append((pending_line, pending.strip()))
-    return joined
-
-
-def _shell_functions(text: str) -> tuple[dict[str, list[tuple[int, str]]], list[tuple[int, str]]]:
-    functions: dict[str, list[tuple[int, str]]] = {}
-    top_level: list[tuple[int, str]] = []
-    current_name: str | None = None
-    current_body: list[tuple[int, str]] = []
-    function_start = re.compile(r"^(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{\s*$")
-    for line_number, raw in enumerate(text.splitlines(), start=1):
-        stripped = _strip_shell_comment(raw).strip()
-        if current_name is None:
-            match = function_start.match(stripped)
-            if match is not None:
-                current_name = match.group(1)
-                current_body = []
-                continue
-            top_level.append((line_number, raw))
-            continue
-        if stripped == "}":
-            functions[current_name] = _join_shell_lines(current_body)
-            current_name = None
-            current_body = []
-            continue
-        current_body.append((line_number, raw))
-    return functions, _join_shell_lines(top_level)
-
-
-_SHELL_VARIABLE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
-_SHELL_ARRAY = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\[@\]\}$")
-
-
-def _resolve_shell_value(value: str, scalars: dict[str, str]) -> str:
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        value = value[1:-1]
-
-    def replacement(match: re.Match[str]) -> str:
-        name = match.group(1) or match.group(2)
-        return scalars.get(name, f"<VAR:{name}>")
-
-    previous = None
-    for _ in range(8):
-        if value == previous:
-            break
-        previous = value
-        value = _SHELL_VARIABLE.sub(replacement, value)
-    return value
-
-
-def _parse_shell_words(command: str) -> list[str]:
-    try:
-        return shlex.split(command, posix=True)
-    except ValueError:
-        return command.split()
-
-
-def _apply_shell_assignment(
-    line: str,
-    scalars: dict[str, str],
-    arrays: dict[str, tuple[str, ...]],
-    exports: set[str],
-) -> bool:
-    candidate = line.strip()
-    exported = False
-    local = False
-    if candidate.startswith("export "):
-        exported = True
-        candidate = candidate[7:].strip()
-    elif candidate.startswith("local "):
-        local = True
-        candidate = candidate[6:].strip()
-    if exported and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", candidate):
-        exports.add(candidate)
-        return True
-    array_match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=\((.*)\)", candidate)
-    if array_match is not None:
-        name, body = array_match.groups()
-        words = tuple(_resolve_shell_value(word, scalars) for word in _parse_shell_words(body))
-        arrays[name] = words
-        if exported:
-            exports.add(name)
-        return True
-    scalar_match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", candidate)
-    if scalar_match is None:
-        return False
-    if len(_parse_shell_words(candidate)) != 1:
-        # A leading NAME=value may be a command-local environment assignment,
-        # e.g. ``PYTHONNOUSERSITE=1 "$PYTHON_BIN" ...``.  That is executable
-        # choreography, not a persistent shell assignment.
-        return False
-    name, raw_value = scalar_match.groups()
-    if name == "ROOT" and "BASH_SOURCE" in raw_value:
-        value = "<ROOT>"
-    elif name == "PYTHON_BIN" and "select_host_python" in raw_value:
-        value = "<HOST_PYTHON>"
-    elif "mktemp" in raw_value:
-        value = "<TMP>"
-    else:
-        value = _resolve_shell_value(raw_value, scalars)
-    scalars[name] = value
-    if exported:
-        exports.add(name)
-    del local
-    return True
-
-
-def _expand_shell_command(
-    line: str,
-    scalars: dict[str, str],
-    arrays: dict[str, tuple[str, ...]],
-) -> tuple[list[str], dict[str, str]]:
-    words = _parse_shell_words(line)
-    expanded: list[str] = []
-    command_environment: dict[str, str] = {}
-    for word in words:
-        array_match = _SHELL_ARRAY.fullmatch(word)
-        if array_match is not None:
-            expanded.extend(arrays.get(array_match.group(1), (word,)))
-            continue
-        expanded.append(_resolve_shell_value(word, scalars))
-    while expanded and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", expanded[0]):
-        name, value = expanded.pop(0).split("=", 1)
-        command_environment[name] = value
-    return expanded, command_environment
+    environment: dict[str, str | None]
+    source: ShellCommand
 
 
 def _argument(argv: list[str] | tuple[str, ...], option: str) -> str | None:
@@ -475,26 +311,6 @@ def _argument(argv: list[str] | tuple[str, ...], option: str) -> str | None:
 def _classify_hosted_action(argv: list[str]) -> str | None:
     if not argv:
         return None
-    if argv[0] == "<HOST_PYTHON>" and "-I" in argv and "--output" in argv:
-        return "capability"
-    if (
-        argv[0] == "<HOST_PYTHON>"
-        and "-P" in argv
-        and "--granularity" in argv
-        and "--batch-size" in argv
-        and "--workers" in argv
-        and "--batch-timeout" in argv
-        and "--report-path" in argv
-    ):
-        return "workload"
-    if (
-        argv[0] == "<HOST_PYTHON>"
-        and "-P" in argv
-        and "--host-capability" in argv
-        and "--manifest" in argv
-        and "--output" in argv
-    ):
-        return "receipt"
     if len(argv) >= 2 and argv[0] == "uv" and argv[1] in {"sync", "lock", "pip"}:
         return "acquisition"
     if len(argv) >= 2 and argv[0] in {"pip", "pip3"} and argv[1] == "install":
@@ -506,63 +322,83 @@ def _classify_hosted_action(argv: list[str]) -> str | None:
 
 def _scan_hosted_shell(
     text: str,
-) -> tuple[list[_HostedDiagnosticAction], dict[str, str], dict[str, list[tuple[int, str]]]]:
-    functions, top_level = _shell_functions(text)
-    scalars: dict[str, str] = {"ROOT": "<ROOT>"}
-    arrays: dict[str, tuple[str, ...]] = {}
-    exports: set[str] = set()
+) -> tuple[list[_HostedDiagnosticAction], dict[str, str], dict[str, list[str]], ShellSourceFacts]:
+    """Inspect native authored source roles without evaluating shell values."""
+    source = shell_source_facts(text)
     actions: list[_HostedDiagnosticAction] = []
+    definitions: dict[str, list[dict[str, Any]]] = {}
+    functions: dict[str, list[str]] = {}
+    for row in source.facts:
+        value = row["value"]
+        if row["kind"] == "shell-variable-declaration":
+            definitions.setdefault(value["name"], []).append(value)
+        tokens = value.get("token_expressions")
+        expressions = (
+            tokens
+            if isinstance(tokens, list)
+            else [word["expression"] for word in value.get("words", [])]
+        )
+        for context in value["context"]:
+            if context.startswith("function:"):
+                functions.setdefault(context.split(":")[1], []).append(" ".join(expressions))
+    for index, command in enumerate(source.commands):
+        if command.function is not None and command.invocation is None:
+            continue
+        kind = _hosted_source_kind(command)
+        if kind is None:
+            continue
+        invocation = command.invocation
+        position = (
+            invocation["invocation_site"]["start_line"] if invocation else command.line_number
+        )
+        actions.append(
+            _HostedDiagnosticAction((position, index), kind, command.argv, command.env(), command)
+        )
+    literals = {
+        name: rows[0]["value_expression"]["literal"]
+        for name, rows in definitions.items()
+        if len(rows) == 1 and isinstance(rows[0]["value_expression"].get("literal"), str)
+    }
+    return sorted(actions, key=lambda action: action.order), literals, functions, source
 
-    def scan_lines(
-        lines: list[tuple[int, str]],
-        order_override: int | None = None,
-        inherited_scalars: dict[str, str] | None = None,
-        inherited_arrays: dict[str, tuple[str, ...]] | None = None,
-        inherited_exports: set[str] | None = None,
-    ) -> None:
-        local_scalars = scalars if inherited_scalars is None else inherited_scalars
-        local_arrays = arrays if inherited_arrays is None else inherited_arrays
-        local_exports = exports if inherited_exports is None else inherited_exports
-        for sub_index, (line_number, line) in enumerate(lines):
-            if _apply_shell_assignment(line, local_scalars, local_arrays, local_exports):
-                continue
-            argv, command_environment = _expand_shell_command(line, local_scalars, local_arrays)
-            if not argv:
-                continue
-            command = argv[0]
-            if command in functions:
-                nested_scalars = dict(local_scalars)
-                nested_arrays = dict(local_arrays)
-                nested_exports = set(local_exports)
-                scan_lines(
-                    functions[command],
-                    line_number if order_override is None else order_override,
-                    nested_scalars,
-                    nested_arrays,
-                    nested_exports,
-                )
-                continue
-            kind = _classify_hosted_action(argv)
-            if kind is None:
-                continue
-            environment = {name: local_scalars.get(name, f"<VAR:{name}>") for name in local_exports}
-            environment.update(command_environment)
-            actions.append(
-                _HostedDiagnosticAction(
-                    order=(line_number if order_override is None else order_override, sub_index),
-                    kind=kind,
-                    argv=tuple(argv),
-                    environment=environment,
-                )
-            )
 
-    scan_lines(top_level)
-    return sorted(actions, key=lambda action: action.order), dict(scalars), functions
+def _hosted_source_kind(command: ShellCommand) -> str | None:
+    acquisition = _classify_hosted_action(list(command.argv))
+    if acquisition is not None:
+        return acquisition
+    # This selects an authored role, not the value or executable returned by the
+    # source substitution. The native producer retains all binding conditions.
+    first = command.source_words[0].get("source_word", {}) if command.source_words else {}
+    if first.get("expression") not in {'"$(select_host_python)"', "$(select_host_python)"}:
+        return None
+    argv = command.argv
+    if "-I" in argv and "--output" in argv:
+        return "capability"
+    if "-P" in argv and {
+        "--granularity",
+        "--batch-size",
+        "--workers",
+        "--batch-timeout",
+        "--report-path",
+    }.issubset(argv):
+        return "workload"
+    if "-P" in argv and {"--host-capability", "--manifest", "--output"}.issubset(argv):
+        return "receipt"
+    return None
+
+
+def _authored_environment_word(action: _HostedDiagnosticAction, name: str) -> dict[str, Any]:
+    exports = action.source.binding_observation.get("authored_environment_bindings", [])
+    for exported in exports:
+        if exported["name"] == name:
+            words = exported["binding"].get("authored_words", [])
+            return words[0] if len(words) == 1 else {}
+    return {}
 
 
 def _surface_contract_violations(
     diagnostic: Path,
-    functions: dict[str, list[tuple[int, str]]],
+    functions: dict[str, list[str]],
 ) -> list[Violation]:
     expected = {
         "backend-unit": "backend/tests/unit",
@@ -570,10 +406,10 @@ def _surface_contract_violations(
         "repository-tooling": "scripts/tests",
     }
     lines = functions.get("surface_config", [])
-    active = "\n".join(line for _, line in lines)
+    active = "\n".join(lines)
     violations: list[Violation] = []
     for surface, path in expected.items():
-        pattern = rf"(?m)^\s*{re.escape(surface)}\)\s*[^\n]*\b{re.escape(path)}\b"
+        pattern = rf"(?m)^\s*{re.escape(surface)}\s*\)\s*[^\n]*\b{re.escape(path)}\b"
         if re.search(pattern, active) is None:
             violations.append(
                 Violation(
@@ -588,7 +424,7 @@ def _check_hosted_diagnostic_contract(diagnostic: Path) -> list[Violation]:
     if not diagnostic.is_file():
         return [Violation(diagnostic, "pre-dependency diagnostic runner is missing")]
     text = diagnostic.read_text(encoding="utf-8")
-    actions, scalars, functions = _scan_hosted_shell(text)
+    actions, scalars, functions, source = _scan_hosted_shell(text)
     violations: list[Violation] = []
 
     if "diagnostic only" not in text.lower():
@@ -666,15 +502,16 @@ def _check_hosted_diagnostic_contract(diagnostic: Path) -> list[Violation]:
             capability_script = capability.argv[script_index]
         except (ValueError, IndexError):
             capability_script = ""
-        if capability_script.startswith("<ROOT>/"):
-            capability_path = diagnostic.parent.parent / capability_script[len("<ROOT>/") :]
+        if capability_script.startswith('"$ROOT/') and capability_script.endswith('"'):
+            capability_path = diagnostic.parent.parent / capability_script[len('"$ROOT/') : -1]
             if not capability_path.is_file():
                 violations.append(
                     Violation(capability_path, "hosted dependency capability owner is missing")
                 )
 
     for workload in workloads:
-        if workload.environment.get("PYTHONPATH") != "<ROOT>/backend/src":
+        source_root = _authored_environment_word(workload, "PYTHONPATH").get("source_word", {})
+        if source_root.get("expression") != '"$ROOT/backend/src"':
             violations.append(
                 Violation(
                     diagnostic,
@@ -691,11 +528,17 @@ def _check_hosted_diagnostic_contract(diagnostic: Path) -> list[Violation]:
                 Violation(diagnostic, "hosted workload must disable ambient pytest plugin autoload")
             )
         marker = _argument(workload.argv, "--marker") or ""
-        marker_exclusions = set(re.findall(r"\bnot\s+([A-Za-z_][A-Za-z0-9_]*)\b", marker))
-        for missing in sorted(required_exclusions - marker_exclusions):
-            violations.append(
-                Violation(diagnostic, f"hosted workload marker exclusion is missing: {missing}")
-            )
+        # Source input qualification is distinct from effective pytest selection.
+        # The base declaration above and runtime selector regressions protect the
+        # current conditional marker input; unknown source words are not expanded.
+        marker_words = workload.source.source_words
+        marker_index = workload.argv.index("--marker") + 1 if "--marker" in workload.argv else -1
+        if 0 <= marker_index < len(marker_words) and "literal" in marker_words[marker_index]:
+            marker_exclusions = set(re.findall(r"\bnot\s+([A-Za-z_][A-Za-z0-9_]*)\b", marker))
+            for missing in sorted(required_exclusions - marker_exclusions):
+                violations.append(
+                    Violation(diagnostic, f"hosted workload marker exclusion is missing: {missing}")
+                )
         workers = _argument(workload.argv, "--workers")
         if workers is None or not workers.isdigit() or int(workers) > 1:
             violations.append(
@@ -723,8 +566,13 @@ def _check_hosted_diagnostic_contract(diagnostic: Path) -> list[Violation]:
                     )
                 )
 
-    active_text = "\n".join(
-        line for _, line in _join_shell_lines(list(enumerate(text.splitlines(), start=1)))
+    source_facts = source.facts
+    active_text = (
+        "\n".join(
+            token for row in source_facts for token in row["value"].get("token_expressions", [])
+        )
+        + "\n"
+        + "\n".join(action.argv[0] for action in actions if action.argv)
     )
     for token in (
         "--system-site-packages",

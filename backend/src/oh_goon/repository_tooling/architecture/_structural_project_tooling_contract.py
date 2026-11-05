@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import json
-import re
 import shlex
 from pathlib import Path
 
@@ -18,7 +17,6 @@ from oh_goon.repository_tooling.architecture.shell_semantics import (
     ShellCommand,
     make_semantic_facts,
     shell_semantic_commands,
-    strip_shell_comment,
 )
 
 _REQUIRED_ENTRYPOINTS = (
@@ -32,12 +30,20 @@ _REQUIRED_ENTRYPOINTS = (
     "oh-goon-container",
 )
 
-
-def _target_body(text: str, name: str) -> str:
-    match = re.search(rf"(?m)^{re.escape(name)}:[^\n]*\n", text)
-    if match is None:
-        return ""
-    return text[match.end() :].split("\n\n", 1)[0]
+# These are internal interpreter delegates, not independently selectable project
+# commands. The trusted merge controller supplies candidate Python and this exact
+# collector file under -I/-p __main__; the native qualification owner supplies the
+# worker's resolved interpreter and isolated re-entry authority. Their receiving
+# boundaries validate that authority. Re-registering either as a public command
+# would not establish it, and conditional shell-array source words do not prove
+# an effective invocation. Keep the exception confined to these owned modules;
+# the ordinary launch/safety checks still apply to their source.
+_INTERNAL_INTERPRETER_DELEGATES = frozenset(
+    {
+        "oh_goon.repository_tooling.pytest_member_selection",
+        "oh_goon.repository_tooling._native_test_worker",
+    }
+)
 
 
 def _check_required_entrypoints(root: Path, pyproject_text: str) -> list[Violation]:
@@ -121,8 +127,8 @@ def _is_direct_python(command: ShellCommand) -> bool:
 def _docker_commands(text: str) -> tuple[ShellCommand, ...]:
     active: list[str] = []
     for raw in text.splitlines():
-        line = strip_shell_comment(raw).strip()
-        if not line:
+        line = raw.strip()
+        if not line or line.startswith("#"):
             continue
         instruction, _, body = line.partition(" ")
         if instruction.upper() == "RUN" and body:
@@ -272,6 +278,7 @@ def _repository_tooling_module_violation(
         and module_name not in script_targets
         and module_name not in runtime_owned_modules
         and module_name not in externally_invoked_modules
+        and module_name not in _INTERNAL_INTERPRETER_DELEGATES
     ):
         violations.append(
             Violation(
@@ -340,19 +347,15 @@ def _check_precommit(root: Path) -> list[Violation]:
     violations: list[Violation] = []
     for entry in entries:
         commands = list(shell_semantic_commands(entry, include_function_bodies=False))
-        # Parse shell -c payload from the original YAML scalar so outer-shell
-        # single quotes keep inner $variables intact until the nested shell owns
-        # their expansion.
-        try:
-            entry_argv = tuple(shlex.split(entry, posix=True))
-        except ValueError:
-            entry_argv = ()
-        if (
-            entry_argv[:1] in {("bash",), ("sh",)}
-            and len(entry_argv) >= 3
-            and entry_argv[1] in {"-c", "-lc"}
-        ):
-            commands.extend(shell_semantic_commands(entry_argv[2], include_function_bodies=False))
+        # Only the producer's literal shell payload is admitted as nested source.
+        for command in tuple(commands):
+            if (
+                len(command.source_words) >= 3
+                and command.argv[0] in {"bash", "sh"}
+                and command.argv[1] in {"-c", "-lc"}
+                and isinstance(body := command.source_words[2].get("literal"), str)
+            ):
+                commands.extend(shell_semantic_commands(body, include_function_bodies=False))
         for command in commands:
             argv = _effective_argv(command.argv)
             forbidden_reason: str | None = None
@@ -493,7 +496,12 @@ def _check_make_progress_and_frontend(
 ) -> list[Violation]:
     del root
     violations: list[Violation] = []
-    if "--no-print-directory" not in facts.variables.get("MAKEFLAGS", "").split():
+    if not any(
+        word.get("literal") == "--no-print-directory"
+        for row in facts.facts
+        if row["kind"] == "make-variable-declaration" and row["value"]["name"] == "MAKEFLAGS"
+        for word in row["value"].get("value_words") or []
+    ):
         violations.append(
             Violation(
                 makefile,
@@ -534,7 +542,9 @@ def _check_make_progress_and_frontend(
 def _check_operator_uv_environment(makefile: Path, facts: MakeSemanticFacts) -> list[Violation]:
     violations: list[Violation] = []
     commands = _all_make_commands(facts)
-    environment_names = set(facts.variables)
+    environment_names = {
+        row["value"]["name"] for row in facts.facts if row["kind"] == "make-variable-declaration"
+    }
     for command in commands:
         environment_names.update(command.env())
     if "UV_CONCURRENT_DOWNLOADS" in environment_names:

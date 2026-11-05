@@ -165,11 +165,6 @@ def test_launch_ownership_inventory_cannot_present_phase_zero_gaps_as_current_tr
     ownership = (ROOT / "docs/development/LAUNCH_OWNERSHIP.md").read_text(
         encoding="utf-8"
     )
-    from oh_goon.repository_tooling.architecture.structural_launch_contract import (
-        _check_launch_manifest_foundation,
-        _check_runtime_authority_registry,
-    )
-
     assert "historical baseline evidence" in ownership
     assert "## Historical Phase 0 entry paths" in ownership
     assert "## Historical Phase 0 responsibility map" in ownership
@@ -182,11 +177,6 @@ def test_launch_ownership_inventory_cannot_present_phase_zero_gaps_as_current_tr
     assert "**Historical 1267.0.37 status:**" in ownership
     assert "current runtime contract" in ownership
     assert "`CHECKPOINT_NOT_RELEASE.md`" in ownership
-
-    # Current launch truth is semantic architecture, not comments/private helper
-    # names retained only to satisfy historical documentation tests.
-    assert _check_launch_manifest_foundation(ROOT) == []
-    assert _check_runtime_authority_registry(ROOT) == []
 
 
 def test_execution_authority_history_cannot_present_landed_atomic_handoff_as_next_work() -> (

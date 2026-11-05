@@ -46,4 +46,17 @@ describe("dependencyReviewState", () => {
       coverage: "absent_from_lock",
     });
   });
+
+  it("keeps npm scopes and same-name ecosystem selections separate in URLs", () => {
+    const scoped = dependencyQuery({ packageName: "@scope/shared", ecosystem: "npm", coverage: "matching" });
+    expect(dependencyReviewStateFromHash(`#dependencies?${new URLSearchParams(scoped)}`)).toMatchObject({ packageName: "@scope/shared", ecosystem: "npm" });
+    const python = dependencyQuery({ packageName: "shared", ecosystem: "pypi" });
+    const npm = dependencyQuery({ packageName: "shared", ecosystem: "npm" });
+    expect(python).not.toEqual(npm);
+    expect(dependencyReviewStateFromHash("#dependencies?package=shared").ecosystem).toBeUndefined();
+  });
+
+  it("does not reinterpret an unsupported URL namespace as another package", () => {
+    expect(dependencyReviewStateFromHash("#dependencies?package=shared&ecosystem=unsupported").packageName).toBe("");
+  });
 });

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from dataclasses import replace
+
 import pytest
 
 from pathlib import Path
@@ -244,3 +247,52 @@ def test_external_developer_tool_comment_and_string_are_representation_only() ->
 def test_external_developer_tool_reexport_remains_rejected() -> None:
     text = "export { inspect as review } from 'agentsCookbook/runtime';\n"
     assert _runtime_file_leaks(Path("feature.ts"), "frontend", text) is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "export function load(fetch: (path: string) => unknown) { return fetch('/api'); }",
+        "export const load = (fetch: (path: string) => unknown) => fetch('/api');",
+        "import { fetch } from './provided'; export const load = () => fetch('/api');",
+    ),
+)
+def test_lexically_shadowed_fetch_does_not_become_browser_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    _write(tmp_path, "frontend/src/features/status.ts", source)
+
+    assert _local_only(tmp_path, monkeypatch) == []
+
+
+def test_missing_native_syntax_cannot_activate_local_typescript_interpretation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.architecture import (
+        typescript_semantics as source_owner,
+    )
+
+    _write(tmp_path, "frontend/src/features/status.ts", "fetch('/api');")
+    assert "raw fetch is owned only by app/api/httpTransport.ts" in _local_only(
+        tmp_path, monkeypatch
+    )
+    evidence = source_owner.project_typescript("fetch('/api');").evidence
+    unavailable = evidence.packet()
+    unavailable.update(
+        availability="unavailable",
+        completeness="unknown",
+        truncation="unknown",
+        facts=[],
+        reason="native-syntax-unavailable",
+    )
+    refused = replace(
+        evidence,
+        canonical_packet_json=json.dumps(unavailable),
+        source_bytes=None,
+    )
+    monkeypatch.setattr(
+        source_owner, "observe_source_bindings_text", lambda *_a, **_k: refused
+    )
+
+    with pytest.raises(ValueError, match="native-syntax-unavailable"):
+        _local_only(tmp_path, monkeypatch)

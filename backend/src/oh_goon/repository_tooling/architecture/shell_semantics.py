@@ -1,451 +1,205 @@
+"""Architecture projections of qualified native Make/shell source facts.
+
+All candidates describe authored source; native Make/Bash retains effective
+expansion, command binding, process environment and execution authority.
+"""
+
 from __future__ import annotations
 
-import re
-import shlex
 from dataclasses import dataclass
+from typing import Any, Literal
 
-_SHELL_VARIABLE = re.compile(
-    r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*|[0-9]+)(?:(:?)-([^}]*))?\}|([A-Za-z_][A-Za-z0-9_]*|[0-9]+))"
+from oh_goon.integrations.hashmarks import (
+    HashmarksSourceEvidence,
+    observe_make_shell_declarations_text,
 )
-_SHELL_ARRAY = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\[@\]\}$")
-_MAKE_VARIABLE = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_.-]*)\)|\$\{([A-Za-z_][A-Za-z0-9_.-]*)\}")
 
 
 @dataclass(frozen=True, slots=True)
 class ShellCommand:
-    """One bounded executable shell command after static alias expansion."""
+    """One source-word observation, never an effective executable argv.
+
+    ``argv`` retains native literal/conditional words. An unresolved word keeps
+    its exact authored expression; ``source_words`` distinguishes it from a
+    literal, without inventing a runtime value. Complete evidence remains with
+    the enclosing source observation.
+    """
 
     argv: tuple[str, ...]
-    environment: tuple[tuple[str, str], ...]
+    environment: tuple[tuple[str, str | None], ...]
     line_number: int
-    function: str | None = None
+    function: str | None
+    source_words: tuple[dict[str, Any], ...]
+    source_fact: dict[str, Any]
+    binding_observation: dict[str, Any]
+    invocation: dict[str, Any] | None = None
 
-    def env(self) -> dict[str, str]:
+    def env(self) -> dict[str, str | None]:
         return dict(self.environment)
 
 
 @dataclass(frozen=True, slots=True)
+class ShellSourceFacts:
+    evidence: HashmarksSourceEvidence
+    facts: tuple[dict[str, Any], ...]
+    commands: tuple[ShellCommand, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class MakeSemanticFacts:
-    """Static Make projection used by architecture ownership checks.
+    """Declared targets/variables and conditional source commands, without expansion."""
 
-    Comments, whitespace, private variable names, and simple variable indirection are
-    representation details.  The projection retains target names, resolved recipes,
-    and executable shell argv/environment facts only.
-    """
-
+    evidence: HashmarksSourceEvidence
+    facts: tuple[dict[str, Any], ...]
     variables: dict[str, str]
-    raw_variables: dict[str, str]
     variable_operators: dict[str, str]
-    targets: dict[str, tuple[str, ...]]
-    raw_targets: dict[str, tuple[str, ...]]
+    targets: frozenset[str]
     target_commands: dict[str, tuple[ShellCommand, ...]]
 
 
-def strip_shell_comment(line: str) -> str:
-    """Remove an unquoted shell comment without interpreting shell execution."""
-
-    quote: str | None = None
-    escaped = False
-    for index, char in enumerate(line):
-        if escaped:
-            escaped = False
-            continue
-        if char == "\\" and quote != "'":
-            escaped = True
-            continue
-        if quote is not None:
-            if char == quote:
-                quote = None
-            continue
-        if char in {"'", '"'}:
-            quote = char
-            continue
-        if char == "#" and (index == 0 or line[index - 1].isspace()):
-            return line[:index]
-    return line
-
-
-def join_shell_lines(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    joined: list[tuple[int, str]] = []
-    pending = ""
-    pending_line = 0
-    for line_number, raw in lines:
-        line = strip_shell_comment(raw).rstrip()
-        if not line and not pending:
-            continue
-        if not pending:
-            pending_line = line_number
-        if line.endswith("\\"):
-            pending += line[:-1].rstrip() + " "
-            continue
-        pending += line
-        if pending.strip():
-            joined.append((pending_line, pending.strip()))
-        pending = ""
-    if pending.strip():
-        joined.append((pending_line, pending.strip()))
-    return joined
+def _source_facts(
+    text: str, *, path: str, language: Literal["make", "shell"]
+) -> tuple[HashmarksSourceEvidence, tuple[dict[str, Any], ...]]:
+    evidence = observe_make_shell_declarations_text(
+        text, path=path, language=language, layout="file"
+    )
+    packet = evidence.packet()
+    providers = packet.get("providers") or []
+    groups = packet.get("declarations", {}).get("groups") or []
+    if (
+        packet.get("schema") != "hashmarks.repository-declaration-discovery.v1"
+        or not packet.get("observation_identity")
+        or len(providers) != 1
+        or providers[0].get("state") != "collected"
+        or providers[0].get("provenance", {}).get("missing_selected_paths")
+        or len(groups) != 1
+        or groups[0].get("concept", {}).get("kind") != "make-shell-file-observation"
+    ):
+        raise ValueError("Architecture Make/shell source observation is unavailable")
+    declarations = groups[0].get("declarations") or []
+    if len(declarations) != 1:
+        raise ValueError("Architecture Make/shell source observation is incomplete")
+    value = declarations[0].get("value") or {}
+    if (
+        value.get("facts_completeness") != "complete-supported-subset"
+        or value.get("facts_truncation") != "not-truncated"
+        or not isinstance(value.get("facts"), list)
+        or value.get("observed_fact_count") != len(value["facts"])
+    ):
+        raise ValueError("Architecture Make/shell source facts are incomplete")
+    return evidence, tuple(value["facts"])
 
 
-def shell_functions(text: str) -> tuple[dict[str, list[tuple[int, str]]], list[tuple[int, str]]]:
-    functions: dict[str, list[tuple[int, str]]] = {}
-    top_level: list[tuple[int, str]] = []
-    current_name: str | None = None
-    current_body: list[tuple[int, str]] = []
-    depth = 0
-    start = re.compile(r"^(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{\s*$")
-    for line_number, raw in enumerate(text.splitlines(), start=1):
-        stripped = strip_shell_comment(raw).strip()
-        if current_name is None:
-            match = start.match(stripped)
-            if match is not None:
-                current_name = match.group(1)
-                current_body = []
-                depth = 1
-                continue
-            top_level.append((line_number, raw))
-            continue
-        # Keep nested braces inside a function body.  This is intentionally bounded
-        # and sufficient for shell helpers used by repository tooling.
-        opens = stripped.count("{")
-        closes = stripped.count("}")
-        if stripped == "}" and depth == 1:
-            functions[current_name] = join_shell_lines(current_body)
-            current_name = None
-            current_body = []
-            depth = 0
-            continue
-        current_body.append((line_number, raw))
-        depth += opens - closes
-    if current_name is not None:
-        functions[current_name] = join_shell_lines(current_body)
-    return functions, join_shell_lines(top_level)
+def _authored_words(value: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    if isinstance(value.get("authored_words"), list):
+        return tuple(value["authored_words"])
+    return tuple(
+        {"state": "literal-source-candidate", "literal": word} for word in value.get("words", [])
+    )
 
 
-def _resolve_shell_value(value: str, scalars: dict[str, str]) -> str:
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        value = value[1:-1]
-
-    def replacement(match: re.Match[str]) -> str:
-        name = match.group(1) or match.group(4)
-        if name in scalars:
-            value = scalars[name]
-            if match.group(2) == ":" and not value:
-                return match.group(3) or ""
-            return value
-        if match.group(2) is not None:
-            return match.group(3) or ""
-        return f"<VAR:{name}>"
-
-    previous: str | None = None
-    for _ in range(12):
-        if value == previous:
-            break
-        previous = value
-        value = _SHELL_VARIABLE.sub(replacement, value)
-    return value
+def _word_spelling(word: dict[str, Any]) -> str:
+    literal = word.get("literal")
+    if isinstance(literal, str):
+        return literal
+    return str(word.get("source_word", {}).get("expression", ""))
 
 
-def _parse_shell_words(command: str) -> list[str]:
-    try:
-        return shlex.split(command, posix=True)
-    except ValueError:
-        return command.split()
+def _literal_environment(value: dict[str, Any]) -> dict[str, str | None]:
+    result: dict[str, str | None] = {}
+    for exported in value.get("authored_environment_bindings", []):
+        words = _authored_words(exported.get("binding", {}))
+        result[exported["name"]] = words[0].get("literal") if len(words) == 1 else None
+    return result
 
 
-def _split_shell_statements(line: str) -> list[str]:
-    """Split active shell statements on unquoted control separators."""
-
-    statements: list[str] = []
-    current: list[str] = []
-    quote: str | None = None
-    escaped = False
-    index = 0
-    while index < len(line):
-        char = line[index]
-        if escaped:
-            current.append(char)
-            escaped = False
-            index += 1
-            continue
-        if char == "\\" and quote != "'":
-            current.append(char)
-            escaped = True
-            index += 1
-            continue
-        if quote is not None:
-            current.append(char)
-            if char == quote:
-                quote = None
-            index += 1
-            continue
-        if char in {"'", '"'}:
-            quote = char
-            current.append(char)
-            index += 1
-            continue
-        pair = line[index : index + 2]
-        if pair in {"&&", "||"}:
-            if "".join(current).strip():
-                statements.append("".join(current).strip())
-            current = []
-            index += 2
-            continue
-        if char == ";":
-            if "".join(current).strip():
-                statements.append("".join(current).strip())
-            current = []
-            index += 1
-            continue
-        current.append(char)
-        index += 1
-    if "".join(current).strip():
-        statements.append("".join(current).strip())
-    return statements
-
-
-def _trim_shell_control(statement: str) -> str:
-    candidate = statement.strip()
-    # Shell control keywords introduce executable commands but are not themselves
-    # the command authority being inspected.
-    for prefix in ("if ", "elif ", "then ", "while ", "until ", "do "):
-        if candidate.startswith(prefix):
-            candidate = candidate[len(prefix) :].strip()
-            break
-    if candidate in {"then", "do", "done", "fi", "esac", "else", "{", "}"}:
-        return ""
-    if candidate.startswith("else "):
-        candidate = candidate[5:].strip()
-    # case labels and variable-only loop declarations are control syntax.
-    if re.match(r"^(?:case\b|for\s+[A-Za-z_][A-Za-z0-9_]*\s+in\b)", candidate):
-        return ""
-    if re.match(r"^[^()]+\)\s*$", candidate):
-        return ""
-    return candidate
-
-
-def _apply_shell_assignment(
-    statement: str,
-    scalars: dict[str, str],
-    arrays: dict[str, tuple[str, ...]],
-    exports: set[str],
-) -> bool:
-    candidate = statement.strip()
-    exported = False
-    if candidate.startswith("export "):
-        exported = True
-        candidate = candidate[7:].strip()
-    elif candidate.startswith("local "):
-        candidate = candidate[6:].strip()
-    elif candidate.startswith("readonly "):
-        candidate = candidate[9:].strip()
-
-    if exported and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", candidate):
-        exports.add(candidate)
-        return True
-
-    array_match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=\((.*)\)", candidate)
-    if array_match is not None:
-        name, body = array_match.groups()
-        arrays[name] = tuple(
-            _resolve_shell_value(word, scalars) for word in _parse_shell_words(body)
+def _command(
+    row: dict[str, Any], observation: dict[str, Any], *, invocation: dict[str, Any] | None = None
+) -> ShellCommand:
+    value = row["value"]
+    words = _authored_words(observation)
+    if not words:
+        words = tuple(
+            {"state": "literal-source-candidate", "literal": word["literal"]}
+            if word.get("state") == "literal"
+            else {"state": "unresolved-source-expression", "source_word": word}
+            for word in value["words"]
         )
-        if exported:
-            exports.add(name)
-        return True
+    environment = _literal_environment(observation)
+    for source in (value, observation):
+        for assignment in source.get("command_local_environment", []):
+            environment[assignment["name"]] = assignment["value_expression"].get("literal")
+    functions = [part for part in value["context"] if part.startswith("function:")]
+    return ShellCommand(
+        tuple(_word_spelling(word) for word in words),
+        tuple(sorted(environment.items())),
+        row["start_line"],
+        functions[-1].split(":")[1] if functions else None,
+        words,
+        row,
+        observation,
+        invocation,
+    )
 
-    scalar_match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", candidate)
-    if scalar_match is None:
-        return False
-    # Leading NAME=value followed by a command is command-local environment, not
-    # a persistent assignment.
-    if len(_parse_shell_words(candidate)) != 1:
-        return False
-    name, raw_value = scalar_match.groups()
-    scalars[name] = _resolve_shell_value(raw_value, scalars)
-    if exported:
-        exports.add(name)
-    return True
+
+def _commands(
+    facts: tuple[dict[str, Any], ...], *, include_function_bodies: bool
+) -> tuple[ShellCommand, ...]:
+    commands: list[ShellCommand] = []
+    for row in facts:
+        if row["kind"] != "shell-command-expression":
+            continue
+        value = row["value"]
+        in_function = any(part.startswith("function:") for part in value["context"])
+        if include_function_bodies or not in_function:
+            commands.append(_command(row, value.get("static_binding_observation", {})))
+        for invocation in value.get("invocation_binding_observation", {}).get("candidates", []):
+            caller_context = invocation["invocation_site"]["context"]
+            if include_function_bodies or not any(
+                part.startswith("function:") for part in caller_context
+            ):
+                commands.append(_command(row, invocation["observation"], invocation=invocation))
+    return tuple(commands)
 
 
-def _expand_shell_command(
-    statement: str,
-    scalars: dict[str, str],
-    arrays: dict[str, tuple[str, ...]],
-) -> tuple[list[str], dict[str, str]]:
-    statement = statement.lstrip().lstrip("@-+").lstrip()
-    words = _parse_shell_words(statement)
-    expanded: list[str] = []
-    for word in words:
-        array_match = _SHELL_ARRAY.fullmatch(word)
-        if array_match is not None:
-            expanded.extend(arrays.get(array_match.group(1), (word,)))
-        else:
-            expanded.append(_resolve_shell_value(word, scalars))
-    environment: dict[str, str] = {}
-    while expanded and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", expanded[0]):
-        name, value = expanded.pop(0).split("=", 1)
-        environment[name] = value
-    return expanded, environment
+def shell_source_facts(
+    text: str, *, path: str = "source.sh", include_function_bodies: bool = True
+) -> ShellSourceFacts:
+    evidence, facts = _source_facts(text, path=path, language="shell")
+    return ShellSourceFacts(
+        evidence, facts, _commands(facts, include_function_bodies=include_function_bodies)
+    )
 
 
 def shell_semantic_commands(
     text: str, *, include_function_bodies: bool = True
 ) -> tuple[ShellCommand, ...]:
-    """Project executable shell commands with bounded static alias resolution.
-
-    The projection intentionally ignores comments and function/private variable
-    spelling.  It resolves simple scalar/array aliases and command-local environment
-    assignments, which is enough to make architecture checks representation-invariant
-    without trying to become a shell interpreter.
-    """
-
-    functions, top_level = shell_functions(text)
-    commands: list[ShellCommand] = []
-
-    def scan(
-        lines: list[tuple[int, str]],
-        function: str | None,
-        scalars: dict[str, str] | None = None,
-        arrays: dict[str, tuple[str, ...]] | None = None,
-        exports: set[str] | None = None,
-        stack: tuple[str, ...] = (),
-    ) -> tuple[dict[str, str], dict[str, tuple[str, ...]], set[str]]:
-        local_scalars = {} if scalars is None else scalars
-        local_arrays = {} if arrays is None else arrays
-        local_exports = set() if exports is None else exports
-        for line_number, line in lines:
-            for raw_statement in _split_shell_statements(line):
-                statement = _trim_shell_control(raw_statement)
-                if not statement:
-                    continue
-                if _apply_shell_assignment(statement, local_scalars, local_arrays, local_exports):
-                    continue
-                argv, local_environment = _expand_shell_command(
-                    statement, local_scalars, local_arrays
-                )
-                if not argv:
-                    continue
-                command_name = argv[0]
-                if command_name in functions and command_name not in stack:
-                    nested_scalars = dict(local_scalars)
-                    nested_arrays = dict(local_arrays)
-                    nested_exports = set(local_exports)
-                    for index, value in enumerate(argv[1:], start=1):
-                        nested_scalars[str(index)] = value
-                    scan(
-                        functions[command_name],
-                        command_name,
-                        nested_scalars,
-                        nested_arrays,
-                        nested_exports,
-                        (*stack, command_name),
-                    )
-                    continue
-                environment = {
-                    name: local_scalars.get(name, f"<VAR:{name}>") for name in local_exports
-                }
-                environment.update(local_environment)
-                commands.append(
-                    ShellCommand(
-                        argv=tuple(argv),
-                        environment=tuple(sorted(environment.items())),
-                        line_number=line_number,
-                        function=function,
-                    )
-                )
-        return local_scalars, local_arrays, local_exports
-
-    globals_scalars, globals_arrays, globals_exports = scan(top_level, None)
-    if include_function_bodies:
-        for name, lines in functions.items():
-            scan(
-                lines,
-                name,
-                dict(globals_scalars),
-                dict(globals_arrays),
-                set(globals_exports),
-                (name,),
-            )
-    return tuple(commands)
-
-
-def _expand_make_value(value: str, variables: dict[str, str]) -> str:
-    def replace(match: re.Match[str]) -> str:
-        name = match.group(1) or match.group(2)
-        return variables.get(name, match.group(0))
-
-    previous: str | None = None
-    for _ in range(20):
-        if value == previous:
-            break
-        previous = value
-        value = _MAKE_VARIABLE.sub(replace, value)
-    return value
+    return shell_source_facts(text, include_function_bodies=include_function_bodies).commands
 
 
 def make_semantic_facts(text: str) -> MakeSemanticFacts:
-    """Parse active Make variables/recipes and resolve simple variable aliases."""
-
-    raw_variables: dict[str, str] = {}
-    variable_operators: dict[str, str] = {}
-    raw_targets: dict[str, list[str]] = {}
-    current_target: str | None = None
-    for raw_line in text.splitlines():
-        line = strip_shell_comment(raw_line).rstrip()
-        if not line.strip():
-            continue
-        if raw_line.startswith("\t"):
-            if current_target is not None:
-                raw_targets.setdefault(current_target, []).append(raw_line[1:])
-            continue
-        current_target = None
-        match = re.match(r"^([A-Za-z0-9_.-]+)\s*(\?=|:=|\+=|=)\s*(.*)$", line)
-        if match is not None:
-            name, operator, value = match.groups()
-            if operator == "+=":
-                old = raw_variables.get(name, "")
-                raw_variables[name] = (old + " " + value.strip()).strip()
-                variable_operators[name] = operator
-            elif operator == "?=":
-                if name not in raw_variables:
-                    raw_variables[name] = value.strip()
-                    variable_operators[name] = operator
-            else:
-                raw_variables[name] = value.strip()
-                variable_operators[name] = operator
-            continue
-        target_match = re.match(r"^([A-Za-z0-9_.-]+)\s*:(?:\s.*)?$", line)
-        if target_match is not None and not target_match.group(1).startswith("."):
-            current_target = target_match.group(1)
-            raw_targets.setdefault(current_target, [])
-
-    variables = dict(raw_variables)
-    for _ in range(20):
-        changed = False
-        for name, value in list(variables.items()):
-            expanded = _expand_make_value(value, variables)
-            if expanded != value:
-                variables[name] = expanded
-                changed = True
-        if not changed:
-            break
-
-    targets: dict[str, tuple[str, ...]] = {}
-    target_commands: dict[str, tuple[ShellCommand, ...]] = {}
-    for name, raw_lines in raw_targets.items():
-        joined = join_shell_lines(list(enumerate(raw_lines, start=1)))
-        resolved_lines = tuple(_expand_make_value(line, variables) for _, line in joined)
-        targets[name] = resolved_lines
-        target_commands[name] = shell_semantic_commands(
-            "\n".join(resolved_lines), include_function_bodies=False
-        )
+    evidence, facts = _source_facts(text, path="Makefile", language="make")
+    definitions: dict[str, list[dict[str, Any]]] = {}
+    targets: set[str] = set()
+    for row in facts:
+        value = row["value"]
+        if row["kind"] == "make-variable-declaration":
+            definitions.setdefault(value["name"], []).append(value)
+        elif row["kind"] == "make-target-declaration":
+            targets.update(value["targets"])
+    commands: dict[str, list[ShellCommand]] = {name: [] for name in targets}
+    for command in _commands(facts, include_function_bodies=False):
+        for name in command.source_fact["value"].get("make_targets", []):
+            commands[name].append(command)
     return MakeSemanticFacts(
-        variables=variables,
-        raw_variables=dict(raw_variables),
-        variable_operators=variable_operators,
-        targets=targets,
-        raw_targets={name: tuple(lines) for name, lines in raw_targets.items()},
-        target_commands=target_commands,
+        evidence,
+        facts,
+        {name: rows[0]["value_expression"] for name, rows in definitions.items() if len(rows) == 1},
+        {
+            name: rows[0]["assignment_operator"]
+            for name, rows in definitions.items()
+            if len(rows) == 1
+        },
+        frozenset(targets),
+        {name: tuple(rows) for name, rows in commands.items()},
     )

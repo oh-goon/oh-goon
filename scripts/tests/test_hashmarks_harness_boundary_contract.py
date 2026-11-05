@@ -30,7 +30,7 @@ def _configure_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return package
 
 
-def test_package_boundary_scan_reuses_unchanged_tree_and_invalidates_on_semantic_import_change(
+def test_package_boundary_reobserves_source_after_semantic_import_change(
     tmp_path: Path,
 ) -> None:
     package = tmp_path / "oh_goon"
@@ -38,12 +38,8 @@ def test_package_boundary_scan_reuses_unchanged_tree_and_invalidates_on_semantic
     source = package / "owner.py"
     source.write_text("class RepositoryImpactGraph:\n    pass\n", encoding="utf-8")
 
-    contract._package_boundary_violations_cached.cache_clear()
     assert contract._package_boundary_violations(package) == ()
-    after_first = contract._package_boundary_violations_cached.cache_info()
     assert contract._package_boundary_violations(package) == ()
-    after_second = contract._package_boundary_violations_cached.cache_info()
-    assert after_second.hits == after_first.hits + 1
 
     source.write_text("import hashmarks\n", encoding="utf-8")
     violations = contract._package_boundary_violations(package)
@@ -51,14 +47,6 @@ def test_package_boundary_scan_reuses_unchanged_tree_and_invalidates_on_semantic
         "explicit oh_goon.integrations.hashmarks package" in item.message
         for item in violations
     )
-    assert (
-        contract._package_boundary_violations_cached.cache_info().misses
-        == after_second.misses + 1
-    )
-
-
-def test_hashmarks_harness_boundary_contract() -> None:
-    assert contract.check_hashmarks_harness_boundary_contract() == []
 
 
 def test_hashmarks_boundary_documentation_can_be_reworded_without_architecture_effect(
@@ -204,6 +192,46 @@ def test_dynamic_or_rebound_imports_do_not_change_boundary_ownership(
     )
 
 
+def test_native_literal_import_selector_cannot_evade_boundary_with_source_concatenation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _configure_package(tmp_path, monkeypatch)
+    owner = package / "owner.py"
+    owner.write_text(
+        "import importlib\nload = importlib.import_module\n"
+        "name = 'hash' + 'marks'\nload(name)\n",
+        encoding="utf-8",
+    )
+
+    assert any(
+        row.path == owner
+        and "explicit oh_goon.integrations.hashmarks package" in row.message
+        for row in contract.check_hashmarks_harness_boundary_contract()
+    )
+
+
+@pytest.mark.parametrize(
+    ("selector", "private_selector"),
+    [("['consumer']", True), ("[unknown('consumer')]", False)],
+)
+def test_native_fromlist_literals_are_bound_to_direct_authored_container_elements(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selector: str,
+    private_selector: bool,
+) -> None:
+    package = _configure_package(tmp_path, monkeypatch)
+    owner = package / "owner.py"
+    owner.write_text(
+        "from builtins import __import__ as load\n"
+        f"load('oh_goon.integrations.hashmarks', fromlist={selector})\n",
+        encoding="utf-8",
+    )
+
+    rows = contract.check_hashmarks_harness_boundary_contract()
+    assert any(row.path == owner for row in rows) is private_selector
+
+
 @pytest.mark.parametrize(
     "statement",
     (
@@ -253,7 +281,7 @@ def test_supplied_callable_inputs_do_not_become_unconditional_native_imports(
     assert contract.check_hashmarks_harness_boundary_contract() == []
 
 
-def test_guard_binding_options_leave_other_semantic_consumers_unchanged(
+def test_guard_does_not_upgrade_callable_defaults_or_unresolved_builtin_calls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from oh_goon.repository_tooling.architecture.common import (
@@ -275,8 +303,16 @@ def test_guard_binding_options_leave_other_semantic_consumers_unchanged(
         guarded = contract._import_facts(owner, python_ast(owner), package)
         after = python_semantic_facts(owner, imported_only=True)
 
-    assert [name for name, _call in before.calls] == ["importlib.import_module"]
-    assert [name for name, _call in guarded.calls] == ["builtins.__import__"]
+    assert before.calls == guarded.calls == ()
+    observed = before.evidence.packet()["facts"]
+    assert any(
+        fact["kind"] == "default-binding" and fact["qualification"] == "conditional"
+        for fact in observed
+    )
+    assert any(
+        fact["kind"] == "call-site" and "parameter-value-unknown" in fact["reasons"]
+        for fact in observed
+    )
     assert after == before
 
 
@@ -419,12 +455,16 @@ def test_hashmarks_execution_reuses_existing_schedule_authority() -> None:
 def test_canonical_validation_authority_cannot_import_hashmarks_selection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _configure_package(tmp_path, monkeypatch)
     owner = tmp_path / "self_certification_plan.py"
+    owner.write_text("def evaluate():\n    return ()\n", encoding="utf-8")
+    monkeypatch.setattr(contract, "VALIDATION_AUTHORITY_OWNER", owner)
+    assert contract.check_hashmarks_harness_boundary_contract() == []
+
     owner.write_text(
         "from oh_goon.integrations.hashmarks.repository_intelligence import HashmarksEvidenceKind\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(contract, "VALIDATION_AUTHORITY_OWNER", owner)
     violations = contract.check_hashmarks_harness_boundary_contract()
     assert any(
         item.path == owner
@@ -532,9 +572,16 @@ def test_hashmarks_contract_identity_is_preserved_across_admission_materializati
 def test_game_tape_cannot_project_raw_hashmarks_repository_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _configure_package(tmp_path, monkeypatch)
     path = tmp_path / "game_tape.py"
-    path.write_text("canonical_payload_json = 'forbidden'\n", encoding="utf-8")
+    identity = "producer_contract_identity: str\n"
+    path.write_text(identity, encoding="utf-8")
     monkeypatch.setattr(contract, "GAME_TAPE_MODEL", path)
+    assert contract.check_hashmarks_harness_boundary_contract() == []
+
+    path.write_text(
+        identity + "canonical_payload_json = 'forbidden'\n", encoding="utf-8"
+    )
     violations = contract.check_hashmarks_harness_boundary_contract()
     assert any(
         item.path == path

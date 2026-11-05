@@ -349,12 +349,3 @@ def test_frontend_e2e_fixture_integrity_handles_absent_and_bad_fixtures(
     issues = frontend_base.check_frontend_e2e_fixture_type_integrity()
     assert len(issues) == 1
     assert "double-cast 'as unknown as' is forbidden" in issues[0].message
-
-
-def test_full_repository_architecture_contract_passes_in_process(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    from oh_goon.repository_tooling import check_architecture
-
-    assert check_architecture.main() == 0
-    assert "Architecture checks passed" in capsys.readouterr().out

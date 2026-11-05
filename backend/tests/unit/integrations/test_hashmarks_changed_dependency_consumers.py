@@ -130,14 +130,21 @@ def test_dependency_nominations_keep_actual_source_owner_after_reopen(
     for packet in (cold, reopened):
         observation = packet["observations"][0]
         assert observation["state"] == "LINKED", packet.get("dependency_changes")
-        assert observation["edit_candidates"] == [_SOURCE_PATH]
         assert observation["nominations"][0]["nomination"]["verification_target"] == {
             "path": "backend/tests/test_feature.py",
             "test_symbol": None,
         }
         chain = packet["dependency_changes"]["chains"][0]
         assert chain["source_path"] == _SOURCE_PATH
-        assert _LOCK_PATH not in chain["ownership"]["edit_candidates"]
+        assert chain["changed_verification"]["changed_paths"] == [_SOURCE_PATH]
+        assert chain["changed_verification"]["negative_evidence_admissible"] is False
+        projected = chain["nomination"]
+        assert "context" not in projected
+        assert projected["relationships"]
+        assert all(
+            relation in chain["changed_verification"]["changes"][0]["relationships"]
+            for relation in projected["relationships"]
+        )
         assert packet["dependency_changes"]["consumer_scope"]["completeness"] == "incomplete"
     assert reopened == cold
 
@@ -163,8 +170,10 @@ def test_dependency_source_preparation_reuses_one_inventory_before_composite_rea
         assert not native.index.is_current(_SOURCE_PATH)
         inventory = native.files.iter_files
         synchronize = native.index.sync
+        observe = native.reads.observe
         inventory_depths: list[int] = []
         prepared: list[tuple[int, tuple[str, ...]]] = []
+        observed_current: list[bool] = []
 
         def track_inventory(prefix: str = "") -> Iterator[Any]:
             if prefix == "backend/src":
@@ -176,14 +185,32 @@ def test_dependency_source_preparation_reuses_one_inventory_before_composite_rea
                 prepared.append((native.reads.depth, tuple(str(path) for path in paths)))
             return synchronize(paths, **options)
 
+        def require_prepared_read(*arguments: Any, **options: Any) -> Any:
+            observed_current.append(native.index.is_current(_SOURCE_PATH))
+            assert observed_current[-1]
+            return observe(*arguments, **options)
+
         monkeypatch.setattr(native.files, "iter_files", track_inventory)
         monkeypatch.setattr(native.index, "sync", track_synchronization)
+        monkeypatch.setattr(native.reads, "observe", require_prepared_read)
         refreshed = nominate_changed_verification(root, (_LOCK_PATH,), dependency_base=base)
         assert refreshed["observations"][0]["state"] == "LINKED", refreshed["dependency_changes"]
         changes = refreshed["dependency_changes"]
         assert inventory_depths == [0]
-        assert prepared == [(0, tuple(changes["consumer_scope"]["paths"]))]
+        assert all(depth == 0 for depth, _paths in prepared)
+        assert observed_current and all(observed_current)
         assert native.index.is_current(_SOURCE_PATH)
+        before = {
+            member["path"]: member["member_revision"]
+            for packet in cold["dependency_changes"]["consumer_packets"]
+            for member in packet["source_scope"]["members"]
+        }
+        after = {
+            member["path"]: member["member_revision"]
+            for packet in changes["consumer_packets"]
+            for member in packet["source_scope"]["members"]
+        }
+        assert before[_SOURCE_PATH] != after[_SOURCE_PATH]
     assert changes["consumer_scope"]["completeness"] == "incomplete"
     assert changes["consumer_scope"]["negative_evidence"] == "not-admissible"
     assert all(

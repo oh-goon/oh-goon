@@ -210,7 +210,7 @@ from oh_goon.core.models.provenance import MAX_SOURCE_LOCATION_LENGTH
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.vocabulary.result_semantics import FailureImpact
 
-FLEET_PLAN_CONTRACT_VERSION: Literal[47] = 47
+FLEET_PLAN_CONTRACT_VERSION: Literal[48] = 48
 _NATIVE_AGENT_ADAPTER = TypeAdapter(ResolvedNativeAgent)
 DEFAULT_PRE_COMMIT_REQUIREMENT = "pre-commit==4.6.2"
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 3600.0
@@ -863,7 +863,7 @@ class ResolvedImport(ImmutableModel):
 class ResolvedFleetPlan(ImmutableModel):
     """Fully bound immutable execution plan.  Runtime never re-reads YAML/TOML."""
 
-    contract_version: Literal[47] = FLEET_PLAN_CONTRACT_VERSION
+    contract_version: Literal[48] = FLEET_PLAN_CONTRACT_VERSION
     _project_archives: dict[str, bytes] = PrivateAttr(default_factory=dict)
 
     @field_validator("contract_version", mode="before")

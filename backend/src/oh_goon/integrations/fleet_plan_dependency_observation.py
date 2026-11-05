@@ -10,7 +10,9 @@ from oh_goon.integrations.hashmarks import observe_locked_dependencies
 def execute_dependency_inventory(
     repository: Path, step: ResolvedDependencyInventoryStep
 ) -> StepOutcome:
-    snapshot = observe_locked_dependencies(repository)
+    snapshot = observe_locked_dependencies(
+        repository, ecosystem=step.ecosystem, lock_path=step.lock_path
+    )
     if (
         snapshot.evidence.availability != "available"
         or snapshot.evidence.freshness != "current"

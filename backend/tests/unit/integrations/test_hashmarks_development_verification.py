@@ -55,19 +55,23 @@ def test_nested_python_qualified_nominations_survive_closed_map_reopen(
         assert [row["changed_path"] for row in packet["observations"]] == list(changed)
         linked, changed_test = packet["observations"]
         assert linked["state"] == "LINKED"
-        assert linked["edit_candidates"] == [changed[0]]
+        assert linked["changed_set"]["changed_paths"] == [changed[0]]
         assert linked["qualification"]["qualified_identity_ambiguous"] is False
-        assert linked["qualification"]["authority"] == (
-            "bounded-index-evidence-not-verification-execution"
-        )
+        assert linked["changed_set"]["authority"] == "repository-evidence-only"
+        assert linked["qualification"]["negative_evidence_admissible"] is False
         assert changed_test["state"] == "CHANGED_TEST"
-        assert [row["relationship"] for row in linked["nominations"]] == ["direct-reference"]
+        assert [
+            row["relation_kind"] for row in linked["changed_set"]["changes"][0]["relationships"]
+        ] == ["direct-reference"]
         for observation in (linked, changed_test):
             nominations = observation["nominations"]
             # Equal symbol names in sample.other must not add its verifier, and
             # file-level evidence must not invent collected pytest selectors.
             assert [row["nomination"]["verification_target"] for row in nominations] == [target]
             nomination = nominations[0]["nomination"]
+            assert "context" not in nominations[0] and "relationships" not in nominations[0]
+            native_target = observation["changed_set"]["targets"][0]
+            assert native_target["nomination"] == nomination and native_target["context"]
             assert nominations[0]["workspace_prefix"] == ""
             assert nomination["available"] is True
             assert nomination["scope"] == "test-file"
@@ -106,7 +110,10 @@ def test_nested_manifest_change_rebinds_verifier_to_current_source_root(
     assert after[original]["nominations"] == []
     assert after[alternate]["state"] == "LINKED"
     nominations = after[alternate]["nominations"]
-    assert [row["relationship"] for row in nominations] == ["direct-reference"]
+    assert [
+        row["relation_kind"]
+        for row in after[alternate]["changed_set"]["changes"][0]["relationships"]
+    ] == ["direct-reference"]
     assert [row["nomination"]["verification_target"] for row in nominations] == [
         {"path": "backend/tests/test_feature.py", "test_symbol": None}
     ]
@@ -114,9 +121,7 @@ def test_nested_manifest_change_rebinds_verifier_to_current_source_root(
         nominations[0]["nomination"]["source_member_revision"]
         == before[original]["nominations"][0]["nomination"]["source_member_revision"]
     )
-    assert after[alternate]["qualification"]["authority"] == (
-        "bounded-index-evidence-not-verification-execution"
-    )
+    assert after[alternate]["changed_set"]["authority"] == "repository-evidence-only"
 
 
 def test_public_nominations_keep_native_bounded_verifiers_and_residual_qualifications(
@@ -129,41 +134,58 @@ def test_public_nominations_keep_native_bounded_verifiers_and_residual_qualifica
             encoding="utf-8",
         )
     with CodeMap(nested_repository) as native:
-        native_primary = native.tasks.verification_ownership_graph(
-            f"Verify {source}", limit=20, candidate_limit=1
-        )
-        native_candidates = native.tasks.verification_relevance(
-            f"Verify {source}", limit=20, candidate_limit=16
-        )
-        native_graph = native.tasks.verification_ownership_graph(
-            f"Verify {source}", limit=20, candidate_limit=2
-        )
-    native_owners = cast(list[dict[str, Any]], native_graph["verification_owners"])
-    assert len(native_owners) == 2
-    primary = cast(list[dict[str, Any]], native_primary["verification_owners"])[0]
-    first_reference = native_candidates["candidates"][0]
-    assert {primary["path"], first_reference["path"]} <= {row["path"] for row in native_owners}
-    for row in native_owners:
-        assert row["covers_edit_candidates"] == [source]
-        assert row["coverage_evidence"] in {"direct-reference", "bounded-indirect-reference"}
-    qualification = cast(dict[str, Any], native_graph["verification_qualification"])
-    assert qualification["candidate_count"] > len(native_owners)
-
+        expected = cast(dict[str, Any], native.verification.changed_set((source,), limit=2))
+    assert expected["truncated"] is True
+    assert expected["changes"][0]["consumer_scope"]["omitted_reference_candidates"] > 0
     packet = nominate_changed_verification(nested_repository, (source,))
-
     linked = packet["observations"][0]
     assert linked["state"] == "LINKED"
-    assert linked["edit_candidates"] == native_graph["edit_candidates"]
-    assert linked["qualification"] == qualification
+    assert linked["changed_set"] == expected
+    assert linked["qualification"]["completeness"] == "incomplete"
+    assert linked["qualification"]["negative_evidence_admissible"] is False
     assert packet["owner_coverage"] == "not-claimed"
-    assert len(linked["nominations"]) == 2
-    assert [
-        (row["nomination"]["verification_target"]["path"], row["relationship"])
-        for row in linked["nominations"]
-    ] == [(row["path"], row["coverage_evidence"]) for row in native_owners]
+    assert [row["nomination"] for row in linked["nominations"]] == [
+        row["nomination"] for row in expected["targets"]
+    ]
     assert all(
         row["nomination"]["execution_authority"] == "external" for row in linked["nominations"]
     )
+
+
+def test_verification_support_keeps_its_needed_relationship_view_and_intact_packet(
+    nested_repository: Path,
+) -> None:
+    manifest = nested_repository / "backend/pyproject.toml"
+    manifest.write_text(manifest.read_text() + 'pythonpath = ["."]\n')
+    source = "backend/tests/factories/support.py"
+    member = nested_repository / source
+    member.parent.mkdir(parents=True)
+    member.write_text("def build_value():\n    return 42\n")
+    (nested_repository / "backend/tests/test_support.py").write_text(
+        "from tests.factories.support import build_value\n"
+        "def test_support():\n    assert build_value() == 42\n"
+    )
+
+    evidence = nominate_changed_verification(nested_repository, (source,))
+
+    observation = evidence["observations"][0]
+    change = observation["changed_set"]["changes"][0]
+    assert observation["state"] == "LINKED"
+    assert change["classification"]["kind"] == "verification-support"
+    assert observation["qualification"] == change["consumer_scope"]
+    assert observation["qualification"]["completeness"] in {"incomplete", "unknown"}
+    assert observation["qualification"]["negative_evidence_admissible"] is False
+    for projected in observation["nominations"]:
+        target = projected["nomination"]["verification_target"]["path"]
+        assert "context" not in projected
+        assert projected["relationships"] == [
+            relation for relation in change["relationships"] if relation["target"] == target
+        ]
+        assert projected["relationships"]
+        assert any(
+            row["path"] == target and row["context"]
+            for row in observation["changed_set"]["targets"]
+        )
 
 
 def test_native_task_preparation_refreshes_contributors_before_composite_observation(
@@ -172,10 +194,8 @@ def test_native_task_preparation_refreshes_contributors_before_composite_observa
     source = "backend/src/sample/feature.py"
     verifier = "backend/tests/test_feature.py"
     with CodeMap(nested_repository) as native:
-        baseline = native.tasks.verification_ownership_graph(
-            f"Verify {source}", limit=20, candidate_limit=2
-        )
-        assert baseline["edit_candidates"] == [source]
+        baseline = native.verification.changed_set((source,), limit=2)
+        assert baseline["changed_paths"] == [source]
         assert native.index.is_current(source)
         (nested_repository / source).write_text("def answer():\n    return 43\n", encoding="utf-8")
         assert not native.index.is_current(source)
@@ -200,7 +220,7 @@ def test_native_task_preparation_refreshes_contributors_before_composite_observa
         evidence = nominate_changed_verification(
             nested_repository, (verifier, source), required=(verifier,)
         )
-        assert any(depth == 0 and not before and after for _task, depth, before, after in observed)
+        assert observed and all(depth == 0 and after for _task, depth, _before, after in observed)
         assert native.index.is_current(source)
     assert [row["state"] for row in evidence["observations"]] == ["CHANGED_TEST", "LINKED"]
     assert [row["changed_path"] for row in evidence["observations"]] == [verifier, source]

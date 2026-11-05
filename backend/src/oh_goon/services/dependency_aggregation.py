@@ -5,6 +5,7 @@ from collections import defaultdict
 from collections.abc import Collection
 from datetime import datetime
 
+from oh_goon.core.dependency_identity import DependencyEcosystem
 from oh_goon.core.models.dependency_fleet import (
     DependencyFreshnessSummary,
     DependencyPackageOverview,
@@ -17,8 +18,14 @@ def build_dependency_overview(
     store: DependencyObservationStore,
     package: str,
     current: Collection[str],
+    *,
+    ecosystem: DependencyEcosystem = "pypi",
 ) -> DependencyPackageOverview:
-    rows = [row for row in store.package_rows(package) if str(row["repository_id"]) in current]
+    rows = [
+        row
+        for row in store.package_rows(package, ecosystem=ecosystem)
+        if str(row["repository_id"]) in current
+    ]
     by_repository: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
         by_repository[str(row["repository_id"])].append(row)
@@ -29,7 +36,9 @@ def build_dependency_overview(
     current_count = sum(state == "current" for state in states.values())
     unknown_count = sum(state == "unknown" for state in states.values())
     stale_count = sum(state == "stale" for state in states.values())
-    snapshot_rows = [row for row in store.snapshot_rows() if str(row["repository_id"]) in current]
+    snapshot_rows = [
+        row for row in store.snapshot_rows(ecosystem) if str(row["repository_id"]) in current
+    ]
     current_snapshot_ids = {
         str(row["repository_id"])
         for row in snapshot_rows
@@ -50,6 +59,7 @@ def build_dependency_overview(
         default=None,
     )
     return DependencyPackageOverview(
+        ecosystem=ecosystem,
         package_name=package,
         observed_repositories=len(by_repository),
         versions=versions,

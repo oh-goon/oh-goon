@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,7 +11,6 @@ import pytest
 from oh_goon.repository_tooling.architecture._structural_authority_execution import (
     _check_hosted_diagnostic_contract,
 )
-
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/backend_core_test_diagnostic.sh"
@@ -266,6 +267,61 @@ def test_hosted_diagnostic_allows_only_narrowing_extra_marker_subset() -> None:
     assert 'MARKER="$BASE_MARKER and ($EXTRA_MARKER)"' in text
     assert "must be MARKER or 'not MARKER'" in text
     assert "Marker policy: $MARKER" in text
+
+
+@pytest.mark.parametrize("extra", ["", "unit", "not unit"])
+def test_hosted_diagnostic_transports_actual_narrowed_marker_to_native_batch_boundary(
+    tmp_path: Path, extra: str
+) -> None:
+    if os.name == "nt":
+        pytest.skip("hosted diagnostic is POSIX shell tooling")
+    capture = tmp_path / "native-arguments.jsonl"
+    interpreter = tmp_path / "capture-interpreter"
+    interpreter.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "with open(os.environ['DIAGNOSTIC_CAPTURE'], 'a') as stream:\n"
+        "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n",
+        encoding="utf-8",
+    )
+    interpreter.chmod(0o755)
+    environment = os.environ.copy()
+    environment.update(
+        PYTHON=str(interpreter),
+        DIAGNOSTIC_CAPTURE=str(capture),
+        DIAGNOSTIC_SURFACE="backend-unit",
+        DIAGNOSTIC_BATCH="1",
+        DIAGNOSTIC_BATCH_LIMIT="1",
+        DIAGNOSTIC_EXTRA_MARKER=extra,
+        OH_GOON_HOSTED_DIAGNOSTIC_RECEIPT="",
+        OH_GOON_HOSTED_DIAGNOSTIC_STATUS="",
+        TMPDIR=str(tmp_path),
+    )
+
+    result = subprocess.run(
+        ("bash", str(SCRIPT)),
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    calls = [
+        json.loads(line) for line in capture.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(calls) == 2
+    capability, workload = calls
+    assert "-I" in capability
+    assert workload[:3] == ["-P", "-m", "oh_goon.repository_tooling.test_batches"]
+    base = (
+        "not certification and not slow and not process and not scale "
+        "and not host_dns and not dependency_complete"
+    )
+    assert workload[workload.index("--marker") + 1] == (
+        f"{base} and ({extra})" if extra else base
+    )
 
 
 @pytest.mark.parametrize(

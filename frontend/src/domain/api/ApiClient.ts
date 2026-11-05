@@ -5,7 +5,7 @@ import type {
   OperationResponse,
 } from "@generated/operations";
 import type { WriteCommandResult } from "@/domain/mutations/WriteCommandResult";
-import type { RunAgentSelection } from "@generated/models";
+import type { DependencyTargetFilter, RunAgentSelection } from "@generated/models";
 
 type OperationBody<Name extends OperationName> = NonNullable<OperationCall<Name>["body"]>;
 type ReadOperationResult<Name extends OperationName> = Promise<OperationResponse<Name>>;
@@ -18,8 +18,14 @@ type FleetRunExecutionObservationQuery = NonNullable<OperationCall<typeof op.fle
 type ScoutFindingCategory = NonNullable<NonNullable<OperationCall<typeof op.scout_findings.operationId>["query"]>["category"]>;
 type ScoutDetailSection = NonNullable<NonNullable<OperationCall<typeof op.scout_plan.operationId>["query"]>["section"]>;
 type ScheduleOccurrenceStatus = NonNullable<NonNullable<OperationCall<typeof op.schedule_occurrence_repositories.operationId>["query"]>["status"]>;
+type DependencyCoveragePopulation = NonNullable<OperationCall<typeof op.dependency_coverage_repositories.operationId>["query"]>["coverage"];
 
 export type SharedPlanInputs = NonNullable<OperationBody<typeof op.preview_shared_plan.operationId>["inputs"]>;
+export type DependencyEcosystem = NonNullable<DependencyTargetFilter["ecosystem"]>;
+export interface DependencyPackageIdentity {
+  packageName: DependencyTargetFilter["package_name"];
+  ecosystem?: DependencyEcosystem;
+}
 
 export interface ReadRequestOptions {
   readonly signal?: AbortSignal;
@@ -57,12 +63,12 @@ export interface ApiClient {
   gameTapePerformance(runId: string, sampleLimit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.game_tape_performance.operationId>;
   gameTapeFailureHistory(runId: string, repositoryId: string, stepId: string, sampleLimit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.game_tape_failure_history.operationId>;
   gameTapeLiveOutput(runId: string, after?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.game_tape_live_output.operationId>;
-  dependencySearch(query: string, offset?: number, limit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_search.operationId>;
-  dependencyFleetCoverage(options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_fleet_coverage.operationId>;
-  dependencyOverview(packageName: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_overview.operationId>;
-  dependencyAdvisory(packageName: string, advisoryId: string, affectedSpecifier: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_advisory_overview.operationId>;
-  dependencyCoverageRepositories(packageName: string, coverage: "absent_from_lock" | "no_current_evidence", offset?: number, limit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_coverage_repositories.operationId>;
-  dependencyRepositories(packageName: string, resolvedVersion?: string, versionPrefix?: string, evidence?: "all" | "current" | "unknown" | "stale", offset?: number, limit?: number, versionSpecifier?: string, advisoryId?: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_repositories.operationId>;
+  dependencySearch(query: string, offset?: number, limit?: number, ecosystem?: DependencyEcosystem, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_search.operationId>;
+  dependencyFleetCoverage(ecosystem?: DependencyEcosystem, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_fleet_coverage.operationId>;
+  dependencyOverview(identity: DependencyPackageIdentity, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_overview.operationId>;
+  dependencyAdvisory(identity: DependencyPackageIdentity, advisoryId: string, affectedSpecifier: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_advisory_overview.operationId>;
+  dependencyCoverageRepositories(identity: DependencyPackageIdentity, coverage: DependencyCoveragePopulation, offset?: number, limit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_coverage_repositories.operationId>;
+  dependencyRepositories(identity: DependencyPackageIdentity, resolvedVersion?: string, versionPrefix?: string, evidence?: NonNullable<DependencyTargetFilter["evidence"]>, offset?: number, limit?: number, versionSpecifier?: string, advisoryId?: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_repositories.operationId>;
   repositoryDependencies(repositoryId: string, offset?: number, limit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.repository_dependencies.operationId>;
   materializeDependencyTargets(request: OperationBody<typeof op.materialize_dependency_targets.operationId>): WriteOperationResult<typeof op.materialize_dependency_targets.operationId>;
   dependencyTargetSelection(queryId: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.dependency_target_selection.operationId>;

@@ -19,6 +19,25 @@ describe("createApiClient write fence transport", () => {
     write.mockResolvedValue({ outcome: "saved", value: undefined, causalityRevision: 1 } as never);
   });
 
+  it("keeps ecosystem and scoped package spelling in dependency reads", () => {
+    const client = createApiClient(new MutationController());
+    const options = { signal: new AbortController().signal };
+    void client.dependencyOverview({ packageName: "shared", ecosystem: "pypi" }, options);
+    void client.dependencyOverview({ packageName: "shared", ecosystem: "npm" }, options);
+    void client.dependencyRepositories({ packageName: "@scope/shared", ecosystem: "npm" }, undefined, undefined, "current", 0, 25, "^1.0.0", "advisory", options);
+    void client.dependencySearch("shared", 0, 30, "npm", options);
+    expect(read).toHaveBeenNthCalledWith(1, op.dependency_overview.operationId, { path: { package_name: "shared" }, query: { ecosystem: "pypi" } }, options);
+    expect(read).toHaveBeenNthCalledWith(2, op.dependency_overview.operationId, { path: { package_name: "shared" }, query: { ecosystem: "npm" } }, options);
+    expect(read).toHaveBeenNthCalledWith(3, op.dependency_repositories.operationId, { path: { package_name: "@scope/shared" }, query: { ecosystem: "npm", evidence: "current", offset: 0, limit: 25, version_specifier: "^1.0.0", advisory_id: "advisory" } }, options);
+    expect(read).toHaveBeenNthCalledWith(4, op.dependency_search.operationId, { query: { q: "shared", ecosystem: "npm", offset: 0, limit: 30 } }, options);
+  });
+
+  it("leaves an unspecified legacy dependency namespace to the backend", () => {
+    const client = createApiClient(new MutationController());
+    void client.dependencyOverview({ packageName: "shared" });
+    expect(read).toHaveBeenCalledWith(op.dependency_overview.operationId, { path: { package_name: "shared" } }, undefined);
+  });
+
   it("requests artifact byte observation only through an explicit read selection", () => {
     const client = createApiClient(new MutationController());
     const options = { signal: new AbortController().signal };

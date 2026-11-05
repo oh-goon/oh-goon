@@ -1,33 +1,37 @@
 from __future__ import annotations
 
 import ast
-import tomllib
+import os
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+from oh_goon.integrations.hashmarks import (
+    HashmarksSourceEvidence,
+    hashmarks_source_scope,
+    observe_python_project_declarations_text,
+    observe_source_bindings,
+)
 
 
 def project_scripts_from_text(text: str) -> dict[str, str]:
-    """Return semantic ``[project.scripts]`` ownership from TOML text.
-
-    Quote style, whitespace, and ordering are representation details. Architecture
-    contracts should consume this mapping instead of searching raw pyproject text.
-    """
-
-    payload = tomllib.loads(text)
-    project = payload.get("project")
-    if not isinstance(project, dict):
-        return {}
-    scripts = project.get("scripts")
-    if not isinstance(scripts, dict):
-        return {}
-    return {
-        str(name): target
-        for name, target in scripts.items()
-        if isinstance(name, str) and isinstance(target, str)
-    }
+    """Project producer-declared script bindings; installed launchers stay unproven."""
+    snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
+    evidence = snapshot.manifest_evidence.get(text) if snapshot is not None else None
+    if evidence is None:
+        evidence = observe_python_project_declarations_text(text)
+        if snapshot is not None:
+            snapshot.manifest_evidence[text] = evidence
+    scripts: dict[str, str] = {}
+    for group in evidence.packet()["declarations"]["groups"]:
+        if group["concept"]["kind"] == "python-script-entrypoint-declaration":
+            for declaration in group["declarations"]:
+                value = declaration["value"]
+                scripts[value["name"]] = value["target"]
+    return scripts
 
 
 DEPENDENCY_POLICY_BOOTSTRAP_CAPABILITY = "oh-goon-dependency-policy"
@@ -76,12 +80,13 @@ class Violation:
 
 @dataclass(frozen=True, slots=True)
 class PythonSemanticFacts:
-    """Representation-invariant Python source facts used by architecture checks.
+    """Producer source bindings projected into existing architecture policy.
 
-    Imported module/function aliases and simple callable aliases are resolved to their
-    qualified semantic names. Comments and quote style never enter this projection.
-    The projection is intentionally bounded to static Python structure; architecture
-    checks should consume these facts instead of searching raw source fragments.
+    Qualified names describe authored bindings, never a proved runtime target.
+    With ``imported_only=False``, native qualified symbolic receiver references
+    also expose their lexical spelling for local forbidden-API shape policy.
+    All conditional and unknown facts remain in the intact producer evidence;
+    defaults and observed callers never specialize a parameter's call target.
     """
 
     calls: tuple[tuple[str, ast.Call], ...]
@@ -89,161 +94,88 @@ class PythonSemanticFacts:
     imports: frozenset[str]
     string_literals: tuple[str, ...]
     classes: tuple[ast.ClassDef, ...]
+    call_observations: tuple[tuple[dict[str, Any], ast.Call], ...]
+    evidence: HashmarksSourceEvidence
 
 
-def _scope_nodes(
-    statements: list[ast.stmt],
-    *,
-    definition_expressions: bool = False,
-    comprehension_scopes: bool = False,
-) -> tuple[ast.AST, ...]:
-    """Return nodes owned by one lexical scope without entering nested scopes."""
-
-    nodes: list[ast.AST] = []
-
-    def visit(node: ast.AST) -> None:
-        nodes.append(node)
-        if comprehension_scopes and isinstance(
-            node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
-        ):
-            # Python evaluates only the first iterable in the containing
-            # scope. Targets and the remaining expressions belong to the
-            # comprehension's own lexical scope.
-            visit(node.generators[0].iter)
-            return
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
-            if definition_expressions:
-                expressions: list[ast.expr | None] = []
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-                    expressions.extend((*node.args.defaults, *node.args.kw_defaults))
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    expressions.extend(node.decorator_list)
-                if isinstance(node, ast.ClassDef):
-                    expressions.extend(node.bases)
-                    expressions.extend(keyword.value for keyword in node.keywords)
-                for expression in expressions:
-                    if expression is not None:
-                        visit(expression)
-            return
-        for child in ast.iter_child_nodes(node):
-            visit(child)
-
-    for statement in statements:
-        visit(statement)
-    return tuple(nodes)
-
-
-def _qualified_symbol(
-    node: ast.AST,
-    aliases: dict[str, str | None],
-    *,
-    imported_only: bool = False,
-) -> str | None:
-    if isinstance(node, ast.Name):
-        return aliases.get(node.id, None if imported_only else node.id)
-    if isinstance(node, ast.Attribute):
-        prefix = _qualified_symbol(node.value, aliases, imported_only=imported_only)
-        return f"{prefix}.{node.attr}" if prefix else None
+def source_binding_packet(
+    evidence: HashmarksSourceEvidence, *, language: str | tuple[str, ...]
+) -> dict[str, Any]:
+    """Require a bounded complete syntax observation, not complete semantics."""
+    packet = evidence.packet()
+    languages = (language,) if isinstance(language, str) else language
+    parser = packet.get("parser") or {}
     if (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "getattr"
-        and (not imported_only or "getattr" not in aliases)
-        and len(node.args) >= 2
-        and isinstance(node.args[1], ast.Constant)
-        and isinstance(node.args[1].value, str)
+        packet.get("schema") != "hashmarks.source-bindings.v1"
+        or packet.get("language") not in languages
+        or packet.get("availability") != "observed"
+        or packet.get("completeness") != "complete"
+        or packet.get("truncation") != "not-truncated"
+        or packet.get("freshness") == "stale"
+        or packet.get("coordinate_system") != "zero-based-half-open-bytes"
+        or not isinstance(packet.get("facts"), list)
+        or not parser.get("signature")
+        or parser.get("capability", {}).get("available") is not True
+        or not packet.get("observation_identity")
     ):
-        prefix = _qualified_symbol(node.args[0], aliases, imported_only=imported_only)
-        return f"{prefix}.{node.args[1].value}" if prefix else None
+        raise ValueError(
+            "Architecture source bindings are unavailable or incomplete: "
+            + str(packet.get("reason") or packet.get("availability"))
+        )
+    return packet
+
+
+def source_import_spelling(target: dict[str, Any]) -> str:
+    """Render an authored import target without changing its qualification."""
+    root = "." * target.get("level", 0) + str(target.get("module") or "")
+    member = target.get("name")
+    if member:
+        root += ("." if root and not root.endswith(".") else "") + member
+    return ".".join((root, *target.get("properties", [])))
+
+
+def source_import_name(fact: dict[str, Any]) -> str | None:
+    """Retain an authored import declaration independently of later rebinding."""
+    syntax = fact.get("import_syntax")
+    return source_import_spelling(syntax) if isinstance(syntax, dict) else None
+
+
+def source_binding_name(fact: dict[str, Any], *, imported_only: bool) -> str | None:
+    if fact.get("qualification") == "qualified" and not fact.get("conditions"):
+        target = fact.get("target")
+        if isinstance(target, dict):
+            properties = target.get("properties", [])
+            if target.get("kind") == "import":
+                # Preserve relative import spelling and unresolved module
+                # qualification. Owned-package policy may compare this syntax;
+                # this projection does not resolve a cross-member import.
+                return source_import_spelling(target)
+            if not imported_only and target.get("kind") == "declaration":
+                return ".".join((target["name"], *properties))
+    if imported_only:
+        return None
+    symbolic = fact.get("symbolic_reference")
+    if (
+        isinstance(symbolic, dict)
+        and symbolic.get("qualification") == "qualified"
+        and not symbolic.get("conditions")
+        and isinstance(symbolic.get("root"), dict)
+    ):
+        root = symbolic["root"]
+        if isinstance(root.get("name"), str):
+            return ".".join((root["name"], *symbolic.get("properties", [])))
     return None
 
 
-def _scope_aliases(
-    statements: list[ast.stmt],
-    inherited: dict[str, str | None],
-    *,
-    imported_only: bool = False,
-) -> tuple[dict[str, str | None], set[str]]:
-    aliases = dict(inherited)
-    imported: set[str] = set()
-    nodes = _scope_nodes(statements, comprehension_scopes=imported_only)
-    for node in nodes:
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                bound = alias.asname or alias.name.split(".", 1)[0]
-                qualified = alias.name if alias.asname else bound
-                aliases[bound] = qualified
-                imported.add(alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if not node.module and not imported_only:
-                continue
-            for alias in node.names:
-                if alias.name == "*":
-                    continue
-                if imported_only and (node.level or not node.module):
-                    aliases[alias.asname or alias.name] = None
-                    imported.add(
-                        "." * node.level + f"{node.module + '.' if node.module else ''}{alias.name}"
-                    )
-                    continue
-                qualified = f"{node.module}.{alias.name}"
-                aliases[alias.asname or alias.name] = qualified
-                imported.add(qualified)
-
-    assignments: list[tuple[ast.AST, ast.AST]] = []
-    for node in nodes:
-        if isinstance(node, ast.Assign):
-            assignments.extend((target, node.value) for target in node.targets)
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            assignments.append((node.target, node.value))
-        elif isinstance(node, ast.NamedExpr):
-            assignments.append((node.target, node.value))
-
-    if imported_only:
-        # Rebinding an import is a shadow, not a second import of the same
-        # native module. An alias must be its name's sole lexical binding;
-        # other declarations cannot be overwritten by alias resolution.
-        counts: dict[str, int] = {}
-        for node in nodes:
-            if isinstance(node, ast.Import):
-                names = tuple(alias.asname or alias.name.split(".", 1)[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                names = tuple(
-                    alias.asname or alias.name for alias in node.names if alias.name != "*"
-                )
-            else:
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                    bound = node.id
-                elif isinstance(node, ast.ExceptHandler) and node.name:
-                    bound = node.name
-                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    bound = node.name
-                else:
-                    continue
-                aliases[bound] = None
-                names = (bound,)
-            for name in names:
-                counts[name] = counts.get(name, 0) + 1
-        assignments = [
-            (target, value)
-            for target, value in assignments
-            if isinstance(target, ast.Name) and counts[target.id] == 1
-        ]
-
-    changed = True
-    while changed:
-        changed = False
-        for target, value in assignments:
-            if not isinstance(target, ast.Name):
-                continue
-            if target.id in aliases and (not imported_only or aliases[target.id] is not None):
-                continue
-            resolved = _qualified_symbol(value, aliases, imported_only=imported_only)
-            if resolved is None:
-                continue
-            aliases[target.id] = resolved
-            changed = True
-    return aliases, imported
+def _node_byte_range(node: ast.AST, line_offsets: list[int]) -> tuple[int, int] | None:
+    if not isinstance(node, (ast.expr, ast.stmt)):
+        return None
+    if node.end_lineno is None or node.end_col_offset is None:
+        return None
+    return (
+        line_offsets[node.lineno - 1] + node.col_offset,
+        line_offsets[node.end_lineno - 1] + node.end_col_offset,
+    )
 
 
 def python_semantic_facts(
@@ -251,256 +183,167 @@ def python_semantic_facts(
     *,
     imported_only: bool = False,
     tree: ast.Module | None = None,
-    builtin_names: tuple[str, ...] = (),
-    bind_callable_inputs: bool = True,
 ) -> PythonSemanticFacts:
-    """Project Python semantics without granting comments/private spellings authority.
+    """Consume native binding facts; retain AST only for local structure policy.
 
-    ``imported_only`` requires a static import binding, including unambiguous
-    callable aliases and callable defaults. Parameters and local declarations
-    shadow inherited imports. Dynamic imports and arbitrary data flow are not
-    inferred. A direct module-local helper call may transport an imported
-    argument across one edge; recursive/multihop argument flow is not inferred.
-    Callers selecting this mode must define their supported APIs. Explicit
-    ``builtin_names`` receive the same scope-shadowing rules as imports.
-    ``bind_callable_inputs=False`` leaves callable parameters unqualified,
-    without specializing them from defaults or module-local helper arguments.
+    Conditional defaults and observed caller arguments never become an
+    unconditional invocation target. Unknown call observations remain separate
+    from qualified binding names for explicit architecture syntax policy.
     """
-
-    tree = python_ast(path) if tree is None else tree
-    builtin_bindings: dict[str, str | None] = {name: f"builtins.{name}" for name in builtin_names}
+    if _PYTHON_SOURCE_SNAPSHOT.get() is None:
+        with python_source_snapshot():
+            return python_semantic_facts(path, imported_only=imported_only, tree=tree)
+    raw = _python_source_capture(path)
+    evidence = _python_source_evidence(path)
+    packet = source_binding_packet(evidence, language="python")
+    if evidence.source_bytes != raw:
+        raise ValueError("Producer source bytes differ from captured Python structure")
+    selected_tree = _python_tree(path, raw) if tree is None else tree
+    offsets = [0]
+    for line in raw.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    nodes = {
+        span: node
+        for node in ast.walk(selected_tree)
+        if isinstance(node, ast.Call) and (span := _node_byte_range(node, offsets)) is not None
+    }
     calls: list[tuple[str, ast.Call]] = []
+    observations: list[tuple[dict[str, Any], ast.Call]] = []
     references: set[str] = set()
     imports: set[str] = set()
     strings: list[str] = []
-    classes: list[ast.ClassDef] = []
-
-    def function_bindings(
-        function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
-        inherited: dict[str, str | None],
-        *,
-        default_bindings: dict[str, str | None] | None = None,
-    ) -> dict[str, str | None]:
-        bindings = dict(inherited)
-        definition_bindings = inherited if default_bindings is None else default_bindings
-        arguments = function.args
-        positional = [*arguments.posonlyargs, *arguments.args]
-        parameters = [*positional, *arguments.kwonlyargs]
-        parameters.extend(arg for arg in (arguments.vararg, arguments.kwarg) if arg is not None)
-        bindings.update((arg.arg, None) for arg in parameters)
-        if not bind_callable_inputs:
-            return bindings
-        defaults = [
-            *zip(
-                positional[len(positional) - len(arguments.defaults) :],
-                arguments.defaults,
-                strict=True,
-            ),
-            *zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True),
-        ]
-        for arg, default in defaults:
-            if default is not None:
-                bindings[arg.arg] = _qualified_symbol(
-                    default, definition_bindings, imported_only=True
-                )
-        if not isinstance(function, ast.Lambda):
-            bindings.update(function_inputs.get(function, {}))
-        return bindings
-
-    function_inputs: dict[ast.FunctionDef | ast.AsyncFunctionDef, dict[str, str]] = {}
-    if imported_only and bind_callable_inputs:
-        # Native modules may be explicitly passed to a module-local helper
-        # (for example cli_start's imported uvicorn delegate). Follow only one
-        # direct call edge from imports/defaults, never speculative caller
-        # state or recursive argument data flow.
-        module_aliases, _imports = _scope_aliases(tree.body, builtin_bindings, imported_only=True)
-        definitions = {
-            node.name: node
-            for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        }
-        candidates: dict[str, dict[str, set[str]]] = {}
-        scopes: list[tuple[list[ast.stmt], dict[str, str | None], set[str]]] = [
-            (tree.body, module_aliases, set())
-        ]
-        scopes.extend(
-            (
-                node.body,
-                function_bindings(node, module_aliases),
-                {
-                    arg.arg
-                    for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
-                }
-                | {arg.arg for arg in (node.args.vararg, node.args.kwarg) if arg is not None},
-            )
-            for node in definitions.values()
-        )
-        for statements, inherited, parameters in scopes:
-            aliases, _imports = _scope_aliases(statements, inherited, imported_only=True)
-            nodes = _scope_nodes(statements, comprehension_scopes=True)
-            shadowed = {
-                node.id
-                for node in nodes
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
-            }
-            shadowed.update(
-                node.name
-                for node in nodes
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                and statements is not tree.body
-            )
-            shadowed.update(name for name, binding in inherited.items() if binding is not None)
-            shadowed.update(parameters)
-            for node in nodes:
-                if isinstance(node, ast.Import):
-                    shadowed.update(
-                        alias.asname or alias.name.split(".", 1)[0] for alias in node.names
-                    )
-                elif isinstance(node, ast.ImportFrom):
-                    shadowed.update(alias.asname or alias.name for alias in node.names)
-            for node in nodes:
-                if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-                    continue
-                target = definitions.get(node.func.id)
-                if target is None or node.func.id in shadowed:
-                    continue
-                positional = [*target.args.posonlyargs, *target.args.args]
-                supplied = [
-                    (arg.arg, value) for arg, value in zip(positional, node.args, strict=False)
-                ]
-                supplied.extend(
-                    (keyword.arg, keyword.value) for keyword in node.keywords if keyword.arg
-                )
-                for parameter, value in supplied:
-                    imported = _qualified_symbol(value, aliases, imported_only=True)
-                    if imported is not None:
-                        candidates.setdefault(target.name, {}).setdefault(parameter, set()).add(
-                            imported
-                        )
-        function_inputs = {
-            definitions[name]: {
-                parameter: next(iter(bindings))
-                for parameter, bindings in parameters.items()
-                if len(bindings) == 1
-            }
-            for name, parameters in candidates.items()
-        }
-
-    def inspect_scope(
-        statements: list[ast.stmt],
-        inherited: dict[str, str | None],
-        *,
-        class_enclosing: dict[str, str | None] | None = None,
-    ) -> None:
-        aliases, scope_imports = _scope_aliases(statements, inherited, imported_only=imported_only)
-        # A class suite evaluates against its own aliases, but its nested
-        # lexical scopes close over the enclosing function/module instead.
-        nested_bindings = aliases if class_enclosing is None else class_enclosing
-        imports.update(scope_imports)
-        nodes = _scope_nodes(
-            statements,
-            definition_expressions=imported_only,
-            comprehension_scopes=imported_only,
-        )
-        for node in nodes:
-            if isinstance(node, ast.Call):
-                qualified = _qualified_symbol(node.func, aliases, imported_only=imported_only)
-                if qualified is not None:
-                    calls.append((qualified, node))
-            elif isinstance(node, (ast.Name, ast.Attribute)):
-                qualified = _qualified_symbol(node, aliases, imported_only=imported_only)
-                if qualified is not None:
-                    references.add(qualified)
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                strings.append(node.value)
-            elif imported_only and isinstance(node, ast.Lambda):
-                inspect_scope(
-                    [ast.Expr(value=node.body)],
-                    function_bindings(node, nested_bindings, default_bindings=aliases),
-                )
-            elif imported_only and isinstance(
-                node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
-            ):
-                local = dict(nested_bindings)
-                for generator in node.generators:
-                    for target in ast.walk(generator.target):
-                        if isinstance(target, ast.Name) and isinstance(target.ctx, ast.Store):
-                            local[target.id] = None
-                expressions = [generator.iter for generator in node.generators[1:]]
-                expressions.extend(
-                    condition for generator in node.generators for condition in generator.ifs
-                )
-                expressions.extend(
-                    (node.key, node.value) if isinstance(node, ast.DictComp) else (node.elt,)
-                )
-                inspect_scope([ast.Expr(value=value) for value in expressions], local)
-
-        for statement in statements:
-            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                inspect_scope(
-                    statement.body,
-                    function_bindings(statement, nested_bindings, default_bindings=aliases)
-                    if imported_only
-                    else aliases,
-                )
-            elif isinstance(statement, ast.ClassDef):
-                classes.append(statement)
-                inspect_scope(
-                    statement.body,
-                    nested_bindings,
-                    class_enclosing=nested_bindings if imported_only else None,
-                )
-            else:
-                for node in _scope_nodes([statement], comprehension_scopes=imported_only):
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        inspect_scope(
-                            node.body,
-                            function_bindings(node, nested_bindings, default_bindings=aliases)
-                            if imported_only
-                            else aliases,
-                        )
-                    elif isinstance(node, ast.ClassDef):
-                        classes.append(node)
-                        inspect_scope(
-                            node.body,
-                            nested_bindings,
-                            class_enclosing=nested_bindings if imported_only else None,
-                        )
-
-    inspect_scope(tree.body, builtin_bindings)
+    for fact in packet["facts"]:
+        name = source_binding_name(fact, imported_only=imported_only)
+        if fact.get("kind") == "call-site":
+            span = fact["range"]
+            node = nodes.get((span["start_byte"], span["end_byte"]))
+            if node is None:
+                raise ValueError("Producer call range differs from retained Python structure")
+            observations.append((fact, node))
+            if name is not None:
+                calls.append((name, node))
+        elif fact.get("kind") == "reference" and name is not None:
+            references.add(name)
+        elif fact.get("kind") == "import-binding":
+            imported = source_import_name(fact)
+            if imported is not None:
+                imports.add(imported)
+        if (
+            fact.get("kind") == "literal-expression"
+            and fact.get("qualification") == "qualified"
+            and not fact.get("conditions")
+            and isinstance(fact.get("literal"), str)
+        ):
+            strings.append(fact["literal"])
     return PythonSemanticFacts(
         calls=tuple(calls),
         references=frozenset(references),
         imports=frozenset(imports),
         string_literals=tuple(strings),
-        classes=tuple(classes),
+        classes=tuple(node for node in ast.walk(selected_tree) if isinstance(node, ast.ClassDef)),
+        call_observations=tuple(observations),
+        evidence=evidence,
     )
 
 
-_PYTHON_SOURCE_SNAPSHOT: ContextVar[dict[Path, ast.Module] | None] = ContextVar(
+@dataclass(slots=True)
+class _PythonSourceSnapshot:
+    lifetime: ExitStack
+    root: Path | None = None
+    captures: dict[Path, bytes] = field(default_factory=dict)
+    trees: dict[Path, ast.Module] = field(default_factory=dict)
+    evidence: dict[Path, HashmarksSourceEvidence] = field(default_factory=dict)
+    manifest_evidence: dict[str, HashmarksSourceEvidence] = field(default_factory=dict)
+    native_scopes: dict[Path, object] = field(default_factory=dict)
+
+
+_PYTHON_SOURCE_SNAPSHOT: ContextVar[_PythonSourceSnapshot | None] = ContextVar(
     "architecture_python_source_snapshot", default=None
 )
+_SOURCE_CHECKOUT_ROOT = Path(__file__).resolve().parents[5]
 
 
 @contextmanager
-def python_source_snapshot() -> Generator[None]:
-    """Read and parse each source once for one architecture invocation."""
+def python_source_snapshot(root: Path | None = None) -> Generator[None]:
+    """Retain exact native source packets and local structural trees once."""
     if _PYTHON_SOURCE_SNAPSHOT.get() is not None:
         yield
         return
-    token = _PYTHON_SOURCE_SNAPSHOT.set({})
-    try:
-        yield
-    finally:
-        _PYTHON_SOURCE_SNAPSHOT.reset(token)
+    with ExitStack() as lifetime:
+        snapshot = _PythonSourceSnapshot(lifetime, root.resolve() if root is not None else None)
+        token = _PYTHON_SOURCE_SNAPSHOT.set(snapshot)
+        try:
+            yield
+        finally:
+            _PYTHON_SOURCE_SNAPSHOT.reset(token)
+
+
+def _python_source_evidence(path: Path) -> HashmarksSourceEvidence:
+    resolved = path.resolve()
+    snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
+    if snapshot is not None and resolved in snapshot.evidence:
+        return snapshot.evidence[resolved]
+    root = (
+        snapshot.root
+        if snapshot is not None
+        and snapshot.root is not None
+        and resolved.is_relative_to(snapshot.root)
+        else _SOURCE_CHECKOUT_ROOT
+        if resolved.is_relative_to(_SOURCE_CHECKOUT_ROOT)
+        else resolved.parent
+    )
+    scope = None
+    if snapshot is not None:
+        if root not in snapshot.native_scopes:
+            snapshot.native_scopes[root] = snapshot.lifetime.enter_context(
+                hashmarks_source_scope(root)
+            )
+        scope = snapshot.native_scopes[root]
+    relative = resolved.relative_to(root).as_posix()
+    evidence = observe_source_bindings(root, (relative,), scope=scope)[relative]
+    source_binding_packet(evidence, language="python")
+    if evidence.source_bytes is None:
+        raise ValueError("Architecture Python source bytes are unavailable")
+    if snapshot is not None:
+        snapshot.evidence[resolved] = evidence
+    return evidence
 
 
 def python_ast(path: Path) -> ast.Module:
-    """Return exact invocation-local syntax; no timestamp-based reusable proof."""
+    """Inspect native Python structure for local policy, without binding inference."""
+    return _python_tree(path, _python_source_capture(path))
+
+
+def _python_source_capture(path: Path) -> bytes:
     resolved = path.resolve()
     snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
-    if snapshot is None:
-        return ast.parse(resolved.read_text(encoding="utf-8"), filename=str(resolved))
-    if resolved not in snapshot:
-        snapshot[resolved] = ast.parse(resolved.read_text(encoding="utf-8"), filename=str(resolved))
-    return snapshot[resolved]
+    if snapshot is not None and resolved in snapshot.captures:
+        return snapshot.captures[resolved]
+    with resolved.open("rb") as stream:
+        before = os.fstat(stream.fileno())
+        raw = stream.read(8_388_609)
+        after = os.fstat(stream.fileno())
+    if len(raw) > 8_388_608:
+        raise ValueError("Architecture Python source exceeds its capture byte bound")
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ):
+        raise ValueError("Architecture Python source changed during capture")
+    if snapshot is not None:
+        snapshot.captures[resolved] = raw
+    return raw
+
+
+def _python_tree(path: Path, raw: bytes) -> ast.Module:
+    resolved = path.resolve()
+    snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
+    if snapshot is not None and resolved in snapshot.trees:
+        return snapshot.trees[resolved]
+    tree = ast.parse(raw, filename=str(resolved))
+    if snapshot is not None:
+        snapshot.trees[resolved] = tree
+    return tree

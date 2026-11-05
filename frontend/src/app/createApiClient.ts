@@ -110,34 +110,34 @@ export function createApiClient(mutations: MutationController): ApiClient {
       { path: { fleet_run_id: runId }, query: { after } },
       options,
     ),
-    dependencySearch: (query, offset = 0, limit = 20, options) => readOperation(
+    dependencySearch: (query, offset = 0, limit = 20, ecosystem, options) => readOperation(
       op.dependency_search.operationId,
-      { query: { q: query, offset, limit } },
+      { query: { q: query, offset, limit, ...(ecosystem === undefined ? {} : { ecosystem }) } },
       options,
     ),
-    dependencyFleetCoverage: (options) => readOperation(
+    dependencyFleetCoverage: (ecosystem, options) => readOperation(
       op.dependency_fleet_coverage.operationId,
-      {},
+      ecosystem === undefined ? {} : { query: { ecosystem } },
       options,
     ),
-    dependencyOverview: (packageName, options) => readOperation(
+    dependencyOverview: ({ packageName, ecosystem }, options) => readOperation(
       op.dependency_overview.operationId,
-      { path: { package_name: packageName } },
+      { path: { package_name: packageName }, ...(ecosystem === undefined ? {} : { query: { ecosystem } }) },
       options,
     ),
-    dependencyAdvisory: (packageName, advisoryId, affectedSpecifier, options) => readOperation(
+    dependencyAdvisory: ({ packageName, ecosystem }, advisoryId, affectedSpecifier, options) => readOperation(
       op.dependency_advisory_overview.operationId,
-      { path: { package_name: packageName }, query: { advisory_id: advisoryId, affected_specifier: affectedSpecifier } },
+      { path: { package_name: packageName }, query: { advisory_id: advisoryId, affected_specifier: affectedSpecifier, ...(ecosystem === undefined ? {} : { ecosystem }) } },
       options,
     ),
-    dependencyCoverageRepositories: (packageName, coverage, offset = 0, limit = 20, options) => readOperation(
+    dependencyCoverageRepositories: ({ packageName, ecosystem }, coverage, offset = 0, limit = 20, options) => readOperation(
       op.dependency_coverage_repositories.operationId,
-      { path: { package_name: packageName }, query: { coverage, offset, limit } },
+      { path: { package_name: packageName }, query: { coverage, offset, limit, ...(ecosystem === undefined ? {} : { ecosystem }) } },
       options,
     ),
-    dependencyRepositories: (packageName, resolvedVersion, versionPrefix, evidence = "all", offset = 0, limit = 20, versionSpecifier, advisoryId, options) => readOperation(
+    dependencyRepositories: ({ packageName, ecosystem }, resolvedVersion, versionPrefix, evidence = "all", offset = 0, limit = 20, versionSpecifier, advisoryId, options) => readOperation(
       op.dependency_repositories.operationId,
-      { path: { package_name: packageName }, query: { evidence, offset, limit, ...(resolvedVersion === undefined ? {} : { resolved_version: resolvedVersion }), ...(versionPrefix === undefined ? {} : { version_prefix: versionPrefix }), ...(versionSpecifier === undefined ? {} : { version_specifier: versionSpecifier }), ...(advisoryId === undefined ? {} : { advisory_id: advisoryId }) } },
+      { path: { package_name: packageName }, query: { evidence, offset, limit, ...(ecosystem === undefined ? {} : { ecosystem }), ...(resolvedVersion === undefined ? {} : { resolved_version: resolvedVersion }), ...(versionPrefix === undefined ? {} : { version_prefix: versionPrefix }), ...(versionSpecifier === undefined ? {} : { version_specifier: versionSpecifier }), ...(advisoryId === undefined ? {} : { advisory_id: advisoryId }) } },
       options,
     ),
     repositoryDependencies: (repositoryId, offset = 0, limit = 20, options) => readOperation(

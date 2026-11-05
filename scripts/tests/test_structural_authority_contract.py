@@ -618,6 +618,58 @@ def test_guard_rejects_unregistered_repository_command_with_private_cli_name(
     )
 
 
+@pytest.mark.parametrize(
+    "helper", ("_native_test_worker.py", "pytest_member_selection.py")
+)
+def test_guard_retains_owned_internal_interpreter_delegates(
+    tmp_path: Path, helper: str
+) -> None:
+    root = _minimal_repo(tmp_path)
+    baseline = _messages(root)
+    relative = Path("backend/src/oh_goon/repository_tooling") / helper
+    (root / relative).write_text((ROOT / relative).read_text(encoding="utf-8"))
+
+    assert _messages(root) == baseline
+
+
+@pytest.mark.parametrize(
+    "helper", ("unknown_collector.py", "nested/pytest_member_selection.py")
+)
+def test_internal_delegate_names_do_not_authorize_other_repository_commands(
+    tmp_path: Path, helper: str
+) -> None:
+    root = _minimal_repo(tmp_path)
+    assert not any(
+        "repeated repository Python command must be a named" in message
+        for message in _messages(root)
+    )
+    module = root / "backend/src/oh_goon/repository_tooling" / helper
+    module.parent.mkdir(parents=True, exist_ok=True)
+    module.write_text('if __name__ == "__main__":\n    raise SystemExit(0)\n')
+
+    assert any(
+        "repeated repository Python command must be a named" in message
+        for message in _messages(root)
+    )
+
+
+@pytest.mark.parametrize(
+    "helper", ("_native_test_worker.py", "pytest_member_selection.py")
+)
+def test_internal_interpreter_delegates_cannot_add_a_direct_python_shebang(
+    tmp_path: Path, helper: str
+) -> None:
+    root = _minimal_repo(tmp_path)
+    relative = Path("backend/src/oh_goon/repository_tooling") / helper
+    module = root / relative
+    source = (ROOT / relative).read_text(encoding="utf-8")
+    module.write_text(source)
+    assert not any("direct Python shebang" in message for message in _messages(root))
+    module.write_text("#!/usr/bin/python3\n" + source)
+
+    assert any("direct Python shebang" in message for message in _messages(root))
+
+
 def test_guard_rejects_browser_release_package_lock_parser(tmp_path: Path) -> None:
     root = _minimal_repo(tmp_path)
     release = root / "backend/src/oh_goon/repository_tooling/release"

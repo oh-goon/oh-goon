@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from oh_goon.core.dependency_identity import DependencyEcosystem
 from oh_goon.core.models.fleet_observation import DependencyObservationSnapshot
 from oh_goon.core.models.operation import OperationReport
 
@@ -21,49 +22,63 @@ def set_watermark(connection: sqlite3.Connection, revision: int) -> None:
     )
 
 
-def package_search_rows(connection: sqlite3.Connection, query: str) -> list[sqlite3.Row]:
-    pattern = f"%{query}%"
+def package_search_rows(
+    connection: sqlite3.Connection, query: str, ecosystem: DependencyEcosystem | None = None
+) -> list[sqlite3.Row]:
+    pattern = f"%{_like_text(query)}%"
     return list(
         connection.execute(
             """
-            SELECT package_name, repository_id, resolved_version
+            SELECT ecosystem, package_name, repository_id, resolved_version
             FROM dependency_observations
-            WHERE ecosystem='pypi' AND package_name LIKE ? ESCAPE '\\'
-            ORDER BY package_name, repository_id
+            WHERE (? IS NULL OR ecosystem=?) AND package_name LIKE ? ESCAPE '\\'
+            ORDER BY ecosystem, package_name, repository_id
             """,
-            (pattern,),
+            (ecosystem, ecosystem, pattern),
         ).fetchall()
     )
 
 
-def package_search(connection: sqlite3.Connection, query: str, limit: int) -> list[sqlite3.Row]:
-    pattern = f"%{query}%"
+def package_search(
+    connection: sqlite3.Connection,
+    query: str,
+    limit: int,
+    ecosystem: DependencyEcosystem | None = None,
+) -> list[sqlite3.Row]:
+    pattern = f"%{_like_text(query)}%"
     return list(
         connection.execute(
             """
-            SELECT package_name, COUNT(DISTINCT repository_id) AS repositories,
+            SELECT ecosystem, package_name, COUNT(DISTINCT repository_id) AS repositories,
                    COUNT(DISTINCT resolved_version) AS resolved_versions
             FROM dependency_observations
-            WHERE ecosystem='pypi' AND package_name LIKE ? ESCAPE '\\'
-            GROUP BY package_name
+            WHERE (? IS NULL OR ecosystem=?) AND package_name LIKE ? ESCAPE '\\'
+            GROUP BY ecosystem, package_name
             ORDER BY CASE WHEN package_name=? THEN 0 ELSE 1 END,
                      repositories DESC, package_name
             LIMIT ?
             """,
-            (pattern, query, limit),
+            (ecosystem, ecosystem, pattern, query, limit),
         ).fetchall()
     )
+
+
+def _like_text(value: str) -> str:
+    """Keep native SQLite wildcards separate from literal caller query text."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def package_rows(
     connection: sqlite3.Connection,
     package_name: str,
     *,
+    ecosystem: DependencyEcosystem = "pypi",
     resolved_version: str | None,
     version_prefix: str | None,
 ) -> list[sqlite3.Row]:
     where, params = _package_where(
         package_name,
+        ecosystem=ecosystem,
         resolved_version=resolved_version,
         version_prefix=version_prefix,
     )
@@ -101,25 +116,31 @@ def repository_rows(connection: sqlite3.Connection, repository_id: str) -> list[
     )
 
 
-def snapshot_rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+def snapshot_rows(
+    connection: sqlite3.Connection, ecosystem: DependencyEcosystem | None = None
+) -> list[sqlite3.Row]:
     return list(
         connection.execute(
             """
             SELECT s.*, h.repository_name, h.repository_path
             FROM dependency_observation_snapshots s
             LEFT JOIN repository_observation_heads h ON h.repository_id=s.repository_id
-            WHERE s.ecosystem='pypi'
-            ORDER BY s.repository_id
-            """
+            WHERE (? IS NULL OR s.ecosystem=?)
+            ORDER BY s.repository_id, s.ecosystem
+            """,
+            (ecosystem, ecosystem),
         ).fetchall()
     )
 
 
-def observed_repository_ids(connection: sqlite3.Connection) -> set[str]:
+def observed_repository_ids(
+    connection: sqlite3.Connection, ecosystem: DependencyEcosystem | None = None
+) -> set[str]:
     return {
         str(row[0])
         for row in connection.execute(
-            "SELECT repository_id FROM dependency_observation_snapshots WHERE ecosystem='pypi'"
+            "SELECT repository_id FROM dependency_observation_snapshots WHERE (? IS NULL OR ecosystem=?)",
+            (ecosystem, ecosystem),
         ).fetchall()
     }
 
@@ -189,16 +210,17 @@ def replace_snapshot(
     connection.executemany(
         """
         INSERT INTO dependency_observations(
-            repository_id, ecosystem, package_name, node_id,
+            repository_id, ecosystem, package_name, component_id, node_id,
             resolved_version, resolved_source, package_source, contexts_json,
             fleet_run_id, operation_id, producer_goon, step_id, observed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             (
                 repository_id,
                 item.ecosystem,
                 item.package_name,
+                item.component_id,
                 item.node_id,
                 item.resolved_version,
                 item.resolved_source,
@@ -258,15 +280,16 @@ def _upsert_snapshot_row(
 def _package_where(
     package_name: str,
     *,
+    ecosystem: DependencyEcosystem,
     resolved_version: str | None,
     version_prefix: str | None,
 ) -> tuple[str, tuple[object, ...]]:
-    clauses = ["d.ecosystem='pypi'", "d.package_name=?"]
-    params: list[object] = [package_name]
+    clauses = ["d.ecosystem=?", "d.package_name=?"]
+    params: list[object] = [ecosystem, package_name]
     if resolved_version is not None:
         clauses.append("d.resolved_version=?")
         params.append(resolved_version)
     if version_prefix is not None:
-        clauses.append("d.resolved_version LIKE ?")
-        params.append(f"{version_prefix}%")
+        clauses.append("d.resolved_version LIKE ? ESCAPE '\\'")
+        params.append(f"{_like_text(version_prefix)}%")
     return " AND ".join(clauses), tuple(params)

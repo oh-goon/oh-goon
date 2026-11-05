@@ -187,11 +187,13 @@ def test_static_project_proof_uses_native_project_and_completed_existing_owners(
     assert plan["evidence"]["observations"][0]["state"] == "UNAVAILABLE"
 
 
+@pytest.mark.parametrize("missing_frontend", ("skipped", "missing-owner"))
 def test_static_project_and_runtime_frontend_keep_their_distinct_native_proofs(
     static_preparation_root: Path,
     reviewed_static_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     static_project_packet: dict[str, Any],
+    missing_frontend: str,
 ) -> None:
     tmp_path = static_preparation_root
     plan, result = _static_proof(static_project_packet)
@@ -213,7 +215,7 @@ def test_static_project_and_runtime_frontend_keep_their_distinct_native_proofs(
             ],
         }
     )
-    native = {
+    native: dict[str, Any] = {
         "success": True,
         "numTotalTests": 1,
         "numPassedTests": 1,
@@ -247,9 +249,16 @@ def test_static_project_and_runtime_frontend_keep_their_distinct_native_proofs(
         lambda *_args: result["outcomes"][1]["static_project_context"],
     )
     _validate_static(tmp_path, plan, result, reviewed_static_root)
-    native["testResults"][0]["assertionResults"][0]["status"] = "skipped"
-    with pytest.raises(ValueError, match="frontend proof is skipped"):
-        _validate_static(tmp_path, plan, result, reviewed_static_root)
+    if missing_frontend == "skipped":
+        native["testResults"][0]["assertionResults"][0]["status"] = "skipped"
+        with pytest.raises(ValueError, match="frontend proof is skipped"):
+            _validate_static(tmp_path, plan, result, reviewed_static_root)
+    else:
+        result["outcomes"] = [
+            row for row in result["outcomes"] if row["owner"] != "Frontend behavior"
+        ]
+        with pytest.raises(ValueError, match="check owners are missing"):
+            _validate_static(tmp_path, plan, result, reviewed_static_root)
 
 
 @pytest.mark.parametrize(
@@ -1621,13 +1630,38 @@ def test_changed_test_requires_own_execution_despite_linked_passes(
     result["plan"] = copy.deepcopy(plan)
 
     def validate() -> None:
-        validate_merge_proof(
+        executed_files, executed_members = validate_merge_proof(
             plan,
             result,
             candidate=plan["candidate"],
             base=plan["base"],
             changed_paths=plan["changed_paths"],
             control_base=None,
+        )
+        # This seam supplies independently observed native membership. Its
+        # authority is separate from candidate labels or filename spelling.
+        gate._require_ordinary_changed_test_execution(
+            {
+                "source_identity": plan["source_identity"],
+                "changed_paths": sorted(plan["changed_paths"]),
+                "contexts": [
+                    {
+                        "name": "backend",
+                        "selected": [
+                            {
+                                "file": changed_test,
+                                "selector": changed_test + "::test_result",
+                            }
+                        ],
+                    },
+                    {"name": "tooling", "selected": []},
+                    {"name": "cross-owner", "selected": []},
+                ],
+            },
+            changed_paths=plan["changed_paths"],
+            source_identity=plan["source_identity"],
+            executed_files=executed_files,
+            executed_members=executed_members,
         )
 
     validate()
@@ -2675,6 +2709,201 @@ def test_candidate_producer_is_native_locked_data_without_candidate_execution(
     assert not (root / "backend/.venv").exists()
 
 
+@pytest.mark.parametrize(
+    "fault", ("none", "candidate-source", "trusted-source", "producer", "nonquiescent")
+)
+def test_native_collection_preparation_follows_independent_dependency_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    (trusted / "README.md").write_text("Immutable control source.\n")
+    source_identity = package_slim.canonical_source_identity(root)
+    observations = _stub_candidate_materialization(monkeypatch)
+    materialize = command_owner.run_command
+    events: list[str] = []
+    plan: dict[str, Any] = {"evidence": {}}
+
+    def prepare(*argv: str, **options: Any) -> command_owner.CommandResult:
+        if "--no-build" in argv:
+            result = materialize(*argv, **options)
+            plan["evidence"]["producer_implementation_identity"] = observations[0][
+                "identity"
+            ]
+            events.append("data-only")
+            return result
+        if argv[:3] == ("uv", "workspace", "dir"):
+            return materialize(*argv, **options)
+        assert argv[:2] == ("uv", "sync")
+        assert events == ["data-only", "dependency-observation"]
+        assert "--no-build" not in argv and "--no-install-project" not in argv
+        assert [
+            argv[index + 1] for index, arg in enumerate(argv) if arg == "--group"
+        ] == ["dev", "quality", "build"]
+        assert (
+            Path(options["env"]["UV_PROJECT_ENVIRONMENT"])
+            == observations[0]["environment"]
+        )
+        events.append("collection-preparation")
+        if fault == "candidate-source":
+            (root / "README.md").write_text("Changed during native setup.\n")
+        elif fault == "trusted-source":
+            (trusted / "README.md").write_text("Changed control source.\n")
+        elif fault == "producer":
+            (observations[0]["package"] / "implementation.py").write_text("VALUE = 2\n")
+        return command_owner.CommandResult(
+            0,
+            "",
+            "",
+            supervisor=command_owner.CommandSupervisorReceipt(
+                final_process_group_quiescent=fault != "nonquiescent"
+            ),
+        )
+
+    def observe_dependency(*_args: Any, **options: Any) -> dict[str, Any]:
+        assert events == ["data-only"]
+        assert options["environment"] == observations[0]["environment"]
+        events.append("dependency-observation")
+        return {"source_identity": source_identity}
+
+    def collect(*_args: Any, **options: Any) -> dict[str, Any]:
+        assert events == [
+            "data-only",
+            "dependency-observation",
+            "collection-preparation",
+        ]
+        assert options["environment"] == observations[0]["environment"]
+        assert options["trusted_root"] == trusted
+        assert options["source_identity"] == source_identity
+        events.append("native-collection")
+        return {"source_identity": source_identity}
+
+    monkeypatch.setattr(command_owner, "run_command", prepare)
+    monkeypatch.setattr(gate, "_trusted_dependency_probe", observe_dependency)
+    monkeypatch.setattr(gate, "_trusted_ordinary_probe", collect)
+    dependency_receipt: dict[str, Any] = {}
+    ordinary_receipt: dict[str, Any] = {}
+
+    def inspect() -> str:
+        return gate._candidate_producer_identity(
+            root,
+            dependency_plan=plan,
+            trusted_root=trusted,
+            dependency_receipt=dependency_receipt,
+            ordinary_receipt=ordinary_receipt,
+            ordinary_paths=("source.py",),
+            source_identity=source_identity,
+        )
+
+    if fault == "none":
+        assert inspect() == observations[0]["identity"]
+        assert events[-1] == "native-collection"
+        assert ordinary_receipt[
+            "trusted_source_identity"
+        ] == package_slim.canonical_source_identity(trusted)
+    else:
+        with pytest.raises(ValueError):
+            inspect()
+        assert "native-collection" not in events
+        assert ordinary_receipt == {}
+    assert dependency_receipt == {"source_identity": source_identity}
+    assert not observations[0]["environment"].exists()
+
+
+@pytest.mark.parametrize("missing", ("trusted-root", "source-identity"))
+def test_native_collection_missing_authority_is_rejected_before_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    observations = _stub_candidate_materialization(monkeypatch)
+    with pytest.raises(ValueError, match="requires trusted source authority"):
+        gate._candidate_producer_identity(
+            root,
+            trusted_root=None if missing == "trusted-root" else tmp_path,
+            source_identity=None
+            if missing == "source-identity"
+            else "sha256:" + "a" * 64,
+            ordinary_receipt={},
+        )
+    assert observations == []
+
+
+@pytest.mark.parametrize("expected", ("matching", "mismatched", "missing", "invalid"))
+def test_ordinary_only_producer_authority_precedes_project_setup_and_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, expected: str
+) -> None:
+    root = _candidate_gate_root(tmp_path)
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    (trusted / "README.md").write_text("Immutable control source.\n")
+    source_identity = package_slim.canonical_source_identity(root)
+    observations = _stub_candidate_materialization(monkeypatch)
+    actual = gate._candidate_producer_identity(root)
+    assert len(observations) == 1
+    materialize = command_owner.run_command
+    events: list[str] = []
+
+    def prepare(*argv: str, **options: Any) -> command_owner.CommandResult:
+        if argv[:3] == ("uv", "workspace", "dir"):
+            return materialize(*argv, **options)
+        if "--no-build" in argv:
+            events.append("data-only")
+            return materialize(*argv, **options)
+        assert argv[:2] == ("uv", "sync")
+        assert events == ["data-only"]
+        events.append("project-setup")
+        return command_owner.CommandResult(
+            0,
+            "",
+            "",
+            supervisor=command_owner.CommandSupervisorReceipt(
+                final_process_group_quiescent=True
+            ),
+        )
+
+    def collect(*_args: Any, **options: Any) -> dict[str, Any]:
+        assert events == ["data-only", "project-setup"]
+        assert options["source_identity"] == source_identity
+        assert options["trusted_root"] == trusted
+        events.append("collection")
+        return {"source_identity": source_identity}
+
+    monkeypatch.setattr(command_owner, "run_command", prepare)
+    monkeypatch.setattr(gate, "_trusted_ordinary_probe", collect)
+    receipt: dict[str, Any] = {}
+    claim = (
+        actual
+        if expected == "matching"
+        else "sha256:" + "0" * 64
+        if expected == "mismatched"
+        else None
+        if expected == "missing"
+        else "unqualified"
+    )
+
+    def inspect() -> str:
+        return gate._candidate_producer_identity(
+            root,
+            trusted_root=trusted,
+            ordinary_receipt=receipt,
+            ordinary_paths=("source.py",),
+            source_identity=source_identity,
+            expected_producer_identity=claim,
+        )
+
+    if expected == "matching":
+        assert inspect() == actual
+        assert events == ["data-only", "project-setup", "collection"]
+        assert receipt["source_identity"] == source_identity
+    else:
+        with pytest.raises(ValueError, match="[Pp]roducer"):
+            inspect()
+        assert events == (["data-only"] if expected == "mismatched" else [])
+        assert receipt == {}
+    assert all(not row["environment"].exists() for row in observations)
+
+
 @pytest.mark.process
 def test_native_candidate_producer_probe_never_executes_candidate_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -3147,12 +3376,28 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
             "backend/uv.lock" in plan["changed_paths"]
             and "hashmarks_upgrade" not in plan["evidence"]
         )
-        assert bool(options) == expects_dependency_probe
+        expects_ordinary_probe = any(
+            Path(path).suffix == ".py" for path in plan["changed_paths"]
+        )
+        assert (options["dependency_plan"] is not None) == expects_dependency_probe
+        assert (options["ordinary_receipt"] is not None) == expects_ordinary_probe
         if expects_dependency_probe:
             assert options["dependency_plan"] == plan
             assert options["trusted_root"] == trusted
             options["dependency_receipt"].update(
                 source_identity=plan["source_identity"]
+            )
+        if expects_ordinary_probe:
+            assert options["trusted_root"] == trusted
+            assert sorted(options["ordinary_paths"]) == sorted(plan["changed_paths"])
+            assert options["source_identity"] == plan["source_identity"]
+            options["ordinary_receipt"].update(
+                source_identity=plan["source_identity"],
+                changed_paths=sorted(plan["changed_paths"]),
+                contexts=[
+                    {"name": name, "selected": []}
+                    for name in ("backend", "tooling", "cross-owner")
+                ],
             )
         if fault == "native-timeout":
             raise command_owner.CommandTimeoutExpired(

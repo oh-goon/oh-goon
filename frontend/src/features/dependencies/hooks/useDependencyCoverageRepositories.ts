@@ -5,11 +5,10 @@ import { useApiClient } from "@/app/ApiClientProvider";
 import { useReadResource } from "@/app/reads/useReadResource";
 import { canonicalIdentity } from "@/domain/identity/canonicalValue";
 import type { ReadResource } from "@/domain/reads/ReadResource";
-import type { DependencyCoverage } from "@/features/dependencies/model";
+import { matchesDependencyPackageIdentity, type DependencyCoverage, type DependencyPackageIdentity } from "@/features/dependencies/model";
 import type { DependencyCoverageRepositoryPage } from "@generated/models";
 
-interface Query {
-  packageName: string;
+interface Query extends DependencyPackageIdentity {
   coverage: DependencyCoverage;
   offset: number;
 }
@@ -24,14 +23,14 @@ export function useDependencyCoverageRepositories(query: Query): ReadResource<De
         throw new Error("Matching dependency populations use the matching repository endpoint");
       }
       return client.dependencyCoverageRepositories(
-        query.packageName,
+        { packageName: query.packageName, ecosystem: query.ecosystem },
         query.coverage,
         query.offset,
         25,
         { signal },
       );
     },
-    [client, query.coverage, query.offset, query.packageName],
+    [client, query.coverage, query.offset, query.packageName, query.ecosystem],
   );
   return useReadResource<DependencyCoverageRepositoryPage>({
     scope: "dependency-coverage-repositories",
@@ -41,7 +40,7 @@ export function useDependencyCoverageRepositories(query: Query): ReadResource<De
     errorMessage: t("dependencies.errors.repositories"),
     request,
     validate: (value) => {
-      if (value.package_name !== query.packageName || value.coverage !== query.coverage || value.offset !== query.offset || value.limit !== 25) {
+      if (!matchesDependencyPackageIdentity(query, value) || value.coverage !== query.coverage || value.offset !== query.offset || value.limit !== 25) {
         throw new Error("Dependency coverage response does not match the requested coverage page");
       }
     },

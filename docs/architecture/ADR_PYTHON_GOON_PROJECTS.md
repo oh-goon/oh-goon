@@ -255,7 +255,9 @@ boundary. The native issuer restriction is separate from the existing isolated
 Resolved Plan contract 46 introduced explicit lock mode; contract 47 separates
 captured application source from native environment selection. Execution lock
 version 2 uses one `execution_sources` collection for Goon, Plan and application
-pins. Database schema 92 refuses older serialized Plans before decoding; no old
+pins. Contract 48 adds explicit ecosystem and lock-input authority for dependency
+inventory Steps. Database schema 93 retains the exact-version refusal of older
+serialized Plans before decoding; no old
 source spelling or lock format is accepted as an alias. Incompatible histories
 are not corruption and are never reinterpreted as current selections. Quiesce the old writer before
 switching runtimes, retain old evidence under its original runtime, and re-resolve

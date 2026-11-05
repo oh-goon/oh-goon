@@ -1,8 +1,29 @@
-import type { DependencyPackageOverview, DependencyRepositoryMatch, RepositoryIdentity } from "@generated/models";
+import type { DependencyPackageOverview, DependencyQueryIdentity, DependencyRepositoryMatch, DependencyTargetFilter, RepositoryIdentity } from "@generated/models";
 
 import { DEFAULT_RUN_ID } from "./runIds";
 import { FIXTURE_REPOSITORIES } from "./identities";
 import { FIXTURE_NOW as NOW } from "./time";
+
+export function dependencyQueryIdentity(ecosystem: NonNullable<DependencyTargetFilter["ecosystem"]>, requestedName: string, canonicalName: string): DependencyQueryIdentity {
+  return {
+    ecosystem, requested_name: requestedName, canonical_name: canonicalName,
+    producer_implementation_identity: "controlled-backend-fixture",
+    producer_evidence: { ecosystem, requested_name: requestedName, canonical_name: canonicalName, identity: "fixture-query-correspondence", coordinate_existence: "not-observed" },
+  };
+}
+
+export function dependencyPopulationId(filter: DependencyTargetFilter, repoIds: readonly string[]): string {
+  return JSON.stringify({ filter: {
+    package_name: filter.package_name,
+    ecosystem: filter.ecosystem ?? "pypi",
+    coverage: filter.coverage ?? "matching",
+    resolved_version: filter.resolved_version ?? null,
+    version_prefix: filter.version_prefix ?? null,
+    evidence: filter.evidence ?? "all",
+    version_specifier: filter.version_specifier ?? null,
+    advisory_id: filter.advisory_id ?? null,
+  }, repo_ids: [...repoIds].sort() });
+}
 
 export function dependencyMatches(packageName: string): DependencyRepositoryMatch[] {
   if (packageName.toLowerCase() !== "mlflow") return [];

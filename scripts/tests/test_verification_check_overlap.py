@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import concurrent.futures
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -284,7 +285,7 @@ def test_main_thread_interruption_joins_native_cleanup_before_propagating(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(owner, "run_command", observed_command)
-    monkeypatch.setattr(owner.concurrent.futures, "wait", interrupt_wait)
+    monkeypatch.setattr(concurrent.futures, "wait", interrupt_wait)
 
     with pytest.raises(KeyboardInterrupt):
         owner.execute_change(root, plan, mode="focused", workers=2)

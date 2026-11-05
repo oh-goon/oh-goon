@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from oh_goon.core.dependency_identity import DependencyEcosystem
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan_step_contract import (
     PlanStepCache,
@@ -33,7 +34,8 @@ class DependencyInventoryPlanStep(ImmutableModel):
     step_id: str = Field(min_length=1, max_length=80)
     timeout_seconds: float = Field(default=300, gt=0, le=3600)
     lifecycle: StepLifecycle = StepLifecycle.NORMAL
-    ecosystem: Literal["pypi"] = "pypi"
+    ecosystem: DependencyEcosystem = "pypi"
+    lock_path: str | None = Field(default=None, min_length=1, max_length=240)
     imports: PlanStepImports = Field(default_factory=PlanStepImports)
     workspace: PlanStepWorkspace = Field(default_factory=PlanStepWorkspace)
     cache: PlanStepCache = Field(default_factory=PlanStepCache)

@@ -82,6 +82,14 @@ workflow/result policy and selector changes require the named
 **verification-policy protection** obligation. Shared fixture or dependency
 uncertainty cannot be excused by that generic policy proof.
 
+Verification-support sources may use the named **bounded verification-support
+proof** when an intact native changed-set packet supplies positive consumer
+relationships bound to the exact source and verifier revisions. Existing native
+collection and successful execution must include a qualified consumer; an empty
+or cadence-deselected target alone supplies no proof. Dynamic consumer scope
+remains incomplete and no whole-owner coverage is claimed. Missing or
+unqualified relationships retain `SELECTION_UNVERIFIED`.
+
 Ordinary Markdown under `docs/` and root `CONTRIBUTING.md` use the existing
 [documentation contract](../scripts/tests/test_documentation_authority_contract.py)
 and architecture through the same admission, execution and trusted-gate owners.
@@ -214,10 +222,12 @@ into a pass.
 
 The candidate job emits **MERGE_PROOF_READY** only after its selected checks.
 The required **merge-gate** separately checks out the immutable base controller,
-inspects the candidate as data, and validates the bounded same-run proof artifact.
-It never executes or imports candidate code. Missing, skipped, failed, cancelled,
-stale or mismatched proof cannot qualify. The base control also rejects missing
-owners and surviving changed tests without meaningful execution. Absence of reviewed base
+validates the bounded same-run proof artifact and retains its independently
+base-owned interpreter, package and decisions. Candidate source is data except
+for the narrowly selected native collection children described below. Missing,
+skipped, failed, cancelled, stale or mismatched proof cannot qualify. The base
+control also rejects missing owners and surviving changed ordinary tests without
+meaningful execution. Absence of reviewed base
 controls is **CUTOVER_UNVERIFIED**. Draft feedback has the distinct nonrequired
 name **draft-feedback** and means **FOCUSED / NOT_FULLY_VERIFIED**.
 
@@ -255,13 +265,45 @@ workspace installation, no source builds, and the trusted interpreter explicitly
 selected. The existing public-lock policy rejects local dependency sources first.
 Native workspace discovery must resolve to that exact backend project before
 materialization; an enclosing workspace cannot substitute another lock.
-The controller reads distribution metadata and calls the trusted Hashmarks public
-artifact-identity API over the contained installed package; it never starts the
-candidate interpreter or imports those package bytes. Missing, ambiguous, escaped,
+The artifact-identity phase reads distribution metadata and calls the trusted
+Hashmarks public identity API over the contained installed package without
+importing it. Required dependency admission may then use that dependency-only
+runtime with immutable base admission code and the released producer; candidate
+project code and build hooks remain unavailable in that phase. Missing, ambiguous, escaped,
 oversized or mismatched producer evidence remains unverified. The candidate source
 is checked again after this observation. This permits a normally locked producer
 upgrade without confusing the base controller's older runtime with the candidate's
 producer or granting a version-mismatch exception.
+
+For changed Python sources, the same merge gate observes ordinary native pytest
+membership once for each existing backend, tooling and cross-owner invocation.
+The local planner and editing loop continue to collect only relevant targets.
+After the separate no-build dependency phase, native uv prepares the candidate's
+committed `dev`, `quality` and `build` groups and project for this explicit
+collection exception. Base control stays in the base process; it never starts
+its orchestration parent with the post-install candidate interpreter or its
+startup hooks. Only the existing native collector children use candidate Python
+and import candidate tests, with the immutable base collector hook file.
+
+Resolved source, interpreter/environment, actual cwd, config identity, argv,
+exclusions and cadence marker are transported and verified before collection.
+Native selected and deselected membership stays distinct; the retained projection
+names changed files only and keeps full-scope counts and membership identities.
+Changed ordinary selected cases require exact passed execution evidence even if
+the candidate plan hides their role. A source-shaped helper is not made a test
+by its filename. Deselected slow/daily/certification journeys remain separately
+selected and unverified here; collection never counts as test execution. Existing
+planner refusal for a changed-test nomination without selected members remains.
+Source/base fences and positive native process-group quiescence protect setup
+and collection. This uses the existing merge gate and collector/process owners.
+
+That independent ordinary-membership proof covers the three repository pytest
+contexts above. The configured frontend retains its existing positive Vitest
+self-nomination obligation; source syntax alone does not prove native frontend
+membership or complete owner coverage. Test-shaped template fixtures or another
+project do not acquire an obligation from their spelling. A nomination requiring
+an unavailable native project context stays `NATIVE_PROJECT_CONTEXT_REQUIRED` /
+unverified through the existing planner, without a complete-suite fallback.
 
 Only needed toolchains are materialized with native committed locks. Python-only
 work does not install/build the frontend. Node/npm is prepared only for admitted

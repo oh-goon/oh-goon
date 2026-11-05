@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 
+from oh_goon.core.dependency_identity import DependencyEcosystem
 from oh_goon.core.errors import InvalidRequest
 from oh_goon.core.models.dependency_fleet import (
     DependencyCoveragePopulation,
@@ -29,12 +30,14 @@ class DependencyCoverageService:
         self._repositories = repositories
         self._store = observations
 
-    def overview(self) -> DependencyFleetCoverageOverview:
+    def overview(
+        self, *, ecosystem: DependencyEcosystem = "pypi"
+    ) -> DependencyFleetCoverageOverview:
         with self._store.assessment_scope():
             current = self._current_repositories()
             snapshots = {
                 str(row["repository_id"]): row
-                for row in self._store.snapshot_rows()
+                for row in self._store.snapshot_rows(ecosystem)
                 if str(row["repository_id"]) in current
             }
             counts = {"current": 0, "unknown": 0, "stale": 0, "missing": 0}
@@ -49,6 +52,7 @@ class DependencyCoverageService:
                 counts[state] += 1
             no_current = counts["unknown"] + counts["stale"] + counts["missing"]
             return DependencyFleetCoverageOverview(
+                ecosystem=ecosystem,
                 repository_total=len(current),
                 current_dependency_evidence=counts["current"],
                 unknown_dependency_evidence=counts["unknown"],
@@ -61,6 +65,8 @@ class DependencyCoverageService:
         self,
         package_name: str,
         coverage: DependencyCoveragePopulation,
+        *,
+        ecosystem: DependencyEcosystem = "pypi",
     ) -> list[DependencyCoverageRepository]:
         with self._store.assessment_scope():
             if coverage not in {"absent_from_lock", "no_current_evidence"}:
@@ -68,7 +74,7 @@ class DependencyCoverageService:
             current = self._current_repositories()
             snapshots = {
                 str(row["repository_id"]): row
-                for row in self._store.snapshot_rows()
+                for row in self._store.snapshot_rows(ecosystem)
                 if str(row["repository_id"]) in current
             }
             items: list[DependencyCoverageRepository] = []
@@ -85,7 +91,7 @@ class DependencyCoverageService:
                         continue
                 elif assessment.absence_admissible:
                     continue
-                items.append(_coverage_item(repository, coverage, snapshot, assessment))
+                items.append(_coverage_item(repository, coverage, snapshot, assessment, ecosystem))
             return sorted(items, key=lambda item: item.repository.name.casefold())
 
     def _current_repositories(self) -> dict[str, RepositoryIdentity]:
@@ -101,10 +107,12 @@ def _coverage_item(
     coverage: DependencyCoveragePopulation,
     snapshot: sqlite3.Row | None,
     assessment: DependencyEvidenceAssessment,
+    ecosystem: DependencyEcosystem,
 ) -> DependencyCoverageRepository:
     if snapshot is None:
         return DependencyCoverageRepository(
             repository=repository,
+            ecosystem=ecosystem,
             coverage=coverage,
             evidence=assessment,
         )
@@ -112,6 +120,7 @@ def _coverage_item(
     sources = tuple(item.path for item in observed.sources)
     return DependencyCoverageRepository(
         repository=repository,
+        ecosystem=ecosystem,
         coverage=coverage,
         evidence=assessment,
         sources=sources,
