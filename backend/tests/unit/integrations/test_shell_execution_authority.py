@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from oh_goon.integrations import shell_execution_authority as subject
+from oh_goon.integrations.hashmarks import hashmarks_source_scope
 from oh_goon.integrations.make_execution_authority import derive_make_target_authority
 from oh_goon.integrations.shell_execution_authority import derive_shell_fragment_authority
 
@@ -16,222 +18,416 @@ def _repo(tmp_path: Path) -> Path:
     return root
 
 
-def test_owned_script_closure_derives_indirect_launches(tmp_path: Path) -> None:
+def test_literal_owned_source_preserves_tool_need_and_exact_source_evidence(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "scripts/worker.sh").write_text(
-        r"""#!/bin/sh
-set -eu
-find work -type f -exec rm -f {} \\\;
-printf '%s\\n' item | xargs -r env MODE=copy sh -c 'cp source target'
-""",
-        encoding="utf-8",
+    (root / "scripts/worker.sh").write_text("#!/bin/sh\ngit --version\n", encoding="utf-8")
+    result = derive_shell_fragment_authority(root, "sh scripts/worker.sh", chain=("target",))
+    assert result.unresolved == ()
+    assert result.tools == ("git", "sh")
+    assert result.scripts == ("scripts/worker.sh",)
+    assert any(
+        evidence.source_bytes == b"#!/bin/sh\ngit --version\n"
+        for evidence in result.repository_evidence
     )
-
-    authority = derive_shell_fragment_authority(
-        root,
-        "sh scripts/worker.sh",
-        chain=("target",),
-    )
-
-    assert authority.unresolved == ()
-    assert set(authority.tools) == {"cp", "env", "find", "rm", "sh", "xargs"}
-    assert "scripts/worker.sh" in authority.scripts
-
-
-def test_owned_script_dynamic_executable_fails_closed(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / "scripts/dynamic.sh").write_text(
-        """#!/bin/sh
-set -eu
-"$TOOL" --version
-""",
-        encoding="utf-8",
-    )
-
-    authority = derive_shell_fragment_authority(
-        root,
-        "sh scripts/dynamic.sh",
-        chain=("target",),
-    )
-
-    assert authority.unresolved
-    assert any("unresolved executable variable: $TOOL" in item for item in authority.unresolved)
 
 
 @pytest.mark.parametrize(
-    ("fragment", "expected"),
+    "fragment",
     [
-        ('p=backend/.venv/bin/private-tool; "$p"', "unresolved executable variable"),
-        ('command "$tool"', "unresolved executable variable"),
-        ('env "$tool"', "unresolved executable variable"),
-        ('"${TOOL}"', "unresolved executable parameter expansion"),
-        ("$(printf tool)", "unresolved executable command substitution"),
-        ('eval "$tool"', "dynamic eval execution is unprovable"),
-        ("`printf tool`", "unresolved executable token"),
+        '"$TOOL" --version',
+        'command "$tool"',
+        'env "$tool"',
+        '"${TOOL}"',
+        "$(printf tool)",
+        'eval "$tool"',
+        "`printf tool`",
     ],
 )
-def test_dynamic_executable_forms_fail_closed(
-    tmp_path: Path,
-    fragment: str,
-    expected: str,
+def test_unknown_command_heads_cannot_use_ambient_or_declared_environment_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fragment: str
 ) -> None:
     root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(root, fragment, chain=("step:check",))
-
-    assert authority.unresolved
-    assert any(expected in item for item in authority.unresolved)
-
-
-def test_direct_owned_script_binds_shebang_interpreter(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    script = root / "scripts/direct.sh"
-    script.write_text("#!/usr/bin/env bash\nprintf 'ok\\n'\n", encoding="utf-8")
-
-    authority = derive_shell_fragment_authority(
-        root,
-        "scripts/direct.sh",
-        chain=("target",),
+    assert (
+        derive_shell_fragment_authority(root, "git --version", chain=("target",)).unresolved == ()
     )
-
-    assert authority.unresolved == ()
-    assert set(authority.tools) == {"bash", "env"}
-
-
-def test_forwarding_contract_resolves_static_forwarded_command(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / "scripts/wrapper.sh").write_text(
-        """#!/bin/sh
-# OH_GOON_FORWARD_ARGV_FROM: 2
-label=$1
-shift
-"$@"
-""",
-        encoding="utf-8",
+    monkeypatch.setenv("TOOL", "curl")
+    result = derive_shell_fragment_authority(
+        root, fragment, chain=("target",), environment={"TOOL": "curl"}
     )
-
-    authority = derive_shell_fragment_authority(
-        root,
-        "sh scripts/wrapper.sh label env MODE=1 sh -c 'rm -f artifact'",
-        chain=("target",),
-    )
-
-    assert authority.unresolved == ()
-    assert set(authority.tools) == {"env", "rm", "sh"}
+    assert result.unresolved
+    assert "curl" not in result.tools
 
 
-def test_bash_control_groups_keep_substitutions_and_following_executables(
+def test_declared_forwarding_transports_positive_need_without_qualifying_native_behavior(
     tmp_path: Path,
 ) -> None:
     root = _repo(tmp_path)
     (root / "scripts/wrapper.sh").write_text(
-        "#!/bin/bash\n# OH_GOON_FORWARD_ARGV_FROM: 1\n"
-        'if [[ -z "$(id -u)" || "${VALUE:-}" == none ]]; then\n'
-        "  (( child = $(getconf _NPROCESSORS_ONLN) )); git --version\n"
-        "fi\n"
-        "(( cpus > 0 )) || return 2\n"
-        'exec systemd-run -- "$@"\n',
-        encoding="utf-8",
+        '#!/bin/sh\n# OH_GOON_FORWARD_ARGV_FROM: 2\nshift\n"$@"\n', encoding="utf-8"
+    )
+    result = derive_shell_fragment_authority(
+        root, "sh scripts/wrapper.sh label rm -f artifact", chain=("target",)
+    )
+    assert result.tools == ("rm", "sh")
+    assert result.unresolved
+    assert any("declared forwarding" in reason for reason in result.unresolved)
+    assert any("<declared-child-argv>" in path for tool, path in result.provenance if tool == "rm")
+
+
+def test_direct_script_name_does_not_establish_a_native_interpreter(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "scripts/direct.sh").write_text("#!/usr/bin/env bash\nprintf okay\n", encoding="utf-8")
+    result = derive_shell_fragment_authority(root, "scripts/direct.sh", chain=("target",))
+    assert result.unresolved
+    assert "bash" not in result.tools and "env" not in result.tools
+
+
+def test_conditional_source_never_selects_a_branch_from_consumer_environment(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    fragment = (
+        'MODE=${MODE:-local}\nif [ "$MODE" = local ]; then\n  git status\nelse\n  curl remote\nfi\n'
+    )
+    first = derive_shell_fragment_authority(
+        root, fragment, chain=("target",), environment={"MODE": "local"}
+    )
+    second = derive_shell_fragment_authority(
+        root, fragment, chain=("target",), environment={"MODE": "remote"}
+    )
+    assert first.unresolved and second.unresolved
+    assert first.tools == second.tools
+    assert {"git", "curl"} <= set(first.tools)
+
+
+def test_unavailable_source_producer_cannot_activate_a_shell_parser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _repo(tmp_path)
+    assert derive_shell_fragment_authority(root, "git --version", chain=("target",)).tools == (
+        "git",
     )
 
-    authority = derive_shell_fragment_authority(
-        root, "bash scripts/wrapper.sh env MODE=1 rm -f artifact", chain=("target",)
-    )
+    def unavailable(*_args: object, **_kwargs: object) -> object:
+        raise ValueError("producer source unavailable")
 
-    assert authority.unresolved == ()
-    assert set(authority.tools) == {"bash", "env", "getconf", "git", "id", "rm", "systemd-run"}
+    monkeypatch.setattr(subject, "observe_make_shell_declarations_text", unavailable)
+    result = derive_shell_fragment_authority(root, "git --version", chain=("target",))
+    assert result.unresolved
+    assert result.tools == ()
+
+
+def test_cached_owned_script_diamond_has_one_shared_work_budget(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "scripts/leaf.sh").write_text("git --version\n", encoding="utf-8")
+    (root / "scripts/middle.sh").write_text(
+        "sh scripts/leaf.sh\nsh scripts/leaf.sh\n", encoding="utf-8"
+    )
+    (root / "scripts/root.sh").write_text(
+        "sh scripts/middle.sh\nsh scripts/middle.sh\n", encoding="utf-8"
+    )
+    baseline = derive_shell_fragment_authority(root, "sh scripts/root.sh", chain=("target",))
+    assert baseline.unresolved == ()
+    assert baseline.tools == ("git", "sh")
+    with hashmarks_source_scope(root) as scope:
+        captured = subject.ShellSourceObservations(root, scope, work_remaining=6)
+        result = derive_shell_fragment_authority(
+            root, "sh scripts/root.sh", chain=("target",), source_observations=captured
+        )
+    assert result.unresolved
+    assert any("work bound exhausted" in reason for reason in result.unresolved)
+    assert "sh" in result.tools
+
+
+def test_literal_make_prerequisites_use_producer_source_paths(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "Makefile").write_text(
+        "target: child\nchild:\n\tgit --version\nunrelated:\n\tcurl remote\n", encoding="utf-8"
+    )
+    result = derive_make_target_authority(root, "target")
+    assert result.unresolved == ()
+    assert result.tools == ("git",)
+    assert result.provenance == (("git", "target -> child -> git"),)
+    assert result.repository_evidence
+
+
+def test_make_source_default_stays_conditional_and_never_reads_ambient_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _repo(tmp_path)
+    (root / "Makefile").write_text("TOOL ?= git\ntarget:\n\t$(TOOL) --version\n", encoding="utf-8")
+    monkeypatch.setenv("TOOL", "curl")
+    result = derive_make_target_authority(root, "target")
+    assert result.unresolved
+    assert "git" in result.tools
+    assert "curl" not in result.tools
 
 
 @pytest.mark.parametrize(
     "fragment",
     [
-        "[[ -n <(curl --version) ]]; git --version",
-        "[[ -n >(curl --version) ]]; git --version",
-        "[[ `curl --version` == value ]]; git --version",
-        '[[ "`curl --version`" == value ]]; git --version',
+        "printf '%s' ${UNSET:-`curl --version`}; git status",
+        "[[ -n <(curl --version) ]]; git status",
+        "(( value = `getconf LONG_BIT` )); git status",
+        "values=($(curl --version)); git status",
+        'printf "%s" "$(curl --version)"; git status',
     ],
 )
-def test_conditional_groups_cannot_hide_unowned_native_execution(
+def test_unobserved_native_expansions_cannot_become_complete_source_need(
     tmp_path: Path, fragment: str
 ) -> None:
     root = _repo(tmp_path)
-    baseline = derive_shell_fragment_authority(
-        root,
-        "[[ '<(curl --version)' == \"<(curl --version)\" || "
-        "'`curl --version`' == \"\\`curl --version\\`\" || "
-        r"\<\(curl\) == \>\(curl\) ]]; git --version",
-        chain=("target",),
-    )
+    baseline = derive_shell_fragment_authority(root, "git status", chain=("target",))
     assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
-
-    authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
-
-    assert any("unparseable shell fragment" in item for item in authority.unresolved)
+    result = derive_shell_fragment_authority(root, fragment, chain=("target",))
+    assert result.unresolved or {"curl", "getconf"}.intersection(result.tools)
 
 
 @pytest.mark.parametrize(
     "fragment",
     [
-        "(( value = <(curl --version) )); git --version",
-        "(( value = >(curl --version) )); git --version",
-        "(( value = `getconf LONG_BIT` )); git --version",
-        '(( value = "`getconf LONG_BIT`" )); git --version',
+        "env MODE=one rm -f artifact",
+        "xargs rm",
+        r"find . -exec rm {} \;",
+        "timeout 5 rm",
+        "nice rm",
+        "nohup rm",
+        "stdbuf -oL rm",
+        "setsid rm",
     ],
 )
-def test_arithmetic_groups_cannot_hide_unowned_native_execution(
-    tmp_path: Path, fragment: str
-) -> None:
+def test_native_child_operand_semantics_stay_unproven(tmp_path: Path, fragment: str) -> None:
     root = _repo(tmp_path)
-    baseline = derive_shell_fragment_authority(
-        root,
-        "printf '%s' '`getconf LONG_BIT`' '<(curl --version)'; "
-        '(( value = "(1 + 2)" * 3 )); git --version',
-        chain=("target",),
-    )
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
-
-    authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
-
-    assert any("unparseable shell fragment" in item for item in authority.unresolved)
+    assert derive_shell_fragment_authority(root, "git status", chain=("target",)).unresolved == ()
+    result = derive_shell_fragment_authority(root, fragment, chain=("target",))
+    assert result.unresolved
 
 
 @pytest.mark.parametrize(
-    "fragment",
+    "argv,cwd,expected",
     [
-        "[[ -n ${UNSET:-`curl --version`} ]]; git --version",
-        '[[ -n "${UNSET:-`curl --version`}" ]]; git --version',
-        "[[ -n \"${UNSET:-'`curl --version`'}\" ]]; git --version",
-        "[[ -n ${UNSET:-<(curl --version)} ]]; git --version",
-        "[[ -n ${UNSET:->(curl --version)} ]]; git --version",
-        "(( value = ${UNSET:-`getconf LONG_BIT`} )); git --version",
-        "(( value = ${UNSET:-$((`getconf LONG_BIT`))} )); git --version",
-        "(( value = $((`getconf LONG_BIT`)) )); git --version",
-        '[[ -n "$((`getconf LONG_BIT`))" ]]; git --version',
-        "[[ -n $(printf '%s' ${UNSET:-`curl --version`}) ]]; git --version",
+        (("backend/./.venv/bin/private-tool",), ".", "backend/.venv/bin/private-tool"),
+        ((".venv/bin/private-tool",), "backend", "backend/.venv/bin/private-tool"),
+        (("/workspace/backend/.venv/bin/private-tool",), ".", "backend/.venv/bin/private-tool"),
+        (
+            ("/workspace/frontend/node_modules/.bin/private-tool",),
+            ".",
+            "frontend/node_modules/.bin/private-tool",
+        ),
     ],
 )
-def test_nested_expansions_cannot_hide_unowned_execution_before_control_masking(
-    tmp_path: Path, fragment: str
+def test_materialized_paths_use_explicit_original_argv_and_working_directory(
+    tmp_path: Path, argv: tuple[str, ...], cwd: str, expected: str
+) -> None:
+    root = _repo(tmp_path)
+    result = derive_shell_fragment_authority(
+        root, "ignored source spelling", chain=("target",), argv=argv, working_directory=cwd
+    )
+    assert result.materialized_executables == (expected,)
+    assert result.unresolved == ()
+
+
+def test_source_cd_does_not_replace_explicit_working_directory(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    result = derive_shell_fragment_authority(
+        root, """sh -c 'cd backend && exec "$@"' sh .venv/bin/private-tool""", chain=("target",)
+    )
+    assert result.unresolved
+    assert "backend/.venv/bin/private-tool" not in result.materialized_executables
+
+
+@pytest.mark.parametrize(
+    "literal", ["/bin/true)", "(/bin/true)", "'/bin/true'", r"backend\.venv\bin\private-tool"]
+)
+def test_original_argv_punctuation_cannot_be_repaired_into_an_executable(
+    tmp_path: Path, literal: str
 ) -> None:
     root = _repo(tmp_path)
     baseline = derive_shell_fragment_authority(
-        root,
-        "[[ -n '${UNSET:-`curl --version`}' || "
-        r'-n "\${UNSET:-\`curl --version\`}" ]]; '
-        "[[ -n ${UNSET:-'`curl --version`'} || "
-        r"-n ${UNSET:-\<\(curl\)} ]]; "
-        '[[ -n "${UNSET:-$(id -u)}" ]]; '
-        "(( value = ${UNSET:-$(getconf LONG_BIT)} )); git --version",
-        chain=("target",),
+        root, "unused", chain=("target",), argv=("/bin/true",)
     )
     assert baseline.unresolved == ()
-    assert baseline.tools == ("getconf", "git", "id")
+    assert baseline.tools == ("true",)
+    result = derive_shell_fragment_authority(root, "unused", chain=("target",), argv=(literal,))
+    assert result.unresolved
+    assert "true" not in result.tools
 
-    authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
 
-    assert any("unparseable shell fragment" in item for item in authority.unresolved)
+def test_dash_uses_the_same_producer_source_boundary(tmp_path: Path) -> None:
+    result = derive_shell_fragment_authority(
+        _repo(tmp_path), "unused", chain=("target",), argv=("dash", "-c", "git --version")
+    )
+    assert result.unresolved == ()
+    assert result.tools == ("dash", "git")
+
+
+@pytest.mark.parametrize("program", ["/bin/sh", "/bin/bash", "/bin/dash"])
+def test_absolute_shell_spelling_cannot_establish_an_admitted_native_role(
+    tmp_path: Path, program: str
+) -> None:
+    result = derive_shell_fragment_authority(
+        _repo(tmp_path), "unused", chain=("target",), argv=(program, "-c", 'exec "$unresolved"')
+    )
+    assert result.unresolved
+
+
+def test_closed_original_source_scope_cannot_reuse_cached_shell_observations(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    with hashmarks_source_scope(root) as scope:
+        captured = subject.ShellSourceObservations(root, scope)
+        baseline = derive_shell_fragment_authority(
+            root, "unused", chain=("target",), argv=("/bin/true",), source_observations=captured
+        )
+        assert baseline.unresolved == ()
+    result = derive_shell_fragment_authority(
+        root, "unused", chain=("target",), argv=("/bin/true",), source_observations=captured
+    )
+    assert result.unresolved
+    assert result.tools == ()
+
+
+def test_literal_data_does_not_invent_command_substitution_need(tmp_path: Path) -> None:
+    result = derive_shell_fragment_authority(
+        _repo(tmp_path), "printf '%s' '$(rm -f artifact)'", chain=("target",)
+    )
+    assert result.unresolved == ()
+    assert result.tools == ()
+
+
+def test_authority_identity_inputs_change_when_owned_script_bytes_change(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "Makefile").write_text("target:\n\tsh scripts/task.sh\n", encoding="utf-8")
+    script = root / "scripts/task.sh"
+    script.write_text("#!/bin/sh\nprintf one\n", encoding="utf-8")
+    before = derive_make_target_authority(root, "target")
+    script.write_text("#!/bin/sh\nprintf two\n", encoding="utf-8")
+    after = derive_make_target_authority(root, "target")
+    assert before.tools == after.tools == ("sh",)
+    assert before.source_identities != after.source_identities
+
+
+def test_materialized_supply_does_not_become_repository_shell_source(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "Makefile").write_text(
+        "target:\n\tbackend/.venv/bin/private-tool tests/unit\n", encoding="utf-8"
+    )
+    before = derive_make_target_authority(root, "target")
+    wrapper = root / "backend/.venv/bin/private-tool"
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_text(
+        "#!/usr/bin/python3\nfrom package import main\nraise SystemExit(main())\n", encoding="utf-8"
+    )
+    after = derive_make_target_authority(root, "target")
+    assert before.tools == after.tools == ()
+    assert (
+        before.materialized_executables
+        == after.materialized_executables
+        == ("backend/.venv/bin/private-tool",)
+    )
+    assert before.source_identities == after.source_identities
+
+
+@pytest.mark.process
+def test_native_make_parse_time_effect_cannot_be_omitted_by_selected_recipe_scope(
+    tmp_path: Path,
+) -> None:
+    make = shutil.which("make")
+    if make is None:
+        pytest.skip("Native Make is required for parse-time authority proof")
+    root = _repo(tmp_path)
+    makefile = root / "Makefile"
+    makefile.write_text("target:\n\t/usr/bin/true\n", encoding="utf-8")
+    assert derive_make_target_authority(root, "target").unresolved == ()
+    marker = root / "parse-time-marker"
+    (root / "scripts/canary.sh").write_text(
+        "printf observed > parse-time-marker\n", encoding="utf-8"
+    )
+    makefile.write_text(
+        "SIDE != sh scripts/canary.sh\ntarget:\n\t/usr/bin/true\n", encoding="utf-8"
+    )
+    result = derive_make_target_authority(root, "target")
+    assert result.unresolved
+    assert not marker.exists()
+    native = subprocess.run(
+        [make, "--no-print-directory", "-rR", "target"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert native.returncode == 0, native.stderr
+    assert marker.read_text(encoding="utf-8") == "observed"
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "source",
+    [
+        'value="$(bash scripts/assignment-canary.sh)"',
+        'values=("$(bash scripts/assignment-canary.sh)")',
+    ],
+)
+def test_native_assignment_and_array_expansion_cannot_hide_child_execution(
+    tmp_path: Path, source: str
+) -> None:
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("Native Bash is required for assignment authority proof")
+    root = _repo(tmp_path)
+    (root / "scripts/assignment-canary.sh").write_text(
+        "printf 1\nprintf ASSIGNMENT_EXECUTION_CANARY >&2\n", encoding="utf-8"
+    )
+    baseline = derive_shell_fragment_authority(root, "printf literal", chain=("target",))
+    assert baseline.unresolved == ()
+    result = derive_shell_fragment_authority(root, source, chain=("target",))
+    assert result.unresolved or (
+        "bash" in result.tools and "scripts/assignment-canary.sh" in result.scripts
+    )
+    native = subprocess.run(
+        [bash, "--noprofile", "--norc", "-c", source],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert native.returncode == 0, native.stderr
+    assert native.stderr == "ASSIGNMENT_EXECUTION_CANARY"
+
+
+@pytest.mark.process
+def test_native_path_assignment_does_not_qualify_later_literal_program_binding(
+    tmp_path: Path,
+) -> None:
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("Native Bash is required for PATH authority proof")
+    root = _repo(tmp_path)
+    bindir = root / "private-bin"
+    bindir.mkdir()
+    program = bindir / "git"
+    program.write_text("#!/bin/sh\nprintf observed > path-binding-marker\n", encoding="utf-8")
+    program.chmod(0o700)
+    assert (
+        derive_shell_fragment_authority(root, "git --version", chain=("target",)).unresolved == ()
+    )
+    source = 'PATH="$PWD/private-bin:$PATH"; git'
+    result = derive_shell_fragment_authority(root, source, chain=("target",))
+    assert result.unresolved
+    assert not (root / "path-binding-marker").exists()
+    native = subprocess.run(
+        [bash, "--noprofile", "--norc", "-c", source],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert native.returncode == 0, native.stderr
+    assert (root / "path-binding-marker").read_text(encoding="utf-8") == "observed"
 
 
 @pytest.mark.process
@@ -273,7 +469,7 @@ def test_native_arithmetic_substitutions_cannot_lose_their_execution_authority(
         timeout=10,
     )
     assert native_baseline.returncode == 0, native_baseline.stderr
-    baseline_authority = derive_shell_fragment_authority(root, baseline, chain=("target",))
+    baseline_authority = derive_shell_fragment_authority(root, "printf literal", chain=("target",))
     assert baseline_authority.unresolved == ()
     assert baseline_authority.tools == ()
 
@@ -296,499 +492,3 @@ def test_native_arithmetic_substitutions_cannot_lose_their_execution_authority(
     assert authority.unresolved or (
         "bash" in authority.tools and "scripts/arithmetic-canary.sh" in authority.scripts
     )
-
-
-def test_control_prefix_assignments_and_reads_preserve_substitution_authority(
-    tmp_path: Path,
-) -> None:
-    root = _repo(tmp_path)
-    fragment = (
-        "while IFS=: read -r hierarchy controllers relative; do :; done; "
-        'if ! IFS= read -r limit < input || [[ "$limit" != max ]]; then :; fi; '
-        'if ! root=$(realpath .) || ! directory=$(dirname "$root"); then :; fi; '
-        "if ! tasks_max=$(getconf CHILD_MAX); then :; fi"
-    )
-
-    authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("dirname", "getconf", "realpath")
-
-
-@pytest.mark.parametrize(
-    ("prefix", "suffix"),
-    [("", ""), ("! ", ""), ("if ! ", "; then :; fi"), ("while ", "; do break; done")],
-)
-def test_assignment_prefixes_keep_actual_executables_and_unknown_variables(
-    tmp_path: Path, prefix: str, suffix: str
-) -> None:
-    root = _repo(tmp_path)
-    baseline = derive_shell_fragment_authority(
-        root, f"{prefix}MODE=scan git --version{suffix}", chain=("target",)
-    )
-
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
-
-    dynamic = derive_shell_fragment_authority(
-        root, f'{prefix}MODE=scan "$TOOL" --version{suffix}', chain=("target",)
-    )
-
-    assert any("unresolved executable variable: $TOOL" in item for item in dynamic.unresolved)
-
-
-def test_array_assignment_data_keeps_substitutions_and_following_commands(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    authority = derive_shell_fragment_authority(
-        root,
-        'MODE=scan values=(--limit "$limit" "a)b" "$(getconf CHILD_MAX)"); '
-        'values+=("literal || rm"); env MODE=scan git status',
-        chain=("target",),
-    )
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("env", "getconf", "git")
-
-
-def test_array_assignment_cannot_hide_a_following_dynamic_executable(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    baseline = derive_shell_fragment_authority(
-        root, 'values=(--limit "$limit"); git --version', chain=("target",)
-    )
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
-
-    authority = derive_shell_fragment_authority(
-        root, 'values=(--limit "$limit"); "$TOOL" --version', chain=("target",)
-    )
-
-    assert any("unresolved executable variable: $TOOL" in item for item in authority.unresolved)
-
-
-def test_quoted_array_spelling_does_not_mask_shell_control_commands(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    authority = derive_shell_fragment_authority(
-        root, "printf '%s' 'values=(' value || curl --version", chain=("target",)
-    )
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("curl",)
-
-
-def test_unclosed_array_assignment_remains_unproven(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    baseline = derive_shell_fragment_authority(root, 'values=(--limit "$limit")', chain=("target",))
-    assert baseline.unresolved == ()
-    assert baseline.tools == ()
-
-    authority = derive_shell_fragment_authority(root, 'values=(--limit "$limit"', chain=("target",))
-
-    assert any("unparseable shell fragment" in item for item in authority.unresolved)
-
-
-@pytest.mark.parametrize(
-    "payload",
-    ["<(curl --version)", ">(curl --version)", "`curl --version`", '"`curl --version`"'],
-)
-def test_array_assignment_cannot_hide_unowned_native_execution_forms(
-    tmp_path: Path, payload: str
-) -> None:
-    root = _repo(tmp_path)
-    baseline = derive_shell_fragment_authority(
-        root,
-        "values=('`curl --version`' '<(curl --version)' '>(curl --version)' "
-        r"\`curl\` \<\(curl\)); git --version",
-        chain=("target",),
-    )
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
-
-    authority = derive_shell_fragment_authority(
-        root, f"values=({payload}); git --version", chain=("target",)
-    )
-
-    assert any("unparseable shell fragment" in item for item in authority.unresolved)
-
-
-def test_arithmetic_variable_names_still_require_authority_when_executed(
-    tmp_path: Path,
-) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(
-        root, "(( cpus > 0 )); child --version; cpus --version", chain=("target",)
-    )
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("child", "cpus")
-
-
-def test_bash_group_spelling_in_arguments_cannot_hide_later_commands(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(
-        root, "printf '%s' [[ value || curl --version ]]", chain=("target",)
-    )
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("curl",)
-
-
-def test_literal_cwd_shell_forwarding_skips_zero_and_retains_environment_and_child(
-    tmp_path: Path,
-) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(
-        root,
-        "sh -c 'cd backend && exec \"$@\"' ignored-zero env MODE=1 git status --porcelain",
-        chain=("target",),
-    )
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("env", "git", "sh")
-
-
-def test_literal_cwd_shell_forwarding_binds_materialized_child_and_preserves_outer_cwd(
-    tmp_path: Path,
-) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(
-        root,
-        "sh -c 'cd backend && exec \"$@\"' sh env MODE=1 .venv/bin/private-tool; "
-        "frontend/node_modules/.bin/other-tool",
-        chain=("target",),
-    )
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("env", "sh")
-    assert authority.materialized_executables == (
-        "backend/.venv/bin/private-tool",
-        "frontend/node_modules/.bin/other-tool",
-    )
-
-
-def test_literal_cwd_shell_forwarding_reads_owned_sources_from_that_directory(
-    tmp_path: Path,
-) -> None:
-    root = _repo(tmp_path)
-    (root / "backend/scripts").mkdir(parents=True)
-    (root / "backend/scripts/worker.sh").write_text("#!/bin/sh\nrm -f artifact\n")
-    (root / "scripts/worker.sh").write_text("#!/bin/sh\ncurl https://example.invalid\n")
-
-    authority = derive_shell_fragment_authority(
-        root, "sh -c 'cd backend && exec \"$@\"' sh sh scripts/worker.sh", chain=("target",)
-    )
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("rm", "sh")
-    assert authority.scripts == ("backend/scripts/worker.sh",)
-
-
-@pytest.mark.parametrize(
-    "program",
-    (
-        'cd "$DIR" && exec "$@"',
-        'cd ../.. && exec "$@"',
-        'cd backend || exec "$@"',
-        "cd backend && exec '$@'",
-        'cd backend && exec "$1"',
-        'cd backend && "$@"',
-        'cd backend && exec "$@"; curl https://example.invalid',
-    ),
-)
-def test_unproven_shell_positional_forwarding_remains_admission_fatal(
-    tmp_path: Path, program: str
-) -> None:
-    import shlex
-
-    root = _repo(tmp_path)
-    baseline = derive_shell_fragment_authority(
-        root, "sh -c 'cd backend && exec \"$@\"' sh git status", chain=("target",)
-    )
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git", "sh")
-    authority = derive_shell_fragment_authority(
-        root, f"sh -c {shlex.quote(program)} sh git status", chain=("target",)
-    )
-
-    assert authority.unresolved
-    assert any("unresolved executable" in item for item in authority.unresolved)
-
-
-def test_authority_identity_inputs_change_when_owned_script_bytes_change(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / "Makefile").write_text("target:\n\tsh scripts/task.sh\n", encoding="utf-8")
-    script = root / "scripts/task.sh"
-    script.write_text("#!/bin/sh\nprintf 'one\\n'\n", encoding="utf-8")
-
-    before = derive_make_target_authority(root, "target")
-    script.write_text("#!/bin/sh\nprintf 'two\\n'\n", encoding="utf-8")
-    after = derive_make_target_authority(root, "target")
-
-    assert before.tools == after.tools == ("sh",)
-    assert before.source_identities != after.source_identities
-
-
-def test_single_quoted_command_substitution_does_not_expand_authority(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(
-        root,
-        "printf '%s\\n' '$(rm -f artifact)'",
-        chain=("target",),
-    )
-
-    assert authority.unresolved == ()
-    assert authority.tools == ()
-
-
-def test_double_quoted_command_substitution_is_part_of_authority(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(
-        root,
-        'printf "%s\\n" "$(rm -f artifact)"',
-        chain=("target",),
-    )
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("rm",)
-
-
-def test_materialized_venv_console_wrapper_cannot_change_static_authority(tmp_path: Path) -> None:
-    root = tmp_path / "repo"
-    root.mkdir()
-    (root / "Makefile").write_text(
-        "target:\n\tbackend/.venv/bin/oh-goon-test-batches tests/unit\n",
-        encoding="utf-8",
-    )
-
-    before = derive_make_target_authority(root, "target")
-    wrapper = root / "backend/.venv/bin/oh-goon-test-batches"
-    wrapper.parent.mkdir(parents=True)
-    wrapper.write_text(
-        "#!/usr/bin/python3\n"
-        "from oh_goon.repository_tooling.test_batches import main\n"
-        "if __name__ == '__main__':\n"
-        "    raise SystemExit(main())\n",
-        encoding="utf-8",
-    )
-    wrapper.chmod(0o755)
-
-    after = derive_make_target_authority(root, "target")
-
-    assert before == after
-    assert "__name__" not in after.tools
-    assert "from" not in after.tools
-    assert "raise" not in after.tools
-    assert "python3" not in after.tools
-    assert after.materialized_executables == ("backend/.venv/bin/oh-goon-test-batches",)
-
-
-def test_materialized_executable_identity_is_canonical_across_shell_cwd_aliases(
-    tmp_path: Path,
-) -> None:
-    root = _repo(tmp_path)
-
-    forms = {
-        "backend/./.venv/bin/private-tool": "backend/.venv/bin/private-tool",
-        "cd backend && .venv/bin/private-tool": "backend/.venv/bin/private-tool",
-        "(cd backend && .venv/bin/private-tool)": "backend/.venv/bin/private-tool",
-        "sh -c 'cd backend && .venv/bin/private-tool'": "backend/.venv/bin/private-tool",
-        "cd packages/web && node_modules/.bin/private-tool": (
-            "packages/web/node_modules/.bin/private-tool"
-        ),
-    }
-
-    for fragment, expected in forms.items():
-        authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
-        assert expected in authority.materialized_executables
-
-
-@pytest.mark.parametrize(
-    ("fragment", "expected"),
-    [
-        (
-            "/workspace/backend/.venv/bin/private-tool",
-            "backend/.venv/bin/private-tool",
-        ),
-        (
-            "sh -c '/workspace/backend/.venv/bin/private-tool'",
-            "backend/.venv/bin/private-tool",
-        ),
-        (
-            "/workspace/frontend/node_modules/.bin/private-tool",
-            "frontend/node_modules/.bin/private-tool",
-        ),
-        (
-            "sh -c '/workspace/frontend/node_modules/.bin/private-tool'",
-            "frontend/node_modules/.bin/private-tool",
-        ),
-    ],
-)
-def test_materialized_executable_identity_normalizes_canonical_sandbox_workspace_alias(
-    tmp_path: Path,
-    fragment: str,
-    expected: str,
-) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(root, fragment, chain=("target",))
-
-    assert authority.materialized_executables == (expected,)
-
-
-def test_repo_absolute_path_is_not_treated_as_internal_sandbox_alias(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(
-        root,
-        "/repo/backend/.venv/bin/private-tool",
-        chain=("target",),
-    )
-
-    assert authority.materialized_executables == ()
-    assert authority.tools == ("private-tool",)
-
-
-def test_materialized_executable_identity_uses_initial_step_working_directory(
-    tmp_path: Path,
-) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(
-        root,
-        ".venv/bin/private-tool",
-        chain=("step:check",),
-        working_directory="backend",
-    )
-
-    assert authority.materialized_executables == ("backend/.venv/bin/private-tool",)
-
-
-def test_materialized_executable_identity_tracks_literal_cd_from_step_working_directory(
-    tmp_path: Path,
-) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(
-        root,
-        "cd .. && backend/.venv/bin/private-tool",
-        chain=("step:check",),
-        working_directory="backend",
-    )
-
-    assert authority.materialized_executables == ("backend/.venv/bin/private-tool",)
-
-
-@pytest.mark.parametrize(
-    ("fragment", "expected"),
-    [
-        ("xargs backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        ("printf x | xargs backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        (r"find . -exec backend/.venv/bin/private-tool {} \;", "backend/.venv/bin/private-tool"),
-        (
-            r"find . -execdir frontend/node_modules/.bin/private-tool {} \;",
-            "frontend/node_modules/.bin/private-tool",
-        ),
-        ("timeout 5 backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        ("nice backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        ("nohup backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        ("stdbuf -oL backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        ("setsid backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-    ],
-)
-def test_child_launchers_expose_materialized_executable_authority(
-    tmp_path: Path,
-    fragment: str,
-    expected: str,
-) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(root, fragment, chain=("step:check",))
-
-    assert authority.unresolved == ()
-    assert authority.materialized_executables == (expected,)
-
-
-@pytest.mark.parametrize(
-    ("fragment", "expected_tools"),
-    [
-        ("timeout 5 rm -f artifact", {"timeout", "rm"}),
-        ("nice rm -f artifact", {"nice", "rm"}),
-        ("nohup rm -f artifact", {"nohup", "rm"}),
-        ("stdbuf -oL rm -f artifact", {"stdbuf", "rm"}),
-        ("setsid rm -f artifact", {"setsid", "rm"}),
-    ],
-)
-def test_process_launchers_share_child_tool_authority_traversal(
-    tmp_path: Path,
-    fragment: str,
-    expected_tools: set[str],
-) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(root, fragment, chain=("step:check",))
-
-    assert authority.unresolved == ()
-    assert set(authority.tools) == expected_tools
-
-
-@pytest.mark.parametrize(
-    "fragment",
-    [
-        "timeout --unknown 5 backend/.venv/bin/private-tool",
-        "nice --unknown backend/.venv/bin/private-tool",
-        "nohup --unknown backend/.venv/bin/private-tool",
-        "stdbuf --unknown backend/.venv/bin/private-tool",
-        "setsid --unknown backend/.venv/bin/private-tool",
-    ],
-)
-def test_process_launchers_fail_closed_when_child_argv_is_not_provable(
-    tmp_path: Path,
-    fragment: str,
-) -> None:
-    root = _repo(tmp_path)
-
-    authority = derive_shell_fragment_authority(root, fragment, chain=("step:check",))
-
-    assert authority.unresolved
-    assert any("child command is unprovable" in item for item in authority.unresolved)
-
-
-@pytest.mark.parametrize(
-    ("recipe", "expected"),
-    [
-        ("printf x | xargs backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        (r"find . -exec backend/.venv/bin/private-tool {} \;", "backend/.venv/bin/private-tool"),
-        ("timeout 5 backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-    ],
-)
-def test_make_authority_uses_same_child_launcher_materialization_traversal(
-    tmp_path: Path,
-    recipe: str,
-    expected: str,
-) -> None:
-    root = _repo(tmp_path)
-    (root / "Makefile").write_text(f"target:\n\t{recipe}\n", encoding="utf-8")
-
-    authority = derive_make_target_authority(root, "target")
-
-    assert authority.unresolved == ()
-    assert authority.materialized_executables == (expected,)
-
-
-def test_multiple_find_exec_children_share_materialization_traversal(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    fragment = (
-        r"find . -exec true {} \; "
-        r"-exec frontend/node_modules/.bin/private-tool {} \;"
-    )
-
-    authority = derive_shell_fragment_authority(root, fragment, chain=("step:check",))
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("find",)
-    assert authority.materialized_executables == ("frontend/node_modules/.bin/private-tool",)

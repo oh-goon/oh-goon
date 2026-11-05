@@ -9,7 +9,11 @@ from typing import Any
 
 from oh_goon.repository_tooling.architecture.common import (
     Violation,
+    _node_byte_range,
     dependency_policy_bootstrap_source_path,
+    python_ast,
+    python_semantic_facts,
+    python_source_snapshot,
 )
 from oh_goon.repository_tooling.architecture.shell_semantics import (
     ShellCommand,
@@ -591,87 +595,110 @@ def _check_hosted_diagnostic_contract(diagnostic: Path) -> list[Violation]:
     return violations
 
 
-def _check_local_executor_control_state(root: Path) -> list[Violation]:
-    """Local strict executor bookkeeping must never require system-wide /run ownership."""
-    isolation = (
-        root / "backend" / "src" / "oh_goon" / "integrations" / "fleet_plan_bubblewrap_isolation.py"
+def _control_state_values(tree: ast.Module) -> set[ast.expr]:
+    """Select explicit control-field syntax without following names or values."""
+    fields = {
+        "control_state_root",
+        "control_root",
+        "egress_lock",
+        "egress_state_dir",
+        "cgroup_lock",
+        "cgroup_state_dir",
+    }
+    values: set[ast.expr] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            values.update(keyword.value for keyword in node.keywords if keyword.arg in fields)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(
+                isinstance(target, ast.Attribute) and target.attr in fields for target in targets
+            ):
+                values.add(node.value)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            arguments = [*node.args.posonlyargs, *node.args.args]
+            defaults = [
+                *zip(
+                    arguments[len(arguments) - len(node.args.defaults) :],
+                    node.args.defaults,
+                    strict=True,
+                ),
+                *zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True),
+            ]
+            values.update(
+                value
+                for argument, value in defaults
+                if argument.arg in fields and value is not None
+            )
+    return values
+
+
+def _forbidden_control_literal(fact: dict[str, Any]) -> bool:
+    literal = fact.get("literal")
+    return (
+        fact.get("qualification") == "qualified"
+        and not fact.get("conditions")
+        and isinstance(literal, str)
+        and literal.startswith(("/run/oh-goon", "/run/lock/oh-goon"))
     )
-    violations: list[Violation] = []
-    if isolation.is_file():
-        tree = ast.parse(isolation.read_text(encoding="utf-8"))
-        system_paths: set[str] = set()
 
-        def system_path(value: ast.AST) -> bool:
-            return any(
-                isinstance(item, ast.Constant)
-                and isinstance(item.value, str)
-                and item.value.startswith(("/run/oh-goon", "/run/lock/oh-goon"))
-                or isinstance(item, ast.Name)
-                and item.id in system_paths
-                for item in ast.walk(value)
+
+def _check_local_executor_control_state(root: Path) -> list[Violation]:
+    """Reject qualified host-path/control literals, never infer local value flow."""
+    isolation = root / "backend/src/oh_goon/integrations/fleet_plan_bubblewrap_isolation.py"
+    if not isolation.is_file():
+        return []
+    with python_source_snapshot(root):
+        tree = python_ast(isolation)
+        facts = python_semantic_facts(isolation, imported_only=True, tree=tree)
+        selected = _control_state_values(tree)
+        offsets = [0]
+        for line in (facts.evidence.source_bytes or b"").splitlines(keepends=True):
+            offsets.append(offsets[-1] + len(line))
+        ranges = {_node_byte_range(value, offsets) for value in selected}
+        forbidden = any(
+            fact["kind"] in {"reference", "literal-expression"}
+            and (fact["range"]["start_byte"], fact["range"]["end_byte"]) in ranges
+            and _forbidden_control_literal(fact)
+            for fact in facts.evidence.packet()["facts"]
+        )
+        targets = {id(call): name for name, call in facts.calls}
+        for fact, call in facts.call_observations:
+            target = targets.get(id(call))
+            constructors = {"pathlib.Path"} | (
+                {"pathlib.PurePosixPath"} if call in selected else set()
             )
-
-        # Follow literal aliases without coupling the invariant to private
-        # variable names. Guest-only PurePosixPath values are harmless until
-        # transported into a host Path, filesystem operation or control field.
-        assignments = [
-            item for item in ast.walk(tree) if isinstance(item, (ast.Assign, ast.AnnAssign))
+            for argument in fact.get("arguments", []):
+                path_argument = (
+                    target in constructors
+                    and argument["kind"] == "positional"
+                    or target == "builtins.open"
+                    and (
+                        argument["kind"] == "positional"
+                        and argument["index"] == 0
+                        or argument["kind"] == "keyword"
+                        and argument["name"] == "file"
+                    )
+                    or target == "os.open"
+                    and (
+                        argument["kind"] == "positional"
+                        and argument["index"] == 0
+                        or argument["kind"] == "keyword"
+                        and argument["name"] == "path"
+                    )
+                )
+                if path_argument and _forbidden_control_literal(argument):
+                    forbidden = True
+    return (
+        [
+            Violation(
+                isolation,
+                "local Bubblewrap locks/recovery metadata must use application-owned private state rather than system-wide /run",
+            )
         ]
-        for _ in range(len(assignments)):
-            previous = len(system_paths)
-            for item in assignments:
-                if item.value is not None and system_path(item.value):
-                    targets = item.targets if isinstance(item, ast.Assign) else [item.target]
-                    system_paths.update(
-                        target.id for target in targets if isinstance(target, ast.Name)
-                    )
-            if len(system_paths) == previous:
-                break
-        fields = {
-            "control_state_root",
-            "control_root",
-            "egress_lock",
-            "egress_state_dir",
-            "cgroup_lock",
-            "cgroup_state_dir",
-        }
-        host_values: list[ast.AST] = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                name = ast.unparse(node.func)
-                if name in {"Path", "pathlib.Path", "open", "os.open"}:
-                    host_values.extend(node.args)
-                host_values.extend(
-                    keyword.value for keyword in node.keywords if keyword.arg in fields
-                )
-            elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                if any(
-                    isinstance(target, ast.Attribute) and target.attr in fields
-                    for target in targets
-                ):
-                    host_values.append(node.value)
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                arguments = [*node.args.posonlyargs, *node.args.args]
-                defaults: list[tuple[ast.arg, ast.expr | None]] = []
-                if node.args.defaults:
-                    defaults.extend(
-                        zip(arguments[-len(node.args.defaults) :], node.args.defaults, strict=False)
-                    )
-                defaults.extend(zip(node.args.kwonlyargs, node.args.kw_defaults, strict=False))
-                host_values.extend(
-                    value
-                    for argument, value in defaults
-                    if argument.arg in fields and value is not None
-                )
-        if any(system_path(value) for value in host_values):
-            violations.append(
-                Violation(
-                    isolation,
-                    "local Bubblewrap locks/recovery metadata must use application-owned private state rather than system-wide /run",
-                )
-            )
-    return violations
+        if forbidden
+        else []
+    )
 
 
 def _check_certification_storage_loss_boundary(root: Path) -> list[Violation]:

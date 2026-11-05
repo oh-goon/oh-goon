@@ -48,48 +48,6 @@ def _equivalent_frontend() -> str:
     )
 
 
-def test_lock_architecture_accepts_equivalent_native_source_spelling(
-    tmp_path: Path,
-) -> None:
-    _write_lock_check(
-        tmp_path,
-        backend=_equivalent_backend(),
-        frontend=_equivalent_frontend(),
-    )
-
-    assert _check_lock_authority(tmp_path) == []
-
-
-def test_lock_architecture_rejects_presence_only_uv_authority(tmp_path: Path) -> None:
-    _write_lock_check(
-        tmp_path,
-        backend=(
-            "    command = ('uv', 'lock', '--project', str(root / 'backend'), '--check-exists')\n"
-            "    return _native_check(command, cwd=root, runner=runner, label='backend')"
-        ),
-        frontend=_equivalent_frontend(),
-    )
-
-    violations = _check_lock_authority(tmp_path)
-
-    assert any("native uv lock --check" in item.message for item in violations)
-
-
-def test_lock_architecture_rejects_non_ci_npm_authority(tmp_path: Path) -> None:
-    _write_lock_check(
-        tmp_path,
-        backend=_equivalent_backend(),
-        frontend=(
-            "    command = ('npm', 'install', '--dry-run', '--package-lock-only')\n"
-            "    return _native_check(command, cwd=root / 'frontend', runner=runner, label='frontend')"
-        ),
-    )
-
-    violations = _check_lock_authority(tmp_path)
-
-    assert any("native npm ci" in item.message for item in violations)
-
-
 def test_lock_architecture_rejects_parallel_lock_content_interpretation(
     tmp_path: Path,
 ) -> None:

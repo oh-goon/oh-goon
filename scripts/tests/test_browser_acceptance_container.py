@@ -86,6 +86,28 @@ def test_playwright_image_refuses_unpinned_versions() -> None:
         playwright_image("latest")
 
 
+def test_native_npm_is_the_only_lock_interpreter(tmp_path: Path) -> None:
+    _write_lock(tmp_path)
+    lock = tmp_path / "frontend/package-lock.json"
+    lock.write_bytes(b"not a JSON document\n")
+    assert (
+        locked_playwright_version(tmp_path, runner=_npm_runner(_npm_tree())) == "1.62.1"
+    )
+
+    # Even a locally readable selection cannot replace a refused native result.
+    lock.write_text(_npm_tree(), encoding="utf-8")
+
+    def refused(
+        command: tuple[str, ...], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            command, 1, stdout="", stderr="native lock refused"
+        )
+
+    with pytest.raises(BrowserAcceptanceEnvironmentError, match="native lock refused"):
+        locked_playwright_version(tmp_path, runner=refused)
+
+
 def test_container_runner_uses_locked_image_and_disposable_shm_bounded_run(
     tmp_path: Path,
 ) -> None:

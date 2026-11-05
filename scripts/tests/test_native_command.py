@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import ast
+import json
+import os
+import sys
 
 from typing import Any
 from collections.abc import Sequence
@@ -73,44 +76,73 @@ def test_native_command_process_start_error_is_one_attempt(
         raise OSError("temporary process start failure")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    assert native_command.run_native_command(command, show_command_banner=False) == 127
+    assert native_command.main(["--no-command-banner", "--", *command]) == 127
     assert seen == [command]
     assert "Failure class: process_start" in capsys.readouterr().err
 
 
-def test_native_command_display_sanitization_never_changes_native_command(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("returncode", [0, 75])
+def test_native_command_cli_preserves_native_inputs_and_redacts_only_display(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    returncode: int,
 ) -> None:
-    private_root = "/home/example/private/oh-goon"
-    command = ("tool", "--output", private_root + "/artifact")
-    seen: list[tuple[str, ...]] = []
-
-    def fake_run(
-        args: Sequence[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[str]:
-        seen.append(tuple(args))
-        return subprocess.CompletedProcess(
-            args,
-            0,
-            stdout=f"created {private_root}/artifact\n",
-            stderr=f"cache {private_root}/cache\n",
-        )
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    assert (
-        native_command.run_native_command(
-            command,
-            show_command_banner=False,
-            path_labels=((private_root, "<repo>"),),
-        )
-        == 0
+    private_root = tmp_path / "private=workspace"
+    private_artifacts = private_root / "artifacts"
+    receipt = tmp_path / "native-attempts.jsonl"
+    command = (
+        sys.executable,
+        "-c",
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "with Path(sys.argv[1]).open('a', encoding='utf-8') as output:\n"
+        "    output.write(json.dumps({'argv': sys.argv[2:], 'cwd': str(Path.cwd()), "
+        "'environment': os.environ.get('OH_GOON_NATIVE_LABEL')}) + '\\n')\n"
+        "print('created ' + sys.argv[2])\n"
+        "print('temporary failure ' + sys.argv[3], file=sys.stderr)\n"
+        "raise SystemExit(int(sys.argv[4]))\n",
+        str(receipt),
+        str(private_root / "source"),
+        str(private_artifacts / "artifact"),
+        str(returncode),
     )
-    captured = capsys.readouterr()
-    assert private_root not in captured.out
-    assert private_root not in captured.err
-    assert "<repo>/artifact" in captured.out
-    assert "<repo>/cache" in captured.err
-    assert seen == [command]
+    monkeypatch.delenv("OH_GOON_NATIVE_LABEL", raising=False)
+    assert (
+        native_command.main(
+            [
+                "--cwd",
+                str(tmp_path),
+                "--env",
+                f"OH_GOON_NATIVE_LABEL={private_root}",
+                "--path-label",
+                f"{private_root}=<repo>",
+                "--path-label",
+                f"{private_artifacts}=<artifacts>",
+                "--",
+                *command,
+            ]
+        )
+        == returncode
+    )
+    attempts = [
+        json.loads(row) for row in receipt.read_text(encoding="utf-8").splitlines()
+    ]
+    assert attempts == [
+        {
+            "argv": list(command[4:]),
+            "cwd": str(tmp_path),
+            "environment": str(private_root),
+        }
+    ]
+    captured = capfd.readouterr()
+    assert str(private_root) not in captured.out + captured.err
+    assert "Command:" in captured.out
+    assert "created <repo>/source" in captured.out
+    assert "temporary failure <artifacts>/artifact" in captured.err
+    if returncode:
+        assert f"Exit code: {returncode}" in captured.err
+    assert "OH_GOON_NATIVE_LABEL" not in os.environ
 
 
 def test_native_command_cli_rejects_non_absolute_display_path_label() -> None:

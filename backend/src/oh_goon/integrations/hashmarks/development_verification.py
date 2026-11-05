@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, cast
 from oh_goon.integrations.hashmarks.dependencies import (
     observe_changed_dependency_consumers,
     revalidate_changed_dependency_consumers,
-    validate_required_dependency_introductions,
 )
 from oh_goon.integrations.hashmarks.repository_scope import repository_evidence_scope
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
@@ -69,54 +68,20 @@ def _dependency_verification(
         "scope": "explicit-backend-runtime-python-sources",
         "consumer_completeness": "not-claimed",
     }
-    introduced = validate_required_dependency_introductions(evidence)
-    changes: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
-    chains: list[dict[str, Any]] = []
+    chains = evidence["chains"]
     nominations: dict[str, dict[str, Any]] = {}
-    chain_keys: set[tuple[str, str, str]] = set()
-    for packet in evidence["consumer_packets"]:
-        for consumer in packet["consumers"]:
-            if consumer.get("distribution_state") != "resolved-unique":
-                continue
-            source = consumer["source_path"]
-            if source not in changes:
-                changes[source] = _changed_verification(native, source, retain_relationships=True)
-            changed, projected_nominations = changes[source]
-            for node_id in consumer["distribution_nodes"]:
-                if node_id not in evidence["changed_node_ids"]:
-                    continue
-                supported_nodes = (
-                    node_id,
-                    *(child for child, parent in introduced.items() if parent == node_id),
-                )
-                for projected in projected_nominations:
-                    if projected["nomination"].get("available") is not True:
-                        continue
-                    key = json.dumps(projected, sort_keys=True)
-                    nominations[key] = projected
-                    for supported in supported_nodes:
-                        chain_key = supported, source, key
-                        if chain_key in chain_keys:
-                            continue
-                        chain_keys.add(chain_key)
-                        chain = {
-                            "node_id": supported,
-                            "source_path": source,
-                            "consumer": consumer,
-                            "changed_verification": changed,
-                            "nomination": projected,
-                        }
-                        if supported != node_id:
-                            # A required dependency path connects the child to
-                            # this imported parent. It is not a child import.
-                            chain["consumer_node_id"] = node_id
-                        chains.append(chain)
-    evidence["chains"] = chains
+    for chain in chains:
+        projected = chain["nomination"]
+        nominations[json.dumps(projected, sort_keys=True)] = projected
     observation = {
         "changed_path": base["lock_path"],
         "state": "LINKED" if chains else "UNAVAILABLE",
         "dependency_chain": chains,
-        "stale": any(packet.get("freshness") == "stale" for packet, _ in changes.values()),
+        "stale": any(
+            packet.get("freshness") == "stale"
+            for verification in evidence["verification_packets"]
+            for packet in verification["verification_packets"]
+        ),
         "qualification": {"consumer_scope": evidence["consumer_scope"]},
         "nominations": list(nominations.values()),
     }

@@ -105,6 +105,30 @@ def test_project_runtime_capability_resolution_identity_changes_with_lock_bytes(
     assert a["identity"] != b["identity"]
 
 
+def test_runtime_observation_does_not_admit_python_or_package_compatibility(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text(
+        '[project]\nrequires-python = ">=999"\ndependencies = ["fastapi>=999"]\n',
+        encoding="utf-8",
+    )
+    lock = tmp_path / "uv.lock"
+    # Resolution bytes are provenance; the observer must not interpret them.
+    lock.write_bytes(b"not a native lock document\n")
+    monkeypatch.setattr(importlib.metadata, "version", _versions(fastapi="0.1.0"))
+    monkeypatch.setattr(capability, "_default_import_probe", lambda *_: None)
+
+    payload = capability.build_project_capability(pyproject=manifest, lock=lock)
+
+    assert payload["result"] == "PROJECT-RUNTIME-CAPABILITIES-OBSERVED"
+    assert payload["declared_requires_python"] == ">=999"
+    assert payload["compatibility_decision"] == "native-uv-only"
+    assert payload["packages"][0]["observed_version"] == "0.1.0"
+    assert payload["packages"][0]["declared_requirement"] == "fastapi>=999"
+    assert payload["blockers"] == []
+
+
 def test_project_python_capability_is_explicit_diagnostic_not_startup_gate() -> None:
     text = (ROOT / "Makefile").read_text(encoding="utf-8")
     init = text.split("init:", 1)[1].split("\n\n", 1)[0]

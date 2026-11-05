@@ -119,6 +119,62 @@ def test_importing_owner_but_emitting_duplicate_local_authority_fails_closed(
     assert any("diagnostic semantic owner" in message for message in _messages())
 
 
+@pytest.mark.parametrize(
+    "binding",
+    (
+        "def degrade(diagnostics, exc, Evidence):\n    diagnostics.emit(Evidence())\n",
+        "class LocalDiagnostic:\n"
+        "    pass\n"
+        "def degrade(diagnostics, exc):\n"
+        "    Evidence = LocalDiagnostic\n"
+        "    diagnostics.emit(Evidence())\n",
+    ),
+    ids=("parameter-shadow", "local-rebinding"),
+)
+def test_shadowed_or_rebound_import_cannot_qualify_diagnostic_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    binding: str,
+) -> None:
+    package = _write_contract_root(
+        tmp_path,
+        monkeypatch,
+        source_body=(
+            "from oh_goon.core.models.diagnostic import DiagnosticEvidence as Evidence\n"
+            "def degrade(diagnostics, exc):\n"
+            "    diagnostics.emit(Evidence())\n"
+        ),
+    )
+    assert _messages() == []
+
+    for relative in _REQUIRED_SOURCES:
+        (package / relative).write_text(
+            "from oh_goon.core.models.diagnostic import DiagnosticEvidence as Evidence\n"
+            + binding,
+            encoding="utf-8",
+        )
+
+    assert any("diagnostic semantic owner" in message for message in _messages())
+
+
+def test_native_constructor_alias_keeps_diagnostic_owner_qualification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_contract_root(
+        tmp_path,
+        monkeypatch,
+        source_body=(
+            "from oh_goon.core.models.diagnostic import DiagnosticEvidence as Evidence\n"
+            "capture = Evidence.renamed_exception_capture\n"
+            "def degrade(diagnostics, exc):\n"
+            "    diagnostics.emit(event=capture(exc))\n"
+        ),
+    )
+
+    assert _messages() == []
+
+
 def test_architecture_contains_no_private_diagnostic_constructor_authority() -> None:
     root = Path(__file__).resolve().parents[2]
     architecture = (

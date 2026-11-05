@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, nullcontext
+from copy import deepcopy
 from importlib import metadata
 from pathlib import Path
 from shutil import copytree
@@ -12,8 +13,10 @@ from hashmarks import CodeMap
 
 from oh_goon.integrations.hashmarks.dependencies import (
     observe_changed_dependency_consumers,
+    project_dependency_verification,
     require_current_dependency_environment,
     revalidate_changed_dependency_consumers,
+    validate_dependency_delta,
 )
 from oh_goon.integrations.hashmarks.development_verification import nominate_changed_verification
 
@@ -220,14 +223,42 @@ def test_dependency_source_preparation_reuses_one_inventory_before_composite_rea
 
 
 def test_source_scope_is_chunked_without_losing_native_members(
-    distribution_repository: tuple[Path, Path], tmp_path: Path
+    distribution_repository: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root, _info = distribution_repository
     paths = tuple(f"backend/src/consumer_{index}.py" for index in range(65))
     for relative in paths:
         (root / relative).write_text("import different_import.api\n")
     with CodeMap(root, state_dir=tmp_path / "index") as native:
+        verification = native.dependencies.verification
+        consumers = native.dependencies.consumers
+        changed_set = native.verification.changed_set
+        active = False
+        observed: list[tuple[str, ...]] = []
+
+        def compose(observation: Any, *, source_paths: Any, **options: Any) -> Any:
+            nonlocal active
+            observed.append(tuple(source_paths))
+            active = True
+            try:
+                return verification(observation, source_paths=source_paths, **options)
+            finally:
+                active = False
+
+        def native_consumers(*arguments: Any, **options: Any) -> Any:
+            assert active, "dependency consumers must come from the producer composition"
+            return consumers(*arguments, **options)
+
+        def native_verifiers(*arguments: Any, **options: Any) -> Any:
+            assert active, "dependency verifiers must come from the producer composition"
+            return changed_set(*arguments, **options)
+
+        monkeypatch.setattr(native.dependencies, "verification", compose)
+        monkeypatch.setattr(native.dependencies, "consumers", native_consumers)
+        monkeypatch.setattr(native.verification, "changed_set", native_verifiers)
         result = _observe(native, root, paths)
+    assert observed == [paths[:64], paths[64:]]
+    assert len(result["verification_packets"]) == 2
     packets = result["consumer_packets"]
     assert [len(packet["source_scope"]["paths"]) for packet in packets] == [64, 1]
     assert {row["source_path"] for packet in packets for row in packet["consumers"]} == set(paths)
@@ -385,7 +416,7 @@ def test_required_child_uses_the_actual_parent_consumer_and_verifier_after_reope
     (child,) = introduction["node_ids"]
     chains = {chain["node_id"]: chain for chain in changes["chains"]}
     assert set(chains) == {parent, child}
-    assert "consumer_node_id" not in chains[parent]
+    assert chains[parent]["consumer_node_id"] == parent
     assert chains[child]["consumer_node_id"] == parent
     assert chains[child]["consumer"]["distribution_nodes"] == [parent]
     assert chains[child]["consumer"] == chains[parent]["consumer"]
@@ -520,8 +551,32 @@ def test_required_child_keeps_native_query_uncertainty_and_binding(
             return packet
 
         monkeypatch.setattr(native.dependencies, "queries", observe_then_limit)
-        with pytest.raises(ValueError, match="introduction"):
+        with pytest.raises(ValueError, match="verification|introduction"):
             _observe(native, root)
+
+
+def test_retained_dependency_projections_follow_native_validation(
+    distribution_repository: tuple[Path, Path], tmp_path: Path
+) -> None:
+    root, _info = distribution_repository
+    with CodeMap(root, state_dir=tmp_path / "index") as native:
+        result = _observe(native, root)
+    original = result["verification_packets"][0]
+    assert (
+        project_dependency_verification(original, result["after_observation"]) == result["chains"]
+    )
+    altered = deepcopy(original)
+    altered["chains"][0]["node_id"] = "foreign-node"
+    with pytest.raises(ValueError, match="Hashmarks rejected"):
+        project_dependency_verification(altered, result["after_observation"])
+    delta = deepcopy(result["delta"])
+    delta["selection_changes"]["added"][0]["component"]["name"] = "inferred-package"
+    assert (
+        validate_dependency_delta(delta, result["before_observation"], result["after_observation"])[
+            "valid"
+        ]
+        is False
+    )
 
 
 def test_introduced_distribution_metadata_cannot_drift_during_native_path_observation(

@@ -27,8 +27,17 @@ class PreflightError(ValueError):
 # kernel parser lives in the CLI. The mechanism is owned only by linux.
 _command = linux._command
 
-for _name in ("_read_regular", "_birth", "_component", *linux.PROBES):
-    globals()[_name] = getattr(linux, _name)
+_read_regular = linux._read_regular
+_birth = linux._birth
+_component = linux._component
+_cgroup = linux._cgroup
+_cgroup_subtree = linux._cgroup_subtree
+_process = linux._process
+_mounts = linux._mounts
+_tracked_namespace_inventory = linux._tracked_namespace_inventory
+_namespace_fd_holders = linux._namespace_fd_holders
+_visible_foreign_mount_targets = linux._visible_foreign_mount_targets
+_visible_mount_fd_holders = linux._visible_mount_fd_holders
 
 
 def parse_scope(raw: object) -> Scope:
