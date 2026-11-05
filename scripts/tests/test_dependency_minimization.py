@@ -6,6 +6,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from packaging.requirements import Requirement
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -154,13 +156,15 @@ def test_hashmarks_upgrade_is_normal_uv_dependency_without_oh_goon_release_clien
     project = project_path.read_text(encoding="utf-8")
     payload = tomllib.loads(project)
     hashmarks_dependencies = [
-        item
+        requirement
         for item in payload["project"]["dependencies"]
-        if item.startswith("hashmarks @ ")
+        if (requirement := Requirement(item)).name == "hashmarks"
     ]
 
     assert len(hashmarks_dependencies) == 1
-    release_url = hashmarks_dependencies[0].split(" @ ", 1)[1]
+    assert "syntax" in hashmarks_dependencies[0].extras
+    release_url = hashmarks_dependencies[0].url
+    assert release_url is not None
     assert release_url.startswith(
         "https://github.com/Hugloss/Hashmarks/releases/download/v"
     )
