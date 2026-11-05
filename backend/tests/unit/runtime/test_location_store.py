@@ -198,6 +198,7 @@ def test_restart_does_not_fail_run_still_owned_by_live_execution_lease(tmp_path:
         expected_durable_revision=database.durable_revision(),
         mutate=lambda _connection: None,
     )[0]
+    assert lease.custody is not None and lease.custody.phase == "ADMITTED_UNCLAIMED"
     target = RepositoryIdentity(name="api", path=tmp_path / "api")
     admit_test_run(first.journal, "run-live", OperationAction.INIT, [target])
     start_run(first.journal, "run-live")
@@ -214,7 +215,9 @@ def test_restart_does_not_fail_run_still_owned_by_live_execution_lease(tmp_path:
 
     assert detail is not None
     assert detail.run.status is FleetRunStatus.RUNNING
-    leases.finish_as_owner(lease, lambda _connection: None)
+    assert leases.active_lease() == lease
+    leases.finish_submission_as_owner(lease, lambda _connection: None)
+    assert leases.active_lease() is None
 
 
 def test_restart_finalizes_abandoned_cancellation_as_cancelled(tmp_path: Path) -> None:

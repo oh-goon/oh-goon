@@ -60,7 +60,7 @@ class CommandParentGuard:
     def create(cls) -> CommandParentGuard:
         enable_native_child_reaping()
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-        parent.settimeout(5)
+        parent.settimeout(exec_guard_protocol.STARTUP_TIMEOUT_SECONDS)
         return cls(parent, child)
 
     @property

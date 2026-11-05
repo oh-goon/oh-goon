@@ -416,6 +416,7 @@ def test_ready_initializer_rejects_native_arguments_before_registration(
     from oh_goon.engine.git import GitService
     from oh_goon.runtime.agent_providers import load_agent_providers
     from oh_goon.runtime.league_folders import LeagueFolderStore
+    from oh_goon.services import fleet_plans
     from oh_goon.services.agent_authoring_sources import capture_agent_sources
     from oh_goon.services.execution_lock_persistence import (
         load_execution_lock,
@@ -451,6 +452,7 @@ def test_ready_initializer_rejects_native_arguments_before_registration(
     monkeypatch.setattr(cli_ai, "load_agent_providers", load)
     monkeypatch.setattr("oh_goon.services.agent_authoring_sources.capture_agent_sources", capture)
     monkeypatch.setattr("oh_goon.services.execution_lock_persistence.write_execution_lock", publish)
+    monkeypatch.setattr(fleet_plans, "write_execution_lock", publish)
     output = tmp_path / "workflow"
     arguments = [
         "init",

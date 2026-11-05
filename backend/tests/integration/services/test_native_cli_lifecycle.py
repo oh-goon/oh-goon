@@ -31,6 +31,7 @@ from oh_goon.core.models.agent_providers import (
 from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
+from oh_goon.core.models.run_events import ProcessStartedEvent, ProcessStartingEvent
 from oh_goon.core.vocabulary import FleetRunEventType, FleetRunOutcome, FleetRunStatus
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
@@ -189,12 +190,26 @@ def test_native_terminal_sequence_is_accepted_once_by_original_run(
             if event.event_type in {FleetRunEventType.STEP_SUCCEEDED, FleetRunEventType.STEP_FAILED}
         ]
         assert len(terminal_steps) == 1
+        step_process_events: list[ProcessStartingEvent] = [
+            event
+            for event in events
+            if isinstance(event, ProcessStartingEvent)
+            and event.step_id == step.step_id
+            and event.attempt_number == attempt.attempt
+        ]
+        started_processes = {
+            event.physical_execution_id
+            for event in step_process_events
+            if type(event) is ProcessStartedEvent
+        }
+        assert started_processes
         for kind in (
             FleetRunEventType.PROCESS_EXITED,
             FleetRunEventType.DESCENDANTS_QUIESCENT,
         ):
-            physical_events = [event for event in events if event.event_type is kind]
-            assert physical_events, (kind, [event.event_type for event in events])
+            physical_events = [event for event in step_process_events if event.event_type is kind]
+            assert len(physical_events) == len(started_processes)
+            assert {event.physical_execution_id for event in physical_events} == started_processes
             assert max(event.sequence for event in physical_events) < terminal_steps[0].sequence
         assert (
             sum(

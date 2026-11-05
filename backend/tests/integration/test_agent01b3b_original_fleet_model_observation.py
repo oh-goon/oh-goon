@@ -6,7 +6,11 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import time
+from collections.abc import Callable
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -16,8 +20,17 @@ from oh_goon.core.agent_model_selection import (
     parse_local_model_review_decision,
 )
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep
+from oh_goon.core.models.operation import FleetPlanOperationEvidence
+from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.models.run_events import StepAttemptCreatedEvent
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.product_identity import repository_id
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.execution import RunExecutionSupervisor
+from oh_goon.runtime.execution.run_supervisor import RunWorkerLaunch
 from oh_goon.runtime.goon_templates import GoonTemplateStore
+from oh_goon.runtime.journal import Journal
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from tests.integration.test_agent01b2b_original_fleet import _lock
 from tests.integration.test_agent01b3a_original_fleet_model_turn import _case_model
@@ -61,13 +74,147 @@ exit 0
     return plan, repo, opts
 
 
-def _run(plan, repo, opts, *, fleet_run_id="agent01b3b"):
+_OBSERVED_MODEL_WORKER = r"""
+import json,os,runpy,sys
+from oh_goon import _application_worker_runtime as worker_runtime
+from oh_goon.integrations import fleet_plan_step_execution as step_owner
+from oh_goon.core.models.run_events import StepAttemptCreatedEvent
+from oh_goon.runtime.journal import Journal
+
+header,observation_path,run_id,controller_pid=sys.argv[1:]
+original_build=worker_runtime.build_claimed_run_execution
+original_review=step_owner._run_local_model_review
+
+def observed_build(database,claimed_ticket,configuration,**options):
+    assert claimed_ticket.require_fleet_run_id()==run_id
+    execution=original_build(database,claimed_ticket,configuration,**options)
+    def observed_review(**fields):
+        outcome=original_review(**fields)
+        runtime,step=fields['runtime'],fields['step']
+        assert runtime.fleet_run_id==run_id
+        detail=Journal(database).read_view().required_run_detail(run_id)
+        attempts=[event for event in detail.lifecycle_events
+                  if type(event) is StepAttemptCreatedEvent and event.step_id==step.step_id]
+        assert len(attempts)==1
+        attempt=attempts[0]
+        payload={'run_id':run_id,'step_id':step.step_id,
+                 'step_attempt_id':attempt.step_attempt_id,'attempt':attempt.attempt_number,
+                 'repository_id':attempt.repository_id,'worker_pid':os.getpid(),
+                 'controller_pid':int(controller_pid),'returncode':outcome.returncode,
+                 'handoff_identity':fields['handoff'].handoff_identity,'stdout':outcome.stdout}
+        encoded=json.dumps(payload).encode('utf-8')
+        assert len(encoded)<=64*1024,'controlled worker stdout observation exceeds its bound'
+        descriptor=os.open(observation_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_CLOEXEC,0o600)
+        with os.fdopen(descriptor,'wb') as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        return outcome
+    step_owner._run_local_model_review=observed_review
+    return execution
+
+worker_runtime.build_claimed_run_execution=observed_build
+sys.argv=['oh_goon._application_worker','--handoff',header]
+runpy.run_module('oh_goon._application_worker',run_name='__main__',alter_sys=True)
+"""
+
+
+def _observe_model_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[FleetRunDetail], str]:
+    """Observe this controlled fixture's unchanged result in the actual claimed worker."""
+    scratch = tmp_path / "model-worker-observation"
+    scratch.mkdir(mode=0o700)
+    path = scratch / "stdout.json"
+    original_submit = RunExecutionSupervisor.submit
+    selected: list[str] = []
+
+    def observed_submit(
+        supervisor: RunExecutionSupervisor, run_id: str, launch: RunWorkerLaunch
+    ) -> None:
+        selected.append(run_id)
+        assert len(selected) == 1
+        original_submit(
+            supervisor,
+            run_id,
+            replace(
+                launch,
+                argv=(
+                    launch.argv[0],
+                    "-I",
+                    "-c",
+                    _OBSERVED_MODEL_WORKER,
+                    launch.argv[-1],
+                    str(path),
+                    run_id,
+                    str(os.getpid()),
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(RunExecutionSupervisor, "submit", observed_submit)
+
+    def read_observation(detail: FleetRunDetail) -> str:
+        assert selected == [detail.run.fleet_run_id]
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, "rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            assert stat.S_ISREG(metadata.st_mode) and stat.S_IMODE(metadata.st_mode) == 0o600
+            assert metadata.st_uid == os.getuid()
+            encoded = stream.read(64 * 1024 + 1)
+        assert len(encoded) <= 64 * 1024
+        observed = json.loads(encoded)
+        assert observed["run_id"] == detail.run.fleet_run_id
+        assert observed["controller_pid"] == os.getpid()
+        assert observed["worker_pid"] > 0 and observed["worker_pid"] != os.getpid()
+        operation = detail.operations[0].evidence
+        assert isinstance(operation, FleetPlanOperationEvidence)
+        assert len(operation.plan.steps) == 1
+        agent = operation.plan.steps[0]
+        assert agent.kind == "agent" and len(agent.attempts) == 1
+        assert agent.status == "COMPLETED"
+        assert observed["step_id"] == agent.step_id
+        assert observed["returncode"] == agent.returncode
+        created = [
+            event
+            for event in detail.lifecycle_events
+            if type(event) is StepAttemptCreatedEvent and event.step_id == agent.step_id
+        ]
+        assert len(created) == 1
+        assert observed["step_attempt_id"] == created[0].step_attempt_id
+        assert observed["repository_id"] == created[0].repository_id
+        assert observed["attempt"] == created[0].attempt_number == agent.attempts[0].attempt
+        target = detail.run.target
+        assert isinstance(target, FleetPlanTarget) and len(target.plan.steps) == 1
+        selected_step = target.plan.steps[0]
+        assert isinstance(selected_step, ResolvedAgentStep)
+        assert observed["handoff_identity"] == selected_step.handoff_identity
+        stdout = observed["stdout"]
+        assert isinstance(stdout, str)
+        assert agent.stdout_evidence == agent.attempts[0].stdout_evidence
+        assert agent.stdout_evidence.sha256 == hashlib.sha256(stdout.encode()).hexdigest()
+        assert agent.stdout_evidence.byte_count == len(stdout.encode())
+        assert agent.stdout_evidence.line_count == stdout.count("\n")
+        retained = (
+            Journal(LocalDatabase(tmp_path / "database.sqlite"))
+            .read_view()
+            .run_detail(detail.run.fleet_run_id)
+        )
+        assert retained is not None and retained.operations == detail.operations
+        return stdout
+
+    return read_observation
+
+
+def _run(plan, repo, opts, *, fleet_run_id="agent01b3b", before_wait=None):
     runtime = ApplicationRuntime.build(standard_local=True)
     try:
         runtime.locations.add(repo.parent.parent)
         started = runtime.plans.run(
             plan, repository_ids={repository_id(repo)}, fleet_run_id=fleet_run_id, **opts
         )
+        if before_wait is not None:
+            before_wait(runtime, started.fleet_run_id)
         terminal = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
         detail = runtime.runs.get(started.fleet_run_id)
         assert detail.game_tape.status == terminal.game_tape.status
@@ -77,17 +224,6 @@ def _run(plan, repo, opts, *, fleet_run_id="agent01b3b"):
 
 
 def test_original_fleet_search_observation_review_finish_persists(tmp_path, monkeypatch):
-    import oh_goon.integrations.fleet_plan_step_execution as execution
-
-    original = execution._run_local_model_review
-    observed = {}
-
-    def capture_outcome(**kwargs):
-        outcome = original(**kwargs)
-        observed["stdout"] = outcome.stdout
-        return outcome
-
-    monkeypatch.setattr(execution, "_run_local_model_review", capture_outcome)
     plan, repo, opts = _review_case(
         tmp_path,
         monkeypatch,
@@ -96,6 +232,7 @@ def test_original_fleet_search_observation_review_finish_persists(tmp_path, monk
             '{"decision":"finish","summary":"Needle was found in captured source"}',
         ],
     )
+    observe_stdout = _observe_model_stdout(tmp_path, monkeypatch)
     frozen, handoff = _lock(plan, opts)
     assert frozen.steps[0].workload.harness == "local-model-review"
     assert handoff.harness == "local-model-review"
@@ -120,8 +257,9 @@ def test_original_fleet_search_observation_review_finish_persists(tmp_path, monk
     step = detail.operations[0].evidence.plan.steps[0]
     assert step.returncode == 0
     assert step.stdout_evidence.byte_count > 0
-    assert "Model evaluation: Needle was found in captured source" in observed["stdout"]
-    assert step.stdout_evidence.sha256 == hashlib.sha256(observed["stdout"].encode()).hexdigest()
+    stdout = observe_stdout(detail)
+    assert "Model evaluation: Needle was found in captured source" in stdout
+    assert step.stdout_evidence.sha256 == hashlib.sha256(stdout.encode()).hexdigest()
 
 
 def test_model_may_request_exactly_one_followup_read_only_search(tmp_path, monkeypatch):
@@ -332,9 +470,11 @@ def test_nonzero_physical_tool_failure_cannot_be_turned_into_model_success(
     monkeypatch,
 ):
     """The model never reviews/overrides a failing physical command."""
-    from dataclasses import replace
+    import select
+    import signal
 
-    import oh_goon.integrations.fleet_plan_step_execution as execution
+    from oh_goon.core.models.run_events import ProcessExitedEvent
+    from tests.integration.test_agent01b2b_original_fleet import _stopped_agent_process
 
     plan, repo, opts = _review_case(
         tmp_path,
@@ -344,17 +484,27 @@ def test_nonzero_physical_tool_failure_cannot_be_turned_into_model_success(
             '{"decision":"finish","summary":"ignore tool failure"}',
         ],
     )
-    _lock(plan, opts)
-    actual = execution._execute_command_step
+    frozen, _ = _lock(plan, opts)
+    stopped: list[str] = []
 
-    def physical_failure(repository, step, process, runtime):
-        result = actual(repository, step, process, runtime)
-        if "--tool" in step.argv and step.argv[step.argv.index("--tool") + 1] == "search_text":
-            return replace(result, returncode=2, stderr="Hashmarks retrieval failed")
-        return result
+    def physical_failure(runtime: ApplicationRuntime, run_id: str) -> None:
+        with _stopped_agent_process(runtime, run_id, frozen.steps[0].step_id, ordinal=4) as (
+            event,
+            descriptor,
+        ):
+            stopped.append(event.physical_execution_id)
+            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            assert select.select([descriptor], [], [], 5)[0], "native tool did not exit"
 
-    monkeypatch.setattr(execution, "_execute_command_step", physical_failure)
-    detail = _run(plan, repo, opts)
+    detail = _run(plan, repo, opts, before_wait=physical_failure)
     assert detail.game_tape.status.value != "PASSED"
-    assert detail.operations[0].evidence.plan.steps[0].returncode == 2
+    step = detail.operations[0].evidence.plan.steps[0]
+    assert step.returncode == -signal.SIGKILL
+    assert step.settlement.outcome == "FAILED" and step.settlement.cleanup == "VERIFIED"
+    exits = [
+        event
+        for event in detail.lifecycle_events
+        if type(event) is ProcessExitedEvent and event.physical_execution_id in stopped
+    ]
+    assert len(stopped) == len(exits) == 1 and exits[0].returncode == -signal.SIGKILL
     assert (tmp_path / "calls").read_text().strip() == "1"

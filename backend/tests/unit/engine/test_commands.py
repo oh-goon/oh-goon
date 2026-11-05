@@ -239,7 +239,9 @@ print("leader-done")
 """
 
     started = time.monotonic()
-    result = run_command(sys.executable, "-S", "-c", script, str(pid_file), timeout=10)
+    result = run_command(
+        sys.executable, "-S", "-c", script, str(pid_file), timeout=10, parent_death_signal=True
+    )
     elapsed = time.monotonic() - started
 
     assert result.returncode == 0

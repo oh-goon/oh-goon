@@ -16,6 +16,7 @@ from oh_goon.core.agent_model_selection import (
 from oh_goon.core.errors import FleetPlanInvalid
 from tests.integration.test_agent01b2b_original_fleet import _lock
 from tests.integration.test_agent01b3b_original_fleet_model_observation import (
+    _observe_model_stdout,
     _review_case,
     _run,
 )
@@ -35,17 +36,6 @@ def _tools_case(tmp_path, monkeypatch, *, model_replies, exits=None, sleep_revie
 
 
 def test_listing_files_then_model_finish_uses_original_fleet_and_tape(tmp_path, monkeypatch):
-    import oh_goon.integrations.fleet_plan_step_execution as execution
-
-    original = execution._run_local_model_review
-    output = {}
-
-    def capture(**kwargs):
-        result = original(**kwargs)
-        output["stdout"] = result.stdout
-        return result
-
-    monkeypatch.setattr(execution, "_run_local_model_review", capture)
     plan, repo, opts = _tools_case(
         tmp_path,
         monkeypatch,
@@ -54,6 +44,7 @@ def test_listing_files_then_model_finish_uses_original_fleet_and_tape(tmp_path, 
             '{"decision":"finish","summary":"The frozen repository contains code.txt"}',
         ],
     )
+    observe_stdout = _observe_model_stdout(tmp_path, monkeypatch)
     frozen, handoff = _lock(plan, opts)
     assert frozen.steps[0].workload.harness == handoff.harness == "local-model-tools"
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3d-list")
@@ -66,8 +57,9 @@ def test_listing_files_then_model_finish_uses_original_fleet_and_tape(tmp_path, 
     assert "repo/code.txt" not in (tmp_path / "prompt-1.txt").read_text()
     step = detail.operations[0].evidence.plan.steps[0]
     assert step.returncode == 0
-    assert step.stdout_evidence.sha256 == hashlib.sha256(output["stdout"].encode()).hexdigest()
-    assert "Model evaluation: The frozen repository" in output["stdout"]
+    stdout = observe_stdout(detail)
+    assert step.stdout_evidence.sha256 == hashlib.sha256(stdout.encode()).hexdigest()
+    assert "Model evaluation: The frozen repository" in stdout
 
 
 def test_list_paths_then_one_search_and_final_evaluation(tmp_path, monkeypatch):
@@ -283,9 +275,12 @@ def test_original_step_cancellation_during_tool_review(tmp_path, monkeypatch):
 
 
 def test_physical_file_listing_failure_cannot_be_relabelled_success(tmp_path, monkeypatch):
-    from dataclasses import replace
+    import select
+    import signal
 
-    import oh_goon.integrations.fleet_plan_step_execution as execution
+    from oh_goon.application import ApplicationRuntime
+    from oh_goon.core.models.run_events import ProcessExitedEvent
+    from tests.integration.test_agent01b2b_original_fleet import _stopped_agent_process
 
     plan, repo, opts = _tools_case(
         tmp_path,
@@ -295,19 +290,29 @@ def test_physical_file_listing_failure_cannot_be_relabelled_success(tmp_path, mo
             '{"decision":"finish","summary":"ignore physical failure"}',
         ],
     )
-    _lock(plan, opts)
-    original = execution._execute_command_step
+    frozen, _ = _lock(plan, opts)
+    stopped: list[str] = []
 
-    def failing_tool(repository, step, process, runtime):
-        result = original(repository, step, process, runtime)
-        if "--tool" in step.argv and step.argv[step.argv.index("--tool") + 1] == "list_paths":
-            return replace(result, returncode=2, stderr="Hashmarks repository discovery failed")
-        return result
+    def failing_tool(runtime: ApplicationRuntime, run_id: str) -> None:
+        with _stopped_agent_process(runtime, run_id, frozen.steps[0].step_id, ordinal=4) as (
+            event,
+            descriptor,
+        ):
+            stopped.append(event.physical_execution_id)
+            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            assert select.select([descriptor], [], [], 5)[0], "native listing tool did not exit"
 
-    monkeypatch.setattr(execution, "_execute_command_step", failing_tool)
-    detail = _run(plan, repo, opts, fleet_run_id="agent01b3d-list-failed")
+    detail = _run(plan, repo, opts, fleet_run_id="agent01b3d-list-failed", before_wait=failing_tool)
     assert detail.game_tape.status.value != "PASSED"
-    assert detail.operations[0].evidence.plan.steps[0].returncode == 2
+    step = detail.operations[0].evidence.plan.steps[0]
+    assert step.returncode == -signal.SIGKILL
+    assert step.settlement.outcome == "FAILED" and step.settlement.cleanup == "VERIFIED"
+    exits = [
+        event
+        for event in detail.lifecycle_events
+        if type(event) is ProcessExitedEvent and event.physical_execution_id in stopped
+    ]
+    assert len(stopped) == len(exits) == 1 and exits[0].returncode == -signal.SIGKILL
     assert (tmp_path / "calls").read_text().strip() == "1"
 
 

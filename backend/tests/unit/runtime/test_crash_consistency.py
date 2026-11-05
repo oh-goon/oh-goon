@@ -17,6 +17,7 @@ from oh_goon.core.vocabulary import (
     FleetRunEventType,
     FleetRunStatus,
     OperationAction,
+    ReconciliationOutcome,
 )
 from oh_goon.core.vocabulary.fleet import FleetScope
 from oh_goon.engine.command import CommandProcessLifecycleEvent, observe_command_processes
@@ -116,9 +117,24 @@ def test_startup_unknown_settlement_continues_to_reconciliation_after_lost_respo
     _lose_next_write_response(database)
     _recovery(database, journal, attempts).recover()
 
-    with pytest.raises(OperationNotFound):
-        attempts.get(attempt.operation_id)
-    assert journal.read_view().latest_effect_reconciliation(attempt.operation_id) is not None
+    retained = attempts.get(attempt.operation_id)
+    assert retained.status is EffectAttemptStatus.INDETERMINATE
+    assert retained.identity == attempt.identity
+    assert retained.quarantines_repository
+    view = journal.read_view()
+    evidence = view.latest_effect_reconciliation(attempt.operation_id)
+    assert evidence is not None and evidence.effect == retained.identity
+    assert evidence.reconciliation == retained.reconciliation
+    assert evidence.reconciliation.outcome is ReconciliationOutcome.INDETERMINATE
+    assert evidence.reconciliation.baseline.state_id == evidence.reconciliation.current.state_id
+    assert evidence.reconciliation.requires_operator and not evidence.reconciliation.retry_safe
+    assert view.operation(attempt.operation_id) is None
+    assert view.effect_acknowledgement(attempt.operation_id) is None
+    reopened = LocalDatabase(database.path)
+    assert RepositoryEffectAttemptStore(reopened).get(attempt.operation_id) == retained
+    assert (
+        Journal(reopened).read_view().latest_effect_reconciliation(attempt.operation_id) == evidence
+    )
 
 
 def test_startup_settlement_replay_rejects_superseding_attempt(tmp_path: Path) -> None:

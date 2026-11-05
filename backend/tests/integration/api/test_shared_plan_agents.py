@@ -308,7 +308,7 @@ def shared_single_agent(shared_agent, monkeypatch):
         "expected_revision": document.sha256,
         "inputs": {"repo": "local:repo", "skill": "local:skills/repair"},
     }
-    monkeypatch.setattr(runtime.runs, "_submit", lambda *_args: None)
+    monkeypatch.setattr(runtime.runs, "_submit", lambda *_args, **_kwargs: None)
 
     def reviewed_request(selection):
         response = client.post("/api/league/shared-plan-previews", json=selection)

@@ -8,7 +8,10 @@ import json
 import pytest
 
 from tests.integration.test_agent01b2b_original_fleet import _lock
-from tests.integration.test_agent01b3b_original_fleet_model_observation import _run
+from tests.integration.test_agent01b3b_original_fleet_model_observation import (
+    _observe_model_stdout,
+    _run,
+)
 from tests.integration.test_agent01b3g_bounded_skill_loop import _bounded_agent_case
 
 _ORIGINAL = b"needle from real original Fleet\n"
@@ -35,17 +38,6 @@ def _case(tmp_path, monkeypatch, *, model_replies):
 
 
 def test_proposal_is_durable_evidence_but_repository_stays_unchanged(tmp_path, monkeypatch):
-    import oh_goon.integrations.fleet_plan_step_execution as execution
-
-    recorded = {}
-    real = execution._run_local_model_review
-
-    def record(**kwargs):
-        outcome = real(**kwargs)
-        recorded["stdout"] = outcome.stdout
-        return outcome
-
-    monkeypatch.setattr(execution, "_run_local_model_review", record)
     plan, repo, opts = _case(
         tmp_path,
         monkeypatch,
@@ -54,6 +46,7 @@ def test_proposal_is_durable_evidence_but_repository_stays_unchanged(tmp_path, m
             _payload(),
         ],
     )
+    observe_stdout = _observe_model_stdout(tmp_path, monkeypatch)
     frozen, handoff = _lock(plan, opts)
     assert frozen.steps[0].workload.harness == handoff.harness == "local-model-proposal"
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3i-proposal")
@@ -61,8 +54,9 @@ def test_proposal_is_durable_evidence_but_repository_stays_unchanged(tmp_path, m
     assert (repo / "code.txt").read_bytes() == _ORIGINAL
     assert (tmp_path / "calls").read_text().strip() == "2"
     assert "propose" in (tmp_path / "prompt-2.txt").read_text()
-    assert "Agent proposal only; no repository mutation" in recorded["stdout"]
-    receipt = json.loads(recorded["stdout"].splitlines()[-1])
+    stdout = observe_stdout(detail)
+    assert "Agent proposal only; no repository mutation" in stdout
+    receipt = json.loads(stdout.splitlines()[-1])
     assert receipt == {
         "schema": "agent-patch-proposal-v1",
         "handoff_identity": handoff.handoff_identity,
@@ -73,7 +67,7 @@ def test_proposal_is_durable_evidence_but_repository_stays_unchanged(tmp_path, m
     }
     assert (
         detail.operations[0].evidence.plan.steps[0].stdout_evidence.sha256
-        == hashlib.sha256(recorded["stdout"].encode()).hexdigest()
+        == hashlib.sha256(stdout.encode()).hexdigest()
     )
 
 

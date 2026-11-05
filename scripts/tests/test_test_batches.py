@@ -45,6 +45,32 @@ def test_receipt_plugin_loader_intentionally_isolates_module_global_state(
     assert second._STATE == {}
 
 
+@pytest.mark.parametrize("seconds", ("0", "-1", "1.5", "unknown"))
+def test_member_deadline_requires_positive_integer_before_execution(
+    seconds: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
+    import oh_goon.repository_tooling.test_batches as batches
+
+    arguments = ["oh-goon-test-batches", "--granularity=tests"]
+    monkeypatch.setattr(
+        sys, "argv", [*arguments, "--member-timeout=test_case.py::test_work=8"]
+    )
+    _, valid = parse_batch_args()
+    assert valid.member_timeouts == {"test_case.py::test_work": 8}
+    monkeypatch.setattr(
+        sys, "argv", [*arguments, "--member-timeout=test_case.py::test_work=" + seconds]
+    )
+
+    def forbidden(*_args: object, **_kwargs: object) -> int:
+        pytest.fail("invalid native member deadline reached collection or execution")
+
+    monkeypatch.setattr(batches, "run_batch_cli", forbidden)
+    with pytest.raises(SystemExit) as failure:
+        batches.main()
+    assert failure.value.code == 2
+
+
 def test_failure_output_is_bounded_but_keeps_head_and_tail() -> None:
     output = "\n".join(f"line-{index}" for index in range(300)) + "\n"
     bounded = _bounded_failure_output(output, max_lines=30)
@@ -218,6 +244,7 @@ def test_fail_fast_consumes_completed_failure_before_replenishing_successful_wor
         marker=None,
         show_output=False,
         batch_timeout=10,
+        member_timeouts={},
         no_timeout_bisection=False,
     )
     plan = SimpleNamespace(

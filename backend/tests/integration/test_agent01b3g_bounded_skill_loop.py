@@ -7,7 +7,10 @@ import hashlib
 import pytest
 
 from tests.integration.test_agent01b2b_original_fleet import _lock
-from tests.integration.test_agent01b3b_original_fleet_model_observation import _run
+from tests.integration.test_agent01b3b_original_fleet_model_observation import (
+    _observe_model_stdout,
+    _run,
+)
 from tests.integration.test_agent01b3f_frozen_skill_resources import _resources_case
 
 
@@ -27,17 +30,6 @@ def _bounded_agent_case(tmp_path, monkeypatch, *, model_replies, proposal=False,
 
 
 def test_four_different_tools_then_final_evaluation_is_persisted(tmp_path, monkeypatch):
-    import oh_goon.integrations.fleet_plan_step_execution as execution
-
-    recorded = {}
-    original = execution._run_local_model_review
-
-    def record(**kwargs):
-        result = original(**kwargs)
-        recorded["stdout"] = result.stdout
-        return result
-
-    monkeypatch.setattr(execution, "_run_local_model_review", record)
     from tests.integration.test_agent01b3i_source_bound_patch_proposal import _payload
 
     plan, repo, opts, resource = _bounded_agent_case(
@@ -52,6 +44,7 @@ def test_four_different_tools_then_final_evaluation_is_persisted(tmp_path, monke
             _payload(),
         ],
     )
+    observe_stdout = _observe_model_stdout(tmp_path, monkeypatch)
     frozen, handoff = _lock(plan, opts)
     assert handoff.harness == frozen.steps[0].workload.harness == "local-model-proposal"
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3g-four")
@@ -62,10 +55,11 @@ def test_four_different_tools_then_final_evaluation_is_persisted(tmp_path, monke
     assert "needle from real original Fleet" in (tmp_path / "prompt-5.txt").read_text()
     assert "Previous tool observations" in (tmp_path / "prompt-5.txt").read_text()
     assert "list_skill_paths" in (tmp_path / "prompt-5.txt").read_text()
-    assert "Agent proposal only" in recorded["stdout"]
+    stdout = observe_stdout(detail)
+    assert "Agent proposal only" in stdout
     assert (
         detail.operations[0].evidence.plan.steps[0].stdout_evidence.sha256
-        == hashlib.sha256(recorded["stdout"].encode()).hexdigest()
+        == hashlib.sha256(stdout.encode()).hexdigest()
     )
 
 
@@ -150,9 +144,12 @@ def test_stale_skill_capture_fails_before_work(tmp_path, monkeypatch):
 
 def test_failed_read_file_exit_one_is_not_a_successful_model_observation(tmp_path, monkeypatch):
     """A read is not an rg no-match: its exit 1 means physical failure."""
-    from dataclasses import replace
+    import json
+    import shutil
+    import subprocess
+    import sys
 
-    import oh_goon.integrations.fleet_plan_step_execution as execution
+    from oh_goon.core.models.run_events import ProcessExitedEvent
 
     plan, repo, opts, _ = _bounded_agent_case(
         tmp_path,
@@ -162,18 +159,41 @@ def test_failed_read_file_exit_one_is_not_a_successful_model_observation(tmp_pat
             '{"decision":"finish","summary":"Cannot turn failed read into success"}',
         ],
     )
-    original = execution._execute_command_step
-
-    def fail_after_real_read(repository, step, process, runtime):
-        result = original(repository, step, process, runtime)
-        if step.argv[0] == "head":
-            return replace(result, returncode=1, stderr="read_file returned an I/O failure")
-        return result
-
-    monkeypatch.setattr(execution, "_execute_command_step", fail_after_real_read)
-    _lock(plan, opts)
+    native_head = shutil.which("head")
+    assert native_head is not None
+    control = subprocess.run(
+        [native_head, "-c", "2048", "--", str(repo / "code.txt")],
+        capture_output=True,
+        check=False,
+    )
+    assert control.returncode == 0 and b"needle from real original Fleet" in control.stdout
+    marker = tmp_path / "head-call.json"
+    head = tmp_path / "bin" / "head"
+    head.write_text(
+        f"#!{sys.executable}\n"
+        "import json,os,sys\nfrom pathlib import Path\n"
+        "assert sys.argv[1:]==['-c','2048','--','repo/code.txt']\n"
+        "assert b'needle from real original Fleet' in Path(sys.argv[-1]).read_bytes()\n"
+        f"Path({str(marker)!r}).write_text(json.dumps({{'pid':os.getpid(),'argv':sys.argv[1:]}}))\n"
+        "raise SystemExit(1)\n"
+    )
+    head.chmod(0o700)
+    frozen, _ = _lock(plan, opts)
     detail = _run(plan, repo, opts, fleet_run_id="agent01b3h-failed-read")
     assert detail.game_tape.status.value != "PASSED"
-    assert detail.operations[0].evidence.plan.steps[0].returncode == 125
+    step = detail.operations[0].evidence.plan.steps[0]
+    assert step.returncode == 125
+    assert step.settlement.outcome == "FAILED" and step.settlement.cleanup == "VERIFIED"
+    observed = json.loads(marker.read_text())
+    assert observed["argv"] == ["-c", "2048", "--", "repo/code.txt"]
+    exits = [
+        event
+        for event in detail.lifecycle_events
+        if type(event) is ProcessExitedEvent
+        and event.pid == observed["pid"]
+        and event.step_id == frozen.steps[0].step_id
+        and event.attempt_number == step.attempts[0].attempt
+    ]
+    assert len(exits) == 1 and exits[0].returncode == 1
     # There is a single model-selection process, but no model evaluation after failed read.
     assert (tmp_path / "calls").read_text().strip() == "1"

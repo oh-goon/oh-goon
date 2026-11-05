@@ -13,6 +13,77 @@ from oh_goon.engine.command import CommandTerminal, RuntimeAuthorityBinding, run
 from tests.factories.runtime_authority import native_invocation_executable
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX native exec errors")
+@pytest.mark.parametrize("preserve_path", (True, False))
+@pytest.mark.parametrize("kind", ("invalid-format", "missing-interpreter"))
+def test_guarded_exec_preserves_native_startup_errno_and_original_filename(
+    tmp_path: Path, preserve_path: bool, kind: str
+) -> None:
+    control = tmp_path / "valid-command"
+    control.write_text("#!/bin/sh\nprintf native-control\n")
+    control.chmod(0o700)
+    baseline = run_command(
+        str(control), parent_death_signal=True, preserve_native_executable_path=preserve_path
+    )
+    assert baseline.returncode == 0 and baseline.stdout == "native-control"
+
+    executable = tmp_path / "invalid-command"
+    executable.write_text(
+        "echo no-shebang\n"
+        if kind == "invalid-format"
+        else "#!/definitely/missing/interpreter\necho unreachable\n"
+    )
+    executable.chmod(0o700)
+    with pytest.raises(OSError) as native:
+        subprocess.run([str(executable)], check=False, capture_output=True)
+    events: list[str] = []
+    with pytest.raises(OSError) as guarded:
+        run_command(
+            str(executable),
+            parent_death_signal=True,
+            preserve_native_executable_path=preserve_path,
+            process_observer=lambda event: events.append(event.kind),
+        )
+
+    assert guarded.value.errno == native.value.errno
+    assert guarded.value.filename == native.value.filename == str(executable)
+    assert events == ["PROCESS_STARTING"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX guarded native results")
+@pytest.mark.parametrize("exit_code", (0, 126, 127))
+def test_guarded_native_results_and_errno_looking_output_are_not_startup_failures(
+    exit_code: int,
+) -> None:
+    result = run_command(
+        sys.executable,
+        "-I",
+        "-c",
+        "import os,sys; "
+        "assert not any(name.startswith('OH_GOON_EXEC_GUARD_') for name in os.environ); "
+        "print('EXEC_ERROR errno=8', file=sys.stderr); raise SystemExit(int(sys.argv[1]))",
+        str(exit_code),
+        parent_death_signal=True,
+    )
+
+    assert result.returncode == exit_code
+    assert result.stderr == "EXEC_ERROR errno=8"
+    assert result.supervisor.final_process_group_quiescent
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX env shebang")
+def test_guarded_env_interpreter_keeps_its_native_missing_command_result(tmp_path: Path) -> None:
+    executable = tmp_path / "env-command"
+    executable.write_text("#!/usr/bin/env oh-goon-definitely-missing-command\n")
+    executable.chmod(0o700)
+    native = subprocess.run([str(executable)], check=False, capture_output=True)
+
+    result = run_command(str(executable), parent_death_signal=True)
+
+    assert native.returncode == result.returncode == 127
+    assert result.supervisor.final_process_group_quiescent
+
+
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux executable identity")
 @pytest.mark.parametrize("guarded", [False, True])
 def test_default_native_command_preserves_kernel_invocation_name(

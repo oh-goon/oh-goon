@@ -23,7 +23,20 @@ steps:
     execution.execute()
     reconstructed = execution.reconstructed_detail()
     batch = execution.journal.run_events(execution.fleet_run_id)
-    event_types = [event.event_type for event in batch.events]
+    preparation = [
+        event
+        for event in batch.events
+        if event.event_type is FleetRunEventType.PROCESS_STARTED and event.step_id is None
+    ]
+    assert preparation
+    scoped = [
+        event
+        for event in batch.events
+        if getattr(event, "step_id", None) == "observed"
+        or event.event_type
+        in {FleetRunEventType.REPOSITORY_STARTED, FleetRunEventType.REPOSITORY_COMPLETED}
+    ]
+    event_types: list[FleetRunEventType] = [event.event_type for event in scoped]
 
     assert FleetRunEventType.REPOSITORY_STARTED in event_types
     assert FleetRunEventType.STEP_REACHED in event_types
@@ -62,7 +75,22 @@ steps:
         FleetRunEventType.REPOSITORY_COMPLETED
     )
 
-    tape_types = [event.event_type for event in reconstructed.game_tape.play_by_play]
+    complete_tape = reconstructed.game_tape.play_by_play
+    assert all(
+        any(
+            item.event_type is GameTapeEventType.PROCESS_STARTED
+            and item.physical_execution_id == event.physical_execution_id
+            and item.step_id is None
+            for item in complete_tape
+        )
+        for event in preparation
+    )
+    step_tape = [
+        event
+        for event in complete_tape
+        if event.step_id == "observed" or event.event_type is GameTapeEventType.REPOSITORY_STARTED
+    ]
+    tape_types = [event.event_type for event in step_tape]
     assert tape_types.count(GameTapeEventType.REPOSITORY_STARTED) == 1
     assert tape_types.count(GameTapeEventType.STEP_REACHED) == 1
     assert tape_types.count(GameTapeEventType.STEP_STARTED) == 1
@@ -73,25 +101,19 @@ steps:
     assert tape_types.count(GameTapeEventType.DESCENDANTS_QUIESCENT) == 1
     assert tape_types.count(GameTapeEventType.STEP_PASSED) == 1
     attempt_event = next(
-        event
-        for event in reconstructed.game_tape.play_by_play
-        if event.event_type is GameTapeEventType.STEP_ATTEMPT_CREATED
+        event for event in step_tape if event.event_type is GameTapeEventType.STEP_ATTEMPT_CREATED
     )
     assert attempt_event.attempt_number == 1
     assert attempt_event.step_attempt_id is not None
     assert attempt_event.authority_sequence > 0
     process_started = next(
-        event
-        for event in reconstructed.game_tape.play_by_play
-        if event.event_type is GameTapeEventType.PROCESS_STARTED
+        event for event in step_tape if event.event_type is GameTapeEventType.PROCESS_STARTED
     )
     assert process_started.step_attempt_id == attempt_event.step_attempt_id
     assert process_started.physical_execution_id is not None
     assert process_started.pid is not None
     process_exited = next(
-        event
-        for event in reconstructed.game_tape.play_by_play
-        if event.event_type is GameTapeEventType.PROCESS_EXITED
+        event for event in step_tape if event.event_type is GameTapeEventType.PROCESS_EXITED
     )
     assert process_exited.physical_execution_id == process_started.physical_execution_id
     assert process_exited.pid == process_started.pid
@@ -119,11 +141,13 @@ steps:
         future = pool.submit(execution.execute)
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            event_types = [
-                event.event_type
-                for event in execution.journal.run_events(execution.fleet_run_id).events
-            ]
-            if FleetRunEventType.PROCESS_STARTED in event_types:
+            events = execution.journal.run_events(execution.fleet_run_id).events
+            event_types = [event.event_type for event in events]
+            if any(
+                event.event_type is FleetRunEventType.PROCESS_STARTED
+                and event.step_id == "interruptible"
+                for event in events
+            ):
                 break
             time.sleep(0.02)
         else:
