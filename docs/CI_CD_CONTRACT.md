@@ -33,6 +33,21 @@ flat membership. It retains source/configuration/environment identity and exact
 results. A nomination does not establish whole-owner coverage, and bounded
 producer qualifiers remain visible.
 
+Hosted verification admits one immutable plan, then runs its static checks and
+selected behavioral proof in separate GitHub jobs. Each execution job has its
+own 15-minute budget; steps within a job share that budget. The behavioral job
+still uses the original native batching owner and complete selected membership.
+GitHub owns job scheduling, and each runner owns its own prepared environment.
+The jobs do not select work again or share mutable test infrastructure.
+
+The existing `selected-proof` job combines the applicable phase receipts into
+the original complete result. Missing, duplicate, failed, cancelled, stale or
+foreign-source parts cannot qualify it; a phase receipt alone is never merge
+proof. The unchanged independent `merge-gate` validates that complete result
+against trusted-base policy. Empty phases require no execution job or dummy
+receipt. Rerunning failed jobs for the same frozen source retains successful
+job artifacts by their original IDs, including when their attempts differ.
+
 Development verification and explicit hosted focused feedback select the native
 batch owner's `--fail-fast` policy. Each pytest process receives `--maxfail=1`;
 after a terminal batch failure, the same owner stops queued work and cancels active

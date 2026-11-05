@@ -994,15 +994,22 @@ def _execute_check_group(
 
 
 def execute_change(
-    root: Path, plan: ChangeVerificationPlan, *, mode: str, workers: int
+    root: Path,
+    plan: ChangeVerificationPlan,
+    *,
+    mode: str,
+    workers: int,
+    phase: Literal["all", "static", "behavioral"] = "all",
 ) -> dict[str, Any]:
     require_current_plan(root, plan)
     if mode == "merge":
         require_merge_selection(root, plan)
+    if phase != "all" and phase not in _phase_owners(root, plan):
+        raise ValueError("Verification phase has no admitted owners")
     outcomes: list[dict[str, Any]] = []
     static_projects = admitted_static_projects(plan.changed_paths, plan.evidence)
     static_context = None
-    commands = _commands(root, plan)
+    commands = _commands(root, plan) if phase != "behavioral" else []
     capacity = min(2, resolve_pytest_resource_budget(workers).worker_ceiling) if commands else 1
     # Keep cheap Ruff failures early and its native cache consumers serial. The
     # two expensive read-only owners use separate native analysis/cache state.
@@ -1035,7 +1042,7 @@ def execute_change(
         root, plan.source_identity, static_projects
     ):
         raise ValueError("Static-project native context changed during execution")
-    if plan.frontend:
+    if phase != "static" and plan.frontend:
         with tempfile.TemporaryDirectory(prefix="oh-goon-change-frontend-") as directory:
             report = Path(directory) / "vitest.json"
             result = run_command(
@@ -1085,7 +1092,7 @@ def execute_change(
                 }
             outcomes[-1]["native_report"] = native_frontend
             require_current_plan(root, plan)
-    if plan.pytest:
+    if phase != "static" and plan.pytest:
         with tempfile.TemporaryDirectory(prefix="oh-goon-change-result-") as directory:
             report = Path(directory) / "pytest.json"
             result = run_command(
@@ -1146,6 +1153,77 @@ def execute_change(
     }
 
 
+def _phase_owners(root: Path, plan: ChangeVerificationPlan) -> dict[str, tuple[str, ...]]:
+    owners = {
+        "static": tuple(label for label, *_rest in _commands(root, plan)),
+        "behavioral": (
+            *(("Frontend behavior",) if plan.frontend else ()),
+            *(("Native pytest",) if plan.pytest else ()),
+        ),
+    }
+    return {phase: expected for phase, expected in owners.items() if expected}
+
+
+def aggregate_change(
+    root: Path,
+    plan: ChangeVerificationPlan,
+    parts: list[Mapping[str, Any]],
+    *,
+    mode: str,
+) -> dict[str, Any]:
+    """Rejoin original owner receipts without admitting or executing another selection."""
+    require_current_plan(root, plan)
+    if mode == "merge":
+        require_merge_selection(root, plan)
+    required = _phase_owners(root, plan)
+    original = plan.model_dump(mode="json")
+    retained: dict[str, list[dict[str, Any]]] = {}
+    for part in parts:
+        phase = part.get("phase")
+        if not isinstance(phase, str) or phase not in required or phase in retained:
+            raise ValueError("Verification phases are missing, duplicated or extra")
+        if part.get("plan") != original:
+            raise ValueError("Verification phase belongs to another admitted plan")
+        if part.get("status") != "CHECKS_PASSED":
+            raise ValueError("Verification phase is failed, cancelled or incomplete")
+        outcomes = part.get("outcomes")
+        if (
+            not isinstance(outcomes, list)
+            or any(
+                not isinstance(row, dict)
+                or type(row.get("returncode")) is not int
+                or row["returncode"] != 0
+                or row.get("status") not in (None, "PASSED")
+                for row in outcomes
+            )
+            or tuple(row.get("owner") for row in outcomes) != required[phase]
+        ):
+            raise ValueError("Verification phase owners are missing, duplicated, extra or non-PASS")
+        for row in outcomes:
+            if row["owner"] in {"Native pytest", "Frontend behavior"} and not isinstance(
+                row.get("native_report"), Mapping
+            ):
+                raise ValueError("Verification phase has no native behavioral receipt")
+            if row["owner"] == "Native pytest":
+                require_complete_membership(
+                    row.get("native_report", {}), source_identity=plan.source_identity
+                )
+            elif row["owner"] == "Frontend behavior":
+                complete, satisfied, _counts = vitest_outcomes(row.get("native_report", {}))
+                if not complete or not satisfied:
+                    raise ValueError("Native frontend assertions are skipped, failed or incomplete")
+        retained[phase] = outcomes
+    if set(retained) != set(required):
+        raise ValueError("Verification phases are missing, duplicated or extra")
+    require_current_plan(root, plan)
+    return {
+        "status": "CHECKS_PASSED",
+        "outcomes": [row for phase in required for row in retained[phase]],
+        "daily_deferred": "Unrelated, exhaustive and daily-cadence instances; no full-regression claim",
+        "performance": "PROVISIONAL",
+    }
+
+
 def _write_transport(path: Path, payload: Mapping[str, Any], root: Path) -> None:
     target = path.absolute()
     if target.is_relative_to(root) or target.parent.resolve(strict=True) != target.parent:
@@ -1165,6 +1243,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=("focused", "merge"), default="focused")
     parser.add_argument("--plan", type=Path)
     parser.add_argument("--execute", type=Path)
+    parser.add_argument("--phase", choices=("all", "static", "behavioral"), default="all")
+    parser.add_argument("--aggregate", action="store_true")
+    parser.add_argument("--aggregate-part", type=Path, action="append", default=[])
     parser.add_argument("--report", type=Path)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--github-output", type=Path)
@@ -1174,6 +1255,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("workers must be positive")
     try:
         root = args.root.resolve(strict=True)
+        aggregating = args.aggregate or bool(args.aggregate_part)
+        if (args.phase != "all" or aggregating) and (
+            args.execute is None or args.plan or args.prepare_capabilities
+        ):
+            raise ValueError("Verification phases require the original admitted --execute plan")
+        if aggregating and args.phase != "all":
+            raise ValueError("Aggregation cannot execute a verification phase")
         if args.prepare_capabilities:
             _base, _head, paths, _removed = capture_change(root, args.base, args.candidate)
             if args.github_output is None:
@@ -1205,10 +1293,22 @@ def main(argv: list[str] | None = None) -> int:
                     stream.write(
                         f"native_resources={'true' if requires_native_resource_host(plan) else 'false'}\n"
                     )
+                    stream.write(f"static_phase={'true' if plan.static else 'false'}\n")
+                    stream.write(
+                        f"behavioral_phase={'true' if plan.pytest or plan.frontend else 'false'}\n"
+                    )
             return 0
-        result = execute_change(root, plan, mode=args.mode, workers=args.workers)
+        result = (
+            aggregate_change(
+                root, plan, [_read_json(path) for path in args.aggregate_part], mode=args.mode
+            )
+            if aggregating
+            else execute_change(root, plan, mode=args.mode, workers=args.workers, phase=args.phase)
+        )
         payload = {"plan": plan.model_dump(mode="json"), **result}
-        if result["status"] == "CHECKS_PASSED":
+        if args.phase != "all":
+            payload["phase"] = args.phase
+        elif result["status"] == "CHECKS_PASSED":
             payload["status"] = "FOCUSED / NOT_FULLY_VERIFIED"
             if args.mode == "merge":
                 payload["status"] = "MERGE_PROOF_READY"
@@ -1234,9 +1334,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(summary, sort_keys=True))
         else:
             print(json.dumps(payload, sort_keys=True))
-        return (
-            0 if payload["status"] in {"MERGE_PROOF_READY", "FOCUSED / NOT_FULLY_VERIFIED"} else 1
-        )
+        return 0 if result["status"] == "CHECKS_PASSED" else 1
     except (ValueError, OSError) as exc:
         print(f"SELECTION_UNVERIFIED: {exc}", file=sys.stderr)
         return 2
