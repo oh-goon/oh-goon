@@ -14,6 +14,30 @@ ROOT = Path(__file__).resolve().parents[2]
 OWNER = "backend/src/oh_goon/runtime/fixture_owner.py"
 
 
+def test_committed_registry_admits_native_owners_and_rejects_a_removed_owner(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(
+        (ROOT / "docs/development/RUNTIME_AUTHORITY_REGISTRY.json").read_text()
+    )
+    registry = tmp_path / "docs/development/RUNTIME_AUTHORITY_REGISTRY.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(json.dumps(payload))
+    # Exercise the actual governed source/registry pair. The bounded fixture
+    # retains every declared native owner, without scanning unrelated modules.
+    for relative in payload["owners"]:
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / relative).read_bytes())
+    assert _check_runtime_authority_registry(tmp_path) == []
+    removed = "backend/src/oh_goon/runtime/exec_guard.py"
+    del payload["owners"][removed]
+    registry.write_text(json.dumps(payload))
+    assert [
+        (row.path, row.message) for row in _check_runtime_authority_registry(tmp_path)
+    ] == [(tmp_path / removed, "physical process lifecycle authority is unclassified")]
+
+
 def _fixture(root: Path, source: str, *, classified: bool = False) -> Path:
     path = root / OWNER
     path.parent.mkdir(parents=True, exist_ok=True)

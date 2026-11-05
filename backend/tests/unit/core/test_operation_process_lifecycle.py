@@ -6,10 +6,11 @@ from typing import Any, TypedDict
 import pytest
 from pydantic import ValidationError
 
-from oh_goon.core.errors import InvalidRunTransition, JournalConflict
+from oh_goon.core.errors import InvalidRunTransition
 from oh_goon.core.execution_lifecycle_ledger import lifecycle_events
+from oh_goon.core.execution_lifecycle_validation import validate_execution_lifecycle
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.run_events import ProcessStartingEvent
+from oh_goon.core.models.run_events import ProcessExitedEvent, ProcessStartingEvent
 from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
@@ -152,21 +153,29 @@ def test_operation_process_identity_cannot_escape_or_rebind_its_admitted_scope(
 ) -> None:
     journal, repository, run_id, operation_id = _setup(tmp_path)
     _start_process(journal, repository, run_id, operation_id)
-    candidate: dict[str, Any] = {
-        "fleet_run_id": run_id,
-        "repository_id": repository.repository_id,
-        "operation_id": operation_id,
-        "event_type": FleetRunEventType.PROCESS_STARTING,
-        "physical_execution_id": "native-command",
-    }
+    detail = journal.read_view().required_run_detail(run_id)
+    history = journal.read_view().run_events(run_id).events
+    original = ProcessExitedEvent(
+        sequence=5,
+        fleet_run_id=run_id,
+        repository_id=repository.repository_id,
+        operation_id=operation_id,
+        event_type=FleetRunEventType.PROCESS_EXITED,
+        physical_execution_id="native-command",
+        pid=12345,
+        process_identity="native-birth",
+        returncode=0,
+    )
+    validate_execution_lifecycle(detail.run, original, history)
+    candidate: dict[str, Any] = {}
     if scope == "repository":
         candidate["repository_id"] = "foreign-repository"
     elif scope == "operation":
         candidate["operation_id"] = "foreign-operation"
     else:
         candidate.update(step_id="fake-step", step_order=1, attempt_number=1)
-    with pytest.raises((InvalidRunTransition, JournalConflict)):
-        journal.record_execution_lifecycle(**candidate)
+    with pytest.raises(InvalidRunTransition):
+        validate_execution_lifecycle(detail.run, original.model_copy(update=candidate), history)
     assert len(journal.read_view().run_events(run_id).events) == 4
 
 

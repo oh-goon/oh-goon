@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from dataclasses import replace
@@ -26,11 +27,13 @@ from oh_goon.core.models.run_admission import (
     fleet_repository_scope,
 )
 from oh_goon.core.vocabulary import OperationAction
-from oh_goon.engine.command import CommandResult
+from oh_goon.engine.command import CommandOutputLimitExceeded, CommandResult
+from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import (
+    MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
     NativeProfileCommandRunner,
     StandardIsolatedProcessRequest,
     native_profile_command_runner,
@@ -185,6 +188,47 @@ def test_worker_preserves_original_native_git_scope_and_observation(
     assert all(request.resources == selected.profile.resources for request in requests)
 
 
+@pytest.mark.process
+def test_restored_local_git_keeps_bounded_capture_and_prelaunch_cancellation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, _, _, git = _native_git(tmp_path, sandboxed=False)
+    git = replace(git, executable=sys.executable)
+    captured = worker.WorkerGitConfiguration.capture(git)
+    restored = worker.WorkerGitConfiguration.model_validate_json(
+        captured.model_dump_json()
+    ).restore()
+    assert type(restored.command_runner) is NativeProfileCommandRunner
+    result = restored.run(
+        "-S",
+        "-c",
+        "import os; print(os.environ['NATIVE_GIT_CANARY'])",
+        cwd=repository,
+        env={"NATIVE_GIT_CANARY": "captured-environment"},
+    )
+    assert result.returncode == 0 and result.stdout == "captured-environment"
+
+    with pytest.raises(CommandOutputLimitExceeded) as caught:
+        restored.run(
+            "-S",
+            "-c",
+            f"print('x' * {2 * MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM})",
+            cwd=repository,
+        )
+    assert caught.value.limit_bytes == MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM
+    assert len(caught.value.stdout.encode("utf-8")) <= MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM
+    assert caught.value.supervisor.final_process_group_quiescent is True
+
+    def unexpected_process(*_args: object, **_kwargs: object) -> NoReturn:
+        pytest.fail("pre-cancelled native Git must not launch a process")
+
+    monkeypatch.setattr(
+        "oh_goon.integrations.fleet_plan_process_isolation.run_command", unexpected_process
+    )
+    with pytest.raises(OperationCancelledError):
+        restored.run("--version", cancel_requested=lambda: True)
+
+
 @pytest.mark.parametrize(
     "fault",
     (
@@ -271,6 +315,53 @@ def test_native_git_transport_refuses_unfrozen_or_changed_owners_before_admissio
         worker.capture_runtime_worker_configuration(source, "native-run")
     assert source.database.durable_revision() == before
     assert source.execution.active_lease() is None
+
+
+@pytest.mark.parametrize("fault", ("workspace", "missing-backend", "backend-configuration"))
+def test_native_git_restore_rechecks_selected_scope_before_process_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    repository, selected, isolation, git = _native_git(tmp_path, sandboxed=True)
+    assert isolation is not None
+    selected = replace(
+        selected,
+        profile=selected.profile.model_copy(update={"workspace_roots": (str(repository),)}),
+    )
+    runner = native_profile_command_runner(
+        repository, selected, isolation, RepositoryWorkspaceAuthority.pin_repository_subject
+    )
+    git = replace(
+        git,
+        command_runner=runner,
+        observation_runner=partial(runner, read_only_workspace=True),
+    )
+    captured = worker.WorkerGitConfiguration.capture(git, isolation=isolation)
+    transported = worker.WorkerGitConfiguration.model_validate_json(captured.model_dump_json())
+
+    def unexpected_process(*_args: object, **_kwargs: object) -> NoReturn:
+        pytest.fail("changed native Git scope must refuse before process effects")
+
+    monkeypatch.setattr(BubblewrapProcessIsolation, "execute", unexpected_process)
+    assert transported.restore(isolation=isolation).command_runner is not None
+
+    backend: BubblewrapProcessIsolation | None = isolation
+    if fault == "workspace":
+        other = tmp_path / "outside-selected-workspace"
+        other.mkdir()
+        payload = transported.model_dump(mode="json")
+        payload["native_repository"] = str(other)
+        transported = worker.WorkerGitConfiguration.model_validate(payload)
+    elif fault == "missing-backend":
+        backend = None
+    else:
+        other_program = tmp_path / "changed-isolation-backend"
+        other_program.write_text("#!/bin/sh\nexit 9\n")
+        other_program.chmod(0o700)
+        backend = BubblewrapProcessIsolation(
+            str(other_program), control_state_root=tmp_path / "other-control"
+        )
+    with pytest.raises(FleetPlanInvalid):
+        transported.restore(isolation=backend)
 
 
 @pytest.mark.parametrize("field", ("native_repository", "native_agent", "native_observation"))

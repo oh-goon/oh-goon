@@ -7,9 +7,11 @@ import json
 import os
 import shutil
 import subprocess
+import sys
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 
 import pytest
 import yaml
@@ -34,10 +36,10 @@ from oh_goon.core.product_identity import (
     repository_id,
     schedule_repository_fleet_run_id,
 )
-from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
-from oh_goon.integrations import fleet_plan_step_execution
 from oh_goon.integrations.fleet_content_store import FleetContentObject
 from oh_goon.runtime.diagnostics import JsonlDiagnosticSink
+from oh_goon.runtime.execution import ExecutionTicket
+from oh_goon.runtime.execution.run_supervisor import RunWorkerAdmission, RunWorkerLaunch
 from oh_goon.services import fleet_run_control_plane
 from oh_goon.services.run_configuration import load_run_configuration
 from tests.factories import python_goon_projects
@@ -62,6 +64,107 @@ class _ScheduleOptions(TypedDict):
     interval_minutes: int
     caller_input_file: CallerInputFileIdentity
     external_artifacts: tuple[tuple[str, bytes], ...]
+
+
+_NATIVE_RECEIPT_WORKER = r"""import json, os, sys
+from dataclasses import replace
+from pathlib import Path
+from oh_goon import _application_worker as worker
+from oh_goon.integrations import fleet_plan_step_execution
+
+configuration = json.loads(sys.argv[2])
+observation = Path(configuration['observation'])
+lifecycle = None
+build = worker.build_claimed_run_execution
+def capture_execution(*args, **kwargs):
+    global lifecycle
+    execution = build(*args, **kwargs)
+    lifecycle = execution._lifecycle
+    return execution
+worker.build_claimed_run_execution = capture_execution
+native = fleet_plan_step_execution._direct_step_command_runner
+injected = False
+def observe_native(*argv, **kwargs):
+    global injected
+    result = native(*argv, **kwargs)
+    consumer = configuration['phase'] == 'consumer'
+    selected = argv[:2] == (('git', 'hash-object') if consumer else
+                           ('uv', 'sync' if configuration['phase'] == 'preparation' else 'run'))
+    record = None
+    if consumer and selected:
+        assert result.returncode == 0
+        assert result.supervisor.final_process_group_quiescent is True
+        record = {'output': argv[2]}
+    elif not consumer:
+        record = {'roots': [str(kwargs['cwd']), kwargs['env']['UV_PROJECT_ENVIRONMENT'],
+                            argv[argv.index('--project') + 1]]}
+    if record is not None:
+        record.update(worker_pid=os.getpid(), selected=selected and not injected)
+        with observation.open('a') as stream:
+            stream.write(json.dumps(record) + '\n')
+    if selected and not injected:
+        injected = True
+        if configuration['cancel']:
+            assert lifecycle is not None
+            lifecycle.cancel(configuration['run_id'])
+        quiescent = configuration['quiescent']
+        return replace(result, supervisor=(None if quiescent is None else
+                       replace(result.supervisor, final_process_group_quiescent=quiescent)))
+    return result
+fleet_plan_step_execution._direct_step_command_runner = observe_native
+raise SystemExit(worker.execute_handoff(sys.argv[1]))
+"""
+
+
+def _observe_native_receipt_in_worker(
+    runtime: ApplicationRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+    observation: Path,
+    *,
+    phase: str,
+    quiescent: bool | None,
+    cancel: bool = False,
+) -> None:
+    """Inject after real native work in the original claimed fresh-process owner."""
+    capture = runtime.runs._worker_configuration
+    assert capture is not None
+
+    def select(run_id: str) -> Callable[[ExecutionTicket], RunWorkerLaunch]:
+        prepare = capture(run_id)
+        configuration = json.dumps(
+            {
+                "observation": str(observation),
+                "phase": phase,
+                "quiescent": quiescent,
+                "cancel": cancel,
+                "run_id": run_id,
+            }
+        )
+
+        def launch(ticket: ExecutionTicket) -> RunWorkerLaunch:
+            original = prepare(ticket)
+            return replace(
+                original,
+                argv=(
+                    sys.executable,
+                    "-I",
+                    "-c",
+                    _NATIVE_RECEIPT_WORKER,
+                    original.argv[-1],
+                    configuration,
+                ),
+            )
+
+        return launch
+
+    monkeypatch.setattr(runtime.runs, "_worker_configuration", select)
+
+
+def _native_receipt_observations(observation: Path) -> list[dict[str, Any]]:
+    records = [json.loads(line) for line in observation.read_text().splitlines()]
+    assert records and any(record["selected"] for record in records)
+    assert all(record["worker_pid"] != os.getpid() for record in records)
+    return records
 
 
 def _select_independent_application(plan: Path) -> Path:
@@ -173,31 +276,16 @@ def test_native_package_lifecycle_retains_scratch_only_when_terminal_supervision
     """Inject terminal receipt loss after real uv/application work, without claiming live survivors."""
     runtime, repository, plan = execution
     runtime.plans.lock(plan)
-    native_runner = fleet_plan_step_execution._direct_step_command_runner
-    inputs: list[tuple[Path, Path, Path]] = []
-    injected = False
-
-    def observe_native(*argv: str, **kwargs: Any) -> CommandResult:
-        nonlocal injected
-        result = native_runner(*argv, **kwargs)
-        environment = Path(kwargs["env"]["UV_PROJECT_ENVIRONMENT"])
-        package_source = Path(argv[argv.index("--project") + 1])
-        inputs.append((kwargs["cwd"], environment, package_source))
-        selected = argv[:2] == ("uv", "sync" if phase == "preparation" else "run")
-        if selected and not injected:
-            injected = True
-            if quiescent is None:
-                return replace(result, supervisor=cast(CommandSupervisorReceipt, None))
-            return replace(
-                result,
-                supervisor=replace(result.supervisor, final_process_group_quiescent=quiescent),
-            )
-        return result
-
-    monkeypatch.setattr(fleet_plan_step_execution, "_direct_step_command_runner", observe_native)
+    observation = plan.parent.parent / "native-receipts.jsonl"
+    _observe_native_receipt_in_worker(
+        runtime, monkeypatch, observation, phase=phase, quiescent=quiescent
+    )
     started = runtime.plans.run(plan, repository_ids={repository_id(repository)})
     completed = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
-    assert injected and inputs
+    inputs = [
+        tuple(Path(root) for root in record["roots"])
+        for record in _native_receipt_observations(observation)
+    ]
     operation = completed.operations[0]
     assert isinstance(operation.evidence, FleetPlanOperationEvidence)
     first = operation.evidence.plan.steps[0]
@@ -248,8 +336,6 @@ def test_cancellation_after_unsettled_native_receipt_preserves_package_resources
     runtime, repository, plan = execution
     application = _select_independent_application(plan) if independent_application else None
     runtime.plans.lock(plan)
-    native_runner = fleet_plan_step_execution._direct_step_command_runner
-    roots: list[tuple[Path, Path, Path]] = []
     failed_diagnostics: list[DiagnosticEvent] = []
     if diagnostic_failure:
         original_write = JsonlDiagnosticSink.write
@@ -262,30 +348,9 @@ def test_cancellation_after_unsettled_native_receipt_preserves_package_resources
 
         monkeypatch.setattr(JsonlDiagnosticSink, "write", refuse_diagnostic)
 
-    def cancel_after_native(*argv: str, **kwargs: Any) -> CommandResult:
-        result = native_runner(*argv, **kwargs)
-        selected = argv[:2] == ("uv", "sync" if phase == "preparation" else "run")
-        if selected:
-            roots.append(
-                (
-                    kwargs["cwd"],
-                    Path(kwargs["env"]["UV_PROJECT_ENVIRONMENT"]),
-                    Path(argv[argv.index("--project") + 1]),
-                )
-            )
-            runtime.runs.cancel("cancel-after-unsettled-package")
-            return replace(
-                result,
-                supervisor=(
-                    replace(result.supervisor, final_process_group_quiescent=False)
-                    if quiescent is False
-                    else cast(CommandSupervisorReceipt, None)
-                ),
-            )
-        return result
-
-    monkeypatch.setattr(
-        fleet_plan_step_execution, "_direct_step_command_runner", cancel_after_native
+    observation = plan.parent.parent / "native-receipts.jsonl"
+    _observe_native_receipt_in_worker(
+        runtime, monkeypatch, observation, phase=phase, quiescent=quiescent, cancel=True
     )
     started = runtime.plans.run(
         plan,
@@ -298,7 +363,11 @@ def test_cancellation_after_unsettled_native_receipt_preserves_package_resources
     first_step = cancelled.game_tape.repositories[0].steps[0]
     assert first_step.settlement.outcome == "INCOMPLETE"
     assert first_step.settlement.cleanup == "UNAVAILABLE"
-    assert roots
+    roots = [
+        tuple(Path(root) for root in record["roots"])
+        for record in _native_receipt_observations(observation)
+        if record["selected"]
+    ]
     diagnostic_path = ApplicationStatePathLayout.from_database(
         Path(os.environ["OH_GOON_DB"])
     ).diagnostics_log
@@ -441,12 +510,30 @@ def test_admission_conflict_preserves_committed_source_and_releases_only_loser_r
         )
     else:
         admit = runtime.runs._lifecycle.admit
+        register = runtime.runs._supervisor.register_admission
+        capture = runtime.runs._worker_configuration
+        assert capture is not None
+        pending: list[RunWorkerAdmission] = []
+        prepared: list[Callable[[ExecutionTicket], RunWorkerLaunch]] = []
+
+        def observe_configuration(run_id: str) -> Callable[[ExecutionTicket], RunWorkerLaunch]:
+            prepare = capture(run_id)
+            prepared.append(prepare)
+            return prepare
+
+        def observe_registration(run_id: str) -> RunWorkerAdmission:
+            admission = register(run_id)
+            pending.append(admission)
+            return admission
 
         def lose_committed_ack(*args: Any, **kwargs: Any) -> Any:
             ticket, state = admit(*args, **kwargs)
-            runtime.runs._submit(state.fleet_run_id, ticket)
+            assert len(pending) == len(prepared) == 1
+            runtime.runs._submit(state.fleet_run_id, ticket, prepared[0], admission=pending[0])
             raise JournalConflict("injected lost admission ACK after original dispatch")
 
+        monkeypatch.setattr(runtime.runs, "_worker_configuration", observe_configuration)
+        monkeypatch.setattr(runtime.runs._supervisor, "register_admission", observe_registration)
         monkeypatch.setattr(runtime.runs._lifecycle, "admit", lose_committed_ack)
 
     store = runtime.plans._content_store
@@ -656,33 +743,20 @@ def scratch_file():
         )
     )
     runtime.plans.lock(plan)
-    native = fleet_plan_step_execution._direct_step_command_runner
-    consumed: list[Path] = []
-
-    def observe_consumer(*argv: str, **kwargs: Any) -> CommandResult:
-        result = native(*argv, **kwargs)
-        if argv[:2] == ("git", "hash-object"):
-            assert result.returncode == 0
-            assert result.supervisor.final_process_group_quiescent is True
-            consumed.append(Path(argv[2]))
-            if quiescent is not True:
-                runtime.runs.cancel("mixed-package-consumer")
-                return replace(
-                    result,
-                    supervisor=(
-                        replace(result.supervisor, final_process_group_quiescent=False)
-                        if quiescent is False
-                        else cast(CommandSupervisorReceipt, None)
-                    ),
-                )
-        return result
-
-    monkeypatch.setattr(fleet_plan_step_execution, "_direct_step_command_runner", observe_consumer)
+    observation = plan.parent.parent / "native-receipts.jsonl"
+    _observe_native_receipt_in_worker(
+        runtime,
+        monkeypatch,
+        observation,
+        phase="consumer",
+        quiescent=quiescent,
+        cancel=quiescent is not True,
+    )
     started = runtime.plans.run(
         plan, repository_ids={repository_id(repository)}, fleet_run_id="mixed-package-consumer"
     )
     completed = runtime.runs.wait_for_terminal(started.fleet_run_id, timeout=30)
-    assert consumed
+    consumed = [Path(record["output"]) for record in _native_receipt_observations(observation)]
     for output in consumed:
         if quiescent is True:
             assert completed.game_tape.status.value == "PASSED"

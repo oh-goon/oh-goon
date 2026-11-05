@@ -28,7 +28,7 @@ from oh_goon.engine.command import (
     run_command,
 )
 from oh_goon.engine.command_process_tree import CommandParentGuard, _terminate_process_group
-from oh_goon.runtime import exec_guard_protocol
+from oh_goon.runtime.exec_guard_protocol import GUARD_CHANNEL_ENV, GUARD_QUIESCENT
 from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor, RunWorkerLaunch
 from oh_goon.runtime.process_group import (
     wait_for_process_group_quiescence,
@@ -289,7 +289,7 @@ def test_missing_guard_cleanup_ack_keeps_native_exit_and_records_helper_containm
     original = socket.socket.sendall
 
     def drop_quiescent_ack(channel: socket.socket, data: bytes, flags: int = 0) -> None:
-        if data != exec_guard_protocol.GUARD_QUIESCENT:
+        if data != GUARD_QUIESCENT:
             original(channel, data, flags)
 
     monkeypatch.setattr(socket.socket, "sendall", drop_quiescent_ack)
@@ -322,7 +322,7 @@ def test_guard_startup_rejects_missing_or_substituted_kernel_identity_before_tar
     fake = tmp_path / "fake-guard.py"
     fake.write_text(
         "import array,os,socket,time\n"
-        f"channel=socket.socket(fileno=int(os.environ[{exec_guard_protocol.GUARD_CHANNEL_ENV!r}]))\n"
+        f"channel=socket.socket(fileno=int(os.environ[{GUARD_CHANNEL_ENV!r}]))\n"
         f"mode={substitution!r}\n"
         "if mode=='missing-pidfd':\n"
         "    channel.send(b'1 123')\n"

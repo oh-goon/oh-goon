@@ -1,11 +1,61 @@
 from __future__ import annotations
 
-import pytest
-
+import json
+import shlex
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from oh_goon.repository_tooling import local_dev_launch
 from oh_goon.runtime.local_launch_plan import contributor_dev_plan
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_shell_frontdoor_reaches_native_entrypoint_parser_once(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout with spaces"
+    script = checkout / "scripts/dev.sh"
+    script.parent.mkdir(parents=True)
+    script.write_bytes((ROOT / "scripts/dev.sh").read_bytes())
+    entrypoint = checkout / "backend/.venv/bin/oh-goon-local-dev-launch"
+    entrypoint.parent.mkdir(parents=True)
+    probe = (
+        "import json\n"
+        "from importlib.metadata import distribution\n"
+        "from pathlib import Path\n"
+        "from oh_goon.repository_tooling import local_dev_launch\n"
+        "calls = []\n"
+        "def launch(workspace):\n"
+        "    calls.append({'workspace': str(workspace), 'cwd': str(Path.cwd())})\n"
+        "    return 17\n"
+        "local_dev_launch.run = launch\n"
+        "entrypoint = next(item for item in distribution('oh-goon').entry_points "
+        "if item.group == 'console_scripts' and item.name == 'oh-goon-local-dev-launch')\n"
+        "status = entrypoint.load()()\n"
+        "print(json.dumps(calls))\n"
+        "raise SystemExit(status)\n"
+    )
+    entrypoint.write_text(
+        f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(probe)} "$@"\n',
+        encoding="utf-8",
+    )
+    entrypoint.chmod(0o700)
+
+    result = subprocess.run(
+        ("bash", str(script)),
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 17, result.stderr
+    assert json.loads(result.stdout) == [
+        {"workspace": str(checkout.resolve()), "cwd": str(checkout.resolve())}
+    ]
 
 
 def test_contributor_plan_is_exact_spawn_and_readiness_authority(
