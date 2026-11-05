@@ -475,8 +475,18 @@ def bounded_verification_support_targets(observation: Mapping[str, Any]) -> froz
 
 
 def require_verification_support_proof(
-    plan: Mapping[str, Any], evidence: Mapping[str, Any], executed_files: set[str]
+    plan: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    executed_files: set[str],
+    *,
+    admitted_hashmarks_upgrade: bool = False,
 ) -> None:
+    # The caller has already admitted the named native-artifact/smoke route.
+    # Keep file-wide producer roles intact without repeating its proof for the
+    # two dependency inputs. Every other support source retains this obligation.
+    upgrade_inputs = (
+        {"backend/pyproject.toml", "backend/uv.lock"} if admitted_hashmarks_upgrade else set()
+    )
     bounded = {
         row["changed_path"]: bounded_verification_support_targets(row)
         for row in evidence.get("observations", [])
@@ -484,6 +494,7 @@ def require_verification_support_proof(
         if change.get("classification", {}).get("kind") == "verification-support"
         and row.get("qualification", {}).get("completeness") != "complete"
         and row.get("changed_path") not in plan.get("removed_paths", [])
+        and row.get("changed_path") not in upgrade_inputs
     }
     if not bounded:
         if "verification_support_admission" in evidence:
@@ -1247,7 +1258,9 @@ def validate_merge_proof(
         }
         if not nominated & executed_files:
             raise ValueError("Changed behavior has no executed qualified consumer proof")
-    require_verification_support_proof(plan, evidence, executed_files)
+    require_verification_support_proof(
+        plan, evidence, executed_files, admitted_hashmarks_upgrade=hashmarks_upgrade
+    )
     return frozenset(executed_files), frozenset(executed_members)
 
 

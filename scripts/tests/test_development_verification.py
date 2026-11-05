@@ -2060,7 +2060,9 @@ def _hashmarks_upgrade(repository: Path) -> str:
     return base
 
 
-@pytest.mark.parametrize("producer_rows", ("unavailable", "missing"))
+@pytest.mark.parametrize(
+    "producer_rows", ("unavailable", "missing", "verification-support")
+)
 def test_mandatory_hashmarks_upgrade_requires_unchanged_native_non_target_artifacts(
     repository: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2082,6 +2084,19 @@ def test_mandatory_hashmarks_upgrade_requires_unchanged_native_non_target_artifa
         evidence = _dependency_evidence(paths, dependency_base=None, **options)
         for row in evidence["observations"]:
             row.update(state="UNAVAILABLE", nominations=[], stale=True)
+            if (
+                producer_rows == "verification-support"
+                and row["changed_path"] == "backend/pyproject.toml"
+            ):
+                observed = _support_evidence((row["changed_path"],))["observations"][0]
+                observed["nominations"] = []
+                observed["changed_set"]["targets"] = []
+                observed["changed_set"]["changes"][0]["relationships"] = []
+                observed["changed_set"]["changes"][0]["classification"]["reason"] = (
+                    "pytest-configuration"
+                )
+                row.clear()
+                row.update(observed)
         if producer_rows == "missing":
             evidence["observations"] = []
         observations.extend(copy.deepcopy(evidence["observations"]))
@@ -2173,7 +2188,7 @@ def test_hashmarks_upgrade_without_changed_lock_cannot_claim_equivalence(
         owner.require_merge_selection(repository, plan)
 
 
-@pytest.mark.parametrize("extra", ("manifest", "source"))
+@pytest.mark.parametrize("extra", ("manifest", "source", "pytest-config"))
 def test_hashmarks_upgrade_does_not_qualify_unrelated_changes(
     repository: Path,
     extra: str,
@@ -2184,11 +2199,16 @@ def test_hashmarks_upgrade_does_not_qualify_unrelated_changes(
             "a", encoding="utf-8"
         ) as stream:
             stream.write('\n[project.scripts]\nunrelated = "application:main"\n')
+    elif extra == "pytest-config":
+        with (repository / "backend/pyproject.toml").open(
+            "a", encoding="utf-8"
+        ) as stream:
+            stream.write('\n[tool.pytest.ini_options]\naddopts = "-q"\n')
     else:
         (repository / "behavior.py").write_text("value = 1\n", encoding="utf-8")
 
     def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
-        if extra == "manifest":
+        if extra in {"manifest", "pytest-config"}:
             assert "dependency_base" in options
         evidence = _dependency_evidence(
             paths, dependency_base=options.pop("dependency_base", None), **options
@@ -2198,7 +2218,7 @@ def test_hashmarks_upgrade_does_not_qualify_unrelated_changes(
         return evidence
 
     plan = owner.admit_change(repository, base=base, nominator=nominate)
-    if extra == "manifest":
+    if extra in {"manifest", "pytest-config"}:
         assert "hashmarks_upgrade" not in plan.evidence
         assert "DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED" in plan.unverified
     else:
