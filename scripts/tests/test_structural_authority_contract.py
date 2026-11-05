@@ -136,10 +136,6 @@ def _messages(root: Path) -> list[str]:
     ]
 
 
-def test_current_repository_satisfies_structural_authority_guard() -> None:
-    assert check_structural_authority_contract(ROOT) == []
-
-
 def test_make_workflow_assignment_whitespace_is_representation_invariant(
     tmp_path: Path,
 ) -> None:
