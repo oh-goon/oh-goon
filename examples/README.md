@@ -8,6 +8,7 @@ Use [the template first-run guide](../templates/README.md) to register a target 
 | [Local Skill authoring](agent-skill-authoring/README.md) | Preview-only fixture | Typed local Skill/source capture; its `opencode` declaration is not executable. |
 | [Pinned cookbook review](agent-skill-cookbook/README.md) | Runnable with prerequisites | Canonical `run.yml`, remote Skill registry and installed native agent/profile. |
 | [Frozen local search](agent-skill-local-search/README.md) | Runnable with prerequisites | Recipient-free captured-source search through the CLI, Fleet and Game Tape. |
+| [Private code catalog](private-code-catalog/README.md) | Runnable with prerequisites (synthetic) | Local Hashmarks/Git discovery, reviewed team metadata and an Oh-Goon-retained Backstage catalog artifact; no provider step. |
 | [Offline Skill resources](agent-skill-offline/README.md) | Preview-only fixture | Local resource capture and relocation; scripts travel as data. |
 | [Review–repair](agentic-review-repair-loop/README.md) | Runnable with prerequisites | Provider or native workflow, explicit phase composition and bounded repair. |
 | [Standard Atomic](standard-atomic/README.md) | Runnable with prerequisites | Shell execution through the CLI, Fleet and Game Tape; separate native failure/cancellation checks. |
