@@ -1,0 +1,4 @@
+# Work only in a disposable copy of this fixture.
+**/.hashmarks/
+sample-repo/.git/
+generator/catalog-info.yaml
