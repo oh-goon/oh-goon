@@ -34,6 +34,8 @@ name = "iris-train"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "joblib" },
+    { name = "numpy" },
     { name = "scikit-learn" },
 ]
 
@@ -44,7 +46,11 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "scikit-learn", specifier = ">=1.6,<2" }]
+requires-dist = [
+    { name = "joblib" },
+    { name = "numpy" },
+    { name = "scikit-learn", specifier = ">=1.6,<2" },
+]
 
 [package.metadata.requires-dev]
 dev = [

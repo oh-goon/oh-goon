@@ -1,0 +1,47 @@
+application:
+  path: /absolute/path/to/iris-project
+runtime: python
+uv: {lock_mode: frozen}
+inputs:
+  random_seed:
+    type: integer
+    min: 0
+    max: 2147483647
+    default: 42
+  test_size_percent:
+    type: integer
+    min: 10
+    max: 40
+    default: 20
+  max_iterations:
+    type: integer
+    min: 100
+    max: 2000
+    default: 300
+  minimum_accuracy_percent:
+    type: integer
+    min: 80
+    max: 100
+    default: 90
+steps:
+- id: ingest
+  run: iris-pipeline ingest --random-seed ${{ inputs.random_seed }} --test-size-percent ${{ inputs.test_size_percent }}
+  outputs:
+    DATA: {path: ml-pipeline/data.json, max_bytes: 16384}
+- id: train
+  run: iris-pipeline train --data ${{ steps.ingest.outputs.DATA }} --max-iterations ${{ inputs.max_iterations }}
+  outputs:
+    MODEL: {path: ml-pipeline/model.json, max_bytes: 16384}
+- id: evaluate
+  run: iris-pipeline evaluate --data ${{ steps.ingest.outputs.DATA }} --model ${{ steps.train.outputs.MODEL }} --minimum-accuracy-percent ${{ inputs.minimum_accuracy_percent }}
+  outputs:
+    VERDICT: {path: ml-pipeline/evaluation.json, max_bytes: 16384}
+- id: publish
+  run: iris-pipeline publish --model ${{ steps.train.outputs.MODEL }} --verdict ${{ steps.evaluate.outputs.VERDICT }}
+  artifacts:
+  - path: ml-output/iris-training-metrics.json
+    retention: content_store
+  - path: ml-output/iris-model-parameters.json
+    retention: content_store
+  - path: ml-output/iris-model.joblib
+    retention: content_store

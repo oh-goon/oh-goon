@@ -82,6 +82,13 @@ attempt workspaces disappear. Retention preserves explicitly declared file
 bytes; the [content-store lifecycle](../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md)
 still owns their availability.
 
+## Run ordered stages
+
+For separately observed ingestion, training, evaluation and publication, use the
+[staged Iris example](../../../../examples/iris-pipeline/README.md). It selects
+this same Python application through an independent application declaration;
+the simple Plan above retains its single-Step training contract.
+
 ## Select strict execution explicitly
 
 Local retention does not establish strict isolation or privileged native
