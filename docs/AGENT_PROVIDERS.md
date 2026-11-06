@@ -780,6 +780,14 @@ escaped local descendants are not qualified by ordinary terminal or exit evidenc
 See the [mode-specific lifetime boundary](development/AGENT_HARNESS_COMPATIBILITY.md#native-detached-work-boundary)
 before relying on detached work.
 
+Native JSON output is a harness claim, not proof that an optional plugin or
+extension cannot write to the same stream. Pi redirects ordinary stdout/console
+output to stderr before loading extensions, but raw descriptor writes can bypass
+that guard. Such extension-origin separation remains unqualified; neither
+`--no-session` nor Bubblewrap authenticates the writer. The
+[protocol-origin boundary](development/AGENT_HARNESS_COMPATIBILITY.md#native-protocol-origin-boundary)
+keeps nested tool data, native control claims and accepted Run results distinct.
+
 Model context limits, output budgets and thinking controls belong to the native
 agent/provider configuration. Include reasoning tokens in the output budget.
 A provider may reject or ignore an unsupported thinking setting; for local
