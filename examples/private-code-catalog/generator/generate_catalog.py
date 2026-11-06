@@ -16,9 +16,9 @@ OUTPUT = Path("catalog-info.yaml")
 REQUIRED = frozenset({"name", "description", "owner", "type", "lifecycle", "languages"})
 TYPES = frozenset({"service", "website", "library"})
 LIFECYCLES = frozenset({"experimental", "production", "deprecated"})
-SLUG = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
-TAG = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\Z")
-OWNER = re.compile(r"group:default/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+TAG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+OWNER = re.compile(r"group:default/[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
 
 def _valid_string(value: object, *, label: str, limit: int = 240) -> str:
