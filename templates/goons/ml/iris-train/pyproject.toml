@@ -3,10 +3,11 @@ name = "iris-train"
 version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["scikit-learn>=1.6,<2"]
+dependencies = ["scikit-learn>=1.6,<2", "numpy", "joblib"]
 
 [project.scripts]
 iris-train = "iris_train.cli:main"
+iris-pipeline = "iris_train.pipeline:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff"]
