@@ -582,6 +582,69 @@ def test_documentation_uses_bounded_proof_without_starting_intelligence(
     owner.require_current_plan(repository, plan)
 
 
+@pytest.mark.parametrize(
+    "document_path",
+    ("examples/sample/README.md", "templates/plans/general/sample/README.md"),
+)
+def test_example_readmes_without_nominations_receive_bounded_documentation_proof(
+    repository: Path, document_path: str
+) -> None:
+    document = repository / document_path
+    document.parent.mkdir(parents=True)
+    document.write_text("# Guide\n```sh\nproject-check\n```\n", encoding="utf-8")
+
+    def unavailable(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            row.update(state="UNAVAILABLE", nominations=[])
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=unavailable)
+
+    owner.require_merge_selection(repository, plan)
+    assert plan.behavioral_status == "NOT_APPLICABLE"
+    assert plan.static == ("architecture",)
+    assert plan.pytest == (DOCUMENTATION_PROOF_TEST,)
+    assert plan.obligations == (DOCUMENTATION_PROOF_OBLIGATION,)
+    assert plan.evidence["documentation_policy"] == {
+        "authority": "oh-goon-execution-policy",
+        "paths": [document_path],
+        "coverage": "not-claimed",
+    }
+    assert not plan.unverified
+
+
+@pytest.mark.parametrize(
+    "source_path",
+    (
+        "examples/sample/SKILL.md",
+        "examples/sample/run.yml",
+        "examples/sample/providers.toml",
+        "templates/goons/general/sample/goon.yml",
+        "templates/goons/general/sample/check.py",
+        "docs/certification/README.md",
+    ),
+)
+def test_adjacent_machine_inputs_cannot_use_readme_documentation_proof(
+    repository: Path, source_path: str
+) -> None:
+    source = repository / source_path
+    source.parent.mkdir(parents=True)
+    source.write_text("unqualified input\n", encoding="utf-8")
+
+    def unavailable(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            row.update(state="UNAVAILABLE", nominations=[])
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=unavailable)
+
+    assert f"NO_QUALIFIED_VERIFIER:{source_path}" in plan.unverified
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
+
+
 def test_documentation_contract_can_also_prove_a_source_qualified_behavior(
     repository: Path,
 ) -> None:

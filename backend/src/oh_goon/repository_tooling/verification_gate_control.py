@@ -712,6 +712,7 @@ def documentation_proof_paths(paths: Sequence[str]) -> tuple[str, ...]:
                 and not path.startswith("docs/certification/")
                 and Path(path).suffix == ".md"
             )
+            or (path.startswith(("examples/", "templates/")) and Path(path).name == "README.md")
         )
     )
 
