@@ -44,7 +44,7 @@ from oh_goon.integrations.agent_native_execution import (
 )
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
-from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.integrations.hashmarks import require_loaded_hashmarks_runtime
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from tests.fakes.codex_auth import prepare_codex_auth
 from tests.fakes.codex_responses import CodexResponsesFixture
@@ -607,7 +607,15 @@ def test_installed_protected_managed_codex_retains_context_with_native_code_mode
                         "api_key_env": "PROTECTED_CONTEXT_KEY",
                     }
                 },
-                "models": {"selected": {"provider": "synthetic", "model": "gpt-6.1-sol"}},
+                "models": {
+                    "selected": {
+                        "provider": "synthetic",
+                        "model": "gpt-6.1-sol",
+                        # This workload explicitly exercises ID-bearing native
+                        # tool-output replay and compaction continuation.
+                        "allow_provider_history": True,
+                    }
+                },
             }
         )
         selected = ResolvedNativeAgent(

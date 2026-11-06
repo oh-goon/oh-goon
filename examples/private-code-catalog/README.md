@@ -50,9 +50,10 @@ Edit generator/catalog-input.json **only after reviewing** repository evidence a
 
 The renderer is a small independent application, not a second repository index. It never scans the source repository or interprets CODEOWNERS/Git/Hashmarks packets. It validates an exact allowlist of fields and creates only a Backstage Component descriptor. Inputs above 16 KiB, unknown fields, malformed owners, unexpected language tags, and existing outputs fail closed. Field validation does not detect sensitive content inside approved strings.
 
-Validate and inspect the candidate with native Python:
+Inspect the candidate with native Python. The repository's merge checks run the
+[renderer regressions](../../tests/integration/test_private_code_catalog_renderer.py),
+including the input-size and process-memory boundaries.
 
-    python3 -m unittest discover -s generator -p 'test_*.py'
     (cd generator && python3 generate_catalog.py && diff -u ../expected/catalog-info.yaml catalog-info.yaml && rm catalog-info.yaml)
 
 The checked-in expected/catalog-info.yaml is **illustrative expected output**, not an authoritative catalog entry for the Oh-Goon project. It contains the synthetic team reference group:default/platform-team.

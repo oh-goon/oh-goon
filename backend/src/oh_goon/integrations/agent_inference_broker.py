@@ -21,7 +21,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedAgentModel
+from oh_goon.core.models.agent_providers import (
+    PROVIDER_HISTORY_AUTHORIZATION_MESSAGE,
+    AgentProviderError,
+    ProviderHistoryAuthorizationRequired,
+    ResolvedAgentModel,
+    validate_provider_history_policy,
+)
 
 _ROUTES = {
     "openai-chat-completions": ("/v1/chat/completions", "/chat/completions"),
@@ -101,6 +107,10 @@ def _request_body(raw: bytes, selected: ResolvedAgentModel, context: str) -> byt
         body = json.loads(raw, object_pairs_hook=_unique_pairs, parse_constant=_nonfinite)
         if not isinstance(body, dict) or body.get("model") != selected.model:
             raise ValueError("the exact selected model is required")
+    except (UnicodeError, ValueError, TypeError, RecursionError) as exc:
+        raise AgentProviderError("Inference request violates the selected broker contract") from exc
+    validate_provider_history_policy(body, allow_provider_history=selected.allow_provider_history)
+    try:
         if "background" in body and body["background"] is not False:
             # Closing this owned request must end provider work. Background
             # jobs have independent remote lifetimes and cancellation routes.
@@ -323,8 +333,13 @@ class _BrokerHandler(BaseHTTPRequestHandler):
             if len(raw) != length:
                 raise AgentProviderError("Incomplete inference request")
             body = _request_body(raw, selected, self.server.context)
-        except AgentProviderError:
-            self._error(400, "Inference request violates the selected broker contract")
+        except (AgentProviderError, ProviderHistoryAuthorizationRequired) as exc:
+            message = (
+                PROVIDER_HISTORY_AUTHORIZATION_MESSAGE
+                if isinstance(exc, ProviderHistoryAuthorizationRequired)
+                else "Inference request violates the selected broker contract"
+            )
+            self._error(400, message)
             return
         asyncio.run(self._forward(body))
 

@@ -12,10 +12,13 @@ from collections.abc import Sequence
 from typing import Any, NoReturn
 
 from oh_goon.core.models.agent_providers import (
+    PROVIDER_HISTORY_AUTHORIZATION_MESSAGE,
     AgentMessage,
     AgentProviderError,
     AgentReply,
+    ProviderHistoryAuthorizationRequired,
     ResolvedAgentModel,
+    validate_provider_history_policy,
 )
 
 
@@ -157,6 +160,12 @@ def _request(
         body["messages"] = ordinary
         body["max_tokens"] = selected.max_output_tokens
         path = "/messages"
+    try:
+        validate_provider_history_policy(
+            body, allow_provider_history=selected.allow_provider_history
+        )
+    except ProviderHistoryAuthorizationRequired:
+        raise AgentProviderError(PROVIDER_HISTORY_AUTHORIZATION_MESSAGE) from None
     return selected.provider.base_url + path, body
 
 

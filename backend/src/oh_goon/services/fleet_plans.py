@@ -342,6 +342,8 @@ class FleetPlanService:
         read_only_workspace: bool = False,
     ) -> ResolvedNativeAgent:
         """Bind and preflight the original backend before any native Run admission."""
+        if selected.connection is not None:
+            selected.connection.selection.require_history_authorization()
         from oh_goon.integrations.fleet_plan_bubblewrap_isolation import (
             BubblewrapProcessIsolation,
         )

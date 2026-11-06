@@ -4,7 +4,17 @@ from pathlib import Path
 
 import pytest
 
-from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.agent_providers import (
+    AgentConnection,
+    AgentProviderError,
+    AgentProvidersConfig,
+)
+from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
+    ResolvedFleetPlan,
+    ResolvedProviderAgentWorkload,
+)
+from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
 from oh_goon.runtime.agent_providers import agent_providers_path, load_agent_providers
 
 CONFIG = """version = 1
@@ -29,8 +39,10 @@ model = "my-model:latest"
 """
 
 
-def load(tmp_path, content=CONFIG):
-    path = tmp_path / "providers.toml"
+def load(
+    tmp_path: Path, content: str = CONFIG, *, filename: str = "providers.toml"
+) -> AgentProvidersConfig:
+    path = tmp_path / filename
     path.write_text(content)
     return load_agent_providers(path)
 
@@ -66,10 +78,171 @@ def test_selection_is_a_snapshot_of_config_and_credentials(tmp_path):
     assert b'"temperature": 0.2' in selected.parameters_json
 
 
+def test_provider_history_permission_defaults_to_denial_and_survives_selected_transport(
+    tmp_path: Path,
+) -> None:
+    config = load(tmp_path)
+    default = AgentConnection.select(config, "review")
+    assert default.selection.allow_provider_history is False
+    assert "allow_provider_history" not in default.model_dump(mode="json")["selection"]
+    assert (
+        default.resolve(
+            {"MY_API_KEY": "synthetic", "WORKSPACE_TOKEN": "workspace"}
+        ).allow_provider_history
+        is False
+    )
+
+    explicit = load(
+        tmp_path,
+        CONFIG.replace(
+            "max_output_tokens = 700", "max_output_tokens = 700\nallow_provider_history = true"
+        ),
+    )
+    admitted = AgentConnection.select(explicit, "review")
+    transported = AgentConnection.model_validate_json(admitted.model_dump_json())
+    explicit.models["review"] = config.models["review"]
+    selected = transported.resolve({"MY_API_KEY": "synthetic", "WORKSPACE_TOKEN": "workspace"})
+    assert transported.selection.allow_provider_history is True
+    assert selected.allow_provider_history is True
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        {"previous_response_id": "PRIVATE_HISTORY_REFERENCE"},
+        {"conversation": "PRIVATE_HISTORY_REFERENCE"},
+        {"conversation": {"id": "PRIVATE_HISTORY_REFERENCE"}},
+    ],
+)
+def test_declared_history_parameters_require_explicit_authorization_before_selection(
+    tmp_path: Path, reference: dict[str, object]
+) -> None:
+    payload = tomllib.loads(CONFIG)
+    payload["models"]["review"]["parameters"] = reference
+    config = load(tmp_path, json.dumps(payload), filename="providers.json")
+    # Passive decoding preserves evidence; current execution still requires a grant.
+    recorded = AgentConnection(
+        profile="review",
+        provider_name="gateway",
+        provider=config.providers["gateway"],
+        selection=config.models["review"],
+    )
+    decoded = AgentConnection.model_validate_json(recorded.model_dump_json())
+    assert decoded.selection.parameters == reference
+    with pytest.raises(AgentProviderError) as refused:
+        AgentConnection.select(config, "review")
+    with pytest.raises(AgentProviderError, match="allow_provider_history"):
+        decoded.resolve({})
+    assert "PRIVATE_HISTORY_REFERENCE" not in str(refused.value)
+    assert "allow_provider_history" in str(refused.value)
+    payload["models"]["review"]["allow_provider_history"] = True
+    selected = load(tmp_path, json.dumps(payload), filename="providers.json").resolve(
+        "review", environment={"MY_API_KEY": "synthetic", "WORKSPACE_TOKEN": "workspace"}
+    )
+    assert selected.allow_provider_history is True
+    assert json.loads(selected.parameters_json) == reference
+
+
+@pytest.mark.parametrize(
+    "reference", [{"conversation": {}}, {"previous_response_id": ""}, {"conversation": False}]
+)
+def test_nonnull_history_values_cannot_bypass_default_denial_by_being_falsey(
+    tmp_path: Path, reference: dict[str, object]
+) -> None:
+    payload = tomllib.loads(CONFIG)
+    payload["models"]["review"]["parameters"] = reference
+    config = load(tmp_path, json.dumps(payload), filename="providers.json")
+    with pytest.raises(AgentProviderError):
+        AgentConnection.select(config, "review")
+    with pytest.raises(AgentProviderError):
+        config.resolve("review", environment={})
+
+
+def test_mutated_parameters_cannot_cross_selection_or_credential_resolution(tmp_path: Path) -> None:
+    config = load(tmp_path)
+    config.models["review"].parameters["previous_response_id"] = "PRIVATE_HISTORY_REFERENCE"
+    with pytest.raises(AgentProviderError, match="allow_provider_history"):
+        AgentConnection.select(config, "review")
+    with pytest.raises(AgentProviderError, match="allow_provider_history"):
+        config.resolve("review", environment={})
+
+
+def test_request_parameters_cannot_authorize_history_even_in_an_authorized_model(
+    tmp_path: Path,
+) -> None:
+    payload = tomllib.loads(CONFIG)
+    payload["models"]["review"].update(
+        allow_provider_history=True, parameters={"allow_provider_history": True}
+    )
+    config = load(tmp_path, json.dumps(payload), filename="providers.json")
+    with pytest.raises(AgentProviderError):
+        AgentConnection.select(config, "review")
+    with pytest.raises(AgentProviderError):
+        config.resolve("review", environment={})
+
+
+def test_no_grant_preserves_resolved_plan_identity_and_true_binds_a_new_identity(
+    tmp_path: Path,
+) -> None:
+    connection = AgentConnection.select(load(tmp_path), "review")
+
+    def resolve(selected: AgentConnection) -> ResolvedFleetPlan:
+        return ResolvedFleetPlan.create(
+            name="recorded-review",
+            description="Recorded execution policy",
+            execution=MaintenanceExecutionPolicy(),
+            steps=(
+                ResolvedAgentStep(
+                    step_id="review",
+                    timeout_seconds=10,
+                    workload=ResolvedProviderAgentWorkload(
+                        harness="provider-review", connection=selected
+                    ),
+                    delivery_sha256="a" * 64,
+                    handoff_identity="frozen-source",
+                    source_step_id="review",
+                ),
+            ),
+        )
+
+    plan = resolve(connection)
+    wire = plan.model_dump(mode="json")
+    assert '"allow_provider_history"' not in json.dumps(wire)
+    assert ResolvedFleetPlan.model_validate_json(json.dumps(wire)).plan_id == plan.plan_id
+
+    explicit_false = connection.model_copy(
+        update={
+            "selection": connection.selection.model_copy(update={"allow_provider_history": False})
+        }
+    )
+    same = resolve(explicit_false)
+    assert same.plan_id == plan.plan_id
+    assert same.model_dump(mode="json") == wire
+
+    granted = connection.model_copy(
+        update={
+            "selection": connection.selection.model_copy(update={"allow_provider_history": True})
+        }
+    )
+    authorized = resolve(granted)
+    assert authorized.plan_id != plan.plan_id
+    assert '"allow_provider_history": true' in authorized.model_dump_json(indent=2)
+    assert (
+        ResolvedFleetPlan.model_validate_json(authorized.model_dump_json()).plan_id
+        == authorized.plan_id
+    )
+
+
 @pytest.mark.parametrize(
     "content",
     [
         CONFIG.replace("version = 1", "version = true"),
+        CONFIG.replace(
+            "max_output_tokens = 700", "max_output_tokens = 700\nallow_provider_history = 1"
+        ),
+        CONFIG.replace(
+            "max_output_tokens = 700", 'max_output_tokens = 700\nallow_provider_history = "true"'
+        ),
         CONFIG.replace("version = 1", "version = 2"),
         CONFIG.replace('default_model = "review"', 'default_model = "missing"'),
         CONFIG.replace('provider = "gateway"', 'provider = "missing"'),

@@ -50,6 +50,16 @@ Opt-in watch notifications use the browser/operating-system Notification API onl
 
 Dependency maintenance itself can require network access: Git can contact configured remotes, uv can contact configured package indexes, and security-audit operations can contact their configured advisory service.
 
+## Provider-held conversation context
+
+Optional inference uses the explicitly selected provider. Oh-Goon does not own
+its history storage, retrieval, migration or authorization mechanisms. Each Run
+starts with fresh execution context; known provider-history selectors require an
+explicit permission in that Run's selected model policy. Shared credentials and
+prior-Run data do not grant it. This boundary does not claim stronger remote
+isolation than the native provider supplies. See [provider-history authorization](AGENT_PROVIDERS.md#provider-held-history-authorization)
+for the default denial, broad opt-in scope and unsupported strict guarantees.
+
 ## Enforcement
 
 The repository quality gates enforce the local-app/SSOT contract through frontend architecture checks and the backend architecture owner. `make check` exercises the fast development architecture projection; stricter frontend/backend quality owners run in their dedicated checks and certification. Browser business-state persistence, telemetry beacons, external frontend URLs, unapproved backend persistence stores, and direct SQLite access outside the canonical or explicitly allowed Scout analytical persistence boundaries fail the quality gate. Direct localStorage access is allowed only through `frontend/src/app/preferences.ts` for harmless presentation preferences.
