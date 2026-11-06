@@ -82,7 +82,12 @@ attempt workspaces disappear. Retention preserves explicitly declared file
 bytes; the [content-store lifecycle](../../../../docs/development/TEMPLATE_ARTIFACT_RETENTION.md)
 still owns their availability.
 
-## Run ordered stages
+## Run staged or recurring training
+
+For recurring single-command training, use the
+[Schedule walkthrough](../../../../examples/scheduled-iris/README.md). It keeps
+this Plan under the same original Run/Step owners; creating a Schedule does not
+start a background product process.
 
 For separately observed ingestion, training, evaluation and publication, use the
 [staged Iris example](../../../../examples/iris-pipeline/README.md). It selects

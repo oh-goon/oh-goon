@@ -97,6 +97,11 @@ A Schedule is active or paused and uses an interval trigger. A newly created Sch
 
 The public API uses `/api/schedules`. The older generic browser workflow composer and `/api/workflows` product route are not part of the product model.
 
+The [recurring Iris walkthrough](../examples/scheduled-iris/README.md) demonstrates
+this public process/CLI/API path with the existing training project and retained
+Run evidence. Its real wall-clock witness is distinct from bounded owner-clock
+tests and from an explicitly requested manual occurrence.
+
 ## Schedule definitions are not workflow programs
 
 Valid:
