@@ -312,7 +312,8 @@ def test_strict_source_only_shell_rejects_materialized_cwd_alias_before_run_admi
             [_entry(repository)],
         )
 
-    assert "live package-manager materialization paths" in str(exc.value)
+    # Authored cd/subshell syntax cannot establish the native working directory.
+    assert "execution authority for explicit shell command is unproven" in str(exc.value)
 
 
 @pytest.mark.parametrize(
@@ -482,7 +483,7 @@ def test_strict_make_owner_rejects_materialized_cwd_alias_before_run_admitted(
             [_entry(repository)],
         )
 
-    assert "live package-manager materialization paths" in str(exc.value)
+    assert "execution authority for make:package is unproven" in str(exc.value)
 
 
 def test_verification_plan_keeps_materialized_cwd_alias_outside_strict_cicd_gate(
@@ -1282,26 +1283,26 @@ def test_strict_cicd_duplicate_entries_reach_selected_root_set_proof(
 
 
 @pytest.mark.parametrize(
-    ("fragment", "expected"),
+    ("fragment", "launcher"),
     [
-        ("xargs backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        ("printf x | xargs backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        (r"find . -exec backend/.venv/bin/private-tool {} \;", "backend/.venv/bin/private-tool"),
+        ("xargs backend/.venv/bin/private-tool", "xargs"),
+        ("printf x | xargs backend/.venv/bin/private-tool", "xargs"),
+        (r"find . -exec backend/.venv/bin/private-tool {} \;", "find"),
         (
             r"find . -execdir frontend/node_modules/.bin/private-tool {} \;",
-            "frontend/node_modules/.bin/private-tool",
+            "find",
         ),
-        ("timeout 5 backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        ("nice backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        ("nohup backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        ("stdbuf -oL backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
-        ("setsid backend/.venv/bin/private-tool", "backend/.venv/bin/private-tool"),
+        ("timeout 5 backend/.venv/bin/private-tool", "timeout"),
+        ("nice backend/.venv/bin/private-tool", "nice"),
+        ("nohup backend/.venv/bin/private-tool", "nohup"),
+        ("stdbuf -oL backend/.venv/bin/private-tool", "stdbuf"),
+        ("setsid backend/.venv/bin/private-tool", "setsid"),
     ],
 )
 def test_strict_shell_child_launcher_rejects_materialized_executable_before_run_admitted(
     tmp_path: Path,
     fragment: str,
-    expected: str,
+    launcher: str,
 ) -> None:
     repository = tmp_path / "repo"
     seed_cicd_repository(repository)
@@ -1326,21 +1327,21 @@ def test_strict_shell_child_launcher_rejects_materialized_executable_before_run_
             [_entry(repository)],
         )
 
-    assert "live package-manager materialization paths" in str(exc.value)
-    assert expected in str(exc.value)
+    assert f"native child operand binding is unproven: {launcher}" in str(exc.value)
 
 
 @pytest.mark.parametrize(
-    "recipe",
+    ("recipe", "launcher"),
     [
-        "printf x | xargs backend/.venv/bin/private-tool",
-        r"find . -exec backend/.venv/bin/private-tool {} \;",
-        "timeout 5 backend/.venv/bin/private-tool",
+        ("printf x | xargs backend/.venv/bin/private-tool", "xargs"),
+        (r"find . -exec backend/.venv/bin/private-tool {} \;", "find"),
+        ("timeout 5 backend/.venv/bin/private-tool", "timeout"),
     ],
 )
 def test_strict_make_child_launcher_rejects_materialized_executable_before_run_admitted(
     tmp_path: Path,
     recipe: str,
+    launcher: str,
 ) -> None:
     repository = tmp_path / "repo"
     seed_cicd_repository(repository)
@@ -1369,8 +1370,7 @@ def test_strict_make_child_launcher_rejects_materialized_executable_before_run_a
             [_entry(repository)],
         )
 
-    assert "live package-manager materialization paths" in str(exc.value)
-    assert "backend/.venv/bin/private-tool" in str(exc.value)
+    assert f"native child operand binding is unproven: {launcher}" in str(exc.value)
 
 
 def test_repository_plan_admission_resolves_import_applicability_once(

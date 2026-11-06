@@ -27,9 +27,6 @@ from oh_goon.core.vocabulary import (
     OperationAction,
 )
 from oh_goon.engine.native_uv_environment import capture_native_uv_authority
-from oh_goon.integrations.executable_materialization_authority import (
-    logical_step_execution_authority,
-)
 from oh_goon.integrations.fleet_plan_environment import step_host_environment_names
 from oh_goon.integrations.python_goon_projects import materialize_plan_projects
 from oh_goon.integrations.uv_python_runtime import find_uv_system_python
@@ -367,52 +364,6 @@ def _prove_direct_uv_projects(
                 )
 
 
-def _materialize_direct_package_executables(
-    plan: ResolvedFleetPlan,
-    *,
-    repository: Path,
-    uv: Path,
-    python: Path,
-    scratch: Path,
-    cache: Path,
-) -> None:
-    materialized = {
-        relative
-        for step in plan.steps
-        for relative in logical_step_execution_authority(repository, step).materialized_executables
-    }
-    projects: set[Path] = set()
-    for relative in materialized:
-        parts = PurePosixPath(relative).parts
-        if ".venv" not in parts:
-            raise FleetPlanInvalid(
-                f"template certification has no fixture materializer for {relative!r}"
-            )
-        marker = parts.index(".venv")
-        projects.add(repository.joinpath(*parts[:marker]))
-
-    for project in sorted(projects, key=str):
-        env = _native_uv_environment(
-            project / ".venv",
-            cache,
-            python,
-        )
-        _materialize_fixture_environment(
-            uv,
-            ("sync", "--project", str(project), "--locked", "--no-default-groups"),
-            project=project,
-            env=env,
-            failure_prefix=(
-                f"native uv could not materialize direct project executable for {project}"
-            ),
-        )
-
-    for relative in materialized:
-        path = repository.joinpath(*PurePosixPath(relative).parts)
-        if not path.is_file() or not os.access(path, os.X_OK):
-            raise FleetPlanInvalid(f"required repository executable `{relative}` is not resolvable")
-
-
 def _prove_repository_paths(plan: ResolvedFleetPlan, repository: Path) -> None:
     for step in plan.steps:
         if not isinstance(step, ResolvedOciBuildStep):
@@ -453,9 +404,6 @@ def _prove_fixture_contract(
     )
     cache = Path(selected_cache.stdout.strip())
     _prove_fixture_locks(repository, uv, python, scratch, cache)
-    _materialize_direct_package_executables(
-        plan, repository=repository, uv=uv, python=python, scratch=scratch, cache=cache
-    )
     _prove_direct_uv_projects(
         plan, repository=repository, uv=uv, python=python, scratch=scratch, cache=cache
     )

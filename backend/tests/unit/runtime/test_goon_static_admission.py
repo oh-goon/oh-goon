@@ -67,8 +67,9 @@ def test_every_shipped_canonical_goon_passes_static_admission_without_execution(
     assert payload["goon_count"] == len(tuple((_root() / "templates/goons").rglob("goon.yml")))
     assert payload["step_count"] > 0
     assert payload["issues"] == []
-    assert payload["authority_closures_proven"] == payload["authority_closure_count"]
-    assert payload["unresolved_execution_edge_count"] == 0
+    # Catalog permission admission does not prove native Make/shell expansion.
+    assert 0 < payload["authority_closures_proven"] < payload["authority_closure_count"]
+    assert payload["unresolved_execution_edge_count"] > 0
     assert str(payload["requirements_identity"]).startswith("sha256:")
     assert str(payload["execution_authority_identity"]).startswith("sha256:")
 
@@ -147,8 +148,8 @@ def test_complete_static_admission_is_invariant_after_uv_entrypoint_family_mater
     assert "oh-goon-test-batches" in materialized
     assert before == after
     assert after["status"] == "PASS"
-    assert after["authority_closures_proven"] == after["authority_closure_count"]
-    assert after["unresolved_execution_edge_count"] == 0
+    assert 0 < after["authority_closures_proven"] < after["authority_closure_count"]
+    assert after["unresolved_execution_edge_count"] > 0
 
 
 def test_backend_test_tool_authority_is_stable_after_uv_entrypoint_materialization(

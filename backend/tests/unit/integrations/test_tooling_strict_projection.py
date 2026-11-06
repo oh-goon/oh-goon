@@ -55,7 +55,9 @@ def test_tooling_step_projects_exact_declared_children_into_strict_toolchain(
     repository = tmp_path / "repository"
     repository.mkdir()
     (repository / "owned.txt").write_text("tooling-source\n", encoding="utf-8")
-    (repository / "Makefile").write_text("test-tooling-complete:\n\t@true\n", encoding="utf-8")
+    (repository / "Makefile").write_text(
+        "test-tooling-complete:\n\tgit --version\n", encoding="utf-8"
+    )
 
     with prepare_physical_test_run(
         RepositoryIdentity(path=repository),

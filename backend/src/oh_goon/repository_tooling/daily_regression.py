@@ -736,7 +736,12 @@ def main(argv: list[str] | None = None) -> int:
                         f"full-owner-{target}-{args.attempt}",
                         directory,
                     ):
-                        row = _read(directory / "owner.json")
+                        try:
+                            row = _read(directory / "owner.json")
+                        except FileNotFoundError:
+                            # Cancellation can leave a successfully uploaded partial
+                            # artifact without an owner receipt. Keep that owner missing.
+                            continue
                         rows.append(row)
                         if row.get("membership") is not None:
                             report = _read(directory / "pytest.json")
