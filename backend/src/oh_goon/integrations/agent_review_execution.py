@@ -294,6 +294,7 @@ def _worker(path: Path) -> int:
         chat_token_parameter=model.chat_token_parameter,
         parameters_json=json.dumps(model.parameters, allow_nan=False).encode(),
         headers=tuple((name, SecretStr(value)) for name, value in headers.items()),
+        allow_provider_history=model.allow_provider_history,
     )
     try:
         answer = AgentProviderClient().complete(

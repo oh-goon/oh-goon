@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+import sys
+from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -13,30 +15,59 @@ from oh_goon.core.errors import (
     FleetExtensionInvalid,
     FleetPlanInvalid,
 )
+from oh_goon.core.models.agent_providers import (
+    AgentConnection,
+    AgentProviderError,
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
 from oh_goon.core.models.fleet_plan import (
     ManagedToolRuntime,
     MissingConfigPolicy,
+    ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedExtensionStep,
     ResolvedFleetPlan,
+    ResolvedNativeAgentWorkload,
     ResolvedPreCommitStep,
+    ResolvedProviderAgentWorkload,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
+from oh_goon.core.models.goon_plan_source import PlanFileSource
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.run_admission import ExplicitRepositoryScope
+from oh_goon.core.models.run_admission import (
+    DirectFleetExecutionAdmission,
+    ExplicitRepositoryScope,
+    FleetRunAdmissionIntent,
+    fleet_repository_scope,
+)
 from oh_goon.core.models.schedule_execution import ScheduledFleetRunIntent
-from oh_goon.core.vocabulary import CommandSafety, OperationAction
-from oh_goon.engine.command import CommandResult
+from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
+from oh_goon.core.vocabulary import CommandSafety, FleetRunTerminalIntent, OperationAction
+from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
+from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_compilation import load_extension_catalog
 from oh_goon.integrations.gitlab_ci_component import GitLabComponentFetcher
 from oh_goon.integrations.gitlab_ci_goon import GitLabCiGoonMigrator
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.journal import Journal
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from oh_goon.services.fleet_plans import FleetPlanService
+from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
+from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
+from tests.factories.capabilities import capability_snapshot
 from tests.factories.fleet_plan_executor import PhysicalFleetPlanExecutorHarness
-from tests.factories.fleet_plan_targets import structural_fleet_plan_target
+from tests.factories.fleet_plan_targets import (
+    structural_execution_identity,
+    structural_fleet_plan_target,
+)
+from tests.factories.journal import admit_run, terminalize_run
 from tests.factories.path_authority import TEST_PATH_AUTHORITY
+from tests.factories.run_admission import repository_admissions_for
 
 
 def _git(repository: Path, *args: str) -> None:
@@ -627,3 +658,175 @@ def test_canonical_step_evidence_does_not_persist_raw_command_output(
     assert secret not in durable
     assert execution.steps[0].stdout_evidence.byte_count > 0
     assert execution.steps[0].stderr_evidence.byte_count > 0
+
+
+def _recorded_history_connection(*, allowed: bool = False) -> AgentConnection:
+    return AgentConnection.model_validate(
+        {
+            "profile": "review",
+            "provider_name": "chosen",
+            "provider": {"api": "openai-responses", "base_url": "http://127.0.0.1:12345"},
+            "selection": {
+                "provider": "chosen",
+                "model": "synthetic/reviewer",
+                "parameters": {"previous_response_id": "PRIVATE_HISTORY_REFERENCE"},
+                **({"allow_provider_history": True} if allowed else {}),
+            },
+        }
+    )
+
+
+def _history_admission_target(connection: AgentConnection, *, native: bool) -> FleetPlanTarget:
+    selected = (
+        ResolvedNativeAgent(
+            agent="codex",
+            profile_name="isolated",
+            definition=NativeAgentDefinition(executable=sys.executable),
+            profile=NativeAgentProfile(backend="bubblewrap"),
+            executable_sha256="a" * 64,
+            connection=connection,
+        )
+        if native
+        else None
+    )
+    workload = (
+        ResolvedNativeAgentWorkload(native_agent=selected)
+        if selected is not None
+        else ResolvedProviderAgentWorkload(harness="provider-review", connection=connection)
+    )
+    plan = ResolvedFleetPlan.create(
+        name="history-admission",
+        description="Current permission before any Step",
+        execution=MaintenanceExecutionPolicy(),
+        native_agent=selected,
+        steps=(
+            ResolvedCommandStep(step_id="before-agent", argv=("would-run-before-agent",)),
+            ResolvedAgentStep(
+                step_id="review",
+                timeout_seconds=10,
+                workload=workload,
+                delivery_sha256="a" * 64,
+                handoff_identity="frozen",
+                source_step_id="review",
+            ),
+        ),
+    )
+    return FleetPlanTarget(
+        kind="fleet_plan",
+        plan=plan,
+        source=PlanFileSource(sha256="0" * 64),
+        identity=structural_execution_identity(plan),
+        agent_deliveries=(
+            AgentStepDeliveryReference(
+                step_id="review",
+                delivery_sha256="a" * 64,
+                handoff_identity="frozen",
+                reference_id="retained-record",
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_current_history_policy_precedes_new_admission_but_preserves_recorded_result(
+    tmp_path: Path,
+    native: bool,
+) -> None:
+    database = LocalDatabase(tmp_path / "history-admission.db")
+    with database.execution_connection_scope():
+        journal = Journal(database)
+        effects: Any = Mock()
+        lifecycle = FleetRunLifecycle(
+            database, journal, effects, effects, standard_local_fleet=True
+        )
+        plane = FleetRunControlPlane(
+            effects, journal, lifecycle, effects, effects, effects, worker_configuration=effects
+        )
+        # A currently authorized selection is valid at this policy boundary.
+        lifecycle.require_agent_history_authorization(
+            _history_admission_target(_recorded_history_connection(allowed=True), native=native)
+        )
+        target = _history_admission_target(_recorded_history_connection(), native=native)
+        repository = RepositoryIdentity(path=tmp_path / "repo")
+        revision = journal.read_view().revision
+        with pytest.raises(AgentProviderError, match="allow_provider_history") as denied:
+            plane.start_prepared_plan(
+                target, repository_ids={repository.repository_id}, fleet_run_id="new-run"
+            )
+        assert "PRIVATE_HISTORY_REFERENCE" not in str(denied.value)
+        assert journal.read_view().revision == revision
+        assert journal.read_view().run_detail("new-run") is None
+        assert effects.mock_calls == []
+
+        # An accepted pre-policy receipt remains the same fact. It is not a new
+        # grant: a different Run identity still fails the current admission cut.
+        admit_run(
+            journal,
+            "recorded-run",
+            FleetRunAdmissionIntent(
+                target=target,
+                capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+                execution=DirectFleetExecutionAdmission(),
+                repository_admissions=repository_admissions_for(target, [repository]),
+            ),
+            fleet_repository_scope({repository.repository_id}),
+            [repository],
+        )
+        recorded = terminalize_run(journal, "recorded-run", FleetRunTerminalIntent.CANCEL)
+        revision = journal.read_view().revision
+        assert (
+            plane.start_prepared_plan(
+                target,
+                repository_ids={repository.repository_id},
+                fleet_run_id="recorded-run",
+            )
+            == recorded
+        )
+        assert journal.read_view().revision == revision
+        assert effects.mock_calls == []
+
+
+def test_passive_native_history_selection_is_denied_before_backend_probe(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    backend = Mock(spec=BubblewrapProcessIsolation)
+    backend.configuration_identity.return_value = "selected-backend"
+    backend.require_standard_available.side_effect = RuntimeError("native probe reached")
+    runs: Any = Mock()
+    dependency: Any = Mock()
+    service = FleetPlanService(
+        dependency,
+        runs,
+        dependency,
+        dependency,
+        dependency,
+        content_store=dependency,
+        standard_local_fleet=True,
+        standard_process_isolation=backend,
+        git_service=GitService(command_runner=run_command, observation_runner=run_command),
+    )
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable=sys.executable),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+        connection=_recorded_history_connection(allowed=True),
+    )
+    # Baseline reaches the real backend interface without launching a Run.
+    with pytest.raises(RuntimeError, match="native probe reached"):
+        service.run_native_agent(
+            selected=selected, workspace=workspace, skill=None, task="Current review", role="review"
+        )
+    assert backend.require_standard_available.call_count == 1
+    backend.reset_mock()
+    with pytest.raises(AgentProviderError, match="allow_provider_history"):
+        service.run_native_agent(
+            selected=replace(selected, connection=_recorded_history_connection()),
+            workspace=workspace,
+            skill=None,
+            task="Current review",
+            role="review",
+        )
+    assert backend.mock_calls == []
+    runs.start_prepared_plan.assert_not_called()

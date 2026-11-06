@@ -736,6 +736,7 @@ class FleetRunControlPlane:
             )
             if existing is not None:
                 return existing
+            FleetRunLifecycle.require_agent_history_authorization(intent.target)
             self._supervisor.require_accepting()
             if self._worker_configuration is None:
                 raise FleetPlanInvalid("New FleetRun admission requires the Run worker launcher")

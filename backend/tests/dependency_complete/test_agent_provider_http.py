@@ -1,18 +1,36 @@
 import json
+import os
 import traceback
+from dataclasses import replace
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from threading import Thread
+from types import SimpleNamespace
+from typing import Any
 
 import httpx2
 import pytest
+from tests.factories.agent_review import agent_review_case
 
 from oh_goon.core.models.agent_providers import (
+    AgentConnection,
     AgentMessage,
     AgentProviderError,
     AgentProvidersConfig,
+    ResolvedAgentModel,
 )
+from oh_goon.engine.command import run_command
 from oh_goon.integrations.agent_provider_client import AgentProviderClient
+from oh_goon.integrations.agent_review_execution import execute_provider_agent
 
 
-def selection(api="openai-chat-completions", *, parameters=None, provider=None, model=None):
+def selection(
+    api: str = "openai-chat-completions",
+    *,
+    parameters: dict[str, object] | None = None,
+    provider: dict[str, object] | None = None,
+    model: dict[str, object] | None = None,
+) -> ResolvedAgentModel:
     config = AgentProvidersConfig.model_validate(
         {
             "default_model": "review",
@@ -38,7 +56,7 @@ def selection(api="openai-chat-completions", *, parameters=None, provider=None, 
     return config.resolve(None, environment={"MODEL_KEY": "PRIVATE_KEY"})
 
 
-def response_for(api):
+def response_for(api: str) -> dict[str, object]:
     if api == "ollama":
         return {
             "model": "actual-model",
@@ -138,6 +156,169 @@ def test_no_authentication_is_invented_and_new_chat_token_field_is_explicit():
     assert "authorization" not in requests[0].headers
     body = json.loads(requests[0].content)
     assert body["max_completion_tokens"] == 17 and "max_tokens" not in body
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        {"previous_response_id": "PRIVATE_HISTORY_REFERENCE"},
+        {"conversation": "PRIVATE_HISTORY_REFERENCE"},
+        {"conversation": {"id": "PRIVATE_HISTORY_REFERENCE"}},
+    ],
+)
+def test_default_direct_client_cannot_send_history_from_a_forged_resolved_body(
+    reference: dict[str, object],
+) -> None:
+    selected = replace(
+        selection("openai-responses"), parameters_json=json.dumps(reference).encode()
+    )
+
+    def forbidden(request: httpx2.Request) -> httpx2.Response:
+        pytest.fail("Unauthorized provider history reached HTTP transport")
+
+    with pytest.raises(AgentProviderError, match="allow_provider_history") as refused:
+        AgentProviderClient(transport=httpx2.MockTransport(forbidden)).complete(
+            selected, [AgentMessage("user", "PRIVATE_PROMPT")]
+        )
+    assert "PRIVATE_HISTORY_REFERENCE" not in str(refused.value)
+    assert "PRIVATE_PROMPT" not in str(refused.value)
+
+
+@pytest.mark.parametrize("permission", [False, True])
+@pytest.mark.parametrize("wire_override", [False, True])
+def test_direct_request_data_cannot_grant_or_override_selected_history_policy(
+    permission: bool, wire_override: bool
+) -> None:
+    selected = replace(
+        selection("openai-responses", model={"allow_provider_history": permission}),
+        parameters_json=json.dumps({"allow_provider_history": wire_override}).encode(),
+    )
+
+    def forbidden(request: httpx2.Request) -> httpx2.Response:
+        pytest.fail("A request-side policy override reached HTTP transport")
+
+    with pytest.raises(AgentProviderError, match="allow_provider_history"):
+        AgentProviderClient(transport=httpx2.MockTransport(forbidden)).complete(
+            selected, [AgentMessage("user", "current inline input")]
+        )
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        {"previous_response_id": "authorized-reference"},
+        {"conversation": "authorized-reference"},
+        {"conversation": {"id": "authorized-reference"}},
+    ],
+)
+@pytest.mark.parametrize("status", [200, 403])
+def test_explicit_direct_history_permission_preserves_provider_decision(
+    reference: dict[str, object], status: int
+) -> None:
+    selected = selection(
+        "openai-responses", parameters=reference, model={"allow_provider_history": True}
+    )
+    observed: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        observed.append(request)
+        return (
+            httpx2.Response(200, json=response_for("openai-responses"))
+            if status == 200
+            else httpx2.Response(403, text="PRIVATE_KEY PRIVATE_PROVIDER_HISTORY")
+        )
+
+    client = AgentProviderClient(transport=httpx2.MockTransport(handler))
+    messages = [AgentMessage("user", "current inline input")]
+    if status == 200:
+        assert client.complete(selected, messages).text == "hello"
+    else:
+        with pytest.raises(AgentProviderError, match="HTTP 403") as refused:
+            client.complete(selected, messages)
+        assert "PRIVATE" not in str(refused.value)
+    assert len(observed) == 1
+    body = json.loads(observed[0].content)
+    assert all(body[key] == value for key, value in reference.items())
+    assert "allow_provider_history" not in body
+    assert body["input"] == [{"role": "user", "content": "current inline input"}]
+
+
+@pytest.mark.process
+def test_authorized_history_reaches_native_provider_review_worker_once(tmp_path: Path) -> None:
+    observed: list[dict[str, object]] = []
+
+    class RefusingProvider(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            body = b"PRIVATE_PROVIDER_HISTORY_REFUSAL"
+            self.send_response(403)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    provider = ThreadingHTTPServer(("127.0.0.1", 0), RefusingProvider)
+    serving = Thread(target=provider.serve_forever, daemon=True)
+    serving.start()
+    try:
+        # The fixture is shared with the existing typed phase acceptance tests.
+        resolver, source, _, options = agent_review_case(tmp_path)
+        connection = AgentConnection.select(
+            AgentProvidersConfig.model_validate(
+                {
+                    "default_model": "review",
+                    "providers": {
+                        "chosen": {
+                            "api": "openai-responses",
+                            "base_url": f"http://127.0.0.1:{provider.server_port}",
+                        }
+                    },
+                    "models": {
+                        "review": {
+                            "provider": "chosen",
+                            "model": "synthetic/reviewer",
+                            "allow_provider_history": True,
+                            "parameters": {"previous_response_id": "authorized-reference"},
+                        }
+                    },
+                }
+            )
+        )
+        plan, deliveries, _ = resolver.resolve_frozen_agents(
+            source, **{**options, "connection": connection}
+        )
+        step = plan.steps[0]
+        scratch = tmp_path / "worker-scratch"
+        scratch.mkdir()
+        process: Any = SimpleNamespace(
+            host_environment={},
+            environment=dict(os.environ),
+            paths=SimpleNamespace(tmp=scratch),
+            command_runner=run_command,
+        )
+        runtime: Any = SimpleNamespace(cancel_requested=None, runtime_supervision=None)
+        outcome = execute_provider_agent(
+            step,
+            deliveries[step.step_id],
+            process,
+            runtime,
+            timeout=15,
+            repository_evidence="Producer-qualified synthetic evidence",
+        )
+        assert outcome.returncode == 2
+        assert "HTTP 403" in outcome.stderr
+        assert "PRIVATE_PROVIDER_HISTORY_REFUSAL" not in outcome.stderr
+        assert len(observed) == 1
+        assert observed[0]["previous_response_id"] == "authorized-reference"
+        assert "allow_provider_history" not in observed[0]
+        assert not (scratch / "agent-provider-request.json").exists()
+    finally:
+        provider.shutdown()
+        serving.join(timeout=5)
+        provider.server_close()
+        assert not serving.is_alive()
 
 
 @pytest.mark.parametrize("status", [301, 302, 307, 401, 403, 429, 500])

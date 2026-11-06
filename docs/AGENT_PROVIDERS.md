@@ -834,23 +834,6 @@ remain supported. Responses
 `instructions`, inline `input`, `prompt_cache_key`, `previous_response_id`, and
 `conversation` retain their native wire meaning. See the native [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
-The broker injects the captured repository evidence and Skill on each request;
-it does not bind provider-held history references to that capture or establish
-their ownership. A fresh Step broker retains the selected provider credentials.
-History available through those credentials therefore remains part of the
-provider's trust boundary. Workloads requiring separate history need
-provider/account/project separation enforced by the provider. The existing
-catalog selects endpoints and credential references; it does not establish
-storage isolation. Qualify the selected provider's actual behavior before relying
-on that isolation. For OpenAI, [conversation state](https://developers.openai.com/api/docs/guides/conversation-state)
-documents durable conversations and response chaining. Bounded stateful broker
-regressions cover continuation, forks, resets, fresh brokers and known history
-references under the same selected provider configuration, while checking current context
-delivery and socket cleanup. These local provider fixtures establish transport
-and lifecycle behavior; live provider retrieval and storage isolation remain
-provider-specific qualifications. This optional managed API boundary does not
-require API setup for the signed-in Codex CLI profile above.
-
 For Pi's retained explicit configuration surface, native inference must target
 `http://127.0.0.1:18743` inside the namespace, use the selected API path/model and either no client key or the dummy
 key `oh-goon-local` (also supplied as `OH_GOON_NATIVE_BROKER_KEY`). The broker
@@ -934,6 +917,47 @@ parameters freeze before admission, while credential values stay in the original
 environment/header authority. A profile or configured endpoint is not proof of
 connection, compatible wire protocol, model installation, native authentication,
 containment qualification, or admitted permission.
+
+### Provider-held history authorization
+
+Each admitted Run starts with fresh execution context. The broker delivers its
+current task, complete Skill and captured Hashmarks evidence on every request;
+prior-Run data never grants history access, permissions or verification success.
+
+`models.<name>.allow_provider_history` defaults to `false`. Known non-null
+`previous_response_id` and `conversation` selectors, explicit `item_reference`
+inputs, and input items carrying provider IDs require this permission in the
+selected model policy. Request data cannot grant or override it. The same rule
+applies before upstream transport in the managed broker and direct provider
+client; unauthorized configured parameters reject before work. Reference-free
+inline messages remain supported.
+
+With no history-ID registry, Oh-Goon cannot infer which Run created an opaque
+reference. Default denial therefore also covers server-side chaining within one
+Run and replay of ID-bearing output items, even if they include content. Explicit
+`allow_provider_history: true` authorizes native history access under the current
+selected provider credentials/project. It does not authorize one named
+predecessor, transfer execution authority, or establish provider storage isolation.
+
+Native profile selection freezes public configuration, policy and credential
+references. The Run captures its launch environment, the Step resolves values
+from that supplied process authority, and the broker retains the resulting
+headers. A profile name, new worker or new repository capture is not proof of
+separate provider history. A workload requiring strict independent history needs
+a qualified native provider mechanism; unsupported guarantees must be refused.
+Oh-Goon does not store, migrate or interpret provider history or preserve obsolete
+reference formats/behavior.
+
+The [four-Run security case](../backend/tests/integration/services/test_native_agent_history.py)
+checks fresh defaults, denial of unapproved A-to-B reference use before upstream
+work, explicitly authorized reuse, and native provider refusal under a different
+scope. Original results and independent-verification dispositions remain intact.
+These A-level fixtures qualify current authorization boundaries, not live account
+or Conversations API behavior. Native references remain opaque; see the current
+[Responses input-item schema](https://developers.openai.com/api/reference/resources/responses/methods/create)
+and [conversation-state guide](https://developers.openai.com/api/docs/guides/conversation-state)
+for provider-owned interfaces. This optional managed API boundary does not require
+API setup for the signed-in Codex CLI profile above.
 
 ## Configure once
 

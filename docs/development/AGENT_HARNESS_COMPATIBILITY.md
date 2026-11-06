@@ -266,6 +266,19 @@ HUG-122 covers actual overlap; HUG-96/123 cover release artifacts. HUG-181 owns
 worker crash/drain qualification. Their limits are not inherited from this
 matrix or silently implemented here.
 
+Provider-history disposition: **retain** current native request shapes and
+context/header owners, and **remove** unconditional history-reference forwarding.
+The selected model policy defaults to denying provider-held context selectors;
+explicit authorization is frozen with each admission. HUG-106 checks Run
+isolation and safe refusal, not historical reference compatibility, migration or
+cross-version preservation. IDs stay opaque and no registry infers their owning
+Run. Same-Run server chaining also needs opt-in. Live provider account/storage
+isolation still requires its own native qualification; no installed-protocol
+adaptation or new history infrastructure is introduced.
+Earlier installed-context results retain their recorded source and policy scope;
+this A-level security proof does not qualify the new default for every installed
+harness or provider.
+
 The source subtraction is limited to two unreachable assignments in
 `native_agent_command`: Codex/OpenCode `configuration_directory` values were
 already rejected before prepared-source access, yet later branches still tried

@@ -49,6 +49,45 @@ class AgentProviderError(InvalidRequest):
     code = "AGENT_PROVIDER_ERROR"
 
 
+PROVIDER_HISTORY_AUTHORIZATION_MESSAGE = (
+    "Provider-held history requires explicit selected-model allow_provider_history=true. "
+    "Request data cannot change this policy; authorization includes the selected provider scope."
+)
+
+
+class ProviderHistoryAuthorizationRequired(ValueError):
+    """A fixed policy refusal, never a provider handle or credential diagnostic."""
+
+    def __init__(self) -> None:
+        super().__init__(PROVIDER_HISTORY_AUTHORIZATION_MESSAGE)
+
+
+def validate_provider_history_policy(
+    request: Mapping[str, object], *, allow_provider_history: bool
+) -> None:
+    """Known provider-held history needs explicit selected execution policy.
+
+    Opaque references do not identify their owning Run. Default denial therefore
+    covers same-Run and foreign references alike, without a local history store.
+    Inline text and null/omitted reset fields do not select provider-held history.
+    Native input items with provider IDs also require permission, even when the
+    caller supplies content; this boundary does not infer their storage meaning.
+    """
+    if "allow_provider_history" in request:
+        raise ProviderHistoryAuthorizationRequired()
+    items = request.get("input")
+    stored_item = isinstance(items, list) and any(
+        isinstance(item, Mapping)
+        and (item.get("type") == "item_reference" or item.get("id") is not None)
+        for item in items
+    )
+    if allow_provider_history is not True and (
+        stored_item
+        or any(request.get(name) is not None for name in ("previous_response_id", "conversation"))
+    ):
+        raise ProviderHistoryAuthorizationRequired()
+
+
 def _http_url(value: str) -> str:
     try:
         parsed = urlsplit(value)
@@ -137,7 +176,25 @@ class AgentModel(ImmutableModel):
     model: str = Field(min_length=1, max_length=240)
     max_output_tokens: int = Field(default=1024, ge=1, le=1_048_576)
     chat_token_parameter: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
+    # Canonical absence is no grant and preserves recorded Plan identities; true is identity-bound.
+    allow_provider_history: bool = Field(
+        default=False,
+        exclude_if=lambda value: value is False,
+        description=(
+            "Authorize provider-held history and context IDs within the selected credential "
+            "scope; this does not establish per-Run ownership or isolation."
+        ),
+    )
     parameters: dict[str, JsonValue] = Field(default_factory=dict, max_length=32)
+
+    def require_history_authorization(self) -> None:
+        """Validate current execution policy without changing passive receipt decoding."""
+        try:
+            validate_provider_history_policy(
+                self.parameters, allow_provider_history=self.allow_provider_history
+            )
+        except ProviderHistoryAuthorizationRequired:
+            raise AgentProviderError(PROVIDER_HISTORY_AUTHORIZATION_MESSAGE) from None
 
     @field_validator("model")
     @classmethod
@@ -174,6 +231,7 @@ class ResolvedAgentModel:
     chat_token_parameter: str
     parameters_json: bytes
     headers: tuple[tuple[str, SecretStr], ...] = field(repr=False)
+    allow_provider_history: bool = False
 
 
 class NativeAgentDefinition(ImmutableModel):
@@ -355,6 +413,7 @@ class AgentProvidersConfig(ImmutableModel):
                 "Select a configured model profile with --model or default_model"
             )
         model = self.models[selected]
+        model.require_history_authorization()
         provider = self.providers[model.provider]
         headers = dict(provider.headers)
 
@@ -386,6 +445,7 @@ class AgentProvidersConfig(ImmutableModel):
             chat_token_parameter=model.chat_token_parameter,
             parameters_json=json.dumps(model.parameters, allow_nan=False).encode(),
             headers=tuple((name, SecretStr(value)) for name, value in headers.items()),
+            allow_provider_history=model.allow_provider_history,
         )
 
 
@@ -409,6 +469,7 @@ class AgentConnection(ImmutableModel):
         if name is None or name not in config.models:
             raise AgentProviderError("Select an agent model profile or configure default_model")
         model = config.models[name]
+        model.require_history_authorization()
         return cls(
             profile=name,
             provider_name=model.provider,

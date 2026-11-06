@@ -863,6 +863,12 @@
       "AgentModel": {
         "additionalProperties": false,
         "properties": {
+          "allow_provider_history": {
+            "default": false,
+            "description": "Authorize provider-held history and context IDs within the selected credential scope; this does not establish per-Run ownership or isolation.",
+            "title": "Allow Provider History",
+            "type": "boolean"
+          },
           "chat_token_parameter": {
             "default": "max_tokens",
             "enum": [

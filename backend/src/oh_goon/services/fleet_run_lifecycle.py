@@ -329,6 +329,30 @@ class FleetRunLifecycle:
                     "compiled Fleet contract deployment policy not provisioned"
                 )
 
+    @staticmethod
+    def require_agent_history_authorization(target: OperationTarget | None) -> None:
+        """Apply current history policy to a new admission, never passive Run readback."""
+        if isinstance(target, FleetPlanTarget):
+            from oh_goon.core.models.fleet_plan import (
+                ResolvedAgentStep,
+                ResolvedNativeAgentWorkload,
+                ResolvedProviderAgentWorkload,
+            )
+
+            for step in target.plan.steps:
+                if not isinstance(step, ResolvedAgentStep):
+                    continue
+                workload = step.workload
+                connection = (
+                    workload.connection
+                    if isinstance(workload, ResolvedProviderAgentWorkload)
+                    else workload.native_agent.connection
+                    if isinstance(workload, ResolvedNativeAgentWorkload)
+                    else None
+                )
+                if connection is not None:
+                    connection.selection.require_history_authorization()
+
     @contextmanager
     def project_source_transport(
         self, intent: ResolvedCapabilityIntent, repositories: tuple[RepositoryIdentity, ...]
@@ -447,6 +471,7 @@ class FleetRunLifecycle:
             readmitted_from_run_id=readmitted_from_run_id,
             rerun_from_run_id=rerun_from_run_id,
         )
+        self.require_agent_history_authorization(target)
         application_launch = current_application_launch_receipt()
         if isinstance(target, FleetPlanTarget) and self._require_authenticated_fleet:
             # No legacy fallback (including Strict), replay or execution-ticket

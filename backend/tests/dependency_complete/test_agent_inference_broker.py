@@ -100,7 +100,11 @@ def directory() -> Iterator[Path]:
 
 
 def _selected(
-    provider: _Provider, api: str = "openai-chat-completions", **limits: Any
+    provider: _Provider,
+    api: str = "openai-chat-completions",
+    *,
+    allow_provider_history: bool = False,
+    **limits: Any,
 ) -> ResolvedAgentModel:
     return AgentProvidersConfig.model_validate(
         {
@@ -116,7 +120,13 @@ def _selected(
                     **limits,
                 }
             },
-            "models": {"selected": {"provider": "company", "model": "approved/model"}},
+            "models": {
+                "selected": {
+                    "provider": "company",
+                    "model": "approved/model",
+                    "allow_provider_history": allow_provider_history,
+                }
+            },
         }
     ).resolve(None, environment={"COMPANY_MODEL_KEY": "host-only-secret"})
 
@@ -513,15 +523,12 @@ def test_responses_hosted_prompt_rejects_before_provider_work(
     [
         pytest.param({}, id="omitted"),
         pytest.param({"previous_response_id": None, "conversation": None}, id="null"),
-        pytest.param({"previous_response_id": "resp-fixture-parent"}, id="previous-response"),
-        pytest.param({"conversation": "conv-fixture-parent"}, id="conversation-string"),
-        pytest.param({"conversation": {"id": "conv-fixture-parent"}}, id="conversation-object"),
     ],
 )
-def test_responses_prompt_data_and_causal_fields_remain_native_transport(
+def test_inline_responses_data_and_fresh_reset_fields_remain_supported(
     directory: Path, provider: _Provider, causal_fields: dict[str, Any]
 ) -> None:
-    """Transport preservation only; this provider fixture does not resolve causal state."""
+    """Ordinary inline inputs remain usable without history authorization."""
     body = _body("openai-responses")
     body.update(causal_fields)
     body["instructions"] = 'Native instructions retain literal {"prompt": "ordinary data"}.'
@@ -546,7 +553,14 @@ def test_responses_prompt_data_and_causal_fields_remain_native_transport(
             "call_id": "edit-1",
             "name": "edit",
             "arguments": json.dumps(
-                {"prompt": {"id": "ordinary-argument-data", "variables": {"prompt": "native data"}}}
+                {
+                    "prompt": {
+                        "id": "ordinary-argument-data",
+                        "variables": {"prompt": "native data"},
+                    },
+                    "conversation": {"id": "literal-function-data"},
+                    "input": [{"type": "item_reference", "id": "literal-function-data"}],
+                }
             ),
         }
     )
@@ -572,171 +586,202 @@ def test_responses_prompt_data_and_causal_fields_remain_native_transport(
     }
 
 
-@pytest.mark.parametrize(
-    "reference_shape", ["previous-response", "conversation-string", "conversation-object"]
+_HISTORY_REFERENCE_SHAPES = (
+    "previous-response",
+    "conversation-string",
+    "conversation-object",
+    "typed-item",
+    "bare-item",
+    "null-type-item",
+    "reasoning-id",
 )
-def test_optional_managed_history_remains_provider_owned_across_broker_lifetimes(
-    directory: Path, provider: _Provider, reference_shape: str
-) -> None:
-    """Deliberate fixture state proves transport, not production history isolation.
 
-    The local provider alone creates and resolves these fixture-owned handles.
-    This does not exercise Conversations API creation or real authorization.
-    """
-    evidence_a = EVIDENCE + "; fixture-capture-A-canary"
-    skill_a = SKILL + "\nfixture-Skill-A-canary"
-    evidence_b = EVIDENCE + "; fixture-capture-B-canary"
-    skill_b = SKILL + "\nfixture-Skill-B-canary"
-    frozen_headers = {
-        "OpenAI-Project": "fixture-project",
-        "OpenAI-Organization": "fixture-organization",
-    }
-    selected = _selected(provider, "openai-responses", api_key_env=None, headers=frozen_headers)
-    provider_history: dict[str, str] = {}
-    retrievals: list[tuple[str | None, str | None]] = []
-    replies: list[bytes] = []
 
-    def reference(handle: str) -> dict[str, Any]:
-        if reference_shape == "previous-response":
-            return {"previous_response_id": handle}
-        return {
-            "conversation": {"id": handle} if reference_shape == "conversation-object" else handle
-        }
+def _history_reference(shape: str, handle: str) -> dict[str, Any]:
+    if shape == "previous-response":
+        return {"previous_response_id": handle}
+    if shape == "typed-item":
+        return {"input": [{"type": "item_reference", "id": handle}]}
+    if shape == "bare-item":
+        return {"input": [{"id": handle}]}
+    if shape == "null-type-item":
+        return {"input": [{"type": None, "id": handle}]}
+    if shape == "reasoning-id":
+        return {"input": [{"type": "reasoning", "id": handle, "summary": []}]}
+    if shape == "missing-item-id":
+        return {"input": [{"type": "item_reference"}]}
+    return {"conversation": {"id": handle} if shape == "conversation-object" else handle}
 
-    def stateful_reply(raw: bytes) -> tuple[int, tuple[bytes, ...]]:
-        assert len(provider.requests) <= 8
+
+def _stateful_history_provider(provider: _Provider) -> dict[str, tuple[tuple[Any, ...], str]]:
+    """The fixture provider alone owns reference creation, lookup and scope."""
+    history: dict[str, tuple[tuple[Any, ...], str]] = {}
+
+    def respond(raw: bytes) -> tuple[int, tuple[bytes, ...]]:
+        assert len(provider.requests) <= 4
+        path, headers, received = provider.requests[-1]
+        assert received == raw
+        scope = (path, headers.get("authorization"), headers.get("openai-project"))
         body = json.loads(raw)
-        handle = (
-            body.get("previous_response_id")
-            if reference_shape == "previous-response"
-            else body.get("conversation")
-        )
+        assert body["input"][0]["role"] == "developer"
+        handle = body.get("previous_response_id") or body.get("conversation")
         if isinstance(handle, dict):
             handle = handle["id"]
-        assert handle is None or isinstance(handle, str)
-        retrieved = provider_history.get(handle) if handle is not None else None
-        retrievals.append((handle, retrieved))
-        if handle is not None and handle not in provider_history:
-            reply = b"fixture-private-provider-refusal"
-            replies.append(reply)
-            return 403, (reply,)
-        next_handle = f"{'resp' if reference_shape == 'previous-response' else 'conv'}-fixture-{len(provider.requests)}"
-        provider_history[next_handle] = body["input"][0]["content"]
-        reply = (
-            b"data: "
-            + json.dumps(
-                {"fixture_reference": next_handle, "fixture_retrieved_context": retrieved}
-            ).encode()
-            + b"\n\n"
-        )
-        replies.append(reply)
-        return 200, (reply,)
+        if handle is None:
+            handle = next(
+                (item["id"] for item in body["input"][1:] if item.get("id") is not None), None
+            )
+        if handle is None:
+            handle = f"opaque-provider-reference-{len(provider.requests)}"
+            history[handle] = scope, body["input"][0]["content"]
+            retrieved = None
+        else:
+            stored = history.get(handle)
+            if stored is None or stored[0] != scope:
+                return 403, (b"PRIVATE_PROVIDER_HISTORY_REFUSAL host-only-secret",)
+            retrieved = stored[1]
+        return 200, (json.dumps({"id": handle, "history": retrieved}).encode(),)
 
-    provider.respond = stateful_reply
+    provider.respond = respond
+    return history
 
-    def send(
-        client: httpx2.Client,
-        causal: dict[str, Any],
-        evidence: str,
-        skill: str,
-        *,
-        rejected: bool = False,
-    ) -> str:
-        body = _body("openai-responses")
-        body.update(causal)
-        count = len(provider.requests)
-        response = client.post(
-            "/v1/responses",
-            json=body,
-            headers={
-                "OpenAI-Project": "untrusted-project",
-                "OpenAI-Organization": "untrusted-organization",
-            },
-        )
-        assert len(provider.requests) == count + 1
-        path, headers, raw = provider.requests[-1]
-        assert path == "/provider/v1/responses"
-        assert "authorization" not in headers
-        assert all(headers[name.lower()] == value for name, value in frozen_headers.items())
-        forwarded = json.loads(raw)
-        assert forwarded["input"][0]["role"] == "developer"
-        assert evidence in forwarded["input"][0]["content"]
-        assert skill in forwarded["input"][0]["content"]
-        assert forwarded["input"][1:] == body["input"]
-        assert {key: value for key, value in forwarded.items() if key != "input"} == {
-            key: value for key, value in body.items() if key != "input"
-        }
-        if evidence == evidence_b:
-            assert b"fixture-capture-A-canary" not in raw
-            assert b"fixture-Skill-A-canary" not in raw
-        if rejected:
-            assert response.status_code == 502
-            assert "fixture-private-provider-refusal" not in response.text
-            return ""
-        assert response.status_code == 200 and response.content == replies[-1]
-        return str(json.loads(response.content.removeprefix(b"data: "))["fixture_reference"])
 
-    prior_threads = set(threading.enumerate())
+def _fresh_history_request(
+    directory: Path,
+    selected: ResolvedAgentModel,
+    *,
+    label: str,
+    causal: dict[str, Any] | None = None,
+) -> httpx2.Response:
     with approved_model_broker(
         directory,
         selected,
-        task=TASK,
-        repository_evidence=evidence_a,
-        skill_instructions=skill_a,
-        cancel_requested=lambda: False,
-    ) as broker_a:
-        workers_a = set(threading.enumerate()) - prior_threads
-        assert workers_a
-        with _client(broker_a.socket_path) as client:
-            initial = send(client, {}, evidence_a, skill_a)
-            captured_a = provider_history[initial]
-            followup = send(client, reference(initial), evidence_a, skill_a)
-            assert retrievals[-1:] == [(initial, captured_a)]
-            fork = send(client, reference(initial), evidence_a, skill_a)
-            assert len({initial, followup, fork}) == 3
-            assert retrievals[-1:] == [(initial, captured_a)]
-            send(client, {}, evidence_a, skill_a)
-            assert retrievals[-1:] == [(None, None)]
-            send(client, {"previous_response_id": None, "conversation": None}, evidence_a, skill_a)
-            assert retrievals[-1:] == [(None, None)]
-    assert not broker_a.socket_path.exists()
-    assert all(not worker.is_alive() for worker in workers_a)
-    with _client(broker_a.socket_path) as revoked:
-        with pytest.raises(httpx2.ConnectError):
-            revoked.post("/v1/responses", json=_body("openai-responses"))
-    assert len(provider.requests) == 5
+        task=TASK + "; " + label,
+        repository_evidence=EVIDENCE + "; " + label,
+        skill_instructions=SKILL + "\n" + label,
+    ) as broker:
+        with _client(broker.socket_path) as client:
+            return client.post(
+                "/v1/responses", json={**_body("openai-responses"), **(causal or {})}
+            )
 
-    prior_threads = set(threading.enumerate())
-    with approved_model_broker(
+
+@pytest.mark.parametrize("reset", [{}, {"previous_response_id": None, "conversation": None}])
+def test_default_fresh_broker_does_not_automatically_inherit_provider_history(
+    directory: Path, provider: _Provider, reset: dict[str, Any]
+) -> None:
+    history = _stateful_history_provider(provider)
+    first = _fresh_history_request(
         directory,
-        selected,
-        task=TASK,
-        repository_evidence=evidence_b,
-        skill_instructions=skill_b,
-        cancel_requested=lambda: False,
-    ) as broker_b:
-        workers_b = set(threading.enumerate()) - prior_threads
-        assert workers_b and broker_b.socket_path != broker_a.socket_path
-        with _client(broker_b.socket_path) as client:
-            send(client, {}, evidence_b, skill_b)
-            assert retrievals[-1:] == [(None, None)]
-            send(client, reference(initial), evidence_b, skill_b)
-            assert retrievals[-1:] == [(initial, captured_a)]
-            assert (
-                json.loads(replies[-1].removeprefix(b"data: "))["fixture_retrieved_context"]
-                == captured_a
-            )
-            send(
-                client,
-                reference("fixture-provider-rejected-handle"),
-                evidence_b,
-                skill_b,
-                rejected=True,
-            )
-            assert retrievals[-1:] == [("fixture-provider-rejected-handle", None)]
-    assert len(provider.requests) == len(retrievals) == 8
-    assert not broker_b.socket_path.exists()
-    assert all(not worker.is_alive() for worker in workers_b)
+        _selected(provider, "openai-responses", allow_provider_history=True),
+        label="Run A",
+    )
+    selected = _selected(provider, "openai-responses")
+    assert selected.allow_provider_history is False
+    second = _fresh_history_request(directory, selected, label="Run B", causal=reset)
+    assert first.status_code == second.status_code == 200
+    initial = first.json()["id"]
+    assert first.json()["history"] is None and second.json()["history"] is None
+    assert initial != second.json()["id"]
+    captured_a = history[initial][1]
+    captured_b = history[second.json()["id"]][1]
+    assert TASK + "; Run A" in captured_a
+    assert TASK + "; Run B" in captured_b
+    assert EVIDENCE + "; Run B" in captured_b and SKILL + "\nRun B" in captured_b
+    assert captured_a not in captured_b and "allow_provider_history" not in captured_b
+    assert len(provider.requests) == 2
+
+
+@pytest.mark.parametrize("shape", (*_HISTORY_REFERENCE_SHAPES, "missing-item-id"))
+def test_default_policy_denies_explicit_provider_references_before_any_history_lookup(
+    directory: Path, provider: _Provider, shape: str
+) -> None:
+    history = _stateful_history_provider(provider)
+    selected = _selected(provider, "openai-responses")
+    with approved_model_broker(
+        directory, selected, task=TASK, repository_evidence=EVIDENCE, skill_instructions=SKILL
+    ) as broker:
+        with _client(broker.socket_path) as client:
+            seed = client.post("/v1/responses", json=_body("openai-responses"))
+            assert seed.status_code == 200
+            handle = seed.json()["id"]
+            assert handle in history
+            causal = _history_reference(shape, handle)
+            same_run = client.post("/v1/responses", json={**_body("openai-responses"), **causal})
+            assert same_run.status_code == 400
+            assert same_run.json()["error"]["type"] == "inference_boundary"
+            assert "allow_provider_history" in same_run.json()["error"]["message"]
+            assert handle not in same_run.text
+    for policy_override in ({}, {"allow_provider_history": True}):
+        response = _fresh_history_request(
+            directory, selected, label="Run B", causal={**causal, **policy_override}
+        )
+        assert response.status_code == 400
+        assert "allow_provider_history" in response.json()["error"]["message"]
+        assert history[handle][1] not in response.text
+        assert "host-only-secret" not in response.text
+    # The known A reference would retrieve provider history if it crossed the
+    # broker. Both same-Run and foreign-Run uses fail without an ID registry.
+    assert len(provider.requests) == 1
+
+
+@pytest.mark.parametrize("shape", _HISTORY_REFERENCE_SHAPES)
+def test_selected_execution_policy_can_explicitly_authorize_provider_history(
+    directory: Path, provider: _Provider, shape: str
+) -> None:
+    history = _stateful_history_provider(provider)
+    seed = _fresh_history_request(directory, _selected(provider, "openai-responses"), label="Run A")
+    assert seed.status_code == 200
+    handle = seed.json()["id"]
+    allowed = _selected(provider, "openai-responses", allow_provider_history=True)
+    response = _fresh_history_request(
+        directory, allowed, label="Run B", causal=_history_reference(shape, handle)
+    )
+    assert response.status_code == 200
+    assert response.json()["history"] == history[handle][1]
+    forwarded = json.loads(provider.requests[-1][2])
+    for key, value in _history_reference(shape, handle).items():
+        assert (forwarded[key][1:] if key == "input" else forwarded[key]) == value
+    current = forwarded["input"][0]["content"]
+    assert TASK + "; Run B" in current
+    assert EVIDENCE + "; Run B" in current and SKILL + "\nRun B" in current
+    assert history[handle][1] not in current
+    assert "allow_provider_history" not in forwarded
+    for policy_override in (False, True):
+        refused = _fresh_history_request(
+            directory,
+            allowed,
+            label="Run B",
+            causal={**_history_reference(shape, handle), "allow_provider_history": policy_override},
+        )
+        assert refused.status_code == 400
+    assert len(provider.requests) == 2
+
+
+@pytest.mark.parametrize("shape", _HISTORY_REFERENCE_SHAPES)
+def test_authorized_history_does_not_override_a_provider_scope_refusal(
+    directory: Path, provider: _Provider, shape: str
+) -> None:
+    history = _stateful_history_provider(provider)
+    seed = _fresh_history_request(directory, _selected(provider, "openai-responses"), label="Run A")
+    assert seed.status_code == 200
+    handle = seed.json()["id"]
+    selected = _selected(
+        provider,
+        "openai-responses",
+        allow_provider_history=True,
+        headers={"OpenAI-Project": "different-project"},
+    )
+    response = _fresh_history_request(
+        directory, selected, label="Run B", causal=_history_reference(shape, handle)
+    )
+    assert response.status_code == 502
+    assert all(
+        private not in response.text
+        for private in (history[handle][1], "PRIVATE_PROVIDER_HISTORY_REFUSAL", "host-only-secret")
+    )
+    assert len(provider.requests) == 2
+    assert provider.requests[-1][1]["openai-project"] == "different-project"
 
 
 @pytest.mark.parametrize(
