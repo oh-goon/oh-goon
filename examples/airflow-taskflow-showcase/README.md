@@ -5,7 +5,8 @@ Classification: runnable-with-prerequisites
 Select one revision of this repository and run its complete
 [general/orders-taskflow Python project](../../templates/goons/general/orders-taskflow/README.md)
 against your actual Orders application Git checkout. This trusted-local
-verification Plan needs an initialized Oh-Goon CLI, Python 3.12+ and native uv.
+verification Plan needs an initialized [Oh-Goon CLI](../../README.md#cli-first--no-frontend-setup),
+Python 3.12+ and native uv.
 The application has no runtime dependencies; the separate Airflow adapter is
 optional.
 
@@ -24,16 +25,17 @@ The result in `.showcase/result.json` contains `{"total_order_value": "1236.70"}
 The installed command's `run` form calls the same extraction, transformation and
 loading functions that the three Oh-Goon Steps invoke individually.
 
-Register this real application repository and initialize by its path:
+Initialize for this real application Git root by its path:
 
 ```bash
-oh-goon league add-folder "$PWD"
-oh-goon init --template general/orders-taskflow --kind goon --output /absolute/path/to/orders-workflow --repository "$PWD"
+task_workflow=/absolute/path/to/orders-workflow
+oh-goon init --template general/orders-taskflow --kind goon --output "$task_workflow" --repository "$PWD" --no-input
 ```
 
-Choose that absolute output path as the sibling `../orders-workflow` used below; its parent must already exist.
+Initialization registers only this exact root when needed. The output directory
+must not exist and its parent must already exist.
 
-Keep the generated `target` and `inputs` in `../orders-workflow/run.yml`;
+Keep the generated `target` and `inputs` in `$task_workflow/run.yml`;
 replace only its `source` mapping with this explicit Git selection:
 
 ```yaml
@@ -50,19 +52,20 @@ Plan. That Plan imports the package from the same revision. Its captured Git
 source supplies the executed implementation; your application checkout remains
 the registered execution subject. The initializer's local `plan.yml` is now
 unselected. This directory's `run.yml` is a reference selection; initialization
-has already supplied your actual target identity.
+has already supplied your actual target identity. The unique import exposes
+the Goon's `fixture` input and its default; the Plan does not repeat its schema.
 
 ```bash
-cd ../orders-workflow
-oh-goon workflow prepare ./run.yml
-oh-goon run ./run.yml
+oh-goon workflow prepare "$task_workflow/run.yml"
+oh-goon run "$task_workflow/run.yml" --no-input
 ```
 
-`workflow inspect ./run.yml --acquire` is optional: it explicitly
-acquires source and shows its input contract and selected commit without
+`oh-goon workflow inspect "$task_workflow/run.yml" --acquire` is optional: it
+explicitly acquires source and shows its input contract and selected commit without
 installing or executing application code. Locking records the exact commit in
 `goon.lock`; later Runs consume that pin. Editing `fixture`
-and locking again preserves the pin. Only `workflow prepare --refresh goons` explicitly
+and preparing again preserves the pin. Only
+`oh-goon workflow prepare "$task_workflow/run.yml" --refresh goons` explicitly
 refreshes Git source selection. `uv.lock` owns native Python dependency
 resolution; `goon.lock` additionally binds selected workflow source and caller
 inputs. Cached inspection without `--acquire` does not fetch missing source.
@@ -74,10 +77,11 @@ ID in a new CLI process, and export into a directory outside the application
 source checkout:
 
 ```bash
-mkdir -p ../orders-results
+task_results=/absolute/path/to/orders-results
+mkdir -p "$task_results"
 oh-goon runs tape RUN_ID --json
 oh-goon runs outputs RUN_ID --json
-oh-goon runs export-artifact RUN_ID --step general-orders-taskflow.load --path .showcase/result.json --output ../orders-results/official.json
+oh-goon runs export-artifact RUN_ID --step general-orders-taskflow.load --path .showcase/result.json --output "$task_results/official.json"
 ```
 
 The final JSON uses `retention: content_store`. Export verifies the recorded
@@ -89,7 +93,7 @@ See the [retention lifecycle](../../docs/development/TEMPLATE_ARTIFACT_RETENTION
 for retained-reference availability.
 
 Set `inputs.fixture: changed`, lock and run again, then export that Run to
-`../orders-results/changed.json`; its total is `60.00`. Both Run IDs remain
+`$task_results/changed.json`; its total is `60.00`. Both Run IDs remain
 independently inspectable. Export the first ID to a fresh filename after the
 later Run to recover its original `1236.70` bytes.
 

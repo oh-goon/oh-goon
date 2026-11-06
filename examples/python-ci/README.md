@@ -21,6 +21,11 @@ test or dependency preparation prevents later Steps from running. Ordinary
 verification uses trusted local execution; this example does not grant strict
 isolation, APP certification or enforced CPU/memory caps.
 
+The Plan exposes no caller inputs: the selected application, native dependency
+group, commands and artifact paths are owned by its two Goon YAML files.
+Customize those declarations for your project; adding unrelated `run.yml`
+inputs does not override them.
+
 ## Run this checkout locally
 
 Use Linux with Bash, Git, Make, Python 3.12+ and uv. Prepare the CLI from this
