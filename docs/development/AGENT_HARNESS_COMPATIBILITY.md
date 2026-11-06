@@ -8,6 +8,10 @@ execution. The [runtime owner map](AGENT_RUNTIME_OWNERS.md),
 [provider guide](../AGENT_PROVIDERS.md) and [contributor contract](../../AGENTS.md)
 retain those responsibilities.
 
+The [final scoped qualification](AGENT_RUNTIME_OWNERS.md#final-scoped-native-qualification)
+links the requirement/vector results and cumulative subtraction review. Each
+dated observation below keeps its original source, policy, mode and environment.
+
 The tables map existing source and tests; a test reference is not a passing test
 result. Installed qualification is scoped to the exact selected implementation,
 mode, policy and environment. The first installed table retains the 2026-10-26
@@ -279,7 +283,7 @@ Earlier installed-context results retain their recorded source and policy scope;
 this A-level security proof does not qualify the new default for every installed
 harness or provider.
 
-The source subtraction is limited to two unreachable assignments in
+HUG-49's source subtraction was limited to two unreachable assignments in
 `native_agent_command`: Codex/OpenCode `configuration_directory` values were
 already rejected before prepared-source access, yet later branches still tried
 to assign `CODEX_HOME`/`OPENCODE_CONFIG_DIR`. Those branches are deleted.
