@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,6 +16,7 @@ from oh_goon.core.models.tool_health import ReadyToolHealth
 from oh_goon.core.vocabulary import ToolStatus
 from oh_goon.runtime.database import DatabasePathIdentityLost
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+from oh_goon.services.run_configuration import NormalizedRunConfiguration
 from oh_goon.services.system_health import SystemHealthService
 
 
@@ -81,6 +83,77 @@ def test_workflow_flags_keep_independent_refresh_and_authorization() -> None:
     )
     assert initial.kind == "plan" and initial.key == "python/quality"
     assert initial.input_values == ["label=null"] and initial.input_nulls == ["optional"]
+
+
+def test_workflow_preview_selects_only_the_existing_workflow_and_output_format() -> None:
+    preview = build_parser().parse_args(["workflow", "preview", "./workflow", "--json"])
+    assert preview.configuration == Path("./workflow") and preview.as_json
+    assert preview.workflow_command == "preview"
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--acquire"],
+        ["--register-target"],
+        ["--refresh", "goons"],
+        ["--authorize-repair"],
+        ["--review-source"],
+        ["--probe"],
+    ],
+)
+def test_workflow_preview_refuses_effect_and_probe_flags(flags: list[str]) -> None:
+    with pytest.raises(SystemExit) as refusal:
+        build_parser().parse_args(["workflow", "preview", "run.yml", *flags])
+    assert refusal.value.code == 2
+
+
+def test_workflow_preview_presents_the_original_report_without_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repository = tmp_path / "repository"
+    (repository / ".git").mkdir(parents=True)
+    (repository / "goon.yml").write_text("steps:\n- run: echo PRIVATE_ARGUMENT\n")
+    league = tmp_path / "league.yml"
+    league.write_text(f"version: 1\nfolders: [{repository}]\n")
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(league))
+    database = tmp_path / "state.db"
+    monkeypatch.setenv("OH_GOON_DB", str(database))
+    workflow = tmp_path / "workflow"
+    workflow.mkdir()
+    (workflow / "run.yml").write_text(
+        "version: 2\nsource: {kind: repository-goon}\ntarget: {repository: ../repository}\n"
+    )
+    report: dict[str, Any] = {
+        "schema": "oh-goon.workflow-preview/v1",
+        "status": "observed",
+        "execution_authorized": False,
+        "current_target_preview": [{"state": "BLOCKED", "reason": "original owner refusal"}],
+    }
+    calls: list[NormalizedRunConfiguration] = []
+
+    def inspect(
+        normalized: NormalizedRunConfiguration, resolver: FleetPlanResolver, **options: Any
+    ) -> dict[str, Any]:
+        calls.append(normalized)
+        assert normalized.repository.path == repository
+        assert options["source_graph"].root.path == repository / "goon.yml"
+        assert options["preview_targets"] is True
+        return report
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Preview initialized runtime or entered an effect owner")
+
+    monkeypatch.setattr("oh_goon.cli_configuration.inspect_run_configuration", inspect)
+    monkeypatch.setattr("oh_goon.cli._build_application_runtime", forbidden)
+    monkeypatch.setattr("oh_goon.cli_lock.run_stateless_lock", forbidden)
+    monkeypatch.setattr("oh_goon.cli_configuration.register_run_configuration_target", forbidden)
+    assert main(["workflow", "preview", str(workflow), "--json"]) == 0
+    presented = json.loads(capsys.readouterr().out)
+    assert presented.pop("_cli")["exit_code"] == 0
+    assert presented == report
+    assert len(calls) == 1
+    assert not database.exists() and not (workflow / "goon.lock").exists()
 
 
 def test_basic_doctor_uses_native_tool_owner_without_application_state(

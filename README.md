@@ -249,10 +249,12 @@ roots or registers a container's descendants. After editing source or inputs,
 review the change and run `oh-goon workflow prepare ./workflow` before running.
 Run performs fresh Fleet admission and waits for the recorded terminal outcome.
 
-`templates list`, `workflow inspect`, `workflow validate` and stateless `doctor`
-provide optional discovery and diagnostics. Inspection and validation are local
+`templates list`, `workflow inspect`, `workflow validate`, `workflow preview` and
+stateless `doctor` provide optional discovery and diagnostics. Inspection and validation are local
 and read-only by default; `--acquire` explicitly permits source acquisition.
-Neither diagnostic proves native prerequisites or grants execution authority.
+Preview observes original Fleet Step dispositions for the current explicit target
+without source acquisition or native probes. Successful preview reports include
+`execution_authorized: false`. These diagnostics grant no execution authority.
 Use `init --draft` for incomplete Agent/repair authoring; it reports NOT_READY
 and requires completion and explicit preparation. The
 [configuration guide](docs/development/TEMPLATE_INPUT_INSPECTION.md) owns the full

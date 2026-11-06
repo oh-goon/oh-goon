@@ -498,7 +498,7 @@ def _main(
         args.update_applications = "applications" in refresh
         args.update_skills = "skills" in refresh
 
-    if args.command == "workflow" and args.workflow_command in {"inspect", "validate"}:
+    if args.command == "workflow" and args.workflow_command in {"inspect", "validate", "preview"}:
         from oh_goon.cli_configuration import run_config_command
 
         return run_config_command(args)

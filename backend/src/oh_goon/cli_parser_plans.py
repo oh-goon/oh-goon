@@ -44,7 +44,7 @@ def add_workflow_commands[_Parser: argparse.ArgumentParser](
     subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     workflow = subparsers.add_parser(
-        "workflow", help="Inspect, validate or explicitly prepare one workflow"
+        "workflow", help="Inspect, validate, preview or explicitly prepare one workflow"
     )
     commands = workflow.add_subparsers(dest="workflow_command", required=True)
     for name in ("inspect", "validate"):
@@ -66,6 +66,13 @@ def add_workflow_commands[_Parser: argparse.ArgumentParser](
                 action="store_true",
                 help="Observe the exact selected repository source for target.reviewed_source; does not authorize execution",
             )
+    preview = commands.add_parser(
+        "preview",
+        help="Observe selected sources against the current target without authorizing execution",
+        description="Observe the existing selected source graph and current explicit repository targets without acquiring sources, writing a lock, registering targets or starting execution. Native capabilities not established by the original preview remain unverified.",
+    )
+    preview.add_argument("configuration", type=Path)
+    preview.add_argument("--json", action="store_true", dest="as_json")
     prepare = commands.add_parser(
         "prepare",
         help="Acquire selected sources and write the lock; registration only with --register-target",
