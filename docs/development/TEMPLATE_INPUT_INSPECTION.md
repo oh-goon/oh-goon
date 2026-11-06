@@ -128,6 +128,58 @@ the evidence. A successful contract inspection does not establish installation
 or execution. Default inspection retains its no-network behavior and uses
 existing exact pins.
 
+## Observe the current target
+
+An optional preview applies the original Fleet Plan preview to the explicitly
+selected current repository, using the same captured source graph and resolved
+Plan as input inspection:
+
+```sh
+oh-goon workflow preview ./workflow
+oh-goon workflow preview ./workflow --json
+```
+
+The report includes source and repository-instance identity, execution policy,
+ordered Step dispositions, requested effects and output-retention declarations.
+`READY`, `SKIPPED` and `RUNTIME_DEPENDENT` are the original owner's
+repository-resolvable Step observations. Target `OBSERVED` means that query
+completed; it does not establish current Run admission. Original repository
+refusals appear as `BLOCKED`. Unresolved inputs or Agent source remain
+`declarations-only` with target `UNVERIFIED`; Agent preview does not capture
+Skills, provider state or native implementation state.
+
+Every successful preview report states `execution_authorized: false`. Native
+capabilities remain `UNVERIFIED`, the executor and host storage are `NOT_PROBED`,
+lock freshness is `NOT_VERIFIED`, and reusable cache authority remains bound to
+runtime. Existing lock records are observations only, including records whose
+integrity or freshness has not been established. A successful command exit means
+the observation was reported; inspect its states and diagnostics. Invalid source
+selection or unavailable source capture still refuses the command.
+
+Preview has no acquisition, refresh, registration or repair flags. Git
+Plan/Goon/application sources report source acquisition required even with a
+cached pin: their original Git owner materializes leases and worktrees, which
+passive preview does not request. Use explicit `workflow inspect --acquire` for
+source-contract discovery, or local source for this passive preview. A source
+acquisition refusal is distinct from a captured Plan's current target refusal.
+External `from:` inputs remain unobserved, including Git inputs that could invoke
+repository hooks. Explicit scalar inputs and ordinary defaults still resolve
+through the original binder. Free-form string values and runtime-derived reasons
+or references that could contain them are withheld; typed dispositions and policy
+facts remain visible.
+
+Preview does not install packages, probe executors, contact models, write a lock,
+register a target, enroll a Run or Journal, issue a ticket, or start a worker.
+The original local project source owner may use disposable capture scratch;
+read-only state access can use its existing empty SQLite authority coordination
+sidecar. Neither is a Run or a source/lock mutation. Human and JSON output carry
+the same observations and proof limits.
+
+Preview saves no authorization token. A later `run` independently checks fresh
+source, lock, repository instance and current admission through the normal Fleet
+Run path. A source or target change after preview can therefore refuse execution
+before effects; preview is never a prerequisite for Run.
+
 ## Limit a local Run
 
 For a trusted-local, waited CLI Run on Linux, add an optional budget to

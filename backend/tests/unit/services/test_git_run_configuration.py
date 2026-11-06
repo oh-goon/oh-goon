@@ -1,5 +1,8 @@
 """Remote selections consume valid frozen pins before native acquisition."""
 
+import hashlib
+import shlex
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import Mock
@@ -7,7 +10,7 @@ from unittest.mock import Mock
 import pytest
 import yaml
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceAcquisitionRequired
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.core.models.repository import RepositoryIdentity
@@ -27,6 +30,7 @@ def _case(
     *,
     complete_example: bool = False,
     extra_package: bool = False,
+    application_source: bool = False,
 ) -> tuple[RunConfigurationSnapshot, RepositoryIdentity, FleetPlanResolver]:
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     source = tmp_path / "upstream"
@@ -34,6 +38,10 @@ def _case(
     package.mkdir(parents=True)
     (package / "README.md").write_text("# general/check\n\nObserve the selected command.\n")
     (package / "goon.yml").write_text("steps:\n- run: echo selected\n")
+    if application_source:
+        application = source / "application"
+        application.mkdir()
+        (application / "app.py").write_text("VALUE = 42\n")
     if extra_package:
         second = source / "goons/general/second"
         second.mkdir()
@@ -72,6 +80,19 @@ def _case(
             }
         )
     )
+    if application_source:
+        local = workflow / "goons/general/check"
+        local.mkdir(parents=True)
+        (local / "README.md").write_text("# general/check\n")
+        (local / "goon.yml").write_text(
+            yaml.safe_dump(
+                {
+                    "application": {"git": str(source), "ref": "main", "path": "application"},
+                    "steps": [{"run": "python app.py"}],
+                }
+            )
+        )
+        (workflow / "plan.yml").write_text("goons:\n- import: general/check\n  from: ./goons\n")
     selection = {"kind": "file-plan", "path": "plan.yml"}
     if complete_example:
         selection = {
@@ -107,6 +128,155 @@ def _case(
         build_execution_lock(resolved, external_artifacts=snapshot.external_artifacts()),
     )
     return snapshot, repository, resolver
+
+
+def _filesystem_observation(root: Path) -> dict[str, str]:
+    return {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        if path.is_file()
+        else "directory"
+        for path in root.rglob("*")
+    }
+
+
+@pytest.mark.parametrize(
+    "captured_graph", [False, True], ids=["source-owner-fallback", "captured-source"]
+)
+def test_passive_preview_never_runs_repository_git_input_fsmonitor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured_graph: bool
+) -> None:
+    from oh_goon.services.run_configuration_inspection import inspect_run_configuration
+
+    target = tmp_path / "target"
+    target.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(target)], check=True)
+    (target / "tracked.txt").write_text("source\n")
+    subprocess.run(["git", "-C", str(target), "add", "."], check=True)
+    marker = tmp_path / "git-fsmonitor-executed"
+    hook = tmp_path / "fsmonitor.sh"
+    hook.write_text(
+        "#!/bin/sh\nprintf invoked > " + shlex.quote(str(marker)) + '\nprintf "token\\000/\\000"\n'
+    )
+    hook.chmod(0o700)
+    subprocess.run(["git", "-C", str(target), "config", "core.fsmonitor", str(hook)], check=True)
+    workflow = tmp_path / "workflow"
+    package = workflow / "goons/general/check"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# general/check\n")
+    (package / "goon.yml").write_text(
+        "inputs:\n  branch: {type: string}\nsteps:\n- run: echo ${{ inputs.branch }}\n"
+    )
+    (workflow / "plan.yml").write_text(
+        "goons:\n- import: general/check\n  from: ./goons\n"
+        "  with:\n    branch: {from: {git: branch}}\n"
+    )
+    configuration = workflow / "run.yml"
+    configuration.write_text(
+        "version: 2\nsource: {kind: file-plan, path: plan.yml}\ntarget: {repository: ../target}\n"
+    )
+    repository = RepositoryIdentity(path=target)
+    resolver = FleetPlanResolver()
+    selected, graph = capture_run_configuration_source(
+        load_run_configuration(configuration),
+        (repository,),
+        resolver,
+        allow_source_materialization=False,
+    )
+    before = _filesystem_observation(tmp_path)
+    with monkeypatch.context() as passive:
+        observe = Mock(side_effect=AssertionError("Passive preview contacted native Git"))
+        passive.setattr(GitService, "observe", observe)
+        report = inspect_run_configuration(
+            selected,
+            resolver,
+            source_graph=graph if captured_graph else None,
+            preview_targets=True,
+        )
+        observe.assert_not_called()
+    assert report["diagnostic"]["code"] == "EXTERNAL_INPUT_NOT_OBSERVED"
+    assert report["current_target_preview"]["targets"][0]["state"] == "UNVERIFIED"
+    assert report["execution_authorized"] is False
+    assert _filesystem_observation(tmp_path) == before
+    # This is a live native boundary, not a dormant hook: ordinary resolution
+    # keeps native Git authority and demonstrably invokes the configured hook.
+    resolved = resolver.resolve_source_graph(graph, repository=target)
+    assert resolved.steps[0].argv == ("echo", "main")
+    assert marker.read_text() == "invoked"
+
+
+@pytest.mark.parametrize("source_kind", ["plan", "goon", "application"])
+@pytest.mark.parametrize("cached", [False, True])
+def test_passive_source_observation_refuses_git_before_materialization_even_with_valid_pins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_kind: str, cached: bool
+) -> None:
+    from oh_goon.integrations import git_source_preparation
+
+    snapshot, repository, resolver = _case(
+        tmp_path,
+        monkeypatch,
+        complete_example=source_kind == "plan",
+        application_source=source_kind == "application",
+    )
+    if not cached:
+        shutil.rmtree(tmp_path / "cache")
+    before = _filesystem_observation(tmp_path)
+    with monkeypatch.context() as passive:
+        materialize = Mock(side_effect=AssertionError("Passive source reached Git materialization"))
+        passive.setattr(git_source_preparation, "prepare_git_source", materialize)
+        with pytest.raises(FleetPlanSourceAcquisitionRequired, match="Passive preview"):
+            capture_run_configuration_source(
+                snapshot,
+                (repository,),
+                resolver,
+                allow_source_materialization=False,
+            )
+        materialize.assert_not_called()
+    assert _filesystem_observation(tmp_path) == before
+    # The ordinary source owner still acquires exactly this valid authored
+    # selection; a passive refusal must not replace normal preparation semantics.
+    selected, graph = capture_run_configuration_source(
+        snapshot, (repository,), resolver, acquire=True, allow_network=True
+    )
+    assert selected.repositories == (repository,)
+    assert [pin.kind for pin in graph.execution_sources] == [source_kind]
+    assert len(resolver.resolve_source_graph(graph).steps) == 1
+
+
+@pytest.mark.parametrize("lock_state", ["absent", "unavailable", "captured", "unverified-digest"])
+def test_local_source_transports_one_existing_lock_observation_without_requiring_freshness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lock_state: str
+) -> None:
+    from oh_goon.services import run_configuration
+    from oh_goon.services.execution_lock_persistence import load_execution_lock
+
+    snapshot, repository, resolver = _case(tmp_path, monkeypatch)
+    local = snapshot.root / "goons/general/local"
+    local.mkdir(parents=True)
+    (local / "README.md").write_text("# general/local\n")
+    (local / "goon.yml").write_text("steps:\n- run: echo local\n")
+    (snapshot.root / "plan.yml").write_text("goons:\n- import: general/local\n  from: ./goons\n")
+    expected = load_execution_lock(snapshot.lock_path)
+    if lock_state == "absent":
+        snapshot.lock_path.unlink()
+    elif lock_state == "unavailable":
+        snapshot.lock_path.write_text("invalid: [\n")
+    elif lock_state == "unverified-digest":
+        expected = expected.model_copy(update={"digest": "sha256:" + "0" * 64})
+        write_execution_lock(snapshot.lock_path, expected)
+    read = Mock(wraps=run_configuration.read_caller_file_bytes)
+    monkeypatch.setattr(run_configuration, "read_caller_file_bytes", read)
+    selected, graph = capture_run_configuration_source(
+        snapshot, (repository,), resolver, allow_source_materialization=False
+    )
+    observation = selected.lock_observation
+    captured = lock_state in {"captured", "unverified-digest"}
+    assert observation is not None
+    assert observation.status == ("captured" if captured else lock_state)
+    assert observation.lock == (expected if captured else None)
+    assert read.call_count == (0 if lock_state == "absent" else 1)
+    # The old valid envelope belongs to a different source graph. Capturing it
+    # makes its records observable without asserting that it admits this Plan.
+    assert resolver.resolve_source_graph(graph).steps[0].argv == ("echo", "local")
 
 
 def test_git_plan_plural_capture_keeps_one_source_graph_and_exact_target_set(
