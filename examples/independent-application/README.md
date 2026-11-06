@@ -87,8 +87,11 @@ Inspect the recorded application origin, path, commit and content identity in
 Game Tape's Technical Step details. This is an application source selection,
 not a Git Goon import: the application needs no catalog path or Goon files.
 
-The [native integration cases](../../backend/tests/integration/services/test_independent_application_sources.py)
-exercise independent local/Git source, native environment selection, actual
-producer-to-consumer output and fresh-process history. Their local Linux scope
+The [first-use integration case](../../backend/tests/integration/services/test_independent_application_sources.py)
+runs the initializer, copy/edit, prepare and Run sequence above as bounded ordinary
+feedback, preserving the initializer's target and checking fresh-process tape and
+handoff. The longer daily cases retain independent local/Git source, native
+environment selection, actual producer-to-consumer output and history coverage.
+Their local Linux scope
 does not establish private Git authentication, model quality, strict custody,
 WSL or target-free execution qualification.

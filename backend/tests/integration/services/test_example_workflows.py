@@ -36,8 +36,11 @@ def test_checked_in_example_completes_a_locked_fleet_run_and_durable_tape(
         approved = workflow / "repos"
     configuration = workflow / "run.yml"
     selection = yaml.safe_load(configuration.read_text())
-    if example == "agent-skill-local-search":
+    if example == "standard-atomic":
+        selection["target"] = {"repository": "."}
+    else:
         selection["agent"]["repository_root"] = str(approved)
+    configuration.write_text(yaml.safe_dump(selection, sort_keys=False))
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
     environment = {
         name: value for name, value in os.environ.items() if not name.startswith("OH_GOON_")
@@ -88,22 +91,32 @@ def test_checked_in_example_completes_a_locked_fleet_run_and_durable_tape(
                 assert result.returncode == 0, (result.stdout, result.stderr)
                 return result.stdout
 
-            cli("league", "add-folder", str(approved))
-            scan = json.loads(cli("league", "scan", "--json"))
-            target = next(
-                team["repository"]
-                for team in scan["teams"]
-                if Path(team["repository"]["path"]) == repository
-            )
-            selection["target"] = {"repository": target["path"]}
-            configuration.write_text(yaml.safe_dump(selection, sort_keys=False))
+            if example == "agent-skill-local-search":
+                cli("league", "add-folder", str(approved))
+                scan = json.loads(cli("league", "scan", "--json"))
+                target = next(
+                    team["repository"]
+                    for team in scan["teams"]
+                    if Path(team["repository"]["path"]) == repository
+                )
+                selection["target"] = {"repository": target["path"]}
+                configuration.write_text(yaml.safe_dump(selection, sort_keys=False))
             lock = workflow / "goon.lock"
             before = lock.read_bytes() if lock.exists() else None
-            inspected = json.loads(cli("workflow", "validate", str(configuration), "--json"))
+            read_command = "inspect" if example == "standard-atomic" else "validate"
+            inspected = json.loads(cli("workflow", read_command, str(configuration), "--json"))
             assert inspected["proof"]["provider"] == "not-applicable"
             assert (lock.read_bytes() if lock.exists() else None) == before
-            cli("workflow", "prepare", str(configuration))
-            result = json.loads(cli("run", str(configuration), "--json"))
+            if example == "standard-atomic":
+                cli("workflow", "prepare", str(configuration), "--register-target", "--no-input")
+                assert yaml.safe_load(configuration.read_text())["target"] == {"repository": "."}
+                locked = lock.read_bytes()
+                validated = json.loads(cli("workflow", "validate", str(configuration), "--json"))
+                assert validated["proof"]["provider"] == "not-applicable"
+                assert lock.read_bytes() == locked
+            else:
+                cli("workflow", "prepare", str(configuration))
+            result = json.loads(cli("run", str(configuration), "--no-input", "--json"))
             assert result["status"] == "COMPLETED" and result["outcome"] == "SUCCESS"
             tape = json.loads(cli("runs", "tape", result["fleet_run_id"], "--json"))
             assert tape["fleet_run_id"] == result["fleet_run_id"]
