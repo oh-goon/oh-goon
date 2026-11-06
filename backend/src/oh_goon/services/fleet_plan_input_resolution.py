@@ -36,6 +36,7 @@ class InputResolutionContext:
     environment: Mapping[str, str] | None = None
     git: GitService = GitService()
     observe_environment: bool = True
+    observe_external_inputs: bool = True
 
 
 def resolve_input_sources(
@@ -76,6 +77,12 @@ def _resolve_source(
     context: InputResolutionContext,
     input_name: str,
 ) -> tuple[bool, PlanInputValue, str, Literal["missing", "null", "empty", "selected"]]:
+    if not context.observe_external_inputs:
+        raise FleetPlanInputRejected(
+            "External input was not observed by passive preview",
+            diagnostic_code="EXTERNAL_INPUT_NOT_OBSERVED",
+            input_names=(input_name,),
+        )
     if isinstance(source, EnvInputSource):
         if not context.observe_environment:
             raise FleetPlanInputRejected(

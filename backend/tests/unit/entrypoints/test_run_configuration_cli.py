@@ -929,6 +929,45 @@ def test_inspection_and_validation_use_the_same_owner_report_without_runtime(
     assert not (workflow.parent / "goon.lock").exists()
 
 
+def test_preview_human_and_json_show_original_observations_and_proof_limits(
+    workflow, monkeypatch, capsys
+):
+    data = yaml.safe_load(workflow.read_text())
+    data["source"] = {"kind": "repository-goon"}
+    workflow.write_text(yaml.safe_dump(data))
+    repository = (workflow.parent / data["target"]["repository"]).resolve()
+    (repository / "goon.yml").write_text(
+        "steps:\n- id: observe\n  run: echo PRIVATE_COMMAND_SENTINEL\n"
+    )
+    monkeypatch.setattr(
+        "oh_goon.cli._build_application_runtime",
+        lambda **kw: pytest.fail("preview started runtime"),
+    )
+    assert main(["workflow", "preview", str(workflow), "--json"]) == 0
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    observation = report["current_target_preview"]
+    target = observation["targets"][0]
+    step = target["preview"]["steps"][0]
+    assert report["schema"] == "oh-goon.workflow-preview/v1"
+    assert report["execution_authorized"] is False
+    assert target["state"] == "OBSERVED"
+    assert main(["workflow", "preview", str(workflow)]) == 0
+    human = capsys.readouterr().out
+    assert f"Plan ID: {observation['plan_id']}" in human
+    assert f"Repository instance: {target['repository_instance_id']}" in human
+    assert f"observe: command | {step['disposition']}" in human
+    assert f"retain={step['cache_retain']}" in human
+    assert f"Egress: {step['egress_mode']}" in human
+    assert "Execution policy:" in human and "verification" in human
+    assert "native_capabilities: UNVERIFIED" in human
+    assert "executor: NOT_PROBED" in human
+    assert "lock_freshness: NOT_VERIFIED" in human
+    assert "Execution authorized: false" in human
+    assert "PRIVATE_COMMAND_SENTINEL" not in captured.out + human
+    assert not (workflow.parent / "goon.lock").exists()
+
+
 def test_lock_binds_complete_selection_and_refresh_is_explicit(workflow, capsys):
     assert main(["workflow", "prepare", str(workflow)]) == 0
     before = load_execution_lock(workflow.parent / "goon.lock")

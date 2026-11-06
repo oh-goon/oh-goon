@@ -67,7 +67,11 @@ def prepare_configuration(
         if len(targets) != 1 or not targets[0].registered:
             raise FleetPlanInvalid("Source review requires one explicitly registered repository")
         require_reviewed_source_authoring_layout(snapshot, targets[0].repository.path)
-    read_only = args.command == "workflow" and args.workflow_command in {"inspect", "validate"}
+    read_only = args.command == "workflow" and args.workflow_command in {
+        "inspect",
+        "validate",
+        "preview",
+    }
     register = bool(getattr(args, "register_target", False))
     if register:
         for target in targets:
@@ -93,6 +97,9 @@ def prepare_configuration(
         allow_network=prepare or args.command == "run" or bool(getattr(args, "acquire", False)),
         update=bool(getattr(args, "update_goons", False)),
         update_applications=bool(getattr(args, "update_applications", False)),
+        allow_source_materialization=not (
+            args.command == "workflow" and args.workflow_command == "preview"
+        ),
         targets=targets,
         source_graph=source_graph,
     )
@@ -221,6 +228,7 @@ def run_config_command(args: argparse.Namespace) -> int:
             resolver,
             source_graph=args._source_graph,
             review_source=bool(getattr(args, "review_source", False)),
+            preview_targets=args.workflow_command == "preview",
         )
     except (FleetDomainError, OSError, UnicodeError, ValueError) as exc:
         print_safe_plan_diagnostic(exc, as_json=args.as_json)
@@ -303,4 +311,57 @@ def run_config_command(args: argparse.Namespace) -> int:
         print("Proof:")
         for name, state in report["proof"].items():
             print(f"  {name}: {state}")
+        if args.workflow_command == "preview":
+            _print_current_target_preview(report)
     return 2 if args.workflow_command == "validate" and report["status"] != "inputs-valid" else 0
+
+
+def _print_current_target_preview(report: dict[str, Any]) -> None:
+    """Render original observation facts without deciding current Run admissibility."""
+    observation = report["current_target_preview"]
+    print("Current target preview:")
+    if observation["plan_id"] is not None:
+        print(f"  Plan ID: {observation['plan_id']}")
+    if observation["execution_policy"] is not None:
+        print("  Execution policy: " + json.dumps(observation["execution_policy"], sort_keys=True))
+    for target in observation["targets"]:
+        repository = target["repository"]
+        print(f"  Target: {repository['name']} ({repository['repository_id']}) | {target['state']}")
+        print(f"    Repository instance: {target['repository_instance_id']}")
+        if target["reason"]:
+            print(f"    Reason: {target['reason']}")
+        preview = target["preview"]
+        if preview is not None:
+            print("    Original repository-resolvable Step dispositions:")
+            for step in preview["steps"]:
+                print(f"      {step['step_id']}: {step['kind']} | {step['disposition']}")
+                if step["reason"]:
+                    print(f"        Reason: {step['reason']}")
+                print(
+                    f"        Workspace: {step['workspace_source']} | publish={step['workspace_publish']}"
+                )
+                print(
+                    f"        Cache: {step['cache_source']} | publish={step['cache_publish']} | retain={step['cache_retain']}"
+                )
+                print(
+                    f"        Egress: {step['egress_mode']} | timeout_seconds={step['timeout_seconds']}"
+                )
+        if target["diagnostic"] is not None:
+            _print_preview_diagnostic(target["diagnostic"], indent="    ")
+    print("Preview requirement observations:")
+    for diagnostic in observation["readiness"]:
+        _print_preview_diagnostic(diagnostic, indent="  ")
+    print("Preview proof limits:")
+    for name, state in observation["proof_limits"].items():
+        print(f"  {name}: {state}")
+    print("Execution authorized: " + json.dumps(report["execution_authorized"]))
+
+
+def _print_preview_diagnostic(diagnostic: dict[str, Any], *, indent: str) -> None:
+    print(
+        f"{indent}{diagnostic['authority_owner']}: {diagnostic['state']} | {diagnostic['reason_code']}"
+    )
+    print(f"{indent}  Observed: {diagnostic['current_state']}")
+    print(f"{indent}  Required: {diagnostic['required_state']}")
+    if diagnostic.get("safe_next_action"):
+        print(f"{indent}  Next action: {diagnostic['safe_next_action']}")

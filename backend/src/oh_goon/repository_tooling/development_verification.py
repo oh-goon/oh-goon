@@ -28,7 +28,13 @@ from oh_goon.integrations.hashmarks import (
     validate_required_dependency_introductions,
 )
 from oh_goon.integrations.native_uv_lock import compare_native_uv_dependency_artifacts
-from oh_goon.repository_tooling.frontend_test_results import vitest_outcomes
+from oh_goon.repository_tooling.frontend_test_results import (
+    collect_native_vitest,
+    native_frontend_temporary_base,
+    require_native_vitest_collection,
+    require_native_vitest_files,
+    vitest_outcomes,
+)
 from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
 from oh_goon.repository_tooling.pytest_process_environment import resolve_pytest_invocation
 from oh_goon.repository_tooling.pytest_resource_budget import resolve_pytest_resource_budget
@@ -521,6 +527,7 @@ def admit_change(
     candidate: str | None = None,
     requested_head: str | None = None,
     nominator: Callable[..., dict[str, Any]] = nominate_changed_verification,
+    focused_feedback: bool = False,
 ) -> ChangeVerificationPlan:
     base_sha, head, changed, removed = capture_change(root, base, candidate)
     removed_paths = set(removed)
@@ -714,7 +721,7 @@ def admit_change(
             admitted += 1
         if not admitted:
             unverified.append(f"NO_EXECUTABLE_VERIFIER:{path}")
-    if pytest and not unverified:
+    if pytest and (not unverified or focused_feedback):
         pytest, unavailable = _collect_pytest_proof(
             root,
             evidence,
@@ -723,20 +730,56 @@ def admit_change(
             set(accepted_assets) | removed_paths | upgrade_paths | set(static_projects),
         )
         unverified.extend(unavailable)
+    if frontend and (not unverified or focused_feedback):
+        collection = collect_native_vitest(root, tuple(sorted(frontend)))
+        evidence["frontend_admission"] = {"collection": collection}
+        frontend = {row["file"] for row in collection["selected"]}
+        for row in observations:
+            changed_source = row.get("changed_path")
+            if changed_source in removed_paths or changed_source in static_projects:
+                continue
+            candidates = {
+                str(projected.get("workspace_prefix", ""))
+                + projected.get("nomination", {}).get("verification_target", {}).get("path", "")
+                for projected in row.get("nominations", [])
+                if projected.get("nomination", {}).get("available") is True
+                and projected["nomination"].get("runner_evidence") == "vitest"
+            }
+            if (
+                row.get("state") == "CHANGED_TEST"
+                and changed_source in candidates
+                and changed_source not in frontend
+            ):
+                unverified.append(f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{changed_source}")
+            elif candidates and not candidates.intersection(frontend):
+                unverified.append(f"NO_EXECUTABLE_VERIFIER:{changed_source}")
     if support_paths:
-        selected_files = {path.split("::", 1)[0] for path in pytest} | frontend
+        selected_files = {
+            row["file"]
+            for key in ("pytest_admission", "dependency_admission")
+            for row in evidence.get(key, {}).get("collection", {}).get("selected", [])
+        } | {
+            row["file"]
+            for row in evidence.get("frontend_admission", {})
+            .get("collection", {})
+            .get("selected", [])
+        }
+        admitted_support: set[str] = set()
         for row in observations:
             support_path = row.get("changed_path")
-            if support_path in support_paths and not bounded_verification_support_targets(
-                row
-            ).intersection(selected_files):
-                unverified.append(f"SHARED_FIXTURE_CONSUMER_SCOPE_UNVERIFIED:{support_path}")
-        evidence["verification_support_admission"] = {
-            "authority": "oh-goon-execution-policy",
-            "scope": "positive-source-qualified-consumers",
-            "consumer_coverage": "not-claimed",
-            "paths": sorted(support_paths),
-        }
+            if support_path in support_paths:
+                if bounded_verification_support_targets(row).intersection(selected_files):
+                    admitted_support.add(support_path)
+                else:
+                    unverified.append(f"SHARED_FIXTURE_CONSUMER_SCOPE_UNVERIFIED:{support_path}")
+        support_paths = admitted_support
+        if support_paths:
+            evidence["verification_support_admission"] = {
+                "authority": "oh-goon-execution-policy",
+                "scope": "positive-source-qualified-consumers",
+                "consumer_coverage": "not-claimed",
+                "paths": sorted(support_paths),
+            }
     if dependency_qualified and "collection" in evidence["dependency_admission"]:
         if not _bounded_dependency_scope(evidence, base_sha, selected_files=pytest):
             unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
@@ -778,6 +821,13 @@ def require_current_plan(root: Path, plan: ChangeVerificationPlan) -> None:
         "producer_implementation_identity"
     ) != (require_loaded_hashmarks_runtime()):
         raise ValueError("Loaded Hashmarks implementation changed after admission")
+    if plan.frontend:
+        collection = plan.evidence.get("frontend_admission", {}).get("collection")
+        if not isinstance(collection, Mapping):
+            raise ValueError("Native frontend collection is unavailable")
+        require_native_vitest_collection(
+            collection, project_root=root / "frontend", expected_files=plan.frontend
+        )
     if plan.evidence.get("dependency_admission") or (
         "backend/uv.lock" in plan.changed_paths
         and not plan.unverified
@@ -794,6 +844,7 @@ def require_current_plan(root: Path, plan: ChangeVerificationPlan) -> None:
         plan.model_dump(mode="json", by_alias=True),
         plan.evidence,
         {path.split("::", 1)[0] for path in plan.pytest} | set(plan.frontend),
+        require_complete=not plan.unverified,
         admitted_hashmarks_upgrade=(
             plan.evidence.get("hashmarks_upgrade")
             == {
@@ -1036,11 +1087,14 @@ def execute_change(
     workers: int,
     phase: Literal["all", "static", "behavioral"] = "all",
 ) -> dict[str, Any]:
-    require_current_plan(root, plan)
     if mode == "merge":
         require_merge_selection(root, plan)
+    require_current_plan(root, plan)
     if phase != "all" and phase not in _phase_owners(root, plan):
         raise ValueError("Verification phase has no admitted owners")
+    frontend_temporary_base = (
+        native_frontend_temporary_base(root) if phase != "static" and plan.frontend else None
+    )
     outcomes: list[dict[str, Any]] = []
     static_projects = admitted_static_projects(plan.changed_paths, plan.evidence)
     static_context = None
@@ -1078,14 +1132,16 @@ def execute_change(
     ):
         raise ValueError("Static-project native context changed during execution")
     if phase != "static" and plan.frontend:
-        with tempfile.TemporaryDirectory(prefix="oh-goon-change-frontend-") as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="oh-goon-change-frontend-", dir=frontend_temporary_base
+        ) as directory:
             report = Path(directory) / "vitest.json"
             result = run_command(
                 "npm",
                 "run",
                 "test",
                 "--",
-                *(path.removeprefix("frontend/") for path in plan.frontend),
+                *("./" + path.removeprefix("frontend/") for path in plan.frontend),
                 "--reporter=default",
                 "--reporter=json",
                 f"--outputFile={report}",
@@ -1116,6 +1172,12 @@ def execute_change(
                     "reason": "Native frontend evidence unavailable",
                 }
             try:
+                require_native_vitest_files(
+                    native_frontend,
+                    project_root=root / "frontend",
+                    expected_files=plan.frontend,
+                    collection=plan.evidence.get("frontend_admission", {}).get("collection"),
+                )
                 complete, satisfied, _counts = vitest_outcomes(native_frontend)
             except ValueError as exc:
                 return {"status": "INCOMPLETE", "outcomes": outcomes, "reason": str(exc)}
@@ -1207,9 +1269,9 @@ def aggregate_change(
     mode: str,
 ) -> dict[str, Any]:
     """Rejoin original owner receipts without admitting or executing another selection."""
-    require_current_plan(root, plan)
     if mode == "merge":
         require_merge_selection(root, plan)
+    require_current_plan(root, plan)
     required = _phase_owners(root, plan)
     original = plan.model_dump(mode="json")
     retained: dict[str, list[dict[str, Any]]] = {}
@@ -1244,6 +1306,12 @@ def aggregate_change(
                     row.get("native_report", {}), source_identity=plan.source_identity
                 )
             elif row["owner"] == "Frontend behavior":
+                require_native_vitest_files(
+                    row.get("native_report", {}),
+                    project_root=root / "frontend",
+                    expected_files=plan.frontend,
+                    collection=plan.evidence.get("frontend_admission", {}).get("collection"),
+                )
                 complete, satisfied, _counts = vitest_outcomes(row.get("native_report", {}))
                 if not complete or not satisfied:
                     raise ValueError("Native frontend assertions are skipped, failed or incomplete")
@@ -1310,11 +1378,26 @@ def main(argv: list[str] | None = None) -> int:
             ChangeVerificationPlan.model_validate(_read_json(args.execute))
             if args.execute
             else admit_change(
-                root, base=args.base, candidate=args.candidate, requested_head=args.head
+                root,
+                base=args.base,
+                candidate=args.candidate,
+                requested_head=args.head,
+                focused_feedback=args.mode == "focused",
             )
         )
         if args.plan:
             _write_transport(args.plan, plan.model_dump(mode="json"), root)
+            if plan.unverified:
+                print(
+                    json.dumps(
+                        {
+                            "status": "SELECTION_UNVERIFIED",
+                            "candidate": plan.candidate,
+                            "unverified": list(plan.unverified),
+                        },
+                        sort_keys=True,
+                    )
+                )
             if args.mode == "merge":
                 require_merge_selection(root, plan)
             if args.github_output:
@@ -1341,6 +1424,8 @@ def main(argv: list[str] | None = None) -> int:
             else execute_change(root, plan, mode=args.mode, workers=args.workers, phase=args.phase)
         )
         payload = {"plan": plan.model_dump(mode="json"), **result}
+        if plan.unverified:
+            payload["unverified"] = list(plan.unverified)
         if args.phase != "all":
             payload["phase"] = args.phase
         elif result["status"] == "CHECKS_PASSED":
@@ -1366,6 +1451,8 @@ def main(argv: list[str] | None = None) -> int:
             }
             if "reason" in result:
                 summary["reason"] = result["reason"]
+            if plan.unverified:
+                summary["unverified"] = list(plan.unverified)
             print(json.dumps(summary, sort_keys=True))
         else:
             print(json.dumps(payload, sort_keys=True))

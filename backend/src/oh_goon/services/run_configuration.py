@@ -24,6 +24,7 @@ from oh_goon.core.errors import (
 )
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.caller_input_file import CallerInputFileIdentity
+from oh_goon.core.models.execution_lock_models import ExecutionLock
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.models.git_sources import LockedExecutionSource
 from oh_goon.core.models.repository import RepositoryCatalogEntry, RepositoryIdentity
@@ -268,12 +269,21 @@ class RunConfigurationSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class RunConfigurationLockObservation:
+    """One bounded existing-lock observation, without execution freshness authority."""
+
+    status: Literal["absent", "unavailable", "captured"]
+    lock: ExecutionLock | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class NormalizedRunConfiguration:
     snapshot: RunConfigurationSnapshot
     repositories: tuple[RepositoryIdentity, ...]
     plan_path: Path
     repository_instances: tuple[tuple[str, str], ...] = ()
     registrations: tuple[bool, ...] = ()
+    lock_observation: RunConfigurationLockObservation | None = None
 
     @property
     def repository(self) -> RepositoryIdentity:
@@ -656,6 +666,7 @@ def capture_run_configuration_source(
     update_applications: bool = False,
     targets: tuple[RunConfigurationTarget, ...] | None = None,
     source_graph: FleetPlanSourceGraph | None = None,
+    allow_source_materialization: bool = True,
 ) -> tuple[NormalizedRunConfiguration, FleetPlanSourceGraph]:
     """Acquire only explicitly, then capture one original source graph before closing Git."""
     from oh_goon.core.errors import ExecutionLockRejected
@@ -693,10 +704,12 @@ def capture_run_configuration_source(
             registrations=tuple(target.registered for target in targets)
             if targets is not None
             else (),
+            lock_observation=lock_observation,
         )
 
     locked: tuple[LockedExecutionSource, ...] | None = ()
     lock_present = snapshot.lock_path.exists() or snapshot.lock_path.is_symlink()
+    lock_observation = RunConfigurationLockObservation("absent")
     if not lock_present and allow_network and not acquire:
         raise ExecutionLockRejected(
             "Locked execution requires goon.lock before source acquisition; explicitly prepare run.yml",
@@ -709,9 +722,12 @@ def capture_run_configuration_source(
                 lock_path, expected=stat_caller_file(lock_path), max_bytes=MAX_EXECUTION_LOCK_BYTES
             )
             lock = parse_execution_lock(lock_bytes.decode("utf-8"))
+            lock_observation = RunConfigurationLockObservation("captured", lock)
             verify_execution_lock(lock, lock)
             locked = lock.execution_sources
         except (FleetPlanInvalid, OSError, UnicodeError, ValueError) as exc:
+            if lock_observation.lock is None:
+                lock_observation = RunConfigurationLockObservation("unavailable")
             if acquire or allow_network:
                 if isinstance(exc, ExecutionLockRejected):
                     raise
@@ -733,6 +749,11 @@ def capture_run_configuration_source(
                     )
     selection = snapshot.selection.source
     if isinstance(selection, GitPlanSelection):
+        if not allow_source_materialization:
+            raise FleetPlanSourceAcquisitionRequired(
+                "Passive preview cannot materialize Git Plan source, including cached pins; "
+                "inspect with explicit --acquire or select local source for passive preview"
+            )
         if (
             update
             and not update_applications
@@ -797,6 +818,7 @@ def capture_run_configuration_source(
                 update_goons=update,
                 update_applications=update_applications,
                 allow_source_network=allow_network,
+                allow_source_materialization=allow_source_materialization,
             )
             return normalized(plan), graph
     plan = snapshot.source_path(selected[0].path if len(selected) == 1 else None)
@@ -811,4 +833,5 @@ def capture_run_configuration_source(
         update_goons=update,
         update_applications=update_applications,
         allow_source_network=allow_network,
+        allow_source_materialization=allow_source_materialization,
     )

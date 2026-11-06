@@ -1514,6 +1514,16 @@ def test_candidate_admission_passes_mode_and_stops_setup_after_rejection(
     assert arguments[arguments.index("--plan") + 1] == str(control / "plan.json")
 
 
+def test_manual_replay_cannot_publish_the_required_merge_check_name() -> None:
+    # GitHub owns expression evaluation and required-status matching. Keep the
+    # caller-selected replay base outside the required PR status namespace.
+    assert _merge_aggregate()["name"] == (
+        "${{ github.event_name == 'push' && 'merge-not-applicable'"
+        " || github.event_name == 'workflow_dispatch' && 'replay-feedback'"
+        " || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}"
+    )
+
+
 @pytest.mark.process
 @pytest.mark.parametrize(
     "result", ["success", "failure", "cancelled", "skipped", "", "neutral"]

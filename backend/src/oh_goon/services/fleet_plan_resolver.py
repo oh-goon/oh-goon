@@ -107,6 +107,7 @@ class FleetPlanResolver:
         update_applications: bool = False,
         retained_graph: FleetPlanSourceGraph | None = None,
         allow_source_network: bool = False,
+        allow_source_materialization: bool = True,
         plan_source: LockedExecutionSource | None = None,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> FleetPlanSourceGraph:
@@ -125,6 +126,7 @@ class FleetPlanResolver:
             update_applications=update_applications,
             retained_graph=retained_graph,
             allow_source_network=allow_source_network,
+            allow_source_materialization=allow_source_materialization,
             plan_source=plan_source,
             cancel_requested=cancel_requested,
         )
@@ -201,6 +203,7 @@ class FleetPlanResolver:
         environment: Mapping[str, str] | None = None,
         resolved_inputs: dict[str, PlanInputValue] | None = None,
         observe_environment: bool = True,
+        observe_external_inputs: bool = True,
     ) -> ResolvedFleetPlan:
         plan, _, _ = self._resolve_graph(
             source_graph,
@@ -211,6 +214,7 @@ class FleetPlanResolver:
             environment=environment,
             resolved_inputs=resolved_inputs,
             observe_environment=observe_environment,
+            observe_external_inputs=observe_external_inputs,
         )
         return plan
 
@@ -1049,6 +1053,7 @@ class FleetPlanResolver:
         input_git_service: GitService | None = None,
         resolved_inputs: dict[str, PlanInputValue] | None = None,
         observe_environment: bool = True,
+        observe_external_inputs: bool = True,
     ) -> tuple[ResolvedFleetPlan, Path, str | None]:
         plan_path = source_graph.root.path
         plan_root = source_graph.containment_root
@@ -1087,6 +1092,7 @@ class FleetPlanResolver:
                 environment=(os.environ if environment is None else environment),
                 git=input_git_service or self._git_service,
                 observe_environment=observe_environment,
+                observe_external_inputs=observe_external_inputs,
             ),
         )
         # AG-01 is only a prework source inspection contract. Enabling typed

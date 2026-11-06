@@ -422,7 +422,7 @@ jobs:
           Full unrelated/exhaustive regression remains daily, not claimed by this proof.
           EOF
   merge-gate:
-    name: ${{ github.event_name == 'push' && 'merge-not-applicable' || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}
+    name: ${{ github.event_name == 'push' && 'merge-not-applicable' || github.event_name == 'workflow_dispatch' && 'replay-feedback' || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}
     if: always() && github.event_name != 'push'
     needs: verify
     runs-on: ubuntu-26.04

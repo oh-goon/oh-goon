@@ -6,20 +6,23 @@ import os
 from pathlib import Path
 from typing import Any
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid, FleetPlanSourceStale
 from oh_goon.core.fleet_plan_composition import bind_inputs, coerce_input, input_reference
 from oh_goon.core.models.fleet_plan import (
     AgentPlanStep,
     CommandPlanStep,
     CompiledGoonImportStep,
     ResolvedCommandStep,
+    ResolvedFleetPlan,
 )
 from oh_goon.core.models.fleet_plan_composition import PlanInputType
 from oh_goon.core.models.fleet_plan_evidence import PlanSnapshotEvidence
 from oh_goon.core.models.run_configuration import CatalogPlanSelection
+from oh_goon.core.models.shared_plan import ReadySharedPlanRepositoryPreview
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
 from oh_goon.core.product_identity import repository_subject_instance_id
+from oh_goon.integrations.fleet_plan_preview import preview_plan
 from oh_goon.integrations.source_snapshot import source_snapshot_identity
 from oh_goon.services.execution_lock_persistence import (
     MAX_EXECUTION_LOCK_BYTES,
@@ -37,25 +40,35 @@ from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph, FleetPlanSourceNode
 from oh_goon.services.run_configuration import (
     NormalizedRunConfiguration,
+    RunConfigurationLockObservation,
     require_reviewed_source_authoring_layout,
+)
+from oh_goon.services.shared_plan_preview_diagnostics import (
+    blocked_preview_diagnostic,
+    preview_readiness,
 )
 
 
-def _lock_records(root: Path) -> dict[str, Any]:
+def _lock_records(
+    root: Path, observation: RunConfigurationLockObservation | None = None
+) -> dict[str, Any]:
     """Read bounded lock records through existing file/lock owners; never verify closure."""
-    path = root / "goon.lock"
-    if not os.path.lexists(path):
-        return {"status": "absent", "skill_pins": []}
-    try:
-        selected, _ = locate_caller_file(path, root=root)
-        captured = read_caller_file_bytes(
-            selected, expected=stat_caller_file(selected), max_bytes=MAX_EXECUTION_LOCK_BYTES
-        )
-        # Parse the captured cut with the original lock owner; reopening the path
-        # would discard the no-follow identity proof and its bounded read.
-        lock = parse_execution_lock(captured.decode("utf-8", errors="strict"))
-    except (FleetPlanInvalid, OSError, UnicodeError, ValueError, RecursionError):
-        return {"status": "unavailable", "skill_pins": []}
+    if observation is not None:
+        if observation.status != "captured" or observation.lock is None:
+            return {"status": observation.status, "skill_pins": []}
+        lock = observation.lock
+    else:
+        path = root / "goon.lock"
+        if not os.path.lexists(path):
+            return {"status": "absent", "skill_pins": []}
+        try:
+            selected, _ = locate_caller_file(path, root=root)
+            captured = read_caller_file_bytes(
+                selected, expected=stat_caller_file(selected), max_bytes=MAX_EXECUTION_LOCK_BYTES
+            )
+            lock = parse_execution_lock(captured.decode("utf-8", errors="strict"))
+        except (FleetPlanInvalid, OSError, UnicodeError, ValueError, RecursionError):
+            return {"status": "unavailable", "skill_pins": []}
     return {
         "status": "lock-record-not-verified",
         "skill_pins": [
@@ -71,14 +84,30 @@ def inspect_run_configuration(
     *,
     source_graph: FleetPlanSourceGraph | None = None,
     review_source: bool = False,
+    preview_targets: bool = False,
 ) -> dict[str, Any]:
     """Project one source cut; never fetch Skills, inspect private agent state or admit work."""
     snapshot = normalized.snapshot
+    before_instances = (
+        {
+            repository.repository_id: repository_subject_instance_id(repository.path)
+            for repository in normalized.repositories
+        }
+        if preview_targets
+        else {}
+    )
+    if preview_targets and normalized.repository_instances:
+        if before_instances != dict(normalized.repository_instances):
+            raise FleetPlanSourceStale("Selected repository changed before target preview")
     if review_source:
         if len(normalized.repositories) != 1 or not normalized.registered:
             raise FleetPlanInvalid("Source review requires one explicitly registered repository")
         require_reviewed_source_authoring_layout(snapshot, normalized.repository.path)
-    graph = source_graph or resolver.analyze_source(normalized.plan_path)
+    graph = source_graph or (
+        resolver.analyze_source(normalized.plan_path, allow_source_materialization=False)
+        if preview_targets
+        else resolver.analyze_source(normalized.plan_path)
+    )
     interface = inspect_input_interface(graph)
     agent_source = graph.has_agent_source_contract()
     if (snapshot.selection.agent is not None) != agent_source:
@@ -104,6 +133,7 @@ def inspect_run_configuration(
                 inputs=normalized.inputs,
                 repository=normalized.resolution_repository,
                 observe_environment=False,
+                observe_external_inputs=not preview_targets,
                 resolved_inputs=effective_inputs,
             )
     except (FleetPlanInvalid, ValueError) as exc:
@@ -185,10 +215,16 @@ def inspect_run_configuration(
             "execution": "not-started",
         }
 
+    contains_string_inputs = False
+
     def walk(
         node: Any,
         lineage: tuple[str, ...],
     ) -> None:
+        nonlocal contains_string_inputs
+        contains_string_inputs |= any(
+            item.input_type is PlanInputType.STRING for item in node.compiled.inputs
+        )
         for step in node.compiled.steps:
             if isinstance(step, CompiledGoonImportStep):
                 child = graph.goon(node.path, step)
@@ -314,7 +350,7 @@ def inspect_run_configuration(
                 )
             else:
                 steps.append({**declaration, "proof": "resolved-membership;authored-declarations"})
-    lock_records = _lock_records(snapshot.root)
+    lock_records = _lock_records(snapshot.root, normalized.lock_observation)
     registrations = normalized.registrations or tuple(True for _ in normalized.repositories)
     selected_targets = [
         {
@@ -347,7 +383,7 @@ def inspect_run_configuration(
                 entry_count=source.entry_count,
             ),
         ).model_dump(mode="json")
-    return {
+    report: dict[str, Any] = {
         "schema": "oh-goon.run-configuration/v2",
         "status": "registration-unavailable"
         if not normalized.registered
@@ -402,5 +438,103 @@ def inspect_run_configuration(
             else "not-applicable",
             "admission": "not-started",
             "execution": "not-started",
+        },
+    }
+    if preview_targets:
+        report["schema"] = "oh-goon.workflow-preview/v1"
+        report["status"] = "observed" if resolved is not None else "declarations-only"
+        report["execution_authorized"] = False
+        report["current_target_preview"] = _current_target_preview(
+            normalized,
+            resolved,
+            before_instances,
+            agent_source=agent_source,
+            redact_details=contains_string_inputs,
+        )
+        snapshot.require_fresh()
+    return report
+
+
+def _current_target_preview(
+    normalized: NormalizedRunConfiguration,
+    plan: ResolvedFleetPlan | None,
+    before_instances: dict[str, str],
+    *,
+    agent_source: bool,
+    redact_details: bool,
+) -> dict[str, Any]:
+    """Project original repository semantics from the already-resolved source cut."""
+    targets: list[dict[str, Any]] = []
+    observed: list[ReadySharedPlanRepositoryPreview] = []
+    for repository in normalized.repositories:
+        instance = before_instances[repository.repository_id]
+        entry: dict[str, Any] = {
+            "repository": repository.model_dump(mode="json"),
+            "repository_instance_id": instance,
+            "state": "UNVERIFIED",
+            "preview": None,
+            "diagnostic": None,
+            "reason": (
+                "Agent Skill closure, native implementation and provider state were not captured"
+                if agent_source
+                else "Source and input declarations did not produce a resolved Plan"
+            ),
+        }
+        if plan is not None:
+            try:
+                preview = preview_plan(repository.path, plan)
+            except (FleetDomainError, ValueError) as exc:
+                diagnostic = blocked_preview_diagnostic(exc)
+                details = diagnostic.model_dump(mode="json")
+                reason = diagnostic.current_state
+                if redact_details:
+                    reason = "Original repository preview reason withheld: resolved string inputs"
+                    details["current_state"] = reason
+                entry.update(
+                    state="BLOCKED",
+                    reason=reason,
+                    diagnostic=details,
+                )
+            else:
+                payload = preview.model_dump(mode="json")
+                if redact_details:
+                    # Imported defaults and path transformations can also carry
+                    # protected string inputs. Keep typed decisions, omit the
+                    # runtime-derived free text rather than guessing its origin.
+                    for item in (*payload["imports"], *payload["steps"]):
+                        if item["reason"]:
+                            item["reason"] = "Resolved string detail withheld"
+                        for name in ("workspace_source", "cache_source"):
+                            if name in item and ":" in item[name]:
+                                item[name] = item[name].split(":", 1)[0] + ":***"
+                entry.update(state="OBSERVED", reason="", preview=payload)
+                observed.append(
+                    ReadySharedPlanRepositoryPreview(
+                        repository=repository,
+                        repository_instance_id=instance,
+                        preview=preview,
+                    )
+                )
+        targets.append(entry)
+    readiness = [item.model_dump(mode="json") for item in preview_readiness(observed)]
+    if redact_details:
+        for fact in readiness:
+            if fact["reason_code"] == "CACHE_REUSE_RUNTIME_BOUND":
+                fact["current_state"] = "Resolved cache-reference details withheld"
+    if {
+        repository.repository_id: repository_subject_instance_id(repository.path)
+        for repository in normalized.repositories
+    } != before_instances:
+        raise FleetPlanSourceStale("Selected repository changed during target preview")
+    return {
+        "plan_id": plan.plan_id if plan is not None else None,
+        "execution_policy": plan.execution.model_dump(mode="json") if plan is not None else None,
+        "targets": targets,
+        "readiness": readiness,
+        "proof_limits": {
+            "native_capabilities": "UNVERIFIED",
+            "executor": "NOT_PROBED",
+            "lock_freshness": "NOT_VERIFIED",
+            "resolved_string_details": "REDACTED" if redact_details else "NOT_APPLICABLE",
         },
     }

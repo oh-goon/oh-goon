@@ -187,7 +187,16 @@ def test_static_project_proof_uses_native_project_and_completed_existing_owners(
     assert plan["evidence"]["observations"][0]["state"] == "UNAVAILABLE"
 
 
-@pytest.mark.parametrize("missing_frontend", ("skipped", "missing-owner"))
+@pytest.mark.parametrize(
+    "missing_frontend",
+    (
+        "skipped",
+        "missing-owner",
+        "missing-collection",
+        "duplicate-file",
+        "missing-variant",
+    ),
+)
 def test_static_project_and_runtime_frontend_keep_their_distinct_native_proofs(
     static_preparation_root: Path,
     reviewed_static_root: Path,
@@ -200,6 +209,30 @@ def test_static_project_and_runtime_frontend_keep_their_distinct_native_proofs(
     runtime, test = "frontend/src/runtime.ts", "frontend/src/runtime.test.ts"
     plan["changed_paths"].append(runtime)
     plan["frontend"] = [test]
+    plan["evidence"]["frontend_admission"] = {
+        "collection": {
+            "requested": [test],
+            "selected": [{"file": test, "projectName": "node"}],
+            "unavailable_advisory_targets": [],
+            "native_project_root": str(tmp_path / "frontend"),
+            "native_execution": {
+                "argv": [
+                    "npm",
+                    "exec",
+                    "--offline",
+                    "--no",
+                    "--",
+                    "vitest",
+                    "list",
+                    "./src/runtime.test.ts",
+                    "--filesOnly",
+                    f"--json={tmp_path.parent / 'collection.json'}",
+                ],
+                "returncode": 0,
+                "process_group_quiescent": True,
+            },
+        }
+    }
     plan["evidence"]["observations"].append(
         {
             "changed_path": runtime,
@@ -253,11 +286,34 @@ def test_static_project_and_runtime_frontend_keep_their_distinct_native_proofs(
         native["testResults"][0]["assertionResults"][0]["status"] = "skipped"
         with pytest.raises(ValueError, match="frontend proof is skipped"):
             _validate_static(tmp_path, plan, result, reviewed_static_root)
-    else:
+    elif missing_frontend == "missing-owner":
         result["outcomes"] = [
             row for row in result["outcomes"] if row["owner"] != "Frontend behavior"
         ]
         with pytest.raises(ValueError, match="check owners are missing"):
+            _validate_static(tmp_path, plan, result, reviewed_static_root)
+    elif missing_frontend == "missing-collection":
+        del plan["evidence"]["frontend_admission"]
+        with pytest.raises(
+            ValueError, match="frontend collection proof is unavailable"
+        ):
+            _validate_static(tmp_path, plan, result, reviewed_static_root)
+    elif missing_frontend == "duplicate-file":
+        native["testResults"].append(copy.deepcopy(native["testResults"][0]))
+        for field in (
+            "numTotalTests",
+            "numPassedTests",
+            "numTotalTestSuites",
+            "numPassedTestSuites",
+        ):
+            native[field] = 2
+        with pytest.raises(ValueError, match="files are missing, duplicated or extra"):
+            _validate_static(tmp_path, plan, result, reviewed_static_root)
+    else:
+        plan["evidence"]["frontend_admission"]["collection"]["selected"].append(
+            {"file": test, "projectName": "dom"}
+        )
+        with pytest.raises(ValueError, match="files are missing, duplicated or extra"):
             _validate_static(tmp_path, plan, result, reviewed_static_root)
 
 
