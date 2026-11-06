@@ -1,4 +1,8 @@
-"""Diagnostic ownership mutations and one current-source composition proof."""
+"""Diagnostic ownership mutations and bounded execution-rule composition proof.
+
+The architecture Make owner checks the complete current source. Composition
+coverage here uses a small source fixture instead of repeating that full scan.
+"""
 
 from pathlib import Path
 
@@ -30,8 +34,24 @@ def diagnostic_source(tmp_path: Path) -> Path:
     return package
 
 
-def test_current_execution_architecture_composes_all_rules() -> None:
-    assert check_x0_single_execution_path() == []
+def test_execution_architecture_retains_independent_owner_failures(
+    tmp_path: Path, diagnostic_source: Path
+) -> None:
+    target = diagnostic_source / "services/example.py"
+    target.parent.mkdir()
+    target.write_text(f"import {DIAGNOSTIC_MODULE}\n")
+
+    issues = check_x0_single_execution_path(tmp_path)
+
+    assert any(
+        issue.path == target and "authority import/dispatch" in issue.message
+        for issue in issues
+    )
+    assert any(
+        issue.path == diagnostic_source / "runtime/database.py"
+        and "missing canonical operational SQLite owner" in issue.message
+        for issue in issues
+    )
 
 
 @pytest.mark.parametrize(

@@ -1538,6 +1538,94 @@ def test_qa_policy_change_admits_actual_required_producer_checks(
     assert "VERIFICATION_POLICY_PROTECTION_UNAVAILABLE" in incomplete.unverified
 
 
+@pytest.mark.parametrize("proof", ("complete", "missing", "deselected"))
+def test_private_answer_section_uses_grader_checks_without_repository_evidence(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, proof: str
+) -> None:
+    relative = "docs/certification/answers/11-startup-certification.yml"
+    selected = repository / relative
+    selected.parent.mkdir(parents=True)
+    selected.write_text("grader-only answer truth\n", encoding="utf-8")
+    material_check = "scripts/tests/test_repository_understanding_blueprint.py"
+    expected = (*VERIFICATION_POLICY_TESTS, material_check)
+
+    def nominate(
+        _root: Path, paths: tuple[str, ...], *, required: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
+        assert paths == ()
+        assert required == expected
+        evidence = _evidence(paths)
+        evidence["required_checks"] = [
+            {
+                "nomination": {
+                    "available": True,
+                    "runner_evidence": "pytest",
+                    "verification_target": {"path": path},
+                }
+            }
+            for path in required
+            if proof != "missing" or path != material_check
+        ]
+        return evidence
+
+    if proof == "deselected":
+
+        def collect(paths: tuple[Path, ...], **options: Any) -> NativePytestCollection:
+            native = _synthetic_pytest_collection(paths, [], **options)
+            return NativePytestCollection(
+                tuple(row for row in native.selected if row["file"] != material_check),
+                tuple(row for row in native.selected if row["file"] == material_check),
+            )
+
+        monkeypatch.setattr(owner, "collect_native_pytest", collect)
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+    assert plan.changed_paths == (relative,)
+    assert plan.behavioral_status == "REQUIRED"
+    assert plan.policy_status == "REVIEW_REQUIRED"
+    assert plan.obligations == (
+        "verification-policy protection",
+        "grader answer-material protection",
+    )
+    assert plan.evidence["observations"] == []
+    assert "documentation_policy" not in plan.evidence
+    if proof == "complete":
+        assert set(plan.pytest) == set(expected)
+        assert not plan.unverified
+        owner.require_merge_selection(repository, plan)
+    else:
+        assert "VERIFICATION_POLICY_PROTECTION_UNAVAILABLE" in plan.unverified
+        with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+            owner.require_merge_selection(repository, plan)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    (
+        "docs/certification/answers/nested/11-startup-certification.yml",
+        "docs/certification/answers/benchmark-integrity.yml",
+        "docs/certification/answers/question-audit.yml",
+        "docs/certification/answers/question-lifecycle.yml",
+        "docs/certification/answers/unknown.yml",
+    ),
+)
+def test_grader_section_proof_does_not_admit_other_private_material(
+    repository: Path, relative: str
+) -> None:
+    selected = repository / relative
+    selected.parent.mkdir(parents=True)
+    selected.write_text("unqualified material\n", encoding="utf-8")
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            row.update(state="UNAVAILABLE", nominations=[])
+        return evidence
+
+    plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
+    assert f"NO_QUALIFIED_VERIFIER:{relative}" in plan.unverified
+
+
 @pytest.mark.parametrize(
     ("relative", "reason"),
     (

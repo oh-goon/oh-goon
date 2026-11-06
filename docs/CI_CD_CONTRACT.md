@@ -203,6 +203,16 @@ checks. The immutable base controller derives the same requirements from actual
 changed paths. Other documentation and shared fixtures retain their own evidence
 requirements.
 
+Numbered section banks directly under `docs/certification/answers/` use the
+named **grader answer-material protection** obligation. They require the existing
+Repository Understanding loader/blueprint tests as well as verification-policy
+protection. The answer files stay outside Hashmarks nomination inputs and
+repository evidence; native grader checks validate their schemas and references
+against the admitted source. This bounded route claims no repository-consumer
+coverage and does not admit nested files, non-numbered filenames or separate
+audit, lifecycle and benchmark registries. Its policy must already be present in
+the immutable base controller before a changed answer bank can qualify.
+
 Merge-mode plan admission retains diagnostic JSON but refuses unresolved scope
 outside its bounded routes or missing required behavioral proof before publishing
 proof-selection outputs or preparing native-test capabilities. Existing frontend
