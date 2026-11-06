@@ -1,0 +1,11 @@
+{
+  "name": "order-gateway",
+  "description": "Synthetic order gateway for a local code-discovery demonstration.",
+  "owner": "group:default/platform-team",
+  "type": "service",
+  "lifecycle": "experimental",
+  "languages": [
+    "python",
+    "typescript"
+  ]
+}

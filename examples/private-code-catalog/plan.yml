@@ -1,0 +1,5 @@
+execution:
+  purpose: verification
+goons:
+- import: catalog/generate
+  from: ./goons

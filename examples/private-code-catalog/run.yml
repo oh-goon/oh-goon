@@ -1,0 +1,3 @@
+version: 2
+source: {kind: file-plan, path: plan.yml}
+target: {repository: REPOSITORY_PATH}

@@ -61,6 +61,10 @@ FleetRun admission and Step/Attempt owners. That migration is tracked by
 submits Runs through the thread-based supervisor. Process workers must strengthen
 this lifecycle without adding an execution route.
 
+## Private code discovery and catalog example
+
+The [synthetic private code catalog walkthrough](examples/private-code-catalog/README.md) demonstrates local Hashmarks code discovery, native Git authorship, explicit team ownership review and a Backstage catalog-info.yaml produced under the normal Oh-Goon Run/Game Tape lifecycle. The example contains no model/provider Step; it does not claim a shipped conversational UI or network isolation. Source and publication permissions stay explicit.
+
 ## Recorded qualification examples
 
 These are scoped observations from specific merged changes, not blanket
