@@ -16,11 +16,20 @@ Use [the template first-run guide](../templates/README.md) to register a target 
 | [Python Goon project from Git](python-goon-project/README.md) | Runnable with prerequisites | A complete example's explicit Plan and local Python project captured at one pinned Git revision. |
 | [Independent application](independent-application/README.md) | Runnable with prerequisites | Separately maintained Atomic Goon selecting local or pinned Git application bytes, native commands and original Run readback; actual registered target required. |
 
-The per-domain Plan READMEs contain small configurations for Python, OCI, Kubernetes, security, ML and advanced teaching workflows. Native tools and services retain their command/session semantics beneath the admitted Step; they do not own Oh-Goon Run admission, recovery or results. Example infrastructure addresses and target IDs must be replaced deliberately; configuration inspection is not an external qualification receipt.
+The per-domain Plan READMEs contain small configurations for Python, OCI, Kubernetes, security, ML and advanced teaching workflows. Native tools and services retain their command/session semantics beneath the admitted Step; they do not own Oh-Goon Run admission, recovery or results. Replace placeholder repository paths, endpoint addresses and provider/model selections deliberately; configuration inspection is not an external qualification receipt.
+
+Use `oh-goon workflow inspect /path/to/workflow/run.yml --json` to discover the
+selected workflow's caller inputs, required/default designation and declaring Goon. Edit caller
+values in `run.yml`; keep their types, constraints and defaults in the owning
+Goon. The [input guide](../docs/development/TEMPLATE_INPUT_INSPECTION.md#source-and-value-owners)
+explains fixed bindings, explicit shared recipients and redacted string values.
+Provider execution profiles and inference-model profiles are separate choices;
+use the [provider example](agent-providers/README.md) for their configuration owner.
 
 Every runnable Oh-Goon example uses the same public FleetRun lifecycle. The
-[execution boundary](../docs/execution-boundary.md) distinguishes current
-thread-based Run submission from HUG-180/HUG-181's required claimed-worker
-custody. Neither a standalone application development command, external Airflow
-deployment nor a low-level test probe establishes that future Run guarantee or
-authorizes a special example/ML/CI runner.
+[execution boundary](../docs/execution-boundary.md) describes admission through
+the claimed fresh-process Run worker into the original Step/Attempt owners.
+Neither a standalone application development command, external Airflow
+deployment nor a low-level test probe qualifies that complete lifecycle or
+authorizes a special example/ML/CI runner. Native and cross-repository
+qualification retain their source, harness, mode and environment limits.

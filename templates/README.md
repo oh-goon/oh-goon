@@ -99,12 +99,21 @@ unavailable or excluded members refuse; preparation without explicit registratio
 also refuses an unregistered member. The CLI does not silently reduce the set.
 Git-free applications require exact registration of each root. Registration
 validates the full selection before its first effect and reports any committed
-registrations if a later operation fails. The selected execution policy continues to own resource guarantees;
-ordinary verification currently has no aggregate Run CPU/RAM budget.
+registrations if a later operation fails. The selected execution policy owns
+resource guarantees. A compatible trusted-local CLI Run can explicitly select
+one [aggregate resource budget](../docs/development/TEMPLATE_INPUT_INSPECTION.md#limit-a-local-run)
+for its full target set; omitting that selection adds no product default budget.
 
 ## Change values without editing the Goon
 
 Edit only `run.yml` for caller choices. Atomic Goons own input types, defaults, choices and constraints. A required plain string can be written as `label:`; a default string as `label: example`. Use a mapping when a type, description or constraint adds information. Plans expose unambiguous unbound direct inputs, while fixed `with:` bindings remain fixed. Shared names need explicit recipients in the Plan/Composite; `workflow inspect` shows the selected contract.
+
+To discover caller choices, use `workflow inspect ./workflow --json`: each public
+input reports its declaring owners, `contract.required` and its default
+designation. String defaults and values are redacted; `default_declared` records
+a non-null string default. Fixed `with:` bindings are not caller
+inputs, and `unrouted_inputs` identifies ambiguous names that need explicit
+recipients. Do not copy the schema or a default-value table into `run.yml`.
 
 Native configuration stays native. Put pytest discovery/coverage in `pyproject.toml`; Ruff, Pyright and ty read their own project settings. Pi/OpenCode/Codex retain model window, reasoning, compaction, tools, authentication and personal configuration. Provider connections and OH-Goon profiles belong in the provider catalog; remote Skill sources belong in `.goonskills.yml`.
 

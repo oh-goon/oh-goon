@@ -19,38 +19,47 @@ Keep live dotenv state and other secrets outside the selected source; use
 explicit environment imports. Capture refuses `.env`/`.env.*` runtime files,
 while `.env.example`, `.env.sample` and `.env.template` remain authored templates.
 
-Register the actual application directory and initialize a fresh workflow with
-its target identity. From the Oh-Goon source checkout:
+Use the [CLI-only setup](../../README.md#cli-first--no-frontend-setup) and
+initialize a fresh workflow for the actual application Git root. From the
+Oh-Goon source checkout:
 
 ```sh
-oh-goon league add-folder /absolute/path/to/your/application
-oh-goon init --template python/quality --kind plan --output /absolute/path/to/application-workflow --repository /absolute/path/to/your/application
-cp examples/independent-application/plan.yml ../application-workflow/plan.yml
-cp -R examples/independent-application/goons ../application-workflow/goons
+task_workflow=/absolute/path/to/application-workflow
+oh-goon init --template python/quality --output "$task_workflow" --repository /absolute/path/to/your/application --no-input
+cp examples/independent-application/plan.yml "$task_workflow/plan.yml"
+cp -R examples/independent-application/goons "$task_workflow/goons"
 ```
 
-Choose that absolute output path as the sibling `../application-workflow` used below; its parent must already exist.
+The output directory must not exist and its parent must already exist.
 
-Keep the generated `target` in `../application-workflow/run.yml`; replace its
-`source` with `source: {kind: file-plan, path: ./plan.yml}` and remove any inputs
-that do not belong to the custom Plan. Set the copied Goon's application path
-and installed command as described above. This directory's [run.yml](run.yml)
+Keep the generated `target` in `$task_workflow/run.yml`; replace its `source`
+with `source: {kind: file-plan, path: ./plan.yml}` and remove the generated
+`inputs` mapping: this example's Plan has no caller inputs. Set the copied Goon's
+application path and installed command as described above. A relative local
+application path resolves from the workflow root, not the Goon's subdirectory;
+an absolute path names the independent application directly. This directory's
+[run.yml](run.yml)
 illustrates the selection shape; copying its placeholder over the generated
 target is unnecessary.
 
-Git metadata is optional for an exact registered application root. The Run
-still requires its real registered subject; unregistered or target-free
-execution is unsupported. From `../application-workflow`, use the ordinary
-public commands:
+Initialization registers only the exact Git root when needed. Git metadata is
+optional for an application root already registered through the existing League
+owner. The Run still requires its real registered subject; unregistered or
+target-free execution is unsupported. After editing the copied source, prepare
+and run it:
 
 ```sh
-oh-goon workflow inspect ./run.yml
-oh-goon workflow validate ./run.yml
-oh-goon workflow prepare ./run.yml
-oh-goon run ./run.yml --json
+oh-goon workflow prepare "$task_workflow/run.yml"
+oh-goon run "$task_workflow/run.yml" --no-input --json
 oh-goon runs tape RUN_ID --json
 oh-goon runs handoff RUN_ID --json
 ```
+
+Optional `oh-goon workflow inspect "$task_workflow/run.yml"` and
+`oh-goon workflow validate "$task_workflow/run.yml"` expose the configured
+contract without installing or executing the application. The actual application
+must exist for its source to be captured; the placeholder path/command is not a
+runnable application.
 
 Application files run from a captured private attempt copy. Developer source and
 `.venv` stay outside writable execution state. Frozen mode consumes the native
@@ -68,10 +77,12 @@ application:
 ```
 
 Use an exact contained subdirectory when the project is below repository root.
-First run `oh-goon workflow prepare ./run.yml` to acquire its exact Git selection, then
-inspect, validate and run it. Inspection never silently fetches missing source.
+First run `oh-goon workflow prepare "$task_workflow/run.yml"` to acquire its
+exact Git selection, then inspect, validate and run it. Inspection never silently
+fetches missing source.
 Ordinary lock/run retains the resolved commit after ref movement or cache loss;
-only `oh-goon workflow prepare ./run.yml --refresh applications` deliberately refreshes it.
+only `oh-goon workflow prepare "$task_workflow/run.yml" --refresh applications`
+deliberately refreshes it.
 Inspect the recorded application origin, path, commit and content identity in
 Game Tape's Technical Step details. This is an application source selection,
 not a Git Goon import: the application needs no catalog path or Goon files.

@@ -22,6 +22,22 @@ Hashmarks owns repository meaning and its qualifications; Oh-Goon binds that
 evidence to the admitted Run and owns execution/results. Missing producer
 precision never authorizes native or local repository-intelligence replacement.
 
+## Profile names and defaults
+
+One catalog holds separate selections:
+
+| Selection | Catalog meaning |
+| --- | --- |
+| `ai --profile NAME` or `agent setup --profile NAME` | A native execution policy in `native_profiles`; setup creates that entry. |
+| A native profile's `inference_profile` or setup's `--inference-profile NAME` | A managed HTTP connection in `models`, whose `provider` names an entry in `providers`. |
+| `agent providers request --model NAME` | An existing `models` entry. |
+| Setup's `--model MODEL_ID` | The actual native Codex model ID for login/service setup, or the provider model ID for `agent providers setup`. |
+
+`default_native_profile` selects only native execution; `default_model` selects
+only a managed model connection. A model profile name is not automatically a
+native profile name. The signed-in example below sets the native default once;
+the HTTP-only sample requires an explicit model profile.
+
 ## Set up a native execution profile
 
 `oh-goon agent setup <codex|pi|opencode>` authors one profile in the existing JSON
@@ -47,13 +63,16 @@ its qualified service version and grants when a Run is admitted. Setup retains
 the current native model/configuration contract; it does not read settings to
 guess these protected connection choices.
 
-For Pi, OpenCode or broker-backed Codex, first configure a model/provider profile,
-then select it with managed setup:
+For Pi, OpenCode or broker-backed Codex, first configure a model/provider profile.
+For example, create a new managed catalog, then bind its `models.approved-code`
+connection to a Pi execution profile:
 
 ```sh
-oh-goon agent setup pi --config providers.json --profile company-pi \
+oh-goon agent providers setup --config managed-providers.json \
+  --provider openrouter --model PROVIDER/MODEL_ID --profile approved-code
+oh-goon agent setup pi --config managed-providers.json --profile company-pi \
   --executable /public/bin/pi --workspace-root /path/to/projects \
-  --mode managed --inference-profile company --no-input --json
+  --mode managed --inference-profile approved-code --no-input --json
 ```
 
 Managed setup uses the existing Bubblewrap profile and supported provider wire
@@ -96,19 +115,18 @@ do not transfer to a newly authored profile.
 `oh-goon ai` runs the installed Codex CLI through the existing Fleet
 Run and Step lifecycle. `oh-goon-ai` is the same command with `ai` supplied.
 Select a configured execution profile and start from a Git repository root, or
-select the repository explicitly. The `signed-in` profile is defined in
-[Use an existing Codex sign-in](#use-an-existing-codex-sign-in):
+select the repository explicitly. The first command uses the default
+[signed-in profile](#use-an-existing-codex-sign-in). The second uses `company-pi`
+from managed setup above:
 
 ```sh
 oh-goon ai --config providers.json --prompt-file task.txt --headless --verify "python3 -m unittest discover" --json
-oh-goon ai --agent pi --config providers.json --profile company --prompt-file task.txt --headless
-oh-goon-ai --agent opencode --config providers.json --profile company --workspace /path/to/project --prompt "Review the failing test"
-oh-goon ai --agent codex --config providers.json --profile company-responses --prompt-file task.txt --headless --verify "uv run pytest tests/test_example.py" --json
+oh-goon ai --agent pi --config managed-providers.json --profile company-pi --prompt-file task.txt --headless
 ```
 
 Omitting `--agent` selects `codex`; an explicit `--agent` is preserved. `--profile`
-overrides the catalog's `default_native_profile`. Without either selection,
-the existing `isolated-managed` profile applies. Agent selection does not discover
+overrides the catalog's `default_native_profile`. If neither selects a profile,
+the built-in `isolated-managed` profile applies. Agent selection does not discover
 native authentication or start a model server. New native `init` selections also name Codex
 with the `isolated-managed` profile; existing `run.yml` selections stay explicit.
 Missing configuration fails before work.
@@ -701,12 +719,15 @@ resources. Repeat `--verify` for separate native commands. Each value is an
 argument vector without a shell; inline programs and shell operators retain the
 existing Plan compiler restrictions. Native verification determines results.
 
-The existing provider catalog also holds native execution policy:
+### Managed native profile
+
+The existing provider catalog also holds native execution policy. This profile
+binds its managed connection explicitly through `inference_profile`, so it needs
+no `default_model`:
 
 ```json
 {
   "version": 1,
-  "default_model": "approved-code",
   "providers": {
     "company": {
       "api": "openai-chat-completions",
@@ -728,20 +749,25 @@ The existing provider catalog also holds native execution policy:
     }
   },
   "native_profiles": {
-    "company": {
+    "company-native": {
       "backend": "bubblewrap",
       "allowed_agents": ["pi", "opencode"],
       "workspace_roots": ["/path/to/projects"],
       "inference_profile": "approved-code",
-      "timeout_seconds": 7200,
       "resources": {"memory_mib": 8192, "max_processes": 256}
     }
   }
 }
 ```
 
-Use `--config PATH` for the catalog and `--profile company` for its execution
-profile. Relative paths resolve once against the catalog directory. An omitted
+Save this manual example as `company-providers.json` and select its execution
+profile explicitly:
+
+```sh
+oh-goon-ai --agent opencode --config company-providers.json --profile company-native --workspace /path/to/project --prompt "Review the failing test"
+```
+
+Relative paths resolve once against the catalog directory. An omitted
 executable uses native OS lookup on the supplied `PATH`; Oh-Goon installs no
 native packages. `runtime_roots` names the explicit public runtime inputs needed
 inside the boundary. Unrelated repositories, host credentials and service sockets
@@ -890,9 +916,12 @@ batch apply Step checks preimages and write scope. Regression/verification
 Steps retain their selected profile. Linked Git metadata outside the selected
 workspace requires its supported scoped metadata binding.
 
-OH-Goon-managed inference selects a named catalog model with
-`agent.model_profile`. The provider catalog remains the sole connection/model
-profile owner; native-managed settings remain native-owned. Endpoint and model
+Direct `harness: model` workflows select a named catalog connection with
+`agent.model_profile`. Native workflows instead select `agent.implementation` and
+`agent.profile`; a broker-backed native profile names its connection with
+`inference_profile`. A native selection rejects `agent.model_profile`.
+The provider catalog remains the connection/model profile owner, while native
+agents retain their model/configuration semantics. Endpoint and model
 parameters freeze before admission, while credential values stay in the original
 environment/header authority. A profile or configured endpoint is not proof of
 connection, compatible wire protocol, model installation, native authentication,
@@ -919,7 +948,7 @@ Create a configuration for an explicitly selected OpenRouter model:
 oh-goon agent providers setup --provider openrouter --model PROVIDER/MODEL_ID
 ```
 
-For a running LiteLLM proxy, use `--provider litellm --model YOUR_MODEL_ALIAS`. An explicitly selected existing Ollama server uses `--provider ollama --model YOUR_INSTALLED_MODEL`. No provider is selected implicitly. `--base-url` selects another endpoint and `--api-key-env` names its credential variable. Setup writes the selected JSON file and a sibling `providers.schema.json` derived from Oh-Goon's configuration model. It creates the directory and refuses to overwrite an existing catalog. Setup does not connect, pull a model or install a server.
+For a running LiteLLM proxy, use `--provider litellm --model YOUR_MODEL_ALIAS`. An explicitly selected existing Ollama server uses `--provider ollama --model YOUR_INSTALLED_MODEL`. No provider is selected implicitly. `--base-url` selects another endpoint and `--api-key-env` names its credential variable. Setup writes the selected JSON file and a sibling schema derived from Oh-Goon's configuration model (`providers.json` gets `providers.schema.json`). It creates the directory and refuses to overwrite an existing catalog. Setup does not connect, pull a model or install a server.
 
 The resulting catalog is editable JSON with `$schema` support:
 
@@ -952,12 +981,13 @@ oh-goon agent providers list --json
 
 Both commands parse the selected file and validate references, protocols and field types. They do not check for running servers, installed programs, available models or credential values. Their status is `configured_not_connected`, which establishes configuration validity only. Missing or malformed configuration is an error; there is no inferred localhost fallback.
 
-Only `request` connects, using the chosen profile. Replace model placeholders before sending:
+Only `request` connects, using the chosen model profile. The setup example above
+creates `models.default`; replace its model placeholder before sending:
 
 ```sh
-oh-goon agent providers request --model review --prompt "Reply with hello."
-printf 'Reply with hello.' | oh-goon agent providers request --model review --prompt-file -
-oh-goon agent providers request --model review --prompt-file request.txt --json
+oh-goon agent providers request --model default --prompt "Reply with hello."
+printf 'Reply with hello.' | oh-goon agent providers request --model default --prompt-file -
+oh-goon agent providers request --model default --prompt-file request.txt --json
 ```
 
 The client sends only the explicit prompt. It does not discover or attach checkout files, Skills, history or environment values. It reads credentials referenced by the selected provider just before creating an immutable connection snapshot. The HTTP consumer uses that snapshot without rereading configuration or environment defaults.
@@ -1000,7 +1030,7 @@ parameters = { temperature = 0.2 }
 
 ```toml
 [models.local-code]
-provider = "local"
+provider = "ollama"
 model = "YOUR_INSTALLED_MODEL"
 max_output_tokens = 2048
 parameters = { options = { temperature = 0.2, num_ctx = 8192 } }

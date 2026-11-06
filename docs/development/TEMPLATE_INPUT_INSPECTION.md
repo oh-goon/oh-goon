@@ -238,6 +238,15 @@ the selected input. Preview `explicit_inputs` retains exactly the supplied map.
 The config cannot contain copied schemas, nested executor policy, credentials,
 secret interpolation, `steps`, `goons` or native `modelOverrides`.
 
+For a concrete selection, `workflow inspect run.yml --json` reports each public
+input's `contract.required`, declaring `owners` and value `origin` (`run.yml` or
+`goon`). A non-string contract can include its typed `default`; a string contract
+instead exposes `default_declared` for a non-null default and redacts free-form
+values. An explicit caller value does not make that value a new default. Fixed child
+bindings are excluded from public inputs; `unrouted_inputs` reports names without
+unambiguous caller routing. Inspect the owning Goon when the literal default is
+needed rather than duplicating it in Plan or selection files.
+
 Optional `agent` and `repair` groups select existing invocation facts only.
 Use them only for workflows that support those selections. See
 [Agent Skills](../AGENT_SKILLS.md) and [Agent providers](../AGENT_PROVIDERS.md).
