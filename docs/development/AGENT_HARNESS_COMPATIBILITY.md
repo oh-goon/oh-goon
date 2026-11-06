@@ -445,6 +445,84 @@ the parser and runtime remain unchanged. Neither temporary adaptation's removal
 gate is changed, and no protocol router, signed envelope or second parser is
 introduced. A skipped or empty installed invocation cannot qualify these scopes.
 
+## Native concurrency boundary
+
+[HUG-122](https://linear.app/hugloss/issue/HUG-122) reviews Harness T42/SP-06
+against the existing [Run submission and durable authority](EXECUTION_SUPERVISOR.md#run-submission-and-durable-authority).
+Sequential handoff, independent targets and concurrently admitted native Runs are
+different scopes. The current shared-database mixed-native overlap mode is
+**UNSUPPORTED**; the original admission owners refuse it rather than adding a
+queue, silently serializing native work or widening worker capacity.
+
+| Requested concurrency | Current owner and scope |
+| --- | --- |
+| Another active Run in one runtime | `RunExecutionSupervisor` permits one active Run; a second admission refuses. A different harness/profile does not grant another slot. |
+| Another runtime using the same SQLite database | The singleton execution lease remains authoritative across processes and repositories. A live owner's lease is not stolen or expired by elapsed time. |
+| Parallel repository targets within one Run | Existing Fleet target scheduling follows the admitted Plan's parallel-safety/parallelism policy. Current Agent ingress requires one candidate repository and one frozen native selection; it is not a mixed-native parallel-target mode. |
+| Independent databases/state roots | These are separate authority domains. Their existence does not qualify shared-database admission, aggregate capacity or concurrent same-workspace mutation. An unresolved writer still needs its original drain/fencing proof. |
+
+Busy refusal is at atomic admission, not a new early native guard. Supported
+preflight/capture and source transport may precede it. No second admitted native
+worker, model turn or Step follows from the refusal; the existing source owner
+still cleans up unadmitted delivery resources. A later Run requires fresh
+admission after the original lifecycle releases its authority.
+
+Resource evidence stays within the selected owner. Bubblewrap's explicit native
+workload caps, when selected, are not a whole-application or shared-Run aggregate
+budget. Omitted caps inherit the native environment; they do not establish a new
+limit. Local Codex login/service profiles refuse requested local caps. Owned-PID
+CPU/memory/process snapshots are observations, not global peaks, cgroup-wide
+attribution or proof that another application's work was contained. Agent/repair
+workflows remain outside the ordinary aggregate `run.yml` resource contract.
+Parallel mixed-native resource qualification is **NOT_RUN** because that mode is
+unsupported, not a new ordinary-workflow gate. HUG-90/HUG-12 retain resource-policy
+qualification.
+
+### Scoped native admission qualification — 2026-11-06
+
+Both ordinary [native admission cases](../../backend/tests/integration/services/test_native_agent_concurrency.py)
+passed with zero selected skips. Two valid scoped runtimes share one database
+and use preregistered distinct repositories. One controlled-process case keeps
+the complete selected profile identical and lets A finish; the other selects
+Pi/OpenCode protocol fixtures and cancels A. While A is held at its actual
+provider request, B refuses with `ExecutionBusy`, creates no Run or worker and
+issues no native model request. A's exact lease, live process birth, frozen
+context and original Journal events remain unchanged. Allowed source/Git
+preparation is not claimed absent.
+
+The same B selection succeeds through fresh admission after A settles, retaining
+its own task, Skill, Hashmarks packet and independent verifier. In the canceled
+case, A's held provider response is released only after B becomes terminal;
+both original readbacks remain unchanged. Original physical receipt partitions,
+Step/attempt lineage and Journal reopen are checked rather than reconstructing a
+new Run from late text.
+
+One installed Pi 1.3.0 → OpenCode 2.1.2 case passed with zero failures, errors or
+skips. A valid scoped native baseline prevents configuration refusal from
+masquerading as the busy boundary. The actual Pi request is held while the live
+original worker owns the shared lease; OpenCode refuses without another
+Run/worker/model, then succeeds with its own native review and verifier after
+Pi completes. Each original Run has 15 unique physical execution IDs, disjoint
+from the other Run, with exact exit/quiescence accounting and unchanged Journal
+reopen. This is refusal and fresh reuse, not overlapping native execution.
+
+Both installed profiles leave CPU, memory and process caps `None`. Two
+birth-bound snapshots record only A's worker-process CPU time, RSS and process
+high-water memory; they do not measure the whole native workload, application or
+global peak. Parallel resource qualification remains **NOT_RUN** for the
+unsupported mode. Nine retained custody controls also passed: four actual-worker
+restart/unknown cuts and five runtime/execution-lease/workspace-lease controls.
+Bounded private HUG-122 receipts retain exact source/native identity and the
+original resource/Run observations without adding another runtime registry.
+
+Disposition: **retain** original admission, custody, cancellation, native identity,
+context and Journal owners. This scope does not expand capacity, add a worker
+pool or qualify restart, endpoint/callback reuse or service-peer inheritance
+between overlapping native Runs. Existing sequential handoff and selected
+native/service proofs retain their stated limits. No production defect or
+production-code change was required, and no parallel-capacity claim follows from
+passing refusal tests.
+
 ## Temporary adaptations and removal decisions
 
 ### OPENCODE-CLI-SETTLEMENT — retain pending installed replacement proof

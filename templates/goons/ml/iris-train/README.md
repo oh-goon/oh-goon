@@ -50,15 +50,12 @@ different parameters even when accuracy is unchanged.
 
 ## Run through Oh-Goon
 
-Register your actual project repository and initialize by path:
-
-```sh
-oh-goon league add-folder /absolute/path/to/your/project
-oh-goon init --template ml/iris-training --kind plan --output ./workflow --repository /absolute/path/to/your/project
-# Edit workflow/run.yml inputs if needed.
-oh-goon workflow prepare ./workflow/run.yml
-oh-goon run ./workflow/run.yml
-```
+Follow the [ml/iris-training walkthrough](../../../plans/ml/iris-training/README.md#train-locally)
+for exact-target initialization, optional input inspection, the original Run and
+artifact export. That Plan's unique import exposes this Goon's defaults and
+constraints; it does not copy or redefine the input schema. An unchanged
+initialized workflow already has its lock. Prepare again after changing source
+or caller inputs.
 
 [`goon.yml`](goon.yml) owns the typed inputs. The selected target need not
 implement `iris-train`; `runtime: python` captures and installs this complete
