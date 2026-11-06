@@ -960,12 +960,18 @@ The dataflow surface is intentionally small:
 
 ```text
 inputs      immutable run parameters
-env         immutable named host or literal values with an explicit source
+env         immutable named host, literal or explicitly bound input values
 step output direct reference to an earlier declared output
 steps       fresh isolated attempts
 ```
 
 Inputs and environment values are not automatically exported into every process. A Step receives only the values it explicitly imports plus the deterministic strict baseline. A later Step may reference an earlier declared Step output directly; there is no intermediate variable namespace or output-to-environment alias layer.
+
+`env: {NAME: {from: input, name: INPUT}}` transports that Goon's already-bound
+scalar through an explicit Step environment import. The compiler does not
+reinterpret the supplied value as another expression, consult ambient defaults,
+or change `{value: ...}` literal semantics. The resolved value is covered by the
+same execution lock as its consumer Step. See [Goon authoring](development/GOON_AUTHORING.md).
 
 Secret-bearing host values are captured only when explicitly imported, are used for execution/redaction, and are not persisted as canonical evidence or dumped globally to stdout.
 

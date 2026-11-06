@@ -7,7 +7,7 @@ import { useApiClient, useReadController, useReportMutationFeedback } from "@/ap
 import { useReadResource } from "@/app/reads/useReadResource";
 import { useAppBootstrap } from "@/app/bootstrap/AppBootstrapProvider";
 import type { FleetRunOptions } from "@/domain/api/ApiClient";
-import type { FleetRunDetail, FleetRunOverview, FleetRunState, FleetSnapshot, OperationAction, RunAgentSelection } from "@generated/models";
+import type { CatalogRunRequest, FleetRunDetail, FleetRunOverview, FleetRunState, FleetSnapshot, OperationAction, RunAgentSelection } from "@generated/models";
 import type { WriteCommandResult } from "@/domain/mutations/WriteCommandResult";
 import { readScopesForResources, readScopesInvalidatedByFleetProgress } from "@/domain/reads/readResources";
 import { watchFleetRun } from "@/app/fleetRun/watchFleetRun";
@@ -44,6 +44,7 @@ export interface FleetSnapshotState {
 }
 
 interface FleetRunActionsValue {
+  runCatalog(repositoryId: string, request: Omit<CatalogRunRequest, "fleet_run_id">): Promise<WriteCommandResult<FleetRunState>>;
   runFleet(action: OperationAction, options?: FleetRunOptions): Promise<WriteCommandResult<FleetRunState>>;
   runTeam(repository: string, expectedPipelineSha256: string, expectedRepositoryInstanceId: string, inputs?: Record<string, string>): Promise<WriteCommandResult<FleetRunState>>;
   runSharedPlan(
@@ -212,6 +213,13 @@ export function FleetRunProvider({ children }: { children: ReactNode }) {
     return acceptStartedRun(key, fleetRunId, result);
   }, [acceptStartedRun, client, pendingFleetRunId]);
 
+  const runCatalog = useCallback(async (repositoryId: string, request: Omit<CatalogRunRequest, "fleet_run_id">) => {
+    const key = canonicalIdentity({ catalogRepository: repositoryId, request });
+    const fleetRunId = pendingFleetRunId(key);
+    const result = await client.startCatalogRun(repositoryId, { ...request, fleet_run_id: fleetRunId });
+    return acceptStartedRun(key, fleetRunId, result);
+  }, [acceptStartedRun, client, pendingFleetRunId]);
+
   const cancelFleet = useCallback(async (runId: string) => {
     const result = await client.cancelFleetRun(runId);
     reportMutationFeedback(result);
@@ -331,7 +339,7 @@ export function FleetRunProvider({ children }: { children: ReactNode }) {
           ? runDetail.resource.failure?.message ?? null
           : null,
       }}>
-        <ActionsContext.Provider value={{ runFleet, runTeam, runSharedPlan, cancelFleet, readmitFleet, rerunFleet }}>
+        <ActionsContext.Provider value={{ runCatalog, runFleet, runTeam, runSharedPlan, cancelFleet, readmitFleet, rerunFleet }}>
           {children}
         </ActionsContext.Provider>
       </StatusContext.Provider>

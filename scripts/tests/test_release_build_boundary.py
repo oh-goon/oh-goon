@@ -119,7 +119,61 @@ def _python_goon_release_source(root: Path) -> Path:
         path = package / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("source\n", encoding="utf-8")
+    snapshot_source_directory(
+        ROOT / "templates/goons/general/catalog-render",
+        root / "templates/goons/general/catalog-render",
+        label="shared renderer fixture source",
+    )
     return package
+
+
+def test_shared_renderer_delivery_uses_only_admitted_catalog_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _python_goon_release_source(tmp_path)
+    formatter = (
+        tmp_path / "templates/goons/general/catalog-render/src/oh_goon_catalog_renderer"
+    )
+    expected = (formatter / "__init__.py").read_bytes()
+    module = _hatch_build_module(monkeypatch)
+    with staged_template_catalogs(tmp_path) as stage:
+        archive, digest = _archive_catalogs(stage)
+        monkeypatch.setenv("OH_GOON_RELEASE_CATALOG_ARCHIVE", str(archive))
+        monkeypatch.setenv("OH_GOON_RELEASE_CATALOG_ARCHIVE_SHA256", digest)
+        shutil.rmtree(formatter)
+        inclusion = module.release_catalog_inclusion(version="standard")
+        delivered = next(
+            Path(path)
+            for path, target in inclusion.items()
+            if target == "oh_goon_catalog_renderer"
+        )
+        assert (delivered / "__init__.py").read_bytes() == expected
+        goons = next(
+            Path(path)
+            for path, target in inclusion.items()
+            if target == "oh_goon/templates/goons"
+        )
+        assert (
+            delivered == goons / "general/catalog-render/src/oh_goon_catalog_renderer"
+        )
+
+
+def test_missing_shared_renderer_refuses_before_catalog_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _python_goon_release_source(tmp_path)
+    module = _hatch_build_module(monkeypatch)
+    with staged_template_catalogs(tmp_path) as stage:
+        (
+            stage
+            / "goons/general/catalog-render/src/oh_goon_catalog_renderer/__init__.py"
+        ).unlink()
+        archive, digest = _archive_catalogs(stage)
+        monkeypatch.setenv("OH_GOON_RELEASE_CATALOG_ARCHIVE", str(archive))
+        monkeypatch.setenv("OH_GOON_RELEASE_CATALOG_ARCHIVE_SHA256", digest)
+        with pytest.raises(RuntimeError, match="requires the shared catalog renderer"):
+            module.release_catalog_inclusion(version="standard")
+        assert not (archive.parent / "hatch-catalogs").exists()
 
 
 def test_release_catalog_capture_preserves_authored_output_siblings_and_scopes_scratch(
@@ -301,6 +355,13 @@ def test_native_wheel_includes_captured_python_project_without_generated_outputs
         assert prefix + "src/train.py" in names
         assert prefix + "tests/test_train.py" in names
         assert prefix + "uv.lock" in names
+        shared = "oh_goon/templates/goons/general/catalog-render/src/oh_goon_catalog_renderer/"
+        assert archive.read("oh_goon_catalog_renderer/__init__.py") == archive.read(
+            shared + "__init__.py"
+        )
+        assert archive.read("oh_goon_catalog_renderer/cli.py") == archive.read(
+            shared + "cli.py"
+        )
         assert archive.read(prefix + "build/recipe.txt") == b"source\n"
         assert archive.read(prefix + "dist/fixture.json") == b"source\n"
         assert prefix + "assets/result.json" not in names
@@ -393,6 +454,23 @@ def test_installed_wheel_initializes_complete_agent_workflow_without_checkout_re
     shutil.rmtree(root / "templates")
     shutil.rmtree(root / "examples")
     shutil.rmtree(backend / "src")
+    formatter = subprocess.run(
+        [
+            str(environment / "bin/python"),
+            "-c",
+            "from oh_goon_catalog_renderer import CatalogCandidate, render_catalog; "
+            "value=CatalogCandidate.from_mapping({'name':'demo','description':'Synthetic',"
+            "'owner':'group:default/demo','type':'service','lifecycle':'experimental',"
+            "'languages':['python']}); print(render_catalog(value))",
+        ],
+        cwd=tmp_path,
+        env=native_environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert formatter.returncode == 0, formatter.stderr
+    assert 'owner: "group:default/demo"' in formatter.stdout
     output = tmp_path / "workflow"
     result = subprocess.run(
         [

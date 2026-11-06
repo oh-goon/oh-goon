@@ -18,6 +18,7 @@ from oh_goon.runtime.plan_templates import PlanTemplateStore
 from oh_goon.runtime.schedule_scheduler import ScheduleScheduler
 from oh_goon.runtime.shared_plans import SharedPlanFileStore
 from oh_goon.scout.service import ScoutService, scout_enabled_from_environment
+from oh_goon.services.catalog_showcase import CatalogShowcaseService
 from oh_goon.services.command_center import CommandCenterService
 from oh_goon.services.dependencies import DependencyFleetService
 from oh_goon.services.filesystem import FilesystemService
@@ -237,6 +238,9 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
             foundation.state.journal,
             database=foundation.database,
             enabled=scout_enabled_from_environment(),
+        ),
+        catalog_showcase=CatalogShowcaseService(
+            repositories, plans, plan_resolver, plan_templates, foundation.git_service
         ),
         _lifecycle=foundation.lifecycle,
         _schedule_scheduler=schedule_scheduler,

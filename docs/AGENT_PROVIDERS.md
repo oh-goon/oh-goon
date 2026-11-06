@@ -572,8 +572,12 @@ inventories, unknown states, and unsupported extension origins fail before model
 submission; missing tools alone never proves exclusion. Existing disabled
 plugin/app features retain their own checks.
 
-This profile makes no MCP-startup isolation claim. The installed 0.164.0
-configured-MCP probe observes native initialization during status discovery.
+This profile makes no MCP-startup isolation claim. In the selected Codex 0.164.0
+Linux probe, the synthetic server's first startup canary and initialization messages were observed
+during threadless status discovery, after initialized client readiness. This
+observation does not establish effect-free boot or connection for other native
+configurations. Native initialization can also author ordinary project trust;
+the byte-preservation control predeclares its synthetic workspace trust.
 The earlier Codex 0.163.0
 [status collector](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/codex-mcp/src/mcp/mod.rs)
 also eagerly starts configured servers. Native owns that ordinary initialization and its
@@ -583,6 +587,19 @@ under native [table merging](https://github.com/openai/codex/blob/rust-v0.163.0/
 The explicit per-ID overrides preserve each inherited registration and its native
 authentication. Native startup metadata is distinct from workload tool authority;
 the original daemon supervisor still owns final process closure and quiescence.
+
+The [HUG-124 qualification](development/AGENT_HARNESS_COMPATIBILITY.md#mcp-startup-and-preflight-child-lifetime--2026-11-06)
+checks startup beneath an admitted Run worker and Step. Normal discovery,
+caller cancellation during blocked initialization, and a real status-RPC deadline
+failure retain their different original outcomes. Both interrupted cases make
+zero model requests; the deadline case completes with a failed Step and
+ATTENTION_REQUIRED, without caller cancellation or successful service preflight.
+Verified daemon cleanup does not make that uncertain request successful.
+The observed MCP child used its own process group, so its exit is checked
+independently with a birth-bound PIDFD. It had exited by the component probe's
+client-close checkpoint while the daemon remained alive, and was no longer live
+after original-owner shutdown in each Run case. These observations qualify that
+synthetic child's lifetime, not containment of arbitrary MCP descendants.
 
 The selected native profile denies the filesystem by default, grants only public
 runtime/frozen context and the admitted workspace, denies the private endpoint and

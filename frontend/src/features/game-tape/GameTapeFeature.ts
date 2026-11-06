@@ -1,4 +1,6 @@
 export { GameTape, isGameTapeView } from "@/features/game-tape/components/GameTape";
+export { GameTapeStepArtifacts } from "@/features/game-tape/components/GameTapeStepArtifacts";
+export { RunArtifactExportForm } from "@/features/game-tape/components/RunArtifactExportForm";
 export type { GameTapeView } from "@/features/game-tape/components/GameTape";
 export type { GameTapeComparisonOption } from "@/features/game-tape/components/GameTapeDiff";
 export { isGameTapeLogStream } from "@/features/game-tape/components/GameTapeLiveLogs";

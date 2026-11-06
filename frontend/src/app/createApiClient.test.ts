@@ -5,6 +5,8 @@ import { readOperation } from "@/app/api/httpTransport";
 import { writeOperation } from "@/app/api/mutationTransport";
 import { MutationController } from "@/domain/concurrency/MutationController";
 import { operations as op } from "@generated/operations";
+import { catalogFixturePreview } from "../../e2e/fixtures/catalog";
+import { FIXTURE_REPOSITORIES, fixtureRepositoryInstanceId } from "../../e2e/fixtures/identities";
 
 vi.mock("@/app/api/mutationTransport", () => ({ writeOperation: vi.fn() }));
 vi.mock("@/app/api/httpTransport", () => ({ readOperation: vi.fn() }));
@@ -17,6 +19,26 @@ describe("createApiClient write fence transport", () => {
     write.mockReset();
     read.mockReset();
     write.mockResolvedValue({ outcome: "saved", value: undefined, causalityRevision: 1 } as never);
+  });
+
+  it("transports exact catalog source, candidate and recorded-artifact selections through generated operations", () => {
+    const mutations = new MutationController();
+    const client = createApiClient(mutations);
+    const repositoryId = FIXTURE_REPOSITORIES.catalog.repository_id;
+    const observed = catalogFixturePreview(FIXTURE_REPOSITORIES.catalog);
+    const options = { signal: new AbortController().signal };
+    const exploration = { expected_repository_instance_id: fixtureRepositoryInstanceId(repositoryId), query: "submit_order", path: "src/service.py" };
+    const candidate = { source_authority: observed.source_authority, candidate: observed.candidate };
+    const submission = { ...candidate, expected_plan_id: observed.plan_id, expected_plan_sha256: observed.plan_sha256, expected_execution_digest: observed.execution_digest, fleet_run_id: "original-catalog-run" };
+    const artifact = { repository_id: repositoryId, step_id: "catalog-generate.catalog", path: "catalog-info.yaml", destination: "/tmp/catalog-demo/catalog-info.yaml" };
+    void client.catalogExplore(repositoryId, exploration, options);
+    void client.catalogPreview(repositoryId, candidate, options);
+    void client.startCatalogRun(repositoryId, submission);
+    void client.exportRunArtifact("original-catalog-run", artifact);
+    expect(read).toHaveBeenNthCalledWith(1, op.catalog_explore.operationId, { path: { repository_id: repositoryId }, body: exploration }, options);
+    expect(read).toHaveBeenNthCalledWith(2, op.catalog_preview.operationId, { path: { repository_id: repositoryId }, body: candidate }, options);
+    expect(write).toHaveBeenNthCalledWith(1, mutations, "fleet-run", op.catalog_run.operationId, { path: { repository_id: repositoryId }, body: submission });
+    expect(write).toHaveBeenNthCalledWith(2, mutations, "fleet-run", op.export_run_artifact.operationId, { path: { fleet_run_id: "original-catalog-run" }, body: artifact });
   });
 
   it("keeps ecosystem and scoped package spelling in dependency reads", () => {

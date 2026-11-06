@@ -68,6 +68,7 @@ Do not create a new `shared/` or generic `utils/` layer. Reuse the narrow existi
 - `src/app/api/httpTransport.ts` — raw HTTP transport owner.
 - `src/app/api/mutationTransport.ts` — mutation transport/lifecycle boundary.
 - `src/domain/api/ApiClient.ts` — framework-agnostic frontend API interface.
+- `src/features/catalog/CatalogFeature.tsx` — Explore code evidence, metadata review and approved catalog generation. `src/app/pages/CatalogPage.tsx` connects the existing Fleet Run owner; original Game Tape Outputs exposes explicit retained-artifact export. Candidate and export inputs stay in component memory, while the backend owns source, approval and artifact authority.
 
 A feature change should normally start in `src/features/<feature>/`; cross-feature app behavior starts in `src/app/`.
 

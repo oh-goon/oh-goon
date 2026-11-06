@@ -62,6 +62,13 @@ def test_private_code_catalog_example_exports_its_retained_descriptor(
         ],
         check=True,
         timeout=10,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "Demo Contributor",
+            "GIT_AUTHOR_EMAIL": "demo@example.invalid",
+            "GIT_COMMITTER_NAME": "Demo Contributor",
+            "GIT_COMMITTER_EMAIL": "demo@example.invalid",
+        },
     )
     selected = workflow / "run.yml"
     configuration = yaml.safe_load(selected.read_text())
@@ -125,9 +132,12 @@ def test_private_code_catalog_example_exports_its_retained_descriptor(
 
             def cli(*args: str) -> dict[str, Any]:
                 result = invoke(*args)
-                assert result.returncode == 0, (result.stdout, result.stderr)
                 decoded = json.loads(result.stdout)
                 assert isinstance(decoded, dict)
+                detail = None
+                if result.returncode != 0 and decoded.get("fleet_run_id"):
+                    detail = invoke("runs", "steps", decoded["fleet_run_id"]).stdout
+                assert result.returncode == 0, (result.stdout, result.stderr, detail)
                 return decoded
 
             cli("workflow", "prepare", str(selected), "--register-target", "--no-input")
@@ -141,16 +151,19 @@ def test_private_code_catalog_example_exports_its_retained_descriptor(
             validated = cli("workflow", "validate", str(selected))
             assert validated["proof"]["provider"] == "not-applicable"
             history_before = cli("runs", "list")
-            metadata = workflow / "generator/catalog-input.json"
-            approved = metadata.read_bytes()
-            changed = json.loads(approved)
+            approved = selected.read_bytes()
+            changed = json.loads(configuration["inputs"]["candidate_json"])
             changed["description"] = "UNREVIEWED-METADATA-MUST-NOT-RUN"
-            metadata.write_text(json.dumps(changed), encoding="utf-8")
+            changed_configuration = {
+                **configuration,
+                "inputs": {"candidate_json": json.dumps(changed)},
+            }
+            selected.write_text(yaml.safe_dump(changed_configuration), encoding="utf-8")
             refused = invoke("run", str(selected))
             assert refused.returncode != 0
             assert cli("runs", "list") == history_before
             assert not (repository / "catalog-info.yaml").exists()
-            metadata.write_bytes(approved)
+            selected.write_bytes(approved)
 
             source_path = repository / "src/service.py"
             reviewed_source = source_path.read_bytes()
@@ -172,13 +185,16 @@ def test_private_code_catalog_example_exports_its_retained_descriptor(
             subprocess.run(
                 ["git", "init", "-q", str(other_repository)], check=True, timeout=10
             )
-            other_metadata = other_workflow / "generator/catalog-input.json"
-            other_candidate = json.loads(other_metadata.read_bytes())
-            other_candidate["description"] = "SECOND-REPOSITORY-APPROVED-CANDIDATE"
-            other_candidate["owner"] = "user:demo/reviewed-owner"
-            other_metadata.write_text(json.dumps(other_candidate), encoding="utf-8")
             other_selected = other_workflow / "run.yml"
             other_configuration = yaml.safe_load(other_selected.read_text())
+            other_candidate = json.loads(
+                other_configuration["inputs"]["candidate_json"]
+            )
+            other_candidate["description"] = "SECOND-REPOSITORY-APPROVED-CANDIDATE"
+            other_candidate["owner"] = "user:demo/reviewed-owner"
+            other_configuration["inputs"]["candidate_json"] = json.dumps(
+                other_candidate
+            )
             other_configuration["target"] = {"repository": str(other_repository)}
             other_selected.write_text(
                 yaml.safe_dump(other_configuration, sort_keys=False)
@@ -228,7 +244,7 @@ def test_private_code_catalog_example_exports_its_retained_descriptor(
             ).read_bytes()
             assert artifact["sha256"] == hashlib.sha256(expected).hexdigest()
             # A later edit to caller metadata cannot rewrite a retained Run artifact.
-            (workflow / "generator/catalog-input.json").write_text("{}")
+            (workflow / "run.yml").write_text("{}")
             destination = tmp_path / "exported-catalog-info.yaml"
             exported = cli(
                 "runs",

@@ -1,8 +1,4 @@
-application:
-  path: ./generator
-steps:
-- id: catalog
-  run: python3 generate_catalog.py
-  artifacts:
-  - path: catalog-info.yaml
-    retention: content_store
+inputs: [candidate_json]
+goons:
+- import: general/catalog-render
+  pass: [candidate_json]

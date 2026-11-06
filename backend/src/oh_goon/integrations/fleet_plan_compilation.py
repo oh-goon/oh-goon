@@ -680,7 +680,11 @@ def _env_source_payload(value: Any) -> dict[str, Any]:
         return {"kind": "host"}
     if set(payload) == {"value"} and type(payload.get("value")) in (str, bool, int):
         return {"kind": "literal", "value": payload["value"]}
-    raise FleetPlanInvalid("Fleet env definitions must use {from: host} or {value: ...}")
+    if set(payload) == {"from", "name"} and payload.get("from") == "input":
+        return {"kind": "input", "name": payload["name"]}
+    raise FleetPlanInvalid(
+        "Fleet env definitions must use {from: host}, {value: ...}, or {from: input, name: INPUT}"
+    )
 
 
 def _module_output_source(value: Any) -> str:

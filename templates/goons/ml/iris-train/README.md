@@ -21,7 +21,7 @@ uv run --no-sync ruff check .
 uv run --no-sync iris-train --random-seed 42 --test-size-percent 20 --minimum-accuracy-percent 90 --max-iterations 300
 ```
 
-`pyproject.toml` owns the console entry point, scikit-learn runtime dependency,
+`pyproject.toml` owns the console entry points and native ML runtime dependencies,
 development tools and build backend; committed `uv.lock` owns native dependency
 resolution. Frozen synchronization consumes that lock without a metadata-freshness
 check or rewrite. Local development explicitly selects `dev`; package execution
@@ -47,6 +47,41 @@ its measured metrics and parameters are still written. Invalid arguments are
 refused before training or output creation. Repeating the same seed reproduces
 the parameters in the same native environment; a seed change can produce
 different parameters even when accuracy is unchanged.
+
+## Develop the staged pipeline
+
+The same project also installs `iris-pipeline`, with separate `ingest`, `train`,
+`evaluate` and `publish` commands. The [staged workflow example](../../../../examples/iris-pipeline/README.md)
+uses those commands through four ordinary Steps and the existing retained-artifact
+owner. This package's original `iris-train` command and single-Step Goon keep the
+training behavior described above.
+
+After native synchronization, use a fresh output directory and the installed
+commands. From this project directory in a POSIX shell:
+
+```sh
+iris_project="$PWD"
+task_pipeline_output="$(mktemp -d)"
+cd "$task_pipeline_output"
+"$iris_project/.venv/bin/iris-pipeline" ingest --random-seed 42 --test-size-percent 20
+"$iris_project/.venv/bin/iris-pipeline" train --data "$(cat ml-pipeline/data.json)" --max-iterations 300
+"$iris_project/.venv/bin/iris-pipeline" evaluate --data "$(cat ml-pipeline/data.json)" --model "$(cat ml-pipeline/model.json)" --minimum-accuracy-percent 90
+"$iris_project/.venv/bin/iris-pipeline" publish --model "$(cat ml-pipeline/model.json)" --verdict "$(cat ml-pipeline/evaluation.json)"
+```
+
+Ingestion loads the bundled Iris data and splits it once. Training consumes the
+actual split, evaluation restores the fitted scaler/classifier state and calls
+native scikit-learn prediction/scoring, and publication requires a successful
+verdict matching that model and data. Each JSON handoff is bounded to 16 KiB.
+These small public teaching values can enter command arguments and Run evidence;
+this is not a private or large-dataset intake mechanism.
+
+Only publication creates `ml-output/iris-model.joblib`, along with the metrics
+and parameter JSON files. The binary never travels in a scalar output. Existing
+destinations are refused, and a below-threshold evaluation exits nonzero. Use a
+fresh output directory for another native pipeline; the Oh-Goon example gives
+each Step its own attempt workspace. Load joblib models only from a trusted
+producer, such as this completed workflow's verified retained export.
 
 ## Run through Oh-Goon
 

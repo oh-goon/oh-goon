@@ -7,6 +7,7 @@ import "@/styles/feedback.css";
 import "@/styles/maintenanceWorkspace.css";
 import "@/styles/repositoryWorkspace.css";
 import "@/styles/dependenciesWorkspace.css";
+import "@/styles/catalogWorkspace.css";
 import "@/styles/runHistory.css";
 import "@/styles/toolsWorkspace.css";
 import "@/styles/plans.css";

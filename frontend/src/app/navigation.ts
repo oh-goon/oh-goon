@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 const APP_PAGES = [
-  "overview", "failures", "repositories", "dependencies", "plans", "shared-runs", "schedules",
+  "overview", "failures", "repositories", "catalog", "dependencies", "plans", "shared-runs", "schedules",
   "runs", "scout", "recovery", "tools", "settings", "help",
 ] as const;
 

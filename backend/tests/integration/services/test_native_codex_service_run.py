@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import shlex
 import subprocess
 import sys
@@ -18,6 +19,7 @@ import textwrap
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from threading import Event
+from time import monotonic, sleep
 from typing import Any
 
 import pytest
@@ -35,12 +37,21 @@ from oh_goon.core.models.agent_providers import (
 from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord, AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
+from oh_goon.core.models.run_events import ProcessStartedEvent, StepAttemptCreatedEvent
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.process_birth import observe_process_birth, observe_process_liveness
 from oh_goon.core.product_identity import repository_id
 from oh_goon.core.projections.agent_campaign import project_agent_campaign
-from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
+from oh_goon.core.vocabulary import (
+    FleetRunEventType,
+    FleetRunOutcome,
+    FleetRunStatus,
+    GameTapeStatus,
+)
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.execution.lease_environment import SystemLeaseEnvironment
 from oh_goon.services.execution_lock_persistence import write_execution_lock
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
@@ -333,6 +344,408 @@ def test_installed_codex_service_run_retains_context_and_verifies_independently(
         finally:
             if runtime is not None:
                 runtime.shutdown(wait_for_runs=True)
+
+
+class _McpPreworkResponses(CodexResponsesFixture):
+    """One native tool control and completion after the original MCP preflight."""
+
+    def __init__(self, private: Path) -> None:
+        self.private = private
+        super().__init__(transport="http", prompt=lambda: None, auth_token=_TOKEN)
+
+    def _response(
+        self, body: dict[str, Any], endpoint: BaseHTTPRequestHandler, transport: str
+    ) -> tuple[dict[str, Any], ...]:
+        self.request_count += 1
+        assert self.request_count <= 2
+        assert endpoint.headers.get("Authorization") == "Bearer " + _TOKEN
+        serialized = json.dumps(body)
+        assert "UNADMITTED_MCP_GUIDANCE_CANARY" not in serialized
+        assert "SYNTHETIC_PRIVATE_MCP_CONFIG_VALUE" not in serialized
+        assert "mcp__registered" not in json.dumps(body.get("tools", []))
+        if self.request_count == 1:
+            script = (
+                "import os,pathlib\n"
+                "assert pathlib.Path('source.py').read_text()=='VALUE = 42\\n'\n"
+                f"try: pathlib.Path({str(self.private)!r}).read_bytes()\n"
+                "except OSError: pass\n"
+                "else: raise AssertionError('native private store was readable')\n"
+                "assert 'MCP_PRIVATE_KEY' not in os.environ\n"
+                "assert 'SERVICE_PREWORK_KEY' not in os.environ\n"
+                "print('PREWORK_NATIVE_TOOL_CONTROL')\n"
+            )
+            command = shlex.join(("/usr/bin/python3", "-I", "-c", script))
+            item: dict[str, Any] = dict(
+                type="custom_tool_call",
+                id="ctc_prework",
+                call_id="prework",
+                name="exec",
+                namespace="functions",
+                input="text(await tools.exec_command(" + json.dumps({"cmd": command}) + "));",
+                status="completed",
+            )
+        else:
+            outputs = json.dumps(
+                [item.get("output", "") for item in body["input"] if "output" in item]
+            )
+            assert "PREWORK_NATIVE_TOOL_CONTROL" in outputs
+            item = dict(
+                type="message",
+                id="msg_prework_complete",
+                role="assistant",
+                content=[
+                    dict(
+                        type="output_text", text="Native prework control completed.", annotations=[]
+                    )
+                ],
+                status="completed",
+            )
+        events = self._events(f"resp_prework_{self.request_count}", item, 1)
+        for event in events:
+            if isinstance(event.get("response"), dict):
+                event["response"]["model"] = "gpt-6.1-sol"
+        return events
+
+
+@pytest.mark.certification
+@pytest.mark.parametrize("scenario", ("discovery", "cancel", "preflight_timeout"))
+def test_installed_codex_mcp_prework_keeps_original_run_and_process_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str
+) -> None:
+    """Native MCP startup is an admitted Step effect, including interrupted discovery."""
+    executable = os.environ.get("OH_GOON_NATIVE_CODEX")
+    runtime_root = os.environ.get("OH_GOON_NATIVE_CODEX_RUNTIME_ROOT")
+    if not executable or not runtime_root:
+        pytest.skip("Select installed Codex and its complete public runtime root explicitly")
+    if sys.platform != "linux" or not hasattr(os, "pidfd_open"):
+        pytest.skip("This native child-lifetime qualification requires Linux PIDFDs")
+    program, public_runtime = Path(executable), Path(runtime_root)
+    assert program.is_absolute() and public_runtime.is_absolute()
+    assert program.is_relative_to(public_runtime)
+    tmp_path.chmod(0o700)
+    repository = tmp_path / "repos" / "app"
+    repository.mkdir(parents=True)
+    source = repository / "source.py"
+    source.write_text("VALUE = 42\n")
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    git_config = (repository / ".git/config").read_bytes()
+    native_home, public_mcp = tmp_path / "synthetic-native-home", tmp_path / "public-mcp"
+    native_home.mkdir(mode=0o700)
+    public_mcp.mkdir(mode=0o700)
+    private = native_home / "private-canary"
+    private.write_text("SYNTHETIC_NATIVE_PRIVATE_DATA")
+    trace, release = tmp_path / "mcp-trace.jsonl", tmp_path / "release-initialize"
+    mcp_program = public_mcp / "server.py"
+    mcp_program.write_text(
+        textwrap.dedent("""\
+        import json, os, pathlib, sys, time
+
+        trace, release = map(pathlib.Path, sys.argv[1:])
+        def record(kind):
+            with trace.open('a') as stream:
+                stream.write(json.dumps(dict(kind=kind, pid=os.getpid(), ppid=os.getppid(),
+                    pgid=os.getpgrp(), time_ns=time.time_ns()))+'\\n')
+        record('startup')
+        for _ in range(64):
+            line = sys.stdin.readline(65537)
+            if not line:
+                break
+            if len(line.encode()) > 65536 or not line.endswith('\\n'):
+                raise RuntimeError('Synthetic MCP request exceeded its bound')
+            request = json.loads(line)
+            if 'id' not in request:
+                continue
+            method = request.get('method')
+            if method == 'initialize':
+                record('initialize_blocked')
+                deadline = time.monotonic()+90
+                while not release.exists():
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('Synthetic MCP initialize was not released')
+                    time.sleep(.01)
+                record('initialize_released')
+                result = dict(protocolVersion=request['params']['protocolVersion'],
+                    capabilities=dict(tools={}, resources={}),
+                    serverInfo=dict(name='synthetic-registered', version='1'),
+                    instructions='UNADMITTED_MCP_GUIDANCE_CANARY')
+            elif method == 'tools/list':
+                result = dict(tools=[dict(name='escape', description='Must remain excluded',
+                    inputSchema=dict(type='object', properties={}))])
+            elif method == 'tools/call':
+                record('CALLED')
+                result = dict(content=[dict(type='text', text='UNAUTHORIZED')])
+            else:
+                result = dict(resources=[], resourceTemplates=[], prompts=[])
+            print(json.dumps(dict(jsonrpc='2.0', id=request['id'], result=result)), flush=True)
+        """)
+    )
+    database_path = tmp_path / "state/app.sqlite"
+    monkeypatch.setenv("HOME", str(tmp_path / "synthetic-controller-home"))
+    monkeypatch.setenv("CODEX_HOME", str(native_home))
+    monkeypatch.setenv("SERVICE_PREWORK_KEY", _TOKEN)
+    monkeypatch.setenv("OH_GOON_DB", str(database_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    for name in (
+        "OPENAI_API_KEY",
+        "CODEX_API_KEY",
+        "CODEX_ACCESS_TOKEN",
+        "OH_GOON_EXECUTORS_FILE",
+        "OH_GOON_EXECUTORS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="native-mcp-prework",
+        definition=NativeAgentDefinition(
+            executable=str(program), runtime_roots=(str(public_runtime),)
+        ),
+        profile=NativeAgentProfile(
+            timeout_seconds=60,
+            codex_service=CodexServiceConnection(
+                home=str(native_home), model="gpt-6.1-sol", reasoning_effort="low"
+            ),
+        ),
+        executable_sha256=native_executable_sha256(program),
+    )
+    descriptors: list[int] = []
+    runtime = None
+    with _McpPreworkResponses(private) as endpoint:
+        native_config = (
+            'model="gpt-6.1-sol"\nmodel_provider="prework-fixture"\n'
+            # Public native options keep initialization pending beyond the
+            # original client's bounded response deadline in the failure case.
+            + ("mcp_optional_startup_grace_ms=0\n" if scenario == "preflight_timeout" else "")
+            + '[model_providers.prework-fixture]\nname="prework-fixture"\n'
+            f"base_url={json.dumps(endpoint.base_url + '/v1')}\n"
+            'env_key="SERVICE_PREWORK_KEY"\nwire_api="responses"\n'
+            "requires_openai_auth=false\nsupports_websockets=false\n"
+            "request_max_retries=0\nstream_max_retries=0\n"
+            '[mcp_servers.registered]\ncommand="/usr/bin/python3"\nargs='
+            + json.dumps(["-u", str(mcp_program), str(trace), str(release)])
+            + ("\nstartup_timeout_sec=60\n" if scenario == "preflight_timeout" else "")
+            + '\n[mcp_servers.registered.env]\nMCP_PRIVATE_KEY="SYNTHETIC_PRIVATE_MCP_CONFIG_VALUE"\n'
+            + f'\n[projects.{json.dumps(str(repository))}]\ntrust_level="trusted"\n'
+        )
+        (native_home / "config.toml").write_text(native_config)
+        assert not trace.exists()
+        try:
+            runtime = ApplicationRuntime.build(standard_local=True)
+            runtime.locations.add(repository)
+            assert not trace.exists(), "Runtime startup/registration must not launch the native MCP"
+            admitted = runtime.plans.run_native_agent(
+                selected=selected,
+                workspace=repository,
+                skill=None,
+                task="Read source.py and report VALUE without editing source.",
+            )
+            deadline = monotonic() + 30
+            records: list[dict[str, Any]] = []
+            while monotonic() < deadline:
+                if trace.exists():
+                    with trace.open() as stream:
+                        trace_text = stream.read(65537)
+                    assert len(trace_text.encode()) <= 65536
+                    records = [json.loads(line) for line in trace_text.splitlines()]
+                    if any(record["kind"] == "initialize_blocked" for record in records):
+                        break
+                sleep(0.01)
+            assert [record["kind"] for record in records] == ["startup", "initialize_blocked"], (
+                runtime.runs.get(admitted.fleet_run_id).model_dump_json(),
+                endpoint.errors,
+            )
+            startup = records[0]
+            child_pid = startup["pid"]
+            assert type(child_pid) is int and child_pid > 0
+            child_birth = observe_process_birth(child_pid)
+            assert child_birth is not None and observe_process_liveness(child_pid) is True
+            child_fd = os.pidfd_open(child_pid)
+            descriptors.append(child_fd)
+            assert observe_process_birth(child_pid) == child_birth
+            # The synthetic server's PID/parent/group are hints. Bind them to the
+            # OS and original command event while initialize remains blocked.
+            child_stat = (
+                (Path("/proc") / str(child_pid) / "stat").read_text().rsplit(")", 1)[1].split()
+            )
+            daemon_pid = int(child_stat[1])
+            assert startup["ppid"] == daemon_pid and startup["pgid"] == os.getpgid(child_pid)
+            event_batch = runtime.runs.events(admitted.fleet_run_id)
+            assert not event_batch.has_more
+            events = event_batch.events
+            daemon_events = [
+                event
+                for event in events
+                if isinstance(event, ProcessStartedEvent)
+                and event.event_type is FleetRunEventType.PROCESS_STARTED
+                and event.pid == daemon_pid
+            ]
+            assert len(daemon_events) == 1
+            daemon = daemon_events[0]
+            daemon_birth = observe_process_birth(daemon_pid)
+            assert daemon_birth is not None
+            assert daemon.process_identity == f"{daemon_birth.boot_id}:{daemon_birth.start_ticks}"
+            child_group, daemon_group = os.getpgid(child_pid), os.getpgid(daemon_pid)
+            assert daemon_group == daemon_pid
+            daemon_fd = os.pidfd_open(daemon_pid)
+            descriptors.append(daemon_fd)
+            assert observe_process_birth(daemon_pid) == daemon_birth
+            with LocalDatabase.observe_existing_for_inspection(database_path) as connection:
+                lease = connection.execute(
+                    "SELECT custody_phase,owner_pid,owner_identity,fleet_run_id FROM execution_lease WHERE singleton=1"
+                ).fetchone()
+            assert lease is not None and lease[0] == "WORKER_OWNED"
+            assert lease[3] == admitted.fleet_run_id and lease[1] != os.getpid()
+            worker_birth = observe_process_birth(lease[1])
+            assert worker_birth is not None
+            assert lease[2] == SystemLeaseEnvironment().process_identity(worker_birth.pid)
+            daemon_stat = (
+                (Path("/proc") / str(daemon_pid) / "stat").read_text().rsplit(")", 1)[1].split()
+            )
+            assert int(daemon_stat[1]) == worker_birth.pid
+            worker_fd = os.pidfd_open(worker_birth.pid)
+            descriptors.append(worker_fd)
+            assert observe_process_birth(worker_birth.pid) == worker_birth
+            assert not select.select(descriptors, [], [], 0)[0]
+            attempts = [event for event in events if isinstance(event, StepAttemptCreatedEvent)]
+            assert len(attempts) == 1
+            attempt = attempts[0]
+            assert daemon.step_attempt_id == attempt.step_attempt_id
+            assert daemon.operation_id == attempt.operation_id and daemon.step_id == attempt.step_id
+            for kind in (
+                FleetRunEventType.RUN_ADMITTED,
+                FleetRunEventType.RUN_STARTED,
+                FleetRunEventType.STEP_STARTED,
+            ):
+                matching = [event for event in events if event.event_type is kind]
+                assert (
+                    len(matching) == 1 and matching[0].sequence < attempt.sequence < daemon.sequence
+                )
+            assert endpoint.request_count == 0 and endpoint.http_inference_requests == 0
+            if scenario == "cancel":
+                cancelled = runtime.runs.cancel(admitted.fleet_run_id)
+                assert cancelled.status.cancel_request_satisfied
+            elif scenario == "discovery":
+                release.touch()
+            detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=45)
+            assert endpoint.errors == [], endpoint.errors
+            step = detail.game_tape.repositories[0].steps[0]
+            assert step.settlement.cleanup == "VERIFIED"
+            failure_diagnostic: str | None = None
+            if scenario == "cancel":
+                assert endpoint.request_count == 0 and endpoint.http_inference_requests == 0
+                assert detail.run.status is FleetRunStatus.CANCELLED
+                assert (
+                    step.status is GameTapeStatus.CANCELLED
+                    and step.settlement.outcome == "CANCELLED"
+                )
+                assert step.cancellation is not None and step.cancellation.supervisor is not None
+                supervisor = step.cancellation.supervisor
+                assert step.cancellation.physical_execution_id == daemon.physical_execution_id
+                assert supervisor.cleanup_reason == "cancel" and not step.attempts
+                assert not step.native_agent_observations
+            elif scenario == "preflight_timeout":
+                assert endpoint.request_count == 0 and endpoint.http_inference_requests == 0
+                assert detail.outcome is FleetRunOutcome.ATTENTION_REQUIRED
+                assert detail.run.status is FleetRunStatus.COMPLETED and step.cancellation is None
+                assert step.status is GameTapeStatus.FAILED and step.settlement.outcome == "FAILED"
+                assert step.settlement.reason != "ACCEPTED_SERVICE_COMPLETION"
+                assert len(step.attempts) == 1 and step.attempts[0].supervisor is not None
+                supervisor = step.attempts[0].supervisor
+                assert supervisor.cleanup_reason == "cancel"
+                assert len(step.native_agent_observations) == 1
+                native = step.native_agent_observations[0]
+                assert native.failed and not native.settled and native.execution is None
+                failure_diagnostic = "\n".join(event.summary for event in native.events)
+                assert any(
+                    message in failure_diagnostic
+                    for message in (
+                        "Native Codex request deadline expired",
+                        "Native Codex response deadline expired",
+                        "Native Codex response is unavailable or invalid",
+                    )
+                )
+                assert "request acceptance is unknown" in failure_diagnostic
+            else:
+                assert detail.outcome is FleetRunOutcome.SUCCESS, detail.model_dump_json()
+                assert endpoint.request_count == 2 and step.status is GameTapeStatus.PASSED
+                assert len(step.attempts) == 1 and step.attempts[0].supervisor is not None
+                supervisor = step.attempts[0].supervisor
+                native = step.native_agent_observations[0]
+                assert native.execution is not None and native.execution.mcp_catalog == "empty"
+                assert (
+                    native.execution.preflight == "verified"
+                    and native.execution.process_cleanup == "verified"
+                )
+            assert supervisor.final_process_group_quiescent is True
+            assert select.select([child_fd], [], [], 5)[0] == [child_fd]
+            assert select.select([daemon_fd], [], [], 5)[0] == [daemon_fd]
+            terminal_batch = runtime.runs.events(admitted.fleet_run_id)
+            assert not terminal_batch.has_more
+            terminal_events = terminal_batch.events
+            if scenario == "preflight_timeout":
+                assert not any(
+                    event.event_type is FleetRunEventType.RUN_CANCEL_REQUESTED
+                    for event in terminal_events
+                )
+            for kind in (
+                FleetRunEventType.TERMINATION_REQUESTED,
+                FleetRunEventType.PROCESS_EXITED,
+                FleetRunEventType.DESCENDANTS_QUIESCENT,
+            ):
+                assert any(
+                    event.event_type is kind
+                    and isinstance(event, ProcessStartedEvent)
+                    and event.physical_execution_id == daemon.physical_execution_id
+                    and event.process_identity == daemon.process_identity
+                    for event in terminal_events
+                )
+            with trace.open() as stream:
+                trace_text = stream.read(65537)
+            assert len(trace_text.encode()) <= 65536
+            final_records = [json.loads(line) for line in trace_text.splitlines()]
+            assert [record["kind"] for record in final_records] == (
+                ["startup", "initialize_blocked"]
+                if scenario != "discovery"
+                else ["startup", "initialize_blocked", "initialize_released"]
+            )
+            assert source.read_text() == "VALUE = 42\n"
+            assert (repository / ".git/config").read_bytes() == git_config
+            assert private.read_text() == "SYNTHETIC_NATIVE_PRIVATE_DATA"
+            assert (native_home / "config.toml").read_text() == native_config
+            retained = (
+                detail.model_dump_json()
+                + runtime.runs.game_tape_live_output(admitted.fleet_run_id).model_dump_json()
+            )
+            assert _TOKEN not in retained and "SYNTHETIC_PRIVATE_MCP_CONFIG_VALUE" not in retained
+            (tmp_path / "mcp-prework-run-receipt.json").write_text(
+                json.dumps(
+                    {
+                        "scenario": scenario,
+                        "run_id": admitted.fleet_run_id,
+                        "worker_birth": worker_birth.to_payload(),
+                        "daemon_birth": daemon_birth.to_payload(),
+                        "mcp_birth": child_birth.to_payload(),
+                        "daemon_pgid": daemon_group,
+                        "mcp_pgid": child_group,
+                        "physical_execution_id": daemon.physical_execution_id,
+                        "model_requests": endpoint.request_count,
+                        "outcome": detail.outcome.value,
+                        "run_status": detail.run.status.value,
+                        "failure_diagnostic": failure_diagnostic,
+                        "step_settlement": step.settlement.model_dump(mode="json"),
+                        "supervisor": supervisor.model_dump(mode="json"),
+                        "trace": final_records,
+                    }
+                )
+            )
+        finally:
+            try:
+                if runtime is not None:
+                    runtime.shutdown(wait_for_runs=False)
+            finally:
+                for descriptor in descriptors:
+                    os.close(descriptor)
 
 
 class _CampaignResponses(CodexResponsesFixture):

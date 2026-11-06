@@ -778,6 +778,42 @@ the actual workload must report disabled runtimes and empty effective catalogs.
 The original daemon owner retains final cleanup authority. Cold resume requires
 the original frozen instructions explicitly.
 A profile identifier alone is never permission proof.
+
+### MCP discovery effects and child lifetime
+
+[HUG-124](https://linear.app/hugloss/issue/HUG-124) qualifies the selected Codex
+0.164.0/Linux synthetic-server path through the existing protocol, original
+command owner and claimed Run worker. In the model-free component case, startup
+canary and initialization messages are first observed inside the threadless status interval,
+after initialized readiness. No model request or extra execution owner is needed
+to observe this native effect.
+
+The original-Run cases bind the live MCP child to the observed native daemon and
+claimed worker using independent OS birth, ancestry and PIDFD evidence alongside
+the original Run/Step/Attempt/process events. Child-written hints and timestamps
+do not grant custody or signal authority. MCP uses a distinct process group;
+the daemon's group-quiescence receipt is therefore separate from observed MCP
+child exit. The component child had exited by client close while the daemon
+remained live; no particular native disposal action is inferred from that
+checkpoint.
+
+| Selected preflight case | Original outcome and evidence |
+| --- | --- |
+| Normal discovery | Native startup precedes workload-thread tool exclusion and model work. The effective MCP catalog is empty and no synthetic MCP call is observed; the native command/private-read-denial control and original Step complete with verified daemon cleanup and observed child exit. The component test separately proves direct native MCP RPC refusal. |
+| Caller cancellation during blocked initialization | Canonical cancellation, zero model requests, no successful service-execution fact, original daemon cleanup and independent MCP-child exit. |
+| Status-RPC deadline during blocked initialization | Complete Run with ATTENTION_REQUIRED and a FAILED Step; zero model requests, no caller-cancel event and no successful service-execution fact. The retained diagnostic preserves unknown request acceptance; verified cleanup is a separate fact. |
+
+The existing controlled tests retain explicit malformed/rejected inventory and
+tool-disable failure coverage. The installed deadline case selects public native
+startup timing to exceed the client's bounded RPC deadline; it does not qualify
+every native failure response. Synthetic configuration predeclares workspace
+trust, so its byte-preservation check is not a promise that ordinary native
+startup never authors configuration. Stronger startup isolation, arbitrary
+descendant/group-escape containment, live accounts, other hosts/versions and strict
+custody remain unsupported or unqualified. The
+[compatibility record](AGENT_HARNESS_COMPATIBILITY.md#mcp-startup-and-preflight-child-lifetime--2026-11-06)
+retains the exact test owners and qualification scope.
+
 [OpenCodeServiceClient](../../backend/src/oh_goon/integrations/agent_opencode_service.py)
 owns strict numeric-loopback HTTP authority, bounded readiness, sanitized
 version/PID facts and deterministic client closure. It exposes no session
@@ -1017,7 +1053,7 @@ support bit, scheduler or qualification gate is added.
 | T41 | Historical Linux installed checks | WSL2/container/non-Linux parity NOT_RUN (HUG-110); no new ordinary privileged prerequisite. |
 | T42 | Existing three-harness fixture is sequential | Overlap was unqualified at this census; see the later [current HUG-122 admission boundary](#native-run-concurrency-and-admission-scope). |
 | T43 | Wheel/package smoke and source-checkout native tests are distinct | Exact installed-wheel native-Agent Run NOT_QUALIFIED (HUG-123/HUG-96). |
-| T44 | Codex MCP snapshot tests; historical configured-MCP campaign case | Partial A. Threadless discovery may start native MCP processes before thread disable; it is not effect-free prework (HUG-124). Current installed case NOT_RUN. |
+| T44 | Codex MCP snapshot tests; historical configured-MCP campaign case | Partial A at this census. Threadless discovery may start native MCP processes before thread disable. The installed case was NOT_RUN here; see the later [HUG-124 scope](#mcp-discovery-effects-and-child-lifetime). |
 
 #### Baseline gaps and follow-up ownership
 

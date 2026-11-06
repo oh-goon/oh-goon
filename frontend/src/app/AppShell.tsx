@@ -15,7 +15,7 @@ interface Props {
   children: ReactNode;
 }
 
-const STANDARD_NAV: AppPage[] = ["overview", "repositories", "dependencies", "plans", "runs", "schedules", "scout"];
+const STANDARD_NAV: AppPage[] = ["overview", "repositories", "catalog", "dependencies", "plans", "runs", "schedules", "scout"];
 const ADVANCED_NAV: AppPage[] = [...STANDARD_NAV, "recovery", "tools"];
 const UTILITY_NAV: AppPage[] = ["settings", "help"];
 
