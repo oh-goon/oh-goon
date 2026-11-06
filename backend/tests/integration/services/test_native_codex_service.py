@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import platform
+import select
 import shlex
 import sys
 from collections.abc import Iterator
@@ -33,7 +34,11 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
-from oh_goon.core.process_birth import ProcessBirthIdentity, observe_process_birth
+from oh_goon.core.process_birth import (
+    ProcessBirthIdentity,
+    observe_process_birth,
+    observe_process_liveness,
+)
 from oh_goon.engine.command import (
     CommandCancelledError,
     CommandProcessLifecycleEvent,
@@ -165,21 +170,40 @@ def test_installed_codex_service_keeps_native_stores_outside_phase_commands(tmp_
         Path(environment[key]).mkdir(mode=0o700)
     assert not runtime.is_relative_to(home) and not home.is_relative_to(runtime)
     mcp_trace = root / "mcp-startup-trace"
+    mcp_trace.touch(mode=0o600)
+    child_ready, child_release = root / "mcp-child-ready", root / "mcp-child-release"
+    for fifo in (child_ready, child_release):
+        os.mkfifo(fifo, mode=0o600)
     mcp_program = root / "public-mcp-probe.py"
     mcp_program.write_text(
-        r"""import json,pathlib,sys
+        r"""import json,os,pathlib,sys
 trace=pathlib.Path(sys.argv[1])
-with trace.open('a') as stream: stream.write('startup\n')
-for line in sys.stdin:
+def record(event):
+    payload=(json.dumps({'actor':'mcp','event':event,'pid':os.getpid()},separators=(',',':'))+'\n').encode()
+    assert len(payload)<=2048
+    descriptor=os.open(trace,os.O_WRONLY|os.O_APPEND|os.O_CLOEXEC)
+    try: assert os.write(descriptor,payload)==len(payload)
+    finally: os.close(descriptor)
+record('startup')
+hint=(json.dumps({'pid':os.getpid(),'ppid':os.getppid(),'pgid':os.getpgrp(),'sid':os.getsid(0)})+'\n').encode()
+assert len(hint)<=2048
+with open(sys.argv[2],'wb',buffering=0) as ready: ready.write(hint)
+with open(sys.argv[3],'rb',buffering=0) as release: assert release.read(1)==b'1'
+for index in range(64):
+    line=sys.stdin.readline(65537)
+    if not line: break
+    assert len(line)<=65536
     request=json.loads(line)
     if 'id' not in request: continue
     method=request.get('method')
     if method=='initialize':
+        record('initialize')
         result={'protocolVersion':request['params']['protocolVersion'],'capabilities':{'tools':{},'resources':{}},'serverInfo':{'name':'synthetic-registered','version':'1'},'instructions':'UNADMITTED_MCP_GUIDANCE_CANARY'}
     elif method=='tools/list':
+        record('tools/list')
         result={'tools':[{'name':'escape','description':'Must remain disabled','inputSchema':{'type':'object','properties':{}}}]}
     elif method=='tools/call':
-        with trace.open('a') as stream: stream.write('CALLED\n')
+        record('tools/call')
         result={'content':[{'type':'text','text':'UNAUTHORIZED'}]}
     else:
         result={'resources':[],'resourceTemplates':[],'prompts':[]}
@@ -188,7 +212,7 @@ for line in sys.stdin:
     )
     native_configuration = (
         '[mcp_servers.registered]\ncommand="/usr/bin/python3"\nargs='
-        + json.dumps(["-u", str(mcp_program), str(mcp_trace)])
+        + json.dumps(["-u", str(mcp_program), str(mcp_trace), str(child_ready), str(child_release)])
         + '\n[mcp_servers.registered.env]\nMCP_PRIVATE_KEY="SYNTHETIC_PRIVATE_MCP_CONFIG_VALUE"\n'
     )
     native_config = Path(environment["CODEX_HOME"]) / "config.toml"
@@ -234,6 +258,78 @@ for line in sys.stdin:
     cancelled = Event()
     outcomes: list[CommandResult | BaseException] = []
     process_births: list[ProcessBirthIdentity] = []
+    child_observed = Event()
+    observer_stopped = Event()
+    child_observations: list[dict[str, Any]] = []
+    child_errors: list[BaseException] = []
+    child_descriptors: list[int] = []
+    ready_descriptor = os.open(child_ready, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+    release_descriptor = os.open(child_release, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+
+    def trace_events() -> list[dict[str, Any]]:
+        with mcp_trace.open("rb") as stream:
+            payload = stream.read(65537)
+        assert len(payload) <= 65536
+        lines = payload.splitlines()
+        assert len(lines) <= 64 and all(len(line) <= 2048 for line in lines)
+        return [json.loads(line) for line in lines]
+
+    def checkpoint(phase: str) -> None:
+        payload = (json.dumps({"actor": "parent", "phase": phase}) + "\n").encode()
+        descriptor = os.open(mcp_trace, os.O_WRONLY | os.O_APPEND | os.O_CLOEXEC)
+        try:
+            assert os.write(descriptor, payload) == len(payload)
+        finally:
+            os.close(descriptor)
+
+    def bind_mcp_child() -> None:
+        try:
+            # The child cannot answer initialize until this independent OS
+            # observation completes. File snapshots or sleeps cannot replace it.
+            deadline = monotonic() + 15
+            while not select.select([ready_descriptor], [], [], 0.1)[0]:
+                if observer_stopped.is_set():
+                    return
+                assert monotonic() < deadline, "No native MCP startup"
+            payload = os.read(ready_descriptor, 2049)
+            assert len(payload) <= 2048 and payload.endswith(b"\n")
+            hint = json.loads(payload)
+            assert type(hint["pid"]) is int and hint["pid"] > 0
+            descriptor = os.pidfd_open(hint["pid"])
+            child_descriptors.append(descriptor)
+            birth = observe_process_birth(hint["pid"])
+            assert birth is not None and not select.select([descriptor], [], [], 0)[0]
+            assert len(process_births) == 1
+            daemon = process_births[0]
+            assert observe_process_birth(daemon.pid) == daemon
+            with (Path("/proc") / str(birth.pid) / "stat").open("rb") as stream:
+                stat = stream.read(4097)
+            assert len(stat) <= 4096
+            fields = stat[stat.rfind(b")") + 1 :].split()
+            ppid, pgid, sid = (int(value) for value in fields[1:4])
+            assert ppid == hint["ppid"] == daemon.pid
+            assert pgid == hint["pgid"] == os.getpgid(birth.pid)
+            assert sid == hint["sid"] == os.getsid(birth.pid)
+            assert observe_process_birth(birth.pid) == birth
+            assert not select.select([descriptor], [], [], 0)[0]
+            child_observations.append(
+                {
+                    "birth": birth.to_payload(),
+                    "parent_birth": daemon.to_payload(),
+                    "ppid": ppid,
+                    "pgid": pgid,
+                    "daemon_pgid": os.getpgid(daemon.pid),
+                    "sid": sid,
+                    "pidfd_live_at_binding": True,
+                }
+            )
+            child_observed.set()
+            assert os.write(release_descriptor, b"1") == 1
+        except BaseException as error:
+            child_errors.append(error)
+            cancelled.set()
+
+    observer = Thread(target=bind_mcp_child, name="observe-native-mcp-child")
 
     def process_started(event: CommandProcessLifecycleEvent) -> None:
         if event.kind == "PROCESS_STARTED":
@@ -264,6 +360,8 @@ for line in sys.stdin:
             outcomes.append(error)
 
     server = Thread(target=serve, name="owned-native-codex-service")
+    checkpoint("before_daemon_start")
+    observer.start()
     server.start()
     service_observed = False
     try:
@@ -278,15 +376,28 @@ for line in sys.stdin:
         service_observed = True
 
         async def inspect() -> None:
+            checkpoint("before_connect")
             async with CodexServiceClient(
                 advertised,
                 timeout_seconds=10,
                 experimental_api=True,
                 expected_process=process_births[0],
             ) as client:
+                checkpoint("after_initialize_readiness")
                 assert client.metadata["service_version"] == "0.164.0"
                 assert client.metadata["execution_admitted"] is False
                 assert len(process_births) == 1
+                checkpoint("before_threadless_snapshot")
+                exclusions = await client.mcp_exclusion_configuration()
+                checkpoint("after_threadless_snapshot")
+                assert exclusions == {"mcp_servers": {"registered": {"enabled": False}}}
+                assert child_errors == [] and child_observed.is_set(), child_errors
+                startup = [event for event in trace_events() if event.get("event") == "startup"]
+                assert len(startup) == 1
+                assert startup[0]["pid"] == child_observations[0]["birth"]["pid"]
+                assert {"initialize", "tools/list"} <= {
+                    event.get("event") for event in trace_events()
+                }
                 daemon_pid = process_births[0].pid
                 # This is the exact owned daemon's synthetic environment,
                 # never a parent environment or a discovered process.
@@ -334,8 +445,6 @@ for line in sys.stdin:
                         "facts": facts,
                     }
                 assert client.metadata["private_store_exclusion"] == "unverified"
-                exclusions = await client.mcp_exclusion_configuration()
-                assert exclusions == {"mcp_servers": {"registered": {"enabled": False}}}
                 created = await client.start_thread(
                     cwd=workspace,
                     permissions="phase-review",
@@ -348,6 +457,7 @@ for line in sys.stdin:
                 assert created["activePermissionProfile"]["id"] == "phase-review"
                 assert created["thread"]["turns"] == []
                 await client.require_mcp_servers_excluded(thread_id)
+                checkpoint("after_thread_exclusion")
                 with pytest.raises(AgentProviderError, match="refused"):
                     await client._request(
                         "mcpServer/tool/call",
@@ -369,6 +479,12 @@ for line in sys.stdin:
                     )
                 )
             assert server.is_alive(), "Closing the client must not stop the operator-owned service"
+            assert observe_process_birth(process_births[0].pid) == process_births[0]
+            assert observe_process_liveness(process_births[0].pid) is True
+            checkpoint("after_client_close")
+            child_observations[0]["pidfd_exited_at_client_close"] = bool(
+                select.select(child_descriptors, [], [], 0)[0]
+            )
             async with CodexServiceClient(
                 advertised,
                 timeout_seconds=10,
@@ -401,8 +517,16 @@ for line in sys.stdin:
         assert git.read_text() == "SYNTHETIC_GIT_METADATA"
         assert outside.read_text() == "OUTSIDE_REPAIR_SCOPE"
         assert native_config.read_text() == native_configuration
-        startup_lines = mcp_trace.read_text().splitlines()
-        assert startup_lines and set(startup_lines) == {"startup"}
+        events = trace_events()
+        assert not any(event.get("event") == "tools/call" for event in events)
+        phase = None
+        for event in events:
+            if event["actor"] == "parent":
+                phase = event["phase"]
+            elif event.get("event") == "startup":
+                child_observations[0]["earliest_observed_startup_phase"] = phase
+                break
+        assert phase == "before_threadless_snapshot", events
         for private_file in stores.iterdir():
             assert private_file.read_text() == "SYNTHETIC_PRIVATE_CANARY"
         assert {private_file.name for private_file in stores.iterdir()} == {
@@ -412,8 +536,32 @@ for line in sys.stdin:
             "opencode-config.json",
         }
     finally:
+        primary = sys.exception()
+        checkpoint("before_owner_stop")
         cancelled.set()
+        observer_stopped.set()
         server.join(timeout=12)
+        observer.join(timeout=2)
+        os.close(ready_descriptor)
+        os.close(release_descriptor)
+        try:
+            assert not observer.is_alive(), "Native MCP observation did not close"
+            if primary is None:
+                assert child_errors == [], child_errors
+            elif child_errors:
+                primary.add_note(f"Native MCP observation also failed: {child_errors}")
+            if child_observed.is_set():
+                assert len(child_descriptors) == 1
+                exited = bool(select.select(child_descriptors, [], [], 5)[0])
+                child_observations[0]["pidfd_exited_after_owner_stop"] = exited
+                assert exited, "Observed native MCP child outlived its original daemon owner"
+        finally:
+            for descriptor in child_descriptors:
+                os.close(descriptor)
+            checkpoint("after_owner_stop")
+            (root / "mcp-startup-lifecycle-receipt.json").write_text(
+                json.dumps({"events": trace_events(), "children": child_observations})
+            )
         assert not server.is_alive(), "Native service cleanup did not close its process owner"
         assert len(outcomes) == 1
         outcome = outcomes[0]

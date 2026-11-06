@@ -301,6 +301,41 @@ source bytes were restored after each experiment. These are maintenance probes,
 not alternate production paths. No native version, runtime support bit, registry,
 execution route or qualification gate is introduced.
 
+## MCP startup and preflight child lifetime — 2026-11-06
+
+[HUG-124](https://linear.app/hugloss/issue/HUG-124) retains the current service
+implementation and its explicit MCP-startup-isolation limitation. The selected
+Codex 0.164.0/Linux fixtures use synthetic native configuration, MCP and model
+endpoints in a loopback-only test namespace. Exact source, executable identity,
+commands and outcomes are recorded with the issue's native receipts.
+
+| Existing test owner | Selected observation |
+| --- | --- |
+| [Model-free native policy](../../backend/tests/integration/services/test_native_codex_service.py) | Phase checkpoints bracket native connection/readiness and threadless inventory before other tool RPCs. Startup-canary/initialize/tools-list events are observed in the inventory interval. Effective exclusion, direct native MCP-call refusal, private canaries and original daemon cancellation remain checked. |
+| [Original service Runs](../../backend/tests/integration/services/test_native_codex_service_run.py) | Three cases cover normal discovery, caller cancellation during held MCP initialization, and a genuine native RPC deadline/unknown-acceptance failure. Original claimed-worker/Step custody precedes the effect. Failed/cancelled preflight makes zero model requests and cannot publish successful service execution. |
+
+The configured MCP child has a different process group from the daemon. Its
+birth, parent and PIDFD are independently observed; child trace data remains
+untrusted context. The component child had exited by client closure while the
+original daemon remained alive. Each Run checks MCP-child and daemon exit
+separately from the original supervisor's process-group receipt. This does not
+attribute child exit to a particular native disposal action or claim that the
+daemon's group contains every native child.
+
+Native startup may author project trust. The synthetic byte-stability control
+predeclares the selected workspace's trust and retains stored MCP registrations;
+it does not establish whole-process configuration immutability. The failure case
+uses supported native startup timing beyond the existing client RPC deadline.
+Controlled tests separately retain malformed/rejected inventory and disable
+refusal; that entire installed fault space is not implied by one deadline case.
+
+Disposition: **retain** the native protocol, original Step/process custody and
+existing temporary adaptations. No new runtime behavior or owner is introduced.
+No-start/effect-free preflight, arbitrary descendant or group-escape containment,
+real account/store/network isolation, other native versions/hosts and strict
+custody remain unsupported or unqualified. This scoped lifetime evidence adds no
+ordinary startup or qualification gate.
+
 ## Native detached-work boundary
 
 [HUG-107](https://linear.app/hugloss/issue/HUG-107) separates native inner-task
