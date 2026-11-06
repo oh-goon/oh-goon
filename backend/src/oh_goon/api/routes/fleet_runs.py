@@ -1,10 +1,13 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from oh_goon.api.dependencies import fleet_run_control_plane
+from oh_goon.api.schemas.catalog_showcase import RunArtifactExportRequest
 from oh_goon.api.schemas.fleet import AgentCampaignResult, FleetRunChildRequest, FleetRunRequest
+from oh_goon.core.errors import FleetDomainError
+from oh_goon.core.models.catalog_showcase import RunArtifactExport
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
 from oh_goon.core.models.fleet_failures import (
     FleetFailureGroupPage,
@@ -28,10 +31,59 @@ from oh_goon.core.models.run import (
 )
 from oh_goon.core.models.run_events import FleetRunEventBatch
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunSource, FleetRunStatus
+from oh_goon.integrations.exact_file_write import ExactPublicationDurabilityError
 from oh_goon.services.enforcer_run_receipt import enforcer_run_receipt, render_enforcer_yaml
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 
 router = APIRouter(prefix="/fleet/runs", tags=["fleet"])
+
+
+@router.post(
+    "/{fleet_run_id}/artifact-exports",
+    response_model=RunArtifactExport,
+    operation_id="export_run_artifact",
+)
+def export_run_artifact(
+    fleet_run_id: str,
+    request: RunArtifactExportRequest,
+    control_plane: FleetRunControlPlane = Depends(fleet_run_control_plane),
+) -> RunArtifactExport:
+    """Explicitly export only the exact recorded artifact through its existing owner."""
+    try:
+        result = control_plane.export_artifact(
+            fleet_run_id,
+            repository_id=request.repository_id,
+            step_id=request.step_id,
+            artifact_path=request.path,
+            destination=request.destination,
+        )
+    except (FleetDomainError, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ARTIFACT_EXPORT_FAILED",
+                "kind": "CONFLICT",
+                "message": "Artifact export failed. Inspect the original Run, retained artifact, selected destination and any existing file before retrying.",
+                "details": {
+                    "publication": "VISIBLE_DURABILITY_UNVERIFIED"
+                    if isinstance(exc, ExactPublicationDurabilityError)
+                    else "NOT_CONFIRMED",
+                    "cleanup": "not-established-by-error",
+                },
+            },
+        ) from exc
+    return RunArtifactExport(
+        fleet_run_id=result.fleet_run_id,
+        repository_id=result.repository_id,
+        step_id=result.step_id,
+        artifact_path=result.artifact_path,
+        destination=str(result.destination),
+        sha256=result.sha256,
+        byte_count=result.byte_count,
+        reference_id=result.reference_id,
+        cleanup_status=result.cleanup_status,
+        cleanup_failure="STAGING_CLEANUP_FAILED" if result.cleanup_failure is not None else None,
+    )
 
 
 @router.get("", response_model=FleetRunHistoryPage, operation_id="fleet_run_history")

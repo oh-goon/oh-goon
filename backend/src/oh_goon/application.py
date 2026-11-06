@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from oh_goon.runtime.lifecycle import RuntimeLifecycle
     from oh_goon.runtime.schedule_scheduler import ScheduleScheduler
     from oh_goon.scout.service import ScoutService
+    from oh_goon.services.catalog_showcase import CatalogShowcaseService
     from oh_goon.services.command_center import CommandCenterService
     from oh_goon.services.dependencies import DependencyFleetService
     from oh_goon.services.direct_effect_admission import DirectEffectAdmission
@@ -69,6 +70,7 @@ class ApplicationRuntime:
     shared_plan_schedules: SharedPlanScheduleService
     lineups: LeagueLineupService
     scout: ScoutService
+    catalog_showcase: CatalogShowcaseService
     _lifecycle: RuntimeLifecycle
     _schedule_scheduler: ScheduleScheduler
     _startup_purpose: RuntimeStartupPurpose = "application"

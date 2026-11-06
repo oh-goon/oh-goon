@@ -3,6 +3,7 @@ from functools import lru_cache
 from oh_goon.application import ApplicationRuntime
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.scout.service import ScoutService
+from oh_goon.services.catalog_showcase import CatalogShowcaseService
 from oh_goon.services.command_center import CommandCenterService
 from oh_goon.services.dependencies import DependencyFleetService
 from oh_goon.services.filesystem import FilesystemService
@@ -53,6 +54,10 @@ def league_lineup_service() -> LeagueLineupService:
 
 def repository_service() -> RepositoryService:
     return application().repositories
+
+
+def catalog_showcase_service() -> CatalogShowcaseService:
+    return application().catalog_showcase
 
 
 def dependency_fleet_service() -> DependencyFleetService:

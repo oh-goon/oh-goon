@@ -41,6 +41,10 @@ export interface ApiClient {
   health(options?: ReadRequestOptions): ReadOperationResult<typeof op.health.operationId>;
   privacy(options?: ReadRequestOptions): ReadOperationResult<typeof op.privacy_status.operationId>;
   fleet(options?: ReadRequestOptions): ReadOperationResult<typeof op.fleet_snapshot.operationId>;
+  catalogExplore(repositoryId: string, request: OperationBody<typeof op.catalog_explore.operationId>, options?: ReadRequestOptions): ReadOperationResult<typeof op.catalog_explore.operationId>;
+  catalogPreview(repositoryId: string, request: OperationBody<typeof op.catalog_preview.operationId>, options?: ReadRequestOptions): ReadOperationResult<typeof op.catalog_preview.operationId>;
+  startCatalogRun(repositoryId: string, request: OperationBody<typeof op.catalog_run.operationId>): WriteOperationResult<typeof op.catalog_run.operationId>;
+  exportRunArtifact(runId: string, request: OperationBody<typeof op.export_run_artifact.operationId>): WriteOperationResult<typeof op.export_run_artifact.operationId>;
   scoutOverview(hours?: number, limit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.scout_overview.operationId>;
   scoutFindings(hours?: number, category?: ScoutFindingCategory, offset?: number, limit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.scout_findings.operationId>;
   scoutRepository(repositoryId: string, hours?: number, planId?: string, section?: ScoutDetailSection, offset?: number, limit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.scout_repository.operationId>;

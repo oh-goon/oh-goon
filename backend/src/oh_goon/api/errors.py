@@ -52,7 +52,13 @@ async def validation_exception_handler(
 ) -> JSONResponse:
     # T5 inspection receives caller-supplied Plan input values, potentially secrets.
     # Pydantic error contexts can include rejected input data; never return them.
-    if request.url.path == "/api/league/shared-plan-input-inspections":
+    private_operation = getattr(request.scope.get("route"), "operation_id", None) in {
+        "catalog_explore",
+        "catalog_preview",
+        "catalog_run",
+        "export_run_artifact",
+    }
+    if request.url.path == "/api/league/shared-plan-input-inspections" or private_operation:
         payload = ApiErrorResponse(
             code="VALIDATION_ERROR",
             kind=ErrorKind.INVALID_REQUEST,

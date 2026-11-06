@@ -803,6 +803,9 @@ class FleetPlanService:
         source: FleetPlanSource | None = None,
         expected_plan_id: str | None = None,
         root_expected_name: str | None = None,
+        external_artifacts: tuple[tuple[str, bytes], ...] = (),
+        source_graph: FleetPlanSourceGraph | None = None,
+        reviewed_repository_source: RepositorySourceAuthority | None = None,
     ) -> FleetPlanTarget:
         return prepare_reviewed_execution_target(
             self._resolver,
@@ -813,6 +816,9 @@ class FleetPlanService:
             source=source,
             expected_plan_id=expected_plan_id,
             root_expected_name=root_expected_name,
+            external_artifacts=external_artifacts,
+            source_graph=source_graph,
+            reviewed_repository_source=reviewed_repository_source,
         )
 
     def explain(
@@ -1878,6 +1884,9 @@ class FleetPlanService:
         expected_plan_id: str | None = None,
         expected_repository_instance_ids: dict[str, str] | None = None,
         root_expected_name: str | None = None,
+        external_artifacts: tuple[tuple[str, bytes], ...] = (),
+        source_graph: FleetPlanSourceGraph | None = None,
+        reviewed_repository_source: RepositorySourceAuthority | None = None,
     ) -> FleetRunState:
         # Reviewed direct calls also cross the existing ingress before any
         # resolution/digest work. Do not grant authority from the review hash.
@@ -1889,6 +1898,9 @@ class FleetPlanService:
             source=source,
             expected_plan_id=expected_plan_id,
             root_expected_name=root_expected_name,
+            external_artifacts=external_artifacts,
+            source_graph=source_graph,
+            reviewed_repository_source=reviewed_repository_source,
         )
         return self._runs.start_prepared_plan(
             target,
@@ -2230,10 +2242,15 @@ def prepare_reviewed_execution_target(
     source: FleetPlanSource | None = None,
     expected_plan_id: str | None = None,
     root_expected_name: str | None = None,
+    external_artifacts: tuple[tuple[str, bytes], ...] = (),
+    source_graph: FleetPlanSourceGraph | None = None,
+    reviewed_repository_source: RepositorySourceAuthority | None = None,
 ) -> FleetPlanTarget:
-    graph = resolver.analyze_source(plan_path, root_expected_name=root_expected_name)
+    graph = _selected_source_graph(
+        resolver, plan_path, source_graph=source_graph, root_expected_name=root_expected_name
+    )
     plan = resolver.resolve_source_graph(graph, extensions_path=extensions_path, inputs=inputs)
-    lock = build_execution_lock(plan)
+    lock = build_execution_lock(plan, external_artifacts=external_artifacts)
     if lock.digest != expected_execution_digest:
         raise FleetPlanInvalid(
             "Fleet plan execution identity changed after preview; preview the exact plan again before execution"
@@ -2251,6 +2268,8 @@ def prepare_reviewed_execution_target(
         plan=plan,
         source=source or PlanFileSource(sha256=source_sha256),
         identity=ExecutionIdentity(digest=lock.digest),
+        lock_artifacts=lock.external,
+        reviewed_repository_source=reviewed_repository_source,
     )
 
 

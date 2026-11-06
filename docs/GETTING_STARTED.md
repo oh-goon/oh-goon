@@ -12,6 +12,26 @@ Your repository inventory and repository-owned CI/CD workspace. Add League folde
 
 Run one explicitly selected Shared Plan over one or more explicitly selected repositories. A Shared Run never reads, merges, inherits, or falls back to the selected repositories' own `goon.yml` files.
 
+### Explore code
+
+Choose an included repository, enter a code query and press **Explore repository**.
+Select a returned source location and explore it to see the available native Git
+author and bounded static relationships. Hashmarks observations retain their
+actual freshness and coverage; unknown freshness or no hits never proves absence.
+The last Git commit author is separate from the catalog owner you choose.
+
+Review all six catalog values, request **Preview catalog**, then explicitly approve
+the displayed values for that observed source. **Generate catalog** starts one
+original Run. Editing the candidate or selecting new evidence revokes approval;
+source drift is refused by admission. No external AI provider is selected.
+
+Open the original Game Tape to inspect status and retained outputs. In **Outputs**,
+choose the recorded retained artifact and an absolute path to a new local file,
+then explicitly export it. Existing files are kept. This does not commit, push or
+register anything in Backstage. Native tools retain their network authority;
+this flow does not establish network-isolation qualification. Use the
+[synthetic example](../examples/private-code-catalog/README.md) for demonstrations.
+
 ### Schedules
 
 Inspect time triggers. Each Schedule owns an explicit repository target set, one Plan, and wall-clock timing; it is not a workflow composer. Each repository target becomes its own canonical Run.

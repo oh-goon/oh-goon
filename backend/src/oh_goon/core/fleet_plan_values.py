@@ -9,6 +9,7 @@ from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.models.fleet_plan_values import (
     HostEnvironmentPart,
     HostEnvSource,
+    InputEnvSource,
     LiteralEnvironmentPart,
     LiteralEnvSource,
     PlanEnvDefinition,
@@ -140,6 +141,8 @@ class PipelineValueCompiler:
         source = definition.source
         if isinstance(source, HostEnvSource):
             return CompiledPipelineValue((HostEnvironmentPart(name=name),))
+        if isinstance(source, InputEnvSource):
+            return self._compile_input(source.name)
         if isinstance(source, LiteralEnvSource):
             return CompiledPipelineValue(
                 (LiteralEnvironmentPart(value=_scalar_text(source.value)),)

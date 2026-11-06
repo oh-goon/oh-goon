@@ -2,11 +2,39 @@ import { FleetRepositoryScope } from "@generated/enums";
 import { decodeResponse, operations } from "@generated/operations";
 
 import { BrowserFixtureApiClient } from "../BrowserFixtureApiClient";
-import { FIXTURE_REPOSITORIES, FIXTURE_REPOSITORY_LIST } from "./identities";
+import { FIXTURE_REPOSITORIES, FIXTURE_REPOSITORY_LIST, fixtureRepositoryInstanceId } from "./identities";
 import { FIXTURE_PLANS, FIXTURE_SHA } from "./plans";
 import { DEFAULT_RUN_ID } from "./runIds";
+import { CATALOG_FIXTURE_CANDIDATE, CATALOG_FIXTURE_STEP_ID } from "./catalog";
 
 describe("BrowserFixtureApiClient canonical fixture contracts", () => {
+  it("preserves catalog source/preview authority and the original retained producer through generated contracts", async () => {
+    const client = new BrowserFixtureApiClient();
+    const repositoryId = FIXTURE_REPOSITORIES.catalog.repository_id;
+    const exploration = decodeResponse(operations.catalog_explore.operationId, await client.catalogExplore(repositoryId, { expected_repository_instance_id: fixtureRepositoryInstanceId(repositoryId), query: "submit_order" }));
+    const candidate = { source_authority: exploration.source_authority, candidate: CATALOG_FIXTURE_CANDIDATE };
+    const preview = decodeResponse(operations.catalog_preview.operationId, await client.catalogPreview(repositoryId, candidate));
+    const request = { ...candidate, expected_plan_id: preview.plan_id, expected_plan_sha256: preview.plan_sha256, expected_execution_digest: preview.execution_digest, fleet_run_id: "fleet-catalog-browser-contract" };
+    await expect(client.startCatalogRun(repositoryId, { ...request, expected_plan_sha256: "0".repeat(64) })).resolves.toMatchObject({ outcome: "stale" });
+    const submitted = await client.startCatalogRun(repositoryId, request);
+    expect(submitted.outcome).toBe("saved");
+    if (submitted.outcome !== "saved") return;
+    decodeResponse(operations.catalog_run.operationId, submitted.value);
+    await client.fleetRunEvents(request.fleet_run_id, 0);
+    await client.fleetRunEvents(request.fleet_run_id, 1);
+    await client.fleetRunEvents(request.fleet_run_id, 1);
+    const detail = decodeResponse(operations.get_fleet_run.operationId, await client.fleetRunDetail(request.fleet_run_id));
+    expect(detail.run.fleet_run_id).toBe(request.fleet_run_id);
+    expect(detail.game_tape.repositories[0]?.steps?.map((step) => step.step_id)).toEqual([CATALOG_FIXTURE_STEP_ID]);
+    expect(detail.repository_admissions[0]?.source_authority).toEqual(exploration.source_authority);
+    const selection = { repository_id: repositoryId, step_id: CATALOG_FIXTURE_STEP_ID, path: "catalog-info.yaml", destination: "/tmp/catalog-demo/catalog-info.yaml" };
+    const exported = await client.exportRunArtifact(request.fleet_run_id, selection);
+    expect(exported.outcome).toBe("saved");
+    if (exported.outcome !== "saved") return;
+    decodeResponse(operations.export_run_artifact.operationId, exported.value);
+    await expect(client.exportRunArtifact(request.fleet_run_id, selection)).resolves.toMatchObject({ outcome: "write-error" });
+  });
+
   it("observes selected artifact bytes only on request while retaining the recorded evidence", async () => {
     const client = new BrowserFixtureApiClient("artifact-observation");
     const recorded = decodeResponse(operations.get_fleet_run.operationId, await client.fleetRunDetail(DEFAULT_RUN_ID));

@@ -1,0 +1,17 @@
+[project]
+name = "oh-goon-catalog-renderer"
+version = "0.1.0"
+description = "Serialize explicitly reviewed Backstage Component metadata."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+catalog-render = "oh_goon_catalog_renderer.cli:main"
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oh_goon_catalog_renderer"]

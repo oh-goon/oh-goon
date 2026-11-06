@@ -8,6 +8,7 @@ from oh_goon.core.models.repository import (
     ExcludedRepositoryCatalogEntry,
     IncludedRepositoryCatalogEntry,
     RepositoryCatalogEntry,
+    RepositoryIdentity,
 )
 from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.vocabulary import FleetScope
@@ -31,6 +32,29 @@ class RepositoryService:
         return [
             entry for entry in self.list(view) if isinstance(entry, IncludedRepositoryCatalogEntry)
         ]
+
+    def require_included(self, repository_id: str) -> RepositoryIdentity:
+        """Resolve one explicit registered subject using the existing discovery policy.
+
+        Exact configured filesystem roots do not expand Git-Team discovery or
+        borrow a parent repository's identity. Both routes consume one scope cut.
+        """
+        captured = self._state.read_view()
+        explicit = self._discovery.explicit_configured_roots(
+            captured.locations, repository_ids={repository_id}
+        )
+        if explicit:
+            selected = explicit[0]
+            if str(selected.path) not in captured.exclusions:
+                return selected
+        else:
+            for entry in self.list(captured):
+                if (
+                    isinstance(entry, IncludedRepositoryCatalogEntry)
+                    and entry.repository.repository_id == repository_id
+                ):
+                    return entry.repository
+        raise RepositoryNotManaged("Select an included registered repository")
 
     def exclude(
         self, raw_path: str, reason: str, expected_repository_instance_id: str

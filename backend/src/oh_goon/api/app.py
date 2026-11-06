@@ -25,6 +25,7 @@ from oh_goon.api.local_access import (
 )
 from oh_goon.api.routes import (
     capabilities,
+    catalog_showcase,
     dependencies,
     filesystem,
     fleet_command_center,
@@ -109,6 +110,7 @@ def create_app(
     app.include_router(locations.router, prefix="/api", responses=common_error_responses())
     app.include_router(league.router, prefix="/api", responses=common_error_responses())
     app.include_router(repositories.router, prefix="/api", responses=common_error_responses())
+    app.include_router(catalog_showcase.router, prefix="/api", responses=common_error_responses())
     app.include_router(fleet_snapshot.router, prefix="/api", responses=common_error_responses())
     app.include_router(dependencies.router, prefix="/api", responses=common_error_responses())
     app.include_router(

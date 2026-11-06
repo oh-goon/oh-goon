@@ -83,6 +83,10 @@ const PRIVACY: PrivacyResponse = {
 };
 
 export class InMemoryApiClient implements ApiClient {
+  catalogExplore(..._args: Parameters<ApiClient["catalogExplore"]>): ReturnType<ApiClient["catalogExplore"]> { return unsupported("catalogExplore"); }
+  catalogPreview(..._args: Parameters<ApiClient["catalogPreview"]>): ReturnType<ApiClient["catalogPreview"]> { return unsupported("catalogPreview"); }
+  startCatalogRun(..._args: Parameters<ApiClient["startCatalogRun"]>): ReturnType<ApiClient["startCatalogRun"]> { return unsupported("startCatalogRun"); }
+  exportRunArtifact(..._args: Parameters<ApiClient["exportRunArtifact"]>): ReturnType<ApiClient["exportRunArtifact"]> { return unsupported("exportRunArtifact"); }
   readonly state: InMemoryApiState;
   private locationsState: string[];
   private unavailableLocationsState: string[];

@@ -29,6 +29,9 @@
     "agents/verification": {
       "check": []
     },
+    "general/catalog-render": {
+      "catalog": []
+    },
     "general/orders-taskflow": {
       "extract": [],
       "load": [],

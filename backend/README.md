@@ -120,6 +120,12 @@ Repository-tooling regressions belong in `../scripts/tests/`, even though their 
 
 ## API contract boundary
 
+Catalog preview and native generation share the standalone
+[`general/catalog-render`](../templates/goons/general/catalog-render/README.md)
+formatter. Native Hatch exposes that source package in editable development;
+standard wheels obtain it only from the existing admitted catalog delivery.
+Keep validation/serialization there rather than copying it into backend or UI.
+
 The backend owns API semantics. The contract flow is:
 
 ```text

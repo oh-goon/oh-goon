@@ -33,6 +33,11 @@ flat membership. It retains source/configuration/environment identity and exact
 results. A nomination does not establish whole-owner coverage, and bounded
 producer qualifiers remain visible.
 
+Configured native Vitest collection determines which frontend advice belongs
+to that runner. Uncollected advice remains explicit and cannot be credited from
+passing aggregate counters. Execution and aggregation require the admitted file
+occurrences, preserving configured project variants instead of deduplicating them.
+
 Hosted verification admits one immutable plan, then runs its static checks and
 selected behavioral proof in separate GitHub jobs. Each execution job has its
 own 15-minute budget; steps within a job share that budget. The behavioral job
@@ -43,7 +48,7 @@ The jobs do not select work again or share mutable test infrastructure.
 The existing `selected-proof` job combines the applicable phase receipts into
 the original complete result. Missing, duplicate, failed, cancelled, stale or
 foreign-source parts cannot qualify it; a phase receipt alone is never merge
-proof. The unchanged independent `merge-gate` validates that complete result
+proof. The independent `merge-gate` validates that complete result
 against trusted-base policy. Empty phases require no execution job or dummy
 receipt. Rerunning failed jobs for the same frozen source retains successful
 job artifacts by their original IDs, including when their attempts differ.
@@ -218,10 +223,14 @@ outside its bounded routes or missing required behavioral proof before publishin
 proof-selection outputs or preparing native-test capabilities. Existing frontend
 static requirements are resolved from native changed paths before admission so
 normal locked npm preparation supplies the actual compiler for observation.
-This preparation establishes capability, never verification. Focused plan inspection remains
-available for incomplete selections. Execution applies the same selection guard
-after checking the retained plan's current source; early refusal does not establish
-verification or relax the independent trusted-base gate.
+This preparation establishes capability, never verification. Focused feedback may
+execute the admitted checks in an incomplete selection and aggregate their original
+receipts. It retains every unresolved selection reason and validates every claimed
+bounded proof; an unadmitted source does not acquire proof from another passing
+check. Candidate, source, producer and dependency-environment freshness still apply
+before and after focused execution. Merge execution refuses unresolved selection
+before starting checks. Focused success remains **FOCUSED / NOT_FULLY_VERIFIED**
+and cannot satisfy the independent trusted-base merge gate.
 
 `daily` marks expensive ordinary journeys assigned to daily execution. It is
 separate from `slow` (exhaustive variants), `process`, `scale` and `certification`.
@@ -433,7 +442,9 @@ legacy-protection read means effective enforcement remains unverified. Keep the
 replacement PR in draft until reviewed source, daily execution and the required
 administrator cutover are ready. A green optional workflow is not merge protection.
 A bounded manual replay uses **Relevant verification → Run workflow** with an
-immutable base SHA; it does not alter default-branch settings.
+immutable base SHA. Its final check is **replay-feedback**, because the caller
+selects that base; it cannot publish the required **merge-gate** status or alter
+default-branch settings.
 
 For the repository's current personal-account ownership, use strict required
 status checks in the existing [main ruleset](https://github.com/oh-goon/oh-goon/rules/25700231).
@@ -960,12 +971,18 @@ The dataflow surface is intentionally small:
 
 ```text
 inputs      immutable run parameters
-env         immutable named host or literal values with an explicit source
+env         immutable named host, literal or explicitly bound input values
 step output direct reference to an earlier declared output
 steps       fresh isolated attempts
 ```
 
 Inputs and environment values are not automatically exported into every process. A Step receives only the values it explicitly imports plus the deterministic strict baseline. A later Step may reference an earlier declared Step output directly; there is no intermediate variable namespace or output-to-environment alias layer.
+
+`env: {NAME: {from: input, name: INPUT}}` transports that Goon's already-bound
+scalar through an explicit Step environment import. The compiler does not
+reinterpret the supplied value as another expression, consult ambient defaults,
+or change `{value: ...}` literal semantics. The resolved value is covered by the
+same execution lock as its consumer Step. See [Goon authoring](development/GOON_AUTHORING.md).
 
 Secret-bearing host values are captured only when explicitly imported, are used for execution/redaction, and are not persisted as canonical evidence or dumped globally to stdout.
 

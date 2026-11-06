@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 
 import type { GameTape as GameTapeModel, GameTapeArtifactObservation } from "@generated/models";
 import { GameTapeStepArtifacts } from "@/features/game-tape/components/GameTapeStepArtifacts";
+import { RunArtifactExportForm } from "@/features/game-tape/components/RunArtifactExportForm";
 
 export function GameTapeOutputs({ tape, observation }: { tape: GameTapeModel; observation?: GameTapeArtifactObservation | null }) {
   const { t } = useTranslation();
@@ -21,6 +22,7 @@ export function GameTapeOutputs({ tape, observation }: { tape: GameTapeModel; ob
           <ul>{(step.outputs ?? []).map((output) => <li key={output.name}><code>{output.name}</code><span>{output.byte_count} B</span><code title={output.sha256}>{output.sha256.slice(0, 12)}</code></li>)}</ul>
         </section> : null}
         <GameTapeStepArtifacts artifacts={step.artifacts ?? []} ownerIdentity={step.step_execution_id} observation={observation} artifactOwner={{ repository_execution_id: repository.repository_execution_id, repository_id: repository.repository.repository_id, step_execution_id: step.step_execution_id, step_id: step.step_id }} />
+        {tape.status !== "CANCELLED" && tape.status !== "INTERRUPTED" ? (step.artifacts ?? []).map((artifact) => artifact.status === "PRESENT" && artifact.retained_object ? <RunArtifactExportForm key={artifact.path} fleetRunId={tape.fleet_run_id} repositoryId={repository.repository.repository_id} stepId={step.step_id} artifact={artifact} /> : null) : null}
       </article>)}
     </div>}
   </section>;

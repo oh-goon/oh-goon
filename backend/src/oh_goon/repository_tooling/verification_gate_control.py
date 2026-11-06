@@ -481,6 +481,7 @@ def require_verification_support_proof(
     executed_files: set[str],
     *,
     admitted_hashmarks_upgrade: bool = False,
+    require_complete: bool = True,
 ) -> None:
     # The caller has already admitted the named native-artifact/smoke route.
     # Keep file-wide producer roles intact without repeating its proof for the
@@ -497,6 +498,23 @@ def require_verification_support_proof(
         and row.get("changed_path") not in plan.get("removed_paths", [])
         and row.get("changed_path") not in upgrade_inputs
     }
+    if not require_complete:
+        if not plan.get("unverified"):
+            raise ValueError("Partial support proof requires an explicitly unverified selection")
+        claimed = evidence.get("verification_support_admission")
+        if claimed is None and VERIFICATION_SUPPORT_OBLIGATION not in plan.get("obligations", []):
+            return
+        paths = claimed.get("paths") if isinstance(claimed, Mapping) else None
+        if (
+            not isinstance(paths, list)
+            or not paths
+            or any(not isinstance(path, str) or path not in bounded for path in paths)
+        ):
+            raise ValueError("Bounded verification-support proof names another source")
+        # Draft feedback does not admit the unresolved remainder. Revalidate
+        # every claimed route against its intact native observation and actual
+        # selected consumer; the default trusted merge path still requires all.
+        bounded = {path: bounded[path] for path in paths}
     if not bounded:
         if "verification_support_admission" in evidence:
             raise ValueError("Bounded verification-support proof names another source")
@@ -1216,29 +1234,25 @@ def validate_merge_proof(
     executed_members: set[str] = set()
     for row in outcomes:
         if row["owner"] == "Frontend behavior":
-            classifier = runpy.run_path(str(Path(__file__).with_name("frontend_test_results.py")))[
-                "vitest_outcomes"
-            ]
+            frontend_owner = runpy.run_path(
+                str(Path(__file__).with_name("frontend_test_results.py"))
+            )
             native_frontend = row.get("native_report", {})
-            complete, satisfied, _counts = classifier(native_frontend)
+            complete, satisfied, _counts = frontend_owner["vitest_outcomes"](native_frontend)
             if not complete or not satisfied or root is None:
                 raise ValueError("Native frontend proof is skipped, failed or incomplete")
             producer_project = Path(row.get("native_project_root", ""))
-            if not producer_project.is_absolute() or ".." in producer_project.parts:
-                raise ValueError("Native frontend invocation root is unavailable")
-            frontend_files: set[str] = set()
-            for suite in native_frontend["testResults"]:
-                suite_path = Path(suite["name"])
-                suite_path = (
-                    suite_path if suite_path.is_absolute() else producer_project / suite_path
-                )
-                if not suite_path.is_relative_to(producer_project):
-                    raise ValueError("Native frontend proof names another workspace")
-                frontend_files.add(
-                    "frontend/" + suite_path.relative_to(producer_project).as_posix()
-                )
-            if set(plan.get("frontend", [])) != frontend_files:
-                raise ValueError("Selected frontend proof is missing or has extra files")
+            admission = evidence.get("frontend_admission")
+            if not isinstance(admission, Mapping) or not isinstance(
+                admission.get("collection"), Mapping
+            ):
+                raise ValueError("Native frontend collection proof is unavailable")
+            frontend_files = frontend_owner["require_native_vitest_files"](
+                native_frontend,
+                project_root=producer_project,
+                expected_files=plan.get("frontend", []),
+                collection=admission["collection"],
+            )
             executed_files.update(frontend_files)
         if row["owner"] != "Native pytest":
             continue

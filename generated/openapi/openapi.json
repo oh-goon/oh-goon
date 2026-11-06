@@ -2840,6 +2840,711 @@
         "title": "CapturedProjectSource",
         "type": "object"
       },
+      "CatalogCandidate": {
+        "description": "Six reviewed values; field allowlisting never redacts their contents.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Languages",
+            "type": "array"
+          },
+          "lifecycle": {
+            "enum": [
+              "experimental",
+              "production",
+              "deprecated"
+            ],
+            "title": "Lifecycle",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "service",
+              "website",
+              "library"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "owner",
+          "type",
+          "lifecycle",
+          "languages"
+        ],
+        "title": "CatalogCandidate",
+        "type": "object"
+      },
+      "CatalogCandidateOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "component_types": {
+            "items": {
+              "enum": [
+                "service",
+                "website",
+                "library"
+              ],
+              "type": "string"
+            },
+            "title": "Component Types",
+            "type": "array"
+          },
+          "lifecycles": {
+            "items": {
+              "enum": [
+                "experimental",
+                "production",
+                "deprecated"
+              ],
+              "type": "string"
+            },
+            "title": "Lifecycles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "component_types",
+          "lifecycles"
+        ],
+        "title": "CatalogCandidateOptions",
+        "type": "object"
+      },
+      "CatalogEvidenceQualification": {
+        "additionalProperties": false,
+        "properties": {
+          "admissibility_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Admissibility Reasons",
+            "type": "array"
+          },
+          "completeness": {
+            "title": "Completeness",
+            "type": "string"
+          },
+          "freshness": {
+            "title": "Freshness",
+            "type": "string"
+          },
+          "generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation"
+          },
+          "identity_generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Generation"
+          },
+          "negative_evidence": {
+            "title": "Negative Evidence",
+            "type": "string"
+          },
+          "repository_wide_completeness": {
+            "title": "Repository Wide Completeness",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "freshness",
+          "completeness",
+          "truncated",
+          "negative_evidence",
+          "admissibility_reasons",
+          "repository_wide_completeness"
+        ],
+        "title": "CatalogEvidenceQualification",
+        "type": "object"
+      },
+      "CatalogExploration": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_options": {
+            "$ref": "#/components/schemas/CatalogCandidateOptions"
+          },
+          "git_author": {
+            "$ref": "#/components/schemas/CatalogGitAuthor"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogSearchHit"
+            },
+            "title": "Hits",
+            "type": "array"
+          },
+          "languages": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogLanguageObservation"
+            },
+            "title": "Languages",
+            "type": "array"
+          },
+          "ownership_status": {
+            "const": "manual-review-required",
+            "default": "manual-review-required",
+            "title": "Ownership Status",
+            "type": "string"
+          },
+          "producer_identity": {
+            "title": "Producer Identity",
+            "type": "string"
+          },
+          "provider_mode": {
+            "const": "none",
+            "default": "none",
+            "title": "Provider Mode",
+            "type": "string"
+          },
+          "qualification": {
+            "$ref": "#/components/schemas/CatalogEvidenceQualification"
+          },
+          "relations": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogRelation"
+            },
+            "title": "Relations",
+            "type": "array"
+          },
+          "relationship_message": {
+            "title": "Relationship Message",
+            "type": "string"
+          },
+          "relationship_qualification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRelationshipQualification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relationship_status": {
+            "enum": [
+              "observed",
+              "select-file",
+              "unsupported"
+            ],
+            "title": "Relationship Status",
+            "type": "string"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/RepositoryIdentity"
+          },
+          "repository_instance_id": {
+            "title": "Repository Instance Id",
+            "type": "string"
+          },
+          "source_authority": {
+            "$ref": "#/components/schemas/RepositorySourceAuthority"
+          },
+          "technical_evidence": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Technical Evidence",
+            "type": "object"
+          }
+        },
+        "required": [
+          "repository",
+          "repository_instance_id",
+          "source_authority",
+          "producer_identity",
+          "candidate_options",
+          "languages",
+          "hits",
+          "relations",
+          "relationship_status",
+          "relationship_message",
+          "qualification",
+          "git_author",
+          "technical_evidence"
+        ],
+        "title": "CatalogExploration",
+        "type": "object"
+      },
+      "CatalogExploreRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_repository_instance_id": {
+            "minLength": 1,
+            "title": "Expected Repository Instance Id",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "query": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_repository_instance_id",
+          "query"
+        ],
+        "title": "CatalogExploreRequest",
+        "type": "object"
+      },
+      "CatalogGitAuthor": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "unavailable",
+              "select-file"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message"
+        ],
+        "title": "CatalogGitAuthor",
+        "type": "object"
+      },
+      "CatalogLanguageObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "count"
+        ],
+        "title": "CatalogLanguageObservation",
+        "type": "object"
+      },
+      "CatalogPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/CatalogCandidate"
+          },
+          "execution_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Execution Digest",
+            "type": "string"
+          },
+          "plan_id": {
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "plan_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Sha256",
+            "type": "string"
+          },
+          "provider_mode": {
+            "const": "none",
+            "default": "none",
+            "title": "Provider Mode",
+            "type": "string"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/RepositoryIdentity"
+          },
+          "source_authority": {
+            "$ref": "#/components/schemas/RepositorySourceAuthority"
+          },
+          "yaml": {
+            "title": "Yaml",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "source_authority",
+          "candidate",
+          "yaml",
+          "plan_id",
+          "execution_digest",
+          "plan_sha256"
+        ],
+        "title": "CatalogPreview",
+        "type": "object"
+      },
+      "CatalogPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/CatalogCandidate"
+          },
+          "source_authority": {
+            "$ref": "#/components/schemas/RepositorySourceAuthority"
+          }
+        },
+        "required": [
+          "source_authority",
+          "candidate"
+        ],
+        "title": "CatalogPreviewRequest",
+        "type": "object"
+      },
+      "CatalogRelation": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "resolved_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Resolved Paths",
+            "type": "array"
+          },
+          "source_path": {
+            "title": "Source Path",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_path",
+          "target",
+          "kind",
+          "confidence"
+        ],
+        "title": "CatalogRelation",
+        "type": "object"
+      },
+      "CatalogRelationshipQualification": {
+        "additionalProperties": false,
+        "properties": {
+          "call_limit_per_symbol": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Limit Per Symbol"
+          },
+          "external_or_unindexed_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "External Or Unindexed Reasons",
+            "type": "array"
+          },
+          "lifecycle_completeness": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle Completeness"
+          },
+          "lifecycle_truncated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle Truncated"
+          },
+          "max_depth": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Depth"
+          },
+          "ref_limit_per_symbol": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Limit Per Symbol"
+          },
+          "unresolved_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "unresolved_reasons",
+          "external_or_unindexed_reasons"
+        ],
+        "title": "CatalogRelationshipQualification",
+        "type": "object"
+      },
+      "CatalogRunRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/CatalogCandidate"
+          },
+          "expected_execution_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Expected Execution Digest",
+            "type": "string"
+          },
+          "expected_plan_id": {
+            "minLength": 1,
+            "title": "Expected Plan Id",
+            "type": "string"
+          },
+          "expected_plan_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Plan Sha256",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "source_authority": {
+            "$ref": "#/components/schemas/RepositorySourceAuthority"
+          }
+        },
+        "required": [
+          "source_authority",
+          "candidate",
+          "expected_plan_id",
+          "expected_plan_sha256",
+          "expected_execution_digest",
+          "fleet_run_id"
+        ],
+        "title": "CatalogRunRequest",
+        "type": "object"
+      },
+      "CatalogSearchHit": {
+        "additionalProperties": false,
+        "properties": {
+          "first_line": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Line"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_line": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Line"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "qualname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualname"
+          },
+          "signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature"
+          }
+        },
+        "required": [
+          "path",
+          "kind"
+        ],
+        "title": "CatalogSearchHit",
+        "type": "object"
+      },
       "ChangedGitHead": {
         "additionalProperties": false,
         "properties": {
@@ -26709,6 +27414,117 @@
         "title": "RunAgentSelection",
         "type": "object"
       },
+      "RunArtifactExport": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_path": {
+            "title": "Artifact Path",
+            "type": "string"
+          },
+          "byte_count": {
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "cleanup_failure": {
+            "anyOf": [
+              {
+                "const": "STAGING_CLEANUP_FAILED",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Failure"
+          },
+          "cleanup_status": {
+            "enum": [
+              "verified",
+              "failed"
+            ],
+            "title": "Cleanup Status",
+            "type": "string"
+          },
+          "destination": {
+            "title": "Destination",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "reference_id": {
+            "title": "Reference Id",
+            "type": "string"
+          },
+          "repository_id": {
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "status": {
+            "const": "exported",
+            "default": "exported",
+            "title": "Status",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "repository_id",
+          "step_id",
+          "artifact_path",
+          "destination",
+          "sha256",
+          "byte_count",
+          "reference_id",
+          "cleanup_status"
+        ],
+        "title": "RunArtifactExport",
+        "type": "object"
+      },
+      "RunArtifactExportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "format": "path",
+            "title": "Destination",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "repository_id": {
+            "minLength": 1,
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "step_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_id",
+          "step_id",
+          "path",
+          "destination"
+        ],
+        "title": "RunArtifactExportRequest",
+        "type": "object"
+      },
       "RunCancelRequestedEvent": {
         "additionalProperties": false,
         "properties": {
@@ -36885,6 +37701,99 @@
         ]
       }
     },
+    "/api/fleet/runs/{fleet_run_id}/artifact-exports": {
+      "post": {
+        "description": "Explicitly export only the exact recorded artifact through its existing owner.",
+        "operationId": "export_run_artifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fleet_run_id",
+            "required": true,
+            "schema": {
+              "title": "Fleet Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunArtifactExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunArtifactExport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Export Run Artifact",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/fleet/runs/{fleet_run_id}/cancel": {
       "post": {
         "operationId": "cancel_fleet_run",
@@ -40212,6 +41121,282 @@
         "summary": "Include Repository",
         "tags": [
           "repositories"
+        ]
+      }
+    },
+    "/api/repositories/{repository_id}/catalog/explore": {
+      "post": {
+        "operationId": "catalog_explore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repository_id",
+            "required": true,
+            "schema": {
+              "title": "Repository Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogExploreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogExploration"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Catalog Explore",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/repositories/{repository_id}/catalog/previews": {
+      "post": {
+        "operationId": "catalog_preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repository_id",
+            "required": true,
+            "schema": {
+              "title": "Repository Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Catalog Preview",
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/repositories/{repository_id}/catalog/runs": {
+      "post": {
+        "operationId": "catalog_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repository_id",
+            "required": true,
+            "schema": {
+              "title": "Repository Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetRunState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Catalog Run",
+        "tags": [
+          "catalog"
         ]
       }
     },

@@ -1,0 +1,4 @@
+execution:
+  purpose: verification
+goons:
+- import: general/catalog-render

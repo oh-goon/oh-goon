@@ -115,10 +115,25 @@ class FleetPlanResolutionDiagnostics:
                         "deferred"
                         if env_definition.source.kind == "host"
                         else "empty"
-                        if env_definition.source.value == ""
+                        if (
+                            env_definition.source.kind == "literal"
+                            and env_definition.source.value == ""
+                        )
+                        or (
+                            env_definition.source.kind == "input"
+                            and input_values[env_definition.source.name] in (None, "")
+                        )
                         else "defined"
                     ),
-                    binding=PlanConfigurationBinding(kind=env_definition.source.kind),
+                    binding=(
+                        PlanConfigurationBinding(
+                            kind="expression",
+                            parent_scope=prefix or None,
+                            parent_input=env_definition.source.name,
+                        )
+                        if env_definition.source.kind == "input"
+                        else PlanConfigurationBinding(kind=env_definition.source.kind)
+                    ),
                     source_sha256=node.source_sha256 if node else None,
                     line=position.line if position else None,
                     column=position.column if position else None,

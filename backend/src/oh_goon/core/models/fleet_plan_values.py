@@ -18,8 +18,15 @@ class LiteralEnvSource(ImmutableModel):
     value: str | bool | int
 
 
+class InputEnvSource(ImmutableModel):
+    """Transport one already-bound public Goon scalar without reinterpreting it."""
+
+    kind: Literal["input"] = "input"
+    name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
+
+
 PlanEnvSource = Annotated[
-    HostEnvSource | LiteralEnvSource,
+    HostEnvSource | LiteralEnvSource | InputEnvSource,
     Field(discriminator="kind"),
 ]
 

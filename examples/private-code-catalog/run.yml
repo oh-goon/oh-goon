@@ -1,3 +1,6 @@
 version: 2
 source: {kind: file-plan, path: plan.yml}
 target: {repository: REPOSITORY_PATH}
+inputs:
+  candidate_json: >-
+    {"name":"order-gateway","description":"Synthetic order gateway for a local code-discovery demonstration.","owner":"group:default/platform-team","type":"service","lifecycle":"experimental","languages":["python","typescript"]}

@@ -56,18 +56,30 @@ def release_catalog_inclusion(*, version: str) -> dict[str, str]:
     if digest.hexdigest() != expected:
         raise RuntimeError("release template catalog delivery differs from admitted source")
     destination = archive_path.parent / "hatch-catalogs"
-    destination.mkdir()
     with tarfile.open(archive_path, mode="r:") as archive:
+        missing_renderer = {
+            "goons/general/catalog-render/src/oh_goon_catalog_renderer/__init__.py",
+            "goons/general/catalog-render/src/oh_goon_catalog_renderer/cli.py",
+        }
         for member in archive:
             if not member.isfile() and not member.isdir():
                 raise RuntimeError("release template catalog contains non-regular source")
+            if member.isfile():
+                missing_renderer.discard(member.name)
+        if missing_renderer:
+            raise RuntimeError(
+                "release template catalog requires the shared catalog renderer source"
+            )
+        destination.mkdir()
         archive.extractall(destination, filter="data")
     if {path.name for path in destination.iterdir()} != {"goons", "plans", "examples"}:
         raise RuntimeError("release template catalog must contain goons, plans and examples")
+    renderer = destination / "goons/general/catalog-render/src/oh_goon_catalog_renderer"
     return {
         str(destination / "goons"): "oh_goon/templates/goons",
         str(destination / "plans"): "oh_goon/templates/plans",
         str(destination / "examples"): "oh_goon/examples",
+        str(renderer): "oh_goon_catalog_renderer",
     }
 
 
