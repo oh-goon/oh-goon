@@ -8,6 +8,7 @@ original Run admission or configuration-generation identity.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import platform
@@ -19,13 +20,14 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from threading import Event, Thread
 from time import monotonic, sleep
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import pytest
 
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
+    CodexLoginConnection,
     CodexServiceConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
@@ -40,7 +42,10 @@ from oh_goon.engine.command import (
 )
 from oh_goon.integrations.agent_codex_service import CodexServiceClient
 from oh_goon.integrations.agent_codex_service_execution import service_arguments
-from oh_goon.integrations.agent_native_execution import native_executable_sha256
+from oh_goon.integrations.agent_native_execution import (
+    codex_login_command,
+    native_executable_sha256,
+)
 from tests.fakes.codex_responses import CodexResponsesFixture
 
 _PROBE = r"""import json, os, pathlib, subprocess, sys
@@ -429,6 +434,386 @@ for line in sys.stdin:
         elif isinstance(outcome, CommandResult):
             (root / "startup-error.log").write_text(outcome.stderr[-4096:])
             assert outcome.supervisor.final_process_group_quiescent is True
+
+
+class _DelegationPolicyResponses(CodexResponsesFixture):
+    """Observe native tool exposure while retaining an actual ordinary tool control."""
+
+    marker = "NATIVE_DELEGATION_POLICY_TOOL_CONTROL"
+
+    def _response(
+        self, body: dict[str, Any], endpoint: BaseHTTPRequestHandler, transport: str
+    ) -> tuple[dict[str, Any], ...]:
+        self.request_count += 1
+        assert self.request_count <= 2
+        assert endpoint.headers.get("Authorization") == f"Bearer {self.auth_token}"
+        assert self.model_info is not None and body["model"] == self.model_info["slug"]
+        declarations: list[tuple[str | None, dict[str, Any]]] = []
+        assert len(body.get("tools", [])) <= 64
+        for tool in body.get("tools", []):
+            if tool.get("type") == "namespace":
+                assert len(tool.get("tools", [])) <= 64
+                declarations.extend((tool["name"], item) for item in tool["tools"])
+            else:
+                declarations.append((tool.get("namespace"), tool))
+        outputs = [
+            json.dumps(item.get("output", ""))
+            for item in body["input"]
+            if item.get("type") == "function_call_output"
+        ]
+        self.observations.append(
+            {
+                "model": body["model"],
+                "request_keys": sorted(body),
+                "tool_names": [tool["name"] for _, tool in declarations],
+                "ordinary_tool_followup": any(self.marker in output for output in outputs),
+                "transport": transport,
+            }
+        )
+        if self.request_count == 1:
+            selected = next(
+                (
+                    (namespace, tool)
+                    for namespace, tool in declarations
+                    if tool.get("name") == "exec_command" and tool.get("type") == "function"
+                ),
+                None,
+            )
+            item: dict[str, Any]
+            if selected is None:
+                self._error("Native ordinary tool missing: " + json.dumps(self.observations[-1]))
+                item = {
+                    "type": "message",
+                    "id": "msg_policy_fixture_refused",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Fixture rejected unsupported tool catalog.",
+                            "annotations": [],
+                        }
+                    ],
+                    "status": "completed",
+                }
+            else:
+                namespace, tool = selected
+                item = {
+                    "type": "function_call",
+                    "id": "fc_policy_control",
+                    "call_id": "policy_control",
+                    "name": tool["name"],
+                    "arguments": json.dumps({"cmd": "printf " + self.marker}),
+                    "status": "completed",
+                }
+                if namespace is not None:
+                    item["namespace"] = namespace
+        else:
+            assert self.observations[-1]["ordinary_tool_followup"], outputs
+            item = {
+                "type": "message",
+                "id": "msg_policy_complete",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": self.marker, "annotations": []}],
+                "status": "completed",
+            }
+        events = self._events(f"resp_policy_{self.request_count}", item, 1)
+        for event in events:
+            if isinstance(event.get("response"), dict):
+                event["response"]["model"] = body["model"]
+        return events
+
+
+@pytest.mark.certification
+@pytest.mark.parametrize("mode", ("login", "service"))
+@pytest.mark.parametrize("version", ("v1", "v2"))
+@pytest.mark.parametrize("protected", (False, True))
+def test_installed_codex_policy_excludes_model_selected_delegation(
+    tmp_path: Path, mode: Literal["login", "service"], version: str, protected: bool
+) -> None:
+    """Native metadata can select V1/V2 despite false feature fallback flags."""
+    executable = os.environ.get("OH_GOON_NATIVE_CODEX")
+    runtime_root = os.environ.get("OH_GOON_NATIVE_CODEX_RUNTIME_ROOT")
+    if not executable or not runtime_root:
+        pytest.skip("Select installed Codex and its complete public runtime root explicitly")
+    program, public_runtime = (
+        Path(executable).resolve(strict=True),
+        Path(runtime_root).resolve(strict=True),
+    )
+    assert public_runtime.is_dir() and program.is_relative_to(public_runtime)
+    metadata_home = tmp_path / "metadata-home"
+    metadata_home.mkdir(mode=0o700)
+    metadata = run_command(
+        str(program),
+        "debug",
+        "models",
+        "--bundled",
+        cwd=tmp_path,
+        env={
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(metadata_home),
+            "CODEX_HOME": str(metadata_home),
+        },
+        timeout=10,
+        max_capture_bytes_per_stream=4 * 1024 * 1024,
+    )
+    assert metadata.returncode == 0, metadata.stderr
+    bundled = next(
+        model for model in json.loads(metadata.stdout)["models"] if model["slug"] == "gpt-6.1-sol"
+    )
+    root = tmp_path / f"{version}-{'protected' if protected else 'enabled-control'}"
+    workspace, scratch, home, control = (
+        root / name for name in ("workspace", "scratch", "home", "control")
+    )
+    for directory in (workspace, scratch, home, control):
+        directory.mkdir(parents=True, mode=0o700)
+    initialized = run_command(
+        "/usr/bin/git",
+        "init",
+        "-q",
+        str(workspace),
+        cwd=workspace,
+        env={"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(home)},
+    )
+    assert initialized.returncode == 0, initialized.stderr
+    instructions = control / "instructions.txt"
+    instructions.write_text(
+        "Synthetic native delegation policy qualification; use only the requested ordinary tool."
+    )
+    model = {
+        **bundled,
+        "multi_agent_version": version,
+        "tool_mode": "direct",
+        "supports_search_tool": False,
+        "use_responses_lite": False,
+    }
+    catalog = control / "model-catalog.json"
+    catalog.write_text(json.dumps({"models": [model]}))
+    environment = {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": str(home),
+        "CODEX_HOME": str(home / "codex"),
+        "XDG_CONFIG_HOME": str(home / "config"),
+        "XDG_DATA_HOME": str(home / "data"),
+        "XDG_CACHE_HOME": str(home / "cache"),
+        "TMPDIR": str(scratch),
+        "NATIVE_POLICY_KEY": "synthetic-policy-key",
+    }
+    for key in ("CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"):
+        Path(environment[key]).mkdir(mode=0o700)
+    (Path(environment["CODEX_HOME"]) / "auth.json").write_text(
+        json.dumps({"OPENAI_API_KEY": environment["NATIVE_POLICY_KEY"]})
+    )
+    profile = (
+        NativeAgentProfile(
+            codex_login=CodexLoginConnection(
+                home=environment["CODEX_HOME"], model=model["slug"], reasoning_effort="low"
+            )
+        )
+        if mode == "login"
+        else NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=environment["CODEX_HOME"], model=model["slug"], reasoning_effort="low"
+            )
+        )
+    )
+    selected = ResolvedNativeAgent(
+        agent="codex",
+        profile_name="installed-policy",
+        definition=NativeAgentDefinition(executable=str(program)),
+        profile=profile,
+        executable_sha256=native_executable_sha256(program),
+    )
+    advertised = control / "service.sock"
+    argv = (
+        codex_login_command(
+            selected,
+            instructions=instructions,
+            workspace=workspace,
+            scratch=scratch,
+            read_roots=(public_runtime, control),
+        ).argv
+        if mode == "login"
+        else service_arguments(
+            selected,
+            repository=workspace,
+            read_roots=(public_runtime,),
+            control=control,
+            scratch=scratch,
+            socket=advertised,
+            profile="policy",
+            read_only=True,
+        )
+    )
+    assert "agents.enabled=false" in argv, "production native delegation denial missing"
+    if not protected:
+        # Valid enabled control: retain every other production permission
+        # and feature setting, removing only the master delegation denial.
+        position = argv.index("agents.enabled=false")
+        assert argv[position - 1] == "-c"
+        argv = (*argv[: position - 1], *argv[position + 1 :])
+    with _DelegationPolicyResponses(
+        transport="http",
+        prompt=lambda: instructions.read_bytes(),
+        auth_token=environment["NATIVE_POLICY_KEY"],
+        model_info=model,
+    ) as endpoint:
+        settings = ["model_catalog_json=" + json.dumps(str(catalog))]
+        if mode == "login":
+            settings.append("openai_base_url=" + json.dumps(endpoint.base_url + "/v1"))
+        else:
+            settings.extend(
+                (
+                    'model_provider="policy-fixture"',
+                    'model_providers.policy-fixture={name="policy-fixture",base_url='
+                    + json.dumps(endpoint.base_url + "/v1")
+                    + ',env_key="NATIVE_POLICY_KEY",wire_api="responses",requires_openai_auth=false,supports_websockets=false,request_max_retries=0,stream_max_retries=0}',
+                )
+            )
+        extra = tuple(part for setting in settings for part in ("-c", setting))
+        if mode == "login":
+            result = run_command(
+                *argv[:-1],
+                *extra,
+                argv[-1],
+                cwd=workspace,
+                env=environment,
+                input_data=b"Run the ordinary policy control.",
+                timeout=30,
+                max_capture_bytes_per_stream=65536,
+                require_process_group_quiescence=True,
+            )
+            assert result.returncode == 0, result.stderr[-4000:]
+            assert result.supervisor.final_process_group_quiescent is True
+        else:
+            cancelled = Event()
+            outcomes: list[CommandResult | BaseException] = []
+            births: list[ProcessBirthIdentity] = []
+
+            def observed(event: CommandProcessLifecycleEvent) -> None:
+                if event.kind == "PROCESS_STARTED":
+                    assert event.pid is not None
+                    birth = observe_process_birth(event.pid)
+                    assert birth is not None
+                    births.append(birth)
+
+            def serve() -> None:
+                try:
+                    outcomes.append(
+                        run_command(
+                            argv[0],
+                            *extra,
+                            *argv[1:],
+                            cwd=workspace,
+                            env=environment,
+                            timeout=30,
+                            cancel_requested=cancelled.is_set,
+                            max_capture_bytes_per_stream=65536,
+                            require_process_group_quiescence=True,
+                            process_observer=observed,
+                        )
+                    )
+                except BaseException as error:
+                    outcomes.append(error)
+
+            server = Thread(target=serve, name="native-delegation-policy")
+            server.start()
+            try:
+                deadline = monotonic() + 10
+                while not advertised.exists() and server.is_alive() and monotonic() < deadline:
+                    sleep(0.01)
+                assert advertised.exists(), [str(item)[-2000:] for item in outcomes]
+
+                async def complete() -> None:
+                    async with CodexServiceClient(
+                        advertised,
+                        timeout_seconds=10,
+                        experimental_api=True,
+                        expected_process=births[0],
+                    ) as client:
+                        thread = await client.start_thread(
+                            cwd=workspace,
+                            permissions="policy",
+                            model=model["slug"],
+                            developer_instructions=instructions.read_text(),
+                        )
+                        thread_id = thread["thread"]["id"]
+                        await client.start_turn(
+                            thread_id,
+                            "Run the ordinary policy control.",
+                            permissions="policy",
+                            effort="low",
+                        )
+                        for _ in range(64):
+                            notification = await client.next_notification(thread_id)
+                            if notification["method"] == "turn/completed":
+                                assert notification["params"]["turn"]["status"] == "completed", (
+                                    notification
+                                )
+                                return
+                        pytest.fail("Native policy turn exceeded bounded notification count")
+
+                asyncio.run(complete())
+            finally:
+                cancelled.set()
+                server.join(timeout=10)
+            assert not server.is_alive()
+            assert len(outcomes) == 1 and isinstance(outcomes[0], CommandCancelledError), outcomes
+            assert outcomes[0].supervisor.final_process_group_quiescent is True
+        assert not endpoint.errors, endpoint.errors
+        assert endpoint.request_count == 2, endpoint.observations
+        assert endpoint.observations[-1]["ordinary_tool_followup"]
+        names = set(endpoint.observations[0]["tool_names"])
+        assert "exec_command" in names
+        assert ("spawn_agent" not in names) is protected, names
+        if protected:
+            assert names.isdisjoint(
+                {
+                    "spawn_agent",
+                    "send_input",
+                    "resume_agent",
+                    "wait_agent",
+                    "close_agent",
+                    "followup_task",
+                    "interrupt_agent",
+                    "list_agents",
+                    "send_message",
+                }
+            ), names
+        print(
+            json.dumps(
+                {
+                    "executable_sha256": native_executable_sha256(program),
+                    "native_model_catalog_sha256": hashlib.sha256(catalog.read_bytes()).hexdigest(),
+                    "native_model_metadata": {
+                        key: model[key]
+                        for key in (
+                            "slug",
+                            "multi_agent_version",
+                            "tool_mode",
+                            "supports_search_tool",
+                            "use_responses_lite",
+                        )
+                    },
+                    "policy_settings": [
+                        value
+                        for value in argv
+                        if value.startswith(
+                            ("agents.enabled=", "features.multi_agent=", "features.multi_agent_v2=")
+                        )
+                    ],
+                    "mode": mode,
+                    "model_multi_agent_version": version,
+                    "protected": protected,
+                    "tool_names": sorted(names),
+                    "ordinary_tool_followup": True,
+                    "native_process_group_quiescent": True,
+                    "native_terminal": "exec_exit_zero"
+                    if mode == "login"
+                    else "thread_completed_then_owned_daemon_cancelled",
+                },
+                sort_keys=True,
+            )
+        )
 
 
 class _ServiceContinuationResponses(CodexResponsesFixture):

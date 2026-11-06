@@ -495,6 +495,8 @@ def codex_login_command(
         "features.plugin_hooks=false",
         "features.plugins=false",
         "features.apps=false",
+        "agents.enabled=false",
+        "features.multi_agent=false",
         "features.multi_agent_v2=false",
         "features.skill_mcp_dependency_install=false",
         "features.incremental_tools=false",

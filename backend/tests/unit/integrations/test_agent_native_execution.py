@@ -11,11 +11,13 @@ import pytest
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     CodexLoginConnection,
+    CodexServiceConnection,
     NativeAgentDefinition,
     NativeAgentName,
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
+from oh_goon.integrations.agent_codex_service_execution import service_arguments
 from oh_goon.integrations.agent_native_execution import (
     NativeAgentEventParser,
     codex_login_command,
@@ -72,10 +74,13 @@ def test_codex_login_binds_native_model_instructions_and_tool_permissions(
         evidence_state=tmp_path / "producer-state",
         read_roots=(capture,),
     )
-    settings: dict[str, object] = {}
-    for index, argument in enumerate(command.argv):
-        if argument == "-c":
-            settings.update(tomllib.loads(command.argv[index + 1]))
+    settings: dict[str, object] = tomllib.loads(
+        "\n".join(
+            command.argv[index + 1]
+            for index, argument in enumerate(command.argv[:-1])
+            if argument == "-c"
+        )
+    )
     assert settings["model"] == "gpt-6-luna"
     assert settings["model_reasoning_effort"] == "low"
     assert settings["model_instructions_file"] == str(prompt)
@@ -99,6 +104,44 @@ def test_codex_login_binds_native_model_instructions_and_tool_permissions(
     assert dict(command.environment)["CODEX_HOME"] == str(home)
     assert "PRIVATE evidence" not in " ".join(command.argv)
     assert "--ignore-user-config" in command.argv and "--ignore-rules" in command.argv
+    features = settings["features"]
+    assert isinstance(features, dict)
+    assert features.get("multi_agent") is False
+    assert features.get("multi_agent_v2") is False
+    agents = settings.get("agents")
+    assert isinstance(agents, dict) and agents.get("enabled") is False
+
+
+@pytest.mark.parametrize("read_only", [True, False])
+def test_codex_service_disables_model_selected_native_delegation(
+    tmp_path: Path, read_only: bool
+) -> None:
+    selected = replace(
+        selection("codex"),
+        profile=NativeAgentProfile(
+            codex_service=CodexServiceConnection(
+                home=str(tmp_path / "native-auth"),
+                model="gpt-6-luna",
+                reasoning_effort="low",
+            )
+        ),
+    )
+    argv = service_arguments(
+        selected,
+        repository=tmp_path / "repo",
+        read_roots=(tmp_path / "public-runtime",),
+        control=tmp_path / "control",
+        scratch=tmp_path / "scratch",
+        socket=tmp_path / "control" / "native.sock",
+        profile="phase-review" if read_only else "phase-write",
+        read_only=read_only,
+    )
+    settings = tomllib.loads(
+        "\n".join(argv[index + 1] for index, argument in enumerate(argv[:-1]) if argument == "-c")
+    )
+    assert settings["agents"]["enabled"] is False
+    assert settings["features"]["multi_agent"] is False
+    assert settings["features"]["multi_agent_v2"] is False
 
 
 @pytest.mark.parametrize("root_kind", ["read", "workspace", "scratch", "producer-state"])

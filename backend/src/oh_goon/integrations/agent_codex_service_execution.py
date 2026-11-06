@@ -261,6 +261,7 @@ def service_arguments(
         "notify=[]",
         'web_search="disabled"',
         "cloud.skills.enabled=false",
+        "agents.enabled=false",
         'shell_environment_policy.inherit="none"',
         'shell_environment_policy.include_only=["PATH","TMPDIR"]',
         "shell_environment_policy.experimental_use_profile=false",
