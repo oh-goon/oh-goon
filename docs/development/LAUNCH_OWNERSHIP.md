@@ -148,12 +148,22 @@ A PID match alone is insufficient. A missing/malformed bound record, mismatched 
 PID, or unavailable owner birth proof is an explicit conflict and never authorizes a second
 owner. A terminal bound launch permits the normal binding owner to create the next launch.
 
-Both built `oh-goon app start` and contributor `make dev` resolve this decision before unrelated
-startup work. A compatible rerun returns the existing launch without invoking uvicorn/npm/Vite
-or installing another cleanup owner. A conflicting rerun explains the current launch and
-points to `oh-goon app status`. Token/UI/League-folder work and native child execution remain only
-on the paths that actually need them. This phase deliberately does not infer source/config
-drift; that remains separate Launch Manifest work rather than being guessed from process state.
+The accepting entrypoint determines what happens to that assessment:
+
+- Built [`oh-goon app start`](../../backend/src/oh_goon/cli_start.py) performs local-state
+  preflight, then handles `reuse` by returning the existing launch before UI/League-folder
+  setup, capability creation or native server startup. A conflict reports the current launch
+  and points to `oh-goon app status`.
+- Contributor [`make dev`](../../backend/src/oh_goon/repository_tooling/local_dev_launch.py)
+  performs local-state preflight, resolves its plan and calls
+  [`start_contributor_launch`](../../backend/src/oh_goon/runtime/local_launch_supervisor.py).
+  That supervisor accepts only `start_new`; both `reuse` and `conflict` raise a startup
+  refusal before creating a launch owner or spawning services. A compatible contributor
+  rerun therefore does not attach to the existing launch. Use `oh-goon app status` to
+  inspect its recorded state.
+
+Neither path infers source/config drift from process state; that remains separate Launch
+Manifest work. The read-only reuse assessment never authorizes another cleanup owner.
 
 ## 1267.0.42 — observed-endpoint navigation and private capability handoff
 
@@ -165,8 +175,12 @@ Profile-to-navigation-service policy is explicit and small: built-local uses the
 
 ## 1267.0.951 — local startup authority convergence
 
-Contributor startup no longer uses `scripts/dev.sh` as a process/readiness owner. `make dev`
-performs prerequisite work before runtime startup, then enters the Python local-dev frontdoor.
+Contributor startup no longer uses `scripts/dev.sh` as a process/readiness owner. The
+[`make dev` target](../../Makefile) delegates to the thin
+[`scripts/dev.sh`](../../scripts/dev.sh) frontdoor, which `exec`s the installed
+`oh-goon-local-dev-launch` entrypoint. Its Python `run()` performs local-state preflight
+before resolving the contributor plan and calling the supervisor. Dependency materialization
+remains the separately selected `make init` workflow.
 `LocalLaunchPlan` is the single resolved source for exact service argv, cwd, endpoint intent,
 expected readiness status, and the fixed 30-second startup budget. `LocalLaunchSupervisor` owns
 contributor process creation, required-service liveness, readiness observations, launch-ready
