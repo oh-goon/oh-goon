@@ -1,99 +1,109 @@
-# Private code discovery -> Backstage catalog (Xirp-like walkthrough)
+# Private code discovery → reviewed Backstage catalog
 
-Classification: **runnable with prerequisites, synthetic example**. This is a demonstration of existing, separate authority owners, **not** a Spotify Xirp implementation, a conversational Oh-Goon search UI, or a guarantee of network isolation.
+Classification: **runnable with prerequisites, synthetic example**. Hashmarks supplies repository evidence, native Git supplies commit facts, a human approves catalog ownership and metadata, and Oh-Goon executes and retains the result. There is no model/provider Step or automatic Backstage publication. This is a CLI demonstration with the existing Game Tape; the guided UI is [HUG-208](https://linear.app/hugloss/issue/HUG-208/showcase-p1-guide-private-code-discovery-catalog-review-and-original).
 
-## The five-minute story
+## Operator guide
 
-A new engineer asks: "Where is order submission implemented, what language is it written in, who last changed it, who owns it, and can I register it in Backstage without uploading source code?"
+Start in an Oh-Goon checkout after `make init`, with native Git. Commands use that prepared environment. Five minutes is a target after preparation, not a measured promise. **Stop on any failed command, wrong target, unapproved value or ambiguous owner.** A missing hit is not proof of absence; a Git author is not the catalog owner.
 
-| Question | Demonstrated answer | Authority / qualification |
-| --- | --- | --- |
-| What languages and projects exist? | Local repository orientation | Hashmarks CodeMap; respect reported coverage/freshness |
-| Where is order submission implemented? | Bounded search hits, paths and source references | Hashmarks search; no claim that missing hits prove absence |
-| Who last changed a file? | Git commit author for the selected path | Native Git history; NOT team ownership or authorship of all code |
-| Who owns the service? | Synthetic CODEOWNERS declaration, reviewed by a human | Repository-declared policy; not inferred from recent commits |
-| Can we create catalog-info.yaml? | A deterministic, schema-limited descriptor from approved metadata | Independent renderer, admitted Oh-Goon Plan/Goon/Step, retained artifact |
+### Prepare the synthetic target and capture its review identity
 
-The developer approves catalog metadata; **Git's last commit author is never silently mapped into Backstage spec.owner**. The supplied synthetic metadata produces YAML with no source snippets, commit author emails, absolute paths, or runtime secrets. The renderer copies approved strings without redacting their contents, so review every exported value before sharing it. In a real repository, any private team name, description, path, or secret placed in those fields is information disclosure.
+```sh
+export PATH="$PWD/backend/.venv/bin:$PATH"
+export HASHMARKS_NO_UPDATE_CHECK=1 UV_OFFLINE=1
+CATALOG_DEMO_ROOT=$(mktemp -d /tmp/oh-goon-catalog.XXXXXX)
+export OH_GOON_DB="$CATALOG_DEMO_ROOT/state/state.sqlite"
+export OH_GOON_LEAGUE_FILE="$CATALOG_DEMO_ROOT/state/league.yml"
+mkdir -p "$CATALOG_DEMO_ROOT/evidence"
+cp -R examples/private-code-catalog "$CATALOG_DEMO_ROOT/workflow"
+cd "$CATALOG_DEMO_ROOT/workflow"
+git -C sample-repo init -q --template=
+git -C sample-repo add .
+git -C sample-repo -c user.name="Demo Contributor" -c user.email="demo@example.invalid" -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -qm "Seed synthetic repository"
+python - <<'PY'
+from pathlib import Path
+import yaml
+path = Path("run.yml")
+selection = yaml.safe_load(path.read_text())
+selection["target"]["repository"] = str(Path("sample-repo").resolve())
+path.write_text(yaml.safe_dump(selection, sort_keys=False))
+PY
+oh-goon league add-folder "$PWD"
+oh-goon league scan --json
+hashmarks --workspace sample-repo --state-dir "$CATALOG_DEMO_ROOT/hashmarks" map sync
+oh-goon workflow inspect ./run.yml --review-source --json > "$CATALOG_DEMO_ROOT/evidence/source-review.json"
+git -C sample-repo rev-parse HEAD > "$CATALOG_DEMO_ROOT/evidence/git-revision"
+```
 
-## 1. Work only with the synthetic repository
+The source observation precedes discovery/review. Do not edit the repository during review. Hashmarks state and receipts stay outside authored source. `--review-source` requires one included registered target and observes existing source authority without admitting execution. The selection and lock also stay outside the reviewed target, as in this fixture: embedding the review inside its own source would invalidate it.
 
-Prerequisites: initialized Oh-Goon checkout/CLI (see the root README), native Git, Python 3, and a locally installed Hashmarks CLI. The fixture is intentionally small; no real private code, account, endpoint, or credential belongs in this public example.
+### Discover, distinguish the owners, and review every exported value
 
-Copy this whole directory outside the checkout and work in the copy, for example:
+```sh
+hashmarks --workspace sample-repo --state-dir "$CATALOG_DEMO_ROOT/hashmarks" orient
+hashmarks --workspace sample-repo --state-dir "$CATALOG_DEMO_ROOT/hashmarks" find submit_order --limit 8
+hashmarks --workspace sample-repo --state-dir "$CATALOG_DEMO_ROOT/hashmarks" deps src/service.py
+git -C sample-repo log -1 --format='%H%n%an%n%aI' "$(cat "$CATALOG_DEMO_ROOT/evidence/git-revision")" -- src/service.py
+cat sample-repo/.github/CODEOWNERS
+python -m json.tool generator/catalog-input.json
+```
 
-    cp -R examples/private-code-catalog /tmp/oh-goon-private-code-catalog
-    cd /tmp/oh-goon-private-code-catalog
-    git -C sample-repo init -q
-    git -C sample-repo add .
-    git -C sample-repo -c user.name="Demo Contributor" -c user.email="demo@example.invalid" commit -qm "Seed synthetic repository"
+Expected: observed Python and TypeScript; a localized `submit_order` hit; a **static** import to `src/order_status.py`; native last-matching commit ID, author and date without email. Preserve generation, freshness, ambiguity and coverage labels. Hashmarks 0.36.2 synchronized search can still report freshness `unknown` and negative evidence `not-admissible`; it does not prove complete dependencies or repository-wide absence.
 
-Discover code **locally**, without a model or provider call:
+CODEOWNERS is an inspected **human declaration** here, not automated ownership inference. Confirm the hypothetical `group:default/platform-team`, or select an explicit valid group/user reference. Review all six candidate values, including descriptions and team names: allowed keys do not sanitize sensitive strings. Edit `generator/catalog-input.json` only before approval. The next step binds these captured input bytes to the observed source. If either changes, repeat discovery and review rather than silently refreshing authority.
 
-    export HASHMARKS_NO_UPDATE_CHECK=1
-    hashmarks --workspace sample-repo map sync
-    hashmarks --workspace sample-repo orient
-    hashmarks --workspace sample-repo find "where is order submission implemented?"
+### Bind the review, execute, inspect, and deliberately export
 
-The orientation and search results are producer evidence; read their freshness and coverage fields instead of inventing conclusions. The fixture includes Python service code and a TypeScript client. The exact presentation may change with the pinned Hashmarks version.
+```sh
+python - "$CATALOG_DEMO_ROOT/evidence/source-review.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+import yaml
+path = Path("run.yml")
+selection = yaml.safe_load(path.read_text())
+selection["target"]["reviewed_source"] = json.loads(Path(sys.argv[1]).read_text())["target"]["source_authority"]
+path.write_text(yaml.safe_dump(selection, sort_keys=False))
+PY
+oh-goon workflow prepare ./run.yml --no-input
+oh-goon workflow validate ./run.yml --json
+oh-goon run ./run.yml --json > "$CATALOG_DEMO_ROOT/evidence/run.json"
+CATALOG_RUN_ID=$(python -c 'import json,sys; from pathlib import Path; print(json.loads(Path(sys.argv[1]).read_text())["fleet_run_id"])' "$CATALOG_DEMO_ROOT/evidence/run.json")
+oh-goon runs tape "$CATALOG_RUN_ID" --json
+oh-goon runs steps "$CATALOG_RUN_ID" --json > "$CATALOG_DEMO_ROOT/evidence/steps.json"
+oh-goon runs outputs "$CATALOG_RUN_ID" --json
+CATALOG_STEP_ID=$(python -c 'import json,sys; from pathlib import Path; print(json.loads(Path(sys.argv[1]).read_text())["repositories"][0]["steps"][0]["step_id"])' "$CATALOG_DEMO_ROOT/evidence/steps.json")
+mkdir "$CATALOG_DEMO_ROOT/export"
+oh-goon runs export-artifact "$CATALOG_RUN_ID" --step "$CATALOG_STEP_ID" --path catalog-info.yaml --output "$CATALOG_DEMO_ROOT/export/catalog-info.yaml" --json
+cmp expected/catalog-info.yaml "$CATALOG_DEMO_ROOT/export/catalog-info.yaml"
+git -C sample-repo status --porcelain
+```
 
-Check Git authorship separately from ownership:
+Expect a successful original Run, one command Step, a present retained artifact, byte-identical export for the supplied candidate, and an unchanged target. For deliberately changed approved metadata, inspect its exact output instead of comparing with the supplied golden. A second export to the same destination must refuse overwrite. No catalog file is added to the target; commit, push and Backstage registration remain separate effects.
 
-    git -C sample-repo log -1 --format='%an <%ae>' -- src/service.py
-    cat sample-repo/.github/CODEOWNERS
+Exact `run.yml` and captured independent application bytes (including candidate metadata) are bound by `goon.lock`. Admission compares `target.reviewed_source` with its already observed repository source before admitting a Run. Source edits or repository replacement refuse stale review; metadata edits invalidate the lock. `prepare` does not refresh source approval. Later caller-worktree edits do not rewrite live retained artifacts or original Game Tape. Retention is bounded; released content correctly becomes unavailable.
 
-For this **one synthetic commit**, Git reports Demo Contributor. CODEOWNERS declares a hypothetical team. These are different claims: Git author = commit metadata; CODEOWNERS = a proposed owning group. An effective ownership decision for a real repo needs its own policy/approval. Neither a Git author nor a parser's language guess can grant permissions.
+## Implementation, proof and qualification limits
 
-## 2. Review a minimal, explicit export
+The [requirements](../../docs/development/PRIVATE_CODE_INTELLIGENCE_SHOWCASE_REQUIREMENTS.md) define the intended product. This example supplies separate native discovery, human review, a strict renderer and one original Plan → Goon → Step → Run/artifact path. The renderer accepts exactly six bounded fields; duplicate/unknown fields, invalid values and existing output files are refused. It reads only approved metadata, never source, Git or CODEOWNERS. It uses the standard library and copies approved strings without content redaction. See [Backstage's descriptor format](https://backstage.io/docs/features/software-catalog/descriptor-format/).
 
-Edit generator/catalog-input.json **only after reviewing** repository evidence and confirming the owning team. In this synthetic fixture the approved values are already supplied; they are not automatically derived from filenames or guessed by Oh-Goon.
+From the Oh-Goon checkout, run the focused native proof:
 
-The renderer is a small independent application, not a second repository index. It never scans the source repository or interprets CODEOWNERS/Git/Hashmarks packets. It validates an exact allowlist of fields and creates only a Backstage Component descriptor. Inputs above 16 KiB, unknown fields, malformed owners, unexpected language tags, and existing outputs fail closed. Field validation does not detect sensitive content inside approved strings.
+```sh
+uv run --project backend --offline --frozen --no-sync pytest -c backend/pyproject.toml tests/integration/test_private_code_catalog_discovery.py tests/integration/test_private_code_catalog_renderer.py tests/integration/test_private_code_catalog_example.py
+```
 
-Inspect the candidate with native Python. The repository's merge checks run the
-[renderer regressions](../../tests/integration/test_private_code_catalog_renderer.py),
-including the input-size and process-memory boundaries.
+This covers installed Hashmarks/Git evidence, deterministic bounded serialization, duplicate/invalid input refusal, denied source/environment sentinels, metadata/source drift before Run admission, two repositories' candidates finishing in reverse preparation order, fresh-process export, no target mutation, path/overwrite refusal and zero requests to an ambient model endpoint. Shared lifecycle owners retain their existing cancellation, recovery, repository-scope, partial-retention and browser-persistence proofs. No alternate runner or broad gate is added.
 
-    (cd generator && python3 generate_catalog.py && diff -u ../expected/catalog-info.yaml catalog-info.yaml && rm catalog-info.yaml)
+**No-provider proof is separate from network qualification.** Prepare dependencies before measurement. `UV_OFFLINE=1` disables uv acquisition; Git commands above use no remote; the Hashmarks update check is disabled. These settings do not enforce a host-wide network policy. The showcase is **NOT egress-qualified** until the protocol below is executed. CLI regressions do not establish a live-browser storage-sentinel journey, public screenshot/video qualification or unfamiliar-human comprehension. Game Tape transient logs may be unavailable; their absence does not prove live-output inspection.
 
-The checked-in expected/catalog-info.yaml is **illustrative expected output**, not an authoritative catalog entry for the Oh-Goon project. It contains the synthetic team reference group:default/platform-team.
+For stronger egress qualification, select an independently enforced native boundary for the exact platform and record:
 
-## 3. Run the exact renderer through Oh-Goon
+1. Prepared tool versions and exact source revision; bootstrap/acquisition are outside measurement.
+2. Native denial configuration, permitted loopback, interface/DNS/endpoint scope and an independently exercised denial canary.
+3. Execute discovery/review/Run/inspect/export inside that boundary, with bounded file-backed outbound-attempt observation and independent provider instrumentation. Include all worker/child processes.
+4. Any unexpected external attempt fails qualification even if the Run succeeds. Retain its bounded scope/result; unavailable enforcement or observation is `NOT_RUN` / `NOT QUALIFIED`.
 
-The supplied plan.yml imports the single Atomic Goon at goons/catalog/generate/goon.yml. That Goon selects an **independent local application** (generator/) and invokes its native Python command. There is no parallel execution system, model harness, remote provider, new catalog DB, or repository-intelligence parser.
+Do not advertise trusted-local execution as deny-all isolation, or zero model calls as zero egress. Real team names, descriptions, paths or secrets in allowed fields are exported unchanged. Keep public demonstrations synthetic. Future providers/publication need separate disclosure and effect authority.
 
-Register the synthetic repository, then replace REPOSITORY_PATH in the supplied run.yml with its exact registered absolute path:
-
-    oh-goon league add-folder "$PWD"
-    oh-goon league scan --json
-    # Edit run.yml target.repository to the registered sample-repo path
-    oh-goon workflow inspect ./run.yml
-    oh-goon workflow validate ./run.yml
-    oh-goon workflow prepare ./run.yml
-    oh-goon run ./run.yml --json
-
-Use the resulting actual Run ID and inspect the original evidence before exporting:
-
-    oh-goon runs tape RUN_ID --json
-    oh-goon runs steps RUN_ID --json
-    oh-goon runs outputs RUN_ID --json
-    mkdir -p ../private-code-catalog-output
-    oh-goon runs export-artifact RUN_ID --step STEP_ID_FROM_RUNS_STEPS --path catalog-info.yaml --output ../private-code-catalog-output/catalog-info.yaml
-
-The export is a **deliberate** action. The durable artifact is retained from the admitted Step; an arbitrary later edit to the generator or source does not rewrite that Run's outcome. Use the exact Step ID returned by your Run rather than guessing it. This example has not been live-qualified against every installed Oh-Goon/Hashmarks version, OS or isolation mode.
-
-Backstage normally consumes a catalog-info.yaml from a repository. Registering, committing, pushing or importing the exported descriptor is a separate, explicitly approved action; the demo does **not** upload or register it. See the [Backstage descriptor format](https://backstage.io/docs/features/software-catalog/descriptor-format/).
-
-## What stays local, and what remains unproven
-
-- Hashmarks processes the selected repository locally. Disable its interactive public release check as above; MCP/CI and noninteractive operations already skip the automatic check. Hashmarks itself does not send repository source to an AI model.
-- Oh-Goon's Plan has no model/agent/provider Step and the independent renderer uses only the Python standard library. The default Oh-Goon UI/API is local-first with no built-in source upload or telemetry.
-- There is **no claim that trusted-local execution is a deny-all network sandbox**. Installation, dependency acquisition, Git remote operations, explicit provider selections, or separately enabled integrations can access networks. If zero egress is a contractual requirement, run with independently qualified deny-all network enforcement and capture actual network/provider evidence. Do not infer it merely from this example.
-- An exported catalog descriptor exposes all approved metadata to whomever receives it. This fixture includes no source code; caller-supplied strings are exported unchanged. A remote Backstage registration and any provider-backed future conversational UI need separate disclosure approval and tests.
-- Do not report "owner found" or "catalog ready" from stale, incomplete or ambiguous producer evidence. Refuse promotion or request human review instead.
-
-## Product path from this demo
-
-This proves the **composition story**, not an already shipped Xirp-equivalent UX. A future Oh-Goon discovery UI can ask the same questions while consuming Hashmarks facts through the public oh_goon.integrations.hashmarks API, obtaining native Git commit metadata from Git, requiring explicit approval of Backstage ownership, and using the same admitted Step/artifact path. Any missing typed owner/language evidence belongs in Hashmarks; no Oh-Goon shadow parser or third source of truth should fill the gap.
-
-See [Hashmarks authority boundary](../../docs/architecture/hashmarks-oh-goon-authority-boundary.md), [local privacy](../../docs/PRIVACY.md), [independent application authoring](../../docs/development/GOON_AUTHORING.md), and the existing [frozen local search](../agent-skill-local-search/README.md).
+See [source and lock authority](../../docs/goon-lock.md), [Hashmarks boundary](../../docs/architecture/hashmarks-oh-goon-authority-boundary.md), [privacy](../../docs/PRIVACY.md), [independent application authoring](../../docs/development/GOON_AUTHORING.md) and [frozen local search](../agent-skill-local-search/README.md).

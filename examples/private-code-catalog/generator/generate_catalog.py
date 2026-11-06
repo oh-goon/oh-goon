@@ -18,7 +18,10 @@ TYPES = frozenset({"service", "website", "library"})
 LIFECYCLES = frozenset({"experimental", "production", "deprecated"})
 SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 TAG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
-OWNER = re.compile(r"group:default/[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+OWNER = re.compile(
+    r"(?:group|user):(?P<namespace>[a-z0-9]+(?:-[a-z0-9]+)*)/"
+    r"(?P<name>[a-z0-9]+(?:-[a-z0-9]+)*)\Z"
+)
 
 
 def _valid_string(value: object, *, label: str, limit: int = 240) -> str:
@@ -42,8 +45,11 @@ def render_catalog(payload: object) -> str:
         raise ValueError("name is not a Backstage-safe slug")
     description = _valid_string(payload["description"], label="description")
     owner = _valid_string(payload["owner"], label="owner", limit=80)
-    if not OWNER.fullmatch(owner):
-        raise ValueError("owner must be an explicitly approved group:default/slug")
+    owner_reference = OWNER.fullmatch(owner)
+    if owner_reference is None or any(
+        len(part) > 63 for part in owner_reference.groupdict().values()
+    ):
+        raise ValueError("owner must be an explicitly approved group or user reference")
 
     kind = payload["type"]
     lifecycle = payload["lifecycle"]
@@ -81,13 +87,22 @@ def render_catalog(payload: object) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    fields: dict[str, object] = {}
+    for name, value in pairs:
+        if name in fields:
+            raise ValueError("metadata contains duplicate fields")
+        fields[name] = value
+    return fields
+
+
 def main() -> int:
     try:
         with INPUT.open("rb") as source:
             raw = source.read(16_384 + 1)
         if len(raw) > 16_384:
             raise ValueError("approved metadata exceeds size budget")
-        candidate = render_catalog(json.loads(raw))
+        candidate = render_catalog(json.loads(raw, object_pairs_hook=_unique_fields))
         # Exclusive creation never overwrites a prior output, and the fixed
         # relative path keeps artifact publication inside the Step workspace.
         with OUTPUT.open("x", encoding="utf-8", newline="\n") as output:

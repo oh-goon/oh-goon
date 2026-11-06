@@ -80,6 +80,7 @@ from oh_goon.core.models.schedule import (
     ScheduleReplace,
 )
 from oh_goon.core.models.scheduling import SchedulingPriority
+from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
 from oh_goon.core.path_authority import navigation_path
 from oh_goon.core.product_identity import new_fleet_run_id
@@ -910,6 +911,7 @@ class FleetPlanService:
         source: FleetPlanSource | None = None,
         expected_plan_id: str | None = None,
         expected_repository_instance_ids: dict[str, str] | None = None,
+        reviewed_repository_source: RepositorySourceAuthority | None = None,
         root_expected_name: str | None = None,
         lock_path: Path | None = None,
         caller_input_file: CallerInputFileIdentity | None = None,
@@ -1119,6 +1121,10 @@ class FleetPlanService:
             )
         if caller_input_file is not None:
             require_caller_file_fresh(caller_input_file)
+        if reviewed_repository_source is not None:
+            target = target.model_copy(
+                update={"reviewed_repository_source": reviewed_repository_source}
+            )
         invocation_source = target.source
         return self._runs.start_prepared_plan(
             target,
@@ -1941,6 +1947,7 @@ class FleetPlanService:
         repository_goon: bool = False,
         source_graph: FleetPlanSourceGraph | None = None,
         repository: Path | None = None,
+        reviewed_repository_source: RepositorySourceAuthority | None = None,
     ) -> FleetPlanTarget:
         """Freeze caller-selected values once; future occurrences own no caller file.
 
@@ -1961,6 +1968,10 @@ class FleetPlanService:
             source_graph=source_graph,
             repository=repository,
         )
+        if reviewed_repository_source is not None:
+            target = target.model_copy(
+                update={"reviewed_repository_source": reviewed_repository_source}
+            )
         if caller_input_file is None:
             return target
         # A scheduled occurrence must not require the creator's filesystem.
@@ -1998,6 +2009,7 @@ class FleetPlanService:
         source_graph: FleetPlanSourceGraph | None = None,
         repository: Path | None = None,
         expected_repository_instance_ids: dict[str, str] | None = None,
+        reviewed_repository_source: RepositorySourceAuthority | None = None,
     ) -> ScheduleDefinition:
         """Resolve once, then persist one Schedule target set for the exact Plan."""
         if repository is not None:
@@ -2016,6 +2028,7 @@ class FleetPlanService:
             repository_goon=repository_goon,
             source_graph=source_graph,
             repository=repository,
+            reviewed_repository_source=reviewed_repository_source,
         )
         package_sources = any(getattr(step, "project_source", None) for step in target.plan.steps)
         if package_sources:
@@ -2073,6 +2086,7 @@ class FleetPlanService:
         source_graph: FleetPlanSourceGraph | None = None,
         repository: Path | None = None,
         expected_repository_instance_ids: dict[str, str] | None = None,
+        reviewed_repository_source: RepositorySourceAuthority | None = None,
     ) -> ScheduleDefinition:
         """CAS an existing Schedule target set onto a newly resolved immutable Plan."""
         current = self._schedules.definition(schedule_id)
@@ -2092,6 +2106,7 @@ class FleetPlanService:
             repository_goon=repository_goon,
             source_graph=source_graph,
             repository=repository,
+            reviewed_repository_source=reviewed_repository_source,
         )
         package_sources = any(getattr(step, "project_source", None) for step in target.plan.steps)
         if package_sources and current.repository_ids == tuple(sorted(repository_ids)):

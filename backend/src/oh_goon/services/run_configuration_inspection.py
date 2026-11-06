@@ -15,8 +15,12 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedCommandStep,
 )
 from oh_goon.core.models.fleet_plan_composition import PlanInputType
+from oh_goon.core.models.fleet_plan_evidence import PlanSnapshotEvidence
 from oh_goon.core.models.run_configuration import CatalogPlanSelection
+from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
+from oh_goon.core.product_identity import repository_subject_instance_id
+from oh_goon.integrations.source_snapshot import source_snapshot_identity
 from oh_goon.services.execution_lock_persistence import (
     MAX_EXECUTION_LOCK_BYTES,
     parse_execution_lock,
@@ -31,7 +35,10 @@ from oh_goon.services.fleet_plan_input_resolution import materialize_projected_i
 from oh_goon.services.fleet_plan_input_routing import _binding_origin
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
 from oh_goon.services.fleet_plan_source_graph import FleetPlanSourceGraph, FleetPlanSourceNode
-from oh_goon.services.run_configuration import NormalizedRunConfiguration
+from oh_goon.services.run_configuration import (
+    NormalizedRunConfiguration,
+    require_reviewed_source_authoring_layout,
+)
 
 
 def _lock_records(root: Path) -> dict[str, Any]:
@@ -63,9 +70,14 @@ def inspect_run_configuration(
     resolver: FleetPlanResolver,
     *,
     source_graph: FleetPlanSourceGraph | None = None,
+    review_source: bool = False,
 ) -> dict[str, Any]:
     """Project one source cut; never fetch Skills, inspect private agent state or admit work."""
     snapshot = normalized.snapshot
+    if review_source:
+        if len(normalized.repositories) != 1 or not normalized.registered:
+            raise FleetPlanInvalid("Source review requires one explicitly registered repository")
+        require_reviewed_source_authoring_layout(snapshot, normalized.repository.path)
     graph = source_graph or resolver.analyze_source(normalized.plan_path)
     interface = inspect_input_interface(graph)
     agent_source = graph.has_agent_source_contract()
@@ -318,6 +330,23 @@ def inspect_run_configuration(
             strict=True,
         )
     ]
+    reviewed_source = snapshot.selection.target.reviewed_source
+    if reviewed_source is not None:
+        selected_targets[0]["reviewed_source"] = reviewed_source.model_dump(mode="json")
+    if review_source:
+        repository = normalized.repository
+        source = source_snapshot_identity(repository.path)
+        subject = repository_subject_instance_id(repository.path)
+        if subject != normalized.repository_instance_id:
+            raise FleetPlanInvalid("Repository subject changed during source review")
+        selected_targets[0]["source_authority"] = RepositorySourceAuthority.create(
+            subject_instance_id=subject,
+            source_snapshot=PlanSnapshotEvidence(
+                sha256=source.sha256,
+                byte_count=source.byte_count,
+                entry_count=source.entry_count,
+            ),
+        ).model_dump(mode="json")
     return {
         "schema": "oh-goon.run-configuration/v2",
         "status": "registration-unavailable"

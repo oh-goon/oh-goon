@@ -60,6 +60,12 @@ def add_workflow_commands[_Parser: argparse.ArgumentParser](
             action="store_true",
             help="Explicitly acquire selected Git source to inspect its contract without locking or execution",
         )
+        if name == "inspect":
+            command.add_argument(
+                "--review-source",
+                action="store_true",
+                help="Observe the exact selected repository source for target.reviewed_source; does not authorize execution",
+            )
     prepare = commands.add_parser(
         "prepare",
         help="Acquire selected sources and write the lock; registration only with --register-target",

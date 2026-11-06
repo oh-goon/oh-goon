@@ -70,6 +70,29 @@ the lock. The config's captured file authority also travels through the original
 source-freshness checks. A changed, replaced or missing config refuses before
 effects; the receiver does not reinterpret it into a new selection.
 
+### Binding an explicitly reviewed repository source
+
+An approval-dependent workflow may select one registered target and call
+`oh-goon workflow inspect run.yml --review-source --json` before discovery and
+human review. Its `target.source_authority` is an observation using the existing
+repository subject and source snapshot identity, not execution permission. Copy
+that exact object to `target.reviewed_source` in the selected `run.yml`, then
+prepare the workflow after reviewing all captured application/input values.
+The selection and its lock must be outside the reviewed target's authored
+source; placing the review inside its own snapshot is self-referential and
+refused. This optional selection is not supported for plural targets or repair
+campaigns.
+
+The existing lock binds the exact selection and captured application bytes.
+The frozen target carries the reviewed source explicitly, and the original
+admission owner compares it against its one current repository source
+observation before `RUN_ADMITTED`. A replaced subject or changed source refuses
+with `REVIEWED_SOURCE_STALE`. Repeat observation, discovery and human review;
+`prepare` alone never refreshes the approval. Rerun/readmission and Schedule
+transport retain the expectation and cannot implicitly approve newer source.
+This adds no approval database, signature, second source identity or lock format.
+Ordinary inspection without `--review-source` does not observe a target snapshot.
+
 ## Remote Skills
 
 The adjacent `.goonskills.yml` declares Git source URLs, authored branch/tag/commit

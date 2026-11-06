@@ -19,6 +19,7 @@ from yaml.tokens import AliasToken, AnchorToken, TagToken
 from oh_goon.core.errors import (
     FleetPlanInvalid,
     FleetPlanSourceAcquisitionRequired,
+    ReviewedRepositorySourceStale,
     RunConfigurationInvalid,
 )
 from oh_goon.core.models.base import ImmutableModel
@@ -311,6 +312,18 @@ class RunConfigurationTarget:
     repository_instance_id: str
 
 
+def require_reviewed_source_authoring_layout(
+    snapshot: RunConfigurationSnapshot, repository: Path
+) -> None:
+    """A reviewed source cannot contain the selection/lock that bind its own digest."""
+    if snapshot.path.is_relative_to(repository) or snapshot.lock_path.is_relative_to(repository):
+        raise RunConfigurationInvalid(
+            "Source review requires workflow authoring outside the selected repository",
+            diagnostic_code="CONFIG_REVIEWED_SOURCE_LAYOUT",
+            fields=("target.reviewed_source",),
+        )
+
+
 def _target_paths(
     snapshot: RunConfigurationSnapshot, target_root: Path | None = None
 ) -> tuple[Path, ...]:
@@ -360,6 +373,8 @@ def resolve_run_configuration_targets(
     from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 
     paths = _target_paths(snapshot, target_root)
+    if snapshot.selection.target.reviewed_source is not None:
+        require_reviewed_source_authoring_layout(snapshot, paths[0])
     field = "target.repository" if len(paths) == 1 else "target.repositories"
     try:
         locations, exclusions = LocalState.inspect_configuration_scope()
@@ -386,11 +401,17 @@ def resolve_run_configuration_targets(
                 diagnostic_code="CONFIG_TARGET_UNAVAILABLE",
                 fields=(field,),
             )
+        instance_id = repository_subject_instance_id(selected)
+        reviewed = snapshot.selection.target.reviewed_source
+        if reviewed is not None and reviewed.subject_instance_id != instance_id:
+            raise ReviewedRepositorySourceStale(
+                "Selected repository differs from the reviewed source subject"
+            )
         targets.append(
             RunConfigurationTarget(
                 RepositoryIdentity.model_validate({"path": selected}),
                 registered,
-                repository_subject_instance_id(selected),
+                instance_id,
             )
         )
     snapshot.require_fresh()

@@ -7756,6 +7756,16 @@
             "title": "Project Deliveries",
             "type": "array"
           },
+          "reviewed_repository_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepositorySourceAuthority"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "scheduled_caller_file": {
             "anyOf": [
               {

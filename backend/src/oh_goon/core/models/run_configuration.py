@@ -13,6 +13,7 @@ from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan_composition import PlanInputValue
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.git_sources import GitSourceSelection
+from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.template_identity import canonical_template_key
 
 _INPUT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,63}\Z")
@@ -69,6 +70,9 @@ class RunTargetSelection(_SelectionModel):
     repositories: tuple[_RepositoryPath, ...] | None = Field(
         default=None, min_length=2, exclude_if=lambda value: value is None
     )
+    reviewed_source: RepositorySourceAuthority | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @field_validator("repository", "repositories", mode="before")
     @classmethod
@@ -86,6 +90,8 @@ class RunTargetSelection(_SelectionModel):
     def validate_selection(self) -> RunTargetSelection:
         if (self.repository is None) == (self.repositories is None):
             raise ValueError("target requires exactly one of repository or repositories")
+        if self.reviewed_source is not None and self.repository is None:
+            raise ValueError("target.reviewed_source requires one explicit repository")
         selected = self.selected_paths()
         if len(set(selected)) != len(selected):
             raise ValueError("target.repositories must contain unique repository paths")
@@ -184,6 +190,8 @@ class RunConfiguration(_SelectionModel):
         self.caller_inputs()
         if self.repair is not None and self.agent is None:
             raise ValueError("repair requires an explicit agent selection")
+        if self.repair is not None and self.target.reviewed_source is not None:
+            raise ValueError("reviewed source selects one frozen Run, not a repair campaign")
         if self.resources is not None:
             if all(value is None for value in self.resources.model_dump().values()):
                 raise ValueError("resources requires at least one numeric resource cap")
