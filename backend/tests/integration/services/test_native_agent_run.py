@@ -39,7 +39,8 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.run import FleetRunDetail
-from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
+from oh_goon.core.models.run_events import ProcessStartedEvent, StepAttemptCreatedEvent
+from oh_goon.core.vocabulary import FleetRunEventType, FleetRunOutcome, GameTapeStatus
 from oh_goon.engine.command import run_command
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.agent_native_execution import (
@@ -642,6 +643,8 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
     repository.mkdir(parents=True)
     (repository / "code.py").write_text("VALUE = 41\n")
     (repository / "verify.py").write_text("from code import VALUE\nassert VALUE == 42\n")
+    skill = tmp_path / "skills" / "handoff"
+    skill.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state" / "app.sqlite"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
@@ -650,9 +653,13 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
     runtime: ApplicationRuntime | None = None
     run_ids: list[str] = []
     recorded: list[FleetRunDetail] = []
+    attempt_ids: set[str] = set()
+    process_ids: set[str] = set()
     handoff: dict[str, Any] | None = None
     try:
         for agent in ("codex", "pi", "opencode"):
+            skill_text = f"# Selected handoff Skill\nUse the current {agent} phase guidance.\n"
+            (skill / "SKILL.md").write_text(skill_text)
             executable = tmp_path / f"native-{agent}"
             previous_id = run_ids[-1] if run_ids else None
             previous_agent = "codex" if agent == "pi" else "pi"
@@ -662,6 +669,8 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
                 f"agent={agent!r}\nprevious_id={previous_id!r}\n"
                 "prompt=json.load(sys.stdin)\n"
                 "assert 'Hashmarks' in prompt['repository_evidence']\n"
+                f"assert pathlib.Path(prompt['captured_skill'],'SKILL.md').read_text()=={skill_text!r}\n"
+                f"assert prompt['skill_instructions']=={skill_text!r}\n"
                 "assert not any(flag in sys.argv for flag in ('resume','--resume','--session','--continue','--attach'))\n"
                 "context=prompt['context']\n"
                 "if previous_id is None:\n"
@@ -746,7 +755,7 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
             admitted = runtime.plans.run_native_agent(
                 selected=selected,
                 workspace=repository,
-                skill=None,
+                skill=skill,
                 task="Repair the value" if agent == "pi" else "Review the value",
                 role="report" if agent == "pi" else "review",
                 prior_context=json.dumps(handoff) if handoff is not None else None,
@@ -761,6 +770,53 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
             assert steps[0].status is GameTapeStatus.PASSED
             assert steps[0].native_agent_observations[0].agent == agent
             assert steps[1].native_agent_observations == ()
+            assert len(detail.operations) == 1
+            operation = detail.operations[0]
+            assert operation.provenance.fleet_run_id == admitted.fleet_run_id
+            event_batch = runtime.runs.events(admitted.fleet_run_id)
+            assert not event_batch.has_more
+            events = event_batch.events
+            assert sum(event.event_type is FleetRunEventType.RUN_ADMITTED for event in events) == 1
+            attempts = [event for event in events if isinstance(event, StepAttemptCreatedEvent)]
+            assert len(attempts) == len(steps)
+            assert {event.step_id for event in attempts} == {step.step_id for step in steps}
+            for attempt in attempts:
+                assert (attempt.fleet_run_id, attempt.operation_id, attempt.attempt_number) == (
+                    admitted.fleet_run_id,
+                    operation.provenance.operation_id,
+                    1,
+                )
+            current_attempts = {event.step_attempt_id: event for event in attempts}
+            assert attempt_ids.isdisjoint(current_attempts)
+            attempt_ids.update(current_attempts)
+            processes = [
+                event
+                for event in events
+                if isinstance(event, ProcessStartedEvent)
+                and event.event_type is FleetRunEventType.PROCESS_STARTED
+                and event.step_attempt_id is not None
+            ]
+            assert {event.step_attempt_id for event in processes} == set(current_attempts)
+            for event in processes:
+                assert event.step_attempt_id is not None
+                owner = current_attempts[event.step_attempt_id]
+                assert (
+                    event.fleet_run_id,
+                    event.operation_id,
+                    event.step_id,
+                    event.step_order,
+                    event.attempt_number,
+                ) == (
+                    owner.fleet_run_id,
+                    owner.operation_id,
+                    owner.step_id,
+                    owner.step_order,
+                    owner.attempt_number,
+                )
+            current_processes = {event.physical_execution_id for event in processes}
+            assert len(current_processes) == len(processes)
+            assert process_ids.isdisjoint(current_processes)
+            process_ids.update(current_processes)
             recorded.append(detail)
             for original in recorded:
                 retained = runtime.runs.get(original.run.fleet_run_id)
@@ -776,6 +832,10 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
                     assert current.native_agent_observations == old.native_agent_observations
             handoff = run_handoff_projection(detail)
         assert len(set(run_ids)) == 3
+        assert runtime is not None
+        history = runtime.runs.history(limit=4)
+        assert {item.run.fleet_run_id for item in history.items} == set(run_ids)
+        assert history.next_before_revision is None
     finally:
         if runtime is not None:
             runtime.shutdown(wait_for_runs=True)
