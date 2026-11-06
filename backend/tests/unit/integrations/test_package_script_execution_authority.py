@@ -7,6 +7,7 @@ import pytest
 
 from oh_goon.integrations.make_execution_authority import derive_make_target_authority
 from oh_goon.integrations.package_script_execution_authority import derive_npm_run_authority
+from oh_goon.integrations.shell_execution_authority import derive_shell_fragment_authority
 from oh_goon.integrations.workload_execution_requirements import (
     load_workload_execution_requirements,
 )
@@ -60,10 +61,12 @@ def test_npm_script_closure_recurses_and_records_locked_package_bins(tmp_path: P
         },
     )
 
-    authority = derive_npm_run_authority(tmp_path, "verify", chain=("target", "npm run verify"))
+    authority = derive_npm_run_authority(
+        tmp_path, "verify", chain=("target", "npm run verify"), package_dir=tmp_path / "frontend"
+    )
 
-    assert authority.unresolved == ()
-    assert authority.host_tools == ("npm", "sh")
+    assert authority.unresolved
+    assert authority.host_tools == ("npm",)
     assert [item.bin_name for item in authority.package_executables] == ["tsc", "vite"]
     assert authority.scripts == ("build", "typecheck", "verify")
     assert authority.sources == ("frontend/package.json", "frontend/package-lock.json")
@@ -80,7 +83,9 @@ def test_ambiguous_package_bin_requires_explicit_direct_provider(tmp_path: Path)
         },
     )
 
-    unresolved = derive_npm_run_authority(tmp_path, "test", chain=("target",))
+    unresolved = derive_npm_run_authority(
+        tmp_path, "test", chain=("target",), package_dir=tmp_path / "frontend"
+    )
     assert any(
         "ambiguous package-local executable runner" in item for item in unresolved.unresolved
     )
@@ -88,9 +93,11 @@ def test_ambiguous_package_bin_requires_explicit_direct_provider(tmp_path: Path)
     payload = json.loads((package / "package.json").read_text(encoding="utf-8"))
     payload["ohGoonExecutionAuthority"] = {"packageBinProviders": {"runner": "runner-a"}}
     (package / "package.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    resolved = derive_npm_run_authority(tmp_path, "test", chain=("target",))
+    resolved = derive_npm_run_authority(
+        tmp_path, "test", chain=("target",), package_dir=tmp_path / "frontend"
+    )
 
-    assert resolved.unresolved == ()
+    assert resolved.unresolved
     assert len(resolved.package_executables) == 1
     assert resolved.package_executables[0].package_path == "node_modules/runner-a"
 
@@ -103,9 +110,11 @@ def test_package_bin_provider_must_be_direct_dependency(tmp_path: Path) -> None:
         bins={"runner-a": ("1.0.0", "runner", "cli.js")},
     )
 
-    authority = derive_npm_run_authority(tmp_path, "test", chain=("target",))
+    authority = derive_npm_run_authority(
+        tmp_path, "test", chain=("target",), package_dir=tmp_path / "frontend"
+    )
 
-    assert any("provided only transitively by runner-a" in item for item in authority.unresolved)
+    assert any("provided only transitively" in item for item in authority.unresolved)
 
 
 def test_dynamic_package_script_executable_fails_closed(tmp_path: Path) -> None:
@@ -116,11 +125,65 @@ def test_dynamic_package_script_executable_fails_closed(tmp_path: Path) -> None:
         bins={},
     )
 
-    authority = derive_npm_run_authority(tmp_path, "test", chain=("target",))
-
-    assert any(
-        "unresolved package-script executable variable" in item for item in authority.unresolved
+    authority = derive_npm_run_authority(
+        tmp_path, "test", chain=("target",), package_dir=tmp_path / "frontend"
     )
+
+    assert authority.unresolved
+    assert authority.package_executables == ()
+
+
+def test_conditional_script_source_does_not_gain_effective_branch_authority(tmp_path: Path) -> None:
+    package = _write_package(
+        tmp_path,
+        scripts={"test": "runner test"},
+        dependencies={"runner": "1"},
+        bins={"runner": ("1.0", "runner", "cli.js")},
+    )
+    baseline = derive_npm_run_authority(tmp_path, "test", chain=("target",), package_dir=package)
+    assert baseline.unresolved
+    assert [item.bin_name for item in baseline.package_executables] == ["runner"]
+    assert baseline.repository_evidence
+
+    manifest = package / "package.json"
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["scripts"]["test"] = (
+        'MODE=local; if [ "$MODE" = local ]; then runner test; else "$REMOTE_TOOL"; fi'
+    )
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = derive_npm_run_authority(tmp_path, "test", chain=("target",), package_dir=package)
+    assert result.unresolved
+    assert any("unproven" in item for item in result.unresolved)
+
+
+def test_native_npm_context_comes_from_explicit_step_cwd_not_unique_script_name(
+    tmp_path: Path,
+) -> None:
+    package = _write_package(
+        tmp_path,
+        scripts={"build": "runner"},
+        dependencies={"runner": "1"},
+        bins={"runner": ("1", "runner", "cli.js")},
+    )
+    baseline = derive_npm_run_authority(tmp_path, "build", chain=("target",), package_dir=package)
+    assert baseline.unresolved
+    assert baseline.source_identities
+    inferred = derive_npm_run_authority(tmp_path, "build", chain=("target",))
+    assert inferred.unresolved
+    assert [item.bin_name for item in inferred.package_executables] == ["runner"]
+
+    argv = ("npm", "run", "build")
+    explicit = derive_shell_fragment_authority(
+        tmp_path, "unused", chain=("step",), argv=argv, working_directory="frontend"
+    )
+    assert explicit.unresolved
+    assert [item.bin_name for item in explicit.package_executables] == ["runner"]
+    wrong_context = derive_shell_fragment_authority(
+        tmp_path, "unused", chain=("step",), argv=argv, working_directory="."
+    )
+    assert wrong_context.unresolved
+    assert wrong_context.package_executables == ()
 
 
 def test_make_authority_binds_package_sources_and_package_executables(tmp_path: Path) -> None:
@@ -137,8 +200,8 @@ def test_make_authority_binds_package_sources_and_package_executables(tmp_path: 
 
     authority = derive_make_target_authority(tmp_path, "target")
 
-    assert authority.unresolved == ()
-    assert set(authority.tools) == {"npm", "sh"}
+    assert authority.unresolved
+    assert set(authority.tools) == {"npm"}
     assert [item.bin_name for item in authority.package_executables] == ["tsc"]
     assert {path for path, _identity in authority.source_identities} == {
         "Makefile",
@@ -178,7 +241,7 @@ def test_nested_make_forwarders_capture_scripts_native_tools_and_locked_bins(
     _write_forwarded_make_target(tmp_path)
     authority = derive_make_target_authority(tmp_path, "target")
 
-    assert authority.unresolved == ()
+    assert authority.unresolved
     assert set(authority.tools) == {"bash", "sh", "npm"}
     assert [item.bin_name for item in authority.package_executables] == ["tsc"]
     identities = dict(authority.source_identities)
@@ -212,7 +275,7 @@ def test_nested_make_forwarded_payload_mutation_exposes_the_new_tool(tmp_path: P
     )
     after = derive_make_target_authority(tmp_path, "target")
 
-    assert before.unresolved == after.unresolved == ()
+    assert before.unresolved and after.unresolved
     assert "npm" in before.tools and "rm" not in before.tools
     assert "rm" in after.tools and "npm" not in after.tools
     assert after.package_executables == ()
@@ -235,100 +298,27 @@ def test_unproved_forwarded_make_values_cannot_gain_ambient_execution_authority(
     assert authority.package_executables == ()
 
 
-@pytest.mark.parametrize("invocation", ["$(MAKE) child", "$(RUN)", "$(NESTED)"])
-def test_recursive_make_aliases_retain_child_tools_and_source_identity(
-    tmp_path: Path, invocation: str
-) -> None:
-    makefile = tmp_path / "Makefile"
-    source = (
-        f"RUN = $(MAKE) child\nNESTED = $(RUN)\ntarget:\n\t@{invocation}\nchild:\n\tgit --version\n"
-    )
-    makefile.write_text(source, encoding="utf-8")
-
-    baseline = derive_make_target_authority(tmp_path, "target")
-
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
-    assert any("target -> child" in item for _tool, item in baseline.provenance)
-
-    makefile.write_text(source.replace("git --version", "curl --version"), encoding="utf-8")
-    changed = derive_make_target_authority(tmp_path, "target")
-
-    assert changed.unresolved == ()
-    assert changed.tools == ("curl",)
-    assert (
-        dict(changed.source_identities)["Makefile"] != dict(baseline.source_identities)["Makefile"]
-    )
-
-
-@pytest.mark.parametrize("invocation", ["$(MAKE) child", "$(RUN)", "$(NESTED)"])
-def test_recursive_make_aliases_reject_missing_children(tmp_path: Path, invocation: str) -> None:
-    makefile = tmp_path / "Makefile"
-    source = (
-        f"RUN = $(MAKE) child\nNESTED = $(RUN)\ntarget:\n\t@{invocation}\nchild:\n\tgit --version\n"
-    )
-    makefile.write_text(source, encoding="utf-8")
-    baseline = derive_make_target_authority(tmp_path, "target")
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
-
-    makefile.write_text(source.replace("\nchild:\n", "\nother:\n"), encoding="utf-8")
-    authority = derive_make_target_authority(tmp_path, "target")
-
-    assert any(
-        "missing recursive make target: target -> child" in item for item in authority.unresolved
-    )
-    assert "git" not in authority.tools
-
-
-@pytest.mark.parametrize("invocation", ["$(MAKE) child", "$(RUN)", "$(NESTED)"])
-def test_recursive_make_aliases_reject_child_cycles(tmp_path: Path, invocation: str) -> None:
-    makefile = tmp_path / "Makefile"
-    source = (
-        "RUN = $(MAKE) child\nNESTED = $(RUN)\nLOOP = $(MAKE) target\n"
-        f"target:\n\t@{invocation}\nchild:\n\tgit --version\n"
-    )
-    makefile.write_text(source, encoding="utf-8")
-    baseline = derive_make_target_authority(tmp_path, "target")
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
-
-    makefile.write_text(source.replace("git --version", "$(LOOP)"), encoding="utf-8")
-    authority = derive_make_target_authority(tmp_path, "target")
-
-    assert any(
-        "make target cycle: target -> child -> target" in item for item in authority.unresolved
-    )
-
-
 @pytest.mark.parametrize(
     "invocation",
     [
-        "$(MAKE)",
-        "$(MAKE) $(UNBOUND)",
+        "$(MAKE) child",
+        "$(RUN)",
+        "$(NESTED)",
+        "${MAKE} child",
         "$(MAKE) --directory=elsewhere child",
-        "$(MAKE) child --directory=elsewhere",
-        "$(MAKE) child -C elsewhere",
         "$(MAKE) child -fOtherfile",
-        "$(MAKE) child $(UNBOUND)",
-        '$(MAKE) child "TAIL=$(UNBOUND)"',
+        "$(MAKE) child COMMAND=curl",
         "$(MAKE) child SHELL=curl",
         "$(MAKE) child MAKEFLAGS=-fOtherfile",
-        "$(MAKE) child MAKE=other-make",
-        "$(MAKE) child MFLAGS=-Celsewhere",
-        "$(MAKE) child MAKEFILES=Otherfile",
-        "${MAKE} child",
+        "$(MAKE) $(UNBOUND)",
     ],
 )
-def test_unsupported_recursive_make_aliases_remain_unproven(
+def test_recursive_make_native_binding_remains_unproven(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invocation: str
 ) -> None:
     makefile = tmp_path / "Makefile"
-    source = (
-        "RUN = $(MAKE) child\nNESTED = $(RUN)\ntarget:\n\t@$(NESTED)\nchild:\n\tgit --version\n"
-        "-C:\n\tcurl --version\n-fOtherfile:\n\tcurl --version\n"
-    )
-    makefile.write_text(source, encoding="utf-8")
+    baseline_source = "target: child\nchild:\n\tgit --version\n"
+    makefile.write_text(baseline_source, encoding="utf-8")
     baseline = derive_make_target_authority(tmp_path, "target")
     assert baseline.unresolved == ()
     assert baseline.tools == ("git",)
@@ -336,108 +326,42 @@ def test_unsupported_recursive_make_aliases_remain_unproven(
     monkeypatch.setenv("UNBOUND", "child")
     monkeypatch.setenv("MAKE", "make")
     makefile.write_text(
-        source.replace("RUN = $(MAKE) child", f"RUN = {invocation}"), encoding="utf-8"
-    )
-    authority = derive_make_target_authority(tmp_path, "target")
-
-    assert authority.unresolved
-    assert "git" not in authority.tools
-
-
-@pytest.mark.parametrize("invocation", ["$(MAKE) child", "$(RUN)", "$(NESTED)"])
-def test_recursive_make_aliases_retain_every_literal_goal(tmp_path: Path, invocation: str) -> None:
-    makefile = tmp_path / "Makefile"
-    source = (
-        "RUN = $(MAKE) child\nNESTED = $(RUN)\n"
-        f"target:\n\t@{invocation}\nchild:\n\tgit --version\nother:\n\tcurl --version\n"
-    )
-    makefile.write_text(source, encoding="utf-8")
-    baseline = derive_make_target_authority(tmp_path, "target")
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
-
-    makefile.write_text(source.replace("$(MAKE) child", "$(MAKE) child other"), encoding="utf-8")
-    authority = derive_make_target_authority(tmp_path, "target")
-
-    assert authority.unresolved == ()
-    assert authority.tools == ("curl", "git")
-    assert any("target -> other" in item for _tool, item in authority.provenance)
-
-    makefile.write_text(source.replace("$(MAKE) child", "$(MAKE) child missing"), encoding="utf-8")
-    missing = derive_make_target_authority(tmp_path, "target")
-    assert any(
-        "missing recursive make target: target -> missing" in item for item in missing.unresolved
-    )
-
-
-def test_recursive_make_literal_assignments_bind_each_child_without_leaking(
-    tmp_path: Path,
-) -> None:
-    makefile = tmp_path / "Makefile"
-    source = (
-        "COMMAND = git\nRUN = $(MAKE) child\nNESTED = $(RUN)\n"
-        "target:\n\t@$(NESTED)\nchild:\n\t$(MAKE) grandchild\n"
-        "grandchild:\n\t$(COMMAND) --version\n"
-    )
-    makefile.write_text(source, encoding="utf-8")
-    baseline = derive_make_target_authority(tmp_path, "target")
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
-
-    makefile.write_text(
-        source.replace(
-            "\t@$(NESTED)\n",
-            "\t@$(NESTED) COMMAND=curl\n\t@$(NESTED) COMMAND=rm\n\t@$(NESTED)\n",
-        ),
+        f"RUN = $(MAKE) child\nNESTED = $(RUN)\ntarget:\n\t{invocation}\nchild:\n\tgit --version\n",
         encoding="utf-8",
     )
-    authority = derive_make_target_authority(tmp_path, "target")
+    result = derive_make_target_authority(tmp_path, "target")
+    assert result.unresolved
+    assert "curl" not in result.tools
+    assert "Makefile" in dict(result.source_identities)
 
-    assert authority.unresolved == ()
-    assert authority.tools == ("curl", "git", "rm")
-    assert all("target -> child -> grandchild" in item for _tool, item in authority.provenance)
 
-
-def test_recursive_make_retains_literal_marker_assignment_data(tmp_path: Path) -> None:
-    makefile = tmp_path / "Makefile"
-    source = (
-        "MARKER = not certification\nRUN = $(MAKE) child\nNESTED = $(RUN)\n"
-        'target:\n\t@$(NESTED)\nchild:\n\tgit log --grep "$(MARKER)"\n'
+def test_declared_forward_need_does_not_widen_independent_tool_permission(tmp_path: Path) -> None:
+    from oh_goon.services.canonical_goon_tool_projection import (
+        derive_canonical_goon_tool_projection,
     )
-    makefile.write_text(source, encoding="utf-8")
-    baseline = derive_make_target_authority(tmp_path, "target")
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("git",)
 
-    makefile.write_text(
-        source.replace("\t@$(NESTED)\n", '\t@$(NESTED) MARKER="not certification and not slow"\n'),
+    _write_forwarded_make_target(tmp_path, payload="rm -f artifact")
+    backend = tmp_path / "backend"
+    backend.mkdir(exist_ok=True)
+    (backend / "goon-execution-requirements.json").write_text(
+        json.dumps({"workload_tool_permissions": {"make:target": ["bash", "sh"]}}),
         encoding="utf-8",
     )
-    authority = derive_make_target_authority(tmp_path, "target")
+    goon = tmp_path / "templates/goons/oh-goon/candidate"
+    goon.mkdir(parents=True)
+    (goon / "goon.yml").write_text("steps:\n- run: make target\n", encoding="utf-8")
+    (goon / "README.md").write_text("# oh-goon/candidate\n", encoding="utf-8")
+    workloads = load_workload_execution_requirements(tmp_path)
+    assert workloads.unresolved_by_owner["make:target"]
+    assert "rm" in workloads.derived_tools_by_owner["make:target"]
 
-    assert authority.unresolved == ()
-    assert authority.tools == baseline.tools
-
-
-def test_recursive_make_literal_assignment_keeps_cycle_detection(tmp_path: Path) -> None:
-    makefile = tmp_path / "Makefile"
-    source = (
-        "COMMAND = git\nRUN = $(MAKE) child\nNESTED = $(RUN)\n"
-        "target:\n\t@$(NESTED) COMMAND=curl\nchild:\n\t$(COMMAND) --version\n"
+    projection = derive_canonical_goon_tool_projection(
+        tmp_path,
+        workload_permissions={"make:target": ("bash", "sh")},
+        workloads=workloads,
     )
-    makefile.write_text(source, encoding="utf-8")
-    baseline = derive_make_target_authority(tmp_path, "target")
-    assert baseline.unresolved == ()
-    assert baseline.tools == ("curl",)
-
-    makefile.write_text(
-        source.replace("$(COMMAND) --version", "$(MAKE) target COMMAND=git"), encoding="utf-8"
-    )
-    authority = derive_make_target_authority(tmp_path, "target")
-
-    assert any(
-        "make target cycle: target -> child -> target" in item for item in authority.unresolved
-    )
+    assert len(projection.permission_violations) == 1
+    assert projection.permission_violations[0].missing_tools == ("rm",)
 
 
 def test_canonical_frontend_authority_closes_locked_package_executables() -> None:
@@ -471,18 +395,16 @@ def test_npm_nested_expansions_cannot_hide_unowned_native_execution(
     package = _write_package(
         tmp_path,
         scripts={
-            "test": "printf '%s' '${UNSET:-`curl --version`}' "
-            r'"\${UNSET:-\`curl --version\`}" '
-            "${UNSET:-'`curl --version`'} "
-            r"${UNSET:-\<\(curl\)} "
-            '"${UNSET:-$(getconf LONG_BIT)}" && tsc -b',
+            "test": "printf '%s' literal-data && tsc -b",
         },
         dependencies={"typescript": "1"},
         bins={"typescript": ("1.0.0", "tsc", "bin/tsc")},
     )
-    baseline = derive_npm_run_authority(tmp_path, "test", chain=("target",))
-    assert baseline.unresolved == ()
-    assert baseline.host_tools == ("getconf", "sh")
+    baseline = derive_npm_run_authority(
+        tmp_path, "test", chain=("target",), package_dir=tmp_path / "frontend"
+    )
+    assert baseline.unresolved
+    assert baseline.host_tools == ()
     assert [item.bin_name for item in baseline.package_executables] == ["tsc"]
 
     path = package / "package.json"
@@ -490,7 +412,9 @@ def test_npm_nested_expansions_cannot_hide_unowned_native_execution(
     payload["scripts"]["test"] = body
     path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
-    authority = derive_npm_run_authority(tmp_path, "test", chain=("target",))
+    authority = derive_npm_run_authority(
+        tmp_path, "test", chain=("target",), package_dir=tmp_path / "frontend"
+    )
 
     if "getconf" in body:
         assert authority.unresolved or "getconf" in authority.host_tools

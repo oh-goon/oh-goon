@@ -242,16 +242,26 @@ exceeding it fails identity admission without returning partial evidence.
 Make/shell declarations, Python manifests, byte-range receipts and ECMAScript
 syntax are supported repository observations. Authored shell text does not
 establish native expansion or effective environment, and bounded source syntax
-does not establish complete alias closure or runtime call targets. Current
-architecture/tooling still contains local Python, TypeScript and Make/shell
-semantic analyzers. Their retirement is remaining
-[HUG-179](https://linear.app/hugloss/issue/HUG-179) migration work, not permission
-for another repository-intelligence owner or a fallback when producer evidence
-is incomplete. Oh-Goon's architecture verdicts, approved-owner rules and policy
-lists remain Oh-Goon-owned; repository facts must come through the public API
-with their qualifications. Public import protection does not prove that this
-semantic migration is complete. Qualification grading and SECRET answer truth
-remain outside repository retrieval.
+does not establish complete alias closure or runtime call targets. Architecture
+consumers obtain imported call origins, literal bindings and annotation references
+from the producer, including the separate coordinates of decoded forward
+annotations. Unknown and conditional origins cannot certify an absence property.
+Local AST inspection retains explicit declaration, member and source-range
+policy; it does not reconstruct bindings or value-flow graphs.
+
+Native command, lock, version-authoring and progress behavior is protected at its
+actual process/CLI/Run/Game Tape boundaries. Those checks replace the retired
+architecture interpreters for command arguments, retries, compatibility taint,
+lock-parser flow and progress call graphs. Oh-Goon retains architecture verdicts,
+approved-owner rules, tool ceilings and physical execution custody. Producer
+source candidates do not grant effects or repair unknown native expansion;
+unresolved scope follows the existing execution policy. See the
+[execution-authority contract](EXECUTION_AUTHORITY_CLOSURE.md).
+
+This [HUG-179](https://linear.app/hugloss/issue/HUG-179) migration uses the existing
+public API and qualification owners. Import protection and a bounded semantic
+audit do not establish that every repository-intelligence path is qualified.
+Qualification grading and SECRET answer truth remain outside repository retrieval.
 
 Detailed producer implementation provenance is unavailable until a supported
 public diagnostic API exists; the public loaded implementation identity remains
@@ -350,6 +360,15 @@ and nominations; Oh-Goon retains those facts and applies the existing execution
 admission. Each chain keeps the consumer source's intact changed-set packet; the
 changed lock is connected by retained dependency evidence. This does not introduce another
 resolver or impact graph.
+
+The released producer's `dependencies.verification()` composes those chains once
+per explicit source chunk. Oh-Goon retains each intact composite and projects its
+exact consumer, verifier, target and relationship indices; retained readback uses
+the public adapter's producer validation rather than reconstructing relevance.
+Producer `selection_changes` supplies component, selection, inventory and scoped
+root/incoming-relationship endpoint facts. The native delta validator binds them
+to the retained before/after observations. Accepted dependency-change shapes,
+Python proof admission, cadence and native collection remain Oh-Goon policy.
 
 Pytest-domain file nominations remain advisory until the existing native collector
 establishes executable members under the admitted configuration and cadence. The

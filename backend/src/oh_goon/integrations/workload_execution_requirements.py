@@ -8,8 +8,17 @@ from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_tool_requirements import SHELL_RUNTIME_SUPPORT_TOOLS
-from oh_goon.integrations.make_execution_authority import derive_make_target_authority
+from oh_goon.integrations.hashmarks import (
+    HashmarksSourceEvidence,
+    capture_source_member,
+    hashmarks_source_scope,
+)
+from oh_goon.integrations.make_execution_authority import (
+    derive_make_target_authority,
+    observe_make_target_sources,
+)
 from oh_goon.integrations.package_script_execution_authority import PackageExecutableAuthority
+from oh_goon.integrations.shell_execution_authority import ShellSourceObservations
 
 MAKEFILE = "Makefile"
 _ANNOTATION = re.compile(
@@ -41,11 +50,9 @@ def _opaque_tools_from_annotation(raw: str, line_number: int) -> tuple[str, ...]
     return tools
 
 
-def _load_opaque_tools(path: Path) -> dict[str, tuple[str, ...]]:
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
-        raise ValueError(f"missing workload execution-requirements owner: {path}") from exc
+def _load_opaque_tools(raw: bytes) -> dict[str, tuple[str, ...]]:
+    """Parse the product's declaration ABI from the original captured bytes."""
+    lines = raw.decode("utf-8").split("\n")
     result: dict[str, tuple[str, ...]] = {}
     pending: tuple[str, ...] | None = None
     pending_line = 0
@@ -105,7 +112,13 @@ def _registered_make_owners(root: Path) -> tuple[str, ...]:
 
 
 def _close_owner(
-    root: Path, owner: str, opaque_tools: tuple[str, ...]
+    root: Path,
+    owner: str,
+    opaque_tools: tuple[str, ...],
+    *,
+    source_evidence: HashmarksSourceEvidence,
+    custody_cache: dict[str, str],
+    source_observations: ShellSourceObservations,
 ) -> tuple[
     tuple[str, ...],
     tuple[str, ...],
@@ -116,7 +129,13 @@ def _close_owner(
     tuple[tuple[str, str], ...],
 ]:
     target = owner.removeprefix(_OWNER_PREFIX)
-    authority = derive_make_target_authority(root, target)
+    authority = derive_make_target_authority(
+        root,
+        target,
+        source_evidence=source_evidence,
+        custody_cache=custody_cache,
+        source_observations=source_observations,
+    )
     opaque_provenance = tuple(
         (tool, f"{target} -> <opaque-owned-boundary> -> {tool}") for tool in opaque_tools
     )
@@ -170,53 +189,72 @@ def load_workload_execution_requirements(root: Path) -> WorkloadExecutionRequire
     """Load opaque supplements and derive project-owned Make execution closure."""
 
     root = root.resolve()
-    opaque = _load_opaque_tools(root / MAKEFILE)
-    owners = tuple(sorted(set(_registered_make_owners(root)) | set(opaque)))
-    opaque_by_owner = {owner: opaque.get(owner, ()) for owner in owners}
-    closed: dict[str, tuple[str, ...]] = {}
-    derived: dict[str, tuple[str, ...]] = {}
-    provenance: dict[str, tuple[tuple[str, str], ...]] = {}
-    unresolved: dict[str, tuple[str, ...]] = {}
-    sources: dict[str, tuple[tuple[str, str], ...]] = {}
-    package_executables: dict[str, tuple[PackageExecutableAuthority, ...]] = {}
-    package_provenance: dict[str, tuple[tuple[str, str], ...]] = {}
-    for owner in owners:
-        opaque_tools = opaque_by_owner[owner]
-        (
-            owner_closed,
-            owner_derived,
-            owner_provenance,
-            owner_unresolved,
-            owner_sources,
-            owner_package_executables,
-            owner_package_provenance,
-        ) = _close_owner(root, owner, opaque_tools)
-        closed[owner] = owner_closed
-        derived[owner] = owner_derived
-        provenance[owner] = owner_provenance
-        unresolved[owner] = owner_unresolved
-        sources[owner] = owner_sources
-        package_executables[owner] = owner_package_executables
-        package_provenance[owner] = owner_package_provenance
-    return WorkloadExecutionRequirements(
-        tools_by_owner=closed,
-        opaque_tools_by_owner=opaque_by_owner,
-        derived_tools_by_owner=derived,
-        provenance_by_owner=provenance,
-        unresolved_by_owner=unresolved,
-        source_identities_by_owner=sources,
-        package_executables_by_owner=package_executables,
-        package_provenance_by_owner=package_provenance,
-        identity=_requirements_identity(
-            closed,
-            derived,
-            provenance,
-            unresolved,
-            sources,
-            package_executables,
-            package_provenance,
-        ),
-    )
+    with hashmarks_source_scope(root) as scope:
+        original = capture_source_member(root, MAKEFILE, scope=scope)
+        if original.source_bytes is None:
+            raise ValueError("Workload source bytes are unavailable")
+        opaque = _load_opaque_tools(original.source_bytes)
+        owners = tuple(sorted(set(_registered_make_owners(root)) | set(opaque)))
+        opaque_by_owner = {owner: opaque.get(owner, ()) for owner in owners}
+        closed: dict[str, tuple[str, ...]] = {}
+        derived: dict[str, tuple[str, ...]] = {}
+        provenance: dict[str, tuple[tuple[str, str], ...]] = {}
+        unresolved: dict[str, tuple[str, ...]] = {}
+        sources: dict[str, tuple[tuple[str, str], ...]] = {}
+        package_executables: dict[str, tuple[PackageExecutableAuthority, ...]] = {}
+        package_provenance: dict[str, tuple[tuple[str, str], ...]] = {}
+        source_evidence = observe_make_target_sources(
+            root,
+            tuple(owner.removeprefix(_OWNER_PREFIX) for owner in owners),
+            scope=scope,
+            source_capture=original,
+        )
+        custody_cache: dict[str, str] = {}
+        source_observations = ShellSourceObservations(root, scope)
+        for owner in owners:
+            opaque_tools = opaque_by_owner[owner]
+            (
+                owner_closed,
+                owner_derived,
+                owner_provenance,
+                owner_unresolved,
+                owner_sources,
+                owner_package_executables,
+                owner_package_provenance,
+            ) = _close_owner(
+                root,
+                owner,
+                opaque_tools,
+                source_evidence=source_evidence,
+                custody_cache=custody_cache,
+                source_observations=source_observations,
+            )
+            closed[owner] = owner_closed
+            derived[owner] = owner_derived
+            provenance[owner] = owner_provenance
+            unresolved[owner] = owner_unresolved
+            sources[owner] = owner_sources
+            package_executables[owner] = owner_package_executables
+            package_provenance[owner] = owner_package_provenance
+        return WorkloadExecutionRequirements(
+            tools_by_owner=closed,
+            opaque_tools_by_owner=opaque_by_owner,
+            derived_tools_by_owner=derived,
+            provenance_by_owner=provenance,
+            unresolved_by_owner=unresolved,
+            source_identities_by_owner=sources,
+            package_executables_by_owner=package_executables,
+            package_provenance_by_owner=package_provenance,
+            identity=_requirements_identity(
+                closed,
+                derived,
+                provenance,
+                unresolved,
+                sources,
+                package_executables,
+                package_provenance,
+            ),
+        )
 
 
 def required_tools_for_owner(

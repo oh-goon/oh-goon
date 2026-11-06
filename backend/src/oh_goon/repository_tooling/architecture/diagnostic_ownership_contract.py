@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from oh_goon.repository_tooling.architecture.common import Violation, python_ast
+from oh_goon.repository_tooling.architecture.common import Violation, python_semantic_facts
 from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT
 
 _CONTROL_PREFIXES = (
@@ -19,39 +19,7 @@ _REQUIRED_DIAGNOSTIC_SOURCES = (
 
 
 def _imports(path: Path) -> set[str]:
-    tree = python_ast(path)
-    result: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            result.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            result.add(node.module)
-    return result
-
-
-def _diagnostic_owner_bindings(path: Path) -> set[str]:
-    """Return local names that bind the diagnostic semantic owner module or its exports."""
-
-    tree = python_ast(path)
-    bindings: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == _DIAGNOSTIC_MODEL_MODULE:
-            bindings.update(alias.asname or alias.name for alias in node.names)
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == _DIAGNOSTIC_MODEL_MODULE and alias.asname:
-                    bindings.add(alias.asname)
-    return bindings
-
-
-def _expression_root_name(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return _expression_root_name(node.value)
-    if isinstance(node, ast.Call):
-        return _expression_root_name(node.func)
-    return None
+    return set(python_semantic_facts(path, imported_only=True).imports)
 
 
 def _has_owner_backed_diagnostic_emit(path: Path) -> bool:
@@ -62,14 +30,9 @@ def _has_owner_backed_diagnostic_emit(path: Path) -> bool:
     a binding imported from ``core.models.diagnostic``.
     """
 
-    owner_bindings = _diagnostic_owner_bindings(path)
-    if not owner_bindings:
-        return False
-
-    tree = python_ast(path)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
+    facts = python_semantic_facts(path, imported_only=True)
+    qualified_calls = {call: name for name, call in facts.calls}
+    for _observation, node in facts.call_observations:
         if not isinstance(node.func, ast.Attribute) or node.func.attr != "emit":
             continue
         event: ast.AST | None = node.args[0] if node.args else None
@@ -80,7 +43,11 @@ def _has_owner_backed_diagnostic_emit(path: Path) -> bool:
             )
         if event is None:
             continue
-        if _expression_root_name(event) in owner_bindings:
+        # The native producer owns aliases, rebinding and shadowing. The AST
+        # only identifies which exact call expression supplies the public event
+        # argument; an unrelated imported name cannot qualify that expression.
+        owner = qualified_calls.get(event) if isinstance(event, ast.Call) else None
+        if owner is not None and owner.startswith(_DIAGNOSTIC_MODEL_MODULE + "."):
             return True
     return False
 

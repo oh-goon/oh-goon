@@ -48,7 +48,13 @@ if TYPE_CHECKING:
         project_dependency_package as project_dependency_package,
     )
     from .dependencies import (
+        project_dependency_verification as project_dependency_verification,
+    )
+    from .dependencies import (
         require_current_dependency_environment as require_current_dependency_environment,
+    )
+    from .dependencies import (
+        validate_dependency_delta as validate_dependency_delta,
     )
     from .dependencies import (
         validate_required_dependency_introductions as validate_required_dependency_introductions,
@@ -114,6 +120,9 @@ if TYPE_CHECKING:
         HashmarksSourceInputError as HashmarksSourceInputError,
     )
     from .source_facts import (
+        capture_source_member as capture_source_member,
+    )
+    from .source_facts import (
         hashmarks_source_scope as hashmarks_source_scope,
     )
     from .source_facts import (
@@ -121,6 +130,9 @@ if TYPE_CHECKING:
     )
     from .source_facts import (
         observe_make_shell_declarations_text as observe_make_shell_declarations_text,
+    )
+    from .source_facts import (
+        observe_npm_project_declarations as observe_npm_project_declarations,
     )
     from .source_facts import (
         observe_python_project_declarations as observe_python_project_declarations,
@@ -133,6 +145,9 @@ if TYPE_CHECKING:
     )
     from .source_facts import (
         observe_source_bindings_text as observe_source_bindings_text,
+    )
+    from .source_facts import (
+        verify_source_scope as verify_source_scope,
     )
     from .verification_selection import (
         HashmarksVerificationSelectionInputError as HashmarksVerificationSelectionInputError,
@@ -157,6 +172,8 @@ _EXPORTS = {
     "dependency_version_predicate": "dependencies",
     "observe_locked_dependencies": "dependencies",
     "project_dependency_package": "dependencies",
+    "project_dependency_verification": "dependencies",
+    "validate_dependency_delta": "dependencies",
     "require_current_dependency_environment": "dependencies",
     "validate_required_dependency_introductions": "dependencies",
     "nominate_changed_verification": "development_verification",
@@ -179,13 +196,16 @@ _EXPORTS = {
     "require_loaded_hashmarks_runtime": "runtime_contract",
     "HashmarksSourceEvidence": "source_facts",
     "HashmarksSourceInputError": "source_facts",
+    "capture_source_member": "source_facts",
     "hashmarks_source_scope": "source_facts",
     "observe_make_shell_declarations": "source_facts",
     "observe_make_shell_declarations_text": "source_facts",
+    "observe_npm_project_declarations": "source_facts",
     "observe_python_project_declarations": "source_facts",
     "observe_python_project_declarations_text": "source_facts",
     "observe_source_bindings": "source_facts",
     "observe_source_bindings_text": "source_facts",
+    "verify_source_scope": "source_facts",
     "HashmarksVerificationSelectionInputError": "verification_selection",
     "VerifiedHashmarksVerificationSelection": "verification_selection",
     "load_hashmarks_verification_selection": "verification_selection",

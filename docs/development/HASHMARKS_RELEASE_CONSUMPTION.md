@@ -47,6 +47,13 @@ upgrade ineligible. Extra dependency groups and optional extras are included.
 The check is performed without resolving, installing, or executing candidate
 packages; native uv remains the sole artifact interpreter.
 
+Once this named upgrade route is admitted, its manifest and lock inputs do not
+also require generic verification-support nominations merely because the manifest
+contains pytest configuration. Raw producer roles and uncertainty remain intact;
+the required native artifact, smoke, package and policy proofs still apply.
+Other changed verification-support sources retain their own qualified consumer
+obligation. A pytest-configuration change cannot use the Hashmarks-only route.
+
 Fast admission retains bounded hashes, byte counts, uv version and export scope,
 not multi-megabyte export contents. The independently checked-out **trusted
 base controller** repeats the native export from the candidate's committed

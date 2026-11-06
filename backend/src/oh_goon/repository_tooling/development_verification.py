@@ -22,6 +22,7 @@ from oh_goon.engine.command import CommandCancelledError, CommandTimeoutExpired,
 from oh_goon.integrations.exact_file_write import publish_text_file
 from oh_goon.integrations.hashmarks import (
     nominate_changed_verification,
+    project_dependency_verification,
     require_current_dependency_environment,
     require_loaded_hashmarks_runtime,
     validate_required_dependency_introductions,
@@ -215,74 +216,14 @@ def _backend_dependency_intent(
     return runtime_changed or unsupported, unsupported, hashmarks_upgrade_intent(previous, current)
 
 
-def _dependency_chain_qualified(
-    chain: Mapping[str, Any],
-    packets: list[dict[str, Any]],
-    nominations: list[dict[str, Any]],
-    introduced: Mapping[str, str],
-) -> bool:
-    source = chain.get("source_path")
-    consumer = chain.get("consumer")
-    changed = chain.get("changed_verification")
-    projected = chain.get("nomination")
-    if not all(isinstance(value, Mapping) for value in (consumer, changed, projected)):
+def _same_dependency_receipt(left: object, right: object) -> bool:
+    """Preserve JSON value types when comparing repeated native evidence."""
+    try:
+        return json.dumps(left, sort_keys=True, allow_nan=False) == json.dumps(
+            right, sort_keys=True, allow_nan=False
+        )
+    except (TypeError, ValueError, RecursionError):
         return False
-    assert isinstance(consumer, Mapping)
-    assert isinstance(changed, Mapping)
-    assert isinstance(projected, Mapping)
-    node = chain.get("node_id")
-    consumer_node = introduced.get(node, node) if isinstance(node, str) else None
-    if (
-        not isinstance(node, str)
-        or (node in introduced and chain.get("consumer_node_id") != consumer_node)
-        or (node not in introduced and "consumer_node_id" in chain)
-    ):
-        return False
-    nomination = projected.get("nomination", {})
-    if (
-        not isinstance(source, str)
-        or not source.startswith("backend/src/")
-        or consumer.get("source_path") != source
-        or consumer.get("distribution_state") != "resolved-unique"
-        or consumer.get("distribution_nodes") != [consumer_node]
-        or consumer.get("import_claim_authority") != "source-observed-static-import"
-        or not consumer.get("source_member")
-        or changed.get("freshness") == "stale"
-        or changed.get("changed_paths") != [source]
-        or projected not in nominations
-        or projected.get("workspace_prefix") != ""
-        or not isinstance(nomination, Mapping)
-        or nomination.get("available") is not True
-        or nomination.get("runner_evidence") != "pytest"
-        or not nomination.get("source_member_revision")
-    ):
-        return False
-    if not any(
-        consumer in packet.get("consumers", [])
-        and source in packet.get("source_scope", {}).get("paths", [])
-        and consumer["source_member"] in packet.get("source_scope", {}).get("members", [])
-        for packet in packets
-    ):
-        return False
-    target = nomination.get("verification_target", {}).get("path")
-    changes = changed.get("changes", [])
-    if len(changes) != 1 or changes[0].get("path") != source:
-        return False
-    if not any(
-        row.get("path") == target and row.get("nomination") == nomination
-        for row in changed.get("targets", [])
-    ):
-        return False
-    relationships = projected.get("relationships", [])
-    return any(
-        row in changes[0].get("relationships", [])
-        and row.get("source") == source
-        and row.get("target") == target
-        and row.get("relation_kind") in {"direct-reference", "bounded-indirect-reference"}
-        and row.get("evidence_identity")
-        for row in relationships
-        if isinstance(row, Mapping)
-    )
 
 
 def _bounded_dependency_scope(
@@ -383,11 +324,11 @@ def _bounded_dependency_scope(
     removed = {transition["removed"][0]["node_id"] for transition in transitions}
     if added != replaced_nodes or removed != set(delta.get("selections_removed", [])):
         return False
-    selections = {row["node_id"]: row for row in after.get("selections", [])}
-    components = {row["component_id"]: row for row in after.get("components", [])}
+    endpoints = {row["selection"]["node_id"]: row for row in delta["selection_changes"]["added"]}
     for row in metadata:
-        selection = selections.get(row["node_id"], {})
-        component = components.get(row["component_id"], {})
+        endpoint = endpoints.get(row["node_id"], {})
+        selection = endpoint.get("selection", {})
+        component = endpoint.get("component", {})
         if (
             selection.get("component_id") != row["component_id"]
             or selection.get("version") != row["version"]
@@ -404,6 +345,7 @@ def _bounded_dependency_scope(
     scope = bundle.get("consumer_scope", {})
     selection = bundle.get("source_selection", {})
     packets = bundle.get("consumer_packets")
+    verifications = bundle.get("verification_packets")
     if (
         scope.get("completeness") != "incomplete"
         or scope.get("negative_evidence") != "not-admissible"
@@ -415,6 +357,12 @@ def _bounded_dependency_scope(
         or not isinstance(packets, list)
         or not packets
         or any(not isinstance(packet, dict) for packet in packets)
+        or not isinstance(verifications, list)
+        or len(verifications) != len(packets)
+        or any(not isinstance(packet, dict) for packet in verifications)
+        or not _same_dependency_receipt(
+            packets, [packet.get("consumer_packet") for packet in verifications]
+        )
     ):
         return False
     observed_paths: set[str] = set()
@@ -445,16 +393,36 @@ def _bounded_dependency_scope(
         or lock_rows[0].get("stale") is True
         or not isinstance(chains, list)
         or not chains
-        or lock_rows[0].get("dependency_chain") != chains
+        or not _same_dependency_receipt(lock_rows[0].get("dependency_chain"), chains)
         or any(not isinstance(chain, Mapping) for chain in chains)
         or {chain.get("node_id") for chain in chains} != set(nodes)
     ):
         return False
     nominations = lock_rows[0].get("nominations", [])
-    if not all(
-        _dependency_chain_qualified(chain, packets, nominations, introduced) for chain in chains
-    ):
+    try:
+        projected = [
+            chain
+            for packet in verifications
+            for chain in project_dependency_verification(packet, after)
+        ]
+    except (KeyError, TypeError, ValueError):
         return False
+    if not _same_dependency_receipt(projected, chains):
+        return False
+    for chain in chains:
+        nomination = chain["nomination"]
+        if (
+            not chain["source_path"].startswith("backend/src/")
+            or chain["consumer_node_id"] != introduced.get(chain["node_id"], chain["node_id"])
+            or not any(_same_dependency_receipt(nomination, row) for row in nominations)
+            or nomination.get("workspace_prefix") != ""
+            or nomination["nomination"].get("runner_evidence") != "pytest"
+            or any(
+                row["relation_kind"] not in {"direct-reference", "bounded-indirect-reference"}
+                for row in nomination["relationships"]
+            )
+        ):
+            return False
     return selected_files is None or {
         chain["node_id"]
         for chain in chains
@@ -814,6 +782,18 @@ def require_current_plan(root: Path, plan: ChangeVerificationPlan) -> None:
         plan.model_dump(mode="json", by_alias=True),
         plan.evidence,
         {path.split("::", 1)[0] for path in plan.pytest} | set(plan.frontend),
+        admitted_hashmarks_upgrade=(
+            plan.evidence.get("hashmarks_upgrade")
+            == {
+                "authority": "oh-goon-execution-policy",
+                "scope": "mandatory-hashmarks-upgrade",
+                "consumer_coverage": "not-claimed",
+            }
+            and isinstance(plan.evidence.get("hashmarks_native_artifacts"), Mapping)
+            and plan.evidence["hashmarks_native_artifacts"].get("equivalent") is True
+            and HASHMARKS_UPGRADE_OBLIGATION in plan.obligations
+            and set(HASHMARKS_UPGRADE_TESTS) <= set(plan.pytest)
+        ),
     )
 
 

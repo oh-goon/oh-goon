@@ -254,11 +254,9 @@ contract coverage. Static inspection is justified when governed structure or
 an absence property is itself the contract. Test count and line coverage are
 diagnostics, not quality targets. Local policy is in
 `docs/development/TEST_QUALITY.md`; reusable review methods belong in agentsCookbook.
-Before accepting a repository-review finding or proposed refactor, use the
-[five-question QA](docs/development/REAL_LIFECYCLE_QA.md#five-question-qa-for-repository-findings)
-to distinguish inspected behavior, semantic authority, a real failure, a safe
-control and a bounded verdict. This guides agents with limited reasoning; it
-is not another review approval step or CI/merge prerequisite.
+The optional [repository-finding QA](docs/development/REAL_LIFECYCLE_QA.md#five-question-qa-for-repository-findings)
+applies that methodology to Oh-Goon's evidence and native-execution owners.
+It adds no approval step or CI/merge prerequisite.
 
 Run the narrow owner check first and diagnose its first failure. Ordinary local
 and PR work selects affected fast tests, applicable static/contracts and the

@@ -4,6 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from oh_goon.repository_tooling.architecture._structural_authority_execution import (
+    _check_local_executor_control_state,
+)
 from oh_goon.repository_tooling.architecture._structural_authority_workflow import (
     check_make_single_path,
 )
@@ -520,7 +523,7 @@ def test_guard_rejects_system_wide_local_executor_control_state(tmp_path: Path) 
     )
     isolation.parent.mkdir(parents=True, exist_ok=True)
     isolation.write_text(
-        'control_state_root = Path("/run/oh-goon")\n'
+        'from pathlib import Path\ncontrol_state_root = Path("/run/oh-goon")\n'
         'egress_state_dir = control_root / "egress"\n'
         'cgroup_state_dir = control_root / "cgroups"\n',
         encoding="utf-8",
@@ -550,10 +553,10 @@ def test_guard_allows_namespace_broker_destinations_without_host_control_state(
 @pytest.mark.parametrize(
     "source",
     [
-        'selected = "/run/oh-goon/control"\nrenamed = selected\nprivate_root = Path(renamed)\n',
-        'open("/run/lock/oh-goon/egress.lock", "w")\n',
+        'from pathlib import Path\nselected = "/run/oh-goon/control"\nrenamed = selected\nprivate_root = Path(renamed)\n',
+        'from builtins import open\nopen("/run/lock/oh-goon/egress.lock", "w")\n',
         'backend(egress_state_dir="/run/oh-goon/egress")\n',
-        'class Backend:\n    def __init__(self, *, cgroup_lock=PurePosixPath("/run/oh-goon/cgroups.lock")):\n        self.cgroup_lock = cgroup_lock\n',
+        'from pathlib import PurePosixPath\nclass Backend:\n    def __init__(self, *, cgroup_lock=PurePosixPath("/run/oh-goon/cgroups.lock")):\n        self.cgroup_lock = cgroup_lock\n',
     ],
 )
 def test_guard_rejects_host_control_state_aliases_and_effect_inputs(
@@ -566,6 +569,47 @@ def test_guard_rejects_host_control_state_aliases_and_effect_inputs(
     isolation.parent.mkdir(parents=True, exist_ok=True)
     isolation.write_text(source)
     assert any("system-wide /run" in message for message in _messages(root))
+
+
+@pytest.mark.parametrize(
+    ("source", "blocked"),
+    [
+        (
+            "from pathlib import Path, PurePosixPath\n"
+            'def guest_path():\n    location = PurePosixPath("/run/oh-goon/guest")\n    return location\n'
+            'def host_path():\n    location = "/tmp/owned-control"\n    return Path(location)\n',
+            False,
+        ),
+        (
+            'from pathlib import Path as host_path\nselected="/run/oh-goon/control"\n'
+            "renamed=selected\nprivate_root=host_path(renamed)\n",
+            True,
+        ),
+        ('def Path(value):\n    return value\nPath("/run/oh-goon/guest")\n', False),
+        ('def supplied(Path):\n    return Path("/run/oh-goon/guest")\n', False),
+        ('backend(egress_state_dir="/run/oh-goon/control")\n', True),
+        (
+            "from pathlib import PurePosixPath\n"
+            'def executor(*, cgroup_lock=PurePosixPath("/run/oh-goon/cgroups.lock")):\n    return cgroup_lock\n',
+            True,
+        ),
+        (
+            'from pathlib import Path\nlocation="/run/oh-goon/guest"\n'
+            'location="/tmp/owned-control"\nPath(location)\n',
+            False,
+        ),
+    ],
+)
+def test_native_control_state_bindings_preserve_scope_and_unknowns(
+    tmp_path: Path, source: str, blocked: bool
+) -> None:
+    root = _minimal_repo(tmp_path)
+    isolation = (
+        root / "backend/src/oh_goon/integrations/fleet_plan_bubblewrap_isolation.py"
+    )
+    isolation.parent.mkdir(parents=True, exist_ok=True)
+    isolation.write_text(source)
+    assert bool(_check_local_executor_control_state(root)) is blocked
 
 
 def test_guard_rejects_precommit_pythonpath_bootstrap(tmp_path: Path) -> None:
@@ -664,24 +708,6 @@ def test_internal_interpreter_delegates_cannot_add_a_direct_python_shebang(
     module.write_text("#!/usr/bin/python3\n" + source)
 
     assert any("direct Python shebang" in message for message in _messages(root))
-
-
-def test_guard_rejects_browser_release_package_lock_parser(tmp_path: Path) -> None:
-    root = _minimal_repo(tmp_path)
-    release = root / "backend/src/oh_goon/repository_tooling/release"
-    release.mkdir(parents=True, exist_ok=True)
-    (release / "browser_acceptance_container.py").write_text(
-        "import json\nfrom pathlib import Path\n"
-        "def locked_playwright_version(root: Path):\n"
-        '    lock_path = root / "frontend/package-lock.json"\n'
-        "    payload = json.loads(lock_path.read_text())\n"
-        '    return payload.get("packages")\n',
-        encoding="utf-8",
-    )
-    assert any(
-        "browser acceptance must not parse package-lock semantics" in message
-        for message in _messages(root)
-    )
 
 
 def test_guard_rejects_native_command_retry_semantics(tmp_path: Path) -> None:

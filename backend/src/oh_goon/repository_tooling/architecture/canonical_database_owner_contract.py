@@ -10,7 +10,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from oh_goon.repository_tooling.architecture.common import Violation
+from oh_goon.repository_tooling.architecture.common import (
+    Violation,
+    python_ast,
+    python_semantic_facts,
+    python_source_snapshot,
+)
 
 # These owners have different, explicitly limited capabilities. None is a
 # second authority for committing operational Run admission.
@@ -35,57 +40,68 @@ def database_authority_census(root: Path) -> list[tuple[str, int, str]]:
     """Return reproducible exact-file evidence for engine connection/commit sites."""
     package = root / "backend/src/oh_goon"
     findings: list[tuple[str, int, str]] = []
-    for path in sorted(package.rglob("*.py")):
-        if "__pycache__" in path.parts:
-            continue
-        relative = path.relative_to(package).as_posix()
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        imports = {
-            alias.asname or alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-            if alias.name == "sqlite3"
-        }
-        direct_connect = {
-            alias.asname or alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module == "sqlite3"
-            for alias in node.names
-            if alias.name == "connect"
-        }
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
+    with python_source_snapshot(root):
+        for path in sorted(package.rglob("*.py")):
+            if "__pycache__" in path.parts:
                 continue
-            func = node.func
-            if isinstance(func, ast.Name) and func.id in direct_connect:
-                findings.append((relative, node.lineno, "connection"))
-            if not isinstance(func, ast.Attribute):
-                continue
-            if (
-                func.attr == "connect"
-                and isinstance(func.value, ast.Name)
-                and func.value.id in imports
-            ):
-                findings.append((relative, node.lineno, "connection"))
-            if func.attr == "executescript":
-                findings.append((relative, node.lineno, "schema_script"))
-            if func.attr in {"commit", "rollback"}:
-                findings.append((relative, node.lineno, "transaction"))
-            if func.attr == "execute" and node.args:
-                sql = node.args[0]
-                # A conditional read/write BEGIN is also an owned transaction.
-                expressions = (sql.body, sql.orelse) if isinstance(sql, ast.IfExp) else (sql,)
-                for expr in expressions:
-                    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
-                        token = (
-                            expr.value.strip().split(None, 1)[0].upper()
-                            if expr.value.strip()
-                            else ""
-                        )
-                        if token in {"BEGIN", "COMMIT", "ROLLBACK"}:
-                            findings.append((relative, node.lineno, "transaction"))
-                            break
+            relative = path.relative_to(package).as_posix()
+            tree = python_ast(path)
+            facts = python_semantic_facts(path, imported_only=True, tree=tree)
+            packet = facts.evidence.packet()
+            sqlite_imported = any(
+                name == "sqlite3" or name.startswith("sqlite3.") for name in facts.imports
+            )
+            candidate_names = {"connect"} | {
+                syntax["local_name"]
+                for fact in packet["facts"]
+                if fact.get("kind") == "import-binding"
+                and isinstance(syntax := fact.get("import_syntax"), dict)
+                and syntax.get("module") == "sqlite3"
+                and syntax.get("name") == "connect"
+            }
+            qualified_calls = {id(call) for _name, call in facts.calls}
+            for fact, call in facts.call_observations:
+                symbolic = fact.get("symbolic_reference") or {}
+                if (
+                    sqlite_imported
+                    and id(call) not in qualified_calls
+                    and fact.get("expression", {}).get("name") in candidate_names
+                    and symbolic.get("qualification") != "qualified"
+                ):
+                    # Matching source spellings do not resolve this call. They
+                    # leave the SQLite exclusion unproven; never infer absence
+                    # from a conditional or otherwise unknown producer origin.
+                    raise ValueError(
+                        f"SQLite connection exclusion is unproven in {relative}:{call.lineno}"
+                    )
+            findings.extend(
+                (relative, call.lineno, "connection")
+                for name, call in facts.calls
+                if name == "sqlite3.connect"
+            )
+            # Transaction spellings are explicit local structure policy. Their
+            # receiver is not inferred to be a SQLite connection.
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                    continue
+                func = node.func
+                if func.attr == "executescript":
+                    findings.append((relative, node.lineno, "schema_script"))
+                if func.attr in {"commit", "rollback"}:
+                    findings.append((relative, node.lineno, "transaction"))
+                if func.attr == "execute" and node.args:
+                    sql = node.args[0]
+                    expressions = (sql.body, sql.orelse) if isinstance(sql, ast.IfExp) else (sql,)
+                    for expr in expressions:
+                        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+                            token = (
+                                expr.value.strip().split(None, 1)[0].upper()
+                                if expr.value.strip()
+                                else ""
+                            )
+                            if token in {"BEGIN", "COMMIT", "ROLLBACK"}:
+                                findings.append((relative, node.lineno, "transaction"))
+                                break
     return sorted(set(findings))
 
 
@@ -100,7 +116,7 @@ def check_canonical_database_owner(root: Path) -> list[Violation]:
     findings: list[Violation] = []
     try:
         census = database_authority_census(root)
-    except (OSError, SyntaxError) as exc:
+    except (OSError, SyntaxError, ValueError) as exc:
         return [Violation(package, f"DB0 database authority inventory unreadable: {exc}")]
     for relative, line, category in census:
         allowed = {

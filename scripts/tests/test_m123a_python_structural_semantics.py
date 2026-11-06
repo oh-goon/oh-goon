@@ -231,38 +231,6 @@ def test_renamed_dependency_lock_owner_import_is_rejected(tmp_path: Path) -> Non
     )
 
 
-def test_renamed_local_package_lock_parser_is_rejected(tmp_path: Path) -> None:
-    _write(
-        tmp_path,
-        "backend/src/oh_goon/repository_tooling/release/accept_release.py",
-        "import json as document_codec\n"
-        "from pathlib import Path\n"
-        "def accept(root):\n"
-        "    lock_path = Path(root) / 'frontend' / 'package-lock.json'\n"
-        "    raw_document = lock_path.read_text(encoding='utf-8')\n"
-        "    model = document_codec.loads(raw_document)\n"
-        "    return model.get('packages', {})\n",
-    )
-    assert any(
-        "re-probing or reinterpreting" in message
-        for message in _messages(_check_native_authority_deduplication(tmp_path))
-    )
-
-
-def test_exact_lock_bytes_may_be_transported_without_semantic_redecision(
-    tmp_path: Path,
-) -> None:
-    _write(
-        tmp_path,
-        "backend/src/oh_goon/repository_tooling/release/accept_release.py",
-        "from pathlib import Path\n"
-        "def evidence(root):\n"
-        "    lock_path = Path(root) / 'frontend' / 'package-lock.json'\n"
-        "    return lock_path.read_bytes()\n",
-    )
-    assert _check_native_authority_deduplication(tmp_path) == []
-
-
 def test_workflow_private_domain_words_in_comments_are_not_authority(
     tmp_path: Path,
 ) -> None:

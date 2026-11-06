@@ -11,6 +11,7 @@ from typing import Any, Literal
 import pytest
 
 from oh_goon.engine.command import CommandResult, run_command
+from oh_goon.integrations.hashmarks import validate_required_dependency_introductions
 from oh_goon.integrations.hashmarks.development_verification import (
     nominate_changed_verification,
     observe_repository_assets,
@@ -1826,6 +1827,128 @@ def _dependency_update(
     return base, lock.encode("utf-8"), manifest
 
 
+class _DependencyProducerFixture:
+    """Freeze declared producer outputs for execution-policy tests only.
+
+    Native packet qualification is exercised by the integration tests for
+    changed dependency consumers. This double recognizes exact retained
+    inputs; it does not reconstruct source relationships or dependency paths.
+    """
+
+    def __init__(self) -> None:
+        self.deltas: dict[str, str] = {}
+        self.verifications: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+
+    def retain(self, bundle: dict[str, Any]) -> None:
+        before, after, delta = (
+            bundle["before_observation"],
+            bundle["after_observation"],
+            bundle["delta"],
+        )
+        delta["selection_changes"] = {
+            "added": _declared_selection_endpoints(after, delta["selections_added"]),
+            "removed": [],
+            "changed": [],
+        }
+        for key in (
+            "inventory_added",
+            "inventory_removed",
+            "relationships_added",
+            "relationships_removed",
+        ):
+            delta.setdefault(key, [])
+        delta_identity = f"policy-fixture-delta-{len(self.deltas)}"
+        delta["evidence_identity"] = delta_identity
+        self.deltas[delta_identity] = json.dumps((delta, before, after), sort_keys=True)
+
+        identity = f"policy-fixture-verification-{len(self.verifications)}"
+        for packet in bundle["consumer_packets"]:
+            packet["selected_node_ids"] = bundle["changed_node_ids"].copy()
+        introduction = bundle.get("dependency_introductions", {})
+        packet = {
+            "evidence_identity": identity,
+            "consumer_packet": copy.deepcopy(bundle["consumer_packets"][0]),
+            "path_requests": copy.deepcopy(introduction.get("requests", [])),
+            "path_queries": (
+                [copy.deepcopy(introduction["queries"])] if introduction else []
+            ),
+        }
+        for index, chain in enumerate(bundle["chains"]):
+            chain.setdefault("consumer_node_id", chain["node_id"])
+            chain.update(
+                producer_verification_identity=identity, producer_chain_index=index
+            )
+        bundle["verification_packets"] = [packet]
+        self.verifications[identity] = (
+            json.dumps((packet, after), sort_keys=True),
+            copy.deepcopy(bundle["chains"]),
+        )
+
+    def validate_delta(
+        self, delta: dict[str, Any], before: dict[str, Any], after: dict[str, Any]
+    ) -> dict[str, Any]:
+        expected = self.deltas.get(delta.get("evidence_identity", ""))
+        return {"valid": expected == json.dumps((delta, before, after), sort_keys=True)}
+
+    def project(
+        self, packet: dict[str, Any], observation: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        expected = self.verifications.get(packet.get("evidence_identity", ""))
+        if expected is None or expected[0] != json.dumps(
+            (packet, observation), sort_keys=True
+        ):
+            raise ValueError("Policy fixture producer rejected changed retained inputs")
+        return copy.deepcopy(expected[1])
+
+
+def _declared_selection_endpoints(
+    after: dict[str, Any], nodes: list[str]
+) -> list[dict[str, Any]]:
+    """Declare neutral endpoint facts for the synthetic policy fixture."""
+    components = {row["component_id"]: row for row in after["components"]}
+    roots = {row["node_id"] for row in after.get("roots", [])}
+    return [
+        {
+            "component": components[selection["component_id"]],
+            "selection": selection,
+            "component_selection_count": sum(
+                row["component_id"] == selection["component_id"]
+                for row in after["selections"]
+            ),
+            "inventory": [
+                row
+                for row in after.get("inventory", [])
+                if row["node_id"] == selection["node_id"]
+            ],
+            "roots": [
+                row
+                for row in after.get("roots", [])
+                if row["node_id"] == selection["node_id"]
+            ],
+            "incoming_relationships": [
+                row
+                for row in after.get("relationships", [])
+                if row["target"] == selection["node_id"]
+            ],
+            "root_relationships": [
+                row
+                for row in after.get("relationships", [])
+                if row["source"] in roots and row["target"] == selection["node_id"]
+            ],
+        }
+        for selection in after["selections"]
+        if selection["node_id"] in nodes
+    ]
+
+
+_dependency_producer: _DependencyProducerFixture | None = None
+
+
+def _retain_declared_dependency_evidence(evidence: dict[str, Any]) -> None:
+    if _dependency_producer is not None:
+        _dependency_producer.retain(evidence["dependency_changes"])
+
+
 def _dependency_evidence(
     paths: tuple[str, ...],
     *,
@@ -2024,6 +2147,7 @@ def _dependency_evidence(
             )
         elif row["changed_path"] == "backend/pyproject.toml":
             row.update(state="UNAVAILABLE", nominations=[])
+    _retain_declared_dependency_evidence(evidence)
     return evidence
 
 
@@ -2060,7 +2184,9 @@ def _hashmarks_upgrade(repository: Path) -> str:
     return base
 
 
-@pytest.mark.parametrize("producer_rows", ("unavailable", "missing"))
+@pytest.mark.parametrize(
+    "producer_rows", ("unavailable", "missing", "verification-support")
+)
 def test_mandatory_hashmarks_upgrade_requires_unchanged_native_non_target_artifacts(
     repository: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2082,6 +2208,19 @@ def test_mandatory_hashmarks_upgrade_requires_unchanged_native_non_target_artifa
         evidence = _dependency_evidence(paths, dependency_base=None, **options)
         for row in evidence["observations"]:
             row.update(state="UNAVAILABLE", nominations=[], stale=True)
+            if (
+                producer_rows == "verification-support"
+                and row["changed_path"] == "backend/pyproject.toml"
+            ):
+                observed = _support_evidence((row["changed_path"],))["observations"][0]
+                observed["nominations"] = []
+                observed["changed_set"]["targets"] = []
+                observed["changed_set"]["changes"][0]["relationships"] = []
+                observed["changed_set"]["changes"][0]["classification"]["reason"] = (
+                    "pytest-configuration"
+                )
+                row.clear()
+                row.update(observed)
         if producer_rows == "missing":
             evidence["observations"] = []
         observations.extend(copy.deepcopy(evidence["observations"]))
@@ -2173,7 +2312,7 @@ def test_hashmarks_upgrade_without_changed_lock_cannot_claim_equivalence(
         owner.require_merge_selection(repository, plan)
 
 
-@pytest.mark.parametrize("extra", ("manifest", "source"))
+@pytest.mark.parametrize("extra", ("manifest", "source", "pytest-config"))
 def test_hashmarks_upgrade_does_not_qualify_unrelated_changes(
     repository: Path,
     extra: str,
@@ -2184,11 +2323,16 @@ def test_hashmarks_upgrade_does_not_qualify_unrelated_changes(
             "a", encoding="utf-8"
         ) as stream:
             stream.write('\n[project.scripts]\nunrelated = "application:main"\n')
+    elif extra == "pytest-config":
+        with (repository / "backend/pyproject.toml").open(
+            "a", encoding="utf-8"
+        ) as stream:
+            stream.write('\n[tool.pytest.ini_options]\naddopts = "-q"\n')
     else:
         (repository / "behavior.py").write_text("value = 1\n", encoding="utf-8")
 
     def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
-        if extra == "manifest":
+        if extra in {"manifest", "pytest-config"}:
             assert "dependency_base" in options
         evidence = _dependency_evidence(
             paths, dependency_base=options.pop("dependency_base", None), **options
@@ -2198,7 +2342,7 @@ def test_hashmarks_upgrade_does_not_qualify_unrelated_changes(
         return evidence
 
     plan = owner.admit_change(repository, base=base, nominator=nominate)
-    if extra == "manifest":
+    if extra in {"manifest", "pytest-config"}:
         assert "hashmarks_upgrade" not in plan.evidence
         assert "DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED" in plan.unverified
     else:
@@ -2309,6 +2453,7 @@ def _required_dependency_evidence(
             ],
         },
     }
+    _retain_declared_dependency_evidence(evidence)
     return evidence
 
 
@@ -2335,6 +2480,15 @@ def _synthetic_pytest_collection(
 
 @pytest.fixture
 def dependency_collection(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    producer = _DependencyProducerFixture()
+    monkeypatch.setattr(sys.modules[__name__], "_dependency_producer", producer)
+    # Patch the public adapter boundaries at the module that owns their shared
+    # implementation. Calls made by the public introduction-policy helper use
+    # these same frozen producer outputs. No native validator is changed.
+    adapter = sys.modules[validate_required_dependency_introductions.__module__]
+    monkeypatch.setattr(adapter, "validate_dependency_delta", producer.validate_delta)
+    monkeypatch.setattr(adapter, "project_dependency_verification", producer.project)
+    monkeypatch.setattr(owner, "project_dependency_verification", producer.project)
     calls: list[tuple[str, ...]] = []
 
     def collect(paths: tuple[Path, ...], **options: Any) -> NativePytestCollection:
@@ -2799,6 +2953,8 @@ def test_dependency_collection_preserves_admitted_asset_policy_with_advisory_nom
         "unrelated-verifier",
         "missing-nomination",
         "changed-component",
+        "boolean-chain-index",
+        "boolean-lock-row-index",
         "empty-change",
     ),
 )
@@ -2851,6 +3007,16 @@ def test_dependency_admission_refuses_unqualified_evidence_before_native_collect
             )["nominations"] = []
         elif fault == "changed-component":
             bundle["delta"]["components_changed"] = ["component-0"]
+        elif fault == "boolean-chain-index":
+            chain["producer_chain_index"] = False
+        elif fault == "boolean-lock-row-index":
+            lock = next(
+                row
+                for row in evidence["observations"]
+                if row["changed_path"] == "backend/uv.lock"
+            )
+            lock["dependency_chain"] = copy.deepcopy(bundle["chains"])
+            lock["dependency_chain"][0]["producer_chain_index"] = False
         else:
             bundle["changed_node_ids"] = []
         return evidence
@@ -2934,6 +3100,7 @@ def _add_dependency_target(evidence: dict[str, Any], target: str) -> None:
         if row["changed_path"] == "backend/uv.lock"
     )
     lock["nominations"].append(chain["nomination"])
+    _retain_declared_dependency_evidence(evidence)
 
 
 @pytest.mark.parametrize("cadence", ("empty", "daily"))

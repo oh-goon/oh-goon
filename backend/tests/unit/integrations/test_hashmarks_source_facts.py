@@ -10,7 +10,9 @@ from hashmarks.codemap.providers import TreeSitterRangeProvider
 from hashmarks.codemap.repository_source import RepositorySource
 
 from oh_goon.integrations.hashmarks import (
+    capture_source_member,
     hashmarks_source_scope,
+    observe_make_shell_declarations,
     observe_make_shell_declarations_text,
     observe_python_project_declarations,
     observe_source_bindings,
@@ -124,6 +126,67 @@ def test_source_change_before_structural_bytes_transport_refuses(
     monkeypatch.setattr(RepositorySource, "bindings", change_after_bindings)
     with pytest.raises(ValueError, match="Source bytes differ"):
         observe_source_bindings(tmp_path, ("source.py",))
+
+
+def test_growth_during_binding_byte_transport_cannot_accumulate_beyond_the_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    original_bindings = RepositorySource.bindings
+    original_member = RepositorySource.member
+
+    def grow_after_bindings(
+        owner: RepositorySource, path: str, *, limit: int, max_bytes: int
+    ) -> dict[str, object]:
+        packet = original_bindings(owner, path, limit=limit, max_bytes=max_bytes)
+        source.write_bytes(b"x" * 1024)
+        return packet
+
+    def bounded_transfer(
+        owner: RepositorySource,
+        path: str,
+        *,
+        include_bytes: bool = False,
+        max_bytes: int | None = None,
+    ) -> tuple[dict[str, Any], bytes | None]:
+        member, raw = original_member(owner, path, include_bytes=include_bytes, max_bytes=max_bytes)
+        if path == "source.py":
+            assert raw is None or len(raw) <= 32
+        return member, raw
+
+    monkeypatch.setattr(RepositorySource, "bindings", grow_after_bindings)
+    monkeypatch.setattr(RepositorySource, "member", bounded_transfer)
+    with pytest.raises(ValueError):
+        observe_source_bindings(tmp_path, ("source.py",), max_bytes=32)
+
+
+def test_make_qualification_rejects_drift_from_original_product_input_capture(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "Makefile"
+    source.write_text("target:\n\tgit --version\n", encoding="utf-8")
+    with hashmarks_source_scope(tmp_path) as scope:
+        original = capture_source_member(tmp_path, "Makefile", scope=scope)
+        baseline = observe_make_shell_declarations(
+            tmp_path,
+            make_paths=("Makefile",),
+            layout="file",
+            selected_targets=("target",),
+            source_capture=original,
+            scope=scope,
+        )
+        assert baseline.source_bytes == original.source_bytes
+        source.write_text("target:\n\tcurl remote\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="bytes differ"):
+            observe_make_shell_declarations(
+                tmp_path,
+                make_paths=("Makefile",),
+                layout="file",
+                selected_targets=("target",),
+                source_capture=original,
+                scope=scope,
+            )
 
 
 @pytest.mark.parametrize(

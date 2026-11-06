@@ -23,54 +23,59 @@ Keep two questions separate in review and issue updates:
 
 ### Five-question QA for repository findings
 
-Before turning an agent's SSOT, quality, or performance claim into a task or
-refactor, answer these five questions in order. This is short-context review
-guidance, **not** a new proof registry, release gate, or extra PR prerequisite.
+These optional prompts apply the [canonical finding methodology](AGENTS_COOKBOOK_STRUCTURE_DOGFOOD.md)
+to Oh-Goon. Use the questions relevant to the claim; they add no ordered review
+procedure, proof registry or PR prerequisite. Documentation changes alone do not
+establish better agent review accuracy.
 
-1. **What does this exact revision do?** Record the inspected commit, file,
-   function, callers, and relevant tests. Read the code, not just grep output
-   or a stale sweep. A failing test must have an actual run receipt.
-2. **Which fact, scope, and authority?** Hashmarks owns authored source
-   declarations, repository/source relationships, freshness, relevance and
-   verification nominations. Native uv owns effective resolution and runtime
-   selection; native Git and Oh-Goon own worktree commands, mutation safety,
-   execution custody and result authority. Show two *accepted* producers for
-   the same semantic fact before calling it an SSOT violation.
-3. **Where does an accepted fact become wrong?** Trace entrypoint -> producer
-   observation -> adapter -> accepting consumer/policy -> observable decision.
-   Check that Oh-Goon retains producer unknown/ambiguous/stale, incomplete,
-   truncated and negative-evidence qualifications; a bounded projection is
-   not permission to reconstruct a missing relationship or assert absence.
-4. **What existing behavior disproves the suspicion?** Inspect the closest
-   safe control and regressions before proposing a replacement. For example,
-   `GitService` is a native execution witness (not automatically a second
-   CodeMap); `git status --porcelain=v2 -z` has explicit parsing tests;
-   `os.walk` prunes `directories` before descending; and repeated SHA-256
-   calls may bind different execution/custody facts. Check actual consumers
-   and measurements rather than inferring fragility or slow discovery.
-5. **What result is proved, and what is the least change?** `FINDING`
-   requires a reachable contract violation and consequence; `LEAVE ALONE`
-   means the behavior is intentional/safe; `INSUFFICIENT EVIDENCE` means
-   the decisive contract, path, test or measurement was not established.
-   `CLEAN` applies only to a completed declared scope. For a finding, name
-   one existing owner and a focused regression; do not add another manager,
-   scanner, evidence plane or merge gate without a separate proven need.
+1. **Which implementation and evidence were inspected?** Identify the source
+   revision and decision under review, then inspect its current owner, callers
+   and relevant tests. Distinguish a test reference or proposed reproducer from
+   an actual result; qualify host, harness and loaded producer when relevant.
+2. **Who owns the fact used by that decision?** Hashmarks owns repository
+   declarations, relationships, freshness, relevance and verification selection.
+   Native uv owns effective dependency resolution; Git owns native Git semantics;
+   Oh-Goon owns execution custody, mutation safety, admission and results. A
+   competing-authority claim needs two independently accepted sources for the
+   same fact, scope and generation. Unsupported reconstruction, a missing required
+   producer capability or weakened qualifications can violate their contracts without
+   a second accepted producer.
+3. **Does the consumer preserve the admitted claim?** Trace the observation
+   through the public adapter to its accepting policy. An exact projection of
+   producer-qualified indexed relationships is legitimate; inventing omitted
+   edges or promoting unknown/truncated evidence to absence is not. Preserve
+   typed meaning (`true` and `1` are different JSON values). Packet replay or
+   self-consistency validation alone establishes neither authenticity nor live
+   freshness. Keep source/custody revalidation, loaded-runtime compatibility and
+   provenance/trust checks separate. See the [Hashmarks execution boundary](HASHMARKS_EXECUTION_LAYER.md).
+4. **What could refute the claim?** Inspect relevant controls and existing
+   safeguards. `GitService` supplies a bounded execution witness, and unchanged
+   dirty fingerprints do not authorize replay. Native porcelain parsing and
+   separate custody hashes are not defects by themselves. Top-down `os.walk`
+   prunes only when the actual code mutates its live directory list before
+   descent. Runtime performance claims need measurements of the claimed workload;
+   static complexity claims need a supported bound.
+5. **Which verdict and repair does the evidence support?** Use `FINDING` for
+   a demonstrated contract violation with a consequence, `LEAVE ALONE` for a
+   justified safe case, and `INSUFFICIENT EVIDENCE` for an unresolved claim.
+   `CLEAN` is limited to a completed declared scope. A runnable reproducer is
+   useful for behavior; static proof can establish a governed structure or
+   absence contract. Repair the responsible owners with appropriate focused
+   regression proof. A Hashmarks capability gap is fixed and released there
+   before Oh-Goon adopts it and removes reconstruction; required unavailable
+   evidence remains `INCOMPLETE` under the selected policy.
 
-For Hashmarks declarations and relationships, inspect the
-[public integration exports](../../backend/src/oh_goon/integrations/hashmarks/__init__.py)
-and their actual consumers. In particular,
-[`engine/project.py::project_python`](../../backend/src/oh_goon/engine/project.py)
-consumes authored Python declarations, whereas native uv still decides
-effective compatibility;
-[`integrations/hashmarks/development_verification.py`](../../backend/src/oh_goon/integrations/hashmarks/development_verification.py)
-projects producer changed-set relationships and nominations, and
-[`repository_tooling/development_verification.py`](../../backend/src/oh_goon/repository_tooling/development_verification.py)
-admits their use under Oh-Goon policy. Ask whether these preserve the producer's
-typed meaning and coverage under a *legitimate richer or less precise* result;
-do not describe a candidate as a defect without a reproducer. Start with the
-[existing source-fact tests](../../backend/tests/unit/integrations/test_hashmarks_source_facts.py)
-and [development-verification tests](../../backend/tests/unit/integrations/test_hashmarks_development_verification.py),
-then add the smallest missing consumer-level case if evidence warrants one.
+Follow the decision under review rather than treating this as a hotspot list.
+The [public adapter exports](../../backend/src/oh_goon/integrations/hashmarks/__init__.py)
+are the supported capability census. Declaration consumers such as
+[`project_python`](../../backend/src/oh_goon/engine/project.py) retain native uv's
+effective-resolution authority. The [dependency adapter](../../backend/src/oh_goon/integrations/hashmarks/dependencies.py)
+projects the released producer composite; the [development adapter](../../backend/src/oh_goon/integrations/hashmarks/development_verification.py)
+and [verification admission owner](../../backend/src/oh_goon/repository_tooling/development_verification.py)
+retain Oh-Goon's policy. Existing [source-fact](../../backend/tests/unit/integrations/test_hashmarks_source_facts.py),
+[dependency-consumer](../../backend/tests/unit/integrations/test_hashmarks_changed_dependency_consumers.py)
+and [development-verification](../../backend/tests/unit/integrations/test_hashmarks_development_verification.py)
+regressions provide focused starting points when those boundaries are involved.
 
 These worked examples point to existing owners rather than define another
 capability or result registry:

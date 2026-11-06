@@ -1,6 +1,6 @@
 # Execution Authority Closure
 
-Oh-Goon's execution rule is strict: **if execution authority cannot be proven, the workload must not start**.
+Selected strict execution refuses unresolved execution authority before workload launch. Ordinary trusted-local execution retains its existing admission policy; authored source observations do not create a new strict prerequisite for local development.
 
 This document describes tool permission, materialization and selected strict
 physical-attempt contracts. These checks share the original Fleet admission
@@ -32,12 +32,14 @@ current checkout. Current implementation starts at the
 and [atomic handoff](../../backend/src/oh_goon/integrations/fleet_plan_atomic_runtime_authority.py).
 
 For canonical repository workloads, requirement discovery and permission are deliberately separate.
-Make/script/npm analysis derives executable **need**; `backend/goon-execution-requirements.json` owns
+Producer Make/script/npm observations supply positive executable **need candidates**; `backend/goon-execution-requirements.json` owns
 only the independent `workload_tool_permissions` ceiling for each derived `make:<target>` owner.
 Compiled canonical Steps own their own identity and execution semantics; the policy file does not
 mirror them. A discovered executable never authorizes itself. Static
-admission proves `need ⊆ permission`, then generated canonical tool-authority transport carries only
-the exact need into the immutable Step. Runtime freezing and sibling-Step isolation are unchanged.
+admission proves `observed need ⊆ permission`, then generated canonical tool-authority
+transport carries those exact candidates into the immutable Step. This subset proof
+is not proof that native execution has no other children. Unresolved source scope
+remains explicit. Runtime freezing and sibling-Step isolation are unchanged.
 
 Native readiness is semantic, not predicted from installation shape: actual npm package scripts own
 frontend package resolution, actual Playwright launch owns browser availability, and each
@@ -46,31 +48,79 @@ Playwright filesystem and ceremonial qualification preflights must not return un
 
 ## Logical tool authority
 
-Canonical Steps are validated from project-owned execution source before certification delegation, mutable certification state, workspace preparation, or Fleet Run creation. The closure now follows static Make edges, reached project-owned shell scripts, and reached project-owned npm package-script chains.
+The original compiler owns Step argv, working directory, environment and permission.
+Hashmarks owns authored Make/shell/npm syntax and source relationships. The public
+integration supplies one native Make parse with separate selected-target source
+projections: literal prerequisite edges, source fact indices, provenance, cycles
+and unresolved facts. Oh-Goon consumes those projections without rebuilding a
+prerequisite graph or expanding Make variables.
 
-For each annotated workload owner, Oh-Goon derives:
+Shell command, static binding and invocation observations remain producer-qualified
+source candidates. Conditional defaults, branch conditions, command substitutions,
+unknown heads and opaque native option/operand bindings do not become effective
+commands. Oh-Goon does not evaluate shell `if`/`case`, `fnmatch`, environment
+defaults or Make assignments. Native Make/Bash/npm retain effective expansion,
+resolution, execution and result authority. Explicit original Step argv and working
+directory are transported directly; authored `cd` text cannot replace that authority.
+Global Make assignments/conditionals, shell environment writes and arrays retain
+native evaluation uncertainty even when selected recipe heads are literal. In
+particular, Make parse-time shell effects and shell assignment substitutions
+cannot disappear from admission scope merely because they are not a command head.
 
-- static Make prerequisites and statically named recursive `$(MAKE)` edges;
-- direct Make recipe executables and shell-required recipe structure;
-- reached project-owned shell scripts and their exact source identities;
-- shebang interpreter authority;
-- statically reachable script branches when the controlling environment value is admitted and known;
-- nested owned scripts;
-- `sh -c` / `bash -c`, `env`, explicit `xargs`, `find -exec` / `-execdir`, pipelines/boolean segments, `trap` cleanup paths, and command substitutions;
-- reached `npm run` / package-script aliases from project-owned `package.json`;
-- locked package-local executable providers from authoritative `package-lock.json`;
-- provenance from the owning Make target through each Make/script/package-script edge;
-- unresolved dynamic executable edges that make the closure unprovable.
+One bounded native member capture supplies product annotation input; one Make
+declaration parse in the same original source lifetime verifies that exact member
+revision. Selected roots share captured script/npm observations and custody hashes.
+Both retained payloads and total traversal work are bounded: repeated cached DAG
+visits consume the original operation's work budget, and exhaustion remains unresolved.
+Closed source lifetimes cannot reactivate cached observations. Npm inputs and
+owned scripts carry custody SHA-256 of their original bounded byte transfer,
+verified against producer member revisions. Logical/materialization owners consume
+those receipts; they do not pair old semantic facts with a later independent path
+read. These hashes establish transported-byte custody, not Hashmarks identity or
+repository freshness.
 
-`OH_GOON_OPAQUE_TOOLS` is not a second complete authority table. It is only a bounded supplement for executable requirements behind external/opaque boundaries the project-owned analyzer cannot inspect. `OH_GOON_FORWARD_ARGV_FROM` similarly grants nothing; it only declares which argv position an owned wrapper forwards so the statically supplied child command can itself be analyzed.
+The existing `OH_GOON_OPAQUE_TOOLS` declaration supplies only a bounded positive
+supplement behind an opaque native boundary. The existing
+`OH_GOON_FORWARD_ARGV_FROM` declaration transports the already-supplied child
+operands as conservative need. It grants nothing and does not prove the script
+forwards them. Its original captured bytes and producer provenance remain bound,
+and unresolved `$@` or conditional source remains unresolved after transport.
 
-Package-local executables are a separate authority class from host executables. A package bin is admissible only when its provider is a direct dependency and the provider/version/bin target are locked. If one bin name has multiple locked providers, admission fails unless `package.json` contains a narrow `ohGoonExecutionAuthority.packageBinProviders` disambiguation naming a direct locked provider. This is disambiguation only, not a second package-bin allowlist.
+The npm source adapter consumes selected manifest scripts, dependency declarations
+and lock-bin descriptors from Hashmarks. Oh-Goon retains its own narrow direct
+provider eligibility and explicit `packageBinProviders` disambiguation policy.
+Multiple providers remain ambiguous until that explicit policy selects an eligible
+literal descriptor. A raw string bin, unknown npm flag operand or source-only
+package location cannot establish a native executable binding. In particular,
+`npm --prefix DIR run NAME` is unproven rather than target-free success; this
+consumer does not implement another npm option resolver.
+Source syntax also does not establish native npm script-shell or lifecycle
+configuration. No effective `sh` default is invented; main-body/bin candidates
+remain useful while that native configuration stays unproven. Declared pre/post
+hooks and source `cd` cannot disappear from uncertainty. Native lifecycle operations
+such as `ci`, `install` and `version` remain opaque to this source-only proof;
+metadata flags such as `--version` do not establish configuration absence.
+An explicit Step working directory supplies native package context. A unique
+repository-wide script-name candidate remains explanatory source evidence, never
+proof of the package native npm will select. An explicit missing context cannot
+fall back to another repository package. Producer literals and original argv keep
+their exact spelling; punctuation and quotes are not repaired into another command.
+Plain `dash` uses the same source boundary as the other admitted shell roles.
+An absolute pathname with a shell basename cannot establish an arbitrary binary's
+native role or bypass the logical/materialization source checks.
 
-`npx` is rejected at this logical authority boundary because it can imply package acquisition or resolution not represented by the admitted locked script intent. npm/uv continue to own package dependency and supply semantics; Oh-Goon only proves the executable path the project intends to invoke.
+Canonical catalog admission protects positive need against the independent tool
+ceiling and checks generated transport freshness. It reports unresolved source
+scope separately; it does not certify native closure from source syntax. Existing
+strict Run preview and physical materialization refuse unresolved authority before
+launch. Ordinary trusted-local execution retains its existing policy. No candidate
+can add permission, replace frozen executable custody, bypass sibling-Step isolation
+or strengthen incomplete producer evidence.
 
-A canonical Goon passes only when its declared Step capabilities close the derived + opaque host-tool requirement set and every reached package-local executable has proven locked project intent. Missing host authority is `TOOL_AUTHORITY_MISSING`; unresolved project-owned execution is `EXECUTION_AUTHORITY_UNPROVEN`.
-
-The runtime sandbox remains an independent second fence. Static proof prevents known-invalid workloads from starting; runtime enforcement blocks divergence.
+The selected strict sandbox remains an independent execution fence. It cannot
+supply missing repository meaning or turn unobserved native semantics into a
+complete source proof. Physical provider/symlink checks, exact byte revalidation
+and prelaunch refusal remain with their original execution owners below.
 
 ## 868 materialization closure
 
@@ -195,7 +245,13 @@ External tools may internally spawn implementation-specific children that projec
 
 ## Acceptance invariant
 
-For every canonical executable Step, static admission reports a proven host-tool closure, zero unresolved project-owned execution edges, and proven locked intent for every reached package-local executable before the workload can enter execution. Negative qualification must prove that missing transitive authority, ambiguous package-bin intent, or unresolved owned execution launches zero workload processes.
+Canonical static admission reports positive source need, its independent permission
+comparison, and unresolved source scope without relabeling that scope complete.
+Selected strict execution requires its original resolved authority and byte custody
+before launch. Negative qualification proves that missing permitted authority,
+ambiguous package-bin intent and unresolved strict execution launch zero workload
+processes. Ordinary trusted-local admission does not inherit an additional strict
+qualification gate from these source observations.
 
 ## 873 Bubblewrap sealed-FD handoff repair
 
