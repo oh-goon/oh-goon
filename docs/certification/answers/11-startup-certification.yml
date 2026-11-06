@@ -1624,7 +1624,7 @@ questions:
   - backend/src/oh_goon/cli_runtime_plans.py:220-390
   - scripts/tests/test_run_logging.py:1-150
   - backend/tests/unit/entrypoints/test_cli_plan_progress.py:1-150
-  - backend/src/oh_goon/repository_tooling/architecture/_structural_project_supply_contract.py:79-108
+  - backend/src/oh_goon/repository_tooling/architecture/_structural_project_supply_contract.py:62-79
 - id: Q121
   severity: normal
   expected_claims:
