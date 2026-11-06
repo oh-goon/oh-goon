@@ -970,7 +970,7 @@ support bit, scheduler or qualification gate is added.
 | T34 | [X0][census-x0], retired-input refusal and registry retirement records | Retained source/refusal evidence; no removal in this change, so replacement proof N/A. |
 | T35 | Frozen provider snapshot; command stream and service diagnostic invariance tests | The frozen-provider subset ran. Command-stream and service diagnostic-invariance cases are mapped existing A cases, NOT_RUN here; no universal formatting-invariance claim. |
 | T36 | Executable-byte verification; contract source/execution identity mutants | A fixtures. Entrypoint hashing does not seal an entire imported native package. |
-| T37 | [Broker history][census-broker]: provider-owned references across broker lifetimes | Partial A, same synthetic provider/configuration and three reference shapes; live Conversations API and different-credential separation NOT_RUN. |
+| T37 | [Broker authorization][census-broker] and [four native Runs][census-history-runs] | A-level Run-isolation security proof: fresh defaults, denial before upstream unless current model policy explicitly authorizes known history selectors, authorized access subject to native provider refusal, and unchanged original results. Default denial includes same-Run/ID-bearing replay; no registry infers ownership. Live storage isolation and Conversations API qualification remain separate. |
 | T38 | Shared command cleanup and selected native feature exclusion | Partial A outer boundary at this census; see the later [current detached-work scope](#native-inner-work-and-original-physical-custody) for HUG-107. |
 | T39 | Parser bounds/latching, physical exit precedence and typed acceptance | Protocol-origin REVIEW TARGET at this census; see the later [current HUG-108 scope](#native-control-claims-and-output-origin). |
 | T40 | Opt-in live coding evidence | C refresh/expiry/logout/persistence NOT_RUN (HUG-109); no credential-store inspection. |
@@ -997,7 +997,7 @@ support bit, scheduler or qualification gate is added.
 
 | Addendum | Harness vector | Existing issue | Preserved scope |
 | --- | --- | --- | --- |
-| SP-01 | T37 | HUG-106 | Provider-owned history; partial same-synthetic-provider A, no real/different-credential isolation claim. |
+| SP-01 | T37 | HUG-106 | Provider-held history is default-denied by the current selected model policy. A four-Run security proof covers explicit authorization and native scope refusal; no history store, migration or compatibility obligation. Independent live-provider history remains unqualified. |
 | SP-02 | T38 | HUG-107 | Detached resources; shared process-tree proof is not every native extension lifetime. See the later [mode-specific boundary](#native-inner-work-and-original-physical-custody). |
 | SP-03 | T39 | HUG-108 | Shape-valid root JSONL is not origin attestation. See the later [mode-specific origin boundary](#native-control-claims-and-output-origin). |
 | SP-04 | T40 | HUG-109 | Optional real-account lifecycle C NOT_RUN; no private-store reads. |
@@ -1096,4 +1096,5 @@ independent verification remain legitimate separate responsibilities.
 [census-context]: ../../backend/tests/integration/services/test_native_codex_context.py
 [census-pi-probe]: ../../backend/tests/integration/services/test_native_pi_session_protocol.py
 [census-broker]: ../../backend/tests/dependency_complete/test_agent_inference_broker.py
+[census-history-runs]: ../../backend/tests/integration/services/test_native_agent_history.py
 [census-x0]: ../../scripts/tests/test_ag00_canonical_agent_architecture.py
