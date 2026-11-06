@@ -33,6 +33,7 @@ REAL_LIFECYCLE_QA_PATHS = (
     "docs/development/REAL_LIFECYCLE_QA.yml",
 )
 REAL_LIFECYCLE_QA_TEST = "scripts/tests/test_real_lifecycle_qa_contract.py"
+GRADER_ANSWER_MATERIAL_TEST = "scripts/tests/test_repository_understanding_blueprint.py"
 
 _MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES = 1024 * 1024
 DOCUMENTATION_ASSET_OBLIGATION = "bounded documentation-asset policy"
@@ -514,10 +515,28 @@ def require_verification_support_proof(
         raise ValueError("Bounded verification-support proof lacks an executed qualified consumer")
 
 
+def is_grader_answer_section(path: str) -> bool:
+    """Bound the grader's numbered section banks without reading answer truth.
+
+    Keep this base-owned controller inert: the namespace is execution policy,
+    while the existing grader loader validates the section's actual contents.
+    Other private registries are outside this bounded section-loader proof.
+    """
+    member = Path(path)
+    return (
+        member.parent.as_posix() == "docs/certification/answers"
+        and member.suffix == ".yml"
+        and member.stem[:2].isascii()
+        and member.stem[:2].isdigit()
+        and member.stem[2:3] == "-"
+    )
+
+
 def is_verification_policy_path(path: str) -> bool:
     """The existing contributor, verification and result-authority boundaries."""
     return (
         path in REAL_LIFECYCLE_QA_PATHS
+        or is_grader_answer_section(path)
         or path.startswith((".github/workflows/", "backend/src/oh_goon/repository_tooling/"))
         or Path(path).name == "AGENTS.md"
         or path
@@ -553,8 +572,14 @@ def required_policy_tests(paths: Sequence[str]) -> tuple[str, ...]:
     """Keep qualification-ledger proof conditional on its governing source."""
     if not any(map(is_verification_policy_path, paths)):
         return ()
-    return VERIFICATION_POLICY_TESTS + (
-        (REAL_LIFECYCLE_QA_TEST,) if any(path in REAL_LIFECYCLE_QA_PATHS for path in paths) else ()
+    return (
+        VERIFICATION_POLICY_TESTS
+        + (
+            (REAL_LIFECYCLE_QA_TEST,)
+            if any(path in REAL_LIFECYCLE_QA_PATHS for path in paths)
+            else ()
+        )
+        + ((GRADER_ANSWER_MATERIAL_TEST,) if any(map(is_grader_answer_section, paths)) else ())
     )
 
 
@@ -562,10 +587,18 @@ def required_policy_obligations(paths: Sequence[str]) -> tuple[str, ...]:
     """Name the protection independently re-derived from actual changed paths."""
     if not any(map(is_verification_policy_path, paths)):
         return ()
-    return ("verification-policy protection",) + (
-        ("real-lifecycle QA protection",)
-        if any(path in REAL_LIFECYCLE_QA_PATHS for path in paths)
-        else ()
+    return (
+        ("verification-policy protection",)
+        + (
+            ("real-lifecycle QA protection",)
+            if any(path in REAL_LIFECYCLE_QA_PATHS for path in paths)
+            else ()
+        )
+        + (
+            ("grader answer-material protection",)
+            if any(map(is_grader_answer_section, paths))
+            else ()
+        )
     )
 
 

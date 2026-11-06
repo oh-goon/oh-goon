@@ -50,6 +50,7 @@ from oh_goon.repository_tooling.verification_gate_control import (
     documentation_proof_paths,
     hashmarks_upgrade_intent,
     is_generated_contract_path,
+    is_grader_answer_section,
     is_verification_policy_path,
     native_changed_paths,
     non_executable_documentation,
@@ -528,6 +529,7 @@ def admit_change(
     before = canonical_source_identity(root)
     executable = tuple(path for path in changed if not non_executable_documentation(root, path))
     authored = tuple(path for path in executable if not is_generated_contract_path(path))
+    grader_sections = {path for path in authored if is_grader_answer_section(path)}
     policy_paths = tuple(path for path in authored if is_verification_policy_path(path))
     required = required_policy_tests(policy_paths)
     dependency_intent, unsupported_dependency_intent, hashmarks_upgrade = (
@@ -545,7 +547,12 @@ def admit_change(
     assets = documentation_asset_candidates(authored)
     if assets:
         nomination_arguments["asset_paths"] = assets
-    evidence = nominator(root, authored, **nomination_arguments) if authored or required else {}
+    repository_members = tuple(path for path in authored if path not in grader_sections)
+    evidence = (
+        nominator(root, repository_members, **nomination_arguments)
+        if repository_members or required
+        else {}
+    )
     static_candidates = tuple(
         path for path in static_project_candidates(authored) if path not in removed_paths
     )
@@ -632,7 +639,12 @@ def admit_change(
     upgrade_paths = {"backend/pyproject.toml", "backend/uv.lock"} if hashmarks_upgrade else set()
     support_paths: set[str] = set()
     for path in authored:
-        if path not in removed_paths and path not in observed_paths and path not in upgrade_paths:
+        if (
+            path not in removed_paths
+            and path not in observed_paths
+            and path not in upgrade_paths
+            and path not in grader_sections
+        ):
             unverified.append(f"NO_PRODUCER_OBSERVATION:{path}")
     for row in observations:
         path = str(row.get("changed_path", ""))
