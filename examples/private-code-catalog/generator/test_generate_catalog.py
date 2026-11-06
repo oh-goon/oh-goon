@@ -61,6 +61,13 @@ class CatalogExampleTests(unittest.TestCase):
         self.assertNotEqual(self._run().returncode, 0)
         self.assertFalse((self.work / "catalog-info.yaml").exists())
 
+    def test_language_tags_reject_invalid_segments(self) -> None:
+        self.data["languages"] = ["python--unsafe"]
+        self._save()
+        result = self._run()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.work / "catalog-info.yaml").exists())
+
     def test_output_will_not_overwrite_existing_file(self) -> None:
         output = self.work / "catalog-info.yaml"
         output.write_text("existing candidate", encoding="utf-8")
