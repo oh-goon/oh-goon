@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -71,7 +72,7 @@ def test_release_prerequisites_do_not_redecide_native_lock_freshness(
         )
 
     monkeypatch.setattr(
-        stamp_release_version.subprocess,
+        subprocess,
         "run",
         forbidden_native_lock_redecision,
     )
@@ -105,7 +106,7 @@ def test_release_post_authoring_receipt_does_not_revalidate_frontend_lock_with_n
         )
 
     monkeypatch.setattr(
-        stamp_release_version.subprocess,
+        subprocess,
         "run",
         forbidden_native_lock_redecision,
     )

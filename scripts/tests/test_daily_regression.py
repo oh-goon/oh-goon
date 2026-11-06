@@ -279,6 +279,80 @@ def test_matrix_failure_cancellation_or_skip_is_nonqualifying(job_result: str) -
     assert _aggregate(["first"], rows, job_result)["status"] != "PASS"
 
 
+@pytest.mark.parametrize(
+    "artifact", ("missing", "partial", "malformed", "missing-native")
+)
+def test_campaign_preserves_missing_owners_but_rejects_invalid_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, artifact: str
+) -> None:
+    downloads: list[str] = []
+
+    def download(repository: str, run_id: int, name: str, directory: Path) -> bool:
+        assert repository == "oh-goon/oh-goon" and run_id == 11
+        downloads.append(name)
+        if name == "full-owner-interrupted-1":
+            if artifact == "missing":
+                return False
+            directory.mkdir()
+            (directory / "native-host.json").write_text("{}")
+            if artifact == "malformed":
+                (directory / "owner.json").write_text("{")
+            elif artifact == "missing-native":
+                (directory / "owner.json").write_text(
+                    json.dumps(_owner("interrupted", report=_native()))
+                )
+            return True
+        assert name == "full-owner-completed-1"
+        directory.mkdir()
+        (directory / "owner.json").write_text(json.dumps(_owner("completed")))
+        return True
+
+    monkeypatch.setattr(daily, "_download", download)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    output = tmp_path / "campaign.json"
+    exit_code = daily.main(
+        [
+            "aggregate",
+            "--repository",
+            "oh-goon/oh-goon",
+            "--mode",
+            "daily",
+            "--sha",
+            SHA,
+            "--slot",
+            SLOT,
+            "--run-id",
+            "11",
+            "--attempt",
+            "1",
+            "--targets",
+            json.dumps(["interrupted", "completed"]),
+            "--job-result",
+            "cancelled",
+            "--hosted-example-result",
+            "success",
+            "--output",
+            str(output),
+        ]
+    )
+
+    if artifact in {"malformed", "missing-native"}:
+        assert exit_code == 2
+        assert not output.exists()
+        assert not summary.exists()
+        return
+
+    assert exit_code == 1
+    result = json.loads(output.read_text())
+    assert result["status"] == "INCOMPLETE"
+    assert result["coverage_complete"] is False
+    assert result["missing_owners"] == ["interrupted"]
+    assert result["owners"] == [_owner("completed")]
+    assert downloads == ["full-owner-interrupted-1", "full-owner-completed-1"]
+    assert "Missing owners: interrupted" in summary.read_text()
+
+
 def test_latest_red_is_fresh_and_old_green_stays_separate() -> None:
     previous = _run(1, slot="2026-10-29")
     latest = _run(2, conclusion="failure")
