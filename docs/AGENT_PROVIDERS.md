@@ -298,7 +298,11 @@ Model and reasoning effort are explicit native settings. Oh-Goon transports
 bounded nonblank values without maintaining a model-effort allowlist; the
 installed Codex validates whether the selected model supports the effort. User
 config and exec rules are ignored for this invocation, the project is untrusted, and
-hooks, plugins, Apps, web search and native delegation are disabled. Native tools
+hooks, plugins, Apps, web search and native delegation are disabled. Delegation
+denial uses the native `agents.enabled=false` override together with disabled
+legacy/V2 feature gates; feature flags alone are insufficient when native model
+metadata selects delegation. The [scoped policy proof](development/AGENT_HARNESS_COMPATIBILITY.md#scoped-lifetime-qualification--2026-11-06)
+retains an ordinary shell-tool positive control. Native tools
 use Codex's restricted filesystem policy: platform binaries and selected runtime
 inputs are readable, the working repository and execution scratch are writable,
 and tool networking is disabled. Hashmarks follow-up commands retain the loaded
@@ -767,6 +771,14 @@ native Pi still interprets those values. Explicit native model arguments retain
 the existing public broker-configuration requirement. Unknown extension flags
 do not attest the behavior of arbitrary extension code. Persistent session modes
 remain unqualified; see the [Pi argument QA boundary](development/AGENT_HARNESS_COMPATIBILITY.md#pi-argument-ownership-qa--hug-71).
+
+Pi `--no-session` does not disable extensions, MCP or background tools. A native
+turn settling does not attest their cleanup. With Bubblewrap, CLI workloads retain
+the original PID namespace and command owner; local native profiles retain their
+declared process-group limits. Optional native reload/persistence and unknown
+escaped local descendants are not qualified by ordinary terminal or exit evidence.
+See the [mode-specific lifetime boundary](development/AGENT_HARNESS_COMPATIBILITY.md#native-detached-work-boundary)
+before relying on detached work.
 
 Model context limits, output budgets and thinking controls belong to the native
 agent/provider configuration. Include reasoning tokens in the output budget.

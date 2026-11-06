@@ -307,6 +307,17 @@ def _terminate_posix(
         return False
     try:
         os.killpg(group, signal.SIGKILL)
-        return True
     except ProcessLookupError:
         return False
+    # Signal delivery is not process quiescence. Readers may already be closed,
+    # so guard retirement cannot rely on their drain to cover the exit transition.
+    # Keep the existing cleanup bound; surviving/unknown membership still reaches
+    # the caller's unchanged quiescence verification instead of being accepted.
+    deadline = time.monotonic() + OUTPUT_DRAIN_TIMEOUT_SECONDS
+    while _process_group_exists(group, parent_guard=parent_guard):
+        process.poll()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(POLL_INTERVAL_SECONDS, remaining))
+    return True

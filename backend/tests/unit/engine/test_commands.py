@@ -447,14 +447,23 @@ def test_run_command_records_clean_supervisor_receipt() -> None:
 
 @pytest.mark.process
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
+@pytest.mark.parametrize(
+    "resistant_closed_stdio",
+    (False, True),
+    ids=("inherited-pipes", "closed-pipes-term-resistant"),
+)
 def test_strict_quiescence_cleans_descendants_when_leader_has_already_succeeded(
     tmp_path: Path,
+    resistant_closed_stdio: bool,
 ) -> None:
     pid_file = tmp_path / "child.pid"
     script = """
 import os, pathlib, subprocess, sys, time
 pid_file = pathlib.Path(sys.argv[1])
-subprocess.Popen([sys.executable, '-S', '-c', "import os,time; open(os.environ['PID_FILE'],'w').write(str(os.getpid())); time.sleep(30)"], env={'PID_FILE': str(pid_file)})
+closed = sys.argv[2] == 'closed'
+child = "import os,signal,time; " + ("signal.signal(signal.SIGTERM,signal.SIG_IGN); " if closed else "") + "open(os.environ['PID_FILE'],'w').write(str(os.getpid())); time.sleep(30)"
+stdio = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) if closed else {}
+subprocess.Popen([sys.executable, '-S', '-c', child], env={'PID_FILE': str(pid_file)}, **stdio)
 while not pid_file.exists(): time.sleep(0.01)
 """
     started = time.monotonic()
@@ -464,8 +473,10 @@ while not pid_file.exists(): time.sleep(0.01)
         "-c",
         script,
         str(pid_file),
+        "closed" if resistant_closed_stdio else "inherited",
         timeout=10,
         require_process_group_quiescence=True,
+        parent_death_signal=True if resistant_closed_stdio else None,
     )
     assert time.monotonic() - started < 4
     assert result.returncode == 0
@@ -473,6 +484,8 @@ while not pid_file.exists(): time.sleep(0.01)
     assert receipt.leader_exited_before_group_quiescence is True
     assert receipt.process_group_cleanup_requested is True
     assert receipt.cleanup_reason == "output_cleanup"
+    assert receipt.forced_termination is resistant_closed_stdio
+    assert receipt.final_process_group_quiescent
     assert len(receipt.recovery_events) == 1
     event = receipt.recovery_events[0]
     assert event.kind == "process_group_cleanup"

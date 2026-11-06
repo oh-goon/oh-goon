@@ -269,6 +269,26 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
         for index, value in enumerate(command.argv)
         if index > 0 and (command.argv[index - 1] == "-c" or value == "-c")
     )
+    environment = {"PATH": "/usr/bin:/bin", "HOME": str(home), **dict(command.environment)}
+    feature_result = run_command(
+        str(program),
+        "--no-daemon",
+        *settings,
+        "features",
+        "list",
+        cwd=repo,
+        env=environment,
+        timeout=10.0,
+        preserve_native_executable_path=True,
+    )
+    assert feature_result.returncode == 0, feature_result.stderr
+    native_features = {
+        fields[0]: fields[-1]
+        for line in feature_result.stdout.splitlines()
+        if len(fields := line.split()) >= 3
+    }
+    assert native_features.get("multi_agent") == "false", native_features
+    assert native_features.get("multi_agent_v2") == "false", native_features
     with ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler) as server:
         result = run_command(
             str(program),
@@ -284,7 +304,7 @@ def test_installed_codex_enforces_the_selected_native_tool_boundary(tmp_path: Pa
             str(script),
             str(server.server_port),
             cwd=repo,
-            env={"PATH": "/usr/bin:/bin", "HOME": str(home), **dict(command.environment)},
+            env=environment,
             timeout=30.0,
             preserve_native_executable_path=True,
         )

@@ -282,6 +282,90 @@ source bytes were restored after each experiment. These are maintenance probes,
 not alternate production paths. No native version, runtime support bit, registry,
 execution route or qualification gate is introduced.
 
+## Native detached-work boundary
+
+[HUG-107](https://linear.app/hugloss/issue/HUG-107) separates native inner-task
+lifetime from physical Step closure (LIFE-01/03/04/07/08, Harness T38 and SP-02).
+A native terminal event is a role claim; the original command/backend receipt,
+typed acceptance and independent verification retain their separate authority.
+The claimed Run worker and existing Step/Attempt remain the execution path.
+
+| Selected mode | Native feature scope and disposition | Physical lifetime boundary |
+| --- | --- | --- |
+| Managed Codex/Pi/OpenCode CLI through Bubblewrap | **RETAIN** native tool/configuration semantics. Disposable broker configuration does not attest every native background feature. Pi's `--no-session` excludes product persistence; it does not disable extensions, MCP or background commands. Explicit public Pi configuration and nonconflicting extension arguments remain native-owned. | The original backend launches a private PID namespace and the original command owner retains exit, cancellation and cleanup evidence. A child changing its process group is distinct from escaping that namespace. No optional extension's internal session/disposal semantics are qualified merely by this boundary. |
+| Local Codex sign-in CLI | **RETAIN** the strict owned configuration with disabled hooks, plugins, Apps and native delegation settings. Delegation denial combines `agents.enabled=false` with the legacy/V2 feature exclusions. These settings are specific to this profile, not the general managed CLI configuration or universal native behavior proof. | The original local command owns its process group. Arbitrary daemonization or descendants escaping that group are **UNQUALIFIED**; a clean group receipt does not attest their absence. |
+| Owned Codex service | **RETAIN** effective feature exclusion before the workload turn, including the native `agents.enabled=false` override alongside delegation feature flags, plugins and per-thread MCP tools. Status discovery may still initialize configured MCP servers; startup isolation remains **UNSUPPORTED** under HUG-124. | The original local command owns daemon birth, process group, cancellation and cleanup; closing the client or receiving a turn/abort acknowledgement is insufficient. Group-escaped work remains **UNQUALIFIED**. No separately owned external daemon is adopted. |
+| Pi persistence/reload and OpenCode external service | Product Pi persistent sessions, cross-Run native-session adoption and extension hot reload remain **UNSUPPORTED/UNQUALIFIED**. OpenCode service supports readiness only, not session execution or background-task admission. | External servers retain their operator's lifetime. Transport closure does not kill them. Pi persistence and late restored-extension callbacks remain HUG-19/HUG-89 work, not another cleanup supervisor. |
+
+The pinned ThinkRail [subagent specification](https://github.com/JetBrains/thinkrail/blob/f93fd03319293b3a19e201c274b00c898d7bf976/packages/pi-subagents/SPEC.md)
+allows background children to survive parent-turn abort. Its
+[background-command specification](https://github.com/JetBrains/thinkrail/blob/f93fd03319293b3a19e201c274b00c898d7bf976/packages/pi-background-commands/SPEC.md)
+likewise separates parent-turn stop from session/embedder disposal and explicitly
+limits abrupt-host and escaped-descendant guarantees. These optional Pi packages
+are reference test ideas, not built-in Oh-Goon integrations or qualification evidence.
+No subagent registry, background scheduler or native session owner is added.
+
+The review found that the promised Codex delegation denial was incomplete.
+Codex [0.164.0's native configuration](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/config/mod.rs)
+can select delegation from model metadata before falling back to false legacy/V2
+feature flags. Both owned modes now supply the native `agents.enabled=false`
+override while retaining the false V2 flag; the sign-in CLI also supplies the
+legacy false flag. This corrects the existing permission policy without replacing
+native capability selection or disabling ordinary shell tools. The policy and
+protocol mappings are retained; neither temporary adaptation's removal gate is
+changed by this correction.
+
+The controlled child cut also exposed a command cleanup race. A successful
+parent could leave a TERM-resistant child with closed stdio; the command owner
+sent KILL and returned before the kernel reported group quiescence. The guard
+then correctly refused retirement. The same command owner now waits for native
+group quiescence after KILL within its existing five-second cleanup bound,
+including leader reaping. Guard retirement and final cleanup checks are unchanged;
+surviving or unknown membership still fails that proof. Escalation remains a
+cleanup fact alongside the original exit, never a fabricated child result.
+
+### Scoped lifetime qualification — 2026-11-06
+
+Four [controlled native lifetime cases](../../backend/tests/integration/services/test_native_detached_lifetime.py)
+passed through the original claimed Run: same-group completion, escaped-session
+completion, cancellation and deadline. The exact descendant was alive at the cut
+and its pidfd reported exit at original Run terminal readback. Original
+Step/attempt process events precede settlement; reopening the same Journal
+preserves the result without replay. Five coupled [engine controls](../../backend/tests/unit/engine/test_commands.py)
+passed, including the guarded TERM-resistant child with closed stdio. A separate
+valid escaped-completion baseline passed; removing only `--unshare-pid` then
+failed the exact surviving-child assertion. The flag was restored byte-for-byte,
+and the mutation's owned child was cleaned up.
+
+Installed Pi 1.3.0 and OpenCode 2.1.2 each passed the strengthened
+[read-only native shell case](../../backend/tests/integration/services/test_native_cli_readonly.py)
+after the engine correction, with zero skips. A child with closed stdio and a new
+session was alive before the final model reply and dead by original Run terminal
+readback. This proves those foreground native shell paths and the selected
+Bubblewrap boundary, not an optional background-task API or extension join.
+
+The Codex 0.164.0 [delegation policy matrix](../../backend/tests/integration/services/test_native_codex_service.py)
+passed eight cases: sign-in CLI/owned service, V1/V2 model metadata, and the exact
+policy/master-override-removed control. The four protected cases then passed a
+stronger check excluding all nine delegation tool names; these reruns are not
+additional unique coverage. Enabled controls expose native delegation tools;
+protected cases omit them while an ordinary native `exec_command` still succeeds.
+The native model-free production sign-in permission/feature probe also passed,
+and all 215 portable translator cases passed. The synthetic model catalog uses
+direct tools and full Responses; this does not qualify lite/Code Mode parity,
+live accounts or model reasoning quality. Bounded receipts retain source, binary,
+catalog and cleanup facts with HUG-107.
+
+The earlier 27 command, one direct Bubblewrap and four recovery baseline cases
+passed before the fixes. They are baseline evidence, not the final candidate gate.
+
+HUG-181's worker crash/drain/containment evidence remains scoped to its original
+Linux process and SQLite cases. It does not qualify arbitrary native extensions,
+reload, another host or continuous activity outside the selected physical boundary.
+Unknown child terminal evidence, cleanup or escaped resources cannot be filled by
+native success text, a stored PID or a previous Run's receipt. The dated installed
+results above do not establish Harness T38 for an unexercised feature.
+
 ## Temporary adaptations and removal decisions
 
 ### OPENCODE-CLI-SETTLEMENT — retain pending installed replacement proof
