@@ -104,13 +104,16 @@ or cadence-deselected target alone supplies no proof. Dynamic consumer scope
 remains incomplete and no whole-owner coverage is claimed. Missing or
 unqualified relationships retain `SELECTION_UNVERIFIED`.
 
-Ordinary Markdown under `docs/` and root `CONTRIBUTING.md` use the existing
+Ordinary Markdown under `docs/`, explanatory `README.md` files under `examples/`
+and `templates/`, and root `CONTRIBUTING.md` use the existing
 [documentation contract](../scripts/tests/test_documentation_authority_contract.py)
 and architecture through the same admission, execution and trusted-gate owners.
 This bounded route requires no verifier nomination; code fences alone do not
 enlarge it. It claims neither a qualified nomination nor whole-owner coverage.
 Verification-policy paths retain their named protection, and the machine-consumed
-`docs/certification/` corpus is outside this documentation fallback. Other changed
+`docs/certification/` corpus is outside this documentation fallback. Adjacent Skill
+Markdown, YAML/TOML configuration and executable sources retain their applicable
+proof; a README's location does not admit them as documentation. Other changed
 code retains its applicable checks, and actual check failures remain blocking.
 The root `LICENSE` remains non-executable by its declared document owner.
 

@@ -1158,15 +1158,15 @@ def test_exact_fast_proof_does_not_claim_daily_full() -> None:
 
 
 def _documentation_proof(
-    *, behavioral: bool = True
+    *, behavioral: bool = True, document_path: str = "docs/guide.md"
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     plan, result = _proof(
-        source="docs/guide.md",
+        source=document_path,
         test_file=DOCUMENTATION_PROOF_TEST,
         additional_tests=("tests/test_source.py",) if behavioral else (),
     )
     plan["evidence"]["observations"][0].update(state="UNAVAILABLE", nominations=[])
-    plan["changed_paths"] = ["docs/guide.md"]
+    plan["changed_paths"] = [document_path]
     plan["evidence"]["observations"] = plan["evidence"]["observations"][:1]
     if behavioral:
         plan["changed_paths"].append("source.py")
@@ -1186,7 +1186,7 @@ def _documentation_proof(
         )
     plan["evidence"]["documentation_policy"] = {
         "authority": "oh-goon-execution-policy",
-        "paths": ["docs/guide.md"],
+        "paths": [document_path],
         "coverage": "not-claimed",
     }
     plan["obligations"] = [DOCUMENTATION_PROOF_OBLIGATION]
@@ -1213,13 +1213,23 @@ def _validate_declared(
     )
 
 
-def test_documentation_proof_handles_fenced_and_deleted_sources(tmp_path: Path) -> None:
-    document = tmp_path / "docs/guide.md"
-    document.parent.mkdir()
+@pytest.mark.parametrize(
+    "document_path",
+    (
+        "docs/guide.md",
+        "examples/sample/README.md",
+        "templates/plans/general/sample/README.md",
+    ),
+)
+def test_documentation_proof_handles_fenced_and_deleted_sources(
+    tmp_path: Path, document_path: str
+) -> None:
+    document = tmp_path / document_path
+    document.parent.mkdir(parents=True)
     document.write_text("# Guide\n```sh\nuv run pytest\n```\n")
-    plan, result = _documentation_proof(behavioral=False)
+    plan, result = _documentation_proof(behavioral=False, document_path=document_path)
     plan.update(
-        changed_paths=["docs/guide.md"],
+        changed_paths=[document_path],
         behavioral_status="NOT_APPLICABLE",
         static=["architecture"],
         evidence={"documentation_policy": plan["evidence"]["documentation_policy"]},
@@ -1231,13 +1241,58 @@ def test_documentation_proof_handles_fenced_and_deleted_sources(tmp_path: Path) 
         if outcome["owner"] in {"Native pytest", "Architecture"}
     ]
 
-    assert non_executable_documentation(tmp_path, "docs/guide.md")
     _validate_declared(plan, result, tmp_path)
     document.unlink()
-    plan["removed_paths"] = ["docs/guide.md"]
+    plan["removed_paths"] = [document_path]
     result["plan"] = copy.deepcopy(plan)
-    assert non_executable_documentation(tmp_path, "docs/guide.md")
-    _validate_declared(plan, result, tmp_path, removed_paths=("docs/guide.md",))
+    _validate_declared(plan, result, tmp_path, removed_paths=(document_path,))
+
+
+@pytest.mark.parametrize(
+    "document_path",
+    ("examples/sample/README.md", "templates/plans/general/sample/README.md"),
+)
+def test_readme_documentation_proof_requires_the_original_contract_receipt(
+    document_path: str,
+) -> None:
+    plan, result = _documentation_proof(behavioral=False, document_path=document_path)
+    plan["behavioral_status"] = "NOT_APPLICABLE"
+    result["plan"] = copy.deepcopy(plan)
+    _validate_declared(plan, result)
+
+    plan["pytest"] = []
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError, match="Bounded documentation proof was omitted"):
+        _validate_declared(plan, result)
+
+
+@pytest.mark.parametrize(
+    "source_path",
+    (
+        "examples/sample/SKILL.md",
+        "examples/sample/run.yml",
+        "examples/sample/providers.toml",
+        "templates/goons/general/sample/goon.yml",
+        "templates/goons/general/sample/check.py",
+        "docs/certification/README.md",
+        "examples/sample/AGENTS.md",
+    ),
+)
+def test_readme_documentation_proof_cannot_claim_adjacent_machine_inputs(
+    source_path: str,
+) -> None:
+    plan, result = _documentation_proof(
+        behavioral=False, document_path="examples/sample/README.md"
+    )
+    plan["behavioral_status"] = "NOT_APPLICABLE"
+    result["plan"] = copy.deepcopy(plan)
+    _validate_declared(plan, result)
+
+    plan["changed_paths"].append(source_path)
+    plan["evidence"]["documentation_policy"]["paths"].append(source_path)
+    result["plan"] = copy.deepcopy(plan)
+    with pytest.raises(ValueError):
+        _validate_declared(plan, result)
 
 
 def test_documentation_check_does_not_substitute_for_required_behavior() -> None:
