@@ -4,24 +4,38 @@ Classification: runnable-with-prerequisites
 
 This selection fetches one explicit revision of this repository, captures the named Plan and its local Iris Goon project, and runs the installed `iris-train` command against an explicitly registered target. The Plan's relative import is confined to the selected Git authoring root. It cannot substitute an installed catalog package for the project at that revision.
 
-Use your actual development repository as the target. Initialize its identity
+Use an initialized [Oh-Goon CLI](../../README.md#cli-first--no-frontend-setup)
+and your actual development Git repository as the target. Initialize its identity
 by path, then edit the generated `run.yml` to use this directory's explicit
 `git-plan` source and choose caller values:
 
 ```sh
-oh-goon league add-folder /absolute/path/to/your/project
-oh-goon init --template ml/iris-training --kind plan --output ./workflow --repository /absolute/path/to/your/project
+task_workflow=/absolute/path/to/iris-git-workflow
+oh-goon init --template ml/iris-training --output "$task_workflow" --repository /absolute/path/to/your/project --no-input
 ```
 
-Copy only the `source:` mapping from this example's `run.yml`; keep the generated
-target identity. Use an installed OH-Goon version that supports Python Goon projects.
+The output directory must not exist and its parent must already exist. Copy
+only the `source:` mapping from this example's [run.yml](run.yml); keep the
+generated target and typed inputs. Its unique Goon import exposes the Iris
+defaults without a copied Plan schema. Set `inputs.random_seed: 7` if you want
+the caller choice shown in that file. Use an installed Oh-Goon version that
+supports Python Goon projects.
 
 ```sh
-oh-goon workflow prepare ./workflow/run.yml
-oh-goon run ./workflow/run.yml
+oh-goon workflow prepare "$task_workflow/run.yml"
+oh-goon run "$task_workflow/run.yml" --no-input
 ```
 
-Locking acquires the source and records its exact commit in `goon.lock`. Neither acquisition nor configuration inspection installs dependencies or executes project code. A subsequent Run consumes that pinned revision; changing the remote branch or losing the cache does not advance it. Use `oh-goon workflow prepare ./workflow/run.yml --refresh goons` only when you want to refresh the selected Git pins. Cached inspection with `oh-goon workflow inspect ./workflow/run.yml` never fetches missing source.
+Preparation acquires the source and records its exact commit in `goon.lock`.
+Neither acquisition nor configuration inspection installs dependencies or
+executes project code. A subsequent Run consumes that pinned revision; changing
+the remote branch or losing the cache does not advance it. Use
+`oh-goon workflow prepare "$task_workflow/run.yml" --refresh goons` only when
+you want to refresh the selected Git pins. Optional inspection with
+`oh-goon workflow inspect "$task_workflow/run.yml"` uses existing source and
+never fetches missing source; `--acquire` explicitly permits acquisition before
+preparation. `workflow validate` checks the same selected configuration without
+executing training.
 
 This example explicitly selects `purpose: cicd`. It requires an admitted strict
 executor; ordinary `make init` does not qualify those guarantees. For trusted
