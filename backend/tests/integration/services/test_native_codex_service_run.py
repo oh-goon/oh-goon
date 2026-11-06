@@ -294,11 +294,13 @@ def test_installed_codex_service_run_retains_context_and_verifies_independently(
             assert endpoint.account_checks == 0 and endpoint.websocket_connections == 0, facts
             assert (repository / "code.py").read_text() == "VALUE = 42\n", facts
             assert (repository / ".git" / "config").read_bytes() == git_config, facts
-            # Native Bubblewrap materializes its reserved metadata mountpoint.
-            # Keep that native-owned artifact; agents cannot populate or mutate it.
+            # Native Bubblewrap may leave an empty reserved metadata mountpoint.
+            # Preserve it when present; agents cannot populate or mutate it.
             metadata_directory = repository / ".codex"
-            assert metadata_directory.is_dir() and not metadata_directory.is_symlink(), facts
-            assert list(metadata_directory.iterdir()) == [], facts
+            assert not metadata_directory.is_symlink(), facts
+            if metadata_directory.exists():
+                assert metadata_directory.is_dir(), facts
+                assert list(metadata_directory.iterdir()) == [], facts
             assert private.read_text() == "SYNTHETIC_NATIVE_PRIVATE_DATA", facts
             assert _TOKEN not in live_output, facts
             assert detail.outcome is (

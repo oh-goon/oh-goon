@@ -462,6 +462,9 @@ def test_installed_native_terminal_claim_respects_original_run_settlement(
                             "selected": {
                                 "provider": "approved",
                                 "model": "native-lifecycle-fixture",
+                                # Codex sends ID-bearing initial messages; this lifecycle
+                                # workload explicitly authorizes the selected provider scope.
+                                "allow_provider_history": agent == "codex",
                             }
                         },
                         "native_profiles": {

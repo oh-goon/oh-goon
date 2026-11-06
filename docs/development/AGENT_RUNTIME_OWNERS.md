@@ -848,6 +848,46 @@ their tested scope. Installed-model tests are separate from privileged custody
 proofs; they do not establish every native implementation or optional feature. This document
 does not promote any test result into APP, native-host or release certification.
 
+### Final scoped native qualification
+
+The [HUG-52 qualification report](https://linear.app/hugloss/document/hug-52-final-scoped-native-harness-qualification-and-subtraction-19c304f944a8)
+maps all 51 base requirement IDs, D01–D15 and Harness T01–T44/SP-01–SP-08 to
+actual scoped evidence and remaining limits. It records the exact source,
+released Hashmarks implementation, native executable identities, mode,
+environment, selected membership and effective outcomes. Execution results
+remain in the original native batch receipts. A test link or planning crosswalk
+does not establish a passing result.
+
+| Selected proof owner | Boundary exercised |
+| --- | --- |
+| Portable contracts and [X0][census-x0] | Frozen selection, actual Unix peer/birth/rebind, private-source refusal, cancellation, safe bounded diagnostics and structural ownership counterexamples. |
+| Claimed-worker native fixtures | Original Run/Step terminal acceptance, task/Skill/Hashmarks delivery, fresh handoff and readback, selection, history permission, busy refusal and detached-child containment. |
+| Installed native fixtures | Selected Codex/Pi/OpenCode CLI lifecycle, read-only tool boundaries and compaction; protected Codex Code Mode and owned-service verification/campaign; mixed-native busy refusal followed by fresh reuse. |
+| Original worker/controller recovery | Live claims, healthy-worker survival after control loss, dead-worker uncertainty/no replay, and admission/process/apply/final-publication crash cuts. |
+
+Two qualification-fixture corrections preserve the actual native contract.
+Codex's ID-bearing initial managed input requires explicit selected-model history
+permission; the lifecycle fixture requests it for that workload. Default-denial
+tests retain their own policy. A native `.codex` metadata mountpoint may be absent
+or remain a plain empty directory after a Run. The service-context fixture rejects
+symlinks and populated leftovers while keeping its native mkdir/write/rename/delete
+denials, successful source edit, private canary, independent verifier and physical
+cleanup checks. Artifact persistence is not permission evidence.
+
+The cumulative subtraction review distinguishes HUG-49's four dead assignment
+lines from HUG-106's removal of unconditional history forwarding. Privacy/context
+tests were moved to their receiving owners with behavioral protection retained.
+The two temporary adaptations in the [existing registry][census-registry] remain
+**RETAIN** because their installed replacement gates are unsatisfied. Admission,
+native protocol, Step/process, typed result, Journal and campaign owners retain
+their separate responsibilities.
+
+The report keeps real-account refresh, other hosts, installed-wheel Agent runs,
+combined installed three-harness handoff, arbitrary extension/API/background
+boundaries and stronger MCP-startup isolation explicitly scoped. Shared-database
+overlap remains refused. Historical results are not promoted to another source
+or policy; optional qualification adds no ordinary startup or merge prerequisite.
+
 ### Native harness requirements baseline
 
 The [HUG-21 source census](https://linear.app/hugloss/issue/HUG-21/reconcile-current-baseline-compatibility-inventory-51-requirements-and)
@@ -860,11 +900,11 @@ requirements, G-01–G-11, rollback rules, D01–D15 and **Harness T01–T44**,
 including SP-01–SP-08. Harness T42–T44 are not Pi persistence's separate
 numbered test namespace.
 
-**Implemented** is a current source finding. **A evidence** locates deterministic
+**Implemented** denotes a source finding at that census revision. **A evidence** locates deterministic
 fixtures, sometimes with real supervised children; a named test is not an
 execution result. **Partial**, **missing qualification**, **unsupported** and
 **N/A to this change** retain different meanings. Only the exact portable corpus
-below is a fresh result. Existing dated installed observations retain
+below was executed by that census. Existing dated installed observations retain
 their recorded implementation, mode and environment; they are not new B/C PASS
 results for this source. No installed Codex/Pi/OpenCode implementation, real
 account or personal native credential store was exercised by this census.
@@ -923,7 +963,7 @@ support bit, scheduler or qualification gate is added.
 | SEC-07 | Frozen delivery, provider/context and native continuation owners | Implemented context delivery with fixture and historical scoped installed evidence. Current live-provider, cross-environment and credential-separation qualification is NOT_RUN. |
 | SEC-08 | Bounded, sanitized native metadata and visible output | Implemented limits/redaction, not a generic native metadata proxy. OpenCode readiness is capped at 64 KiB; Codex visible output excludes reasoning and redacts before clipping. |
 | EVI-01 | Existing A/B/C and mode/environment distinctions | Implemented documentation boundary. Recorded installed results retain their original dates and scopes. |
-| EVI-02 | Frozen selection, original receipts, Step/attempt identity and result accounting | Evidence owners implemented. Only the exact selected portable corpus below is a fresh result; installed suites and mere linked test names are not. |
+| EVI-02 | Frozen selection, original receipts, Step/attempt identity and result accounting | Evidence owners implemented. The selected portable corpus below was executed at the recorded census revision; installed suites and mere linked test names were not new results. |
 | EVI-03 | Native byte/observation bounds and durable omissions | Implemented; event/contract/settlement fixtures preserve limits and unknown output. Bounded text is not complete-stream or verification authority. |
 | EVI-04 | Original Run/Step/attempt and fresh source/occurrence binding | Implemented; contract mutants and real-child handoff retain separate identities and earlier failed verification. |
 | EVI-05 | Original Journal/Game Tape plus CLI/API projections | Shared read owners; the [controlled cross-harness case][census-native-run] compares each original claimed-worker Run through fresh CLI outputs/events/handoff/tape/logs and authenticated API detail/events/live-output. It retains failed independent verification, bounded claims and unavailable transient output after the harness binaries are removed, and checks durable state is unchanged by reads. Current public spelling is `runs`, not the historical `plan`. This A-level fixture does not qualify installed upstream implementations. |
@@ -1067,7 +1107,7 @@ verification-result owner. The source and test files were unchanged during
 execution; subsequent edits are this documentation census. No APP, installed-host,
 release, WSL2/container or representative performance qualification follows.
 
-**Subtraction result:** zero production adaptations, branches, fixtures or tests
+**Subtraction result at the 2026-10-31 census:** zero production adaptations, branches, fixtures or tests
 removed. Retain OpenCode's completed-text/physical-exit adaptation and Codex's
 reserved-directory mapping until their existing falsifiable removal gates are
 proved with the selected installed replacement. OpenCode service readiness,

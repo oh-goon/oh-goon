@@ -932,6 +932,12 @@ applies before upstream transport in the managed broker and direct provider
 client; unauthorized configured parameters reject before work. Reference-free
 inline messages remain supported.
 
+Codex 0.164.0's managed CLI sends ID-bearing input messages on its first request.
+That workload therefore needs explicit permission under this policy. The
+installed lifecycle qualification selects `allow_provider_history: true` for
+Codex; an input ID alone leaves server-side storage and ownership unknown. See
+the [scoped qualification record](development/AGENT_RUNTIME_OWNERS.md#final-scoped-native-qualification).
+
 With no history-ID registry, Oh-Goon cannot infer which Run created an opaque
 reference. Default denial therefore also covers server-side chaining within one
 Run and replay of ID-bearing output items, even if they include content. Explicit
