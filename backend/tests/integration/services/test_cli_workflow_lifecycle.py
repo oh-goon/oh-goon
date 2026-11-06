@@ -531,7 +531,7 @@ def test_basic_readonly_commands_do_not_initialize_or_repair_state(
         else:
             _cli(environment, tmp_path, *arguments)
         assert _snapshot(state) == before_state
-    for command in ("inspect", "validate"):
+    for command in ("inspect", "validate", "preview"):
         output = _cli(
             environment,
             tmp_path,
@@ -546,7 +546,12 @@ def test_basic_readonly_commands_do_not_initialize_or_repair_state(
             and "private-corrupt-database-sentinel" not in output
         )
         report = json.loads(output)
-        assert report["status"] in {"registration-unavailable", "rejected"}
+        if command == "preview" and database == "absent":
+            assert report["status"] == "observed"
+            assert report["target"]["registration"] == "unavailable"
+            assert report["execution_authorized"] is False
+        else:
+            assert report["status"] in {"registration-unavailable", "rejected"}
     after_state = _snapshot(state)
     # Reading an existing database takes its original physical-identity guard.
     # A new empty guard lock is coordination metadata, never database repair.
@@ -972,3 +977,189 @@ def test_workflow_run_cannot_recover_previous_work_to_admit_its_selection(
         assert after_files.pop(added) == hashlib.sha256(b"").hexdigest()
     assert after_files == before_files
     assert _snapshot(workflow) == before_workflow
+
+
+def _guarded_workflow_preview(
+    environment: dict[str, str], cwd: Path, workflow: Path, *, expected: int = 0
+) -> dict[str, object]:
+    """A fresh observer cannot hide native execution behind successful presentation."""
+    program = """
+import os, sys
+
+def observe(event, arguments):
+    if event in {
+        'subprocess.Popen', 'os.system', 'os.posix_spawn', 'os.fork', 'os.forkpty',
+        'os.exec', 'os.spawn', 'socket.connect',
+    }:
+        raise AssertionError('read-only preview reached an execution or network boundary')
+    if event == 'sqlite3.connect' and not os.path.exists(os.environ['OH_GOON_DB']):
+        raise AssertionError('read-only preview attempted to create application state')
+
+sys.addaudithook(observe)
+from oh_goon.cli import main
+raise SystemExit(main(['workflow', 'preview', sys.argv[1], '--json']))
+"""
+    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+        completed = subprocess.run(
+            [sys.executable, "-I", "-c", program, str(workflow)],
+            cwd=cwd,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=errors,
+            timeout=30,
+        )
+        output.seek(0)
+        errors.seek(0)
+        stdout, stderr = output.read(65537), errors.read(65537)
+    assert len(stdout) <= 65536 and len(stderr) <= 65536
+    assert completed.returncode == expected, (stdout.decode(), stderr.decode())
+    assert not stderr
+    report = json.loads(stdout)
+    assert isinstance(report, dict)
+    return report
+
+
+def _local_preview_workflow(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
+    state = tmp_path / "state"
+    state.mkdir()
+    environment = _environment(state)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q", str(repository)], check=True, timeout=10)
+    (repository / "check.sh").write_text("printf observed > executed.txt\n")
+    (repository / "goon.yml").write_text("steps:\n- id: check\n  run: sh check.sh\n")
+    (state / "league.yml").write_text(yaml.safe_dump({"version": 1, "folders": [str(repository)]}))
+    workflow = tmp_path / "workflow"
+    workflow.mkdir()
+    (workflow / "run.yml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 2,
+                "source": {"kind": "repository-goon"},
+                "target": {"repository": "../repository"},
+            }
+        )
+    )
+    return environment, workflow, repository
+
+
+def test_current_target_preview_is_a_fresh_readonly_process_without_run_authority(
+    tmp_path: Path,
+) -> None:
+    environment, workflow, repository = _local_preview_workflow(tmp_path)
+    before = _snapshot(tmp_path)
+    report = _guarded_workflow_preview(environment, tmp_path, workflow)
+    assert report["execution_authorized"] is False
+    assert report["target"]["path"] == str(repository)
+    assert report["proof"]["admission"] == "not-started"
+    assert report["proof"]["execution"] == "not-started"
+    assert not (repository / "executed.txt").exists()
+    assert not (workflow / "goon.lock").exists()
+    assert not Path(environment["OH_GOON_DB"]).exists()
+    assert _snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("prepared", [False, True], ids=["missing", "cached-pinned"])
+def test_current_target_preview_never_materializes_git_source_even_with_a_cached_pin(
+    tmp_path: Path, prepared: bool
+) -> None:
+    environment, workflow, repository = _local_preview_workflow(tmp_path)
+    upstream = tmp_path / "upstream"
+    package = upstream / "goons/general/check"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# general/check\n")
+    (package / "goon.yml").write_text("steps:\n- run: sh check.sh\n")
+    (upstream / "plan.yml").write_text("goons:\n- import: general/check\n  from: goons\n")
+    subprocess.run(["git", "init", "-q", "-b", "main", str(upstream)], check=True, timeout=10)
+    subprocess.run(["git", "-C", str(upstream), "add", "."], check=True, timeout=10)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(upstream),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "source",
+        ],
+        check=True,
+        timeout=10,
+    )
+    (workflow / "run.yml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 2,
+                "source": {
+                    "kind": "git-plan",
+                    "git": str(upstream),
+                    "ref": "main",
+                    "path": ".",
+                    "plan": "plan.yml",
+                },
+                "target": {"repository": "../repository"},
+            }
+        )
+    )
+    if prepared:
+        baseline = json.loads(
+            _cli(environment, tmp_path, "workflow", "prepare", str(workflow), "--json")
+        )
+        assert baseline["status"] == "prepared"
+        assert (workflow / "goon.lock").is_file()
+        assert any(Path(environment["XDG_CACHE_HOME"]).rglob("*.git"))
+    before = _snapshot(tmp_path)
+    report = _guarded_workflow_preview(environment, tmp_path, workflow, expected=2)
+    assert report["code"] == "SOURCE_ACQUISITION_REQUIRED"
+    assert report.get("fleet_run_id") is None
+    assert not Path(environment["OH_GOON_DB"]).exists()
+    assert not (repository / "executed.txt").exists()
+    assert _snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("mutation", ["source", "excluded-target"])
+def test_current_target_preview_cannot_admit_a_later_changed_run(
+    tmp_path: Path, mutation: str
+) -> None:
+    from oh_goon.core.product_identity import repository_subject_instance_id
+
+    environment, workflow, repository = _local_preview_workflow(tmp_path)
+    # A real original Run makes refusal meaningful: this source and native Step work.
+    prepared = json.loads(
+        _cli(environment, tmp_path, "workflow", "prepare", str(workflow), "--json")
+    )
+    assert prepared["status"] == "prepared"
+    baseline = json.loads(_cli(environment, tmp_path, "run", str(workflow), "--json"))
+    assert baseline["outcome"] == "SUCCESS"
+    marker = repository / "executed.txt"
+    assert marker.read_text() == "observed"
+    marker.unlink()
+    preview = _guarded_workflow_preview(environment, tmp_path, workflow)
+    assert preview["execution_authorized"] is False
+    if mutation == "source":
+        source = repository / "goon.yml"
+        source.write_text(source.read_text().replace("sh check.sh", "sh changed.sh"))
+        (repository / "changed.sh").write_text("printf changed > executed.txt\n")
+    else:
+        _cli(
+            environment,
+            tmp_path,
+            "exclude",
+            str(repository),
+            "--expected-repository-instance-id",
+            repository_subject_instance_id(repository),
+        )
+    database = Path(environment["OH_GOON_DB"])
+    before_database = _database_snapshot(database)
+    before_sources = (_snapshot(repository), _snapshot(workflow))
+    refused = json.loads(_cli(environment, tmp_path, "run", str(workflow), "--json", expected=2))
+    assert refused.get("fleet_run_id") is None
+    assert refused["status"] in {"error", "rejected"}
+    assert not marker.exists()
+    assert _database_snapshot(database) == before_database
+    assert (_snapshot(repository), _snapshot(workflow)) == before_sources

@@ -225,6 +225,7 @@ class _SourceGraphBuild:
     update_goons: bool = False
     update_applications: bool = False
     allow_source_network: bool = False
+    allow_source_materialization: bool = True
     acquired_git: dict[tuple[str, str], tuple[Path, str]] = field(default_factory=dict)
     selected_git_commits: dict[tuple[str, str], str] = field(default_factory=dict)
     execution_sources: dict[tuple[str, ...], LockedExecutionSource] = field(default_factory=dict)
@@ -247,6 +248,7 @@ def analyze_fleet_plan_sources(
     update_goons: bool = False,
     update_applications: bool = False,
     allow_source_network: bool = False,
+    allow_source_materialization: bool = True,
     plan_source: LockedExecutionSource | None = None,
     cancel_requested: Callable[[], bool] | None = None,
     retained_graph: FleetPlanSourceGraph | None = None,
@@ -291,6 +293,7 @@ def analyze_fleet_plan_sources(
         acquire_sources=acquire_sources,
         update_goons=update_goons,
         allow_source_network=allow_source_network,
+        allow_source_materialization=allow_source_materialization,
         selected_git_commits=selected_commits,
         update_applications=update_applications,
         cancel_requested=cancel_requested,
@@ -441,6 +444,11 @@ def _load_goon_child(
     git_source = None
     git_path = None
     if step.git_source is not None:
+        if not build.allow_source_materialization:
+            raise FleetPlanSourceAcquisitionRequired(
+                "Passive preview cannot materialize Git Goon source, including cached pins; "
+                "inspect with explicit --acquire or select local source for passive preview"
+            )
         from oh_goon.integrations.git_source_preparation import prepare_git_source
 
         selection = step.git_source
@@ -651,6 +659,11 @@ def _capture_project(
                 )
                 build.execution_sources[("application", *coordinates)] = provenance
         elif application is not None:
+            if not build.allow_source_materialization:
+                raise FleetPlanSourceAcquisitionRequired(
+                    "Passive preview cannot materialize Git application source, including cached pins; "
+                    "inspect with explicit --acquire or select local source for passive preview"
+                )
             from oh_goon.integrations.git_source_preparation import prepare_git_source
 
             if build.locked_sources is None:

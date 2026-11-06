@@ -582,3 +582,75 @@ def test_shared_agent_uses_selected_skill_root_lock_and_recovers_exact_git_pin(
     changed = client.post("/api/league/shared-plan-previews", json=selected)
     assert changed.status_code == 400, changed.text
     assert retained_references() == retained
+
+
+def test_workflow_current_target_preview_matches_original_api_semantics_at_one_revision(
+    tmp_path, monkeypatch, capsys
+):
+    from types import SimpleNamespace
+
+    import yaml
+
+    from oh_goon.cli import main
+    from oh_goon.core.models.repository import RepositoryIdentity
+    from oh_goon.runtime.goon_templates import GoonTemplateStore
+    from oh_goon.runtime.shared_plans import SharedPlanFileStore
+    from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
+    from oh_goon.services.fleet_plans import FleetPlanService
+    from oh_goon.services.shared_plans import SharedPlanService
+
+    repository_path = tmp_path / "repository"
+    repository_path.mkdir()
+    repository = RepositoryIdentity(path=repository_path)
+    preferences = tmp_path / "league.yml"
+    preferences.write_text(yaml.safe_dump({"version": 1, "folders": [str(repository_path)]}))
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(preferences))
+    database = tmp_path / "must-not-create.sqlite"
+    monkeypatch.setenv("OH_GOON_DB", str(database))
+    workflow = tmp_path / "workflow"
+    store = SharedPlanFileStore(workflow / "plans")
+    document = store.write("plan", "goons:\n- python/dependency-inventory\n")
+    (workflow / "run.yml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 2,
+                "source": {"kind": "file-plan", "path": "plans/plan/plan.yml"},
+                "target": {"repository": str(repository_path)},
+            }
+        )
+    )
+    plans = FleetPlanService(
+        FleetPlanResolver(goon_templates=GoonTemplateStore()), None, None, None, None
+    )
+    service = SharedPlanService(
+        store, SimpleNamespace(repositories=lambda: (repository,)), plans, None, None
+    )
+    app = create_app(local_access_token="workflow-preview-semantic-parity")
+    app.dependency_overrides[dependencies.shared_plan_service] = lambda: service
+    with closing(authenticated_api_client(app)) as client:
+        response = client.post(
+            "/api/league/shared-plan-previews",
+            json={
+                "plan_key": "plan",
+                "expected_revision": document.sha256,
+                "repository_ids": [repository.repository_id],
+            },
+        )
+    assert response.status_code == 200, response.text
+    api = response.json()
+    capsys.readouterr()
+    assert main(["workflow", "preview", str(workflow), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    current = report["current_target_preview"]
+    target = current["targets"][0]
+    assert report["execution_authorized"] is False
+    assert report["source"]["sha256"] == api["sha256"] == document.sha256
+    assert current["plan_id"] == api["plan_id"]
+    assert target["repository"] == api["teams"][0]["repository"]
+    assert target["repository_instance_id"] == api["teams"][0]["repository_instance_id"]
+    assert target["preview"] == api["teams"][0]["preview"]
+    assert current["execution_policy"]["purpose"] == target["preview"]["execution_purpose"]
+    assert report["proof"]["admission"] == "not-started"
+    assert not database.exists()
+    assert not (workflow / "goon.lock").exists()
+    assert not list(store.root.rglob("goon.lock"))

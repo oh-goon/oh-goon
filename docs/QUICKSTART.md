@@ -195,11 +195,13 @@ oh-goon workflow prepare ./workflow
 oh-goon run ./workflow
 ```
 
-`templates list`, `workflow inspect ./workflow`, `workflow validate ./workflow`
-and stateless `doctor` are optional diagnostics. Inspection/validation do not
-register targets, write locks, start the app or execute checks. Source acquisition
+`templates list`, `workflow inspect ./workflow`, `workflow validate ./workflow`,
+`workflow preview ./workflow` and stateless `doctor` are optional diagnostics.
+Inspection/validation do not register targets, write locks, start the app or execute checks. Source acquisition
 requires explicit `--acquire`; preparing a fresh CI target requires explicit
 `--register-target`. Run never registers, refreshes refs or repairs a lock.
+Preview observes the original Fleet Step dispositions for the current target
+without acquisition or native probes and reports `execution_authorized: false`.
 
 Use [the configuration guide](development/TEMPLATE_INPUT_INSPECTION.md) for
 file/repository/Git sources, typed inputs and explicit `init --draft` Agent/repair

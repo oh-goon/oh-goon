@@ -59,7 +59,7 @@ _CONFIG_FIELDS = frozenset(
 )
 _NEXT_ACTIONS = {
     "DUPLICATE_INPUT": "Supply each input once using either --input NAME=VALUE or --input-null NAME.",
-    "EXTERNAL_INPUT_NOT_OBSERVED": "Inspection does not read environment-backed inputs; explicit lock and run use the original environment authority.",
+    "EXTERNAL_INPUT_NOT_OBSERVED": "This observation did not read the external input; explicit prepare and run use its original source owner.",
     "UNKNOWN_INPUT": "Inspect the accepted input names; remove unrecognized caller inputs.",
     "MISSING_REQUIRED_INPUT": "Supply required caller values, then retry validation.",
     "INVALID_INPUT_VALUE": "Inspect the owning Goon's type and constraints; correct the caller input value.",
