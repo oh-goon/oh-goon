@@ -9,14 +9,17 @@ from __future__ import annotations
 import json
 import os
 import platform
+import select
 import shlex
 import shutil
 import subprocess
 import sys
+from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from typing import Any, Literal
+from uuid import uuid4
 
 import pytest
 
@@ -25,9 +28,16 @@ from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
+from oh_goon.core.models.run_events import (
+    ProcessExitedEvent,
+    ProcessStartedEvent,
+    StepAttemptCreatedEvent,
+)
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
+from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from tests.fakes.native_context import controlled_native_context
+from tests.fakes.native_lifetime import NativeDescendant, bind_native_descendant
 
 
 @pytest.mark.process
@@ -120,7 +130,7 @@ def test_installed_native_cli_reviews_through_the_read_only_boundary(
     probe = tools / "readonly_probe.py"
     probe.write_text(
         r"""import json,os,pathlib,socket,subprocess,sys
-private,port=sys.argv[1:]
+private,port,child_token=sys.argv[1:]
 root=pathlib.Path('/workspace')
 original=pathlib.Path((root/'original-root').read_text())
 facts={'source_read':True,'source_write_denied':True,'rename_denied':True,'delete_denied':True,'shell_write_denied':True,'git_index_write_denied':True,'git_command_denied':True}
@@ -150,6 +160,11 @@ try:
     with socket.create_connection(('127.0.0.1',int(port)),timeout=.2): pass
 except OSError: facts['host_network_denied']=True
 else: facts['host_network_denied']=False
+subprocess.Popen(
+    [sys.executable,'-I','-c','import signal; signal.pause()',child_token],
+    stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+    close_fds=True,start_new_session=True,
+)
 print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
 """,
         encoding="utf-8",
@@ -167,6 +182,9 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
     context_only_requests = 0
     native_tool_requested = False
     native_proof: dict[str, bool] | None = None
+    child_token = f"oh-goon-native-lifetime-{uuid4().hex}"
+    descendant: NativeDescendant | None = None
+    run_ready = Event()
     fixture_failure: str | None = None
     expected_facts = {
         "source_read",
@@ -196,6 +214,7 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
         def do_POST(self) -> None:
             nonlocal identity, request_count, qualified_requests, native_proof, fixture_failure
             nonlocal context_only_requests, native_tool_requested
+            nonlocal descendant
             try:
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 request_count += 1
@@ -279,7 +298,13 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                     )
                     properties = selected["parameters"]["properties"]
                     command = shlex.join(
-                        ("/usr/bin/python3", str(probe), str(private), str(endpoint.server_port))
+                        (
+                            "/usr/bin/python3",
+                            str(probe),
+                            str(private),
+                            str(endpoint.server_port),
+                            child_token,
+                        )
                     )
                     field = "command" if "command" in properties else "cmd"
                     assert properties[field].get("type") == "string"
@@ -316,6 +341,35 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                             )
                     assert isinstance(native_proof, dict) and set(native_proof) == expected_facts
                     assert all(value is True for value in native_proof.values()), native_proof
+                    assert run_ready.wait(10), "original Run admission was not observed"
+                    events = runtime.runs.events(admitted.fleet_run_id).events
+                    attempt = next(
+                        event
+                        for event in reversed(events)
+                        if isinstance(event, StepAttemptCreatedEvent) and event.step_order == 1
+                    )
+                    exited = {
+                        event.physical_execution_id
+                        for event in events
+                        if type(event) is ProcessExitedEvent
+                    }
+                    active = [
+                        event
+                        for event in events
+                        if type(event) is ProcessStartedEvent
+                        and event.step_attempt_id == attempt.step_attempt_id
+                        and event.physical_execution_id not in exited
+                    ]
+                    assert len(active) == 1, "expected the original active native command"
+                    assert descendant is None, "native child was already bound"
+                    # Hold the final model response until the exact escaped-session
+                    # child is alive below this Run's actual native process.
+                    descendant = lifetime.enter_context(
+                        bind_native_descendant(active[0], child_token)
+                    )
+                    assert descendant.child_pgid == descendant.child.pid
+                    assert descendant.child_pgid != descendant.parent_pgid
+                    assert not select.select([descendant.child_fd], [], [], 0)[0]
                     record = {
                         "schema": "oh-goon.agent-review/v1",
                         **identity,
@@ -362,7 +416,7 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "host-data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "host-config"))
     monkeypatch.setenv("HOME", str(tmp_path / "synthetic-home"))
-    with ThreadingHTTPServer(("127.0.0.1", 0), ModelEndpoint) as endpoint:
+    with ExitStack() as lifetime, ThreadingHTTPServer(("127.0.0.1", 0), ModelEndpoint) as endpoint:
         worker = Thread(target=endpoint.serve_forever)
         worker.start()
         try:
@@ -425,7 +479,12 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                         ),
                     ),
                 )
+                run_ready.set()
                 detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
+                assert descendant is not None, (fixture_failure, "native child cut not reached")
+                assert select.select([descendant.child_fd], [], [], 0)[0], (
+                    "native detached child outlived original Run terminal readback"
+                )
                 assert detail.outcome is FleetRunOutcome.SUCCESS, (
                     fixture_failure,
                     request_count,
@@ -490,10 +549,13 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                     json.dumps(
                         {
                             "harness": version,
+                            "executable_sha256": native_executable_sha256(program),
                             "platform": platform.platform(),
                             "profile": "bubblewrap; harness-owned native tools; read-only review",
                             "requests": request_count,
                             "context_only_requests": context_only_requests,
+                            "detached_child_dead_at_terminal": True,
+                            "lifetime_scope": "native foreground shell; close-stdio setsid child",
                             "outcome": detail.outcome.value,
                             "boundary": receipt.model_dump(mode="json"),
                         },
