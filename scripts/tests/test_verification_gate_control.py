@@ -1993,6 +1993,7 @@ def test_executable_change_cannot_claim_behavioral_na() -> None:
         "frontend/src/README.md",
         "docs/development/REAL_LIFECYCLE_QA.md",
         "docs/development/REAL_LIFECYCLE_QA.yml",
+        "docs/certification/answers/11-startup-certification.yml",
     ),
 )
 def test_policy_ingresses_cannot_self_approve_as_ordinary(path: str) -> None:
@@ -2024,16 +2025,26 @@ def test_policy_ingresses_cannot_self_approve_as_ordinary(path: str) -> None:
         "frontend/src/README.md",
         "docs/development/REAL_LIFECYCLE_QA.md",
         "docs/development/REAL_LIFECYCLE_QA.yml",
+        "docs/certification/answers/01-repository-ownership.yml",
+        "docs/certification/answers/11-startup-certification.yml",
     ),
 )
 def test_governing_policy_admits_independently_bound_proof(path: str) -> None:
     plan, result = _proof()
-    required = VERIFICATION_POLICY_TESTS + (
-        (REAL_LIFECYCLE_QA_TEST,) if path in REAL_LIFECYCLE_QA_PATHS else ()
+    required = (
+        VERIFICATION_POLICY_TESTS
+        + ((REAL_LIFECYCLE_QA_TEST,) if path in REAL_LIFECYCLE_QA_PATHS else ())
+        + (
+            (gate.GRADER_ANSWER_MATERIAL_TEST,)
+            if gate.is_grader_answer_section(path)
+            else ()
+        )
     )
     obligations = ["verification-policy protection"]
     if path in REAL_LIFECYCLE_QA_PATHS:
         obligations.append("real-lifecycle QA protection")
+    if gate.is_grader_answer_section(path):
+        obligations.append("grader answer-material protection")
     plan.update(
         changed_paths=[path],
         policy_status="REVIEW_REQUIRED",
@@ -2041,9 +2052,11 @@ def test_governing_policy_admits_independently_bound_proof(path: str) -> None:
         pytest=list(required),
         static=sorted(required_static_obligations([path])),
     )
-    plan["evidence"]["observations"] = [
-        {"changed_path": path, "state": "UNAVAILABLE", "nominations": []}
-    ]
+    plan["evidence"]["observations"] = (
+        []
+        if gate.is_grader_answer_section(path)
+        else [{"changed_path": path, "state": "UNAVAILABLE", "nominations": []}]
+    )
     native = result["outcomes"][0]
     nodes = [f"{test_file}::test_policy" for test_file in required]
     native["native_report"]["native_collection"] = {
@@ -2098,6 +2111,14 @@ def test_governing_policy_admits_independently_bound_proof(path: str) -> None:
     validate(plan, result, plan["base"])
     with pytest.raises(ValueError, match="trusted-base"):
         validate(plan, result, None)
+
+    if gate.is_grader_answer_section(path):
+        incomplete_result = copy.deepcopy(result)
+        incomplete_result["outcomes"][0]["returncode"] = 1
+        with pytest.raises(
+            ValueError, match="Required owner is missing, skipped or failed"
+        ):
+            validate(plan, incomplete_result, plan["base"])
 
     for test_file in required:
         incomplete_plan, incomplete_result = copy.deepcopy((plan, result))
