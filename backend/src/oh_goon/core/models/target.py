@@ -22,6 +22,7 @@ from oh_goon.core.models.execution_identity import (
 from oh_goon.core.models.execution_lock_models import LockedExternalArtifact
 from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.goon_plan_source import FleetPlanSource
+from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.vocabulary import MigrationMode, UvRecipeId
 
 _TASK_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
@@ -91,6 +92,9 @@ class FleetPlanTarget(ImmutableModel):
         default=None, exclude_if=lambda value: value is None
     )
     scheduled_caller_file: ScheduledCallerFileReceipt | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    reviewed_repository_source: RepositorySourceAuthority | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 

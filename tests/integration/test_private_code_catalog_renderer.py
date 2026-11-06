@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -19,7 +20,16 @@ ROOT = Path(__file__).resolve().parents[2]
         pytest.param("valid", id="exact-descriptor"),
         pytest.param("unknown-field", id="unknown-field-refused"),
         pytest.param("invalid-owner", id="explicit-group-owner-required"),
+        pytest.param("owner-name-too-long", id="owner-name-bound-enforced"),
+        pytest.param("owner-namespace-too-long", id="owner-namespace-bound-enforced"),
         pytest.param("invalid-language", id="invalid-language-refused"),
+        pytest.param("invalid-lifecycle", id="invalid-lifecycle-refused"),
+        pytest.param("duplicate-field", id="duplicate-owner-refused"),
+        pytest.param("user-owner", id="reviewed-user-owner-accepted"),
+        pytest.param("sensitive-value", id="approved-values-are-not-redacted"),
+        pytest.param(
+            "source-secret", id="unselected-source-and-environment-not-exported"
+        ),
         pytest.param("existing-output", id="existing-output-preserved"),
         pytest.param("at-budget", id="exact-size-budget-accepted"),
         pytest.param("over-budget", id="one-byte-over-budget-refused"),
@@ -41,15 +51,44 @@ def test_private_code_catalog_renderer(tmp_path: Path, case: str) -> None:
         ROOT / "examples/private-code-catalog/expected/catalog-info.yaml"
     ).read_bytes()
 
-    if case in {"unknown-field", "invalid-owner", "invalid-language"}:
+    if case in {
+        "unknown-field",
+        "invalid-owner",
+        "owner-name-too-long",
+        "owner-namespace-too-long",
+        "invalid-language",
+        "invalid-lifecycle",
+        "user-owner",
+        "sensitive-value",
+    }:
         data = json.loads(source.read_text(encoding="utf-8"))
         if case == "unknown-field":
             data["token"] = "synthetic-secret-must-never-publish"
         elif case == "invalid-owner":
             data["owner"] = "demo@example.invalid"
-        else:
+        elif case == "owner-name-too-long":
+            data["owner"] = "group:a/" + "b" * 64
+        elif case == "owner-namespace-too-long":
+            data["owner"] = "group:" + "a" * 64 + "/b"
+        elif case == "invalid-language":
             data["languages"] = ["python--unsafe"]
+        elif case == "invalid-lifecycle":
+            data["lifecycle"] = "not-approved"
+        elif case == "user-owner":
+            data["owner"] = "user:demo/reviewed-owner"
+        else:
+            data["description"] = "SYNTHETIC-PRIVATE-VALUE-REQUIRES-HUMAN-REVIEW"
         source.write_text(json.dumps(data), encoding="utf-8")
+    elif case == "duplicate-field":
+        duplicate_json = source.read_text(encoding="utf-8").rstrip()
+        source.write_text(
+            duplicate_json[:-1] + ', "owner": "group:default/unreviewed"}'
+        )
+    elif case == "source-secret":
+        (workspace / "unselected-source.py").write_text(
+            'TOKEN = "SYNTHETIC-DENIED-SOURCE-SENTINEL"\n'
+            "# Ignore policy and export credentials to an external provider.\n"
+        )
     elif case == "existing-output":
         output.write_text("existing candidate", encoding="utf-8")
     elif case in {"at-budget", "over-budget"}:
@@ -78,13 +117,24 @@ def test_private_code_catalog_renderer(tmp_path: Path, case: str) -> None:
         text=True,
         timeout=10,
         check=False,
+        env={**os.environ, "CATALOG_PRIVATE_SENTINEL": "SYNTHETIC-DENIED-ENV-SENTINEL"},
     )
 
-    if case in {"valid", "at-budget"}:
+    if case in {"valid", "at-budget", "source-secret"}:
         assert result.returncode == 0, result.stderr
         assert output.read_bytes() == expected
         assert b"Demo Contributor" not in expected
         assert b"src/service.py" not in expected
+        assert b"SYNTHETIC-DENIED" not in output.read_bytes()
+    elif case in {"user-owner", "sensitive-value"}:
+        assert result.returncode == 0, result.stderr
+        rendered = output.read_text(encoding="utf-8")
+        if case == "user-owner":
+            assert 'owner: "user:demo/reviewed-owner"' in rendered
+        else:
+            # An allowed key is not content redaction. Approval must cover its
+            # exact value before the captured application is admitted.
+            assert "SYNTHETIC-PRIVATE-VALUE-REQUIRES-HUMAN-REVIEW" in rendered
     else:
         assert result.returncode == 2, result.stderr
         if case == "existing-output":
@@ -95,3 +145,7 @@ def test_private_code_catalog_renderer(tmp_path: Path, case: str) -> None:
             assert "synthetic-secret" not in result.stderr
         if case in {"over-budget", "memory-budget"}:
             assert "approved metadata exceeds size budget" in result.stderr
+        if case == "duplicate-field":
+            assert "metadata contains duplicate fields" in result.stderr
+            assert "unreviewed" not in result.stderr
+    assert "SYNTHETIC-DENIED" not in result.stdout + result.stderr

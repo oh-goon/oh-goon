@@ -143,6 +143,12 @@ class TargetSelectionError(StateConflict):
     code = "TARGET_SELECTION_ERROR"
 
 
+class ReviewedRepositorySourceStale(TargetSelectionError):
+    """The selected repository no longer matches the caller's reviewed source."""
+
+    code = "REVIEWED_SOURCE_STALE"
+
+
 class MigrationPreconditionFailed(StateConflict):
     code = "MIGRATION_PRECONDITION_FAILED"
 

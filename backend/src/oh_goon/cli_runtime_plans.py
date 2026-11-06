@@ -242,8 +242,12 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             {"caller_input_file": snapshot.authority()} if snapshot is not None else {}
         )
         expected_repository_instances = None
+        reviewed_repository_source = None
         if hasattr(args, "_run_configuration"):
             expected_repository_instances = args._run_configuration.repository_instance_ids
+            reviewed_repository_source = (
+                args._run_configuration.snapshot.selection.target.reviewed_source
+            )
             source_identity["repository"] = args._run_configuration.resolution_repository
             source_identity["source_graph"] = args._source_graph
             source_identity["repository_goon"] = (
@@ -310,6 +314,7 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             allowed_agent_acceptance=tuple(args.allow_agent_acceptance or ()),
             **native_options,
             expected_repository_instance_ids=expected_repository_instances,
+            reviewed_repository_source=reviewed_repository_source,
         )
         plan_id = (
             admitted.target.plan.plan_id if isinstance(admitted.target, FleetPlanTarget) else None
@@ -396,11 +401,17 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 print("Durable Run handoff argv: " + json.dumps(readback))
         return 143 if isinstance(interruption, CliTermination) else 130
     except (FleetDomainError, ValueError) as exc:
+        diagnostic_fields: dict[str, str] = {}
         if hasattr(args, "_run_configuration"):
             from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
 
             diagnostic = safe_plan_diagnostic(exc)
             message = f"{diagnostic['code']}: {diagnostic['safe_next_action']}"
+            diagnostic_fields = {
+                "code": diagnostic["code"],
+                "stage": diagnostic["stage"],
+                "safe_next_action": diagnostic["safe_next_action"],
+            }
         else:
             message = str(exc)
         if as_json:
@@ -412,6 +423,7 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                         "status": "error",
                         "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
                         "message": message,
+                        **diagnostic_fields,
                     },
                     sort_keys=True,
                 )
@@ -1026,6 +1038,11 @@ def _schedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             interval_minutes=args.interval_minutes,
             inputs=selected_inputs,
             caller_input_origins=getattr(args, "_caller_input_origins", {}),
+            reviewed_repository_source=(
+                args._run_configuration.snapshot.selection.target.reviewed_source
+                if hasattr(args, "_run_configuration")
+                else None
+            ),
             **source_identity,
         )
     except (FleetDomainError, ValueError) as exc:
@@ -1067,6 +1084,11 @@ def _reschedule(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             interval_minutes=args.interval_minutes,
             inputs=selected_inputs,
             caller_input_origins=getattr(args, "_caller_input_origins", {}),
+            reviewed_repository_source=(
+                args._run_configuration.snapshot.selection.target.reviewed_source
+                if hasattr(args, "_run_configuration")
+                else None
+            ),
             **source_identity,
         )
     except (FleetDomainError, ValueError) as exc:

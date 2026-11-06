@@ -6,9 +6,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from oh_goon.integrations.hashmarks import observe_source_bindings_text
+from oh_goon.integrations.hashmarks import HashmarksSourceEvidence, observe_source_bindings_text
 from oh_goon.repository_tooling.architecture.common import (
     Violation,
+    python_source_bindings,
+    python_source_bytes,
+    python_source_snapshot,
     source_binding_name,
     source_binding_packet,
 )
@@ -34,6 +37,10 @@ def _is_tool_module(name: str) -> bool:
 
 def _python_imports_external_tool(text: str, *, path: str) -> bool:
     evidence = observe_source_bindings_text(text, path=path)
+    return _python_evidence_imports_external_tool(evidence)
+
+
+def _python_evidence_imports_external_tool(evidence: HashmarksSourceEvidence) -> bool:
     packet = source_binding_packet(evidence, language="python")
     for fact in packet["facts"]:
         target = source_binding_name(fact, imported_only=True)
@@ -108,11 +115,21 @@ def _scan_one_runtime_tree(
         return []
     violations: list[Violation] = []
     for path in _runtime_files(tree, skip_repository_tooling=skip_repository_tooling):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
-        if _runtime_file_leaks(path, kind, text):
+        if kind == "python":
+            if path.suffix != ".py":
+                continue
+            try:
+                python_source_bytes(path).decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            leaked = _python_evidence_imports_external_tool(python_source_bindings(path))
+        else:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            leaked = _runtime_file_leaks(path, kind, text)
+        if leaked:
             violations.append(
                 Violation(
                     path,
@@ -304,11 +321,12 @@ def _check_vendor_boundary(root: Path) -> list[Violation]:
 def check_external_development_tooling_contract(root: Path = ROOT) -> list[Violation]:
     """Keep external refactor tooling outside Oh-Goon product/runtime authority."""
 
-    return [
-        *_scan_dependency_manifests(root),
-        *_scan_runtime_tree(root),
-        *_check_source_record(root),
-        *_check_ignored_checkouts(root),
-        *_check_boundary_document(root),
-        *_check_vendor_boundary(root),
-    ]
+    with python_source_snapshot(root):
+        return [
+            *_scan_dependency_manifests(root),
+            *_scan_runtime_tree(root),
+            *_check_source_record(root),
+            *_check_ignored_checkouts(root),
+            *_check_boundary_document(root),
+            *_check_vendor_boundary(root),
+        ]

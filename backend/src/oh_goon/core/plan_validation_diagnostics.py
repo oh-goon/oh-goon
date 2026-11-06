@@ -14,6 +14,7 @@ from oh_goon.core.errors import (
     ExecutionLockRejected,
     FleetPlanInputRejected,
     FleetPlanSourceAcquisitionRequired,
+    ReviewedRepositorySourceStale,
     RunConfigurationInvalid,
     RuntimeSafetyBlocked,
 )
@@ -25,6 +26,7 @@ _CONFIG_ACTIONS = {
     "CONFIG_PATH_INVALID": "Select an existing regular source contained in the workflow root; remove traversal and symlink aliases.",
     "CONFIG_TARGET_UNAVAILABLE": "Select exact target roots in target.repository or target.repositories; use 'oh-goon workflow prepare run.yml --register-target' for explicit registration, and confirm every target remains included.",
     "CONFIG_CHANGED": "The captured configuration changed; inspect the current run.yml and explicitly regenerate goon.lock.",
+    "CONFIG_REVIEWED_SOURCE_LAYOUT": "Keep run.yml and its goon.lock outside the repository whose source is reviewed, then inspect that exact registered target with --review-source. Do not change source exclusions to hide workflow authoring.",
 }
 _CONFIG_FIELDS = frozenset(
     {
@@ -39,6 +41,7 @@ _CONFIG_FIELDS = frozenset(
         "target",
         "repository",
         "repositories",
+        "reviewed_source",
         "inputs",
         "agent",
         "implementation",
@@ -110,6 +113,17 @@ def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
                     or re.fullmatch(r"target\.repositories\.[0-9]{1,5}", field)
                 )
             }
+        )
+    elif isinstance(exc, ReviewedRepositorySourceStale):
+        code = exc.code
+        inputs = []
+        stage = "repository_admission"
+        action = (
+            "The selected repository changed since source review. Remove the stale "
+            "target.reviewed_source to request a fresh inspection with "
+            "'oh-goon workflow inspect run.yml --review-source --json', repeat discovery "
+            "and metadata review, then update target.reviewed_source and prepare the workflow. "
+            "Relocking alone does not approve changed source."
         )
     elif isinstance(exc, (DurableStateBusy, ExecutionBusy)):
         code = "PLAN_RESOLUTION_REJECTED"

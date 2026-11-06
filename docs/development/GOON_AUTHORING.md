@@ -586,6 +586,12 @@ Put caller scalar values in the selected `run.yml` under `inputs`. `workflow val
 is no values-file overlay or input-flag precedence. Inputs do not alter package
 selection. A changed execution choice requires an explicitly refreshed lock.
 
+For an explicit human review tied to repository contents, use the optional
+single-target [`target.reviewed_source` flow](../goon-lock.md#binding-an-explicitly-reviewed-repository-source).
+Observe before discovery/review, keep the selection and lock outside the reviewed
+target, and prepare only after approving the exact candidate values. The existing
+admission owner refuses source drift; relocking alone cannot approve a new source.
+
 For target-project Python Goons, reference declared inputs from `uv.project` and
 `uv.group` as needed. Commands default to that project working directory.
 Package-owned Python Goons keep their package source and attempt working roots

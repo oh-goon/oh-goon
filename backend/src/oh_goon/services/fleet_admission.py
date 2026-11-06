@@ -18,6 +18,7 @@ from oh_goon.core.errors import (
     CapabilityUnavailable,
     ExecutionBusy,
     FleetPlanInvalid,
+    ReviewedRepositorySourceStale,
     TargetSelectionError,
 )
 from oh_goon.core.execution_environment import ResolvedExecutionEnvironment
@@ -875,6 +876,12 @@ class FleetAdmissionPlanner:
         if not isinstance(target, FleetPlanTarget):
             return ()
 
+        reviewed = target.reviewed_repository_source
+        if reviewed is not None and len(selected) != 1:
+            raise TargetSelectionError(
+                "Reviewed source admission requires exactly one selected repository"
+            )
+
         strict = isinstance(target.plan.execution, CicdExecutionPolicy)
         if strict:
             roots = tuple(entry.repository.path for entry in selected)
@@ -896,6 +903,8 @@ class FleetAdmissionPlanner:
                 blocked.append(f"{entry.repository.name}: {exc}")
                 continue
 
+            if reviewed is not None and evidence.source_authority != reviewed:
+                raise ReviewedRepositorySourceStale("Repository source changed since review")
             admitted.append(evidence)
 
         if blocked:

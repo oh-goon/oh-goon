@@ -27,6 +27,7 @@ from oh_goon.services.run_configuration import (
     capture_run_configuration_source,
     load_run_configuration,
     register_run_configuration_target,
+    require_reviewed_source_authoring_layout,
     require_run_configuration_registration_target,
     resolve_run_configuration_targets,
 )
@@ -62,6 +63,10 @@ def prepare_configuration(
     if args.command == "run":
         require_run_repair_authorization(snapshot, authorized=args.authorize_repair)
     targets = targets or resolve_run_configuration_targets(snapshot, target_root=target_root)
+    if bool(getattr(args, "review_source", False)):
+        if len(targets) != 1 or not targets[0].registered:
+            raise FleetPlanInvalid("Source review requires one explicitly registered repository")
+        require_reviewed_source_authoring_layout(snapshot, targets[0].repository.path)
     read_only = args.command == "workflow" and args.workflow_command in {"inspect", "validate"}
     register = bool(getattr(args, "register_target", False))
     if register:
@@ -212,7 +217,10 @@ def run_config_command(args: argparse.Namespace) -> int:
         prepare_configuration(args)
         resolver = FleetPlanResolver(goon_templates=GoonTemplateStore())
         report = inspect_run_configuration(
-            args._run_configuration, resolver, source_graph=args._source_graph
+            args._run_configuration,
+            resolver,
+            source_graph=args._source_graph,
+            review_source=bool(getattr(args, "review_source", False)),
         )
     except (FleetDomainError, OSError, UnicodeError, ValueError) as exc:
         print_safe_plan_diagnostic(exc, as_json=args.as_json)
@@ -234,6 +242,10 @@ def run_config_command(args: argparse.Namespace) -> int:
         targets = report["target"].get("repositories", (report["target"],))
         for target in targets:
             print(f"Target: {target['name']} ({target['repository_id']})")
+            if "source_authority" in target:
+                print(
+                    f"  Observed source: {json.dumps(target['source_authority'], sort_keys=True)}"
+                )
         print(f"Status: {report['status']}")
         print("Inputs:")
         for item in report["inputs"]:
