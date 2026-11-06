@@ -28,7 +28,7 @@ alone owns the remote source, pinned ref and selected Skill directories.
 | `agent.implementation` + `agent.profile` | Explicit native agent/profile pair. Use a real compatible profile from the existing provider catalog. These names do not configure authentication or a model. |
 | `agent.acceptance` | Required acceptance selection; do not duplicate it in `inputs`. |
 | `agent.skill_root` | Required workflow-contained Skill root. The example's `.` keeps the registry beside `run.yml`. |
-| `inputs.goal` | Optional task override; omit it to retain the Goon's declared task. Inspection reports that default. |
+| `inputs.goal` | Optional task override; omit it to retain the Goon's declared task. Inspection reports the default designation and declaring owners; read the Goon for its literal task text. |
 
 The Plan/Goon owns the input types and defaults. `run.yml` supplies caller values
 and execution selection; the provider catalog owns the selected connection.

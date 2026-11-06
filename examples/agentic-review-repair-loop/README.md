@@ -24,8 +24,9 @@ Run initialization from the intended workflow parent. The initializer includes t
 | `agent.acceptance`, `agent.skill_root` | Required acceptance and workflow-contained Skill root. Keep acceptance out of `inputs`; `skill_root: .` keeps the registry and local phase Skills together. |
 | `repair` | Required explicit review-pass, write-root and timeout choices for this invocation. Write roots are relative to the workload repository. The values in the example are selections, not defaults imposed on other projects. |
 
-The Plan/Goon declares input types and defaults. Inspection reports optional
-`goal`, `adjudication_skill` and `repair_skill` values; override them through
+The Plan/Goon declares input types and defaults. Inspection reports the default
+designation and declaring owners for optional `goal`, `adjudication_skill` and
+`repair_skill` inputs; override them through
 `inputs` only when needed. Keep ordinary omitted defaults in their declaring
 Goon rather than copying another schema into `run.yml`.
 
