@@ -83,7 +83,8 @@ def render_catalog(payload: object) -> str:
 
 def main() -> int:
     try:
-        raw = INPUT.read_bytes()
+        with INPUT.open("rb") as source:
+            raw = source.read(16_384 + 1)
         if len(raw) > 16_384:
             raise ValueError("approved metadata exceeds size budget")
         candidate = render_catalog(json.loads(raw))

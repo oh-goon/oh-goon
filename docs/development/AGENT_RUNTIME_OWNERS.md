@@ -313,6 +313,28 @@ controls, while demonstrating the separate Pi raw-descriptor extension limit.
 It changes no parser/runtime authority and does not authenticate arbitrary
 in-process extensions.
 
+### Native Run concurrency and admission scope
+
+The [original supervisor and SQLite lease](EXECUTION_SUPERVISOR.md#run-submission-and-durable-authority)
+retain one active Run per runtime and one live execution per shared database.
+Different repositories or native profiles do not grant another shared-database
+slot. Eligible parallel targets remain beneath one admitted Run; current Agent
+ingress requires one candidate repository and one frozen native selection.
+Busy refusal can follow supported preparation/capture, without admitting a second
+worker or native Step. Independent stores do not provide a global workspace or
+capacity registry, nor resolve an older writer's unfinished authority.
+
+The [current Harness T42/SP-06 scope](AGENT_HARNESS_COMPATIBILITY.md#native-concurrency-boundary)
+therefore records the unsupported overlap/refusal boundary separately from
+sequential handoff and native service correlation. Per-workload limits and
+owned-PID resource observations cannot become a whole-application or parallel
+aggregate guarantee. Parallel mixed-native resource qualification remains
+NOT_RUN for the unsupported mode; no ordinary startup prerequisite is added.
+The [dated HUG-122 proof](AGENT_HARNESS_COMPATIBILITY.md#scoped-native-admission-qualification--2026-11-06)
+records current shared-database refusal, unchanged live A custody/context and
+fresh B admission, including a late canceled-A response after B settles. The
+selected installed Pi/OpenCode case qualifies that refusal/reuse boundary only.
+
 Three intentional replacements remove concrete sources of future drift:
 
 | Before → current owner | Consumer cutover and bounded finding |
@@ -885,7 +907,7 @@ support bit, scheduler or qualification gate is added.
 | LIFE-03 | Shared command quiescence and native producer cleanup | Implemented outer boundary; native detached-feature breadth remains unqualified. [Command tests][census-command] and receiver cleanup-before-launch tests are scoped evidence. See the later [current mode limits](#native-inner-work-and-original-physical-custody). |
 | LIFE-04 | Service transport closure versus original owned-daemon cancellation | Implemented distinction. OpenCode transport closure does not terminate/adopt an external server; owned daemon cleanup stays with the command owner. |
 | LIFE-05 | Frozen selection and connection-local Codex identity | Partial qualification. Lost-response/restart refusal exists; arbitrary live generation replacement/revocation remains unqualified. |
-| LIFE-06 | Codex request/thread/profile/turn correlation | Implemented correlation; wrong-resume tests exist. Two-live-Run interference and every concurrency combination remain unqualified. |
+| LIFE-06 | Codex request/thread/profile/turn correlation | Implemented correlation; wrong-resume tests exist. Two-live-Run interference and every concurrency combination remain unqualified at this census. See the later [current admission scope](#native-run-concurrency-and-admission-scope). |
 | LIFE-07 | Original cancellation, command supervision and Step/Journal evidence | Controlled service races cover version/readiness/MCP/sandbox preflight, turn acknowledgement, tool/compaction/terminal notifications, transport close and daemon shutdown. Cancellation prevents the next native effect and retains the original command owner's cleanup receipt. Installed per-phase, arbitrary concurrent and other-host combinations remain unqualified. |
 | LIFE-08 | Original recovery and durable campaign decision publication | Selected real controller-death fixtures exist in [review/repair tests][census-repair]. Exhaustive per-mode physical crash cuts remain unqualified. |
 | LIFE-09 | Native-owned session operations; ephemeral Pi product mode | Implemented no transcript repair. Installed persistence probes characterize native behavior without enabling product resume. |
@@ -953,7 +975,7 @@ support bit, scheduler or qualification gate is added.
 | T39 | Parser bounds/latching, physical exit precedence and typed acceptance | Protocol-origin REVIEW TARGET at this census; see the later [current HUG-108 scope](#native-control-claims-and-output-origin). |
 | T40 | Opt-in live coding evidence | C refresh/expiry/logout/persistence NOT_RUN (HUG-109); no credential-store inspection. |
 | T41 | Historical Linux installed checks | WSL2/container/non-Linux parity NOT_RUN (HUG-110); no new ordinary privileged prerequisite. |
-| T42 | Existing three-harness fixture is sequential | Actual overlapping mixed-harness resource/cancel/Journal noninterference remains unqualified (HUG-122). |
+| T42 | Existing three-harness fixture is sequential | Overlap was unqualified at this census; see the later [current HUG-122 admission boundary](#native-run-concurrency-and-admission-scope). |
 | T43 | Wheel/package smoke and source-checkout native tests are distinct | Exact installed-wheel native-Agent Run NOT_QUALIFIED (HUG-123/HUG-96). |
 | T44 | Codex MCP snapshot tests; historical configured-MCP campaign case | Partial A. Threadless discovery may start native MCP processes before thread disable; it is not effect-free prework (HUG-124). Current installed case NOT_RUN. |
 
@@ -980,7 +1002,7 @@ support bit, scheduler or qualification gate is added.
 | SP-03 | T39 | HUG-108 | Shape-valid root JSONL is not origin attestation. See the later [mode-specific origin boundary](#native-control-claims-and-output-origin). |
 | SP-04 | T40 | HUG-109 | Optional real-account lifecycle C NOT_RUN; no private-store reads. |
 | SP-05 | T41 | HUG-110 | Host-specific installed qualification remains NOT_RUN outside recorded Linux scope. |
-| SP-06 | Harness T42 | HUG-122 | Mixed-harness overlapping Runs remain unqualified; sequential handoff is different. |
+| SP-06 | Harness T42 | HUG-122 | Sequential handoff is distinct from overlap. See the later [current mode/refusal scope](#native-run-concurrency-and-admission-scope). |
 | SP-07 | Harness T43 | HUG-123 / HUG-96 | Installed-wheel native-Agent Run parity remains NOT_QUALIFIED. |
 | SP-08 | Harness T44 | HUG-124 / HUG-38 | Native MCP discovery has possible startup effects before thread exclusion. |
 

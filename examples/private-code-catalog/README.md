@@ -14,7 +14,7 @@ A new engineer asks: "Where is order submission implemented, what language is it
 | Who owns the service? | Synthetic CODEOWNERS declaration, reviewed by a human | Repository-declared policy; not inferred from recent commits |
 | Can we create catalog-info.yaml? | A deterministic, schema-limited descriptor from approved metadata | Independent renderer, admitted Oh-Goon Plan/Goon/Step, retained artifact |
 
-The developer approves catalog metadata; **Git's last commit author is never silently mapped into Backstage spec.owner**. The generated YAML contains no source snippets, commit author emails, absolute paths, or runtime secrets. In a real repository, any private team name or description you choose to publish in a catalog is still information disclosure and must be reviewed.
+The developer approves catalog metadata; **Git's last commit author is never silently mapped into Backstage spec.owner**. The supplied synthetic metadata produces YAML with no source snippets, commit author emails, absolute paths, or runtime secrets. The renderer copies approved strings without redacting their contents, so review every exported value before sharing it. In a real repository, any private team name, description, path, or secret placed in those fields is information disclosure.
 
 ## 1. Work only with the synthetic repository
 
@@ -48,7 +48,7 @@ For this **one synthetic commit**, Git reports Demo Contributor. CODEOWNERS decl
 
 Edit generator/catalog-input.json **only after reviewing** repository evidence and confirming the owning team. In this synthetic fixture the approved values are already supplied; they are not automatically derived from filenames or guessed by Oh-Goon.
 
-The renderer is a small independent application, not a second repository index. It never scans the source repository or interprets CODEOWNERS/Git/Hashmarks packets. It validates an exact allowlist of fields and creates only a Backstage Component descriptor. Unknown fields, malformed owners, unexpected language tags, and existing outputs fail closed.
+The renderer is a small independent application, not a second repository index. It never scans the source repository or interprets CODEOWNERS/Git/Hashmarks packets. It validates an exact allowlist of fields and creates only a Backstage Component descriptor. Inputs above 16 KiB, unknown fields, malformed owners, unexpected language tags, and existing outputs fail closed. Field validation does not detect sensitive content inside approved strings.
 
 Validate and inspect the candidate with native Python:
 
@@ -88,7 +88,7 @@ Backstage normally consumes a catalog-info.yaml from a repository. Registering, 
 - Hashmarks processes the selected repository locally. Disable its interactive public release check as above; MCP/CI and noninteractive operations already skip the automatic check. Hashmarks itself does not send repository source to an AI model.
 - Oh-Goon's Plan has no model/agent/provider Step and the independent renderer uses only the Python standard library. The default Oh-Goon UI/API is local-first with no built-in source upload or telemetry.
 - There is **no claim that trusted-local execution is a deny-all network sandbox**. Installation, dependency acquisition, Git remote operations, explicit provider selections, or separately enabled integrations can access networks. If zero egress is a contractual requirement, run with independently qualified deny-all network enforcement and capture actual network/provider evidence. Do not infer it merely from this example.
-- An exported catalog descriptor exposes its own approved metadata to whomever receives it, even though it includes no source code. A remote Backstage registration and any provider-backed future conversational UI need separate disclosure approval and tests.
+- An exported catalog descriptor exposes all approved metadata to whomever receives it. This fixture includes no source code; caller-supplied strings are exported unchanged. A remote Backstage registration and any provider-backed future conversational UI need separate disclosure approval and tests.
 - Do not report "owner found" or "catalog ready" from stale, incomplete or ambiguous producer evidence. Refuse promotion or request human review instead.
 
 ## Product path from this demo

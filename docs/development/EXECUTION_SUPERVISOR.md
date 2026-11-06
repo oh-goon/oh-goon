@@ -14,8 +14,29 @@ to one fresh native Run-worker process. The supervisor owns bounded active Run
 observations and process-local failure reporting; its observer thread runs only
 the existing native command owner. It accepts a prepared `RunWorkerLaunch`,
 never a Fleet execution callable or a reusable worker pool. The conservative
-one-active-Run limit remains in force. Its `ACCEPTING → QUIESCING → CLOSED`
-states control local submission; they are not durable Run status.
+one-active-Run limit remains in force per runtime. Its
+`ACCEPTING → QUIESCING → CLOSED` states control local submission; they are not
+durable Run status.
+
+The [SQLite execution lease](../../backend/src/oh_goon/runtime/execution/sqlite_lease.py)
+also admits only one live execution across runtimes sharing that database. A
+second runtime, different repository or another native profile does not bypass
+that atomic lease. Busy refusal prevents a second admitted worker/Step; supported
+preflight and source capture may already have occurred before final admission.
+It is not a claim of zero preparatory processes or source transport.
+
+Eligible repository targets may run in parallel beneath one claimed worker through
+the existing [target scheduler](../../backend/src/oh_goon/services/fleet_target_scheduler.py)
+and admitted Plan policy. This is distinct from admitting multiple Runs. Current
+Agent ingress requires one candidate repository and one frozen native selection;
+general target parallelism does not enable mixed-harness native overlap.
+Independent databases have separate authority domains, not a shared capacity or
+workspace lease. Choosing another store cannot prove an older writer quiescent or
+authorize concurrent mutation of its workspace. See the [native concurrency
+scope](AGENT_HARNESS_COMPATIBILITY.md#native-concurrency-boundary).
+Its [scoped admission proof](AGENT_HARNESS_COMPATIBILITY.md#scoped-native-admission-qualification--2026-11-06)
+checks refusal while the original worker is alive and fresh admission after
+settlement; it does not qualify overlapping native Runs or expand capacity.
 
 The internal [`_application_worker`](../../backend/src/oh_goon/_application_worker.py)
 entrypoint verifies a bounded sealed-descriptor handoff, establishes the loaded

@@ -20,7 +20,9 @@ class CatalogExampleTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.work = Path(self.temp.name)
         shutil.copy2(HERE / "generate_catalog.py", self.work / "generate_catalog.py")
-        self.data = json.loads((HERE / "catalog-input.json").read_text(encoding="utf-8"))
+        self.data = json.loads(
+            (HERE / "catalog-input.json").read_text(encoding="utf-8")
+        )
         self._save()
 
     def _save(self) -> None:
@@ -74,6 +76,49 @@ class CatalogExampleTests(unittest.TestCase):
         result = self._run()
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(output.read_text(encoding="utf-8"), "existing candidate")
+
+    def test_input_at_size_budget_is_accepted(self) -> None:
+        source = self.work / "catalog-input.json"
+        raw = source.read_bytes()
+        source.write_bytes(raw + b" " * (16_384 - len(raw)))
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            (self.work / "catalog-info.yaml").read_bytes(), EXPECTED.read_bytes()
+        )
+
+    def test_input_over_size_budget_is_refused_without_output(self) -> None:
+        source = self.work / "catalog-input.json"
+        raw = source.read_bytes()
+        source.write_bytes(raw + b" " * (16_385 - len(raw)))
+        result = self._run()
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("approved metadata exceeds size budget", result.stderr)
+        self.assertFalse((self.work / "catalog-info.yaml").exists())
+
+    @unittest.skipUnless(sys.platform == "linux", "requires native RLIMIT_AS")
+    def test_large_input_is_refused_with_bounded_process_memory(self) -> None:
+        # A sparse input costs no large allocation in this test. The child must
+        # refuse it before reading more bytes than its process budget permits.
+        with (self.work / "catalog-input.json").open("wb") as source:
+            source.truncate(64 * 1024 * 1024)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import resource, runpy; "
+                "resource.setrlimit(resource.RLIMIT_AS, (67108864, 67108864)); "
+                "runpy.run_path('generate_catalog.py', run_name='__main__')",
+            ],
+            cwd=self.work,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("approved metadata exceeds size budget", result.stderr)
+        self.assertFalse((self.work / "catalog-info.yaml").exists())
 
 
 if __name__ == "__main__":
