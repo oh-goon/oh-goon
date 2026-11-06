@@ -7,7 +7,7 @@ from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from oh_goon.integrations.hashmarks import (
     HashmarksSourceEvidence,
@@ -15,6 +15,9 @@ from oh_goon.integrations.hashmarks import (
     observe_python_project_declarations_text,
     observe_source_bindings,
 )
+
+if TYPE_CHECKING:
+    from oh_goon.repository_tooling.architecture.typescript_semantics import TypeScriptFacts
 
 
 def project_scripts_from_text(text: str) -> dict[str, str]:
@@ -193,12 +196,16 @@ def python_semantic_facts(
     if _PYTHON_SOURCE_SNAPSHOT.get() is None:
         with python_source_snapshot():
             return python_semantic_facts(path, imported_only=imported_only, tree=tree)
-    raw = _python_source_capture(path)
-    evidence = _python_source_evidence(path)
+    raw = python_source_bytes(path)
+    selected_tree = _python_tree(path, raw) if tree is None else tree
+    snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
+    key = (path.resolve(), imported_only, selected_tree)
+    if snapshot is not None and key in snapshot.semantic_facts:
+        return snapshot.semantic_facts[key]
+    evidence = python_source_bindings(path)
     packet = source_binding_packet(evidence, language="python")
     if evidence.source_bytes != raw:
         raise ValueError("Producer source bytes differ from captured Python structure")
-    selected_tree = _python_tree(path, raw) if tree is None else tree
     offsets = [0]
     for line in raw.splitlines(keepends=True):
         offsets.append(offsets[-1] + len(line))
@@ -235,7 +242,7 @@ def python_semantic_facts(
             and isinstance(fact.get("literal"), str)
         ):
             strings.append(fact["literal"])
-    return PythonSemanticFacts(
+    facts = PythonSemanticFacts(
         calls=tuple(calls),
         references=frozenset(references),
         imports=frozenset(imports),
@@ -244,6 +251,9 @@ def python_semantic_facts(
         call_observations=tuple(observations),
         evidence=evidence,
     )
+    if snapshot is not None:
+        snapshot.semantic_facts[key] = facts
+    return facts
 
 
 @dataclass(slots=True)
@@ -253,6 +263,10 @@ class _PythonSourceSnapshot:
     captures: dict[Path, bytes] = field(default_factory=dict)
     trees: dict[Path, ast.Module] = field(default_factory=dict)
     evidence: dict[Path, HashmarksSourceEvidence] = field(default_factory=dict)
+    semantic_facts: dict[tuple[Path, bool, ast.Module], PythonSemanticFacts] = field(
+        default_factory=dict
+    )
+    typescript_facts: dict[tuple[str, str], TypeScriptFacts] = field(default_factory=dict)
     manifest_evidence: dict[str, HashmarksSourceEvidence] = field(default_factory=dict)
     native_scopes: dict[Path, object] = field(default_factory=dict)
 
@@ -278,7 +292,8 @@ def python_source_snapshot(root: Path | None = None) -> Generator[None]:
             _PYTHON_SOURCE_SNAPSHOT.reset(token)
 
 
-def _python_source_evidence(path: Path) -> HashmarksSourceEvidence:
+def python_source_bindings(path: Path) -> HashmarksSourceEvidence:
+    """Reuse one exact producer observation within the architecture lifetime."""
     resolved = path.resolve()
     snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
     if snapshot is not None and resolved in snapshot.evidence:
@@ -305,16 +320,21 @@ def _python_source_evidence(path: Path) -> HashmarksSourceEvidence:
     if evidence.source_bytes is None:
         raise ValueError("Architecture Python source bytes are unavailable")
     if snapshot is not None:
+        captured = snapshot.captures.get(resolved)
+        if captured is not None and captured != evidence.source_bytes:
+            raise ValueError("Producer source bytes differ from captured Python structure")
+        snapshot.captures.setdefault(resolved, evidence.source_bytes)
         snapshot.evidence[resolved] = evidence
     return evidence
 
 
 def python_ast(path: Path) -> ast.Module:
     """Inspect native Python structure for local policy, without binding inference."""
-    return _python_tree(path, _python_source_capture(path))
+    return _python_tree(path, python_source_bytes(path))
 
 
-def _python_source_capture(path: Path) -> bytes:
+def python_source_bytes(path: Path) -> bytes:
+    """Reuse bounded captured bytes for structural policy and decoding checks."""
     resolved = path.resolve()
     snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
     if snapshot is not None and resolved in snapshot.captures:

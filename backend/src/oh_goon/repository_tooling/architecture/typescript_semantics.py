@@ -13,7 +13,10 @@ from oh_goon.integrations.hashmarks import (
     HashmarksSourceEvidence,
     observe_source_bindings_text,
 )
-from oh_goon.repository_tooling.architecture.common import source_binding_packet
+from oh_goon.repository_tooling.architecture.common import (
+    _PYTHON_SOURCE_SNAPSHOT,
+    source_binding_packet,
+)
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,10 @@ _MEMBER_AUTHORITIES = {("document", "cookie"), ("navigator", "sendBeacon")}
 
 
 def project_typescript(text: str, *, path: str = "source.ts") -> TypeScriptFacts:
+    snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
+    key = (path, text)
+    if snapshot is not None and key in snapshot.typescript_facts:
+        return snapshot.typescript_facts[key]
     evidence = observe_source_bindings_text(text, path=path)
     packet = source_binding_packet(evidence, language=("typescript", "javascript"))
     if evidence.source_bytes != text.encode("utf-8"):
@@ -100,9 +107,12 @@ def project_typescript(text: str, *, path: str = "source.ts") -> TypeScriptFacts
             authorities.add(root)
         if properties and (root, properties[0]) in _MEMBER_AUTHORITIES:
             authorities.add(root + "." + properties[0])
-    return TypeScriptFacts(
+    facts = TypeScriptFacts(
         module_imports=frozenset(imports),
         browser_authorities=frozenset(authorities),
         external_urls=frozenset(external_urls),
         evidence=evidence,
     )
+    if snapshot is not None:
+        snapshot.typescript_facts[key] = facts
+    return facts

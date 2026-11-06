@@ -44,6 +44,11 @@ edit the existing pyproject-owned module
 -> stop
 ```
 
+Architecture policies share captured source, Hashmarks evidence and local
+projections within one invocation. Repeated policies reuse those exact inputs;
+the next invocation observes source again. This state is disposable and closes
+with the existing source lifetime; it is not a persistent index or receipt.
+
 Stop on the focused tooling-test failure before running broader gates. If the
 generator/schema compiler changed, complete focused compiler/generator proof, generation/freshness and the smallest
 actual consumer proof. Complete tooling/integration portfolios remain daily; a

@@ -1,7 +1,14 @@
 import json
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
+
+import pytest
+
+from oh_goon.integrations.hashmarks import HashmarksSourceEvidence
 
 from oh_goon.repository_tooling.architecture import (
+    common,
     external_development_tooling_contract as contract,
 )
 
@@ -111,6 +118,78 @@ def test_rejects_dynamic_runtime_import(tmp_path: Path) -> None:
     assert any(
         item.path == runtime and "developer-only" in item.message for item in violations
     )
+
+
+def test_runtime_checks_reuse_native_source_within_one_invocation_and_refresh_next(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _fixture_root(tmp_path)
+    runtime = root / "backend/src/oh_goon/runtime.py"
+    runtime.write_text("import pathlib\n", encoding="utf-8")
+    from oh_goon.integrations.hashmarks import observe_source_bindings
+
+    native = observe_source_bindings
+    observations: list[tuple[Path, tuple[str, ...]]] = []
+
+    def observe(
+        selected: Path, paths: Sequence[str], **kwargs: Any
+    ) -> dict[str, HashmarksSourceEvidence]:
+        observations.append((selected, tuple(paths)))
+        return native(selected, paths, **kwargs)
+
+    monkeypatch.setattr(common, "observe_source_bindings", observe)
+    with common.python_source_snapshot(root):
+        # Another policy has already captured the exact producer observation.
+        common.python_source_bindings(runtime)
+        original_open = Path.open
+
+        def no_reopen(self: Path, *args: Any, **kwargs: Any) -> Any:
+            if self == runtime:
+                pytest.fail("Runtime policy reopened already captured native source")
+            return original_open(self, *args, **kwargs)
+
+        with monkeypatch.context() as captured:
+            captured.setattr(Path, "open", no_reopen)
+            assert contract.check_external_development_tooling_contract(root) == []
+            assert contract.check_external_development_tooling_contract(root) == []
+    assert observations == [(root, ("backend/src/oh_goon/runtime.py",))]
+
+    runtime.write_text("import agentscookbook\n", encoding="utf-8")
+    violations = contract.check_external_development_tooling_contract(root)
+    assert any(
+        item.path == runtime and "developer-only" in item.message for item in violations
+    )
+    assert observations == [(root, ("backend/src/oh_goon/runtime.py",))] * 2
+
+
+def test_runtime_scan_preserves_non_utf8_file_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _fixture_root(tmp_path)
+    runtime = root / "backend/src/oh_goon/runtime.py"
+    runtime.write_bytes(b"# coding: latin-1\n# caf\xe9\nimport agentscookbook\n")
+
+    def forbidden(_path: Path) -> HashmarksSourceEvidence:
+        pytest.fail("Non-UTF8 files must retain the existing pre-observation skip")
+
+    monkeypatch.setattr(contract, "python_source_bindings", forbidden)
+    assert contract.check_external_development_tooling_contract(root) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "leaked"),
+    [
+        (
+            'from importlib import import_module as load\nload("agentscookbook")\n',
+            True,
+        ),
+        ('def load(name):\n    return name\nload("agentscookbook")\n', False),
+    ],
+)
+def test_supplied_python_fixture_text_retains_qualified_import_policy(
+    text: str, leaked: bool
+) -> None:
+    assert contract._runtime_file_leaks(Path("fixture.py"), "python", text) is leaked
 
 
 def test_runtime_comment_and_docstring_are_not_leaks(tmp_path: Path) -> None:
