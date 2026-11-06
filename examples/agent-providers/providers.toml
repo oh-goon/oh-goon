@@ -1,7 +1,6 @@
 version = 1
 
-# This HTTP-only catalog leaves default_model unset; select a models entry.
-# Validation never starts or probes a server.
+# These are connection descriptions. Validation never starts or probes a server.
 [providers.ollama]
 api = "ollama"
 base_url = "http://127.0.0.1:11434"
@@ -32,6 +31,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 [models.local]
 provider = "ollama"
 model = "YOUR_INSTALLED_MODEL"
+max_output_tokens = 1024
 
 [models.gateway]
 provider = "litellm"

@@ -294,6 +294,25 @@ The [dated HUG-107 proof](AGENT_HARNESS_COMPATIBILITY.md#scoped-lifetime-qualifi
 records the selected claimed-Run/Journal, installed shell-child and native
 delegation-exclusion results without extending them to optional session features.
 
+### Native control claims and output origin
+
+The CLI parser accepts native root records as claims from the selected stdout
+stream; it never reparses nested tool text as another event stream. JSON shape
+and observed tool IDs cannot authenticate a root producer. Codex service request,
+thread, turn and process-peer checks are separate correspondence guarantees, not
+properties of all CLI protocols. The [current origin boundary](AGENT_HARNESS_COMPATIBILITY.md#native-protocol-origin-boundary)
+retains the unqualified raw-descriptor extension/plugin scope, including Pi's
+distinction between guarded ordinary stdout and a direct descriptor write.
+Original process exit, cancellation, cleanup, typed role identity and independent
+verification remain necessary accepting boundaries (LIFE-01/02/06); text cannot
+grant custody or publish another Run/Step result. Retained bounded observations
+and diagnostic text remain untrusted evidence with explicit omissions.
+The [dated HUG-108 evidence](AGENT_HARNESS_COMPATIBILITY.md#scoped-protocol-origin-qualification--2026-11-06)
+qualifies selected installed tool envelopes and original Step/verification
+controls, while demonstrating the separate Pi raw-descriptor extension limit.
+It changes no parser/runtime authority and does not authenticate arbitrary
+in-process extensions.
+
 Three intentional replacements remove concrete sources of future drift:
 
 | Before → current owner | Consumer cutover and bounded finding |
@@ -862,7 +881,7 @@ support bit, scheduler or qualification gate is added.
 | SWAP-07 | `runtime/agent_providers.py` public selection snapshot | Implemented native settings/auth ownership. Selection tests reject native overrides without reading credential stores or duplicating native model inventories. |
 | SWAP-08 | Original Fleet Runs and independent verifier | The real-child [three-harness fixture][census-native-run] re-captures source and the explicitly changed Skill for each fresh Run, retains separate original lineage and reopens Journal without another admission. It is A-level protocol-fixture proof, not a combined installed-harness chain. |
 | LIFE-01 | Parser → original command/Step settlement → Journal | Implemented orthogonal claim/exit/cleanup/result facts. Settlement tests preserve observed exit beside rejected cleanup. |
-| LIFE-02 | `NativeAgentEventParser.finish`; receiver; typed acceptors | Implemented terminal/error precedence. [Event tests][census-events] and receiver failure/unsettled-claim tests protect acceptance. |
+| LIFE-02 | `NativeAgentEventParser.finish`; receiver; typed acceptors | Implemented terminal/error precedence. [Event tests][census-events] and receiver failure/unsettled-claim tests protect acceptance. See the later [origin boundary](#native-control-claims-and-output-origin). |
 | LIFE-03 | Shared command quiescence and native producer cleanup | Implemented outer boundary; native detached-feature breadth remains unqualified. [Command tests][census-command] and receiver cleanup-before-launch tests are scoped evidence. See the later [current mode limits](#native-inner-work-and-original-physical-custody). |
 | LIFE-04 | Service transport closure versus original owned-daemon cancellation | Implemented distinction. OpenCode transport closure does not terminate/adopt an external server; owned daemon cleanup stays with the command owner. |
 | LIFE-05 | Frozen selection and connection-local Codex identity | Partial qualification. Lost-response/restart refusal exists; arbitrary live generation replacement/revocation remains unqualified. |
@@ -931,7 +950,7 @@ support bit, scheduler or qualification gate is added.
 | T36 | Executable-byte verification; contract source/execution identity mutants | A fixtures. Entrypoint hashing does not seal an entire imported native package. |
 | T37 | [Broker history][census-broker]: provider-owned references across broker lifetimes | Partial A, same synthetic provider/configuration and three reference shapes; live Conversations API and different-credential separation NOT_RUN. |
 | T38 | Shared command cleanup and selected native feature exclusion | Partial A outer boundary at this census; see the later [current detached-work scope](#native-inner-work-and-original-physical-custody) for HUG-107. |
-| T39 | Parser bounds/latching, physical exit precedence and typed acceptance | Protocol-origin REVIEW TARGET (HUG-108); no installed tool/plugin root-frame spoof demonstration or vulnerability claim. |
+| T39 | Parser bounds/latching, physical exit precedence and typed acceptance | Protocol-origin REVIEW TARGET at this census; see the later [current HUG-108 scope](#native-control-claims-and-output-origin). |
 | T40 | Opt-in live coding evidence | C refresh/expiry/logout/persistence NOT_RUN (HUG-109); no credential-store inspection. |
 | T41 | Historical Linux installed checks | WSL2/container/non-Linux parity NOT_RUN (HUG-110); no new ordinary privileged prerequisite. |
 | T42 | Existing three-harness fixture is sequential | Actual overlapping mixed-harness resource/cancel/Journal noninterference remains unqualified (HUG-122). |
@@ -958,7 +977,7 @@ support bit, scheduler or qualification gate is added.
 | --- | --- | --- | --- |
 | SP-01 | T37 | HUG-106 | Provider-owned history; partial same-synthetic-provider A, no real/different-credential isolation claim. |
 | SP-02 | T38 | HUG-107 | Detached resources; shared process-tree proof is not every native extension lifetime. See the later [mode-specific boundary](#native-inner-work-and-original-physical-custody). |
-| SP-03 | T39 | HUG-108 | Protocol-origin review target; do not treat shape-valid root JSONL as origin attestation. |
+| SP-03 | T39 | HUG-108 | Shape-valid root JSONL is not origin attestation. See the later [mode-specific origin boundary](#native-control-claims-and-output-origin). |
 | SP-04 | T40 | HUG-109 | Optional real-account lifecycle C NOT_RUN; no private-store reads. |
 | SP-05 | T41 | HUG-110 | Host-specific installed qualification remains NOT_RUN outside recorded Linux scope. |
 | SP-06 | Harness T42 | HUG-122 | Mixed-harness overlapping Runs remain unqualified; sequential handoff is different. |
