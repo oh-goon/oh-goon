@@ -256,8 +256,10 @@ Existing three-Run source, typed-role, failed-verifier and untrusted-handoff
 checks remain. This A-level process chain does not become an installed
 three-harness repair demonstration.
 
-Uncovered extensions already have bounded owners: HUG-48 covers the installed
-mixed-harness chain; HUG-19/39/54/57 cover product Pi persistence and restored
+HUG-48 covers the A-level fresh-Run handoff chain above. A combined installed
+mixed-harness chain remains unqualified and needs separate B-level evidence
+before that portability is claimed. Other extensions have bounded owners:
+HUG-19/39/54/57 cover product Pi persistence and restored
 configuration; HUG-106 covers provider-owned history; HUG-107/108 cover detached
 work and control-stream origin; HUG-109/110 cover real accounts and host parity;
 HUG-122 covers actual overlap; HUG-96/123 cover release artifacts. HUG-181 owns
