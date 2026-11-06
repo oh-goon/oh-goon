@@ -36,4 +36,8 @@ and changed Goon definitions:
 uv run --project backend --offline --frozen --no-sync pytest -q backend/tests/integration/test_exec01_standard_atomic_linux.py
 ```
 
-The separate [canonical example regression](../../backend/tests/integration/services/test_example_workflows.py) executes the installed CLI through lock, Fleet completion and durable Game Tape readback. The direct Step tests retain their narrower process boundary; neither path establishes privileged containment or APP certification.
+The separate [canonical example regression](../../backend/tests/integration/services/test_example_workflows.py)
+uses the relative target and direct registration command above, then executes the
+installed CLI through locking, Fleet completion and durable Game Tape readback.
+The direct Step tests retain their narrower process boundary; neither path
+establishes privileged containment or APP certification.
