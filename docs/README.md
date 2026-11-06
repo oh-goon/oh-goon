@@ -22,10 +22,9 @@ Start with the current operator and developer guides. The linked owners define b
 
 ## Execution contracts
 
-- [Private code intelligence showcase requirements](development/PRIVATE_CODE_INTELLIGENCE_SHOWCASE_REQUIREMENTS.md) — developer handoff for a local Hashmarks/Git discovery journey, reviewed Backstage catalog export, and privacy-qualified OH-Goon Game Tape demonstration; links the synthetic PR #170 baseline without claiming it is a shipped feature.
-
-
 Use topic guides for current behavior. Specialized deployment and high-security contracts apply when selected; they are not additional startup steps for ordinary Linux/WSL work.
+
+- [Private code intelligence showcase requirements](development/PRIVATE_CODE_INTELLIGENCE_SHOWCASE_REQUIREMENTS.md) — developer handoff for a local Hashmarks/Git discovery journey, reviewed Backstage catalog export, and privacy-qualified OH-Goon Game Tape demonstration; links the synthetic PR #170 baseline without claiming it is a shipped feature.
 
 - [Mandatory Hashmarks SSOT requirements](development/OH_GOON_HASHMARKS_MANDATORY_SSOT_API_REQUIREMENTS.md) and [canonical execution-lifecycle requirements](development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md) are the separate normative requirement owners. The first owns repository meaning and its public integration API; the second owns the target claimed Run-worker custody lifecycle. Their source crosswalk and bundled-issue traceability preserve the full imported requirements. Target requirements do not establish implemented or qualified behavior.
 - [Architecture](ARCHITECTURE.md) and [current architecture decisions](development/ARCHITECTURE_DECISIONS.md) — execution environments, admission, SQLite transactions, Journal and recovery ownership.
