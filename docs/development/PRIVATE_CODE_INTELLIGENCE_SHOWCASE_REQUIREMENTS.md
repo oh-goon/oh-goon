@@ -29,7 +29,7 @@ References: [Spotify on Xirp and Portal](https://portal.spotify.com/blog/introdu
 
 ### Success in one sentence
 
-A developer unfamiliar with OH-Goon can complete a **five-minute demonstration after dependencies are prepared**, answer all five questions with appropriately qualified evidence, preview a safe Backstage descriptor, deliberately execute the generator as one OH-Goon Run, inspect Game Tape, and export the exact retained artifact, with **no external AI model and no accidental external disclosure**.
+A developer unfamiliar with OH-Goon can complete a **five-minute demonstration after dependencies are prepared**, answer all five questions with appropriately qualified evidence, preview a safe Backstage descriptor, deliberately execute the generator as one OH-Goon Run, inspect Game Tape, and export the exact retained artifact, with **no external AI model**, explicitly reviewed export metadata, and a clearly stated network-qualification status.
 
 The five-minute figure is a **product target to measure**, not an observed result or a release-hardening gate. Accuracy, authorization, no unintended effects, and proof outrank the time target.
 
@@ -72,7 +72,7 @@ The reference fixture is a **synthetic service repository** with Python order su
 | 6. Review | "Create catalog entry." | Bounded preview of permitted metadata, evidence references and the explicitly selected Backstage owner. Not a write operation. | OH-Goon presentation/approval; Backstage format authority. |
 | 7. Execute | "Generate local catalog-info.yaml." | One admitted existing Plan/Goon/Step Run, terminal result, retained candidate artifact and Run ID. | OH-Goon FleetRun, Step, Journal, Game Tape. |
 | 8. Export | "Export the approved result." | Exact retained bytes saved to a chosen local destination, with no automatic Git commit, Backstage registration or upload. | Existing OH-Goon artifact export with explicit user effect. |
-| 9. Explain | "How do we know no private code was sent to a model?" | No provider step plus independent, scoped egress/provider evidence; disclosed/retained fields can be reviewed. | OH-Goon execution evidence + independent network test; never a self-certified marketing assertion. |
+| 9. Explain | "How do we know no private code was sent to a model?" | No provider step plus measured provider evidence; disclosed/retained fields can be reviewed. Any stronger no-external-egress claim carries separate, scoped qualification evidence. | OH-Goon execution evidence; independent network test only for the stronger egress claim. |
 
 **Demonstration language:** Say "Hashmarks found this source at revision X", "Git records Y as the last commit author", "the team declaration suggests Z, which a human approved", "OH-Goon executed a bounded generator and retained its result." Do not say "the AI knows the owner", "no network traffic is possible", or "catalog published" unless independent evidence proves the stronger claim.
 
@@ -96,8 +96,8 @@ Every `SHALL` is a normative proposed behavior. A requirement is **not implement
 | PCI-012 | P0 | Perform generation using **the existing** registered target → source resolution/locking → FleetRun admission → Plan/Goon/Step → result/evidence lifecycle. | Real installed CLI Run succeeds; no alternative runner, target-free subject, side DB or ad-hoc persistence. |
 | PCI-013 | P0 | Retain exact output under existing artifact policy; Game Tape displays admitted source/run/result identity and export procedure. | Fresh process can inspect Run and export byte-identical retained result; later worktree edits do not rewrite history. |
 | PCI-014 | P0 | Export only on explicit request to a selected local destination; never auto-write target `catalog-info.yaml` or commit/push/register/publish to Backstage. | Run success leaves original source checkout unchanged; explicit export refuses overwrite and requires independent approval for future publication. |
-| PCI-015 | P0 | Default showcase shall have **no model or agent-provider call** and no provider credential requirement. Disable optional interactive update checks and do not allow implicit network acquisition during the measured demo. | Provider invocation count is zero and the offline-ready fixture completes under the specified external-egress test boundary. |
-| PCI-016 | P0 | Distinguish local-by-design properties from proven no-egress properties; provide a reproducible network-observation/denial protocol with scope and exclusions. | Demo docs state precise measured phase, allowed loopback, bootstrap exclusions, denied external endpoints and observed result; without enforcement report `NOT QUALIFIED`. |
+| PCI-015 | P0 | Default showcase shall have **no model or agent-provider call** and no provider credential requirement. Disable optional interactive update checks and do not allow implicit network acquisition during the measured demo. | Provider invocation count is zero and the offline-ready fixture completes without external acquisition. Existing native offline environment preparation remains allowed; a stronger no-external-egress claim requires the separate PCI-016 qualification. |
+| PCI-016 | P0 | Distinguish local-by-design properties from proven no-egress properties; provide a reproducible network-observation/denial protocol with scope and exclusions. | Demo docs state the protocol and qualification status. A no-external-egress claim requires the measured phase, allowed loopback, bootstrap exclusions, denied external endpoints and observed result; without independent enforcement report `NOT QUALIFIED` and make no such claim. |
 | PCI-017 | P0 | Provide a failure-first, 1-page operator guide with exact checked commands and expected outcome, and label what is implemented vs proposed. | A new engineer follows it without correcting undocumented placeholders or guessing API flags. |
 | PCI-018 | P0 | Keep accepted data and display/caches scoped to selected repository, captured generation, run and caller visibility; no source/PII in shareable catalog or browser persistent storage. | Cross-repository/cross-run and browser storage tests detect no denied source or identity bleed. |
 | PCI-019 | P1 | Offer an easy, guided OH-Goon view for the **same** evidence/questions, approvals and original Game Tape Run—not an alternate frontend-owned repository catalog. | New user completes journey with minimal CLI knowledge; frontend consumes canonical backend projection and generated contracts. |
@@ -112,6 +112,7 @@ Every `SHALL` is a normative proposed behavior. A requirement is **not implement
 - Do not claim a human-verified `spec.owner` is implied by Hashmarks findings. Language/relationship evidence and owner approval are different authorities.
 - Source preview and Git author identity are **sensitive display data**, even when not included in catalog output.
 - For P0, no Backstage instance is needed. Catalog YAML compatibility is proved by schema checks and optionally an independent Backstage validation environment; *publication* is not in scope.
+- P0 must prove no provider calls and document the network boundary and qualification status. Independently enforced no-external-egress qualification is a separately selected stronger guarantee. An unavailable qualification remains `NOT_RUN` / `NOT QUALIFIED`; it is not a pass, and it does not prevent P0 completion when the missing guarantee is disclosed.
 
 ## 6. Ownership and anti-duplication contract
 
@@ -190,7 +191,7 @@ The browser may render **authorized** source excerpts but must not independently
 | Threat | Mandatory control | Deterministic verification |
 | --- | --- | --- |
 | Remote source disclosure by AI provider | P0 includes no provider/agent Step, no provider selector, no model request and no inherited provider history. | Instrument selected provider endpoints; request count **0**; verify Run and step plan lack provider calls. |
-| External egress from native tools (Git, uv, update checker, package acquisition) | Prepare offline dependencies before measurement; disable Hashmarks interactive update check; no configured remote refs or dependency installs during execution; use a separately enforced **external-egress-deny** boundary for zero-egress qualification. | Observe/deny attempts during the measured scenario; unexpected outbound attempt fails qualification, even if request content looks harmless. Loopback for the local UI is specified separately. |
+| External egress from native tools (Git, uv, update checker, package acquisition) | Prepare offline dependencies before measurement; disable Hashmarks interactive update check; no remote-ref refresh or external dependency acquisition during execution. Existing native offline installation into the Run's owned environment remains allowed. Use a separately enforced **external-egress-deny** boundary when zero-egress qualification is selected. | Observe/deny attempts during the measured scenario; unexpected outbound attempt fails qualification, even if request content looks harmless. Loopback for the local UI is specified separately. |
 | Sensitive data in exported YAML | Strict reviewed field allowlist; no raw source snippets, Git author email, absolute paths, credentials or hidden fields; explicit review of values. | Sentinel strings in source, env and denied metadata never occur in exported bytes; malicious value in an *allowed* field requires review/refusal, not a claim that key allowlisting sanitizes it. |
 | Secrets in journal, stdout/stderr, screenshots or errors | Do not log raw source, environment, cookies, credentials or unbounded debug dumps; use existing OH-Goon redaction/projection owners. | Seed known synthetic sentinels; inspect logs, Game Tape exports and public screenshot assets, including refusal paths. |
 | Cross-repository, cross-run or credential-scope bleed | Bind captured evidence, approval, caches and artifacts to their exact owner/revision/scope; default no provider history. | Two distinct repository/run fixtures with conflicting values; no cross-output or stale reuse. |
@@ -223,7 +224,7 @@ No new state machine is authorized. These phases explain how the **existing** ow
 - Run cancellation/timeout occurs after output file creation but before sealed artifact retention.
 - Run finishes but terminal/artifact receipt cannot be read by a new CLI process.
 - Export destination already exists; export is denied before overwrite.
-- Network is unavailable; correct offline fixture still completes; unexpected network attempt is recorded as qualification failure.
+- Network is unavailable; correct offline fixture still completes. When no-external-egress qualification is selected, an unexpected network attempt is recorded as qualification failure.
 - Two Runs from different registered repositories finish in reverse order; neither exposes the other's evidence or artifact.
 - Runtime crashes during a Step: existing Run recovery classifies original outcome; no automatic replay/publish under a stale approval.
 
@@ -242,11 +243,11 @@ Use **real public CLI/Run paths** for the end-to-end assertions. Pure renderer u
 | AT-05 Deterministic descriptor | 009–011 | Same approved candidate twice in fresh isolated workspaces. | Byte-identical valid Backstage Component YAML and expected field set. |
 | AT-06 Content rejection | 009–011 | Unknown input field, empty owner, malformed tag, invalid lifecycle, oversize metadata. | Nonzero failure, no published artifact; no sensitive input echoed to logs. |
 | AT-07 Actual Run | 012–013 | `oh-goon workflow inspect`, `validate`, `prepare`, `run` on exact registered target. | Original Run completed, actual Step success, Game Tape/outputs show truthful lineage. |
-| AT-08 Durable readback | 013 | New CLI process; edit/delete later working copy where safe; export prior Run's artifact. | Original retained output still byte-identical or explicit retention-unavailable result; never substitute current source. |
+| AT-08 Durable readback | 013 | New CLI process; edit/delete later working copy where safe; export prior Run's artifact while its retained reference remains live. Separately release that reference and exercise refusal. | Live retained output exports byte-identically; unavailability fails this positive case. Explicitly released content refuses export in the separate negative case; never substitute current source. |
 | AT-09 No source mutation | 014 | Record Git/worktree content before/after successful Run. | No added `catalog-info.yaml` in target checkout and no source writes. |
 | AT-10 No overwrite/no publish | 014 | Pre-existing export target; instrument Git remote/Backstage endpoints. | Existing bytes unchanged; no commit, push, remote call or registration. |
 | AT-11 No model/provider | 015 | No provider set; synthetic and normal user config variants. | Measured provider calls **0**; no ambient default/provider-history request. |
-| AT-12 Egress boundary | 015–016 | Offline-prepared fixture under independently enforced/tested external-egress-deny boundary, allow only specified local loopback. | No unauthorized external attempt; otherwise not qualified, even if output succeeds. |
+| AT-12 Egress boundary (separate qualification) | 016 | When selected, run the offline-prepared fixture under an independently enforced/tested external-egress-deny boundary, allowing only specified local loopback. | No unauthorized external attempt; otherwise not qualified, even if output succeeds. If unavailable, record `NOT_RUN` / `NOT QUALIFIED`; this blocks the stronger egress claim, not the disclosed no-provider P0 showcase. |
 | AT-13 Cross-scope isolation | 002, 018 | Two repositories/Run IDs with conflicting sentinel metadata. | No cross-repository facts, cache payloads, output or approval reuse. |
 | AT-14 Stale/truncated evidence | 003–008, 009 | Modify source, bound result, missing owner, incomplete discovery. | Provenance/unknown state surfaced; false "no match/complete/approved" refused. |
 | AT-15 Cancellation/crash | 012–014 | Kill/cancel before retention and exercise existing recovery/inspection. | No phantom success/export; original terminal or unresolved state preserved. |
@@ -271,9 +272,9 @@ A network test without enforcement/instrumentation is **insufficient** to establ
 
 - Keep one synthetic sample and one independent catalog renderer; review/refine PR #170 or a coherent successor.
 - Prove all **P0** discovery, native author, ownership review, candidate validation, single original Run, durable Game Tape, explicit local export and negative cases.
-- Supply an offline-ready, no-provider mode; test the specified external-egress boundary separately and document restrictions.
+- Supply an offline-ready, no-provider mode. Record the separately selected external-egress qualification and restrictions; if unavailable, report `NOT_RUN` / `NOT QUALIFIED` and make no no-external-egress claim.
 - Write one short script that a presenter can read without explaining OH-Goon internals first.
-- **Exit:** AT-01…AT-17 decisive evidence at exact source/tool versions; no false privacy/feature claims; ready for unfamiliar-engineer AT-18.
+- **Exit:** AT-01…AT-11 and AT-13…AT-17 decisive evidence at exact source/tool versions, plus the separately reported AT-12 qualification status; no false privacy/feature claims; ready for unfamiliar-engineer AT-18.
 
 ### M2 — Guided OH-Goon experience (P1, contingent on M1 evidence)
 
@@ -326,7 +327,7 @@ QA must classify claims as **PROVED**, **CONTRADICTED**, **UNKNOWN/INCOMPLETE**,
 - [ ] The generator executes in the **original** admitted OH-Goon lifecycle, uses the legitimate artifact retention owner and is inspectable/exportable from a separate CLI process.
 - [ ] The selected real source stays unchanged; target-existing files are not overwritten; no automatic commit, push, provider call or Backstage registration occurs.
 - [ ] Scoped security tests cover browser state, trace/log/screenshot content, out-of-scope paths, stale source, cross-run isolation, crash/cancel and artifact export refusal.
-- [ ] Separate no-provider and no-external-egress qualifications record independent evidence. If the latter cannot be run, documentation explicitly says **not egress-qualified**.
+- [ ] No-provider behavior is proved. The separately selected no-external-egress qualification records its independent evidence or exact unrun/unqualified status. If it cannot be run, documentation explicitly says **not egress-qualified** and makes no stronger network claim; P0 completion does not turn that status into a pass.
 - [ ] Relevant native tests and repository quality checks pass; their executed scope, source revision and omissions are reported truthfully. No new broad merge gate is created.
 - [ ] A new engineer completes the demonstration and explains the four owners (Hashmarks, native Git, human catalog approval, OH-Goon) without relying on verbal corrections to the guide.
 - [ ] README/example navigation and source-of-truth documentation are updated in the same implementation PR, without duplicating normative architecture or claiming a feature already shipped.
@@ -354,6 +355,6 @@ If a stronger network claim is desired, add **exactly** the measured platform, b
 
 **Hashmarks:** [getting started](https://github.com/Hugloss/Hashmarks/blob/main/docs/GETTING_STARTED.md) · [public API](https://github.com/Hugloss/Hashmarks/blob/main/docs/reference/API_STABILITY.md).
 
-**Agents Cookbook:** [skills catalog](https://github.com/Hugloss/agentsCookbook/blob/main/skills/README.md) and the eight specific skill contracts in `12.
+**Agents Cookbook:** [skills catalog](https://github.com/Hugloss/agentsCookbook/blob/main/skills/README.md) and the eight specific skill contracts in [section 12](#12-agents-cookbook-quality-method-for-the-developer-team).
 
 **External reference only:** [Spotify: Xirp + Portal](https://portal.spotify.com/blog/introducing-xirp) · [Backstage: descriptor format](https://backstage.io/docs/features/software-catalog/descriptor-format/).
