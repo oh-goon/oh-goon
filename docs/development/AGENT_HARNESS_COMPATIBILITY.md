@@ -368,6 +368,83 @@ Unknown child terminal evidence, cleanup or escaped resources cannot be filled b
 native success text, a stored PID or a previous Run's receipt. The dated installed
 results above do not establish Harness T38 for an unexercised feature.
 
+## Native protocol-origin boundary
+
+[HUG-108](https://linear.app/hugloss/issue/HUG-108) reviews Harness T39/SP-03:
+control-looking tool text must remain data, while a native terminal claim still
+needs original physical closure, typed role acceptance and independent
+verification. The [existing CLI parser][native] consumes bounded LF-framed root
+records from the selected executable. It does not recursively parse JSON strings
+inside tool output, messages or command results. Valid JSON shape alone cannot
+attest which in-process producer wrote a root record to that stdout stream.
+
+CLI tool/item/session identifiers are native protocol facts, not authentication.
+The adapter must not invent a turn/session identifier absent from the selected
+protocol, or promote an observed tool ID into outer Run/Step custody. The
+[Codex service client][codex-service] has a different boundary: exact request
+correspondence, selected thread, owned turn and connected process peer. Foreign
+thread notifications are filtered and wrong-turn evidence refuses; these checks
+do not turn nested native command output into control or result authority.
+
+Pi 1.3.0 [takes over ordinary stdout](https://github.com/earendil-works/pi/blob/v1.3.0/packages/coding-agent/src/core/output-guard.ts)
+before extension loading: [native JSON output](https://github.com/earendil-works/pi/blob/v1.3.0/packages/coding-agent/src/modes/print-mode.ts)
+keeps its captured raw writer, while `process.stdout.write` and console output
+are redirected to stderr. An in-process extension can still bypass that guard
+with a raw descriptor write such as `fs.writeSync(1, ...)`. Origin separation
+against such an extension remains **UNQUALIFIED**. Pi `--no-session` and
+Bubblewrap isolation do not authenticate a stdout producer. Explicit public Pi
+configuration and extension arguments retain their existing native ownership.
+Codex sign-in/service plugin exclusions are specific to those owned policies;
+general managed CLI/project configuration does not inherit those exclusions.
+Arbitrary plugin root-stdout behavior is outside the qualified envelope scope.
+
+The observed CLI identity shapes remain native-owned. Codex 0.164.0 emits
+`thread_id` on `thread.started` and item IDs, but its turn start/completion frames
+have no turn ID. Pi 1.3.0 supplies a session-header ID and tool-call IDs;
+`agent_settled` has only type/aborted fields. OpenCode 2.1.2 supplies root
+`sessionID` and nested tool-part/message IDs. These observations do not establish
+CLI-side ID authentication. The native [Codex JSONL emitter](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/exec/src/event_processor_with_jsonl_output.rs)
+and [OpenCode noninteractive emitter](https://github.com/anomalyco/opencode/blob/v2.1.2/packages/cli/src/run/noninteractive.ts)
+serialize tool output within their typed native envelopes.
+
+### Scoped protocol-origin qualification — 2026-11-06
+
+All 16 selected ordinary [original-Run lifecycle cases][cli-lifecycle-tests]
+passed: eight retained and eight new controls. The new
+cases pair nested-only fake terminal/role text with a genuine current role and
+terminal for all three protocols, then separately retain failed physical exit
+and a failed independent verifier. Nested fake roles use valid captured identity;
+refusal is not an accidental schema mismatch. Original Step/attempt process
+receipts precede one terminal publication, and reopening the Journal preserves
+that result. All 218 [parser-owner cases][native-tests] passed, including three
+new byte-fragment cases beyond the 215-case baseline. Nine retained service
+correlation controls passed without changing the service protocol.
+
+The final installed cohort passed four cases with zero failures, errors or skips.
+Three are actual tool-origin checks: Pi 1.3.0 and OpenCode 2.1.2
+[read-only CLI cases][cli-readonly-tests], plus Codex 0.164.0's protected managed
+[Code Mode context case][codex-context-tests]. Whole fake JSONL frames, valid-bound
+role claims, failure text, ANSI controls and split writes remain nested in native
+tool envelopes; known forged root assistant/item/error records are absent. The
+genuine review, frozen context, existing privacy/child-lifetime controls and an
+independent verification Step remain required. Fresh-worker observers record the
+actual original stream without replacing the unchanged parser. Their private
+128-KiB bounded witnesses do not change product retention.
+
+The fourth case is a separate model-free Pi extension counterexample: ordinary
+console text reaches stderr, while `fs.writeSync(1, ...)` emits a valid root
+`agent_settled` canary. Its test passes by establishing **UNQUALIFIED** extension
+origin, not by qualifying that extension for protected result acceptance. Bounded
+promoted witnesses retain exact source/native identities and root/chunk facts
+with HUG-108. No live-account, arbitrary-extension, model-quality or whole-host
+qualification is claimed.
+
+Disposition: **retain** existing protocol mappings, failure latching, byte bounds,
+physical settlement and role/verification owners. No production defect was found;
+the parser and runtime remain unchanged. Neither temporary adaptation's removal
+gate is changed, and no protocol router, signed envelope or second parser is
+introduced. A skipped or empty installed invocation cannot qualify these scopes.
+
 ## Temporary adaptations and removal decisions
 
 ### OPENCODE-CLI-SETTLEMENT — retain pending installed replacement proof
