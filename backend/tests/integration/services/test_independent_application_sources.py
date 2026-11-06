@@ -22,7 +22,6 @@ from oh_goon.integrations.git_source_preparation import git_source_cache
 ROOT = Path(__file__).resolve().parents[4]
 ORDERS = ROOT / "templates/goons/general/orders-taskflow"
 pytestmark = [
-    pytest.mark.daily,
     pytest.mark.skipif(
         os.name != "posix" or shutil.which("uv") is None,
         reason="native POSIX Git and uv required",
@@ -198,6 +197,7 @@ def _run_and_read(
     return run_id, tape, outputs
 
 
+@pytest.mark.daily
 def test_local_application_uses_unchanged_native_code_and_keeps_three_run_history(
     tmp_path: Path,
 ) -> None:
@@ -292,6 +292,7 @@ def test_local_application_uses_unchanged_native_code_and_keeps_three_run_histor
         )
 
 
+@pytest.mark.daily
 @pytest.mark.parametrize("subdirectory", (".", "nested/project"), ids=("root", "subdirectory"))
 def test_git_application_keeps_its_own_pin_across_ref_changes_and_cache_loss(
     tmp_path: Path, subdirectory: str
@@ -344,6 +345,7 @@ def test_git_application_keeps_its_own_pin_across_ref_changes_and_cache_loss(
     assert not (application / ".showcase").exists()
 
 
+@pytest.mark.daily
 def test_registered_filesystem_application_runs_and_exports_without_git(tmp_path: Path) -> None:
     repository = tmp_path / "plain application"
     application = _orders_application(repository, initialize_git=False)
@@ -439,6 +441,7 @@ def test_registered_filesystem_application_runs_and_exports_without_git(tmp_path
     assert exported["repository_id"] == target
 
 
+@pytest.mark.daily
 def test_plain_application_source_does_not_require_python_or_goon_metadata(
     tmp_path: Path,
 ) -> None:
@@ -485,6 +488,7 @@ def test_plain_application_source_does_not_require_python_or_goon_metadata(
     assert _git(repository, "status", "--porcelain") == ""
 
 
+@pytest.mark.daily
 def test_application_retained_result_exports_after_attempt_disposal(tmp_path: Path) -> None:
     repository = tmp_path / "applications/orders"
     application = _orders_application(repository)
@@ -551,6 +555,7 @@ def test_application_retained_result_exports_after_attempt_disposal(tmp_path: Pa
     assert _git(repository, "status", "--porcelain") == ""
 
 
+@pytest.mark.daily
 def test_repeated_application_occurrences_preserve_independent_output_lineage(
     tmp_path: Path,
 ) -> None:
@@ -591,6 +596,7 @@ def test_repeated_application_occurrences_preserve_independent_output_lineage(
     assert _git(repository, "status", "--porcelain") == ""
 
 
+@pytest.mark.daily
 @pytest.mark.parametrize("mode", ("frozen", "locked"))
 def test_application_uv_lock_mode_matches_native_uv_without_rewriting_source(
     tmp_path: Path, mode: str
@@ -645,9 +651,23 @@ def test_independent_application_example_runs_after_replacing_its_placeholders(
     application = _orders_application(repository)
     environment = _cli_environment(tmp_path)
     cli = _cli(tmp_path, environment)
-    _registered_target(cli, repository)
     workflow = tmp_path / "workflow"
-    shutil.copytree(ROOT / "examples/independent-application", workflow)
+    cli(
+        "init",
+        "--template",
+        "python/quality",
+        "--output",
+        str(workflow),
+        "--repository",
+        str(repository),
+        "--no-input",
+    )
+    selected = workflow / "run.yml"
+    configuration = yaml.safe_load(selected.read_text())
+    target = configuration["target"]
+    assert (workflow / target["repository"]).resolve() == repository
+    shutil.copy2(ROOT / "examples/independent-application/plan.yml", workflow / "plan.yml")
+    shutil.copytree(ROOT / "examples/independent-application/goons", workflow / "goons")
     declarations = tuple(workflow.rglob("goon.yml"))
     assert len(declarations) == 1
     goon = declarations[0]
@@ -655,15 +675,15 @@ def test_independent_application_example_runs_after_replacing_its_placeholders(
     declaration["application"]["path"] = str(application)
     declaration["steps"][0]["run"] = "orders-pipeline run --fixture official"
     goon.write_text(yaml.safe_dump(declaration, sort_keys=False))
-    selected = workflow / "run.yml"
-    configuration = yaml.safe_load(selected.read_text())
-    configuration["target"] = {"repository": str(repository)}
+    configuration["source"] = {"kind": "file-plan", "path": "./plan.yml"}
+    configuration.pop("inputs", None)
     selected.write_text(yaml.safe_dump(configuration, sort_keys=False))
+    cli("workflow", "prepare", str(selected))
+    assert yaml.safe_load(selected.read_text())["target"] == target
     inspection = json.loads(cli("workflow", "inspect", str(selected), "--json"))
     assert inspection["status"] == "inputs-valid"
     cli("workflow", "validate", str(selected), "--json")
-    cli("workflow", "prepare", str(selected))
-    receipt = json.loads(cli("run", str(selected), "--json"))
+    receipt = json.loads(cli("run", str(selected), "--no-input", "--json"))
     assert receipt["outcome"] == "SUCCESS"
     tape = json.loads(cli("runs", "tape", receipt["fleet_run_id"], "--json"))
     assert tape["status"] == "PASSED"
@@ -677,6 +697,7 @@ def test_independent_application_example_runs_after_replacing_its_placeholders(
     assert _git(repository, "status", "--porcelain") == ""
 
 
+@pytest.mark.daily
 def test_python_application_cannot_fall_back_to_an_uninstalled_host_command(
     tmp_path: Path,
 ) -> None:
@@ -703,6 +724,7 @@ def test_python_application_cannot_fall_back_to_an_uninstalled_host_command(
     assert not (application / ".showcase").exists()
 
 
+@pytest.mark.daily
 def test_application_escape_refuses_before_native_install_and_preserves_prior_lock(
     tmp_path: Path,
 ) -> None:
