@@ -44,6 +44,8 @@ def collected_item(item: Any, root: Path) -> dict[str, str]:
         row["no_resume"] = "true"
     if item.get_closest_marker("native_resources") is not None:
         row["native_resources"] = "true"
+    if "native_frontend_toolchain" in getattr(item, "fixturenames", ()):
+        row["native_frontend"] = "true"
     return row
 
 

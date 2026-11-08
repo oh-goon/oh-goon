@@ -6,6 +6,7 @@ import argparse
 import concurrent.futures
 import hashlib
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -29,8 +30,12 @@ from oh_goon.integrations.hashmarks import (
 )
 from oh_goon.integrations.native_uv_lock import compare_native_uv_dependency_artifacts
 from oh_goon.repository_tooling.frontend_test_results import (
+    collect_native_playwright,
     collect_native_vitest,
     native_frontend_temporary_base,
+    native_playwright_arguments,
+    require_native_playwright_collection,
+    require_native_playwright_outcome,
     require_native_vitest_collection,
     require_native_vitest_files,
     vitest_outcomes,
@@ -40,6 +45,7 @@ from oh_goon.repository_tooling.pytest_process_environment import resolve_pytest
 from oh_goon.repository_tooling.pytest_resource_budget import resolve_pytest_resource_budget
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
+    BOUNDED_BUILD_PROOF,
     DOCUMENTATION_ASSET_OBLIGATION,
     DOCUMENTATION_PROOF_OBLIGATION,
     DOCUMENTATION_PROOF_TEST,
@@ -54,12 +60,14 @@ from oh_goon.repository_tooling.verification_gate_control import (
     bounded_verification_support_targets,
     documentation_asset_candidates,
     documentation_proof_paths,
+    get_bounded_owner_proofs,
     hashmarks_upgrade_intent,
     is_generated_contract_path,
     is_grader_answer_section,
     is_verification_policy_path,
     native_changed_paths,
     non_executable_documentation,
+    require_bounded_owner_proofs,
     require_native_pytest_pass,
     require_verification_support_proof,
     required_policy_obligations,
@@ -87,6 +95,7 @@ class ChangeVerificationPlan(ImmutableModel):
     static: tuple[_STATIC, ...]
     pytest: tuple[str, ...]
     frontend: tuple[str, ...]
+    browser: tuple[str, ...] = ()
     unverified: tuple[str, ...]
     evidence: dict[str, Any]
     behavioral_status: Literal["REQUIRED", "NOT_APPLICABLE"]
@@ -539,12 +548,18 @@ def admit_change(
     grader_sections = {path for path in authored if is_grader_answer_section(path)}
     policy_paths = tuple(path for path in authored if is_verification_policy_path(path))
     required = required_policy_tests(policy_paths)
+    owner_proofs = get_bounded_owner_proofs(root, base_sha, authored, {})
+    owner_targets = {target for route in owner_proofs["routes"] for target in route["pytest"]}
+    nomination_required = (
+        *required,
+        *sorted({target.split("::", 1)[0] for target in owner_targets} - set(required)),
+    )
     dependency_intent, unsupported_dependency_intent, hashmarks_upgrade = (
         _backend_dependency_intent(root, base_sha, executable)
     )
     nomination_arguments: dict[str, Any] = {}
-    if required:
-        nomination_arguments["required"] = required
+    if nomination_required:
+        nomination_arguments["required"] = nomination_required
     if "backend/uv.lock" in executable and not hashmarks_upgrade:
         nomination_arguments["dependency_base"] = {
             "lock": _base_lock_bytes(root, base_sha),
@@ -557,7 +572,7 @@ def admit_change(
     repository_members = tuple(path for path in authored if path not in grader_sections)
     evidence = (
         nominator(root, repository_members, **nomination_arguments)
-        if repository_members or required
+        if repository_members or nomination_required
         else {}
     )
     static_candidates = tuple(
@@ -584,9 +599,18 @@ def admit_change(
         }
     accepted_assets = admitted_documentation_assets(authored, evidence)
     static_projects = admitted_static_projects(authored, evidence)
+    owner_proofs = get_bounded_owner_proofs(root, base_sha, authored, evidence)
+    owner_paths = {path for route in owner_proofs["routes"] for path in route["paths"]}
+    if owner_proofs["routes"]:
+        evidence["bounded_owner_proofs"] = owner_proofs
+    if any(route["obligation"] == BOUNDED_BUILD_PROOF for route in owner_proofs["routes"]):
+        dependency_intent = unsupported_dependency_intent = False
     executable = tuple(path for path in executable if path not in accepted_assets)
     static = cast(set[_STATIC], required_static_obligations(executable))
     pytest: set[str] = {DOCUMENTATION_PROOF_TEST} if documents else set()
+    for route in owner_proofs["routes"]:
+        pytest.update(target.split("::", 1)[0] for target in route["pytest"])
+        static.update(route["static"])
     unverified: list[str] = []
     if hashmarks_upgrade:
         pytest.update(HASHMARKS_UPGRADE_TESTS)
@@ -602,7 +626,8 @@ def admit_change(
                 evidence["hashmarks_native_artifacts"] = native_artifacts
                 if native_artifacts["equivalent"] is not True:
                     unverified.append("HASHMARKS_NON_TARGET_ARTIFACT_CHANGED")
-    frontend: set[str] = set()
+    frontend: set[str] = {path for route in owner_proofs["routes"] for path in route["frontend"]}
+    browser: set[str] = set()
     dependency_qualified = (
         "backend/uv.lock" in executable
         and not hashmarks_upgrade
@@ -651,6 +676,7 @@ def admit_change(
             and path not in observed_paths
             and path not in upgrade_paths
             and path not in grader_sections
+            and path not in owner_paths
         ):
             unverified.append(f"NO_PRODUCER_OBSERVATION:{path}")
     for row in observations:
@@ -664,6 +690,7 @@ def admit_change(
             or path in accepted_assets
             or path in upgrade_paths
             or path in static_projects
+            or path in owner_paths
         ):
             continue
         if row.get("state") not in {"LINKED", "CHANGED_TEST"} or row.get("stale") is True:
@@ -706,7 +733,10 @@ def admit_change(
             if not selected or Path(selected).is_absolute() or ".." in Path(selected).parts:
                 raise ValueError("Producer nomination has an unsafe test path")
             runner = nomination.get("runner_evidence")
-            if runner == "pytest":
+            if selected.startswith("frontend/"):
+                frontend.add(selected)
+                static.add("frontend")
+            elif runner == "pytest":
                 if not selected.startswith(
                     ("backend/tests/", "scripts/tests/", "tests/integration/")
                 ):
@@ -727,13 +757,40 @@ def admit_change(
             evidence,
             pytest,
             required,
-            set(accepted_assets) | removed_paths | upgrade_paths | set(static_projects),
+            set(accepted_assets)
+            | removed_paths
+            | upgrade_paths
+            | set(static_projects)
+            | owner_paths,
         )
         unverified.extend(unavailable)
+        native_files = {
+            item["file"]
+            for key in ("pytest_admission", "dependency_admission")
+            for item in evidence.get(key, {}).get("collection", {}).get("selected", [])
+        }
+        native_members = {
+            item["selector"]
+            for key in ("pytest_admission", "dependency_admission")
+            for item in evidence.get(key, {}).get("collection", {}).get("selected", [])
+        }
+        for route in owner_proofs["routes"]:
+            if any(
+                ("::" in target and target not in native_members)
+                or ("::" not in target and target not in native_files)
+                for target in route["pytest"]
+            ):
+                unverified.append(f"NATIVE_OWNER_SELECTION_UNVERIFIED:{route['obligation']}")
     if frontend and (not unverified or focused_feedback):
-        collection = collect_native_vitest(root, tuple(sorted(frontend)))
+        frontend_advice = tuple(sorted(frontend))
+        collection = collect_native_vitest(root, frontend_advice)
         evidence["frontend_admission"] = {"collection": collection}
         frontend = {row["file"] for row in collection["selected"]}
+        if (root / "frontend/playwright.config.ts").is_file():
+            browser_collection = collect_native_playwright(root, frontend_advice)
+            browser = {row["file"] for row in browser_collection["selected"]}
+            if browser:
+                evidence["browser_admission"] = {"collection": browser_collection}
         for row in observations:
             changed_source = row.get("changed_path")
             if changed_source in removed_paths or changed_source in static_projects:
@@ -748,22 +805,26 @@ def admit_change(
             if (
                 row.get("state") == "CHANGED_TEST"
                 and changed_source in candidates
-                and changed_source not in frontend
+                and changed_source not in frontend | browser
             ):
                 unverified.append(f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{changed_source}")
-            elif candidates and not candidates.intersection(frontend):
+            elif candidates and not candidates.intersection(frontend | browser):
                 unverified.append(f"NO_EXECUTABLE_VERIFIER:{changed_source}")
     if support_paths:
-        selected_files = {
-            row["file"]
-            for key in ("pytest_admission", "dependency_admission")
-            for row in evidence.get(key, {}).get("collection", {}).get("selected", [])
-        } | {
-            row["file"]
-            for row in evidence.get("frontend_admission", {})
-            .get("collection", {})
-            .get("selected", [])
-        }
+        selected_files = (
+            {
+                row["file"]
+                for key in ("pytest_admission", "dependency_admission")
+                for row in evidence.get(key, {}).get("collection", {}).get("selected", [])
+            }
+            | {
+                row["file"]
+                for row in evidence.get("frontend_admission", {})
+                .get("collection", {})
+                .get("selected", [])
+            }
+            | browser
+        )
         admitted_support: set[str] = set()
         for row in observations:
             support_path = row.get("changed_path")
@@ -784,6 +845,41 @@ def admit_change(
         if not _bounded_dependency_scope(evidence, base_sha, selected_files=pytest):
             unverified.append("DEPENDENCY_CONSUMER_SCOPE_UNVERIFIED")
         require_current_dependency_environment(evidence["dependency_changes"])
+    selected_files = (
+        {
+            row["file"]
+            for key in ("pytest_admission", "dependency_admission")
+            for row in evidence.get(key, {}).get("collection", {}).get("selected", [])
+        }
+        | frontend
+        | browser
+    )
+    selected_members = {
+        row["selector"]
+        for key in ("pytest_admission", "dependency_admission")
+        for row in evidence.get(key, {}).get("collection", {}).get("selected", [])
+    }
+    admitted_routes = []
+    for route in owner_proofs["routes"]:
+        single = dict(owner_proofs, routes=[route])
+        try:
+            require_bounded_owner_proofs(
+                {"changed_paths": changed, "static": static, "obligations": [route["obligation"]]},
+                {"bounded_owner_proofs": single},
+                selected_files,
+                selected_members,
+                browser,
+                expected=single,
+            )
+        except ValueError:
+            unverified.append(f"NATIVE_OWNER_SELECTION_UNVERIFIED:{route['obligation']}")
+        else:
+            admitted_routes.append(route)
+    owner_proofs = dict(owner_proofs, routes=admitted_routes)
+    if admitted_routes:
+        evidence["bounded_owner_proofs"] = owner_proofs
+    else:
+        evidence.pop("bounded_owner_proofs", None)
     if not changed:
         unverified.append("EMPTY_CHANGE_SET")
     if canonical_source_identity(root) != before:
@@ -798,6 +894,7 @@ def admit_change(
         static=tuple(sorted(static)),
         pytest=tuple(sorted(pytest)),
         frontend=tuple(sorted(frontend)),
+        browser=tuple(sorted(browser)),
         unverified=tuple(unverified),
         evidence=evidence,
         behavioral_status="REQUIRED" if executable else "NOT_APPLICABLE",
@@ -807,7 +904,8 @@ def admit_change(
         + ((DOCUMENTATION_PROOF_OBLIGATION,) if documents else ())
         + ((HASHMARKS_UPGRADE_OBLIGATION,) if hashmarks_upgrade else ())
         + ((STATIC_PROJECT_OBLIGATION,) if static_projects else ())
-        + ((VERIFICATION_SUPPORT_OBLIGATION,) if support_paths else ()),
+        + ((VERIFICATION_SUPPORT_OBLIGATION,) if support_paths else ())
+        + tuple(route["obligation"] for route in owner_proofs["routes"]),
     )
 
 
@@ -828,6 +926,27 @@ def require_current_plan(root: Path, plan: ChangeVerificationPlan) -> None:
         require_native_vitest_collection(
             collection, project_root=root / "frontend", expected_files=plan.frontend
         )
+    if plan.browser:
+        collection = plan.evidence.get("browser_admission", {}).get("collection")
+        if not isinstance(collection, Mapping):
+            raise ValueError("Native browser collection is unavailable")
+        require_native_playwright_collection(
+            collection, project_root=root / "frontend", expected_files=plan.browser
+        )
+    owner_paths = require_bounded_owner_proofs(
+        plan.model_dump(mode="json"),
+        plan.evidence,
+        {path.split("::", 1)[0] for path in plan.pytest} | set(plan.frontend) | set(plan.browser),
+        set(plan.pytest)
+        | {
+            row["selector"]
+            for key in ("pytest_admission", "dependency_admission")
+            for row in plan.evidence.get(key, {}).get("collection", {}).get("selected", [])
+        },
+        set(plan.browser),
+        expected=get_bounded_owner_proofs(root, plan.base, plan.changed_paths, plan.evidence),
+        require_complete=not plan.unverified,
+    )
     if plan.evidence.get("dependency_admission") or (
         "backend/uv.lock" in plan.changed_paths
         and not plan.unverified
@@ -843,8 +962,9 @@ def require_current_plan(root: Path, plan: ChangeVerificationPlan) -> None:
     require_verification_support_proof(
         plan.model_dump(mode="json", by_alias=True),
         plan.evidence,
-        {path.split("::", 1)[0] for path in plan.pytest} | set(plan.frontend),
+        {path.split("::", 1)[0] for path in plan.pytest} | set(plan.frontend) | set(plan.browser),
         require_complete=not plan.unverified,
+        admitted_owner_paths=frozenset(owner_paths),
         admitted_hashmarks_upgrade=(
             plan.evidence.get("hashmarks_upgrade")
             == {
@@ -966,7 +1086,7 @@ def require_merge_selection(root: Path, plan: ChangeVerificationPlan) -> None:
     behavioral_pytest = behavioral_pytest_targets(plan.pytest, plan.evidence, current_paths)
     if (
         plan.behavioral_status == "REQUIRED"
-        and not (behavioral_pytest or plan.frontend)
+        and not (behavioral_pytest or plan.frontend or plan.browser)
         and not all(
             is_generated_contract_path(path)
             or non_executable_documentation(root, path)
@@ -982,6 +1102,16 @@ def requires_native_resource_host(plan: ChangeVerificationPlan) -> bool:
     """Consume native collection's declared capability without changing selection."""
     return any(
         row.get("native_resources") == "true"
+        for key in ("pytest_admission", "dependency_admission")
+        for row in plan.evidence.get(key, {}).get("collection", {}).get("selected", [])
+        if isinstance(row, dict)
+    )
+
+
+def requires_native_frontend_toolchain(plan: ChangeVerificationPlan) -> bool:
+    """Prepare the locked frontend only for explicitly selected native consumers."""
+    return any(
+        row.get("native_frontend") == "true"
         for key in ("pytest_admission", "dependency_admission")
         for row in plan.evidence.get(key, {}).get("collection", {}).get("selected", [])
         if isinstance(row, dict)
@@ -1093,7 +1223,9 @@ def execute_change(
     if phase != "all" and phase not in _phase_owners(root, plan):
         raise ValueError("Verification phase has no admitted owners")
     frontend_temporary_base = (
-        native_frontend_temporary_base(root) if phase != "static" and plan.frontend else None
+        native_frontend_temporary_base(root)
+        if phase != "static" and (plan.frontend or plan.browser)
+        else None
     )
     outcomes: list[dict[str, Any]] = []
     static_projects = admitted_static_projects(plan.changed_paths, plan.evidence)
@@ -1189,6 +1321,63 @@ def execute_change(
                 }
             outcomes[-1]["native_report"] = native_frontend
             require_current_plan(root, plan)
+    if phase != "static" and plan.browser:
+        with tempfile.TemporaryDirectory(
+            prefix="oh-goon-change-browser-", dir=frontend_temporary_base
+        ) as directory:
+            report = Path(directory) / "playwright.json"
+            artifacts = Path(directory) / "artifacts"
+            result = run_command(
+                "npm",
+                "run",
+                "browser:test",
+                "--",
+                "--reporter=json",
+                *native_playwright_arguments(root / "frontend", plan.browser),
+                f"--output={artifacts}",
+                cwd=root / "frontend",
+                env={
+                    **os.environ,
+                    "PLAYWRIGHT_JSON_OUTPUT_FILE": str(report),
+                    "OH_GOON_BROWSER_REUSE_SERVER": "0",
+                },
+                timeout=600,
+                require_process_group_quiescence=True,
+                parent_death_signal=True,
+                max_capture_bytes_per_stream=64 * 1024,
+                retain_output_tail=True,
+                stream_output=lambda stream, text: print(
+                    text, end="", file=sys.stdout if stream == "stdout" else sys.stderr, flush=True
+                ),
+            )
+            outcome = {
+                "owner": "Frontend browser",
+                "returncode": result.returncode,
+                "native_project_root": str(root / "frontend"),
+                "native_execution": {
+                    "argv": list(result.argv),
+                    "process_group_quiescent": result.supervisor.final_process_group_quiescent,
+                },
+            }
+            outcomes.append(outcome)
+            _retain_native_report(outcome, report)
+            if result.returncode:
+                return {"status": "FAIL", "outcomes": outcomes}
+            if result.supervisor.final_process_group_quiescent is not True:
+                return {
+                    "status": "INCOMPLETE",
+                    "outcomes": outcomes,
+                    "reason": "Native browser process cleanup is unverified",
+                }
+            try:
+                require_native_playwright_outcome(
+                    outcome,
+                    expected_files=plan.browser,
+                    collection=plan.evidence["browser_admission"]["collection"],
+                )
+            except ValueError as exc:
+                return {"status": "INCOMPLETE", "outcomes": outcomes, "reason": str(exc)}
+            require_current_plan(root, plan)
     if phase != "static" and plan.pytest:
         with tempfile.TemporaryDirectory(prefix="oh-goon-change-result-") as directory:
             report = Path(directory) / "pytest.json"
@@ -1255,6 +1444,7 @@ def _phase_owners(root: Path, plan: ChangeVerificationPlan) -> dict[str, tuple[s
         "static": tuple(label for label, *_rest in _commands(root, plan)),
         "behavioral": (
             *(("Frontend behavior",) if plan.frontend else ()),
+            *(("Frontend browser",) if plan.browser else ()),
             *(("Native pytest",) if plan.pytest else ()),
         ),
     }
@@ -1297,9 +1487,11 @@ def aggregate_change(
         ):
             raise ValueError("Verification phase owners are missing, duplicated, extra or non-PASS")
         for row in outcomes:
-            if row["owner"] in {"Native pytest", "Frontend behavior"} and not isinstance(
-                row.get("native_report"), Mapping
-            ):
+            if row["owner"] in {
+                "Native pytest",
+                "Frontend behavior",
+                "Frontend browser",
+            } and not isinstance(row.get("native_report"), Mapping):
                 raise ValueError("Verification phase has no native behavioral receipt")
             if row["owner"] == "Native pytest":
                 require_complete_membership(
@@ -1315,6 +1507,12 @@ def aggregate_change(
                 complete, satisfied, _counts = vitest_outcomes(row.get("native_report", {}))
                 if not complete or not satisfied:
                     raise ValueError("Native frontend assertions are skipped, failed or incomplete")
+            elif row["owner"] == "Frontend browser":
+                require_native_playwright_outcome(
+                    row,
+                    expected_files=plan.browser,
+                    collection=plan.evidence["browser_admission"]["collection"],
+                )
         retained[phase] = outcomes
     if set(retained) != set(required):
         raise ValueError("Verification phases are missing, duplicated or extra")
@@ -1403,7 +1601,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.github_output:
                 with args.github_output.open("a", encoding="utf-8") as stream:
                     stream.write(f"python={'true' if 'python' in plan.static else 'false'}\n")
-                    stream.write(f"frontend={'true' if 'frontend' in plan.static else 'false'}\n")
+                    stream.write(
+                        f"frontend={'true' if 'frontend' in plan.static or requires_native_frontend_toolchain(plan) else 'false'}\n"
+                    )
+                    stream.write(f"browser={'true' if plan.browser else 'false'}\n")
                     stream.write(
                         f"static_project={'true' if STATIC_PROJECT_OBLIGATION in plan.obligations else 'false'}\n"
                     )
@@ -1413,7 +1614,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     stream.write(f"static_phase={'true' if plan.static else 'false'}\n")
                     stream.write(
-                        f"behavioral_phase={'true' if plan.pytest or plan.frontend else 'false'}\n"
+                        f"behavioral_phase={'true' if plan.pytest or plan.frontend or plan.browser else 'false'}\n"
                     )
             return 0
         result = (

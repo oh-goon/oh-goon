@@ -57,6 +57,357 @@ STATIC_PROJECT_OWNERS = frozenset(
     }
 )
 
+BOUNDED_BUILD_PROOF = "bounded native build proof"
+BOUNDED_TEMPLATE_PROOF = "bounded shipped stdlib project proof"
+BOUNDED_API_PROOF = "bounded HTTP API boundary proof"
+BOUNDED_FRONTEND_PROOF = "bounded frontend boundary proof"
+BUILD_PROOF_TESTS = ("scripts/tests/test_release_build_boundary.py",)
+TEMPLATE_PROOF_TESTS = (
+    "scripts/tests/test_python_project_checks.py::test_native_shipped_stdlib_unittest_projects",
+    "backend/tests/integration/services/test_catalog_template_startability.py",
+    "tests/integration/test_private_code_catalog_example.py",
+)
+
+
+def _owner_source_bytes(root: Path, relative: str) -> bytes:
+    path = root / relative
+    if path.resolve(strict=True) != path or path.is_symlink():
+        raise ValueError("Native owner input is not a canonical source file")
+    if not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError("Native owner input is absent or exceeds its byte budget")
+    raw = path.read_bytes()
+    if len(raw) > 2 * 1024 * 1024:
+        raise ValueError("Native owner input grew beyond its byte budget")
+    return raw
+
+
+def _owner_base_bytes(root: Path, base: str, relative: str) -> bytes:
+    reference = f"{base}:{relative}"
+    size = subprocess.run(
+        ["git", "-C", str(root), "cat-file", "-s", reference],
+        check=True,
+        capture_output=True,
+        timeout=20,
+    )
+    if int(size.stdout) > 2 * 1024 * 1024:
+        raise ValueError("Reviewed owner input exceeds its byte budget")
+    return subprocess.run(
+        ["git", "-C", str(root), "cat-file", "blob", reference],
+        check=True,
+        capture_output=True,
+        timeout=20,
+    ).stdout
+
+
+def _changed_owner_tests(evidence: Mapping[str, Any], prefix: str, runner: str) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                row["changed_path"]
+                for row in evidence.get("observations", [])
+                if row.get("state") == "CHANGED_TEST"
+                and row.get("stale") is not True
+                and isinstance(row.get("changed_path"), str)
+                and row["changed_path"].startswith(prefix)
+                and any(
+                    item.get("nomination", {}).get("available") is True
+                    and item["nomination"].get("runner_evidence") == runner
+                    and item.get("workspace_prefix", "")
+                    + item["nomination"].get("verification_target", {}).get("path", "")
+                    == row["changed_path"]
+                    for item in row.get("nominations", [])
+                )
+            }
+        )
+    )
+
+
+def _contained_editable_mapping(root: Path, document: Mapping[str, Any]) -> bool:
+    from oh_goon.core.source_tree_policy import is_transient_source_path
+    from oh_goon.repository_tooling.release.package_slim import RELEASE_LOCAL_ROOTS
+
+    mapping = document.get("tool", {}).get("hatch", {}).get("build", {}).get("dev-mode-dirs")
+    if mapping is None:
+        return True
+    if (
+        not isinstance(mapping, list)
+        or not mapping
+        or any(not isinstance(item, str) for item in mapping)
+    ):
+        return False
+    for item in mapping:
+        target = root / "backend" / item
+        if Path(item).is_absolute() or "\x00" in item:
+            return False
+        try:
+            canonical = target.resolve(strict=True)
+        except OSError:
+            return False
+        if (
+            canonical != Path(os.path.abspath(target))
+            or not canonical.is_relative_to(root)
+            or not canonical.is_dir()
+        ):
+            return False
+        relative = canonical.relative_to(root)
+        if (
+            not relative.parts
+            or relative.parts[0] in RELEASE_LOCAL_ROOTS
+            or is_transient_source_path(relative)
+        ):
+            return False
+        # Git supplies committed source containment, not dependency resolution
+        # or consumer meaning. Generated/untracked environments cannot become
+        # extra editable source outside the admitted source tree.
+        observed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-tree",
+                "-d",
+                "HEAD",
+                "--",
+                canonical.relative_to(root).as_posix(),
+            ],
+            capture_output=True,
+            timeout=20,
+            check=True,
+        )
+        if not observed.stdout.strip():
+            return False
+    return True
+
+
+def get_bounded_owner_proofs(
+    root: Path, base: str, paths: Sequence[str], evidence: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Admit bounded execution obligations without inventing consumer relationships.
+
+    These are existing owner boundaries, not another relevance selector. Every
+    raw producer observation remains intact, including unavailable consumer scope.
+    """
+    changed = {
+        path
+        for path in paths
+        if not non_executable_documentation(root, path) and not is_generated_contract_path(path)
+    }
+    observations = {row.get("changed_path"): row for row in evidence.get("observations", [])}
+    existing_static = admitted_static_projects(paths, evidence)
+
+    def needs_boundary(path: str) -> bool:
+        row = observations.get(path, {})
+        if (
+            row.get("stale") is True
+            or row.get("changed_set", {}).get("freshness") == "stale"
+            or path in existing_static
+        ):
+            return False
+        return row.get("state") not in {"LINKED", "CHANGED_TEST"}
+
+    routes: list[dict[str, Any]] = []
+
+    def add(
+        name: str,
+        sources: set[str],
+        tests: Sequence[str],
+        static: Sequence[str],
+        *,
+        frontend: Sequence[str] = (),
+        browser: bool = False,
+    ) -> None:
+        if sources:
+            routes.append(
+                {
+                    "obligation": name,
+                    "paths": sorted(sources),
+                    "pytest": sorted(tests),
+                    "static": sorted(static),
+                    "frontend": sorted(frontend),
+                    "browser": browser,
+                }
+            )
+
+    build_inputs = changed & {"backend/pyproject.toml", "backend/hatch_build.py"}
+    if build_inputs and "backend/uv.lock" not in changed:
+        before = tomllib.loads(_owner_base_bytes(root, base, "backend/pyproject.toml").decode())
+        after = tomllib.loads(_owner_source_bytes(root, "backend/pyproject.toml").decode())
+        contained = _contained_editable_mapping(root, after)
+        # Only native Hatch's editable source mapping is outside dependency intent.
+        # Every other declaration, including nested build/uv policy, stays equal.
+        for document in (before, after):
+            build = document.get("tool", {}).get("hatch", {}).get("build", {})
+            build.pop("dev-mode-dirs", None)
+        if before == after and contained:
+            add(
+                BOUNDED_BUILD_PROOF,
+                build_inputs,
+                BUILD_PROOF_TESTS,
+                ("python", "package", "architecture"),
+            )
+
+    project_paths: set[str] = set()
+    for path in changed:
+        parts = Path(path).parts
+        if len(parts) < 5 or parts[:2] != ("templates", "goons"):
+            continue
+        project = "/".join(parts[:4])
+        try:
+            config = tomllib.loads(_owner_source_bytes(root, project + "/pyproject.toml").decode())
+            _owner_source_bytes(root, project + "/goon.yml")
+            _owner_source_bytes(root, project + "/uv.lock")
+        except (OSError, ValueError):
+            continue
+        if (
+            config.get("project", {}).get("dependencies") == []
+            and not config.get("project", {}).get("optional-dependencies")
+            and not config.get("dependency-groups")
+            and not config.get("tool", {}).get("uv")
+        ):
+            project_paths.add(path)
+    catalog_fixture = changed & {"template-certification/catalog.json"}
+    if project_paths or catalog_fixture:
+        # The existing compiler/census proof owns Plan/Goon syntax and source
+        # closure; the original native example proves actual Run invocation.
+        project_paths.update(
+            path
+            for path in changed
+            if path.startswith("templates/plans/") and Path(path).name == "plan.yml"
+        )
+        project_paths.update(catalog_fixture)
+        add(
+            BOUNDED_TEMPLATE_PROOF,
+            project_paths,
+            TEMPLATE_PROOF_TESTS,
+            ("python", "package", "architecture"),
+        )
+
+    api_tests = tuple(
+        sorted(
+            set(_changed_owner_tests(evidence, "backend/tests/integration/api/", "pytest"))
+            & changed
+        )
+    )
+    if api_tests:
+        add(
+            BOUNDED_API_PROOF,
+            {
+                path
+                for path in changed
+                if path.startswith("backend/src/oh_goon/api/routes/")
+                and Path(path).suffix == ".py"
+                and needs_boundary(path)
+            },
+            api_tests,
+            ("python", "generated", "architecture"),
+        )
+
+    frontend_tests = tuple(
+        sorted(set(_changed_owner_tests(evidence, "frontend/src/", "vitest")) & changed)
+    )
+    browser_advice = {
+        item.get("workspace_prefix", "")
+        + item.get("nomination", {}).get("verification_target", {}).get("path", "")
+        for row in evidence.get("observations", [])
+        for item in row.get("nominations", [])
+        if item.get("nomination", {}).get("available") is True
+        and (
+            item.get("workspace_prefix", "")
+            + item["nomination"].get("verification_target", {}).get("path", "")
+        ).startswith("frontend/e2e/")
+    }
+    frontend_inputs = (
+        "frontend/package.json",
+        "frontend/package-lock.json",
+        "frontend/vitest.config.ts",
+        "frontend/playwright.config.ts",
+    )
+    if frontend_tests and browser_advice and not changed.intersection(frontend_inputs):
+        if all(
+            _owner_source_bytes(root, path) == _owner_base_bytes(root, base, path)
+            for path in frontend_inputs
+        ):
+            add(
+                BOUNDED_FRONTEND_PROOF,
+                {
+                    path
+                    for path in changed
+                    if path.startswith("frontend/src/")
+                    and Path(path).suffix in {".ts", ".tsx", ".css", ".json"}
+                    and needs_boundary(path)
+                },
+                (),
+                ("frontend", "generated", "architecture"),
+                frontend=frontend_tests,
+                browser=True,
+            )
+
+    return {
+        "authority": "oh-goon-execution-policy",
+        "scope": "bounded-native-owner-proof",
+        "consumer_coverage": "not-claimed",
+        "routes": routes,
+    }
+
+
+def require_bounded_owner_proofs(
+    plan: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    executed_files: set[str],
+    executed_members: set[str],
+    browser_files: set[str],
+    *,
+    expected: Mapping[str, Any] | None = None,
+    require_complete: bool = True,
+) -> set[str]:
+    retained = evidence.get("bounded_owner_proofs")
+    if not require_complete:
+        if not plan.get("unverified"):
+            raise ValueError("Partial native owner proof requires an unverified selection")
+        if retained is None:
+            return set()
+        if expected is not None and isinstance(retained, Mapping):
+            expected = dict(
+                expected,
+                routes=[
+                    route
+                    for route in expected.get("routes", [])
+                    if route in retained.get("routes", [])
+                ],
+            )
+    if expected is not None and not expected.get("routes") and retained is None:
+        return set()
+    if expected is not None and retained != expected:
+        raise ValueError("Bounded native owner proof differs from reviewed source scope")
+    if not isinstance(retained, Mapping):
+        if expected is not None and expected.get("routes"):
+            raise ValueError("Bounded native owner proof is unavailable")
+        return set()
+    if (
+        retained.get("authority") != "oh-goon-execution-policy"
+        or retained.get("scope") != "bounded-native-owner-proof"
+        or retained.get("consumer_coverage") != "not-claimed"
+    ):
+        raise ValueError("Bounded native owner proof overclaims producer authority")
+    admitted: set[str] = set()
+    for route in retained.get("routes", []):
+        if (
+            route["obligation"] not in plan.get("obligations", [])
+            or not set(route["static"]) <= set(plan.get("static", []))
+            or not set(route["frontend"]) <= executed_files
+            or (route["browser"] and not browser_files)
+        ):
+            raise ValueError("Bounded native owner proof omitted required native owners")
+        for target in route["pytest"]:
+            if ("::" in target and target not in executed_members) or (
+                "::" not in target and target not in executed_files
+            ):
+                raise ValueError("Bounded native owner proof lacks its required native test")
+        if not set(route["paths"]) <= set(plan.get("changed_paths", [])):
+            raise ValueError("Bounded native owner proof names another source")
+        admitted.update(route["paths"])
+    return admitted
+
 
 def static_project_candidates(paths: Sequence[str]) -> tuple[str, ...]:
     """The existing authored frontend project; filenames alone prove nothing."""
@@ -482,6 +833,7 @@ def require_verification_support_proof(
     *,
     admitted_hashmarks_upgrade: bool = False,
     require_complete: bool = True,
+    admitted_owner_paths: frozenset[str] = frozenset(),
 ) -> None:
     # The caller has already admitted the named native-artifact/smoke route.
     # Keep file-wide producer roles intact without repeating its proof for the
@@ -497,6 +849,7 @@ def require_verification_support_proof(
         and row.get("qualification", {}).get("completeness") != "complete"
         and row.get("changed_path") not in plan.get("removed_paths", [])
         and row.get("changed_path") not in upgrade_inputs
+        and row.get("changed_path") not in admitted_owner_paths
     }
     if not require_complete:
         if not plan.get("unverified"):
@@ -1078,6 +1431,7 @@ def validate_merge_proof(
     trusted_root: Path | None = None,
     removed_paths: Sequence[str] = (),
     observed_hashmarks_upgrade: bool | None = None,
+    observed_owner_proofs: Mapping[str, Any] | None = None,
 ) -> tuple[frozenset[str], frozenset[str]]:
     if plan.get("schema_version") != "oh-goon.development-verification/v1":
         raise ValueError("Verification plan schema is unsupported")
@@ -1107,6 +1461,16 @@ def validate_merge_proof(
     evidence = plan.get("evidence", {})
     if not isinstance(evidence, Mapping):
         raise ValueError("Producer evidence has an invalid shape")
+    retained_owner_proofs = evidence.get("bounded_owner_proofs")
+    if (
+        root is None
+        and retained_owner_proofs is not None
+        and (not isinstance(retained_owner_proofs, Mapping) or retained_owner_proofs.get("routes"))
+    ):
+        raise ValueError("Bounded native owner proof requires independent source authority")
+    expected_owner_proofs = observed_owner_proofs
+    if expected_owner_proofs is None and root is not None:
+        expected_owner_proofs = get_bounded_owner_proofs(root, base, changed_paths, evidence)
     documentation = _require_documentation_proof(changed_paths, plan, evidence)
     plain_docs = documentation | ({"LICENSE"} if "LICENSE" in changed_paths else set())
     hashmarks_upgrade = _independent_hashmarks_upgrade(
@@ -1173,7 +1537,7 @@ def validate_merge_proof(
     )
     if (
         behavior_required
-        and not (behavioral_pytest or plan.get("frontend"))
+        and not (behavioral_pytest or plan.get("frontend") or plan.get("browser"))
         and not (contract_only or static_only)
     ):
         raise ValueError("Executable changes have no behavioral proof")
@@ -1207,6 +1571,10 @@ def validate_merge_proof(
         )
     if plan.get("frontend"):
         expected.append("Frontend behavior")
+    if plan.get("browser"):
+        expected.append("Frontend browser")
+    elif "browser_admission" in evidence:
+        raise ValueError("Native browser evidence has no admitted membership")
     if plan.get("pytest"):
         expected.append("Native pytest")
     if sorted(owners) != sorted(expected):
@@ -1232,7 +1600,27 @@ def validate_merge_proof(
                     )
     executed_files: set[str] = set()
     executed_members: set[str] = set()
+    browser_files: set[str] = set()
     for row in outcomes:
+        if row["owner"] == "Frontend browser":
+            if root is None:
+                raise ValueError("Native browser proof requires independent source authority")
+            frontend_owner = runpy.run_path(
+                str(Path(__file__).with_name("frontend_test_results.py"))
+            )
+            admission = evidence.get("browser_admission")
+            if not isinstance(admission, Mapping) or not isinstance(
+                admission.get("collection"), Mapping
+            ):
+                raise ValueError("Native browser collection proof is unavailable")
+            browser_files.update(
+                frontend_owner["require_native_playwright_outcome"](
+                    row,
+                    expected_files=plan.get("browser", []),
+                    collection=admission["collection"],
+                )
+            )
+            executed_files.update(browser_files)
         if row["owner"] == "Frontend behavior":
             frontend_owner = runpy.run_path(
                 str(Path(__file__).with_name("frontend_test_results.py"))
@@ -1269,6 +1657,14 @@ def validate_merge_proof(
             raise ValueError("Admitted pytest files differ from native execution proof")
         executed_files.update(pytest_files)
         executed_members.update(row["native_report"]["membership_receipt"]["passed"])
+    admitted_owner_paths = require_bounded_owner_proofs(
+        plan,
+        evidence,
+        executed_files,
+        executed_members,
+        browser_files,
+        expected=expected_owner_proofs,
+    )
     changed_tests = {
         observation["changed_path"]
         for observation in plan.get("evidence", {}).get("observations", [])
@@ -1292,6 +1688,8 @@ def validate_merge_proof(
             continue
         if source in static_projects:
             continue
+        if source in admitted_owner_paths:
+            continue
         observation = observations.get(source, {})
         if observation.get("stale") is True or observation.get("state") not in {
             "LINKED",
@@ -1307,7 +1705,11 @@ def validate_merge_proof(
         if not nominated & executed_files:
             raise ValueError("Changed behavior has no executed qualified consumer proof")
     require_verification_support_proof(
-        plan, evidence, executed_files, admitted_hashmarks_upgrade=hashmarks_upgrade
+        plan,
+        evidence,
+        executed_files,
+        admitted_hashmarks_upgrade=hashmarks_upgrade,
+        admitted_owner_paths=frozenset(admitted_owner_paths),
     )
     return frozenset(executed_files), frozenset(executed_members)
 
@@ -1383,6 +1785,7 @@ def _ordinary_candidate_collection(
     source_identity: str,
     requests: Sequence[Mapping[str, Any]],
     env: Mapping[str, str],
+    required_files: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Observe existing ordinary pytest contexts once; never execute their tests."""
     from types import MappingProxyType
@@ -1417,6 +1820,10 @@ def _ordinary_candidate_collection(
     child_environment.pop("UV_PROJECT_ENVIRONMENT", None)
     child_environment = isolated_pytest_environment(child_environment, qualified=True)
     changed = set(changed_paths)
+    required = set(required_files)
+    if any(not _source_path(path) for path in required):
+        raise ValueError("Ordinary required files are not canonical source members")
+    projected = changed | required
     contexts: list[dict[str, Any]] = []
     admitted: list[tuple[str, Mapping[str, Any], PytestInvocation, tuple[Path, ...]]] = []
     for resolved in requests:
@@ -1475,9 +1882,13 @@ def _ordinary_candidate_collection(
                 "name": name,
                 "request": dict(native.request or {}),
                 "runtime": dict(native.runtime or {}),
-                "projection_scope": "changed-source-files-after-complete-native-collection",
-                "selected": [row for row in native.selected if row["file"] in changed],
-                "deselected": [row for row in native.deselected if row["file"] in changed],
+                "projection_scope": (
+                    "changed-and-required-source-files-after-complete-native-collection"
+                    if required
+                    else "changed-source-files-after-complete-native-collection"
+                ),
+                "selected": [row for row in native.selected if row["file"] in projected],
+                "deselected": [row for row in native.deselected if row["file"] in projected],
                 "observed_selected_count": len(native.selected),
                 "observed_deselected_count": len(native.deselected),
                 "selected_membership_identity": logical_membership_identity(
@@ -1491,6 +1902,7 @@ def _ordinary_candidate_collection(
     return {
         "source_identity": source_identity,
         "changed_paths": sorted(changed),
+        "required_files": sorted(required),
         "environment": str(environment),
         "collector_source": str(collector),
         "collector_sha256": collector_identity,
@@ -1507,12 +1919,18 @@ def _require_ordinary_changed_test_execution(
     source_identity: str,
     executed_files: frozenset[str],
     executed_members: frozenset[str],
+    required_files: Sequence[str] = (),
 ) -> None:
     """Require native ordinary changed cases independently of a candidate plan."""
     if receipt.get("source_identity") != source_identity or receipt.get("changed_paths") != sorted(
         set(changed_paths)
     ):
         raise ValueError("Ordinary collection belongs to another captured source")
+    required = set(required_files)
+    if any(not _source_path(path) for path in required) or receipt.get(
+        "required_files", []
+    ) != sorted(required):
+        raise ValueError("Ordinary collection names another required owner scope")
     contexts = receipt.get("contexts")
     if not isinstance(contexts, list) or [row.get("name") for row in contexts] != [
         "backend",
@@ -1521,8 +1939,10 @@ def _require_ordinary_changed_test_execution(
     ]:
         raise ValueError("Ordinary collection omitted an existing native context")
     selected = [item for context in contexts for item in context.get("selected", [])]
-    if any(item.get("file") not in changed_paths for item in selected):
+    if any(item.get("file") not in set(changed_paths) | required for item in selected):
         raise ValueError("Ordinary changed-source projection names another input")
+    if not required <= {item["file"] for item in selected}:
+        raise ValueError("Required native proof file has no ordinary collected cases")
     if (
         not {item["file"] for item in selected} <= executed_files
         or not {item["selector"] for item in selected} <= executed_members
@@ -1780,6 +2200,7 @@ def _trusted_ordinary_probe(
     env: Mapping[str, str],
     changed_paths: Sequence[str],
     source_identity: str,
+    required_files: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Run base-owned collection control with candidate-native dependencies."""
     from oh_goon.core.file_digest import sha256_file
@@ -1791,6 +2212,7 @@ def _trusted_ordinary_probe(
         "environment": str(environment),
         "changed_paths": sorted(set(changed_paths)),
         "source_identity": source_identity,
+        "required_files": sorted(set(required_files)),
     }
     request["contexts"] = _ordinary_collection_requests(
         root.resolve(strict=True), trusted_root=trusted, environment=environment, env=env
@@ -1811,6 +2233,7 @@ def _trusted_ordinary_probe(
         source_identity=source_identity,
         requests=request["contexts"],
         env=env,
+        required_files=required_files,
     )
     collector = trusted / "backend/src/oh_goon/repository_tooling/pytest_member_selection.py"
     if (
@@ -1818,6 +2241,7 @@ def _trusted_ordinary_probe(
         or receipt.get("environment") != str(environment)
         or receipt.get("source_identity") != source_identity
         or receipt.get("changed_paths") != request["changed_paths"]
+        or receipt.get("required_files", []) != request["required_files"]
         or receipt.get("collector_source") != str(collector)
         or receipt.get("collector_sha256") != sha256_file(collector)
         or receipt.get("execution") != "not-performed"
@@ -1847,6 +2271,7 @@ def _candidate_producer_identity(
     ordinary_paths: Sequence[str] = (),
     source_identity: str | None = None,
     expected_producer_identity: str | None = None,
+    required_files: Sequence[str] = (),
 ) -> str:
     """Observe the candidate's native locked package using only trusted code.
 
@@ -1867,6 +2292,10 @@ def _candidate_producer_identity(
 
     if ordinary_receipt is not None and (trusted_root is None or source_identity is None):
         raise ValueError("Native ordinary collection requires trusted source authority")
+    if required_files and (
+        ordinary_receipt is None or any(not _source_path(path) for path in required_files)
+    ):
+        raise ValueError("Native required owner files need explicit ordinary collection authority")
     if ordinary_receipt is not None and (
         (expected_producer_identity is None and dependency_plan is None)
         or (
@@ -2079,6 +2508,7 @@ def _candidate_producer_identity(
                     env=env,
                     changed_paths=ordinary_paths,
                     source_identity=source_identity,
+                    required_files=required_files,
                 )
             )
             if canonical_source_identity(trusted_root) != trusted_source:
@@ -2203,6 +2633,21 @@ def main() -> int:
         )
         if unsupported_intent or (dependency_intent and "backend/uv.lock" not in changed_paths):
             raise ValueError("Dependency declarations lack an admitted native lock scope")
+        evidence = plan.get("evidence", {})
+        if not isinstance(evidence, Mapping):
+            raise ValueError("Producer evidence has an invalid shape")
+        observed_owner_proofs = get_bounded_owner_proofs(
+            args.root, args.base, changed_paths, evidence
+        )
+        required_files = tuple(
+            sorted(
+                {
+                    target.split("::", 1)[0]
+                    for route in observed_owner_proofs["routes"]
+                    for target in route["pytest"]
+                }
+            )
+        )
         executed_files, executed_members = validate_merge_proof(
             plan,
             _read(args.result),
@@ -2214,13 +2659,14 @@ def main() -> int:
             root=args.root,
             trusted_root=trusted,
             observed_hashmarks_upgrade=hashmarks_upgrade_intent,
+            observed_owner_proofs=observed_owner_proofs,
         )
         producer = plan.get("evidence", {}).get("producer_implementation_identity")
         dependency_receipt: dict[str, Any] = {}
         ordinary_receipt: dict[str, Any] = {}
         # This chooses the existing Python execution capability, not which
         # paths are tests. Only actual ordinary native membership decides that.
-        ordinary_required = any(
+        ordinary_required = bool(required_files) or any(
             Path(path).suffix == ".py" for path in set(changed_paths) - set(removed_paths)
         )
         other_verifiers = _trusted_other_changed_verifiers(
@@ -2240,6 +2686,7 @@ def main() -> int:
                 ordinary_paths=changed_paths if ordinary_required else (),
                 source_identity=plan["source_identity"] if ordinary_required else None,
                 expected_producer_identity=producer,
+                required_files=required_files,
             )
             if producer != observed_producer:
                 raise ValueError("Producer implementation differs from trusted admission")
@@ -2250,6 +2697,7 @@ def main() -> int:
                 source_identity=plan["source_identity"],
                 executed_files=executed_files,
                 executed_members=executed_members,
+                required_files=required_files,
             )
         if not other_verifiers <= executed_files:
             raise ValueError("Changed tests have no meaningful execution proof")

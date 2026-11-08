@@ -37,6 +37,12 @@ Configured native Vitest collection determines which frontend advice belongs
 to that runner. Uncollected advice remains explicit and cannot be credited from
 passing aggregate counters. Execution and aggregation require the admitted file
 occurrences, preserving configured project variants instead of deduplicating them.
+The same flat advice is also observed by the configured Chromium Playwright
+project. A package-manifest runner hint cannot substitute for native collection.
+Playwright retains native case/project/repeat occurrences and requires every
+actual attempt to pass; skipped, retried, flaky, omitted or extra results refuse.
+The existing browser owner controls fixture startup and cleanup. Browser engines
+are prepared only when the admitted plan actually contains browser cases.
 
 Hosted verification admits one immutable plan, then runs its static checks and
 selected behavioral proof in separate GitHub jobs. Each execution job has its
@@ -108,6 +114,41 @@ collection and successful execution must include a qualified consumer; an empty
 or cadence-deselected target alone supplies no proof. Dynamic consumer scope
 remains incomplete and no whole-owner coverage is claimed. Missing or
 unqualified relationships retain `SELECTION_UNVERIFIED`.
+
+The **bounded native owner proofs** use the existing owners when a current
+producer observation cannot qualify a consumer relationship. They are execution
+policy, not replacement repository evidence. Raw producer packets, unknown
+consumer scope and `owner_coverage: not-claimed` remain intact. Stale observations
+cannot use the API/frontend fallback, and already qualified sources retain their
+normal proof route. An immutable base controller must contain the policy before
+a candidate can consume it.
+
+- The **bounded native build proof** admits an isolated Hatch editable-source
+  mapping or build-hook change with unchanged dependency, lock and other project
+  declarations. Mappings must resolve to committed, canonical, contained authored
+  source; generated environments and excluded source never qualify. Existing
+  native package, standard-wheel/archive and installed-wheel checks are required.
+- The **bounded shipped stdlib project proof** requires the original compiler and
+  captured standalone Python project, with explicit empty runtime dependencies
+  and no optional/group/uv overrides. Its own locked uv environment runs native
+  unittest discovery and execution with nonempty, exact, all-passed membership.
+  The existing template catalog census/admission and original native example Run
+  also protect Plan/Goon wiring and its machine-consumed scenario fixture.
+- The **bounded HTTP API boundary proof** requires actual changed native API
+  integration tests, backend static checks and generated-contract freshness for
+  unresolved route inputs. Passing an unrelated or empty test cannot substitute.
+- The **bounded frontend boundary proof** requires an unchanged native frontend
+  tool configuration, actual changed component tests, a native-collected Chromium
+  journey and the existing frontend static/i18n/contract checks for unresolved
+  authored frontend inputs. It makes no whole-consumer or browser/APP claim.
+
+The plan names the exact source scope and mandatory native proof. The base derives
+that obligation independently and validates actual receipts. Its existing ordinary
+pytest collection also protects all ordinary cases in mandatory proof files,
+including unchanged files; selecting one easy case from the same file cannot
+replace a wheel, native-project, compiler or Run proof. Missing or unsuccessful
+membership stays unverified. These routes introduce no impact graph or per-file
+coverage manifest and do not expand to the unrelated daily corpus.
 
 Ordinary Markdown under `docs/`, explanatory `README.md` files under `examples/`
 and `templates/`, and root `CONTRIBUTING.md` use the existing

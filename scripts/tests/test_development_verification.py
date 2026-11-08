@@ -230,7 +230,7 @@ def test_plan_cli_publishes_after_actual_source_admission(
     assert plan.behavioral_status == "NOT_APPLICABLE"
     assert (
         outputs.read_text(encoding="utf-8")
-        == "python=false\nfrontend=false\nstatic_project=false\npytest=true\nnative_resources=false\n"
+        == "python=false\nfrontend=false\nbrowser=false\nstatic_project=false\npytest=true\nnative_resources=false\n"
         "static_phase=true\nbehavioral_phase=true\n"
     )
     assert (
@@ -875,7 +875,7 @@ def test_plan_cli_rejects_ineligible_merge_before_capability_outputs(
         assert result == 0
         assert outputs.read_text(encoding="utf-8") == (
             previous
-            + f"python=true\nfrontend=false\nstatic_project=false\npytest={'true' if plan.pytest else 'false'}\n"
+            + f"python=true\nfrontend=false\nbrowser=false\nstatic_project=false\npytest={'true' if plan.pytest else 'false'}\n"
             + "native_resources=false\nstatic_phase=true\n"
             + f"behavioral_phase={'true' if plan.pytest else 'false'}\n"
         )
@@ -919,6 +919,7 @@ def test_merge_plan_cli_keeps_qualified_behavior_and_generated_contract_paths(
     assert outputs.read_text(encoding="utf-8") == (
         f"python={'true' if relative == 'behavior.py' else 'false'}\n"
         f"frontend={'true' if 'frontend' in plan.static else 'false'}\n"
+        "browser=false\n"
         "static_project=false\n"
         f"pytest={'true' if plan.pytest else 'false'}\n"
         "native_resources=false\n"
@@ -4429,3 +4430,374 @@ def test_frontend_execution_refuses_source_scratch_before_starting_checks(
     with pytest.raises(ValueError, match="outside source"):
         owner.execute_change(tmp_path, plan, mode="focused", workers=1)
     assert effects == []
+
+
+def _controller_browser_report(root: Path, *, executed: bool) -> dict[str, Any]:
+    project = root / "frontend"
+    return {
+        "config": {
+            "configFile": str(project / "playwright.config.ts"),
+            "rootDir": str(project / "e2e"),
+            "version": "declared-native-browser-fixture",
+            "forbidOnly": True,
+            "projects": [
+                {
+                    "id": "chromium",
+                    "name": "chromium",
+                    "repeatEach": 1,
+                    "retries": 0,
+                    "testDir": str(project / "e2e"),
+                }
+            ],
+        },
+        "suites": [
+            {
+                "title": "native[case].ts",
+                "specs": [
+                    {
+                        "id": f"native-browser-{index}",
+                        "title": f"native browser case {index}",
+                        "file": "native[case].ts",
+                        "line": index + 1,
+                        "column": 1,
+                        "ok": True,
+                        "tests": [
+                            {
+                                "projectId": "chromium",
+                                "projectName": "chromium",
+                                "expectedStatus": "passed",
+                                "status": "expected" if executed else "skipped",
+                                "results": [
+                                    {"status": "passed", "retry": 0, "errors": []}
+                                ]
+                                if executed
+                                else [],
+                            }
+                        ],
+                    }
+                    for index in range(2)
+                ],
+            }
+        ],
+        "errors": [],
+        "stats": {
+            "expected": 2 if executed else 0,
+            "skipped": 0 if executed else 2,
+            "unexpected": 0,
+            "flaky": 0,
+        },
+    }
+
+
+def _controller_browser_plan(root: Path) -> owner.ChangeVerificationPlan:
+    from oh_goon.repository_tooling.frontend_test_results import (
+        native_playwright_arguments,
+    )
+
+    project = root / "frontend"
+    project.mkdir(exist_ok=True)
+    target = "frontend/e2e/native[case].ts"
+    head = owner._git(root, "rev-parse", "HEAD").strip()
+    collection = {
+        "requested": [target],
+        "unavailable_advisory_targets": [],
+        "selected": [
+            {
+                "id": f"native-browser-{index}",
+                "title": f"native browser case {index}",
+                "file": target,
+                "line": index + 1,
+                "column": 1,
+                "project_id": "chromium",
+                "project_name": "chromium",
+                "occurrence": 0,
+            }
+            for index in range(2)
+        ],
+        "native_project_root": str(project),
+        "native_report": _controller_browser_report(root, executed=False),
+        "native_execution": {
+            "argv": [
+                "npm",
+                "exec",
+                "--offline",
+                "--no",
+                "--",
+                "playwright",
+                "test",
+                "--list",
+                "--reporter=json",
+                "--pass-with-no-tests",
+                *native_playwright_arguments(project, (target,)),
+                "--output=/tmp/declared-browser-proof/artifacts",
+            ],
+            "returncode": 0,
+            "process_group_quiescent": True,
+            "report_path": "/tmp/declared-browser-proof/collection.json",
+        },
+    }
+    return _phase_test_plan().model_copy(
+        update={
+            "base": head,
+            "candidate": head,
+            "source_identity": canonical_source_identity(root),
+            "changed_paths": (target,),
+            "static": (),
+            "pytest": (),
+            "frontend": (),
+            "browser": (target,),
+            "evidence": {"browser_admission": {"collection": collection}},
+        }
+    )
+
+
+@pytest.mark.parametrize("defect", ("omitted", "skipped", "context", "unsettled"))
+def test_browser_controller_executes_original_owner_and_rejects_partial_receipts(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, defect: str
+) -> None:
+    import re
+
+    monkeypatch.setattr(owner, "canonical_source_identity", canonical_source_identity)
+    plan = _controller_browser_plan(repository)
+    owner.require_current_plan(repository, plan)
+    native = _controller_browser_report(repository, executed=True)
+    execution_state = {"settled": True}
+    calls: list[tuple[str, ...]] = []
+    original_command = run_command
+    selected_cache = repository.parent / "selected browser cache"
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(selected_cache))
+
+    def execute(*argv: str, **options: Any) -> Any:
+        if argv[0] == "git":
+            return original_command(*argv, **options)
+        calls.append(argv)
+        assert argv[:5] == ("npm", "run", "browser:test", "--", "--reporter=json")
+        assert argv[5] == "--project=chromium"
+        assert re.fullmatch(argv[6], str(repository / plan.browser[0]))
+        assert len(argv) == 8 and argv[7].startswith("--output=")
+        assert options["cwd"] == repository / "frontend"
+        assert options["require_process_group_quiescence"] is True
+        assert options["parent_death_signal"] is True
+        assert options["env"]["PLAYWRIGHT_BROWSERS_PATH"] == str(selected_cache)
+        assert options["env"]["OH_GOON_BROWSER_REUSE_SERVER"] == "0"
+        report = Path(options["env"]["PLAYWRIGHT_JSON_OUTPUT_FILE"])
+        assert report.parent.stat().st_mode & 0o077 == 0
+        assert not report.is_relative_to(repository)
+        Path(report).write_text(json.dumps(native))
+        return SimpleNamespace(
+            argv=argv,
+            returncode=0,
+            supervisor=SimpleNamespace(
+                final_process_group_quiescent=execution_state["settled"]
+            ),
+        )
+
+    monkeypatch.setattr(owner, "run_command", execute)
+    baseline = owner.execute_change(
+        repository, plan, mode="focused", workers=1, phase="behavioral"
+    )
+    assert baseline["status"] == "CHECKS_PASSED"
+    assert len(calls) == 1
+    outcome = baseline["outcomes"][0]
+    assert outcome["owner"] == "Frontend browser"
+    assert outcome["native_report"] == native
+    assert outcome["native_execution"] == {
+        "argv": list(calls[0]),
+        "process_group_quiescent": True,
+    }
+    part = {"plan": plan.model_dump(mode="json"), "phase": "behavioral", **baseline}
+    assert (
+        owner.aggregate_change(repository, plan, [part], mode="focused")["status"]
+        == "CHECKS_PASSED"
+    )
+
+    if defect == "omitted":
+        native["suites"][0]["specs"].pop()
+        native["stats"]["expected"] = 1
+    elif defect == "skipped":
+        native["suites"][0]["specs"][0]["tests"][0]["results"][0]["status"] = "skipped"
+    elif defect == "context":
+        native["config"]["version"] = "changed-native-browser"
+    else:
+        execution_state["settled"] = False
+    refused = owner.execute_change(
+        repository, plan, mode="focused", workers=1, phase="behavioral"
+    )
+    assert refused["status"] == "INCOMPLETE"
+    damaged = copy.deepcopy(part)
+    damaged["outcomes"][0]["native_report"] = copy.deepcopy(native)
+    damaged["outcomes"][0]["native_execution"]["process_group_quiescent"] = (
+        execution_state["settled"]
+    )
+    with pytest.raises(ValueError):
+        owner.aggregate_change(repository, plan, [damaged], mode="focused")
+
+
+def test_admission_uses_configured_native_browser_membership_without_relabeling_unknown_scope(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, native_frontend_toolchain: None
+) -> None:
+    import shutil
+
+    from oh_goon.repository_tooling.frontend_test_results import (
+        collect_native_playwright,
+        collect_native_vitest,
+    )
+
+    toolchain = Path(__file__).resolve().parents[2] / "frontend/node_modules"
+    if (
+        shutil.which("npm") is None
+        or not (toolchain / "@playwright/test/package.json").is_file()
+    ):
+        pytest.skip("initialized native npm/Playwright environment required")
+    project = repository / "frontend"
+    project.mkdir()
+    (project / "node_modules").symlink_to(toolchain, target_is_directory=True)
+    (repository / ".gitignore").write_text("frontend/node_modules\n")
+    owner._git(repository, "add", ".gitignore")
+    configuration = {
+        "package.json": '{"name":"native-admission-fixture","private":true,"type":"module"}',
+        "vitest.config.ts": 'export default {test:{include:["unit-only.test.ts"]}};\n',
+        "playwright.config.ts": 'export default {testDir:"./e2e",testMatch:"**/advised_check.ts",projects:[{name:"chromium"}],forbidOnly:true};\n',
+    }
+    for filename, text in configuration.items():
+        (project / filename).write_text(text)
+        owner._git(repository, "add", "frontend/" + filename)
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "native frontend contexts",
+    )
+    target = "frontend/e2e/advised_check.ts"
+    source = repository / target
+    source.parent.mkdir()
+    source.write_text(
+        'import {test} from "@playwright/test";\ntest("configured native browser case",()=>{throw new Error("collection must not execute assertions");});\n'
+    )
+    unknown = "frontend/src/unqualified.ts"
+    unqualified = repository / unknown
+    unqualified.parent.mkdir()
+    unqualified.write_text("export const unknown = 1;\n")
+    original_observations: list[dict[str, Any]] = []
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            if row["changed_path"] == target:
+                row.update(
+                    state="CHANGED_TEST",
+                    nominations=[
+                        {
+                            "workspace_prefix": "",
+                            "nomination": {
+                                "available": True,
+                                "runner_evidence": "vitest",
+                                "verification_target": {"path": target},
+                            },
+                        }
+                    ],
+                )
+            else:
+                row.update(state="UNAVAILABLE", nominations=[])
+                row["qualification"]["completeness"] = "unknown"
+        original_observations.extend(copy.deepcopy(evidence["observations"]))
+        return evidence
+
+    native_calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def vitest(root: Path, targets: tuple[str, ...]) -> dict[str, Any]:
+        native_calls.append(("vitest", targets))
+        return collect_native_vitest(root, targets)
+
+    def browser(root: Path, targets: tuple[str, ...]) -> dict[str, Any]:
+        native_calls.append(("playwright", targets))
+        return collect_native_playwright(root, targets)
+
+    monkeypatch.setattr(owner, "collect_native_vitest", vitest)
+    monkeypatch.setattr(owner, "collect_native_playwright", browser)
+    plan = owner.admit_change(
+        repository, base="HEAD", nominator=nominate, focused_feedback=True
+    )
+    assert native_calls == [("vitest", (target,)), ("playwright", (target,))]
+    assert plan.frontend == () and plan.browser == (target,)
+    assert plan.evidence["frontend_admission"]["collection"]["selected"] == []
+    assert plan.evidence["browser_admission"]["collection"]["selected"]
+    assert plan.evidence["observations"] == original_observations
+    assert f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{target}" not in plan.unverified
+    assert plan.unverified == (f"NO_QUALIFIED_VERIFIER:{unknown}",)
+
+
+@pytest.fixture
+def native_frontend_toolchain() -> None:
+    """Declare the locked npm capability without running setup in collection."""
+
+
+@pytest.mark.parametrize("admission", ("pytest_admission", "dependency_admission"))
+@pytest.mark.parametrize("selected_native", (False, True))
+def test_native_pytest_frontend_capability_prepares_tools_without_static_obligation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    admission: str,
+    selected_native: bool,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    control = tmp_path / "control"
+    control.mkdir(mode=0o700)
+    outputs = control / "outputs"
+    native = {
+        "file": "scripts/tests/test_native_owner.py",
+        "selector": "scripts/tests/test_native_owner.py::test_native",
+        "native_frontend": "true",
+    }
+    portable = {
+        "file": "scripts/tests/test_native_owner.py",
+        "selector": "scripts/tests/test_native_owner.py::test_portable",
+    }
+    plan = _phase_test_plan().model_copy(
+        update={
+            "static": (),
+            "frontend": (),
+            "browser": (),
+            "evidence": {
+                admission: {
+                    "collection": {
+                        "selected": [portable, native]
+                        if selected_native
+                        else [portable],
+                        "deselected": [] if selected_native else [native],
+                    }
+                }
+            },
+        }
+    )
+    original = plan.model_dump(mode="json")
+    monkeypatch.setattr(owner, "admit_change", lambda *_args, **_options: plan)
+    assert (
+        owner.main(
+            [
+                "--root",
+                str(source),
+                "--mode",
+                "focused",
+                "--plan",
+                str(control / "plan.json"),
+                "--github-output",
+                str(outputs),
+            ]
+        )
+        == 0
+    )
+    exported = dict(row.split("=", 1) for row in outputs.read_text().splitlines())
+    assert exported["frontend"] == str(selected_native).lower()
+    assert exported["browser"] == "false"
+    assert exported["static_phase"] == "false"
+    assert exported["behavioral_phase"] == "true"
+    assert owner._read_json(control / "plan.json") == original
+    assert plan.static == () and plan.frontend == () and plan.browser == ()

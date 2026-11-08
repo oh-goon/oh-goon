@@ -1,8 +1,10 @@
-"""Transport configured native Vitest membership and assertion outcomes."""
+"""Transport configured native frontend membership and assertion outcomes."""
 
 from __future__ import annotations
 
 import json
+import os
+import re
 import tempfile
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
@@ -252,6 +254,395 @@ def require_native_vitest_files(
     ):
         raise ValueError("Native Vitest project variants differ from collection")
     return set(expected)
+
+
+def native_playwright_arguments(project_root: Path, targets: Iterable[str]) -> list[str]:
+    """Transport exact files through Playwright's native positional-regex interface."""
+    if not project_root.is_absolute() or ".." in project_root.parts:
+        raise ValueError("Native Playwright invocation root is unavailable")
+    return [
+        "--project=chromium",
+        *(
+            "^" + re.escape(str(project_root / path.removeprefix("frontend/"))) + "$"
+            for path in _requested_files(targets)
+        ),
+    ]
+
+
+def _playwright_context(report: Mapping[str, Any], project_root: Path) -> dict[str, Any]:
+    config = report.get("config")
+    if not isinstance(config, Mapping):
+        raise ValueError("Native Playwright configuration is unavailable")
+    for key in ("configFile", "rootDir"):
+        value = config.get(key)
+        if (
+            not isinstance(value, str)
+            or not Path(value).is_absolute()
+            or ".." in Path(value).parts
+            or not Path(value).is_relative_to(project_root)
+        ):
+            raise ValueError("Native Playwright configuration belongs to another project")
+    if not isinstance(config.get("version"), str) or not config["version"]:
+        raise ValueError("Native Playwright implementation identity is unavailable")
+    projects = config.get("projects")
+    if not isinstance(projects, list) or not projects:
+        raise ValueError("Native Playwright projects are unavailable")
+    retained: list[dict[str, Any]] = []
+    identities: set[str] = set()
+    for project in projects:
+        if (
+            not isinstance(project, Mapping)
+            or not isinstance(project.get("id"), str)
+            or not isinstance(project.get("name"), str)
+            or project["id"] in identities
+            or type(project.get("repeatEach")) is not int
+            or project["repeatEach"] < 1
+            or type(project.get("retries")) is not int
+            or project["retries"] < 0
+            or not isinstance(project.get("testDir"), str)
+            or not Path(project["testDir"]).is_absolute()
+            or ".." in Path(project["testDir"]).parts
+            or not Path(project["testDir"]).is_relative_to(project_root)
+        ):
+            raise ValueError("Native Playwright project context is invalid")
+        identities.add(project["id"])
+        # Native execution augments metadata with actualWorkers; it is an outcome,
+        # not selection context. Keep it in the original raw receipt, not this
+        # comparison against collection before workers exist.
+        retained.append(
+            {key: value for key, value in project.items() if key not in {"outputDir", "metadata"}}
+        )
+    # Output/report locations and managed-server startup differ between collection
+    # and execution. Native selection, implementation and project context do not.
+    return {
+        key: config.get(key)
+        for key in (
+            "configFile",
+            "rootDir",
+            "version",
+            "forbidOnly",
+            "fullyParallel",
+            "globalSetup",
+            "globalTeardown",
+            "grep",
+            "grepInvert",
+            "shard",
+            "tags",
+        )
+    } | {"projects": retained}
+
+
+def _playwright_members(
+    report: Mapping[str, Any], project_root: Path, *, executed: bool
+) -> tuple[dict[str, Any], ...]:
+    context = _playwright_context(report, project_root)
+    if report.get("errors") != []:
+        raise ValueError("Native Playwright reported collection or execution errors")
+    projects = {row["id"]: row for row in context["projects"]}
+    root = Path(context["rootDir"])
+    members: list[dict[str, Any]] = []
+    specs_seen: set[str] = set()
+
+    def visit(suites: object) -> None:
+        if not isinstance(suites, list):
+            raise ValueError("Native Playwright suites are unavailable")
+        for suite in suites:
+            if not isinstance(suite, Mapping) or not isinstance(suite.get("specs"), list):
+                raise ValueError("Native Playwright suite has an invalid shape")
+            for spec in suite["specs"]:
+                if (
+                    not isinstance(spec, Mapping)
+                    or not isinstance(spec.get("id"), str)
+                    or not spec["id"]
+                    or spec["id"] in specs_seen
+                    or not isinstance(spec.get("title"), str)
+                    or type(spec.get("line")) is not int
+                    or spec["line"] < 1
+                    or type(spec.get("column")) is not int
+                    or spec["column"] < 1
+                    or not isinstance(spec.get("tests"), list)
+                    or not spec["tests"]
+                ):
+                    raise ValueError("Native Playwright spec identity is invalid or duplicated")
+                specs_seen.add(spec["id"])
+                value = spec.get("file")
+                if not isinstance(value, str):
+                    raise ValueError("Native Playwright file identity is unavailable")
+                file = _frontend_file(str(root / value), project_root)
+                occurrences: Counter[str] = Counter()
+                for test in spec["tests"]:
+                    if not isinstance(test, Mapping):
+                        raise ValueError("Native Playwright test identity is unavailable")
+                    project_id = test.get("projectId")
+                    if not isinstance(project_id, str):
+                        raise ValueError("Native Playwright project identity is unavailable")
+                    project = projects.get(project_id)
+                    if (
+                        project is None
+                        or project["name"] != "chromium"
+                        or test.get("projectName") != project["name"]
+                        or test.get("expectedStatus") != "passed"
+                    ):
+                        raise ValueError(
+                            "Native Playwright test has unsupported project or expected outcome"
+                        )
+                    occurrence = occurrences[project["id"]]
+                    occurrences[project["id"]] += 1
+                    members.append(
+                        {
+                            "id": spec["id"],
+                            "file": file,
+                            "title": spec["title"],
+                            "line": spec["line"],
+                            "column": spec["column"],
+                            "project_id": project["id"],
+                            "project_name": project["name"],
+                            "occurrence": occurrence,
+                        }
+                    )
+                    results = test.get("results")
+                    if not executed:
+                        if results != []:
+                            raise ValueError(
+                                "Native Playwright collection contains execution results"
+                            )
+                        continue
+                    if (
+                        spec.get("ok") is not True
+                        or test.get("status") != "expected"
+                        or not isinstance(results, list)
+                        or len(results) != 1
+                        or not isinstance(results[0], Mapping)
+                        or results[0].get("status") != "passed"
+                        or type(results[0].get("retry")) is not int
+                        or results[0]["retry"] != 0
+                        or results[0].get("errors") != []
+                        or results[0].get("error") is not None
+                    ):
+                        raise ValueError(
+                            "Native Playwright test is skipped, failed, retried or incomplete"
+                        )
+                if any(
+                    count != projects[identity]["repeatEach"]
+                    for identity, count in occurrences.items()
+                ):
+                    raise ValueError(
+                        "Native Playwright repeated instances differ from configured membership"
+                    )
+            visit(suite.get("suites", []))
+
+    visit(report.get("suites"))
+    if executed:
+        stats = report.get("stats")
+        if (
+            not isinstance(stats, Mapping)
+            or any(
+                type(stats.get(key)) is not int
+                for key in ("expected", "skipped", "unexpected", "flaky")
+            )
+            or stats["expected"] != len(members)
+            or any(stats[key] != 0 for key in ("skipped", "unexpected", "flaky"))
+        ):
+            raise ValueError("Native Playwright outcome accounting is incomplete")
+    return tuple(members)
+
+
+def require_native_playwright_collection(
+    collection: Mapping[str, Any], *, project_root: Path, expected_files: Iterable[str]
+) -> tuple[dict[str, Any], ...]:
+    """Replay the retained native receipt without loading browser configuration."""
+    requested_value = collection.get("requested")
+    unavailable_value = collection.get("unavailable_advisory_targets")
+    if not isinstance(requested_value, list) or not isinstance(unavailable_value, list):
+        raise ValueError("Native Playwright advisory accounting is unavailable")
+    requested = _requested_files(requested_value)
+    unavailable = _requested_files(unavailable_value)
+    expected = _requested_files(expected_files)
+    report = collection.get("native_report")
+    if collection.get("native_project_root") != str(project_root) or not isinstance(
+        report, Mapping
+    ):
+        raise ValueError("Native Playwright collection belongs to another project root")
+    members = _playwright_members(report, project_root, executed=False)
+    files = {row["file"] for row in members}
+    if (
+        not requested
+        or files != set(expected)
+        or not files <= set(requested)
+        or set(unavailable) != set(requested) - files
+        or collection.get("selected") != list(members)
+    ):
+        raise ValueError("Native Playwright collection differs from admitted advisory files")
+    native = collection.get("native_execution")
+    if (
+        not isinstance(native, Mapping)
+        or type(native.get("returncode")) is not int
+        or native["returncode"] != 0
+        or native.get("process_group_quiescent") is not True
+    ):
+        raise ValueError("Native Playwright collection has no settled successful invocation")
+    prefix = [
+        "npm",
+        "exec",
+        "--offline",
+        "--no",
+        "--",
+        "playwright",
+        "test",
+        "--list",
+        "--reporter=json",
+        "--pass-with-no-tests",
+    ]
+    argv = native.get("argv")
+    expected_argv = prefix + native_playwright_arguments(project_root, requested)
+    if (
+        not isinstance(argv, list)
+        or len(argv) != len(expected_argv) + 1
+        or argv[:-1] != expected_argv
+        or not isinstance(argv[-1], str)
+        or not argv[-1].startswith("--output=")
+    ):
+        raise ValueError("Native Playwright collection command differs from its request")
+    for value in (native.get("report_path"), argv[-1].partition("=")[2]):
+        if (
+            not isinstance(value, str)
+            or not Path(value).is_absolute()
+            or ".." in Path(value).parts
+            or Path(value).is_relative_to(project_root.parent)
+        ):
+            raise ValueError("Native Playwright evidence is not outside source")
+    return members
+
+
+def collect_native_playwright(root: Path, targets: Sequence[str]) -> dict[str, Any]:
+    """Collect flat advisory paths in the configured Chromium project, without execution."""
+    from oh_goon.engine.command import run_command
+
+    requested = _requested_files(targets)
+    if not requested:
+        raise ValueError("Native Playwright collection requires advisory targets")
+    project_root = root / "frontend"
+    arguments = native_playwright_arguments(project_root, requested)
+    temporary_base = native_frontend_temporary_base(root)
+    with TemporaryDirectory(
+        prefix="oh-goon-playwright-collection-", dir=temporary_base
+    ) as directory:
+        report_path = Path(directory) / "collection.json"
+        environment = dict(os.environ, PLAYWRIGHT_JSON_OUTPUT_FILE=str(report_path))
+        result = run_command(
+            "npm",
+            "exec",
+            "--offline",
+            "--no",
+            "--",
+            "playwright",
+            "test",
+            "--list",
+            "--reporter=json",
+            "--pass-with-no-tests",
+            *arguments,
+            f"--output={Path(directory) / 'artifacts'}",
+            cwd=project_root,
+            env=environment,
+            timeout=60,
+            require_process_group_quiescence=True,
+            parent_death_signal=True,
+            max_capture_bytes_per_stream=64 * 1024,
+            retain_output_tail=True,
+        )
+        if result.returncode != 0 or result.supervisor.final_process_group_quiescent is not True:
+            raise ValueError("Native Playwright collection did not complete successfully")
+        with report_path.open("rb") as stream:
+            raw = stream.read(_COLLECTION_BYTES + 1)
+        if len(raw) > _COLLECTION_BYTES:
+            raise ValueError("Native Playwright collection exceeds its evidence byte budget")
+        report = json.loads(raw)
+    if not isinstance(report, Mapping):
+        raise ValueError("Native Playwright collection must contain a JSON object")
+    selected = _playwright_members(report, project_root, executed=False)
+    files = {row["file"] for row in selected}
+    collection = {
+        "requested": list(requested),
+        "selected": list(selected),
+        "unavailable_advisory_targets": sorted(set(requested) - files),
+        "native_project_root": str(project_root),
+        "native_report": report,
+        "native_execution": {
+            "argv": list(result.argv),
+            "returncode": result.returncode,
+            "process_group_quiescent": result.supervisor.final_process_group_quiescent,
+            "report_path": str(report_path),
+        },
+    }
+    require_native_playwright_collection(
+        collection, project_root=project_root, expected_files=sorted(files)
+    )
+    return collection
+
+
+def require_native_playwright_files(
+    report: Mapping[str, Any],
+    *,
+    project_root: Path,
+    expected_files: Iterable[str],
+    collection: Mapping[str, Any],
+) -> set[str]:
+    """Require original configured occurrences and their actual native PASS results."""
+    expected = _requested_files(expected_files)
+    if not expected:
+        raise ValueError("Native Playwright membership requires admitted files")
+    members = require_native_playwright_collection(
+        collection, project_root=project_root, expected_files=expected
+    )
+    original = collection["native_report"]
+    if _playwright_context(report, project_root) != _playwright_context(original, project_root):
+        raise ValueError("Native Playwright execution context differs from collection")
+    actual = _playwright_members(report, project_root, executed=True)
+    if Counter(json.dumps(row, sort_keys=True) for row in actual) != Counter(
+        json.dumps(row, sort_keys=True) for row in members
+    ):
+        raise ValueError("Native Playwright members are missing, duplicated or extra")
+    return set(expected)
+
+
+def require_native_playwright_outcome(
+    outcome: Mapping[str, Any], *, expected_files: Iterable[str], collection: Mapping[str, Any]
+) -> set[str]:
+    """Validate the settled original invocation and its exact native results."""
+    project_root = Path(outcome.get("native_project_root", ""))
+    native = outcome.get("native_execution")
+    arguments = [
+        "npm",
+        "run",
+        "browser:test",
+        "--",
+        "--reporter=json",
+    ] + native_playwright_arguments(project_root, expected_files)
+    argv = native.get("argv") if isinstance(native, Mapping) else None
+    if (
+        outcome.get("returncode") != 0
+        or not isinstance(native, Mapping)
+        or native.get("process_group_quiescent") is not True
+        or not isinstance(argv, list)
+        or len(argv) != len(arguments) + 1
+        or argv[:-1] != arguments
+        or not isinstance(argv[-1], str)
+        or not argv[-1].startswith("--output=")
+    ):
+        raise ValueError("Native browser execution differs from its admitted invocation")
+    output = Path(argv[-1].partition("=")[2])
+    if (
+        not output.is_absolute()
+        or ".." in output.parts
+        or output.is_relative_to(project_root.parent)
+    ):
+        raise ValueError("Native browser execution artifacts are not outside source")
+    report = outcome.get("native_report")
+    if not isinstance(report, Mapping):
+        raise ValueError("Native browser execution proof is unavailable")
+    return require_native_playwright_files(
+        report, project_root=project_root, expected_files=expected_files, collection=collection
+    )
 
 
 def vitest_outcomes(report: Mapping[str, Any]) -> tuple[bool, bool, dict[str, int]]:
