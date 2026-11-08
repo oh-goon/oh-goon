@@ -58,6 +58,10 @@ proof. The independent `merge-gate` validates that complete result
 against trusted-base policy. Empty phases require no execution job or dummy
 receipt. Rerunning failed jobs for the same frozen source retains successful
 job artifacts by their original IDs, including when their attempts differ.
+The independent merge gate has its own 15-minute job budget for locked toolchain
+preparation, fresh native producer/static-project observation and ordinary test
+collection. It does not execute the selected tests again. Job setup shares that
+budget; expiry remains unverified rather than qualifying a partial observation.
 
 Development verification and explicit hosted focused feedback select the native
 batch owner's `--fail-fast` policy. Each pytest process receives `--maxfail=1`;
