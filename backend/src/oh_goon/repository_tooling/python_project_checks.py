@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
 import stat
 import sys
 import tempfile
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,11 +22,17 @@ from oh_goon.engine.command import (
     run_command,
 )
 from oh_goon.integrations.exact_file_write import publish_text_file
+from oh_goon.integrations.fleet_plan_compilation import parse_goon_template
+from oh_goon.integrations.python_goon_projects import (
+    capture_project_source,
+    materialize_python_goon_project,
+)
 from oh_goon.repository_tooling.pytest_execution_report import (
     _admit_report_directory_location,
     _open_report_directory,
 )
 from oh_goon.repository_tooling.pytest_process_environment import without_test_report_environment
+from oh_goon.runtime.template_discovery import discover_template_packages
 
 ROOT = Path(__file__).resolve().parents[4]
 _PROJECTS = (
@@ -36,6 +44,227 @@ _PROJECTS = (
     ),
 )
 PROJECT_REPORT_SCHEMA = "oh-goon.python-project-checks/v1"
+
+_UNITTEST_OBSERVER = r"""
+import json, pathlib, sys, unittest
+project, environment, report = map(pathlib.Path, sys.argv[1:])
+assert pathlib.Path.cwd() == project
+assert pathlib.Path(sys.prefix).resolve() == environment.resolve()
+loader = unittest.TestLoader()
+suite = loader.discover(str(project / "tests"))
+def members(suite):
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            yield from members(item)
+        else:
+            yield item.id()
+selected = list(members(suite))
+class Result(unittest.TextTestResult):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.started, self.passed = [], []
+    def startTest(self, test):
+        self.started.append(test.id())
+        super().startTest(test)
+    def addSuccess(self, test):
+        self.passed.append(test.id())
+        super().addSuccess(test)
+result = unittest.TextTestRunner(resultclass=Result).run(suite)
+payload = dict(
+    selected=selected, started=result.started, passed=result.passed,
+    tests_run=result.testsRun, loader_errors=loader.errors,
+    failures=[test.id() for test, _ in result.failures],
+    errors=[test.id() for test, _ in result.errors],
+    skipped=[test.id() for test, _ in result.skipped],
+    expected_failures=[test.id() for test, _ in result.expectedFailures],
+    unexpected_successes=[test.id() for test in result.unexpectedSuccesses],
+    project=str(project), environment=str(environment), interpreter=sys.executable,
+)
+report.write_text(json.dumps(payload), encoding="utf-8")
+raise SystemExit(0 if result.wasSuccessful() else 1)
+"""
+
+
+def require_unittest_project_pass(report: dict[str, Any]) -> None:
+    """Require the exact native suite, with no empty or non-passing execution."""
+    selected = report.get("selected")
+    if (
+        not isinstance(selected, list)
+        or not selected
+        or any(not isinstance(member, str) or not member for member in selected)
+        or len(selected) != len(set(selected))
+        or report.get("started") != selected
+        or report.get("passed") != selected
+        or type(report.get("tests_run")) is not int
+        or report["tests_run"] != len(selected)
+        or any(
+            report.get(field) != []
+            for field in (
+                "loader_errors",
+                "failures",
+                "errors",
+                "skipped",
+                "expected_failures",
+                "unexpected_successes",
+            )
+        )
+    ):
+        raise ValueError("Native unittest membership is empty, duplicated, skipped or non-PASS")
+
+
+def check_shipped_stdlib_unittest_projects(root: Path = ROOT) -> tuple[dict[str, Any], ...]:
+    """Check every captured standalone stdlib project from the original Goon census.
+
+    This bounded proof makes no repository-consumer coverage claim. Projects
+    requiring runtime/dev dependencies retain their separately selected owner.
+    """
+    packages = discover_template_packages(
+        root / "templates/goons", source_name="goon.yml", kind="Goon"
+    )
+    scratch = Path(tempfile.mkdtemp(prefix="oh-goon-stdlib-project-checks-"))
+    quiescent = True
+    failure: BaseException | None = None
+    reports: list[dict[str, Any]] = []
+
+    def observe_process(event: CommandProcessLifecycleEvent) -> None:
+        nonlocal quiescent
+        if event.kind == "PROCESS_STARTING":
+            quiescent = False
+        elif event.kind == "DESCENDANTS_QUIESCENT":
+            quiescent = True
+
+    try:
+        for key, package in packages.items():
+            with (package / "goon.yml").open(encoding="utf-8", newline="") as stream:
+                content = stream.read()
+            compiled = parse_goon_template(
+                content, source=str(package / "goon.yml"), expected_name=package.name
+            )
+            standalone_python = compiled.runtime == "python" and compiled.application is None
+            if not standalone_python and not (package / "pyproject.toml").is_file():
+                continue
+            captured = capture_project_source(
+                package, compiled, yaml_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest()
+            )
+            directory = scratch / key
+            project = directory / "project"
+            materialize_python_goon_project(captured.archive, captured.identity, project)
+            metadata = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+            declaration = metadata.get("project", {})
+            if (
+                declaration.get("dependencies") != []
+                or declaration.get("optional-dependencies")
+                or metadata.get("dependency-groups")
+                or metadata.get("tool", {}).get("uv")
+            ):
+                continue
+            if not standalone_python:
+                raise ValueError("Stdlib project requires a captured standalone Python Goon")
+            environment = directory / "environment"
+            report_path = directory / "unittest.json"
+            child_environment = {
+                **without_test_report_environment(os.environ),
+                "UV_PROJECT_ENVIRONMENT": str(environment),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+            commands = (
+                (
+                    "uv",
+                    "sync",
+                    "--project",
+                    str(project),
+                    "--locked",
+                    "--no-default-groups",
+                    "--no-python-downloads",
+                ),
+                (
+                    "uv",
+                    "run",
+                    "--project",
+                    str(project),
+                    "--offline",
+                    "--frozen",
+                    "--no-sync",
+                    "--no-default-groups",
+                    "python",
+                    "-I",
+                    "-c",
+                    _UNITTEST_OBSERVER,
+                    str(project),
+                    str(environment),
+                    str(report_path),
+                ),
+            )
+            invocations = []
+            for command in commands:
+                try:
+                    result = run_command(
+                        *command,
+                        cwd=project,
+                        env=child_environment,
+                        timeout=180,
+                        process_observer=observe_process,
+                        require_process_group_quiescence=True,
+                        parent_death_signal=True,
+                        max_capture_bytes_per_stream=64 * 1024,
+                        retain_output_tail=True,
+                    )
+                except (CommandCancelledError, CommandTimeoutExpired) as exc:
+                    quiescent = exc.supervisor.final_process_group_quiescent
+                    raise
+                quiescent = result.supervisor.final_process_group_quiescent
+                if result.returncode or not quiescent:
+                    raise ValueError(
+                        "Native standalone project check failed or did not settle: " + result.stderr
+                    )
+                invocations.append(
+                    {
+                        "argv": list(result.argv),
+                        "returncode": result.returncode,
+                        "process_group_quiescent": quiescent,
+                    }
+                )
+            with report_path.open("rb") as report_stream:
+                encoded = report_stream.read(1024 * 1024 + 1)
+            if len(encoded) > 1024 * 1024:
+                raise ValueError("Native unittest report exceeds its byte bound")
+            report = json.loads(encoded)
+            if not isinstance(report, dict):
+                raise ValueError("Native unittest report requires an object")
+            require_unittest_project_pass(report)
+            if (
+                report.get("project") != str(project)
+                or report.get("environment") != str(environment)
+                or Path(report.get("interpreter", "")).parent != environment / "bin"
+            ):
+                raise ValueError("Native unittest executed in another project environment")
+            reports.append(
+                {
+                    "package": key,
+                    "source_identity": captured.identity.content_sha256,
+                    "native_execution": invocations,
+                    "native_report": report,
+                }
+            )
+    except BaseException as exc:
+        failure = exc
+        raise
+    finally:
+        if quiescent:
+            try:
+                shutil.rmtree(scratch)
+            except OSError:
+                if failure is None:
+                    raise
+                failure.add_note("Native standalone project scratch cleanup failed")
+        else:
+            message = (
+                f"Native standalone project scratch retained: process cleanup unproven: {scratch}"
+            )
+            if failure is None:
+                raise RuntimeError(message)
+            failure.add_note(message)
+    return tuple(reports)
 
 
 def _admit_report_directory(path: Path, root: Path) -> tuple[Path, int, tuple[int, int]]:

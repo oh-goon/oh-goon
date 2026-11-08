@@ -33,6 +33,7 @@ jobs:
       behavioral_phase: ${{ steps.selection.outputs.behavioral_phase }}
       python: ${{ steps.selection.outputs.python }}
       frontend: ${{ steps.selection.outputs.frontend }}
+      browser: ${{ steps.selection.outputs.browser }}
       pytest: ${{ steps.selection.outputs.pytest }}
       native_resources: ${{ steps.selection.outputs.native_resources }}
     env:
@@ -269,6 +270,14 @@ jobs:
           artifact-ids: ${{ needs.admit.outputs.plan_artifact_id }}
           path: ${{ env.CONTROL_DIR }}
           digest-mismatch: error
+      - name: Resolve admitted browser storage
+        if: needs.admit.outputs.browser == 'true'
+        run: |
+          printf 'PLAYWRIGHT_BROWSERS_PATH=%s/oh-goon-playwright-browsers\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Prepare Chromium required by admitted browser tests
+        if: needs.admit.outputs.browser == 'true'
+        working-directory: frontend
+        run: npm exec --offline --no -- playwright install --with-deps chromium
       - name: Prepare the host required by admitted native resource tests
         if: needs.admit.outputs.native_resources == 'true' && env.OH_GOON_TEST_CPUS == '0'
         run: |
@@ -422,7 +431,7 @@ jobs:
           Full unrelated/exhaustive regression remains daily, not claimed by this proof.
           EOF
   merge-gate:
-    name: ${{ github.event_name == 'push' && 'merge-not-applicable' || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}
+    name: ${{ github.event_name == 'push' && 'merge-not-applicable' || github.event_name == 'workflow_dispatch' && 'replay-feedback' || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}
     if: always() && github.event_name != 'push'
     needs: verify
     runs-on: ubuntu-26.04

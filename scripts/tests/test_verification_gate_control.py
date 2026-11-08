@@ -187,7 +187,16 @@ def test_static_project_proof_uses_native_project_and_completed_existing_owners(
     assert plan["evidence"]["observations"][0]["state"] == "UNAVAILABLE"
 
 
-@pytest.mark.parametrize("missing_frontend", ("skipped", "missing-owner"))
+@pytest.mark.parametrize(
+    "missing_frontend",
+    (
+        "skipped",
+        "missing-owner",
+        "missing-collection",
+        "duplicate-file",
+        "missing-variant",
+    ),
+)
 def test_static_project_and_runtime_frontend_keep_their_distinct_native_proofs(
     static_preparation_root: Path,
     reviewed_static_root: Path,
@@ -200,6 +209,30 @@ def test_static_project_and_runtime_frontend_keep_their_distinct_native_proofs(
     runtime, test = "frontend/src/runtime.ts", "frontend/src/runtime.test.ts"
     plan["changed_paths"].append(runtime)
     plan["frontend"] = [test]
+    plan["evidence"]["frontend_admission"] = {
+        "collection": {
+            "requested": [test],
+            "selected": [{"file": test, "projectName": "node"}],
+            "unavailable_advisory_targets": [],
+            "native_project_root": str(tmp_path / "frontend"),
+            "native_execution": {
+                "argv": [
+                    "npm",
+                    "exec",
+                    "--offline",
+                    "--no",
+                    "--",
+                    "vitest",
+                    "list",
+                    "./src/runtime.test.ts",
+                    "--filesOnly",
+                    f"--json={tmp_path.parent / 'collection.json'}",
+                ],
+                "returncode": 0,
+                "process_group_quiescent": True,
+            },
+        }
+    }
     plan["evidence"]["observations"].append(
         {
             "changed_path": runtime,
@@ -253,11 +286,34 @@ def test_static_project_and_runtime_frontend_keep_their_distinct_native_proofs(
         native["testResults"][0]["assertionResults"][0]["status"] = "skipped"
         with pytest.raises(ValueError, match="frontend proof is skipped"):
             _validate_static(tmp_path, plan, result, reviewed_static_root)
-    else:
+    elif missing_frontend == "missing-owner":
         result["outcomes"] = [
             row for row in result["outcomes"] if row["owner"] != "Frontend behavior"
         ]
         with pytest.raises(ValueError, match="check owners are missing"):
+            _validate_static(tmp_path, plan, result, reviewed_static_root)
+    elif missing_frontend == "missing-collection":
+        del plan["evidence"]["frontend_admission"]
+        with pytest.raises(
+            ValueError, match="frontend collection proof is unavailable"
+        ):
+            _validate_static(tmp_path, plan, result, reviewed_static_root)
+    elif missing_frontend == "duplicate-file":
+        native["testResults"].append(copy.deepcopy(native["testResults"][0]))
+        for field in (
+            "numTotalTests",
+            "numPassedTests",
+            "numTotalTestSuites",
+            "numPassedTestSuites",
+        ):
+            native[field] = 2
+        with pytest.raises(ValueError, match="files are missing, duplicated or extra"):
+            _validate_static(tmp_path, plan, result, reviewed_static_root)
+    else:
+        plan["evidence"]["frontend_admission"]["collection"]["selected"].append(
+            {"file": test, "projectName": "dom"}
+        )
+        with pytest.raises(ValueError, match="files are missing, duplicated or extra"):
             _validate_static(tmp_path, plan, result, reviewed_static_root)
 
 
@@ -3728,3 +3784,965 @@ def test_trusted_public_api_binds_actual_function_origin(
         ValueError, match="Hashmarks owner outside its trusted checkout"
     ):
         gate._require_trusted_hashmarks_api(root)
+
+
+@pytest.fixture
+def bounded_owner_repository(tmp_path: Path) -> tuple[Path, str]:
+    root = tmp_path / "source"
+    root.mkdir()
+    files = {
+        "backend/pyproject.toml": (
+            '[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n'
+            '[project]\nname = "native-owner-fixture"\nversion = "0.0.0"\ndependencies = []\n'
+            '[tool.pytest.ini_options]\naddopts = "-q"\n'
+            '[tool.hatch.build]\npackages = ["src/native_owner_fixture"]\n'
+        ),
+        "backend/hatch_build.py": "def initialize():\n    return None\n",
+        "backend/uv.lock": "version = 1\nrevision = 3\n",
+        "backend/src/native_owner_fixture/__init__.py": "VALUE = 1\n",
+        "templates/goons/general/native-fixture/src/native_owner_fixture/__init__.py": "VALUE = 1\n",
+    }
+    repository = Path(__file__).resolve().parents[2]
+    for name in (
+        "package.json",
+        "package-lock.json",
+        "vitest.config.ts",
+        "playwright.config.ts",
+    ):
+        files[f"frontend/{name}"] = (repository / "frontend" / name).read_text()
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Synthetic Native Owner",
+        "GIT_AUTHOR_EMAIL": "native-owner@example.invalid",
+        "GIT_COMMITTER_NAME": "Synthetic Native Owner",
+        "GIT_COMMITTER_EMAIL": "native-owner@example.invalid",
+    }
+    for arguments in (
+        ("init", "-q"),
+        ("add", "."),
+        (
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "base",
+        ),
+    ):
+        subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            env=env,
+            check=True,
+            capture_output=True,
+            timeout=20,
+        )
+    base = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True, timeout=20
+    ).strip()
+    return root, base
+
+
+def _bounded_owner_test(path: str, runner: str) -> dict[str, Any]:
+    return {
+        "changed_path": path,
+        "state": "CHANGED_TEST",
+        "stale": False,
+        "nominations": [
+            {
+                "workspace_prefix": "",
+                "nomination": {
+                    "available": True,
+                    "runner_evidence": runner,
+                    "verification_target": {"path": path},
+                },
+            }
+        ],
+    }
+
+
+def _bounded_owner_case(
+    root: Path, base: str, kind: str
+) -> tuple[list[str], dict[str, Any], dict[str, Any]]:
+    tests: list[dict[str, Any]] = []
+    if kind == "build":
+        source = root / "backend/pyproject.toml"
+        source.write_text(
+            source.read_text()
+            + 'dev-mode-dirs = ["src", "../templates/goons/general/native-fixture/src"]\n'
+        )
+        paths = ["backend/pyproject.toml", "backend/hatch_build.py"]
+    elif kind == "api":
+        paths = [
+            "backend/src/oh_goon/api/routes/native_fixture.py",
+            "backend/tests/integration/api/test_native_fixture.py",
+        ]
+        for relative, content in (
+            (paths[0], "def native_fixture():\n    return 'synthetic'\n"),
+            (paths[1], "def test_native_fixture():\n    assert 'synthetic'\n"),
+        ):
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        tests = [_bounded_owner_test(paths[1], "pytest")]
+    elif kind == "frontend":
+        paths = [
+            "frontend/src/app/nativeStyles.ts",
+            "frontend/src/styles/nativeWorkspace.css",
+            "frontend/src/i18n/locales/en/translation.json",
+            "frontend/src/app/NativeWorkspace.test.tsx",
+            "frontend/e2e/native-workspace.spec.ts",
+        ]
+        for relative, content in zip(
+            paths,
+            (
+                'import "../styles/nativeWorkspace.css";\n',
+                ".native-workspace { display: grid; }\n",
+                '{"nativeWorkspace": "Synthetic workspace"}\n',
+                'import { test, expect } from "vitest";\ntest("synthetic", () => expect(true).toBe(true));\n',
+                'import { test, expect } from "@playwright/test";\ntest("synthetic", () => expect(true).toBe(true));\n',
+            ),
+            strict=True,
+        ):
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        tests = [
+            _bounded_owner_test(paths[-2], "vitest"),
+            _bounded_owner_test(paths[-1], "vitest"),
+        ]
+    else:
+        assert kind == "template"
+        project = "templates/goons/general/native-fixture"
+        files = {
+            f"{project}/pyproject.toml": '[project]\nname = "native-fixture"\nversion = "0.0.0"\ndependencies = []\n',
+            f"{project}/goon.yml": "runtime: python\nuv: {lock_mode: frozen}\nsteps:\n  - id: prove\n    run: python -c 'print(1)'\n",
+            f"{project}/uv.lock": "version = 1\nrevision = 3\n",
+            f"{project}/src/native_fixture/__init__.py": "VALUE = 1\n",
+            "templates/plans/general/native-fixture/plan.yml": "goons:\n  - general/native-fixture\n",
+        }
+        for relative, content in files.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        paths = list(files)
+    observed_tests = {row["changed_path"] for row in tests}
+    evidence = {
+        "owner_coverage": "not-claimed",
+        "observations": [
+            {
+                "changed_path": path,
+                "state": "UNAVAILABLE",
+                "stale": False,
+                "nominations": [],
+                "qualification": {
+                    "completeness": "unknown",
+                    "negative_evidence_admissible": False,
+                },
+            }
+            for path in paths
+            if path not in observed_tests
+        ]
+        + tests,
+    }
+    proof = gate.get_bounded_owner_proofs(root, base, paths, evidence)
+    return paths, evidence, proof
+
+
+def _bounded_owner_execution(
+    paths: list[str], evidence: dict[str, Any], proof: dict[str, Any]
+) -> tuple[dict[str, Any], set[str], set[str], set[str]]:
+    routes = proof["routes"]
+    evidence["bounded_owner_proofs"] = copy.deepcopy(proof)
+    plan = {
+        "changed_paths": paths,
+        "obligations": [row["obligation"] for row in routes],
+        "static": sorted({name for row in routes for name in row["static"]}),
+    }
+    targets = {target for row in routes for target in row["pytest"]}
+    files = {target.split("::", 1)[0] for target in targets}
+    files.update(target for row in routes for target in row["frontend"])
+    members = {
+        target if "::" in target else target + "::test_native_result"
+        for target in targets
+    }
+    browser = (
+        {"frontend/e2e/native-workspace.spec.ts"}
+        if any(row["browser"] for row in routes)
+        else set()
+    )
+    return plan, files, members, browser
+
+
+@pytest.mark.parametrize("kind", ("build", "api", "frontend", "template"))
+def test_bounded_owner_proof_keeps_unknown_consumers_and_requires_its_native_owners(
+    bounded_owner_repository: tuple[Path, str], kind: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, kind)
+    assert len(proof["routes"]) == 1
+    assert (
+        proof["routes"][0]["obligation"]
+        == {
+            "build": gate.BOUNDED_BUILD_PROOF,
+            "api": gate.BOUNDED_API_PROOF,
+            "frontend": gate.BOUNDED_FRONTEND_PROOF,
+            "template": gate.BOUNDED_TEMPLATE_PROOF,
+        }[kind]
+    )
+    original_observations = copy.deepcopy(evidence["observations"])
+    plan, files, members, browser = _bounded_owner_execution(paths, evidence, proof)
+
+    admitted = gate.require_bounded_owner_proofs(
+        plan, evidence, files, members, browser, expected=proof
+    )
+
+    assert admitted == set(proof["routes"][0]["paths"])
+    assert proof["consumer_coverage"] == "not-claimed"
+    assert evidence["observations"] == original_observations
+
+
+@pytest.mark.parametrize(
+    "fault", ("dependency", "pytest-config", "uv-policy", "builder", "lock")
+)
+def test_bounded_owner_build_mapping_cannot_hide_other_native_configuration(
+    bounded_owner_repository: tuple[Path, str], fault: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "build")
+    assert proof["routes"]
+    manifest = root / "backend/pyproject.toml"
+    content = manifest.read_text()
+    if fault == "dependency":
+        content = content.replace("dependencies = []", 'dependencies = ["unexpected"]')
+    elif fault == "pytest-config":
+        content = content.replace('addopts = "-q"', 'addopts = "--ignore=tests"')
+    elif fault == "uv-policy":
+        content += '\n[tool.uv]\nindex-url = "https://example.invalid/simple"\n'
+    elif fault == "builder":
+        content = content.replace(
+            'build-backend = "hatchling.build"', 'build-backend = "other.build"'
+        )
+    else:
+        paths.append("backend/uv.lock")
+    manifest.write_text(content)
+
+    assert gate.get_bounded_owner_proofs(root, base, paths, evidence)["routes"] == []
+
+
+@pytest.mark.parametrize("mapping", ("outside", "absolute", "generated", "symlink"))
+def test_bounded_owner_build_mapping_requires_committed_contained_source(
+    bounded_owner_repository: tuple[Path, str], mapping: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "build")
+    assert proof["routes"]
+    outside = root.parent / "outside"
+    outside.mkdir()
+    if mapping == "outside":
+        value = "../../outside"
+    elif mapping == "absolute":
+        value = str(root / "backend/src")
+    elif mapping == "generated":
+        (root / "backend/.venv").mkdir()
+        value = ".venv"
+    else:
+        (root / "backend/linked").symlink_to(outside, target_is_directory=True)
+        value = "linked"
+    manifest = root / "backend/pyproject.toml"
+    content = manifest.read_text()
+    content = (
+        content[: content.index("dev-mode-dirs")]
+        + "dev-mode-dirs = "
+        + json.dumps([value])
+        + "\n"
+    )
+    manifest.write_text(content)
+
+    assert gate.get_bounded_owner_proofs(root, base, paths, evidence)["routes"] == []
+
+
+@pytest.mark.parametrize("kind", ("api", "frontend"))
+def test_bounded_owner_boundary_requires_a_current_actually_changed_native_test(
+    bounded_owner_repository: tuple[Path, str], kind: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, kind)
+    assert proof["routes"]
+    test = next(
+        row for row in evidence["observations"] if row["state"] == "CHANGED_TEST"
+    )
+    paths.remove(test["changed_path"])
+    assert gate.get_bounded_owner_proofs(root, base, paths, evidence)["routes"] == []
+    paths.append(test["changed_path"])
+    test["stale"] = True
+    assert gate.get_bounded_owner_proofs(root, base, paths, evidence)["routes"] == []
+
+
+@pytest.mark.parametrize(
+    "tool_input",
+    ("package.json", "package-lock.json", "vitest.config.ts", "playwright.config.ts"),
+)
+def test_bounded_owner_frontend_refuses_changed_native_tool_authority(
+    bounded_owner_repository: tuple[Path, str], tool_input: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "frontend")
+    assert proof["routes"]
+    path = root / "frontend" / tool_input
+    path.write_text(path.read_text() + "\n")
+
+    assert gate.get_bounded_owner_proofs(root, base, paths, evidence)["routes"] == []
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    (
+        'dependencies = ["unexpected"]',
+        'dependencies = []\n[project.optional-dependencies]\nextra = ["unexpected"]',
+        'dependencies = []\n[dependency-groups]\ndev = ["unexpected"]',
+        "dependencies = []\n[tool.uv]\nmanaged = false",
+    ),
+)
+def test_bounded_owner_stdlib_scope_does_not_admit_dependency_or_uv_policy(
+    bounded_owner_repository: tuple[Path, str], declaration: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "template")
+    assert proof["routes"]
+    manifest = root / "templates/goons/general/native-fixture/pyproject.toml"
+    manifest.write_text(manifest.read_text().replace("dependencies = []", declaration))
+
+    assert gate.get_bounded_owner_proofs(root, base, paths, evidence)["routes"] == []
+
+
+@pytest.mark.parametrize(
+    "fault", ("authority", "source", "obligation", "static", "native-test")
+)
+def test_bounded_owner_receipt_cannot_substitute_authority_source_or_execution(
+    bounded_owner_repository: tuple[Path, str], fault: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "build")
+    plan, files, members, browser = _bounded_owner_execution(paths, evidence, proof)
+    gate.require_bounded_owner_proofs(
+        plan, evidence, files, members, browser, expected=proof
+    )
+    if fault == "authority":
+        evidence["bounded_owner_proofs"]["authority"] = "hashmarks"
+    elif fault == "source":
+        evidence["bounded_owner_proofs"]["routes"][0]["paths"] = [
+            "backend/unrelated.py"
+        ]
+    elif fault == "obligation":
+        plan["obligations"] = []
+    elif fault == "static":
+        plan["static"].remove("package")
+    else:
+        files.clear()
+        members.clear()
+        files.add("scripts/tests/test_unrelated.py")
+
+    with pytest.raises(ValueError, match="Bounded native owner proof"):
+        gate.require_bounded_owner_proofs(
+            plan, evidence, files, members, browser, expected=proof
+        )
+
+
+@pytest.mark.parametrize(
+    "kind,fault",
+    (
+        ("template", "native-project"),
+        ("template", "compiler"),
+        ("template", "run"),
+        ("frontend", "component"),
+        ("frontend", "browser"),
+    ),
+)
+def test_bounded_owner_proof_cannot_replace_its_distinct_native_boundaries(
+    bounded_owner_repository: tuple[Path, str], kind: str, fault: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, kind)
+    plan, files, members, browser = _bounded_owner_execution(paths, evidence, proof)
+    gate.require_bounded_owner_proofs(
+        plan, evidence, files, members, browser, expected=proof
+    )
+    if fault == "native-project":
+        members.remove(
+            "scripts/tests/test_python_project_checks.py::test_native_shipped_stdlib_unittest_projects"
+        )
+        members.add("scripts/tests/test_python_project_checks.py::test_unrelated")
+    elif fault == "compiler":
+        files.remove(
+            "backend/tests/integration/services/test_catalog_template_startability.py"
+        )
+    elif fault == "run":
+        files.remove("tests/integration/test_private_code_catalog_example.py")
+    elif fault == "component":
+        files.remove("frontend/src/app/NativeWorkspace.test.tsx")
+    else:
+        browser.clear()
+
+    with pytest.raises(ValueError, match="Bounded native owner proof"):
+        gate.require_bounded_owner_proofs(
+            plan, evidence, files, members, browser, expected=proof
+        )
+
+
+def _bounded_browser_receipt(
+    project: Path,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    from oh_goon.repository_tooling.frontend_test_results import (
+        native_playwright_arguments,
+    )
+
+    file = "frontend/e2e/native-workspace.spec.ts"
+    report: dict[str, Any] = {
+        "config": {
+            "configFile": str(project / "playwright.config.ts"),
+            "rootDir": str(project / "e2e"),
+            "version": "native-browser-fixture",
+            "forbidOnly": True,
+            "projects": [
+                {
+                    "id": "chromium",
+                    "name": "chromium",
+                    "repeatEach": 1,
+                    "retries": 0,
+                    "testDir": str(project / "e2e"),
+                }
+            ],
+        },
+        "suites": [
+            {
+                "specs": [
+                    {
+                        "id": "original-native-boundary",
+                        "title": "original native boundary",
+                        "file": "native-workspace.spec.ts",
+                        "line": 1,
+                        "column": 1,
+                        "ok": True,
+                        "tests": [
+                            {
+                                "projectId": "chromium",
+                                "projectName": "chromium",
+                                "expectedStatus": "passed",
+                                "status": "skipped",
+                                "results": [],
+                            }
+                        ],
+                    }
+                ]
+            }
+        ],
+        "errors": [],
+        "stats": {"expected": 0, "skipped": 1, "unexpected": 0, "flaky": 0},
+    }
+    directory = project.parent.parent / "browser-proof"
+    arguments = native_playwright_arguments(project, (file,))
+    collection = {
+        "requested": [file],
+        "selected": [
+            {
+                "id": "original-native-boundary",
+                "title": "original native boundary",
+                "file": file,
+                "line": 1,
+                "column": 1,
+                "project_id": "chromium",
+                "project_name": "chromium",
+                "occurrence": 0,
+            }
+        ],
+        "unavailable_advisory_targets": [],
+        "native_project_root": str(project),
+        "native_report": copy.deepcopy(report),
+        "native_execution": {
+            "argv": [
+                "npm",
+                "exec",
+                "--offline",
+                "--no",
+                "--",
+                "playwright",
+                "test",
+                "--list",
+                "--reporter=json",
+                "--pass-with-no-tests",
+                *arguments,
+                f"--output={directory / 'artifacts'}",
+            ],
+            "returncode": 0,
+            "process_group_quiescent": True,
+            "report_path": str(directory / "collection.json"),
+        },
+    }
+    test = report["suites"][0]["specs"][0]["tests"][0]
+    test.update(
+        status="expected", results=[{"status": "passed", "retry": 0, "errors": []}]
+    )
+    report["stats"].update(expected=1, skipped=0)
+    execution = {
+        "argv": [
+            "npm",
+            "run",
+            "browser:test",
+            "--",
+            "--reporter=json",
+            *arguments,
+            f"--output={directory / 'artifacts'}",
+        ],
+        "process_group_quiescent": True,
+    }
+    return collection, report, execution
+
+
+def _bounded_merge_proof(
+    root: Path, base: str, kind: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    paths, evidence, proof = _bounded_owner_case(root, base, kind)
+    targets = sorted(
+        {target for route in proof["routes"] for target in route["pytest"]}
+        | set(gate.required_policy_tests(paths))
+    )
+    plan, result = (
+        _proof(test_file=targets[0], additional_tests=tuple(targets[1:]))
+        if targets
+        else _proof()
+    )
+    native_pytest = result["outcomes"][0]
+    static = set(gate.required_static_obligations(paths))
+    static.update(name for route in proof["routes"] for name in route["static"])
+    evidence.update(
+        producer_implementation_identity="sha256:" + "b" * 64,
+        bounded_owner_proofs=copy.deepcopy(proof),
+    )
+    if kind == "build":
+        evidence["observations"][0]["changed_set"] = {
+            "changes": [{"classification": {"kind": "verification-support"}}]
+        }
+    plan.update(
+        base=base,
+        changed_paths=paths,
+        static=sorted(static),
+        pytest=targets,
+        frontend=sorted(
+            {target for route in proof["routes"] for target in route["frontend"]}
+        ),
+        browser=["frontend/e2e/native-workspace.spec.ts"] if kind == "frontend" else [],
+        obligations=[
+            *gate.required_policy_obligations(paths),
+            *(route["obligation"] for route in proof["routes"]),
+        ],
+        policy_status="REVIEW_REQUIRED"
+        if gate.required_policy_tests(paths)
+        else "ORDINARY",
+        evidence=evidence,
+    )
+    outcomes = [native_pytest] if targets else []
+    for name in plan["static"]:
+        for owner in {
+            "python": ("Ruff", "Format", "Types"),
+            "frontend": tuple(
+                f"Frontend {part}"
+                for part in ("typecheck", "lint", "architecture", "i18n:check")
+            ),
+            "architecture": ("Architecture",),
+            "generated": ("Generated contracts",),
+            "package": ("Native package",),
+        }[name]:
+            outcomes.append({"owner": owner, "returncode": 0})
+    if kind == "frontend":
+        component = plan["frontend"][0]
+        project = root / "frontend"
+        evidence["frontend_admission"] = {
+            "collection": {
+                "requested": [component],
+                "selected": [{"file": component, "projectName": "dom"}],
+                "unavailable_advisory_targets": [],
+                "native_project_root": str(project),
+                "native_execution": {
+                    "argv": [
+                        "npm",
+                        "exec",
+                        "--offline",
+                        "--no",
+                        "--",
+                        "vitest",
+                        "list",
+                        "./" + component.removeprefix("frontend/"),
+                        "--filesOnly",
+                        f"--json={root.parent / 'vitest-collection.json'}",
+                    ],
+                    "returncode": 0,
+                    "process_group_quiescent": True,
+                },
+            }
+        }
+        outcomes.append(
+            {
+                "owner": "Frontend behavior",
+                "returncode": 0,
+                "native_project_root": str(project),
+                "native_report": {
+                    "success": True,
+                    "numTotalTests": 1,
+                    "numPassedTests": 1,
+                    "numFailedTests": 0,
+                    "numPendingTests": 0,
+                    "numTodoTests": 0,
+                    "numTotalTestSuites": 1,
+                    "numPassedTestSuites": 1,
+                    "numFailedTestSuites": 0,
+                    "numPendingTestSuites": 0,
+                    "testResults": [
+                        {
+                            "name": str(root / component),
+                            "assertionResults": [{"status": "passed"}],
+                        }
+                    ],
+                },
+            }
+        )
+        collection, report, execution = _bounded_browser_receipt(project)
+        evidence["browser_admission"] = {"collection": collection}
+        outcomes.append(
+            {
+                "owner": "Frontend browser",
+                "returncode": 0,
+                "native_project_root": str(project),
+                "native_report": report,
+                "native_execution": execution,
+            }
+        )
+    result.update(plan=copy.deepcopy(plan), outcomes=outcomes)
+    return plan, result
+
+
+def _validate_bounded_merge(
+    root: Path, plan: dict[str, Any], result: dict[str, Any]
+) -> tuple[frozenset[str], frozenset[str]]:
+    result["plan"] = copy.deepcopy(plan)
+    return gate.validate_merge_proof(
+        plan,
+        result,
+        candidate=plan["candidate"],
+        base=plan["base"],
+        changed_paths=plan["changed_paths"],
+        control_base=plan["base"],
+        root=root,
+    )
+
+
+@pytest.mark.parametrize("kind", ("build", "template", "api", "frontend"))
+def test_bounded_owner_merge_gate_uses_original_native_receipts_without_promoting_consumers(
+    bounded_owner_repository: tuple[Path, str], kind: str
+) -> None:
+    root, base = bounded_owner_repository
+    plan, result = _bounded_merge_proof(root, base, kind)
+    original = copy.deepcopy(plan["evidence"]["observations"])
+
+    files, _members = _validate_bounded_merge(root, plan, result)
+
+    assert plan["evidence"]["observations"] == original
+    if kind == "frontend":
+        assert set(plan["browser"]) <= files
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ("missing-claim", "overclaimed-authority", "another-source", "source-drift"),
+)
+def test_bounded_owner_merge_gate_reobserves_source_before_accepting_claims(
+    bounded_owner_repository: tuple[Path, str], fault: str
+) -> None:
+    root, base = bounded_owner_repository
+    plan, result = _bounded_merge_proof(root, base, "build")
+    _validate_bounded_merge(root, plan, result)
+    if fault == "missing-claim":
+        plan["evidence"].pop("bounded_owner_proofs")
+    elif fault == "overclaimed-authority":
+        plan["evidence"]["bounded_owner_proofs"]["consumer_coverage"] = "complete"
+    elif fault == "another-source":
+        plan["evidence"]["bounded_owner_proofs"]["routes"][0]["paths"] = [
+            "backend/unrelated.py"
+        ]
+    else:
+        manifest = root / "backend/pyproject.toml"
+        manifest.write_text(
+            manifest.read_text().replace(
+                "dependencies = []", 'dependencies = ["unexpected"]'
+            )
+        )
+
+    with pytest.raises(ValueError, match="Bounded native owner proof"):
+        _validate_bounded_merge(root, plan, result)
+
+
+def test_bounded_owner_merge_gate_does_not_waive_unrelated_support_sources(
+    bounded_owner_repository: tuple[Path, str],
+) -> None:
+    root, base = bounded_owner_repository
+    plan, result = _bounded_merge_proof(root, base, "build")
+    _validate_bounded_merge(root, plan, result)
+    support = "backend/tests/factories/unrelated.py"
+    plan["changed_paths"].append(support)
+    plan["evidence"]["observations"].append(
+        {
+            "changed_path": support,
+            "state": "LINKED",
+            "qualification": {"completeness": "unknown"},
+            "changed_set": {
+                "changes": [{"classification": {"kind": "verification-support"}}]
+            },
+            "nominations": [
+                {
+                    "nomination": {
+                        "available": True,
+                        "verification_target": {
+                            "path": gate.BUILD_PROOF_TESTS[0].split("::", 1)[0]
+                        },
+                    }
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="executed qualified consumer"):
+        _validate_bounded_merge(root, plan, result)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "missing-collection",
+        "different-id",
+        "skipped",
+        "duplicate",
+        "unsettled",
+        "arguments",
+        "no-membership",
+        "missing-owner",
+    ),
+)
+def test_bounded_owner_browser_gate_rejects_missing_or_substituted_native_proof(
+    bounded_owner_repository: tuple[Path, str], fault: str
+) -> None:
+    root, base = bounded_owner_repository
+    plan, result = _bounded_merge_proof(root, base, "frontend")
+    _validate_bounded_merge(root, plan, result)
+    browser = next(
+        row for row in result["outcomes"] if row["owner"] == "Frontend browser"
+    )
+    spec = browser["native_report"]["suites"][0]["specs"][0]
+    if fault == "missing-collection":
+        plan["evidence"]["browser_admission"].pop("collection")
+    elif fault == "different-id":
+        spec["id"] = "another-native-case"
+    elif fault == "skipped":
+        spec["tests"][0]["results"][0]["status"] = "skipped"
+    elif fault == "duplicate":
+        browser["native_report"]["suites"][0]["specs"].append(copy.deepcopy(spec))
+    elif fault == "unsettled":
+        browser["native_execution"]["process_group_quiescent"] = False
+    elif fault == "arguments":
+        browser["native_execution"]["argv"][5] = "--project=firefox"
+    elif fault == "no-membership":
+        plan["browser"] = []
+    else:
+        result["outcomes"].remove(browser)
+
+    with pytest.raises(ValueError):
+        _validate_bounded_merge(root, plan, result)
+
+
+def test_bounded_owner_native_collection_retains_whole_required_file_membership(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "source"
+    required = "scripts/tests/test_native_boundary.py"
+    changed = ("backend/src/native_boundary.py",)
+    files = {
+        "backend/pyproject.toml": '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n',
+        "backend/tests/test_backend.py": "def test_backend():\n    assert True\n",
+        required: "def test_easy():\n    assert True\n\ndef test_original_boundary():\n    assert True\n",
+        "tests/integration/test_cross_owner.py": "def test_cross_owner():\n    assert True\n",
+        changed[0]: "VALUE = 1\n",
+    }
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    trusted = Path(__file__).resolve().parents[2]
+    environment = Path(sys.prefix)
+    source_identity = package_slim.canonical_source_identity(root)
+    requests = gate._ordinary_collection_requests(
+        root, trusted_root=trusted, environment=environment, env=os.environ
+    )
+
+    receipt = gate._ordinary_candidate_collection(
+        root,
+        trusted_root=trusted,
+        environment=environment,
+        changed_paths=changed,
+        source_identity=source_identity,
+        requests=requests,
+        env=os.environ,
+        required_files=(required,),
+    )
+
+    assert receipt["changed_paths"] == list(changed)
+    assert receipt["required_files"] == [required]
+    assert [row["name"] for row in receipt["contexts"]] == [
+        "backend",
+        "tooling",
+        "cross-owner",
+    ]
+    selected = [item for context in receipt["contexts"] for item in context["selected"]]
+    assert {row["file"] for row in selected} == {required}
+    members = frozenset(
+        {required + "::test_easy", required + "::test_original_boundary"}
+    )
+    assert {row["selector"] for row in selected} == members
+    gate._require_ordinary_changed_test_execution(
+        receipt,
+        changed_paths=changed,
+        source_identity=source_identity,
+        executed_files=frozenset({required}),
+        executed_members=members,
+        required_files=(required,),
+    )
+
+    with pytest.raises(ValueError, match="meaningful execution proof"):
+        gate._require_ordinary_changed_test_execution(
+            receipt,
+            changed_paths=changed,
+            source_identity=source_identity,
+            executed_files=frozenset({required}),
+            executed_members=frozenset({required + "::test_easy"}),
+            required_files=(required,),
+        )
+    with pytest.raises(ValueError, match="another required owner scope"):
+        gate._require_ordinary_changed_test_execution(
+            receipt,
+            changed_paths=changed,
+            source_identity=source_identity,
+            executed_files=frozenset({required}),
+            executed_members=members,
+        )
+
+
+def test_bounded_owner_build_mapping_cannot_admit_committed_state_outside_source_identity(
+    bounded_owner_repository: tuple[Path, str],
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "build")
+    assert proof["routes"]
+    state = root / "backend/.venv/state.py"
+    state.parent.mkdir()
+    state.write_text("VALUE = 1\n")
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Synthetic Native Owner",
+        "GIT_AUTHOR_EMAIL": "native-owner@example.invalid",
+        "GIT_COMMITTER_NAME": "Synthetic Native Owner",
+        "GIT_COMMITTER_EMAIL": "native-owner@example.invalid",
+    }
+    for arguments in (
+        ("add", "-f", "backend/.venv"),
+        (
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "state",
+        ),
+    ):
+        subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            env=env,
+            check=True,
+            capture_output=True,
+            timeout=20,
+        )
+    assert subprocess.check_output(
+        ["git", "-C", str(root), "ls-tree", "-d", "HEAD", "--", "backend/.venv"],
+        timeout=20,
+    ).strip()
+    manifest = root / "backend/pyproject.toml"
+    content = manifest.read_text()
+    manifest.write_text(
+        content[: content.index("dev-mode-dirs")] + 'dev-mode-dirs = [".venv"]\n'
+    )
+    before = package_slim.canonical_source_identity(root)
+    state.write_text("VALUE = 2\n")
+    assert package_slim.canonical_source_identity(root) == before
+
+    assert gate.get_bounded_owner_proofs(root, base, paths, evidence)["routes"] == []
+
+
+@pytest.mark.parametrize("kind", ("api", "frontend"))
+@pytest.mark.parametrize("stale", ("row", "packet"))
+def test_bounded_owner_fallback_cannot_admit_stale_source_observations(
+    bounded_owner_repository: tuple[Path, str], kind: str, stale: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, kind)
+    source = next(
+        row for row in evidence["observations"] if row["state"] == "UNAVAILABLE"
+    )
+    assert source["changed_path"] in {
+        path for route in proof["routes"] for path in route["paths"]
+    }
+    if stale == "row":
+        source["stale"] = True
+    else:
+        source["changed_set"] = {"freshness": "stale"}
+
+    observed = gate.get_bounded_owner_proofs(root, base, paths, evidence)
+
+    assert source["changed_path"] not in {
+        path for route in observed["routes"] for path in route["paths"]
+    }
+
+
+def test_bounded_owner_qualified_component_inputs_do_not_gain_a_browser_fallback(
+    bounded_owner_repository: tuple[Path, str],
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "frontend")
+    assert proof["routes"]
+    component = next(
+        row
+        for row in evidence["observations"]
+        if row["changed_path"].endswith(".test.tsx")
+    )
+    browser = next(
+        row
+        for row in evidence["observations"]
+        if row["changed_path"].startswith("frontend/e2e/")
+    )
+    for row in evidence["observations"]:
+        if row["state"] == "UNAVAILABLE":
+            row.update(
+                state="LINKED",
+                nominations=copy.deepcopy(
+                    component["nominations"] + browser["nominations"]
+                ),
+            )
+    paths.remove(browser["changed_path"])
+    evidence["observations"].remove(browser)
+    original = copy.deepcopy(evidence)
+
+    observed = gate.get_bounded_owner_proofs(root, base, paths, evidence)
+
+    assert observed["routes"] == []
+    assert evidence == original

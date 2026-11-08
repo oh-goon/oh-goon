@@ -20,6 +20,176 @@ from oh_goon.engine.command import (
 from oh_goon.repository_tooling import python_project_checks
 
 
+def _stdlib_project(root: Path, name: str, body: str) -> Path:
+    project = root / "templates/goons/general" / name
+    (project / "tests").mkdir(parents=True)
+    (project / "src/native_fixture").mkdir(parents=True)
+    (project / "src/native_fixture/__init__.py").write_text("VALUE = 42\n")
+    (project / "README.md").write_text(f"# general/{name}\n")
+    (project / "goon.yml").write_text(
+        "runtime: python\nsteps:\n- run: python --version\n"
+    )
+    (project / "pyproject.toml").write_text(
+        f'[project]\nname="{name}"\nversion="0.1.0"\nrequires-python=">=3.12"\ndependencies=[]\n'
+        '[build-system]\nrequires=["hatchling==1.32.0"]\nbuild-backend="hatchling.build"\n'
+        '[tool.hatch.build.targets.wheel]\npackages=["src/native_fixture"]\n'
+    )
+    (project / "tests/test_native.py").write_text(
+        "import unittest\nfrom native_fixture import VALUE\n" + body
+    )
+    locked = run_command(
+        "uv",
+        "lock",
+        "--project",
+        str(project),
+        timeout=30,
+        require_process_group_quiescence=True,
+        parent_death_signal=True,
+        max_capture_bytes_per_stream=8192,
+    )
+    assert locked.returncode == 0, locked.stderr
+    return project
+
+
+@pytest.mark.process
+def test_native_shipped_stdlib_unittest_projects(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    for name in ("native-first", "native-second"):
+        _stdlib_project(
+            source,
+            name,
+            "class NativeChecks(unittest.TestCase):\n"
+            "    def test_value(self): self.assertEqual(VALUE, 42)\n"
+            "    def test_second(self): self.assertTrue(True)\n",
+        )
+    reports = python_project_checks.check_shipped_stdlib_unittest_projects(source)
+    assert {report["package"] for report in reports} == {
+        "general/native-first",
+        "general/native-second",
+    }
+    for report in reports:
+        native = report["native_report"]
+        assert (
+            native["selected"]
+            == native["started"]
+            == native["passed"]
+            == [
+                "test_native.NativeChecks.test_second",
+                "test_native.NativeChecks.test_value",
+            ]
+        )
+        assert native["tests_run"] == 2
+        assert not Path(native["environment"]).exists()
+        assert all(
+            row["returncode"] == 0 and row["process_group_quiescent"]
+            for row in report["native_execution"]
+        )
+    # The same native proof consumes every eligible shipped project. New stdlib
+    # Python Goons enter through the existing compiler census, without a name map.
+    actual = python_project_checks.check_shipped_stdlib_unittest_projects()
+    for report in actual:
+        python_project_checks.require_unittest_project_pass(report["native_report"])
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "body",
+    [
+        "",
+        "class NativeChecks(unittest.TestCase):\n    def test_value(self): self.fail('failure')\n",
+        "class NativeChecks(unittest.TestCase):\n    @unittest.skip('unavailable')\n    def test_value(self): pass\n",
+        "class NativeChecks(unittest.TestCase):\n    @unittest.expectedFailure\n    def test_value(self): self.fail('expected')\n",
+        "class NativeChecks(unittest.TestCase):\n    @unittest.expectedFailure\n    def test_value(self): pass\n",
+        "class NativeChecks(unittest.TestCase):\n    def test_value(self): pass\n"
+        "def load_tests(loader, tests, pattern):\n"
+        "    case = NativeChecks('test_value')\n"
+        "    return unittest.TestSuite([case, case])\n",
+    ],
+)
+def test_native_stdlib_project_cannot_pass_empty_or_nonpassing_suite(
+    tmp_path: Path, body: str
+) -> None:
+    _stdlib_project(tmp_path, "native-negative", body)
+    with pytest.raises(ValueError, match="Native (unittest|standalone project)"):
+        python_project_checks.check_shipped_stdlib_unittest_projects(tmp_path)
+
+
+@pytest.mark.parametrize("unsupported", ["runtime-dependency", "group", "uv-override"])
+def test_other_native_project_contexts_do_not_start_stdlib_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsupported: str
+) -> None:
+    project = _stdlib_project(tmp_path, "native-other", "")
+    metadata = project / "pyproject.toml"
+    text = metadata.read_text()
+    if unsupported == "runtime-dependency":
+        text = text.replace("dependencies=[]", 'dependencies=["outside"]')
+    elif unsupported == "group":
+        text += '\n[dependency-groups]\ndev=["pytest"]\n'
+    else:
+        text += "\n[tool.uv]\nmanaged=false\n"
+    metadata.write_text(text)
+    monkeypatch.setattr(
+        python_project_checks,
+        "run_command",
+        lambda *args, **kwargs: pytest.fail(
+            "unsupported context started native execution"
+        ),
+    )
+    assert python_project_checks.check_shipped_stdlib_unittest_projects(tmp_path) == ()
+
+
+@pytest.mark.parametrize("kind", ["shell", "application"])
+def test_physical_stdlib_project_requires_compiled_standalone_python_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    project = _stdlib_project(tmp_path, "native-wrong-runtime", "")
+    if kind == "shell":
+        (project / "goon.yml").write_text("steps:\n- run: python --version\n")
+    else:
+        (project / "goon.yml").write_text(
+            "runtime: python\napplication: {path: application}\nsteps:\n- run: python --version\n"
+        )
+    monkeypatch.setattr(
+        python_project_checks,
+        "run_command",
+        lambda *args, **kwargs: pytest.fail("invalid runtime started native execution"),
+    )
+    with pytest.raises(ValueError, match="requires a captured standalone Python Goon"):
+        python_project_checks.check_shipped_stdlib_unittest_projects(tmp_path)
+
+
+@pytest.mark.parametrize("alteration", ["omitted", "added", "duplicate", "wrong-count"])
+def test_unittest_result_requires_exact_native_membership(alteration: str) -> None:
+    native: dict[str, Any] = {
+        "selected": ["example.Case.test_one", "example.Case.test_two"],
+        "started": ["example.Case.test_one", "example.Case.test_two"],
+        "passed": ["example.Case.test_one", "example.Case.test_two"],
+        "tests_run": 2,
+        **{
+            name: []
+            for name in (
+                "loader_errors",
+                "failures",
+                "errors",
+                "skipped",
+                "expected_failures",
+                "unexpected_successes",
+            )
+        },
+    }
+    python_project_checks.require_unittest_project_pass(native)
+    if alteration == "omitted":
+        native["passed"].pop()
+    elif alteration == "added":
+        native["passed"].append("example.Case.test_extra")
+    elif alteration == "duplicate":
+        native["selected"] *= 2
+    else:
+        native["tests_run"] = True
+    with pytest.raises(ValueError, match="Native unittest membership"):
+        python_project_checks.require_unittest_project_pass(native)
+
+
 def test_required_project_checks_select_frozen_application_tests_without_airflow(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

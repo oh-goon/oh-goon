@@ -4,6 +4,7 @@ import copy
 import json
 import stat
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -17,6 +18,9 @@ from oh_goon.integrations.hashmarks.development_verification import (
     observe_repository_assets,
 )
 from oh_goon.repository_tooling import development_verification as owner
+from oh_goon.repository_tooling.frontend_test_results import (
+    native_frontend_temporary_base,
+)
 from oh_goon.repository_tooling.pytest_member_selection import NativePytestCollection
 from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
 from oh_goon.repository_tooling.verification_gate_control import (
@@ -226,7 +230,7 @@ def test_plan_cli_publishes_after_actual_source_admission(
     assert plan.behavioral_status == "NOT_APPLICABLE"
     assert (
         outputs.read_text(encoding="utf-8")
-        == "python=false\nfrontend=false\nstatic_project=false\npytest=true\nnative_resources=false\n"
+        == "python=false\nfrontend=false\nbrowser=false\nstatic_project=false\npytest=true\nnative_resources=false\n"
         "static_phase=true\nbehavioral_phase=true\n"
     )
     assert (
@@ -260,6 +264,7 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "collect_native_pytest",
         lambda paths, **options: _synthetic_pytest_collection(paths, [], **options),
     )
+    monkeypatch.setattr(owner, "collect_native_vitest", _synthetic_vitest_collection)
     return tmp_path
 
 
@@ -870,7 +875,7 @@ def test_plan_cli_rejects_ineligible_merge_before_capability_outputs(
         assert result == 0
         assert outputs.read_text(encoding="utf-8") == (
             previous
-            + f"python=true\nfrontend=false\nstatic_project=false\npytest={'true' if plan.pytest else 'false'}\n"
+            + f"python=true\nfrontend=false\nbrowser=false\nstatic_project=false\npytest={'true' if plan.pytest else 'false'}\n"
             + "native_resources=false\nstatic_phase=true\n"
             + f"behavioral_phase={'true' if plan.pytest else 'false'}\n"
         )
@@ -914,6 +919,7 @@ def test_merge_plan_cli_keeps_qualified_behavior_and_generated_contract_paths(
     assert outputs.read_text(encoding="utf-8") == (
         f"python={'true' if relative == 'behavior.py' else 'false'}\n"
         f"frontend={'true' if 'frontend' in plan.static else 'false'}\n"
+        "browser=false\n"
         "static_project=false\n"
         f"pytest={'true' if plan.pytest else 'false'}\n"
         "native_resources=false\n"
@@ -3895,3 +3901,903 @@ def test_explicit_empty_aggregation_does_not_fall_back_to_execution(
     assert (
         result["status"] == "FOCUSED / NOT_FULLY_VERIFIED" and result["outcomes"] == []
     )
+
+
+def _incomplete_support_plan(
+    repository: Path, *, focused_feedback: bool = True
+) -> owner.ChangeVerificationPlan:
+    qualified = "backend/tests/factories/qualified.py"
+    unresolved = "backend/tests/factories/unresolved.py"
+    for relative in (qualified, unresolved):
+        path = repository / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("VALUE = 1\n")
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _support_evidence(paths)
+        for row in evidence["observations"]:
+            if row["changed_path"] == unresolved:
+                row.update(state="UNAVAILABLE", nominations=[])
+        return evidence
+
+    return owner.admit_change(
+        repository, base="HEAD", nominator=nominate, focused_feedback=focused_feedback
+    )
+
+
+def test_focused_support_plan_executes_and_aggregates_without_claiming_merge(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    plan = _incomplete_support_plan(repository)
+    monkeypatch.setattr(
+        owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
+    )
+    assert plan.unverified == (
+        "NO_QUALIFIED_VERIFIER:backend/tests/factories/unresolved.py",
+    )
+    assert plan.evidence["verification_support_admission"]["paths"] == [
+        "backend/tests/factories/qualified.py"
+    ]
+    owner.require_current_plan(repository, plan)
+    controls = repository.parent / (repository.name + "-controls")
+    controls.mkdir(mode=0o700)
+    selected = controls / "plan.json"
+    monkeypatch.setattr(owner, "admit_change", lambda *_args, **_options: plan)
+    assert (
+        owner.main(
+            ["--root", str(repository), "--mode", "focused", "--plan", str(selected)]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["unverified"] == list(plan.unverified)
+    original_command = run_command
+    commands: list[tuple[str, ...]] = []
+    members = [
+        row["selector"]
+        for row in plan.evidence["pytest_admission"]["collection"]["selected"]
+    ]
+    native = _phase_test_parts(plan)[1]["outcomes"][-1]["native_report"]
+    native["native_collection"]["discovered"] = members
+    native["membership_receipt"].update(
+        selected=members,
+        passed=members,
+        effective_pytest_outcomes=[
+            {
+                "member": member,
+                "status": "PASSED",
+                "attempt_identity": "native-test-attempt",
+                "pytest_outcomes": [{"nodeid": member, "outcome": "PASSED"}],
+            }
+            for member in members
+        ],
+    )
+
+    def execute(*argv: str, **options: Any) -> Any:
+        if argv[0] == "git":
+            return original_command(*argv, **options)
+        commands.append(argv)
+        if "oh_goon.repository_tooling.test_batches" in argv:
+            Path(argv[argv.index("--report-path") + 1]).write_text(json.dumps(native))
+        return SimpleNamespace(
+            returncode=0,
+            argv=argv,
+            supervisor=SimpleNamespace(final_process_group_quiescent=True),
+        )
+
+    monkeypatch.setattr(owner, "run_command", execute)
+    parts = []
+    for phase in ("static", "behavioral"):
+        report = controls / (phase + ".json")
+        assert (
+            owner.main(
+                [
+                    "--root",
+                    str(repository),
+                    "--execute",
+                    str(selected),
+                    "--mode",
+                    "focused",
+                    "--phase",
+                    phase,
+                    "--report",
+                    str(report),
+                ]
+            )
+            == 0
+        )
+        assert json.loads(capsys.readouterr().out)["unverified"] == list(
+            plan.unverified
+        )
+        receipt = owner._read_json(report)
+        assert receipt["status"] == "CHECKS_PASSED" and receipt["unverified"] == list(
+            plan.unverified
+        )
+        parts.extend(["--aggregate-part", str(report)])
+    final = controls / "result.json"
+    assert (
+        owner.main(
+            [
+                "--root",
+                str(repository),
+                "--execute",
+                str(selected),
+                "--mode",
+                "focused",
+                "--aggregate",
+                *parts,
+                "--report",
+                str(final),
+            ]
+        )
+        == 0
+    )
+    assert (
+        json.loads(capsys.readouterr().out)["status"] == "FOCUSED / NOT_FULLY_VERIFIED"
+    )
+    assert owner._read_json(final)["unverified"] == list(plan.unverified)
+    assert "merge_authority" not in owner._read_json(final)
+    commands.clear()
+    assert (
+        owner.main(
+            [
+                "--root",
+                str(repository),
+                "--execute",
+                str(selected),
+                "--mode",
+                "merge",
+                "--phase",
+                "static",
+            ]
+        )
+        == 2
+    )
+    assert (
+        "NO_QUALIFIED_VERIFIER:backend/tests/factories/unresolved.py"
+        in capsys.readouterr().err
+    )
+    assert commands == []
+    monkeypatch.setattr(
+        owner, "canonical_source_identity", lambda _root: "sha256:" + "d" * 64
+    )
+    assert (
+        owner.main(
+            [
+                "--root",
+                str(repository),
+                "--execute",
+                str(selected),
+                "--mode",
+                "focused",
+                "--phase",
+                "static",
+            ]
+        )
+        == 2
+    )
+    assert "source changed" in capsys.readouterr().err
+    assert commands == []
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "missing-ledger",
+        "foreign-path",
+        "unqualified-path",
+        "missing-obligation",
+        "missing-consumer",
+    ],
+)
+def test_incomplete_support_still_rejects_forged_claimed_proof(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    plan = _incomplete_support_plan(repository)
+    monkeypatch.setattr(
+        owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
+    )
+    owner.require_current_plan(repository, plan)
+    invalid = plan.model_dump(mode="json")
+    if fault == "missing-ledger":
+        invalid["evidence"].pop("verification_support_admission")
+    elif fault == "foreign-path":
+        invalid["evidence"]["verification_support_admission"]["paths"] = ["other.py"]
+    elif fault == "unqualified-path":
+        invalid["evidence"]["verification_support_admission"]["paths"] = [
+            "backend/tests/factories/unresolved.py"
+        ]
+    elif fault == "missing-obligation":
+        invalid["obligations"] = []
+    else:
+        invalid["pytest"] = []
+    with pytest.raises(ValueError, match="verification-support"):
+        owner.require_current_plan(
+            repository, owner.ChangeVerificationPlan.model_validate(invalid)
+        )
+    with pytest.raises(ValueError, match="executed qualified consumer"):
+        require_verification_support_proof(
+            plan.model_dump(mode="json"),
+            plan.evidence,
+            {path.split("::", 1)[0] for path in plan.pytest},
+        )
+
+
+def test_support_with_no_native_selected_consumer_remains_unclaimed_feedback(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    support = repository / "backend/tests/factories/support.py"
+    support.parent.mkdir(parents=True)
+    support.write_text("VALUE = 1\n")
+    baseline = owner.admit_change(
+        repository, base="HEAD", nominator=lambda _root, paths: _support_evidence(paths)
+    )
+    assert (
+        not baseline.unverified
+        and VERIFICATION_SUPPORT_OBLIGATION in baseline.obligations
+    )
+    monkeypatch.setattr(
+        owner,
+        "collect_native_pytest",
+        lambda *_args, **_options: NativePytestCollection((), ()),
+    )
+    plan = owner.admit_change(
+        repository,
+        base="HEAD",
+        nominator=lambda _root, paths: _support_evidence(paths),
+        focused_feedback=True,
+    )
+    assert (
+        "SHARED_FIXTURE_CONSUMER_SCOPE_UNVERIFIED:backend/tests/factories/support.py"
+        in plan.unverified
+    )
+    assert not plan.pytest
+    assert "verification_support_admission" not in plan.evidence
+    assert VERIFICATION_SUPPORT_OBLIGATION not in plan.obligations
+    monkeypatch.setattr(
+        owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
+    )
+    owner.require_current_plan(repository, plan)
+
+
+def test_dependency_collection_also_establishes_qualified_support_consumers(
+    repository: Path, dependency_collection: list[tuple[str, ...]]
+) -> None:
+    base, _lock, _manifest = _dependency_update(repository)
+    relative = "backend/tests/factories/support.py"
+    source = repository / relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("VALUE = 1\n")
+
+    def nominate(_root: Path, paths: tuple[str, ...], **options: Any) -> dict[str, Any]:
+        evidence = _dependency_evidence(paths, **options)
+        support = _support_evidence((relative,))["observations"][0]
+        evidence["observations"] = [
+            support if row["changed_path"] == relative else row
+            for row in evidence["observations"]
+        ]
+        return evidence
+
+    plan = owner.admit_change(repository, base=base, nominator=nominate)
+    assert not plan.unverified
+    assert "collection" in plan.evidence["dependency_admission"]
+    assert "pytest_admission" not in plan.evidence
+    assert plan.evidence["verification_support_admission"]["paths"] == [relative]
+    owner.require_current_plan(repository, plan)
+
+
+def _synthetic_vitest_collection(
+    root: Path, targets: tuple[str, ...]
+) -> dict[str, Any]:
+    return {
+        "requested": list(targets),
+        "selected": [{"file": path, "projectName": "unit"} for path in targets],
+        "unavailable_advisory_targets": [],
+        "native_project_root": str(root / "frontend"),
+        "native_execution": {
+            "argv": [
+                "npm",
+                "exec",
+                "--offline",
+                "--no",
+                "--",
+                "vitest",
+                "list",
+                *("./" + path.removeprefix("frontend/") for path in targets),
+                "--filesOnly",
+                "--json=/tmp/declared-native-vitest-collection.json",
+            ],
+            "returncode": 0,
+            "process_group_quiescent": True,
+        },
+    }
+
+
+@pytest.mark.parametrize("focused", [False, True])
+def test_incomplete_collection_is_explicit_focused_feedback_only(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, focused: bool
+) -> None:
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        owner,
+        "collect_native_pytest",
+        lambda paths, **options: _synthetic_pytest_collection(paths, calls, **options),
+    )
+    plan = _incomplete_support_plan(repository, focused_feedback=focused)
+    assert plan.unverified
+    assert bool(calls) is focused
+    assert ("verification_support_admission" in plan.evidence) is focused
+
+
+@pytest.mark.parametrize("focused", [False, True])
+def test_new_python_eligibility_failure_stops_merge_frontend_collection(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, focused: bool
+) -> None:
+    (repository / "behavior.py").write_text("VALUE = 1\n")
+    frontend = repository / "frontend/src/behavior.ts"
+    frontend.parent.mkdir(parents=True)
+    frontend.write_text("export const value = 1;\n")
+    calls: list[tuple[str, ...]] = []
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            if row["changed_path"].startswith("frontend/"):
+                row["nominations"] = [
+                    {
+                        "workspace_prefix": "",
+                        "nomination": {
+                            "available": True,
+                            "runner_evidence": "vitest",
+                            "verification_target": {
+                                "path": "frontend/src/behavior.test.ts"
+                            },
+                        },
+                    }
+                ]
+        return evidence
+
+    def collect(root: Path, targets: tuple[str, ...]) -> dict[str, Any]:
+        calls.append(targets)
+        return _synthetic_vitest_collection(root, targets)
+
+    monkeypatch.setattr(
+        owner,
+        "collect_native_pytest",
+        lambda *_args, **_options: NativePytestCollection((), ()),
+    )
+    monkeypatch.setattr(owner, "collect_native_vitest", collect)
+    plan = owner.admit_change(
+        repository, base="HEAD", nominator=nominate, focused_feedback=focused
+    )
+    assert "NO_EXECUTABLE_VERIFIER:behavior.py" in plan.unverified
+    assert bool(calls) is focused
+
+
+@pytest.mark.parametrize("missing_all", [False, True])
+def test_frontend_support_claims_only_actual_native_consumers(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, missing_all: bool
+) -> None:
+    relative = "frontend/e2e/fixtures/support.ts"
+    source = repository / relative
+    source.parent.mkdir(parents=True)
+    source.write_text("export const value = 1;\n")
+    baseline = owner.admit_change(
+        repository, base="HEAD", nominator=lambda _root, paths: _support_evidence(paths)
+    )
+    assert not baseline.unverified and baseline.frontend
+    raw_observations = baseline.evidence["observations"]
+
+    def collect(root: Path, targets: tuple[str, ...]) -> dict[str, Any]:
+        result = _synthetic_vitest_collection(root, targets)
+        result["selected"] = [] if missing_all else result["selected"][:1]
+        result["unavailable_advisory_targets"] = (
+            list(targets) if missing_all else list(targets[1:])
+        )
+        return result
+
+    monkeypatch.setattr(owner, "collect_native_vitest", collect)
+    plan = owner.admit_change(
+        repository,
+        base="HEAD",
+        nominator=lambda _root, paths: _support_evidence(paths),
+        focused_feedback=True,
+    )
+    assert plan.evidence["observations"] == raw_observations
+    assert len(plan.frontend) == (0 if missing_all else 1)
+    assert plan.evidence["frontend_admission"]["collection"][
+        "unavailable_advisory_targets"
+    ]
+    assert ("verification_support_admission" in plan.evidence) is not missing_all
+    if missing_all:
+        assert f"SHARED_FIXTURE_CONSUMER_SCOPE_UNVERIFIED:{relative}" in plan.unverified
+        assert VERIFICATION_SUPPORT_OBLIGATION not in plan.obligations
+    else:
+        assert not plan.unverified
+        assert plan.evidence["verification_support_admission"]["paths"] == [relative]
+
+
+def test_changed_frontend_verifier_without_native_members_remains_unverified(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    relative = "frontend/e2e/changed.spec.ts"
+    source = repository / relative
+    source.parent.mkdir(parents=True)
+    source.write_text("test('browser', () => {});\n")
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        evidence["observations"][0].update(
+            state="CHANGED_TEST",
+            nominations=[
+                {
+                    "workspace_prefix": "",
+                    "nomination": {
+                        "available": True,
+                        "runner_evidence": "vitest",
+                        "verification_target": {"path": relative},
+                    },
+                }
+            ],
+        )
+        return evidence
+
+    def collect(root: Path, targets: tuple[str, ...]) -> dict[str, Any]:
+        result = _synthetic_vitest_collection(root, targets)
+        result.update(selected=[], unavailable_advisory_targets=list(targets))
+        return result
+
+    monkeypatch.setattr(owner, "collect_native_vitest", collect)
+    plan = owner.admit_change(
+        repository, base="HEAD", nominator=nominate, focused_feedback=True
+    )
+    assert not plan.frontend
+    assert f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{relative}" in plan.unverified
+
+
+def test_frontend_phase_and_aggregation_refuse_omitted_native_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = _phase_test_plan().model_copy(
+        update={
+            "static": (),
+            "pytest": (),
+            "frontend": (
+                "frontend/src/behavior.test.ts",
+                "frontend/--config=other.test.ts",
+            ),
+        }
+    )
+    evidence = {
+        "frontend_admission": {
+            "collection": _synthetic_vitest_collection(tmp_path, plan.frontend)
+        }
+    }
+    plan = plan.model_copy(update={"evidence": evidence})
+    native = _phase_test_parts(plan)[1]["outcomes"][0]["native_report"]
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+
+    def execute(*argv: str, **_options: Any) -> Any:
+        assert argv[4:6] == ("./src/behavior.test.ts", "./--config=other.test.ts")
+        report = next(
+            value.split("=", 1)[1]
+            for value in argv
+            if value.startswith("--outputFile=")
+        )
+        Path(report).write_text(json.dumps(native))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(owner, "run_command", execute)
+    result = owner.execute_change(
+        tmp_path, plan, mode="focused", workers=1, phase="behavioral"
+    )
+    assert result["status"] == "INCOMPLETE"
+    assert "missing, duplicated or extra" in result["reason"]
+    partial = {
+        "plan": plan.model_dump(mode="json"),
+        "phase": "behavioral",
+        "status": "CHECKS_PASSED",
+        "outcomes": [
+            {
+                "owner": "Frontend behavior",
+                "returncode": 0,
+                "native_report": native,
+            }
+        ],
+    }
+    with pytest.raises(ValueError, match="missing, duplicated or extra"):
+        owner.aggregate_change(tmp_path, plan, [partial], mode="focused")
+
+
+def test_frontend_execution_refuses_source_scratch_before_starting_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = _phase_test_plan().model_copy(
+        update={"frontend": ("frontend/src/behavior.test.ts",)}
+    )
+    assert not native_frontend_temporary_base(tmp_path).is_relative_to(tmp_path)
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    effects: list[str] = []
+
+    def unexpected_effect(*_args: Any, **_options: Any) -> Any:
+        effects.append("effect")
+        raise AssertionError("Invalid scratch authority must stop before checks")
+
+    monkeypatch.setattr(owner, "run_command", unexpected_effect)
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", unexpected_effect)
+    with pytest.raises(ValueError, match="outside source"):
+        owner.execute_change(tmp_path, plan, mode="focused", workers=1)
+    assert effects == []
+
+
+def _controller_browser_report(root: Path, *, executed: bool) -> dict[str, Any]:
+    project = root / "frontend"
+    return {
+        "config": {
+            "configFile": str(project / "playwright.config.ts"),
+            "rootDir": str(project / "e2e"),
+            "version": "declared-native-browser-fixture",
+            "forbidOnly": True,
+            "projects": [
+                {
+                    "id": "chromium",
+                    "name": "chromium",
+                    "repeatEach": 1,
+                    "retries": 0,
+                    "testDir": str(project / "e2e"),
+                }
+            ],
+        },
+        "suites": [
+            {
+                "title": "native[case].ts",
+                "specs": [
+                    {
+                        "id": f"native-browser-{index}",
+                        "title": f"native browser case {index}",
+                        "file": "native[case].ts",
+                        "line": index + 1,
+                        "column": 1,
+                        "ok": True,
+                        "tests": [
+                            {
+                                "projectId": "chromium",
+                                "projectName": "chromium",
+                                "expectedStatus": "passed",
+                                "status": "expected" if executed else "skipped",
+                                "results": [
+                                    {"status": "passed", "retry": 0, "errors": []}
+                                ]
+                                if executed
+                                else [],
+                            }
+                        ],
+                    }
+                    for index in range(2)
+                ],
+            }
+        ],
+        "errors": [],
+        "stats": {
+            "expected": 2 if executed else 0,
+            "skipped": 0 if executed else 2,
+            "unexpected": 0,
+            "flaky": 0,
+        },
+    }
+
+
+def _controller_browser_plan(root: Path) -> owner.ChangeVerificationPlan:
+    from oh_goon.repository_tooling.frontend_test_results import (
+        native_playwright_arguments,
+    )
+
+    project = root / "frontend"
+    project.mkdir(exist_ok=True)
+    target = "frontend/e2e/native[case].ts"
+    head = owner._git(root, "rev-parse", "HEAD").strip()
+    collection = {
+        "requested": [target],
+        "unavailable_advisory_targets": [],
+        "selected": [
+            {
+                "id": f"native-browser-{index}",
+                "title": f"native browser case {index}",
+                "file": target,
+                "line": index + 1,
+                "column": 1,
+                "project_id": "chromium",
+                "project_name": "chromium",
+                "occurrence": 0,
+            }
+            for index in range(2)
+        ],
+        "native_project_root": str(project),
+        "native_report": _controller_browser_report(root, executed=False),
+        "native_execution": {
+            "argv": [
+                "npm",
+                "exec",
+                "--offline",
+                "--no",
+                "--",
+                "playwright",
+                "test",
+                "--list",
+                "--reporter=json",
+                "--pass-with-no-tests",
+                *native_playwright_arguments(project, (target,)),
+                "--output=/tmp/declared-browser-proof/artifacts",
+            ],
+            "returncode": 0,
+            "process_group_quiescent": True,
+            "report_path": "/tmp/declared-browser-proof/collection.json",
+        },
+    }
+    return _phase_test_plan().model_copy(
+        update={
+            "base": head,
+            "candidate": head,
+            "source_identity": canonical_source_identity(root),
+            "changed_paths": (target,),
+            "static": (),
+            "pytest": (),
+            "frontend": (),
+            "browser": (target,),
+            "evidence": {"browser_admission": {"collection": collection}},
+        }
+    )
+
+
+@pytest.mark.parametrize("defect", ("omitted", "skipped", "context", "unsettled"))
+def test_browser_controller_executes_original_owner_and_rejects_partial_receipts(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, defect: str
+) -> None:
+    import re
+
+    monkeypatch.setattr(owner, "canonical_source_identity", canonical_source_identity)
+    plan = _controller_browser_plan(repository)
+    owner.require_current_plan(repository, plan)
+    native = _controller_browser_report(repository, executed=True)
+    execution_state = {"settled": True}
+    calls: list[tuple[str, ...]] = []
+    original_command = run_command
+    selected_cache = repository.parent / "selected browser cache"
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(selected_cache))
+
+    def execute(*argv: str, **options: Any) -> Any:
+        if argv[0] == "git":
+            return original_command(*argv, **options)
+        calls.append(argv)
+        assert argv[:5] == ("npm", "run", "browser:test", "--", "--reporter=json")
+        assert argv[5] == "--project=chromium"
+        assert re.fullmatch(argv[6], str(repository / plan.browser[0]))
+        assert len(argv) == 8 and argv[7].startswith("--output=")
+        assert options["cwd"] == repository / "frontend"
+        assert options["require_process_group_quiescence"] is True
+        assert options["parent_death_signal"] is True
+        assert options["env"]["PLAYWRIGHT_BROWSERS_PATH"] == str(selected_cache)
+        assert options["env"]["OH_GOON_BROWSER_REUSE_SERVER"] == "0"
+        report = Path(options["env"]["PLAYWRIGHT_JSON_OUTPUT_FILE"])
+        assert report.parent.stat().st_mode & 0o077 == 0
+        assert not report.is_relative_to(repository)
+        Path(report).write_text(json.dumps(native))
+        return SimpleNamespace(
+            argv=argv,
+            returncode=0,
+            supervisor=SimpleNamespace(
+                final_process_group_quiescent=execution_state["settled"]
+            ),
+        )
+
+    monkeypatch.setattr(owner, "run_command", execute)
+    baseline = owner.execute_change(
+        repository, plan, mode="focused", workers=1, phase="behavioral"
+    )
+    assert baseline["status"] == "CHECKS_PASSED"
+    assert len(calls) == 1
+    outcome = baseline["outcomes"][0]
+    assert outcome["owner"] == "Frontend browser"
+    assert outcome["native_report"] == native
+    assert outcome["native_execution"] == {
+        "argv": list(calls[0]),
+        "process_group_quiescent": True,
+    }
+    part = {"plan": plan.model_dump(mode="json"), "phase": "behavioral", **baseline}
+    assert (
+        owner.aggregate_change(repository, plan, [part], mode="focused")["status"]
+        == "CHECKS_PASSED"
+    )
+
+    if defect == "omitted":
+        native["suites"][0]["specs"].pop()
+        native["stats"]["expected"] = 1
+    elif defect == "skipped":
+        native["suites"][0]["specs"][0]["tests"][0]["results"][0]["status"] = "skipped"
+    elif defect == "context":
+        native["config"]["version"] = "changed-native-browser"
+    else:
+        execution_state["settled"] = False
+    refused = owner.execute_change(
+        repository, plan, mode="focused", workers=1, phase="behavioral"
+    )
+    assert refused["status"] == "INCOMPLETE"
+    damaged = copy.deepcopy(part)
+    damaged["outcomes"][0]["native_report"] = copy.deepcopy(native)
+    damaged["outcomes"][0]["native_execution"]["process_group_quiescent"] = (
+        execution_state["settled"]
+    )
+    with pytest.raises(ValueError):
+        owner.aggregate_change(repository, plan, [damaged], mode="focused")
+
+
+def test_admission_uses_configured_native_browser_membership_without_relabeling_unknown_scope(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, native_frontend_toolchain: None
+) -> None:
+    import shutil
+
+    from oh_goon.repository_tooling.frontend_test_results import (
+        collect_native_playwright,
+        collect_native_vitest,
+    )
+
+    toolchain = Path(__file__).resolve().parents[2] / "frontend/node_modules"
+    if (
+        shutil.which("npm") is None
+        or not (toolchain / "@playwright/test/package.json").is_file()
+    ):
+        pytest.skip("initialized native npm/Playwright environment required")
+    project = repository / "frontend"
+    project.mkdir()
+    (project / "node_modules").symlink_to(toolchain, target_is_directory=True)
+    (repository / ".gitignore").write_text("frontend/node_modules\n")
+    owner._git(repository, "add", ".gitignore")
+    configuration = {
+        "package.json": '{"name":"native-admission-fixture","private":true,"type":"module"}',
+        "vitest.config.ts": 'export default {test:{include:["unit-only.test.ts"]}};\n',
+        "playwright.config.ts": 'export default {testDir:"./e2e",testMatch:"**/advised_check.ts",projects:[{name:"chromium"}],forbidOnly:true};\n',
+    }
+    for filename, text in configuration.items():
+        (project / filename).write_text(text)
+        owner._git(repository, "add", "frontend/" + filename)
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "native frontend contexts",
+    )
+    target = "frontend/e2e/advised_check.ts"
+    source = repository / target
+    source.parent.mkdir()
+    source.write_text(
+        'import {test} from "@playwright/test";\ntest("configured native browser case",()=>{throw new Error("collection must not execute assertions");});\n'
+    )
+    unknown = "frontend/src/unqualified.ts"
+    unqualified = repository / unknown
+    unqualified.parent.mkdir()
+    unqualified.write_text("export const unknown = 1;\n")
+    original_observations: list[dict[str, Any]] = []
+
+    def nominate(_root: Path, paths: tuple[str, ...]) -> dict[str, Any]:
+        evidence = _evidence(paths)
+        for row in evidence["observations"]:
+            if row["changed_path"] == target:
+                row.update(
+                    state="CHANGED_TEST",
+                    nominations=[
+                        {
+                            "workspace_prefix": "",
+                            "nomination": {
+                                "available": True,
+                                "runner_evidence": "vitest",
+                                "verification_target": {"path": target},
+                            },
+                        }
+                    ],
+                )
+            else:
+                row.update(state="UNAVAILABLE", nominations=[])
+                row["qualification"]["completeness"] = "unknown"
+        original_observations.extend(copy.deepcopy(evidence["observations"]))
+        return evidence
+
+    native_calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def vitest(root: Path, targets: tuple[str, ...]) -> dict[str, Any]:
+        native_calls.append(("vitest", targets))
+        return collect_native_vitest(root, targets)
+
+    def browser(root: Path, targets: tuple[str, ...]) -> dict[str, Any]:
+        native_calls.append(("playwright", targets))
+        return collect_native_playwright(root, targets)
+
+    monkeypatch.setattr(owner, "collect_native_vitest", vitest)
+    monkeypatch.setattr(owner, "collect_native_playwright", browser)
+    plan = owner.admit_change(
+        repository, base="HEAD", nominator=nominate, focused_feedback=True
+    )
+    assert native_calls == [("vitest", (target,)), ("playwright", (target,))]
+    assert plan.frontend == () and plan.browser == (target,)
+    assert plan.evidence["frontend_admission"]["collection"]["selected"] == []
+    assert plan.evidence["browser_admission"]["collection"]["selected"]
+    assert plan.evidence["observations"] == original_observations
+    assert f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{target}" not in plan.unverified
+    assert plan.unverified == (f"NO_QUALIFIED_VERIFIER:{unknown}",)
+
+
+@pytest.fixture
+def native_frontend_toolchain() -> None:
+    """Declare the locked npm capability without running setup in collection."""
+
+
+@pytest.mark.parametrize("admission", ("pytest_admission", "dependency_admission"))
+@pytest.mark.parametrize("selected_native", (False, True))
+def test_native_pytest_frontend_capability_prepares_tools_without_static_obligation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    admission: str,
+    selected_native: bool,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    control = tmp_path / "control"
+    control.mkdir(mode=0o700)
+    outputs = control / "outputs"
+    native = {
+        "file": "scripts/tests/test_native_owner.py",
+        "selector": "scripts/tests/test_native_owner.py::test_native",
+        "native_frontend": "true",
+    }
+    portable = {
+        "file": "scripts/tests/test_native_owner.py",
+        "selector": "scripts/tests/test_native_owner.py::test_portable",
+    }
+    plan = _phase_test_plan().model_copy(
+        update={
+            "static": (),
+            "frontend": (),
+            "browser": (),
+            "evidence": {
+                admission: {
+                    "collection": {
+                        "selected": [portable, native]
+                        if selected_native
+                        else [portable],
+                        "deselected": [] if selected_native else [native],
+                    }
+                }
+            },
+        }
+    )
+    original = plan.model_dump(mode="json")
+    monkeypatch.setattr(owner, "admit_change", lambda *_args, **_options: plan)
+    assert (
+        owner.main(
+            [
+                "--root",
+                str(source),
+                "--mode",
+                "focused",
+                "--plan",
+                str(control / "plan.json"),
+                "--github-output",
+                str(outputs),
+            ]
+        )
+        == 0
+    )
+    exported = dict(row.split("=", 1) for row in outputs.read_text().splitlines())
+    assert exported["frontend"] == str(selected_native).lower()
+    assert exported["browser"] == "false"
+    assert exported["static_phase"] == "false"
+    assert exported["behavioral_phase"] == "true"
+    assert owner._read_json(control / "plan.json") == original
+    assert plan.static == () and plan.frontend == () and plan.browser == ()

@@ -257,6 +257,10 @@ def prepare_native_step_input(
         and selected.profile.codex_service is None
     ):
         raise FleetPlanInvalid("Native read-only effects require physical workspace isolation")
+    # These frozen fields are a strict subset of the eventual prompt. Reject a
+    # known overflow before materializing evidence or spending the Step deadline
+    # on its producer; the complete prompt still checks its exact encoded size.
+    _encode_prompt({"task": prepared.task, "skill_instructions": prepared.skill_instructions})
     return prepared
 
 
@@ -354,6 +358,13 @@ def _bootstrap(
     return replace(command, environment=tuple(environment.items()))
 
 
+def _encode_prompt(payload: Mapping[str, object]) -> bytes:
+    prompt = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(prompt) > MAX_COMMAND_INPUT_BYTES:
+        raise FleetPlanInvalid("Native prompt exceeds its bounded command input budget")
+    return prompt
+
+
 def _prompt(
     prepared: AgentHarnessInput,
     step: ResolvedAgentStep,
@@ -413,10 +424,7 @@ def _prompt(
         if step.workload.role != "report"
         else "Report actual work and incomplete verification accurately. Model text is not execution or verification authority.",
     }
-    prompt = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
-    if len(prompt) > MAX_COMMAND_INPUT_BYTES:
-        raise FleetPlanInvalid("Native prompt exceeds its bounded command input budget")
-    return prompt
+    return _encode_prompt(payload)
 
 
 def _retained_native_summary(
