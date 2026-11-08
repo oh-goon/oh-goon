@@ -2,6 +2,8 @@ export const SHARED_RUN_SUBMIT_RELEASE_EVENT = "oh-goon:e2e:release-shared-run-s
 export const ARTIFACT_OBSERVATION_REQUEST_EVENT = "oh-goon:e2e:artifact-observation-request";
 export const ARTIFACT_OBSERVATION_RELEASE_EVENT = "oh-goon:e2e:release-artifact-observation";
 export const ARTIFACT_OBSERVATION_RESPONSE_EVENT = "oh-goon:e2e:artifact-observation-response";
+export const CATALOG_REQUEST_EVENT = "oh-goon:e2e:catalog-request";
+export const CATALOG_EXPLORE_RELEASE_EVENT = "oh-goon:e2e:release-catalog-exploration";
 
 export interface BrowserFixtureScenarioDefinition {
   readonly blockedRepositoryRole?: "payments";
@@ -10,6 +12,7 @@ export interface BrowserFixtureScenarioDefinition {
   readonly terminalOutcome?: "failed";
   readonly campaignDecision?: "converged" | "missing" | "not_admitted";
   readonly artifactObservation?: "immediate" | "held";
+  readonly catalogExploration?: "held";
 }
 
 export const BROWSER_FIXTURE_SCENARIOS = {
@@ -25,6 +28,7 @@ export const BROWSER_FIXTURE_SCENARIOS = {
   "agent-campaign-not-admitted": { campaignDecision: "not_admitted" },
   "artifact-observation": { artifactObservation: "immediate" },
   "artifact-observation-held": { artifactObservation: "held" },
+  "catalog-held": { catalogExploration: "held" },
 } satisfies Record<string, BrowserFixtureScenarioDefinition>;
 
 export type BrowserFixtureScenario = keyof typeof BROWSER_FIXTURE_SCENARIOS;
@@ -37,4 +41,10 @@ export function browserFixtureScenario(value: string | null): BrowserFixtureScen
 
 export function scenarioDefinition(scenario: BrowserFixtureScenario): BrowserFixtureScenarioDefinition {
   return BROWSER_FIXTURE_SCENARIOS[scenario];
+}
+
+export function waitForFixtureEvent(eventName: string): Promise<void> {
+  return new Promise((resolve) => {
+    window.addEventListener(eventName, () => resolve(), { once: true });
+  });
 }

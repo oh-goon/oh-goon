@@ -5,6 +5,12 @@
       "fixture": "advanced/isolated-dataflow",
       "inputs": {"tag": "dev", "test_timeout_seconds": "600"}
     },
+    "general/catalog-render": {
+      "fixture": "repository/empty",
+      "inputs": {
+        "candidate_json": "{\"name\":\"synthetic-catalog-component\",\"description\":\"Synthetic component for native template admission.\",\"owner\":\"group:default/template-fixtures\",\"type\":\"service\",\"lifecycle\":\"experimental\",\"languages\":[\"python\"]}"
+      }
+    },
     "kubernetes/set-image": {
       "fixture": "repository/empty",
       "inputs": {

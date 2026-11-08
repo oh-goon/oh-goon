@@ -117,6 +117,9 @@ build-backend = "hatchling.build"
 [tool.hatch.metadata]
 allow-direct-references = true
 
+[tool.hatch.build]
+dev-mode-dirs = ["src", "../templates/goons/general/catalog-render/src"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/oh_goon"]
 

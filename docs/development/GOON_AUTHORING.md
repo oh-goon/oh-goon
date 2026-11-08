@@ -267,6 +267,26 @@ steps:
 
 Ambient host environment is not implicit pipeline state.
 
+To deliver an already-bound public Goon input as process data, declare an explicit
+input source and import only that environment name into its consumer Step:
+
+```yaml
+env:
+  CATALOG_CANDIDATE_JSON:
+    from: input
+    name: candidate_json
+```
+
+The `candidate_json` input is declared by that Goon. This transport reuses the
+original scalar binding: strings remain exact, booleans use `true`/`false`,
+integers use their ordinary text, and null becomes an empty value. Missing input
+names fail during resolution. Values are never recursively interpolated; an
+environment declaration using `{value: ...}` remains literal, including any
+expression-like text. The resolved export participates in execution identity.
+The [catalog renderer](../../templates/goons/general/catalog-render/README.md)
+uses this boundary so metadata does not enter command arguments or ambient
+process state.
+
 Environment and output declarations use mappings keyed by their public names.
 Step workspace selection uses `workspace: {from: repository}` or the explicit
 producer form, and locked uv selection belongs at Goon level. Resolved-model

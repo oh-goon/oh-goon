@@ -435,7 +435,7 @@ jobs:
     if: always() && github.event_name != 'push'
     needs: verify
     runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       UV_PYTHON: "3.12"
       BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || inputs.base }}

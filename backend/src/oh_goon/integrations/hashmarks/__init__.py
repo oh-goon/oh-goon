@@ -77,6 +77,9 @@ if TYPE_CHECKING:
     from .identity import (
         identify_tree_and_children as identify_tree_and_children,
     )
+    from .repository_exploration import (
+        observe_repository_exploration as observe_repository_exploration,
+    )
     from .repository_intelligence import (
         HashmarksEvidenceDisclosure as HashmarksEvidenceDisclosure,
     )
@@ -160,6 +163,7 @@ if TYPE_CHECKING:
     )
 
 _EXPORTS = {
+    "observe_repository_exploration": "repository_exploration",
     "PreparedAgentEvidence": "agent_tools",
     "agent_evidence_main": "agent_tools",
     "prepare_agent_evidence": "agent_tools",

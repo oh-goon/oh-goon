@@ -1,0 +1,16 @@
+runtime: python
+inputs:
+  candidate_json:
+    type: string
+env:
+  CATALOG_CANDIDATE_JSON:
+    from: input
+    name: candidate_json
+steps:
+- id: catalog
+  run: catalog-render --environment
+  imports:
+    env: [CATALOG_CANDIDATE_JSON]
+  artifacts:
+  - path: catalog-info.yaml
+    retention: content_store

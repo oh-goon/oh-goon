@@ -1,5 +1,5 @@
 export interface BrowserCapability {
-  page: "overview" | "repositories" | "dependencies" | "plans" | "shared-runs" | "schedules" | "runs" | "scout" | "settings" | "help" | "recovery" | "tools";
+  page: "overview" | "repositories" | "catalog" | "dependencies" | "plans" | "shared-runs" | "schedules" | "runs" | "scout" | "settings" | "help" | "recovery" | "tools";
   heading: string;
   standard: boolean;
   criticalInformation: readonly string[];
@@ -8,6 +8,7 @@ export interface BrowserCapability {
 export const browserCapabilities: readonly BrowserCapability[] = [
   { page: "overview", heading: "Overview", standard: true, criticalInformation: ["Successful", "Failed", "Running", "Queued"] },
   { page: "repositories", heading: "Repositories", standard: true, criticalInformation: ["Repository", "readiness", "Run CI/CD"] },
+  { page: "catalog", heading: "Explore code. Review what leaves.", standard: true, criticalInformation: ["Repository", "Review", "Run", "Export"] },
   { page: "dependencies", heading: "Dependencies", standard: true, criticalInformation: ["dependency search", "evidence coverage", "repository population", "Use all"] },
   { page: "plans", heading: "Plan Builder", standard: true, criticalInformation: ["Saved Plan", "Plan key", "plan.yml content"] },
   { page: "shared-runs", heading: "New shared run", standard: true, criticalInformation: ["Saved Plan", "Repositories", "Run"] },

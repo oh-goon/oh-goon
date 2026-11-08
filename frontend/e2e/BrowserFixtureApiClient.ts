@@ -3,6 +3,7 @@ import type { WriteCommandResult } from "@/domain/mutations/WriteCommandResult";
 import { createIncludedFleet, createScaleFleet, createScaleLeague, createScaleRepositories, scaleDependencyMatches as scaleDependencyFixtureMatches } from "./BrowserScaleFixture";
 import { FixtureRunRegistry } from "./fixtures/FixtureRunRegistry";
 import { dependencyMatches, dependencyPopulationId, emptyDependencyOverview } from "./fixtures/dependencies";
+import { CatalogFixtureApi, CATALOG_FIXTURE_PLAN_ID, catalogFixtureRunDetail } from "./fixtures/catalog";
 import { fixtureLockDriftDiagnostic } from "./fixtures/diagnostics";
 import { defaultFailureGroup, requireFailureGroup, scaleFailureGroups, scaleFailureRunId } from "./fixtures/failures";
 import { fixtureArtifactReadback, fixtureCampaignReadback, fixtureCampaignResultForId, fixtureFailureHistory, fixtureLiveOutput, fixtureRunDiff } from "./fixtures/gameTape";
@@ -17,7 +18,7 @@ import {
   PRIMARY_REPOSITORY,
   fixtureRepositoryInstanceId,
 } from "./fixtures/identities";
-import { scenarioDefinition, SHARED_RUN_SUBMIT_RELEASE_EVENT, type BrowserFixtureScenario } from "./fixtures/scenarios";
+import { scenarioDefinition, SHARED_RUN_SUBMIT_RELEASE_EVENT, waitForFixtureEvent, type BrowserFixtureScenario } from "./fixtures/scenarios";
 import { FIXTURE_FLEET_PLAN_TARGET, FIXTURE_PLAN_ID as PLAN_ID, FIXTURE_PLANS, FIXTURE_RESOLVED_PLAN, FIXTURE_SHA as SHA } from "./fixtures/plans";
 import { DEFAULT_RUN_ID, FAILED_RUN_ID, SCALE_FAILED_RUN_ID, SCALE_RUN_ID } from "./fixtures/runIds";
 import { FIXTURE_DIRECT_EXECUTION, runDetail, runState } from "./fixtures/runProjection";
@@ -124,6 +125,7 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
   private schedulesState: ScheduleCatalog;
   private readonly runs = new FixtureRunRegistry();
   private readonly dependencySelections = new Map<string, DependencyTargetMaterialization>();
+  private readonly catalogFixture: CatalogFixtureApi;
   private readonly scenario: BrowserFixtureScenario;
   private readonly scenarioConfig: ReturnType<typeof scenarioDefinition>;
 
@@ -139,9 +141,15 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
     });
     this.scenario = scenario;
     this.scenarioConfig = scenarioDefinition(scenario);
+    this.catalogFixture = new CatalogFixtureApi({ repositoryForId: (id) => this.repositoryForScenario(id), runs: this.runs, saved: (value) => this.fixtureSaved(value), holdFirstExploration: this.scenarioConfig.catalogExploration === "held" });
     this.seedFixtureRuns();
     this.schedulesState = scenario === "empty" ? { schedules: [] } : { schedules: [fixtureScheduleStatus()] };
   }
+
+  override catalogExplore(repositoryId: string, request: Parameters<ApiClient["catalogExplore"]>[1]) { return this.catalogFixture.explore(repositoryId, request); }
+  override catalogPreview(repositoryId: string, request: Parameters<ApiClient["catalogPreview"]>[1]) { return this.catalogFixture.preview(repositoryId, request); }
+  override startCatalogRun(repositoryId: string, request: Parameters<ApiClient["startCatalogRun"]>[1]) { return this.catalogFixture.start(repositoryId, request); }
+  override exportRunArtifact(runId: string, request: Parameters<ApiClient["exportRunArtifact"]>[1]) { return this.catalogFixture.exportArtifact(runId, request); }
 
   override async fleetRunOverview(): Promise<FleetRunOverview> {
     if (this.scenario === "scale") return { journal_revision: 5000, total: 5000, successful: 4312, failed: 188, running: 47, queued: 453, cancelling: 0, cancelled: 0, attention_required: 0 };
@@ -682,6 +690,7 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
       run.status === FleetRunStatus.RUNNING ? GameTapeStatus.RUNNING : failed ? GameTapeStatus.FAILED : GameTapeStatus.PASSED,
       failed,
     );
+    if (run.target?.kind === "fleet_plan" && run.target.plan.plan_id === CATALOG_FIXTURE_PLAN_ID) return catalogFixtureRunDetail(detail);
     if (this.scenarioConfig.campaignDecision) {
       const campaign = fixtureCampaignReadback(runId, this.scenarioConfig.campaignDecision === "converged", this.scenarioConfig.campaignDecision === "not_admitted");
       detail.campaign_journal = campaign;
@@ -848,10 +857,4 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
 
 function clone<Value>(value: Value): Value {
   return structuredClone(value);
-}
-
-function waitForFixtureEvent(eventName: string): Promise<void> {
-  return new Promise((resolve) => {
-    window.addEventListener(eventName, () => resolve(), { once: true });
-  });
 }

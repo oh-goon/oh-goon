@@ -20,6 +20,10 @@ export function createApiClient(mutations: MutationController): ApiClient {
     health: (options) => readOperation(op.health.operationId, {}, options),
     privacy: (options) => readOperation(op.privacy_status.operationId, {}, options),
     fleet: (options) => readOperation(op.fleet_snapshot.operationId, {}, options),
+    catalogExplore: (repositoryId, request, options) => readOperation(op.catalog_explore.operationId, { path: { repository_id: repositoryId }, body: request }, options),
+    catalogPreview: (repositoryId, request, options) => readOperation(op.catalog_preview.operationId, { path: { repository_id: repositoryId }, body: request }, options),
+    startCatalogRun: (repositoryId, request) => write("fleet-run", op.catalog_run.operationId, { path: { repository_id: repositoryId }, body: request }),
+    exportRunArtifact: (runId, request) => write("fleet-run", op.export_run_artifact.operationId, { path: { fleet_run_id: runId }, body: request }),
     scoutOverview: (hours = 24, limit = 20, options) => readOperation(
       op.scout_overview.operationId,
       { query: { hours, limit } },

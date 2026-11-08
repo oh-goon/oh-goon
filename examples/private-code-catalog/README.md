@@ -1,6 +1,6 @@
 # Private code discovery → reviewed Backstage catalog
 
-Classification: **runnable with prerequisites, synthetic example**. Hashmarks supplies repository evidence, native Git supplies commit facts, a human approves catalog ownership and metadata, and Oh-Goon executes and retains the result. There is no model/provider Step or automatic Backstage publication. This is a CLI demonstration with the existing Game Tape; the guided UI is [HUG-208](https://linear.app/hugloss/issue/HUG-208/showcase-p1-guide-private-code-discovery-catalog-review-and-original).
+Classification: **runnable with prerequisites, synthetic example**. Hashmarks supplies repository evidence, native Git supplies commit facts, a human approves catalog ownership and metadata, and Oh-Goon executes and retains the result. There is no model/provider Step or automatic Backstage publication. This CLI demonstration and the **Explore code** UI use the same shipped `general/catalog-render` Python Goon and formatter; the guided journey is [HUG-208](https://linear.app/hugloss/issue/HUG-208/showcase-p1-guide-private-code-discovery-catalog-review-and-original).
 
 ## Operator guide
 
@@ -19,7 +19,7 @@ cp -R examples/private-code-catalog "$CATALOG_DEMO_ROOT/workflow"
 cd "$CATALOG_DEMO_ROOT/workflow"
 git -C sample-repo init -q --template=
 git -C sample-repo add .
-git -C sample-repo -c user.name="Demo Contributor" -c user.email="demo@example.invalid" -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -qm "Seed synthetic repository"
+GIT_AUTHOR_NAME="Demo Contributor" GIT_AUTHOR_EMAIL="demo@example.invalid" GIT_COMMITTER_NAME="Demo Contributor" GIT_COMMITTER_EMAIL="demo@example.invalid" git -C sample-repo -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -qm "Seed synthetic repository"
 python - <<'PY'
 from pathlib import Path
 import yaml
@@ -45,12 +45,17 @@ hashmarks --workspace sample-repo --state-dir "$CATALOG_DEMO_ROOT/hashmarks" fin
 hashmarks --workspace sample-repo --state-dir "$CATALOG_DEMO_ROOT/hashmarks" deps src/service.py
 git -C sample-repo log -1 --format='%H%n%an%n%aI' "$(cat "$CATALOG_DEMO_ROOT/evidence/git-revision")" -- src/service.py
 cat sample-repo/.github/CODEOWNERS
-python -m json.tool generator/catalog-input.json
+python - <<'PY'
+import json
+from pathlib import Path
+import yaml
+print(json.dumps(json.loads(yaml.safe_load(Path("run.yml").read_text())["inputs"]["candidate_json"]), indent=2))
+PY
 ```
 
 Expected: observed Python and TypeScript; a localized `submit_order` hit; a **static** import to `src/order_status.py`; native last-matching commit ID, author and date without email. Preserve generation, freshness, ambiguity and coverage labels. Hashmarks 0.36.2 synchronized search can still report freshness `unknown` and negative evidence `not-admissible`; it does not prove complete dependencies or repository-wide absence.
 
-CODEOWNERS is an inspected **human declaration** here, not automated ownership inference. Confirm the hypothetical `group:default/platform-team`, or select an explicit valid group/user reference. Review all six candidate values, including descriptions and team names: allowed keys do not sanitize sensitive strings. Edit `generator/catalog-input.json` only before approval. The next step binds these captured input bytes to the observed source. If either changes, repeat discovery and review rather than silently refreshing authority.
+CODEOWNERS is an inspected **human declaration** here, not automated ownership inference. Confirm the hypothetical `group:default/platform-team`, or select an explicit valid group/user reference. Review all six candidate values, including descriptions and team names: allowed keys do not sanitize sensitive strings. Edit `inputs.candidate_json` in `run.yml` only before approval. The next step binds these exact caller input bytes to the observed source. If either changes, repeat discovery and review rather than silently refreshing authority.
 
 ### Bind the review, execute, inspect, and deliberately export
 
@@ -81,11 +86,11 @@ git -C sample-repo status --porcelain
 
 Expect a successful original Run, one command Step, a present retained artifact, byte-identical export for the supplied candidate, and an unchanged target. For deliberately changed approved metadata, inspect its exact output instead of comparing with the supplied golden. A second export to the same destination must refuse overwrite. No catalog file is added to the target; commit, push and Backstage registration remain separate effects.
 
-Exact `run.yml` and captured independent application bytes (including candidate metadata) are bound by `goon.lock`. Admission compares `target.reviewed_source` with its already observed repository source before admitting a Run. Source edits or repository replacement refuse stale review; metadata edits invalidate the lock. `prepare` does not refresh source approval. Later caller-worktree edits do not rewrite live retained artifacts or original Game Tape. Retention is bounded; released content correctly becomes unavailable.
+Exact `run.yml`, reviewed candidate input and captured shipped Python Goon source are bound by `goon.lock`. The explicit `from: input` environment binding transports the JSON without recursive interpretation or putting values in argv; literal environment values remain literal. Admission compares `target.reviewed_source` with its already observed repository source before admitting a Run. Source edits or repository replacement refuse stale review; metadata edits invalidate the lock. `prepare` does not refresh source approval. Later caller-worktree edits do not rewrite live retained artifacts or original Game Tape. Retention is bounded; released content correctly becomes unavailable.
 
 ## Implementation, proof and qualification limits
 
-The [requirements](../../docs/development/PRIVATE_CODE_INTELLIGENCE_SHOWCASE_REQUIREMENTS.md) define the intended product. This example supplies separate native discovery, human review, a strict renderer and one original Plan → Goon → Step → Run/artifact path. The renderer accepts exactly six bounded fields; duplicate/unknown fields, invalid values and existing output files are refused. It reads only approved metadata, never source, Git or CODEOWNERS. It uses the standard library and copies approved strings without content redaction. See [Backstage's descriptor format](https://backstage.io/docs/features/software-catalog/descriptor-format/).
+The [requirements](../../docs/development/PRIVATE_CODE_INTELLIGENCE_SHOWCASE_REQUIREMENTS.md) define the intended product. This example supplies native discovery, human review and one original Plan → Goon → Step → Run/artifact path. The standalone formatter is owned by [general/catalog-render](../../templates/goons/general/catalog-render/README.md), and backend preview imports that same source through native packaging. It accepts exactly six bounded fields; duplicate/unknown fields, invalid values and existing output files are refused. It reads only approved metadata, never source, Git or CODEOWNERS. It uses the standard library and copies approved strings without content redaction. See [Backstage's descriptor format](https://backstage.io/docs/features/software-catalog/descriptor-format/).
 
 From the Oh-Goon checkout, run the focused native proof:
 

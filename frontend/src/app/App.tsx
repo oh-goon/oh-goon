@@ -5,6 +5,7 @@ import { useReadController } from "@/app/ApiClientProvider";
 import { ComponentErrorBoundary } from "@/app/errors/ComponentErrorBoundary";
 import { queryParamsFromHash, useAppNavigation } from "@/app/navigation";
 import { CampaignPage } from "@/app/pages/CampaignPage";
+import { CatalogPage } from "@/app/pages/CatalogPage";
 import { OverviewPage } from "@/app/pages/OverviewPage";
 import { PlansPage } from "@/app/pages/PlansPage";
 import { HelpPage } from "@/app/pages/HelpPage";
@@ -31,6 +32,7 @@ export function App() {
   return <AppShell page={page} experience={experience} onNavigate={navigate} onRefresh={refreshAll}>
     <ComponentErrorBoundary key={page} area={page}>
       {page === "overview" ? <OverviewPage navigate={navigate} /> : null}
+      {page === "catalog" ? <CatalogPage onOpenRun={(runId, repositoryId) => navigate("runs", { run: runId, repository: repositoryId })} onOpenRepositories={() => navigate("repositories")} /> : null}
       {page === "failures" ? <FailuresPage navigate={navigate} /> : null}
       {page === "repositories" ? <RepositoriesPage experience={experience} onOpenSettings={() => navigate("settings")} onOpenHelp={() => navigate("help")} onOpenRuns={(repositoryId) => navigate("runs", repositoryId ? { repository: repositoryId } : undefined)} onOpenRun={(runId, repositoryId) => navigate("runs", { run: runId, ...(repositoryId ? { repository: repositoryId } : {}) })} onOpenDependencies={(repositoryId) => navigate("dependencies", repositoryId ? { repository: repositoryId } : undefined)} /> : null}
       {page === "dependencies" ? <DependenciesPage navigate={navigate} /> : null}

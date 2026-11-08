@@ -6,6 +6,7 @@ export type ReadResource =
   | "runtime-progress"
   | "privacy"
   | "fleet-projection"
+  | "catalog-evidence"
   | "scout-observations"
   | "execution-overview"
   | "run-failures"
@@ -32,6 +33,8 @@ const READ_RESOURCES = {
   "runtime-discovery": ["runtime-progress"],
   privacy: ["privacy"],
   fleet: ["fleet-projection"],
+  "catalog-exploration": ["catalog-evidence"],
+  "catalog-preview": ["catalog-evidence"],
   "scout-overview": ["scout-observations"],
   "scout-findings": ["scout-observations"],
   "scout-repository": ["scout-observations"],
@@ -91,8 +94,8 @@ export type ReadScope = keyof typeof READ_RESOURCES;
 
 const MUTATION_RESOURCES: Readonly<Record<MutationScope, readonly ReadResource[]>> = {
   "fleet-run": ["runtime-progress", "fleet-projection", "execution-overview", "run-failures", "run-history", "schedule-state", "security-projection", "executor-operations", "executor-placement-queue", "scout-observations"],
-  locations: ["locations", "league-map", "league-lineups", "fleet-projection", "security-projection", "migration-projection", "dependency-observations"],
-  repositories: ["fleet-projection", "security-projection", "migration-projection", "dependency-observations"],
+  locations: ["locations", "league-map", "league-lineups", "fleet-projection", "catalog-evidence", "security-projection", "migration-projection", "dependency-observations"],
+  repositories: ["fleet-projection", "catalog-evidence", "security-projection", "migration-projection", "dependency-observations"],
   schedules: ["schedule-state"],
   recovery: ["recovery-state", "run-history"],
   plans: ["shared-plans", "plan-templates"],

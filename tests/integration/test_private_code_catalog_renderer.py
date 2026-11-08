@@ -1,15 +1,15 @@
-"""Native process regressions for the checked-in independent catalog renderer."""
+"""Native process regressions for the shared standalone catalog renderer."""
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -44,8 +44,12 @@ ROOT = Path(__file__).resolve().parents[2]
 )
 def test_private_code_catalog_renderer(tmp_path: Path, case: str) -> None:
     workspace = tmp_path / "renderer"
-    shutil.copytree(ROOT / "examples/private-code-catalog/generator", workspace)
+    workspace.mkdir()
     source = workspace / "catalog-input.json"
+    selection = yaml.safe_load(
+        (ROOT / "examples/private-code-catalog/run.yml").read_text()
+    )
+    source.write_text(selection["inputs"]["candidate_json"], encoding="utf-8")
     output = workspace / "catalog-info.yaml"
     expected = (
         ROOT / "examples/private-code-catalog/expected/catalog-info.yaml"
@@ -101,14 +105,21 @@ def test_private_code_catalog_renderer(tmp_path: Path, case: str) -> None:
         with source.open("wb") as stream:
             stream.truncate(64 * 1024 * 1024)
 
-    command = [sys.executable, "generate_catalog.py"]
+    command = [
+        sys.executable,
+        "-m",
+        "oh_goon_catalog_renderer.cli",
+        "--input",
+        str(source),
+    ]
     if case == "memory-budget":
         command = [
             sys.executable,
             "-c",
-            "import resource, runpy; "
+            "import resource, runpy, sys; "
             "resource.setrlimit(resource.RLIMIT_AS, (67108864, 67108864)); "
-            "runpy.run_path('generate_catalog.py', run_name='__main__')",
+            "sys.argv=['catalog-render','--input','catalog-input.json']; "
+            "runpy.run_module('oh_goon_catalog_renderer.cli', run_name='__main__')",
         ]
     result = subprocess.run(
         command,
@@ -144,8 +155,8 @@ def test_private_code_catalog_renderer(tmp_path: Path, case: str) -> None:
         if case == "unknown-field":
             assert "synthetic-secret" not in result.stderr
         if case in {"over-budget", "memory-budget"}:
-            assert "approved metadata exceeds size budget" in result.stderr
+            assert "invalid or oversized reviewed metadata" in result.stderr
         if case == "duplicate-field":
-            assert "metadata contains duplicate fields" in result.stderr
+            assert "invalid or oversized reviewed metadata" in result.stderr
             assert "unreviewed" not in result.stderr
     assert "SYNTHETIC-DENIED" not in result.stdout + result.stderr
