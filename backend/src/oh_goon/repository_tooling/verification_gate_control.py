@@ -2631,14 +2631,19 @@ def main() -> int:
         dependency_intent, unsupported_intent, hashmarks_upgrade_intent = (
             admission_owner._backend_dependency_intent(args.root, args.base, tuple(changed_paths))
         )
-        if unsupported_intent or (dependency_intent and "backend/uv.lock" not in changed_paths):
-            raise ValueError("Dependency declarations lack an admitted native lock scope")
         evidence = plan.get("evidence", {})
         if not isinstance(evidence, Mapping):
             raise ValueError("Producer evidence has an invalid shape")
         observed_owner_proofs = get_bounded_owner_proofs(
             args.root, args.base, changed_paths, evidence
         )
+        isolated_build = any(
+            route["obligation"] == BOUNDED_BUILD_PROOF for route in observed_owner_proofs["routes"]
+        )
+        if not isolated_build and (
+            unsupported_intent or (dependency_intent and "backend/uv.lock" not in changed_paths)
+        ):
+            raise ValueError("Dependency declarations lack an admitted native lock scope")
         required_files = tuple(
             sorted(
                 {
