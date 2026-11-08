@@ -211,7 +211,6 @@ jobs:
     outputs:
       part_artifact_id: ${{ steps.part.outputs.artifact-id }}
     env:
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/oh-goon-playwright-browsers
       UV_PYTHON: "3.12"
       OH_GOON_TEST_CPUS: ${{ vars.OH_GOON_TEST_CPUS || '0' }}
       OH_GOON_NATIVE_QUALIFICATION_PROFILE: shared-user-manager
@@ -271,6 +270,10 @@ jobs:
           artifact-ids: ${{ needs.admit.outputs.plan_artifact_id }}
           path: ${{ env.CONTROL_DIR }}
           digest-mismatch: error
+      - name: Resolve admitted browser storage
+        if: needs.admit.outputs.browser == 'true'
+        run: |
+          printf 'PLAYWRIGHT_BROWSERS_PATH=%s/oh-goon-playwright-browsers\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Prepare Chromium required by admitted browser tests
         if: needs.admit.outputs.browser == 'true'
         working-directory: frontend

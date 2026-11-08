@@ -196,9 +196,12 @@ def test_browser_setup_uses_only_admitted_execution_capability() -> None:
     assert preparation["if"] == "needs.admit.outputs.browser == 'true'"
     assert preparation["working-directory"] == "frontend"
     assert "continue-on-error" not in preparation
-    assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == (
-        "${{ runner.temp }}/oh-goon-playwright-browsers"
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in job["env"]
+    storage = next(
+        step for step in steps if step.get("name") == "Resolve admitted browser storage"
     )
+    assert storage["if"] == preparation["if"]
+    assert steps.index(storage) < steps.index(preparation)
     download = next(
         index
         for index, step in enumerate(steps)
@@ -222,6 +225,36 @@ def test_browser_setup_uses_only_admitted_execution_capability() -> None:
         if name != "behavioral"
         for step in other["steps"]
     ), "Browser collection/static proof must not install a browser"
+
+
+@pytest.mark.process
+def test_browser_storage_resolves_on_runner_before_installation(tmp_path: Path) -> None:
+    step = next(
+        step
+        for step in _workflow()["jobs"]["behavioral"]["steps"]
+        if step.get("name") == "Resolve admitted browser storage"
+    )
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    runner_temporary = tmp_path / "runner $(touch unexpected) cache"
+    environment_file = tmp_path / "github-env"
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            "PATH": os.defpath,
+            "RUNNER_TEMP": str(runner_temporary),
+            "GITHUB_ENV": str(environment_file),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert environment_file.read_text() == (
+        f"PLAYWRIGHT_BROWSERS_PATH={runner_temporary}/oh-goon-playwright-browsers\n"
+    )
+    assert not (tmp_path / "unexpected").exists()
 
 
 @pytest.mark.process
