@@ -183,6 +183,112 @@ def test_native_host_setup_uses_only_admitted_capability_without_new_required_ch
     )
 
 
+def test_browser_setup_uses_only_admitted_execution_capability() -> None:
+    jobs = _workflow()["jobs"]
+    assert (
+        jobs["admit"]["outputs"]["browser"] == "${{ steps.selection.outputs.browser }}"
+    )
+    job = jobs["behavioral"]
+    steps = job["steps"]
+    (preparation,) = [
+        step for step in steps if "playwright install" in step.get("run", "")
+    ]
+    assert preparation["if"] == "needs.admit.outputs.browser == 'true'"
+    assert preparation["working-directory"] == "frontend"
+    assert "continue-on-error" not in preparation
+    assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == (
+        "${{ runner.temp }}/oh-goon-playwright-browsers"
+    )
+    download = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("uses", "").startswith("actions/download-artifact@")
+    )
+    npm = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("run") == "make frontend-install"
+    )
+    execution = next(
+        index
+        for index, step in enumerate(steps)
+        if "--phase behavioral" in step.get("run", "")
+    )
+    assert npm < download < steps.index(preparation) < execution
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in steps[execution].get("env", {})
+    assert not any(
+        "playwright install" in step.get("run", "")
+        for name, other in jobs.items()
+        if name != "behavioral"
+        for step in other["steps"]
+    ), "Browser collection/static proof must not install a browser"
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("installation_status", [0, 17])
+def test_native_chromium_preparation_preserves_selected_cache_and_failure(
+    tmp_path: Path, installation_status: int
+) -> None:
+    job = _workflow()["jobs"]["behavioral"]
+    preparation = next(
+        step for step in job["steps"] if "playwright install" in step.get("run", "")
+    )
+    commands = tmp_path / "commands"
+    commands.mkdir()
+    npm = commands / "npm"
+    npm.write_text(
+        f"#!{sys.executable}\n"
+        "import json,os,sys\n"
+        "from pathlib import Path\n"
+        "Path(os.environ['PREPARATION_EVIDENCE']).write_text(json.dumps({'argv':sys.argv[1:],'cache':os.environ['PLAYWRIGHT_BROWSERS_PATH']}))\n"
+        "raise SystemExit(int(os.environ['INSTALLATION_STATUS']))\n"
+    )
+    npm.chmod(0o755)
+    evidence = tmp_path / "native-selection.json"
+    selected_cache = tmp_path / "selected native browser cache"
+    marker = tmp_path / "execution-started"
+    bash = shutil.which("bash", path=os.defpath)
+    assert bash is not None
+    observed = subprocess.run(
+        [
+            bash,
+            "--noprofile",
+            "--norc",
+            "-e",
+            "-o",
+            "pipefail",
+            "-c",
+            preparation["run"] + '\nprintf started > "$EXECUTION_MARKER"\n',
+        ],
+        env={
+            "PATH": str(commands) + os.pathsep + os.defpath,
+            "PLAYWRIGHT_BROWSERS_PATH": str(selected_cache),
+            "PREPARATION_EVIDENCE": str(evidence),
+            "INSTALLATION_STATUS": str(installation_status),
+            "EXECUTION_MARKER": str(marker),
+        },
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert observed.returncode == installation_status, observed.stderr
+    assert json.loads(evidence.read_text()) == {
+        "argv": [
+            "exec",
+            "--offline",
+            "--no",
+            "--",
+            "playwright",
+            "install",
+            "--with-deps",
+            "chromium",
+        ],
+        "cache": str(selected_cache),
+    }
+    assert marker.exists() is (installation_status == 0)
+
+
 @pytest.mark.process
 @pytest.mark.parametrize(
     "workflow_name,job_name",
@@ -1512,6 +1618,16 @@ def test_candidate_admission_passes_mode_and_stops_setup_after_rejection(
     control = Path(environment_file.read_text().strip().removeprefix("CONTROL_DIR="))
     assert control.parent == runner_temp and control.is_dir()
     assert arguments[arguments.index("--plan") + 1] == str(control / "plan.json")
+
+
+def test_manual_replay_cannot_publish_the_required_merge_check_name() -> None:
+    # GitHub owns expression evaluation and required-status matching. Keep the
+    # caller-selected replay base outside the required PR status namespace.
+    assert _merge_aggregate()["name"] == (
+        "${{ github.event_name == 'push' && 'merge-not-applicable'"
+        " || github.event_name == 'workflow_dispatch' && 'replay-feedback'"
+        " || github.event.pull_request.draft && 'draft-feedback' || 'merge-gate' }}"
+    )
 
 
 @pytest.mark.process

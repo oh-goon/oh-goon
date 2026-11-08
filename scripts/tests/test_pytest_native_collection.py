@@ -733,6 +733,66 @@ def test_native_resource_capability_keeps_membership_and_cadence_independent(
     assert not requires_native_resource_host(portable_only)
 
 
+def test_native_frontend_fixture_capability_does_not_execute_or_select_tests(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.development_verification import (
+        ChangeVerificationPlan,
+        requires_native_frontend_toolchain,
+    )
+
+    path = tmp_path / "test_frontend_capability.py"
+    path.write_text(
+        "import pytest\n"
+        "@pytest.fixture\n"
+        "def native_frontend_toolchain():\n"
+        "    raise AssertionError('collection must not prepare npm')\n"
+        "def test_portable(): pass\n"
+        "def test_native(native_frontend_toolchain): pass\n"
+        "@pytest.mark.daily\n"
+        "def test_daily_native(native_frontend_toolchain): pass\n"
+    )
+    collection = collect_native_pytest((path,), marker="not daily")
+    assert [row["selector"].split("::", 1)[1] for row in collection.selected] == [
+        "test_portable",
+        "test_native",
+    ]
+    portable, native = collection.selected
+    assert "native_frontend" not in portable
+    assert native["native_frontend"] == "true"
+    assert collection.deselected[0]["native_frontend"] == "true"
+    assert collection.deselected[0]["selector"].endswith("::test_daily_native")
+    plan = ChangeVerificationPlan(
+        base="a" * 40,
+        candidate="b" * 40,
+        source_identity="sha256:" + "c" * 64,
+        changed_paths=(str(path),),
+        static=(),
+        pytest=(str(path),),
+        frontend=(),
+        unverified=(),
+        evidence={"pytest_admission": {"collection": collection.payload()}},
+        behavioral_status="REQUIRED",
+        policy_status="ORDINARY",
+    )
+    assert requires_native_frontend_toolchain(plan)
+    portable_only = plan.model_copy(
+        update={
+            "evidence": {
+                "pytest_admission": {
+                    "collection": {
+                        "selected": [portable],
+                        "deselected": [native, *collection.deselected],
+                    }
+                }
+            }
+        }
+    )
+    assert not requires_native_frontend_toolchain(portable_only)
+    assert portable_only.static == plan.static == ()
+    assert portable_only.pytest == plan.pytest
+
+
 def test_batch_rejects_changed_native_membership_before_running_tests(
     tmp_path: Path,
 ) -> None:
