@@ -3726,6 +3726,13 @@ def test_merge_gate_binds_candidate_producer_and_rechecks_source_after_observati
     monkeypatch.setattr(package_slim, "canonical_source_identity", source_identity)
     monkeypatch.setattr(command_owner, "run_command", git)
     monkeypatch.setattr(admission_owner, "run_command", git)
+
+    def owner_base_bytes(candidate: Path, revision: str, relative: str) -> bytes:
+        assert candidate == root and revision == plan["base"]
+        assert relative == "backend/pyproject.toml"
+        return base_manifest.encode("utf-8")
+
+    monkeypatch.setattr(gate, "_owner_base_bytes", owner_base_bytes)
     if "hashmarks_native_artifacts" in plan["evidence"]:
         monkeypatch.setattr(
             admission_owner,
@@ -4746,3 +4753,173 @@ def test_bounded_owner_qualified_component_inputs_do_not_gain_a_browser_fallback
 
     assert observed["routes"] == []
     assert evidence == original
+
+
+@pytest.mark.parametrize(
+    "change", ("build-mapping", "dependency", "mixed", "unsafe-mapping")
+)
+def test_main_build_declaration_admission_uses_fresh_source_before_native_effects(
+    bounded_owner_repository: tuple[Path, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    change: str,
+) -> None:
+    root, base = bounded_owner_repository
+    plan, result = _bounded_merge_proof(root, base, "build")
+    manifest = root / "backend/pyproject.toml"
+    content = manifest.read_text()
+    if change in {"dependency", "mixed"}:
+        content = content.replace("dependencies = []", 'dependencies = ["new-library"]')
+        if change == "dependency":
+            content = content[: content.index("dev-mode-dirs")]
+    elif change == "unsafe-mapping":
+        (root.parent / "outside").mkdir()
+        content = (
+            content[: content.index("dev-mode-dirs")]
+            + 'dev-mode-dirs = ["../../outside"]\n'
+        )
+    manifest.write_text(content)
+    hook = root / "backend/hatch_build.py"
+    hook.write_text(hook.read_text() + "# Reviewed native build hook change.\n")
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Synthetic Native Owner",
+        "GIT_AUTHOR_EMAIL": "native-owner@example.invalid",
+        "GIT_COMMITTER_NAME": "Synthetic Native Owner",
+        "GIT_COMMITTER_EMAIL": "native-owner@example.invalid",
+    }
+    for arguments in (
+        ("add", "backend/pyproject.toml", "backend/hatch_build.py"),
+        (
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "candidate",
+        ),
+    ):
+        subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            env=env,
+            check=True,
+            capture_output=True,
+            timeout=20,
+        )
+    candidate = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True, timeout=20
+    ).strip()
+    trusted = tmp_path / "trusted"
+    subprocess.run(
+        ["git", "clone", "--quiet", "--no-hardlinks", str(root), str(trusted)],
+        check=True,
+        capture_output=True,
+        timeout=20,
+    )
+    subprocess.run(
+        ["git", "-C", str(trusted), "checkout", "--quiet", "--detach", base],
+        check=True,
+        capture_output=True,
+        timeout=20,
+    )
+    plan.update(
+        candidate=candidate,
+        requested_head=candidate,
+        source_identity=package_slim.canonical_source_identity(root),
+    )
+    native = next(row for row in result["outcomes"] if row["owner"] == "Native pytest")[
+        "native_report"
+    ]
+    native["source_identity"] = plan["source_identity"]
+    result["plan"] = copy.deepcopy(plan)
+    plan_file, result_file = tmp_path / "plan.json", tmp_path / "result.json"
+    plan_file.write_text(json.dumps(plan))
+    result_file.write_text(json.dumps(result))
+    trusted_sources = trusted / "backend/src/oh_goon"
+    monkeypatch.setattr(
+        gate,
+        "__file__",
+        str(trusted_sources / "repository_tooling/verification_gate_control.py"),
+    )
+    for module, relative in (
+        (command_owner, "engine/command.py"),
+        (admission_owner, "repository_tooling/development_verification.py"),
+        (lock_owner, "repository_tooling/_dependency_lock_portability.py"),
+        (package_slim, "repository_tooling/release/package_slim.py"),
+    ):
+        monkeypatch.setattr(module, "__file__", str(trusted_sources / relative))
+
+    def source_file(owner: object) -> str:
+        if owner is public_evidence:
+            relative = "integrations/hashmarks/__init__.py"
+        elif owner is public_evidence.observe_repository_assets:
+            relative = "integrations/hashmarks/development_verification.py"
+        else:
+            assert owner is public_evidence.native_producer_implementation_identity
+            relative = "integrations/hashmarks/runtime_contract.py"
+        return str(trusted_sources / relative)
+
+    monkeypatch.setattr(gate, "getsourcefile", source_file)
+    effects: list[str] = []
+
+    def producer(_root: Path, **options: Any) -> str:
+        effects.append("native-environment")
+        assert options["dependency_plan"] is None
+        required_files = options["required_files"]
+        options["ordinary_receipt"].update(
+            source_identity=plan["source_identity"],
+            changed_paths=sorted(plan["changed_paths"]),
+            required_files=list(required_files),
+            contexts=[
+                {
+                    "name": name,
+                    "selected": [
+                        {"file": member.split("::", 1)[0], "selector": member}
+                        for member in native["membership_receipt"]["passed"]
+                        if member.split("::", 1)[0] in required_files
+                    ]
+                    if name == "tooling"
+                    else [],
+                }
+                for name in ("backend", "tooling", "cross-owner")
+            ],
+        )
+        return str(plan["evidence"]["producer_implementation_identity"])
+
+    monkeypatch.setattr(gate, "_candidate_producer_identity", producer)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "oh-goon-verify-gate",
+            "--plan",
+            str(plan_file),
+            "--result",
+            str(result_file),
+            "--candidate",
+            candidate,
+            "--base",
+            base,
+            "--control-base",
+            base,
+            "--head",
+            candidate,
+            "--root",
+            str(root),
+            "--trusted-root",
+            str(trusted),
+        ],
+    )
+
+    status = gate.main()
+
+    accepted = change == "build-mapping"
+    assert status == (0 if accepted else 1)
+    assert effects == (["native-environment"] if accepted else [])
+    output = capsys.readouterr().out
+    if accepted:
+        assert "MERGE_VERIFIED:" in output
+    else:
+        assert "Dependency declarations lack an admitted native lock scope" in output
