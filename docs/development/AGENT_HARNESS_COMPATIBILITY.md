@@ -38,6 +38,14 @@ Whole-Run `run.yml` budgets currently exclude Agent and repair workflows.
 Disposition: **retain** the existing harness adaptations; this CLI resource
 boundary does not replace their protocols or qualify another harness context.
 
+Native prompt admission uses the same compact UTF-8 JSON encoding for the frozen
+task/Skill lower bound and the complete delivered prompt. A definite lower-bound
+overflow rejects before evidence materialization or producer work; fitting that
+subset does not waive the final complete-input check. The original whole-Step
+deadline still covers producer preparation and native execution. Disposition:
+**retain** protocol, context-delivery and settlement adaptations; this receiving
+input guard adds no installed-harness or version qualification.
+
 Grader-source privacy disposition: **retain** the existing protocol, settlement
 and reserved-directory adaptations. The common source-admission owner refuses
 private-bearing native workspaces before harness invocation; it does not add a

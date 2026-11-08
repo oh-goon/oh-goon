@@ -8,7 +8,7 @@ import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, NoReturn, cast
 
 import httpx2
 import pytest
@@ -34,6 +34,7 @@ from oh_goon.core.models.fleet_observation import (
 )
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
+    AgentResultRole,
     ResolvedAgentStep,
     ResolvedCommandStep,
 )
@@ -396,6 +397,7 @@ def test_native_receiver_refuses_missing_or_conflicting_authority_before_evidenc
     tmp_path: Path, attack: str
 ) -> None:
     _, handoff, step, runtime = _case(tmp_path)
+    assert step.workload.harness == "native"
     selected = step.workload.native_agent
     assert selected is not None
     if attack == "no-connection":
@@ -692,16 +694,73 @@ def test_native_initial_evidence_keeps_long_qualified_presentation_intact(
     assert "tests were not executed" in projected["presentation"]["text"]
 
 
-@pytest.mark.process
+@pytest.mark.parametrize("unit,count_divisor", [("x", 1), ("é", 2), ("\n", 2)])
 def test_native_complete_input_budget_still_rejects_before_agent_launch(
-    tmp_path: Path, model_transport: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    model_transport: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    unit: str,
+    count_divisor: int,
 ) -> None:
+    import subprocess
+
     from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES
-    from oh_goon.integrations import fleet_plan_step_execution as module
 
     repository, _, step, runtime = _case(
-        tmp_path, skill_instructions="# Native fixture\n" + "x" * MAX_COMMAND_INPUT_BYTES
+        tmp_path,
+        skill_instructions="# Native fixture\n" + unit * (MAX_COMMAND_INPUT_BYTES // count_divisor),
     )
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("known oversized native input launched a producer"),
+    )
+    with pytest.raises(FleetPlanInvalid, match="Native prompt exceeds.*input budget"):
+        execute_direct_step(repository, step, runtime, step_order=1)
+    assert model_transport == []
+
+
+def test_native_frozen_input_encoded_byte_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.integrations import fleet_plan_native_steps as module
+
+    skill_instructions = "# Native fixture\né\n"
+    _, handoff, step, runtime = _case(tmp_path, skill_instructions=skill_instructions)
+    encoded = json.dumps(
+        {"task": handoff.task, "skill_instructions": skill_instructions},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    monkeypatch.setattr(module, "MAX_COMMAND_INPUT_BYTES", len(encoded))
+    prepared = prepare_native_step_input(handoff.encode_prework_delivery(), step, runtime)
+    assert prepared.skill_instructions == skill_instructions
+    monkeypatch.setattr(module, "MAX_COMMAND_INPUT_BYTES", len(encoded) - 1)
+    with pytest.raises(FleetPlanInvalid, match="Native prompt exceeds.*input budget"):
+        prepare_native_step_input(handoff.encode_prework_delivery(), step, runtime)
+
+
+@pytest.mark.process
+def test_native_complete_prompt_still_checks_evidence_and_metadata_bytes(
+    tmp_path: Path, model_transport: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.integrations import fleet_plan_native_steps
+    from oh_goon.integrations import fleet_plan_step_execution as module
+
+    skill_instructions = "# Native fixture\n" + "x" * (64 * 1024)
+    repository, handoff, step, runtime = _case(
+        tmp_path,
+        skill_instructions=skill_instructions,
+        timeout_seconds=120.0,
+    )
+    frozen_bytes = json.dumps(
+        {"task": handoff.task, "skill_instructions": skill_instructions},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    # Exactly fitting frozen fields permit the real producer. The additional
+    # qualified evidence and metadata must still fail the complete input bound.
+    monkeypatch.setattr(fleet_plan_native_steps, "MAX_COMMAND_INPUT_BYTES", len(frozen_bytes))
     original_factory = native_profile_command_runner
     producers: list[tuple[str, ...]] = []
 
@@ -936,7 +995,7 @@ def test_codex_service_receiver_rejects_conflicting_transport_authority(
     ],
 )
 def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancelled: bool, role: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancelled: bool, role: AgentResultRole
 ) -> None:
     from oh_goon.integrations import agent_codex_service_execution as service_owner
 
@@ -1024,6 +1083,7 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
         assert caught.value.outcome is failure
         retained = cancellation_evidence(step, caught.value)
         assert retained.settlement.outcome == "CANCELLED"
+        assert retained.supervisor is not None
         assert retained.supervisor.final_process_group_quiescent is True
         assert retained.physical_execution_id == "owned-service-preflight"
         assert "synthetic-private-service-protocol" not in retained.model_dump_json()
@@ -1057,14 +1117,14 @@ def test_codex_service_failed_preflight_retains_original_cleanup_in_durable_step
         artifacts=(),
     )
     assert isinstance(evidence, FailedPlanStepExecution)
-    retained = FailedPlanStepExecution.model_validate_json(
+    retained_failure = FailedPlanStepExecution.model_validate_json(
         evidence.model_dump_json(exclude_computed_fields=True)
     )
-    assert retained.returncode == PLAN_CONTRACT_RETURN_CODE
-    assert retained.attempts[0].supervisor is not None
-    assert retained.attempts[0].supervisor.cleanup_reason == "cancel"
-    assert retained.attempts[0].supervisor.final_process_group_quiescent is True
-    assert retained.observations == (observation,)
+    assert retained_failure.returncode == PLAN_CONTRACT_RETURN_CODE
+    assert retained_failure.attempts[0].supervisor is not None
+    assert retained_failure.attempts[0].supervisor.cleanup_reason == "cancel"
+    assert retained_failure.attempts[0].supervisor.final_process_group_quiescent is True
+    assert retained_failure.observations == (observation,)
 
 
 @pytest.mark.parametrize("rejection", ("phase", "protocol"))
@@ -1076,6 +1136,7 @@ def test_private_native_rejection_retains_bounded_static_context_after_a_settled
     from oh_goon.integrations.agent_native_execution import NativeAgentEvents
 
     repository, handoff, step, runtime = _case(tmp_path, sandboxed=False)
+    assert step.workload.harness == "native"
     selected = replace(
         step.workload.native_agent,
         agent="codex",
@@ -1097,6 +1158,7 @@ def test_private_native_rejection_retains_bounded_static_context_after_a_settled
     step = resolve_delivered_agent_step(handoff, native_agent=selected, role="review")
     packet = handoff.encode_prework_delivery()
     runtime = replace(runtime, native_profile=selected, agent_delivery_for=lambda *_args: packet)
+    assert selected.definition.executable is not None
     execution = service_owner.CodexServiceExecution(
         outcome=StepOutcome(
             argv=(selected.definition.executable, "app-server"),
@@ -1124,7 +1186,7 @@ def test_private_native_rejection_retains_bounded_static_context_after_a_settled
     monkeypatch.setattr(service_owner, "execute_codex_service_run", lambda **_kwargs: execution)
     if rejection == "protocol":
 
-        def reject_submission(*_args, **_kwargs):
+        def reject_submission(*_args: object, **_kwargs: object) -> NoReturn:
             raise FleetPlanInvalid("RAW_PRIVATE_SUBMISSION_ERROR_CANARY")
 
         monkeypatch.setattr(native_owner, "decode_agent_harness_submission", reject_submission)
