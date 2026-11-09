@@ -25,6 +25,11 @@ from oh_goon.engine.command import (
     CommandSupervisorReceipt,
 )
 from oh_goon.repository_tooling import local_test_ram as owner
+from oh_goon.repository_tooling.frontend_test_results import (
+    collect_native_vitest,
+    require_native_vitest_files,
+    vitest_outcomes,
+)
 from oh_goon.repository_tooling.pytest_resource_budget import (
     PytestCgroupObservation,
     PytestCgroupUsageSnapshot,
@@ -35,9 +40,18 @@ from oh_goon.repository_tooling.pytest_resource_budget import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@pytest.fixture
+def native_frontend_toolchain() -> None:
+    """Declare native locked npm capability without setup during collection."""
+
+
 def _native_environment() -> dict[str, str]:
     environment = dict(os.environ)
-    for name in ("NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE", "OH_GOON_LOCAL_TEST_PROFILE"):
+    for name in (
+        "NODE_COMPILE_CACHE",
+        "NODE_DISABLE_COMPILE_CACHE",
+        "OH_GOON_LOCAL_TEST_PROFILE",
+    ):
         environment.pop(name, None)
     return {**environment, "OH_GOON_TEST_CPUS": "2"}
 
@@ -64,9 +78,12 @@ def native_ram_capability(tmp_path_factory: pytest.TempPathFactory) -> None:
             for row in budget.cgroups
         )
     ):
-        pytest.skip("native optional RAM headroom unavailable; cache qualification not run")
+        pytest.skip(
+            "native optional RAM headroom unavailable; cache qualification not run"
+        )
     if sys.platform != "linux" or any(
-        shutil.which(name) is None for name in ("unshare", "mount", "node", "systemd-run")
+        shutil.which(name) is None
+        for name in ("unshare", "mount", "node", "systemd-run")
     ):
         pytest.skip("native Linux user namespace, Node and CPU scope tools unavailable")
     node = subprocess.run(
@@ -105,7 +122,11 @@ def native_ram_capability(tmp_path_factory: pytest.TempPathFactory) -> None:
 
 @pytest.fixture
 def admitted(monkeypatch: pytest.MonkeyPatch) -> PytestResourceBudget:
-    for name in ("NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE", "OH_GOON_LOCAL_TEST_PROFILE"):
+    for name in (
+        "NODE_COMPILE_CACHE",
+        "NODE_DISABLE_COMPILE_CACHE",
+        "OH_GOON_LOCAL_TEST_PROFILE",
+    ):
         monkeypatch.delenv(name, raising=False)
     budget = resolve_pytest_resource_budget(2)
     budget = replace(
@@ -115,20 +136,30 @@ def admitted(monkeypatch: pytest.MonkeyPatch) -> PytestResourceBudget:
         available_memory_bytes=16 * 1024**3,
         cgroup_cpu_capacity=2,
         cgroup_usage_started=PytestCgroupUsageSnapshot("test", True, None, None, None),
-        cgroups=(PytestCgroupObservation("test", "200000 100000", 2, None, 0, True, None, True),),
+        cgroups=(
+            PytestCgroupObservation(
+                "test", "200000 100000", 2, None, 0, True, None, True
+            ),
+        ),
     )
-    monkeypatch.setattr(owner, "resolve_pytest_resource_budget", lambda *args, **kwargs: budget)
+    monkeypatch.setattr(
+        owner, "resolve_pytest_resource_budget", lambda *args, **kwargs: budget
+    )
     return budget
 
 
-@pytest.mark.parametrize("setting", ["NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE"])
+@pytest.mark.parametrize(
+    "setting", ["NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE"]
+)
 def test_caller_native_settings_decline_allocation_unchanged(
     admitted: PytestResourceBudget, monkeypatch: pytest.MonkeyPatch, setting: str
 ) -> None:
     environment = {"PATH": os.defpath, setting: "caller-value"}
     calls = []
     monkeypatch.setattr(
-        tempfile, "mkdtemp", lambda **kwargs: pytest.fail("caller setting allocated scratch")
+        tempfile,
+        "mkdtemp",
+        lambda **kwargs: pytest.fail("caller setting allocated scratch"),
     )
 
     def run(*argv: str, **kwargs: Any) -> CommandResult:
@@ -155,14 +186,22 @@ def test_native_resource_unknowns_refuse_or_decline_before_allocation(
     elif unknown == "host-memory":
         budget = replace(budget, host_available_memory_bytes=None)
     elif unknown == "cgroup-limit":
-        budget = replace(budget, cgroups=(replace(budget.cgroups[0], memory_limit_observed=False),))
+        budget = replace(
+            budget, cgroups=(replace(budget.cgroups[0], memory_limit_observed=False),)
+        )
     elif unknown == "memory-high":
-        budget = replace(budget, cgroups=(replace(budget.cgroups[0], memory_high_bytes=1024),))
+        budget = replace(
+            budget, cgroups=(replace(budget.cgroups[0], memory_high_bytes=1024),)
+        )
     else:
         budget = replace(budget, cgroup_cpu_capacity=None)
-    monkeypatch.setattr(owner, "resolve_pytest_resource_budget", lambda *args, **kwargs: budget)
     monkeypatch.setattr(
-        tempfile, "mkdtemp", lambda **kwargs: pytest.fail("invalid budget allocated scratch")
+        owner, "resolve_pytest_resource_budget", lambda *args, **kwargs: budget
+    )
+    monkeypatch.setattr(
+        tempfile,
+        "mkdtemp",
+        lambda **kwargs: pytest.fail("invalid budget allocated scratch"),
     )
     calls = []
 
@@ -176,7 +215,9 @@ def test_native_resource_unknowns_refuse_or_decline_before_allocation(
             owner.run_profiled_command(("native",), resolved_cpus=2)
         assert calls == []
     else:
-        assert owner.run_profiled_command(("native",), resolved_cpus=2).cache == "declined"
+        assert (
+            owner.run_profiled_command(("native",), resolved_cpus=2).cache == "declined"
+        )
         assert calls == [("native",)]
 
 
@@ -190,7 +231,9 @@ def test_preflight_failure_falls_back_once_but_cancellation_never_retries(
         calls.append(argv)
         if len(calls) == 1:
             if failure == "cancel-before-ready":
-                raise CommandCancelledError("cancel", supervisor=CommandSupervisorReceipt())
+                raise CommandCancelledError(
+                    "cancel", supervisor=CommandSupervisorReceipt()
+                )
             return CommandResult(1, "", "unshare denied")
         return CommandResult(23, "", "")
 
@@ -223,7 +266,9 @@ def _ready_keeper(
     monkeypatch.setattr(os, "fstatvfs", capacity)
     if cleanup_failure:
         monkeypatch.setattr(
-            Path, "rmdir", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("busy"))
+            Path,
+            "rmdir",
+            lambda *args, **kwargs: (_ for _ in ()).throw(OSError("busy")),
         )
 
     def run(*argv: str, **kwargs: Any) -> CommandResult:
@@ -243,7 +288,10 @@ def _ready_keeper(
         assert birth is not None
         kwargs["process_observer"](
             CommandProcessLifecycleEvent(
-                "PROCESS_STARTED", "fixture", os.getpid(), f"{birth.boot_id}:{birth.start_ticks}"
+                "PROCESS_STARTED",
+                "fixture",
+                os.getpid(),
+                f"{birth.boot_id}:{birth.start_ticks}",
             )
         )
         os.write(kwargs["pass_fds"][0], json.dumps({"pid": os.getpid()}).encode())
@@ -336,7 +384,10 @@ raise SystemExit(19)
             stdin="native-stdin",
         )
         assert os.read(read_fd, 9) == b"native-fd"
-        assert '"cache": "owned"' in result.stderr and '"cleanup": "verified"' in result.stderr
+        assert (
+            '"cache": "owned"' in result.stderr
+            and '"cleanup": "verified"' in result.stderr
+        )
     finally:
         os.close(read_fd)
         os.close(write_fd)
@@ -396,7 +447,9 @@ def test_keeper_loss_during_work_aborts_without_reexecution(
             while not kwargs["cancel_requested"]() and time.monotonic() < deadline:
                 time.sleep(0.005)
             assert kwargs["cancel_requested"]()
-            raise CommandCancelledError("keeper lost", supervisor=CommandSupervisorReceipt())
+            raise CommandCancelledError(
+                "keeper lost", supervisor=CommandSupervisorReceipt()
+            )
         callbacks = dict(kwargs)
         callbacks["cancel_requested"] = started.is_set
         return original(*argv, **callbacks)
@@ -435,7 +488,11 @@ def test_native_sigterm_after_ready_settles_original_and_keeper(
     descriptors = []
     try:
         deadline = time.monotonic() + 10
-        while not marker.is_file() and process.poll() is None and time.monotonic() < deadline:
+        while (
+            not marker.is_file()
+            and process.poll() is None
+            and time.monotonic() < deadline
+        ):
             time.sleep(0.02)
         assert marker.is_file(), process.communicate(timeout=5)
         started = json.loads(marker.read_text())
@@ -455,3 +512,99 @@ def test_native_sigterm_after_ready_settles_original_and_keeper(
             process.communicate(timeout=10)
         for descriptor in descriptors:
             os.close(descriptor)
+
+
+@pytest.mark.process
+@pytest.mark.native_resources
+def test_authored_node_and_dom_membership_is_identical_with_ram_profile(
+    tmp_path: Path,
+    native_ram_capability: None,
+    native_frontend_toolchain: None,
+) -> None:
+    files = (
+        "src/domain/concurrency/MutationController.test.ts",
+        "src/domain/reads/readResources.test.ts",
+        "src/app/pages/runStepUrl.test.ts",
+        "src/app/pages/CatalogPage.test.tsx",
+        "src/features/game-tape/components/GameTapeOutputs.test.tsx",
+    )
+    targets = tuple("frontend/" + path for path in files)
+    collection = collect_native_vitest(ROOT, targets)
+    projects = {row["file"]: row["projectName"] for row in collection["selected"]}
+    assert set(projects.values()) == {"node", "dom"}
+    signatures = []
+    counts = []
+    for mode in ("baseline", "ram"):
+        directory = tmp_path / mode
+        directory.mkdir(mode=0o700)
+        report = directory / "vitest.json"
+        environment = _native_environment()
+        environment["OH_GOON_VITEST_JSON_REPORT"] = str(report)
+        if mode == "ram":
+            environment.pop("OH_GOON_TEST_CPUS")
+            environment["OH_GOON_LOCAL_TEST_PROFILE"] = "ram"
+        native = subprocess.run(
+            [
+                "bash",
+                str(ROOT / "scripts/development_test_resources.sh"),
+                "sh",
+                "-c",
+                'cd "$1" && shift && exec "$@"',
+                "sh",
+                str(ROOT / "frontend"),
+                "npm",
+                "run",
+                "test",
+                "--",
+                *("./" + path for path in files),
+            ],
+            env=environment,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert native.returncode == 0, (native.stdout, native.stderr)
+        assert "at most 2 CPUs" in native.stderr
+        if mode == "ram":
+            prefix = "RAM_TEST_PROFILE: "
+            diagnostics = [
+                json.loads(line.removeprefix(prefix))
+                for line in native.stderr.splitlines()
+                if line.startswith(prefix)
+            ]
+            assert diagnostics == [
+                {
+                    "cache": "owned",
+                    "cleanup": "verified",
+                    "native_process_cleanup": "verified",
+                    "native_exit_code": 0,
+                }
+            ]
+        with report.open("rb") as source:
+            encoded = source.read(4 * 1024 * 1024 + 1)
+        assert len(encoded) <= 4 * 1024 * 1024
+        payload = json.loads(encoded)
+        complete, passed, native_counts = vitest_outcomes(payload)
+        assert complete and passed and native_counts["numPassedTests"] > 0
+        assert require_native_vitest_files(
+            payload,
+            project_root=ROOT / "frontend",
+            expected_files=targets,
+            collection=collection,
+        ) == set(targets)
+        cases = []
+        project_counts = {"node": 0, "dom": 0}
+        for result in payload["testResults"]:
+            path = (
+                "frontend/"
+                + Path(result["name"]).relative_to(ROOT / "frontend").as_posix()
+            )
+            for assertion in result["assertionResults"]:
+                cases.append((path, assertion["fullName"], assertion["status"]))
+                project_counts[projects[path]] += 1
+        assert all(value > 0 for value in project_counts.values())
+        signatures.append(sorted(cases))
+        counts.append(native_counts)
+    assert signatures[0] == signatures[1]
+    assert counts[0] == counts[1]
