@@ -523,8 +523,9 @@ def test_exec_preserves_process_identity_and_sigint_for_owned_descendants(
     program = (
         "import os,subprocess,sys\n"
         "child=subprocess.Popen([sys.executable,'-S','-c','import time; time.sleep(30)'])\n"
-        "print(os.getpid(), child.pid, flush=True)\n"
-        "try: child.wait()\n"
+        "try:\n"
+        " print(os.getpid(), child.pid, flush=True)\n"
+        " child.wait()\n"
         "except KeyboardInterrupt:\n"
         " child.wait(timeout=5)\n"
         " print('descendant-closed', flush=True)\n"
