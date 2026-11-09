@@ -16,6 +16,24 @@ oh_goon_test_resolved_cpus() {
   printf '%s\n' "$value"
 }
 
+oh_goon_test_exec() {
+  local cpus=$1 profile=$2 scratch_owner
+  shift 2
+  if [[ "$profile" == ram ]]; then
+    # Native caller settings also transport the outer profile's admitted cache.
+    # Nested Make commands reuse it without another scratch discovery/allocation.
+    if [[ -v NODE_COMPILE_CACHE || -v NODE_DISABLE_COMPILE_CACHE ]]; then
+      exec "$@"
+    fi
+    scratch_owner="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/backend/.venv/bin/oh-goon-local-test-ram"
+    if [[ -x "$scratch_owner" ]]; then
+      exec "$scratch_owner" --resolved-cpus "$cpus" -- "$@"
+    fi
+    printf 'Local test RAM cache: unavailable before work (locked backend environment not prepared); retaining original storage\n' >&2
+  fi
+  exec "$@"
+}
+
 oh_goon_test_is_linux() {
   [[ "$OSTYPE" == linux* ]]
 }
@@ -115,7 +133,15 @@ oh_goon_test_cpu_controller_available() {
 
 oh_goon_test_resources_main() {
   local cpus child=0 script quota root directory owner_pid=$BASHPID tasks_max=max
-  local -a tasks_property=() tasks_argument=()
+  local profile=${OH_GOON_LOCAL_TEST_PROFILE-} received_profile
+  local -a tasks_property=() tasks_argument=() profile_argument=()
+  case "$profile" in
+    ''|ram) ;;
+    *)
+      printf 'TEST PROFILE CONFIGURATION ERROR: OH_GOON_LOCAL_TEST_PROFILE must be ram or unset\n' >&2
+      return 2
+      ;;
+  esac
   if [[ ${1-} == --oh-goon-cgroup-child ]]; then
     shift
     cpus=$(oh_goon_test_resolved_cpus "${1-}") || return 2
@@ -124,6 +150,17 @@ oh_goon_test_resources_main() {
       return 2
     fi
     shift
+    if [[ ${1-} == --local-test-profile ]]; then
+      received_profile=${2-}
+      if [[ "$received_profile" != ram || "$received_profile" != "$profile" ]]; then
+        printf 'TEST PROFILE CONFIGURATION ERROR: receiving child differs from its resolved local test profile\n' >&2
+        return 2
+      fi
+      shift 2
+    elif [[ -n "$profile" ]]; then
+      printf 'TEST PROFILE CONFIGURATION ERROR: receiving child has no transported local test profile\n' >&2
+      return 2
+    fi
     if [[ ${1-} == --tasks-max ]]; then
       tasks_max=${2-}
       if [[ ! "$tasks_max" =~ ^[0-9]+$ || ${#tasks_max} -gt 18 ]] || ((10#$tasks_max < 1)); then
@@ -139,7 +176,15 @@ oh_goon_test_resources_main() {
     shift
     child=1
   else
-    cpus=$(oh_goon_test_resolved_cpus "${OH_GOON_TEST_CPUS-0}") || return 2
+    if [[ "$profile" == ram && -z "${OH_GOON_TEST_CPUS+x}" ]]; then
+      cpus=2
+    else
+      cpus=$(oh_goon_test_resolved_cpus "${OH_GOON_TEST_CPUS-0}") || return 2
+    fi
+    if [[ "$profile" == ram ]] && ((cpus == 0)); then
+      printf 'TEST PROFILE CONFIGURATION ERROR: ram requires positive OH_GOON_TEST_CPUS; unset it to use 2 CPUs\n' >&2
+      return 2
+    fi
     if [[ ${1-} == -- ]]; then
       shift
     fi
@@ -149,6 +194,10 @@ oh_goon_test_resources_main() {
     return 2
   fi
   export OH_GOON_TEST_CPUS=$cpus
+  if [[ "$profile" == ram ]]; then
+    export OH_GOON_LOCAL_TEST_PROFILE=$profile
+    profile_argument=(--local-test-profile "$profile")
+  fi
   if ((cpus == 0)); then
     printf 'Test CPU budget: no configured limit (OH_GOON_TEST_CPUS=0)\n' >&2
     exec "$@"
@@ -172,7 +221,8 @@ oh_goon_test_resources_main() {
   fi
   if oh_goon_test_cpu_budget_verified "$cpus" "$root" "$directory"; then
     printf 'Test CPU budget: at most %s CPUs (verified inherited cgroup quota)\n' "$cpus" >&2
-    exec "$@"
+    oh_goon_test_exec "$cpus" "$profile" "$@"
+    return $?
   fi
   if ((child)); then
     printf 'TEST CPU BUDGET UNENFORCED: native cgroup quota does not establish the resolved %s CPU budget\n' "$cpus" >&2
@@ -200,7 +250,7 @@ oh_goon_test_resources_main() {
   printf 'Test CPU budget: native enforcement required; requesting %s CPUs through systemd\n' "$cpus" >&2
   exec systemd-run --user --scope --slice=app.slice \
     -p "CPUQuota=$quota%" -p CPUWeight=20 "${tasks_property[@]}" -- \
-    "$BASH" "$script" --oh-goon-cgroup-child "$cpus" "${tasks_argument[@]}" -- "$@"
+    "$BASH" "$script" --oh-goon-cgroup-child "$cpus" "${profile_argument[@]}" "${tasks_argument[@]}" -- "$@"
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

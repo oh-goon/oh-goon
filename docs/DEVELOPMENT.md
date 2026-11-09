@@ -246,6 +246,57 @@ Coverage gates retain file batches and their original coverage sources. Native c
 
 Batch JSON reports include the resolved budget and observed enforcement facts, native collection duration, whole-run CPU time, and the peak RSS of waited-for children where the host provides those observations. Child peak RSS is not the sum of concurrently resident processes. PID-bound cgroup observations also report CPU-quota throttling counter changes and lifetime memory/task peaks when available; a shared cgroup may include other work, and concurrent task peaks do not count total child creation. Resource diagnostics do not change selected membership, result verdicts, process deadlines or receipt authority. Reduced concurrency can increase elapsed time; a timeout remains unverified and is never converted to PASS or hidden by an automatic timeout extension.
 
+#### Opt-in RAM-first local tests
+
+```bash
+OH_GOON_LOCAL_TEST_PROFILE=ram make test
+OH_GOON_LOCAL_TEST_PROFILE=ram OH_GOON_TEST_CPUS=2 make check
+```
+
+The `ram` profile defaults an **unset** CPU setting to a verified two-CPU
+quota. Explicit positive CPU limits remain supported; an explicit zero is
+rejected before work. Unknown profile names are rejected. Without this opt-in,
+the existing local and hosted defaults remain unchanged. Run major checks
+sequentially: separate invocations still own separate quotas.
+
+The profile experiments with Node's native compile cache in a private,
+512-MiB maximum tmpfs. It does not prefill RAM. Admission uses the existing
+native resource observations, reserves desktop and worker headroom, and
+declines allocation when effective available memory or required native
+facilities cannot be established. Only a cache keeper enters the private
+user/mount namespace; the original workload retains its user, groups,
+namespaces, working directory and native test owners. Node accesses the mount
+through the live keeper's `/proc` path. Normal cleanup waits for the original
+process group to become quiescent, then closes the keeper and its disposable
+cache. If native process cleanup cannot establish quiescence, the optional
+cache is withdrawn, the original scratch root is retained, and cleanup is
+reported incomplete. Existing open filesystem references retain their native
+kernel lifetime; this failure does not trigger another test execution.
+Node owns cache creation, source-byte invalidation and runtime version keys.
+Caller-selected `NODE_COMPILE_CACHE` or `NODE_DISABLE_COMPILE_CACHE` settings are
+preserved instead of allocating another cache.
+
+An unavailable mount, insufficient RAM or denied permissions causes an explicit
+fallback **before work** to the original storage and cache settings, with the CPU
+limit retained. Once the workload starts, a failure, cancellation, OOM or full
+cache is reported through the original native result; it is never retried as a
+successful disk fallback. Cleanup diagnostics remain separate from that result.
+This profile does not move `TMPDIR`, HOME, XDG state, pytest fixtures, SQLite,
+workspaces, resume receipts, logs, coverage or other authoritative evidence.
+Vitest keeps its existing threads, sequential files, isolation and worker
+settings. Its filesystem module cache and result-cache locations are unchanged.
+The native coverage command sets `NODE_DISABLE_COMPILE_CACHE=1` before Vitest
+starts, following [Node's coverage guidance](https://nodejs.org/download/release/v22.22.1/docs/api/module.html#module-compile-cache).
+
+Treat cache population and reuse as separate measurements. Compare fresh native
+runs of the same source, exact test membership, toolchain, workers and verified
+CPU quota, including setup and cache creation; do not time resumed pytest PASS
+receipts. An OS page cache, or an already RAM-backed `/tmp`, can make a storage
+change immaterial. A compile-cache comparison also changes native caching policy;
+it does not establish a RAM-versus-disk speedup. Report negative experiments and
+unmeasured metrics explicitly. This opt-in does not establish APP, browser,
+release, privileged/native or WSL qualification; ordinary CI remains unchanged.
+
 ### Private local check logs
 
 The check/test/verify/certify logging wrapper selects the prepared backend

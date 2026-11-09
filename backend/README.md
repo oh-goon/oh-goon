@@ -46,6 +46,11 @@ budget requires cgroup v2 and native systemd user CPU control; unavailable
 enforcement stops before test execution. Direct focused `uv run ... pytest`
 commands remain native and do not acquire the Make-owned CPU scope.
 
+The opt-in `OH_GOON_LOCAL_TEST_PROFILE=ram` instead defaults an unset CPU
+setting to two and rejects zero. Its optional bounded native Node compile cache
+and pre-run storage fallback are described in the
+[local test resource budget](../docs/DEVELOPMENT.md#opt-in-ram-first-local-tests).
+
 Backend and integration Make gates use the existing bounded pytest batches,
 retain their original pytest configuration and markers, and default locally to
 one worker. Local relevant `make check` requests two workers; relevant hosted

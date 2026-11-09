@@ -50,6 +50,23 @@ class PytestCgroupObservation:
     cpu_capacity: float | None
     memory_max_bytes: int | None
     memory_current_bytes: int | None
+    memory_limit_observed: bool = False
+    memory_high_bytes: int | None = None
+    memory_high_observed: bool = False
+
+
+def _memory_limit(path: Path, *, optional_root: bool) -> tuple[int | None, bool]:
+    """Preserve native unlimited versus unavailable facts in the same read cut."""
+    try:
+        with path.open(encoding="utf-8") as stream:
+            raw = stream.read(8193)
+    except FileNotFoundError:
+        return None, optional_root
+    except (OSError, UnicodeError):
+        return None, False
+    value = raw.strip()
+    parsed = _nonnegative_integer(value)
+    return parsed, len(raw) <= 8192 and (value == "max" or parsed is not None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,13 +123,22 @@ def _cgroup_observations(
             period = _nonnegative_integer(fields[1])
             if quota is not None and period is not None and quota > 0 and period > 0:
                 capacity = quota / period
+        memory_max, memory_observed = _memory_limit(
+            current / "memory.max", optional_root=current == cgroup_root
+        )
+        memory_high, high_observed = _memory_limit(
+            current / "memory.high", optional_root=current == cgroup_root
+        )
         observations.append(
             PytestCgroupObservation(
                 str(current),
                 cpu_max,
                 capacity,
-                _nonnegative_integer(_small_text(current / "memory.max")),
+                memory_max,
                 _nonnegative_integer(_small_text(current / "memory.current")),
+                memory_observed,
+                memory_high,
+                high_observed,
             )
         )
         if current == cgroup_root:
