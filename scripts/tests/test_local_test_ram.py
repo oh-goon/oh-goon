@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import select
-import shutil
 import signal
 import subprocess
 import sys
@@ -40,6 +39,20 @@ from oh_goon.repository_tooling.pytest_resource_budget import (
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _profile_receipt(stderr: str) -> dict[str, Any]:
+    prefix = "RAM_TEST_PROFILE: "
+    receipts = [
+        json.loads(line.removeprefix(prefix))
+        for line in stderr.splitlines()
+        if line.startswith(prefix)
+    ]
+    assert len(receipts) == 1
+    receipt = receipts[0]
+    assert receipt["cleanup"] == receipt["native_process_cleanup"] == "verified"
+    assert receipt["cache"] in {"owned", "declined", "fallback"}
+    return cast(dict[str, Any], receipt)
+
+
 @pytest.fixture
 def native_frontend_toolchain() -> None:
     """Declare native locked npm capability without setup during collection."""
@@ -54,70 +67,6 @@ def _native_environment() -> dict[str, str]:
     ):
         environment.pop(name, None)
     return {**environment, "OH_GOON_TEST_CPUS": "2"}
-
-
-@pytest.fixture(scope="module")
-def native_ram_capability(tmp_path_factory: pytest.TempPathFactory) -> None:
-    budget = resolve_pytest_resource_budget(2)
-    needed = owner.HEADROOM_BYTES + 2 * 512 * 1024**2 + owner.CACHE_BYTES
-    if (
-        budget.host_available_memory_bytes is None
-        or budget.available_memory_bytes is None
-        or budget.available_memory_bytes < needed
-        or not budget.cgroups
-        or any(
-            not row.memory_limit_observed
-            or not row.memory_high_observed
-            or (
-                row.memory_high_bytes is not None
-                and (
-                    row.memory_current_bytes is None
-                    or row.memory_high_bytes - row.memory_current_bytes < needed
-                )
-            )
-            for row in budget.cgroups
-        )
-    ):
-        pytest.skip(
-            "native optional RAM headroom unavailable; cache qualification not run"
-        )
-    if sys.platform != "linux" or any(
-        shutil.which(name) is None
-        for name in ("unshare", "mount", "node", "systemd-run")
-    ):
-        pytest.skip("native Linux user namespace, Node and CPU scope tools unavailable")
-    node = subprocess.run(
-        ["node", "-p", "typeof require('node:module').getCompileCacheDir"],
-        env=_native_environment(),
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    if node.returncode or node.stdout.strip() != "function":
-        pytest.skip("native Node compile cache API unavailable; qualification not run")
-    directory = tmp_path_factory.mktemp("native-ram-capability")
-    probe = subprocess.run(
-        [
-            "unshare",
-            "--user",
-            "--map-root-user",
-            "--mount",
-            "--propagation",
-            "private",
-            "--",
-            "mount",
-            "-t",
-            "tmpfs",
-            "-o",
-            "size=4096,noexec,nodev,nosuid,mode=0700",
-            "tmpfs",
-            str(directory),
-        ],
-        capture_output=True,
-        timeout=10,
-    )
-    if probe.returncode:
-        pytest.skip("native rootless tmpfs mount unavailable on this host")
 
 
 @pytest.fixture
@@ -331,84 +280,117 @@ def test_ready_cache_failure_preserves_native_result_and_converges(
 
 @pytest.mark.process
 @pytest.mark.native_resources
-def test_native_cache_preserves_workload_identity_fds_and_bounded_mount(
-    tmp_path: Path, native_ram_capability: None
+def test_optional_cache_preserves_workload_identity_and_native_settings(
+    tmp_path: Path, record_property: Callable[[str, object], None]
 ) -> None:
-    output = tmp_path / "native.json"
-    read_fd, write_fd = os.pipe()
     script = """
-import json, os, pathlib, subprocess, sys
-cache=pathlib.Path(os.environ['NODE_COMPILE_CACHE'])
-info=os.statvfs(cache)
-original=pathlib.Path(str(cache).partition('/root')[2])
+import json, os, pathlib, shutil, subprocess, sys
+cache_text=os.environ.get('NODE_COMPILE_CACHE')
+facts={}
+node_qualification='NOT_RUN'
 os.write(int(sys.argv[2]), b'native-fd')
-module=pathlib.Path(sys.argv[1]).with_suffix('.cjs')
-module.write_text('module.exports = 42;')
-node=subprocess.run(['node','-e','require('+json.dumps(str(module))+'); console.log(require("node:module").getCompileCacheDir())'],check=True,capture_output=True,text=True)
-assert node.stdout.strip().startswith(str(cache)) and any(path.is_file() for path in cache.rglob('*'))
-pathlib.Path(sys.argv[1]).write_text(json.dumps(dict(uid=os.getuid(),gid=os.getgid(),groups=os.getgroups(),user=os.readlink('/proc/self/ns/user'),mount=os.readlink('/proc/self/ns/mnt'),capacity=info.f_blocks*info.f_frsize,original_empty=not list(original.iterdir()),stdin=sys.stdin.read())))
+if cache_text:
+ cache=pathlib.Path(cache_text)
+ info=os.statvfs(cache)
+ original=pathlib.Path(str(cache).partition('/root')[2])
+ facts=dict(capacity=info.f_blocks*info.f_frsize,original_empty=not list(original.iterdir()))
+ node=shutil.which('node')
+ if node:
+  module=pathlib.Path(sys.argv[1]).with_suffix('.cjs')
+  module.write_text('module.exports = 42;')
+  code='require('+json.dumps(str(module))+'); const m=require("node:module"); console.log(JSON.stringify(typeof m.getCompileCacheDir === "function" ? m.getCompileCacheDir() : null))'
+  native=subprocess.run([node,'-e',code],check=True,capture_output=True,text=True)
+  selected=json.loads(native.stdout)
+  if selected is not None:
+   assert pathlib.Path(selected).is_relative_to(pathlib.Path(cache_text)) and any(path.is_file() for path in cache.rglob('*'))
+   node_qualification='PASS'
+pathlib.Path(sys.argv[1]).write_text(json.dumps(dict(uid=os.getuid(),gid=os.getgid(),groups=os.getgroups(),user=os.readlink('/proc/self/ns/user'),mount=os.readlink('/proc/self/ns/mnt'),stdin=sys.stdin.read(),cache=cache_text,node_qualification=node_qualification,**facts)))
 raise SystemExit(19)
 """
-    try:
-        result = subprocess.run(
-            [
-                "bash",
-                str(ROOT / "scripts/development_test_resources.sh"),
-                str(ROOT / "backend/.venv/bin/oh-goon-local-test-ram"),
-                "--resolved-cpus",
-                "2",
-                "--",
-                sys.executable,
-                "-c",
-                script,
-                str(output),
-                str(write_fd),
-            ],
-            env=_native_environment(),
-            input="native-stdin",
-            text=True,
-            capture_output=True,
-            pass_fds=(write_fd,),
-            timeout=30,
-        )
-        assert result.returncode == 19, result.stderr
-        observed = json.loads(output.read_text())
-        assert observed == dict(
-            uid=os.getuid(),
-            gid=os.getgid(),
-            groups=os.getgroups(),
-            user=os.readlink("/proc/self/ns/user"),
-            mount=os.readlink("/proc/self/ns/mnt"),
-            capacity=owner.CACHE_BYTES,
-            original_empty=True,
-            stdin="native-stdin",
-        )
-        assert os.read(read_fd, 9) == b"native-fd"
-        assert (
-            '"cache": "owned"' in result.stderr
-            and '"cleanup": "verified"' in result.stderr
-        )
-    finally:
-        os.close(read_fd)
-        os.close(write_fd)
+    for mode in ("optional", "caller-disabled"):
+        output = tmp_path / f"{mode}.json"
+        read_fd, write_fd = os.pipe()
+        environment = _native_environment()
+        if mode == "caller-disabled":
+            environment["NODE_DISABLE_COMPILE_CACHE"] = "1"
+        try:
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(ROOT / "scripts/development_test_resources.sh"),
+                    str(ROOT / "backend/.venv/bin/oh-goon-local-test-ram"),
+                    "--resolved-cpus",
+                    "2",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    script,
+                    str(output),
+                    str(write_fd),
+                ],
+                env=environment,
+                input="native-stdin",
+                text=True,
+                capture_output=True,
+                pass_fds=(write_fd,),
+                timeout=30,
+            )
+            assert result.returncode == 19, result.stderr
+            observed = json.loads(output.read_text())
+            assert {
+                name: observed[name]
+                for name in ("uid", "gid", "groups", "user", "mount", "stdin")
+            } == dict(
+                uid=os.getuid(),
+                gid=os.getgid(),
+                groups=os.getgroups(),
+                user=os.readlink("/proc/self/ns/user"),
+                mount=os.readlink("/proc/self/ns/mnt"),
+                stdin="native-stdin",
+            )
+            assert os.read(read_fd, 9) == b"native-fd"
+            receipt = _profile_receipt(result.stderr)
+            assert receipt["native_exit_code"] == 19
+            owned = observed["cache"] is not None
+            assert owned == (receipt["cache"] == "owned")
+            if owned:
+                assert observed["capacity"] == owner.CACHE_BYTES
+                assert observed["original_empty"] is True
+            else:
+                assert receipt["cache"] in {"declined", "fallback"}
+                assert observed["node_qualification"] == "NOT_RUN"
+            if mode == "caller-disabled":
+                assert not owned and receipt["cache"] == "declined"
+            record_property(f"ram_mount_{mode}", "PASS" if owned else "NOT_RUN")
+            record_property(
+                f"node_compile_cache_{mode}", observed["node_qualification"]
+            )
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
 
 
 @pytest.mark.process
 @pytest.mark.native_resources
-def test_native_cache_enospc_after_start_never_reexecutes_workload(
-    tmp_path: Path, native_ram_capability: None
+def test_optional_cache_preserves_native_failure_and_checks_enospc_when_admitted(
+    tmp_path: Path, record_property: Callable[[str, object], None]
 ) -> None:
     count = tmp_path / "count"
     script = r"""
-import errno, os, pathlib, sys
+import errno, json, os, pathlib, sys
 with pathlib.Path(sys.argv[1]).open('a') as count: count.write('once\n')
-try:
- with open(pathlib.Path(os.environ['NODE_COMPILE_CACHE'])/'full', 'wb', buffering=0) as output:
-  os.posix_fallocate(output.fileno(), 0, 600*1024*1024)
-except OSError as error:
- assert error.errno == errno.ENOSPC
- raise SystemExit(27)
-raise SystemExit(3)
+cache=os.environ.get('NODE_COMPILE_CACHE')
+if cache:
+ try:
+  with open(pathlib.Path(cache)/'full', 'wb', buffering=0) as output:
+   os.posix_fallocate(output.fileno(), 0, 600*1024*1024)
+ except OSError as error:
+  assert error.errno == errno.ENOSPC
+  print(json.dumps(dict(cache=cache,enospc_qualification='PASS')))
+  raise SystemExit(27)
+ raise SystemExit(3)
+print(json.dumps(dict(cache=None,enospc_qualification='NOT_RUN')))
+raise SystemExit(27)
 """
     result = subprocess.run(
         [
@@ -429,7 +411,16 @@ raise SystemExit(3)
         timeout=30,
     )
     assert result.returncode == 27, result.stderr
-    assert count.read_text() == "once\n" and '"cache": "owned"' in result.stderr
+    assert count.read_text() == "once\n"
+    observed = json.loads(result.stdout)
+    receipt = _profile_receipt(result.stderr)
+    assert receipt["native_exit_code"] == 27
+    owned = observed["cache"] is not None
+    assert owned == (receipt["cache"] == "owned")
+    assert observed["enospc_qualification"] == ("PASS" if owned else "NOT_RUN")
+    if not owned:
+        assert receipt["cache"] in {"declined", "fallback"}
+    record_property("ram_enospc_qualification", observed["enospc_qualification"])
 
 
 def test_keeper_loss_during_work_aborts_without_reexecution(
@@ -462,11 +453,11 @@ def test_keeper_loss_during_work_aborts_without_reexecution(
 
 @pytest.mark.process
 @pytest.mark.native_resources
-def test_native_sigterm_after_ready_settles_original_and_keeper(
-    tmp_path: Path, native_ram_capability: None
+def test_optional_cache_sigterm_settles_original_and_admitted_keeper(
+    tmp_path: Path, record_property: Callable[[str, object], None]
 ) -> None:
     marker = tmp_path / "started.json"
-    script = "import json,os,pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text(json.dumps({'pid':os.getpid(),'cache':os.environ['NODE_COMPILE_CACHE']})); time.sleep(60)"
+    script = "import json,os,pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text(json.dumps({'pid':os.getpid(),'cache':os.environ.get('NODE_COMPILE_CACHE')})); time.sleep(60)"
     process = subprocess.Popen(
         [
             "bash",
@@ -496,16 +487,24 @@ def test_native_sigterm_after_ready_settles_original_and_keeper(
             time.sleep(0.02)
         assert marker.is_file(), process.communicate(timeout=5)
         started = json.loads(marker.read_text())
-        keeper = int(Path(started["cache"]).parts[2])
-        descriptors = [os.pidfd_open(started["pid"]), os.pidfd_open(keeper)]
+        descriptors.append(os.pidfd_open(started["pid"]))
+        owned = started["cache"] is not None
+        if owned:
+            descriptors.append(os.pidfd_open(int(Path(started["cache"]).parts[2])))
         process.send_signal(signal.SIGTERM)
         _stdout, stderr = process.communicate(timeout=15)
         assert process.returncode in {-signal.SIGTERM, 128 + signal.SIGTERM}, stderr
-        assert '"cache": "owned"' in stderr and '"cleanup": "verified"' in stderr
+        receipt = _profile_receipt(stderr)
+        assert owned == (receipt["cache"] == "owned")
+        if not owned:
+            assert receipt["cache"] in {"declined", "fallback"}
         for descriptor in descriptors:
             poll = select.poll()
             poll.register(descriptor, select.POLLIN)
             assert poll.poll(1000), "owned native process survived cancellation"
+        record_property(
+            "ram_keeper_cancellation_qualification", "PASS" if owned else "NOT_RUN"
+        )
     finally:
         if process.poll() is None:
             process.kill()
@@ -518,8 +517,8 @@ def test_native_sigterm_after_ready_settles_original_and_keeper(
 @pytest.mark.native_resources
 def test_authored_node_and_dom_membership_is_identical_with_ram_profile(
     tmp_path: Path,
-    native_ram_capability: None,
     native_frontend_toolchain: None,
+    record_property: Callable[[str, object], None],
 ) -> None:
     files = (
         "src/domain/concurrency/MutationController.test.ts",
@@ -540,6 +539,17 @@ def test_authored_node_and_dom_membership_is_identical_with_ram_profile(
         report = directory / "vitest.json"
         environment = _native_environment()
         environment["OH_GOON_VITEST_JSON_REPORT"] = str(report)
+        startup = directory / "native-node-startup.jsonl"
+        preload = directory / "observe-native-cache.mjs"
+        preload.write_text(
+            'import {appendFileSync} from "node:fs";import * as m from "node:module";import {isMainThread} from "node:worker_threads";\n'
+            + "appendFileSync("
+            + json.dumps(str(startup))
+            + ',JSON.stringify({main:isMainThread,env:process.env.NODE_COMPILE_CACHE??null,available:typeof m.getCompileCacheDir==="function",cache:typeof m.getCompileCacheDir==="function"?m.getCompileCacheDir()??null:null})+"\\n");\n'
+        )
+        environment["NODE_OPTIONS"] = (
+            environment.get("NODE_OPTIONS", "") + " --import=" + preload.as_uri()
+        ).strip()
         if mode == "ram":
             environment.pop("OH_GOON_TEST_CPUS")
             environment["OH_GOON_LOCAL_TEST_PROFILE"] = "ram"
@@ -566,21 +576,32 @@ def test_authored_node_and_dom_membership_is_identical_with_ram_profile(
         )
         assert native.returncode == 0, (native.stdout, native.stderr)
         assert "at most 2 CPUs" in native.stderr
+        observations = [json.loads(line) for line in startup.read_text().splitlines()]
+        native_main = [row for row in observations if row["main"]]
+        assert native_main
         if mode == "ram":
-            prefix = "RAM_TEST_PROFILE: "
-            diagnostics = [
-                json.loads(line.removeprefix(prefix))
-                for line in native.stderr.splitlines()
-                if line.startswith(prefix)
-            ]
-            assert diagnostics == [
-                {
-                    "cache": "owned",
-                    "cleanup": "verified",
-                    "native_process_cleanup": "verified",
-                    "native_exit_code": 0,
-                }
-            ]
+            receipt = _profile_receipt(native.stderr)
+            assert receipt["native_exit_code"] == 0
+            owned = receipt["cache"] == "owned"
+            assert all((row["env"] is not None) == owned for row in native_main)
+            if owned:
+                assert all(
+                    not row["available"]
+                    or (
+                        isinstance(row["cache"], str)
+                        and Path(row["cache"]).is_relative_to(Path(row["env"]))
+                    )
+                    for row in native_main
+                )
+            else:
+                assert receipt["cache"] in {"declined", "fallback"}
+            qualified = owned and all(row["available"] for row in native_main)
+            record_property(
+                "authored_vitest_ram_compile_cache_qualification",
+                "PASS" if qualified else "NOT_RUN",
+            )
+        else:
+            assert all(row["env"] is None for row in native_main)
         with report.open("rb") as source:
             encoded = source.read(4 * 1024 * 1024 + 1)
         assert len(encoded) <= 4 * 1024 * 1024
