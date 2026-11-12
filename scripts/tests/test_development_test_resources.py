@@ -26,7 +26,6 @@ shift 3
 oh_goon_test_cgroup_root() { printf '%s\\n' "$test_cgroup_root"; }
 oh_goon_test_cgroup_directory() { printf '%s\\n' "$test_cgroup_directory"; }
 oh_goon_test_is_linux() { return 0; }
-oh_goon_test_exec() { shift 2; exec "$@"; }
 printf '%s\\n' "$BASHPID" > "$test_cgroup_directory/cgroup.procs"
 """
 
@@ -35,44 +34,6 @@ def _bash() -> str:
     executable = shutil.which("bash")
     assert executable is not None, "native bash is required for the shell wrapper tests"
     return executable
-
-
-@pytest.mark.parametrize(
-    "name,value",
-    [
-        ("NODE_COMPILE_CACHE", "caller cache"),
-        ("NODE_COMPILE_CACHE", ""),
-        ("NODE_DISABLE_COMPILE_CACHE", "1"),
-    ],
-)
-def test_nested_profile_reuses_native_node_cache_configuration(
-    name: str, value: str
-) -> None:
-    environment = _environment("2", profile="ram")
-    environment.pop("NODE_COMPILE_CACHE", None)
-    environment.pop("NODE_DISABLE_COMPILE_CACHE", None)
-    environment[name] = value
-    observed = subprocess.run(
-        [
-            _bash(),
-            "-c",
-            'source "$1"; shift; oh_goon_test_exec 2 ram "$@"',
-            "test",
-            str(WRAPPER),
-            sys.executable,
-            "-c",
-            "import os,sys;print(os.environ[sys.argv[1]]);print(sys.stdin.read());sys.exit(37)",
-            name,
-        ],
-        env=environment,
-        input="original input",
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert observed.returncode == 37
-    assert observed.stdout == value + "\noriginal input\n"
-    assert observed.stderr == ""
 
 
 @pytest.fixture
@@ -514,9 +475,9 @@ def test_inherited_cpu_quota_keeps_private_memory_and_task_constraints_in_place(
 
 
 @pytest.mark.process
-@pytest.mark.parametrize("cpus", ["0", "2"])
+@pytest.mark.parametrize("cpus,profile", [("0", None), ("2", None), (None, "ram")])
 def test_exec_preserves_process_identity_and_sigint_for_owned_descendants(
-    tmp_path: Path, cgroup: tuple[Path, Path], cpus: str
+    tmp_path: Path, cgroup: tuple[Path, Path], cpus: str | None, profile: str | None
 ) -> None:
     _, directory = cgroup
     (directory / "cpu.max").write_text("200000 100000\n")
@@ -534,7 +495,7 @@ def test_exec_preserves_process_identity_and_sigint_for_owned_descendants(
     process = subprocess.Popen(
         _command(cgroup, sys.executable, "-S", "-c", program),
         cwd=tmp_path,
-        env=_environment(cpus),
+        env=_environment(cpus, profile=profile),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -703,14 +664,27 @@ def test_receiving_child_refuses_missing_or_changed_resolved_profile_before_work
     assert not calls.exists() and not marker.exists()
 
 
+@pytest.mark.parametrize(
+    "native_settings",
+    [
+        {},
+        {"NODE_COMPILE_CACHE": "caller cache"},
+        {"NODE_COMPILE_CACHE": ""},
+        {"NODE_DISABLE_COMPILE_CACHE": "1"},
+    ],
+)
 def test_nested_ram_wrappers_preserve_native_budget_source_environment_and_io(
-    tmp_path: Path, cgroup: tuple[Path, Path]
+    tmp_path: Path, cgroup: tuple[Path, Path], native_settings: dict[str, str]
 ) -> None:
     _root, directory = cgroup
     (directory / "cpu.max").write_text("200000 100000\n")
     binary, calls = _native_runner(tmp_path)
     selected = {
         "OH_GOON_CALLER_SOURCE_REVISION": "sha256:" + "a" * 64,
+        "OH_GOON_DB": str(tmp_path / "selected.sqlite3"),
+        "OH_GOON_LEAGUE_FILE": str(tmp_path / "selected-league.json"),
+        "OH_GOON_SQLITE_JOURNAL_MODE": "DELETE",
+        **native_settings,
         "TMPDIR": "/selected/disk/temp",
         "HOME": "/selected/home",
         "XDG_CACHE_HOME": "/selected/cache",

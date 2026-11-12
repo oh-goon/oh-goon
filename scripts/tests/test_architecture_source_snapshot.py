@@ -55,8 +55,9 @@ def test_checks_share_one_source_read_within_the_invocation(
     assert reads == [path]
 
 
+@pytest.mark.parametrize("packet_cache_bytes", [0, 1_048_576])
 def test_repeated_python_projection_reuses_evidence_without_rebinding_caller_trees(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packet_cache_bytes: int
 ) -> None:
     from oh_goon.integrations.hashmarks import HashmarksSourceEvidence
 
@@ -71,7 +72,7 @@ def test_repeated_python_projection_reuses_evidence_without_rebinding_caller_tre
         return native(self)
 
     monkeypatch.setattr(HashmarksSourceEvidence, "packet", packet)
-    with python_source_snapshot():
+    with python_source_snapshot(packet_cache_bytes=packet_cache_bytes):
         imported = python_semantic_facts(path, imported_only=True)
         observed = len(observations)
         assert observed > 0
@@ -89,7 +90,7 @@ def test_repeated_python_projection_reuses_evidence_without_rebinding_caller_tre
         assert all(call in caller_nodes for _, call in projected.calls)
         assert all(call not in caller_nodes for _, call in imported.calls)
     path.write_text(source.replace("Popen", "start"))
-    with python_source_snapshot():
+    with python_source_snapshot(packet_cache_bytes=packet_cache_bytes):
         assert [
             name for name, _ in python_semantic_facts(path, imported_only=True).calls
         ] == ["subprocess.start"]
@@ -140,6 +141,7 @@ def test_source_packet_reuse_keeps_language_validation_and_detached_public_reads
     )
 
     evidence = observe_source_bindings_text("fetch('/api');", path="source.ts")
+    cache_bytes = len(evidence.canonical_packet_json.encode("utf-8"))
     native = HashmarksSourceEvidence.packet
     observations: list[HashmarksSourceEvidence] = []
 
@@ -148,7 +150,7 @@ def test_source_packet_reuse_keeps_language_validation_and_detached_public_reads
         return native(self)
 
     monkeypatch.setattr(HashmarksSourceEvidence, "packet", observe)
-    with python_source_snapshot():
+    with python_source_snapshot(packet_cache_bytes=cache_bytes):
         packet = source_binding_packet(evidence, language="typescript")
         assert packet["facts"]
         assert (
@@ -168,7 +170,81 @@ def test_source_packet_reuse_keeps_language_validation_and_detached_public_reads
             == "observed"
         )
     assert len(observations) == 2
-    with python_source_snapshot():
+    with python_source_snapshot(packet_cache_bytes=cache_bytes):
         refreshed = source_binding_packet(evidence, language="typescript")
         assert refreshed == packet and refreshed is not packet
     assert len(observations) == 3
+
+
+@pytest.mark.parametrize("budget", [None, 0, "too-small", "exact", "ample"])
+def test_decoded_packet_retention_requires_an_explicit_utf8_byte_budget(
+    budget: str | int | None,
+) -> None:
+    from oh_goon.integrations.hashmarks import observe_source_bindings_text
+
+    evidence = observe_source_bindings_text("const label = 'å';", path="source.ts")
+    encoded_bytes = len(evidence.canonical_packet_json.encode("utf-8"))
+    characters = len(evidence.canonical_packet_json)
+    assert encoded_bytes > characters
+    limits = {
+        "too-small": characters,
+        "exact": encoded_bytes,
+        "ample": encoded_bytes * 2,
+    }
+    lifetime = (
+        python_source_snapshot()
+        if budget is None
+        else python_source_snapshot(
+            packet_cache_bytes=limits[budget] if isinstance(budget, str) else budget
+        )
+    )
+    with lifetime:
+        first = source_binding_packet(evidence, language="typescript")
+        repeated = source_binding_packet(evidence, language="typescript")
+        assert repeated == first
+        assert (repeated is first) is (budget in {"exact", "ample"})
+
+
+def test_packet_budget_overflow_does_not_evict_or_change_observations() -> None:
+    from oh_goon.integrations.hashmarks import observe_source_bindings_text
+
+    first = observe_source_bindings_text("fetch('/api');", path="first.ts")
+    second = observe_source_bindings_text("window.localStorage;", path="second.ts")
+    cache_bytes = len(first.canonical_packet_json.encode("utf-8"))
+    with python_source_snapshot(packet_cache_bytes=cache_bytes):
+        retained = source_binding_packet(first, language="typescript")
+        overflow = source_binding_packet(second, language="typescript")
+        repeated = source_binding_packet(second, language="typescript")
+        assert overflow == repeated and overflow is not repeated
+        assert source_binding_packet(first, language="typescript") is retained
+
+
+@pytest.mark.parametrize("outer_enabled", [False, True])
+@pytest.mark.parametrize("inner_enabled", [False, True])
+def test_nested_source_scopes_preserve_the_outer_packet_budget(
+    outer_enabled: bool, inner_enabled: bool
+) -> None:
+    from oh_goon.integrations.hashmarks import observe_source_bindings_text
+
+    evidence = observe_source_bindings_text("fetch('/api');", path="source.ts")
+    cache_bytes = len(evidence.canonical_packet_json.encode("utf-8"))
+    with python_source_snapshot(packet_cache_bytes=cache_bytes if outer_enabled else 0):
+        outer = source_binding_packet(evidence, language="typescript")
+        with python_source_snapshot(
+            packet_cache_bytes=cache_bytes if inner_enabled else 0
+        ):
+            inner = source_binding_packet(evidence, language="typescript")
+            assert inner == outer
+            assert (inner is outer) is outer_enabled
+        after = source_binding_packet(evidence, language="typescript")
+        assert after == outer
+        assert (after is outer) is outer_enabled
+
+
+@pytest.mark.parametrize("budget", [-1, True, 0.5])
+def test_invalid_packet_budget_is_refused_before_opening_a_lifetime(
+    budget: Any,
+) -> None:
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        with python_source_snapshot(packet_cache_bytes=budget):
+            pytest.fail("invalid packet budget entered a source lifetime")

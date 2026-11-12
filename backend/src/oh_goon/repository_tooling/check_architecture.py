@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import sys
+from collections.abc import Mapping
 from typing import Protocol
 
 from oh_goon.repository_tooling.architecture._hashmarks_verification_boundary_contract import (
@@ -75,6 +77,57 @@ from oh_goon.repository_tooling.architecture.trust_authority_registry_contract i
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     check_x0_single_execution_path,
 )
+from oh_goon.repository_tooling.pytest_resource_budget import resolve_pytest_resource_budget
+
+SOURCE_PACKET_CACHE_BYTES = 64 * 1024**2
+SOURCE_PACKET_MINIMUM_AVAILABLE_BYTES = 16 * 1024**3
+
+
+def source_packet_cache_budget(environment: Mapping[str, str]) -> int:
+    """Admit optional decoded retention from actual native resource facts."""
+    if environment.get("OH_GOON_LOCAL_TEST_PROFILE") != "ram":
+        return 0
+    budget = resolve_pytest_resource_budget(1, environ=environment)
+    if (
+        budget.configured_cpus < 1
+        or budget.cgroup_usage_started is None
+        or not budget.cgroup_usage_started.pid_bound
+        or budget.cgroup_cpu_capacity is None
+        or budget.cgroup_cpu_capacity > budget.configured_cpus
+    ):
+        raise ValueError("RAM architecture requires its resolved positive native CPU quota")
+    eligible = (
+        budget.host_available_memory_bytes is not None
+        and budget.host_available_memory_bytes >= SOURCE_PACKET_MINIMUM_AVAILABLE_BYTES
+        and budget.available_memory_bytes is not None
+        and budget.available_memory_bytes >= SOURCE_PACKET_MINIMUM_AVAILABLE_BYTES
+        and bool(budget.cgroups)
+        and all(
+            row.memory_limit_observed
+            and row.memory_high_observed
+            and (row.memory_max_bytes is None or row.memory_current_bytes is not None)
+            and (
+                row.memory_high_bytes is None
+                or (
+                    row.memory_current_bytes is not None
+                    and row.memory_high_bytes - row.memory_current_bytes
+                    >= SOURCE_PACKET_MINIMUM_AVAILABLE_BYTES
+                )
+            )
+            for row in budget.cgroups
+        )
+    )
+    if not eligible:
+        print(
+            "RAM architecture packet retention declined: memory headroom unverified or insufficient",
+            file=sys.stderr,
+        )
+        return 0
+    print(
+        f"RAM architecture packet retention: {SOURCE_PACKET_CACHE_BYTES} encoded bytes maximum",
+        file=sys.stderr,
+    )
+    return SOURCE_PACKET_CACHE_BYTES
 
 
 class ArchitectureCheck(Protocol):
@@ -113,7 +166,12 @@ CHECKS: tuple[ArchitectureCheck, ...] = (
 
 
 def main() -> int:
-    with python_source_snapshot():
+    try:
+        packet_cache_bytes = source_packet_cache_budget(dict(os.environ))
+    except ValueError as error:
+        print(f"RAM architecture refused: {error}", file=sys.stderr)
+        return 3
+    with python_source_snapshot(packet_cache_bytes=packet_cache_bytes):
         failures = [(check.__name__, violation) for check in CHECKS for violation in check()]
     if not failures:
         print("Architecture checks passed")

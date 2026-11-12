@@ -9,7 +9,6 @@ import stat
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
 
 from oh_goon.core import local_access_protocol
 from oh_goon.core.file_digest import sha256_file_with_size
@@ -23,11 +22,6 @@ from oh_goon.engine.atomic_execution_bytes import (
     sealed_execution_shebang,
 )
 from oh_goon.runtime import exec_guard_protocol
-
-CommandEnvironmentContext = Literal["step", "trusted_developer"]
-_DEVELOPER_CONFIGURATION_ENVIRONMENT = frozenset(
-    {"OH_GOON_DB", "OH_GOON_LEAGUE_FILE", SQLITE_JOURNAL_MODE_ENV, "OH_GOON_PROGRESS_FD"}
-)
 
 
 def _non_exportable_process_environment() -> frozenset[str]:
@@ -45,21 +39,11 @@ def _non_exportable_process_environment() -> frozenset[str]:
 
 
 def sanitized_child_environment(
-    argv: Sequence[str],
-    env: Mapping[str, str] | None,
-    *,
-    context: CommandEnvironmentContext = "step",
+    argv: Sequence[str], env: Mapping[str, str] | None
 ) -> dict[str, str]:
     """Remove control-plane authority before process birth and preserve explicit lookup authority."""
-    if context not in ("step", "trusted_developer"):
-        raise ValueError("command environment context must be step or trusted_developer")
-    if context == "trusted_developer" and env is None:
-        raise ValueError("trusted developer command requires an explicitly captured environment")
     child = dict(os.environ if env is None else env)
-    non_exportable = _non_exportable_process_environment()
-    if context == "trusted_developer":
-        non_exportable -= _DEVELOPER_CONFIGURATION_ENVIRONMENT
-    blocked = {name.casefold() for name in non_exportable}
+    blocked = {name.casefold() for name in _non_exportable_process_environment()}
     child = {name: value for name, value in child.items() if name.casefold() not in blocked}
     if env is not None and argv and _requires_path_lookup(argv[0]) and "PATH" not in child:
         raise ValueError(

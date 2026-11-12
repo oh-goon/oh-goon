@@ -1,27 +1,22 @@
-import json
 import os
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Never, cast
 
 import pytest
 
 from oh_goon.core.models.termination import TerminationSignal
-from oh_goon.core.strict_executor_authority import STRICT_EXECUTOR_AUTHORITY_ENVIRONMENT
 from oh_goon.engine.command import (
     CommandAuthorityTerminatedError,
     CommandCancelledError,
-    CommandEnvironmentContext,
     CommandOutputLimitExceeded,
     CommandProcessLifecycleEvent,
     CommandTimeoutExpired,
+    _terminate_process_group,
     run_command,
 )
-from oh_goon.engine.command_process_tree import _terminate_process_group
-from oh_goon.runtime import exec_guard_protocol
 
 
 def test_run_command_supports_working_directory_and_environment(tmp_path: Path) -> None:
@@ -151,13 +146,11 @@ def test_run_command_terminates_process_group_on_cancellation() -> None:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
-def test_parent_death_guard_establishes_owned_process_group_before_supervision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_parent_death_guard_establishes_owned_process_group_before_supervision(monkeypatch) -> None:
     observed_start_new_session: list[bool] = []
     real_popen = subprocess.Popen
 
-    def recording_popen(*args: Any, **kwargs: Any) -> subprocess.Popen[str]:
+    def recording_popen(*args, **kwargs):
         observed_start_new_session.append(bool(kwargs.get("start_new_session")))
         return real_popen(*args, **kwargs)
 
@@ -308,7 +301,7 @@ def test_run_command_explicit_capture_limit_fails_closed_without_unbounded_reten
     assert error.supervisor.final_process_group_quiescent is True
 
 
-def test_command_does_not_inherit_control_plane_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_command_does_not_inherit_control_plane_authority(monkeypatch) -> None:
     authority = {
         "OH_GOON_DB": "authority.sqlite",
         "OH_GOON_EXECUTORS_FILE": "executors.json",
@@ -334,7 +327,7 @@ def test_command_does_not_inherit_control_plane_authority(monkeypatch: pytest.Mo
 
 
 def test_command_never_exports_process_local_access_capability(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch,
 ) -> None:
     monkeypatch.setenv("OH_GOON_LOCAL_ACCESS_TOKEN", "control-plane-secret")
     result = run_command(
@@ -355,72 +348,8 @@ def test_command_never_exports_process_local_access_capability(
     assert explicit.stdout == "absent"
 
 
-@pytest.mark.parametrize("context", ["step", "trusted_developer"])
-def test_trusted_developer_environment_preserves_only_selected_caller_configuration(
-    context: CommandEnvironmentContext,
-) -> None:
-    configuration = {
-        "OH_GOON_DB": "/caller/state.sqlite",
-        "OH_GOON_LEAGUE_FILE": "/caller/league.yml",
-        "OH_GOON_SQLITE_JOURNAL_MODE": "DELETE",
-        "OH_GOON_PROGRESS_FD": "9",
-    }
-    private_authority = {
-        name: "not-exported"
-        for name in (
-            "OH_GOON_LOCAL_ACCESS_TOKEN",
-            "oh_goon_local_access_token",
-            *STRICT_EXECUTOR_AUTHORITY_ENVIRONMENT,
-            *exec_guard_protocol.ENVIRONMENT,
-        )
-    }
-    environment = {"PATH": os.defpath, **configuration, **private_authority}
-    result = run_command(
-        sys.executable,
-        "-S",
-        "-c",
-        "import json,os,sys; print(json.dumps({k:os.environ[k] for k in sys.argv[1:] if k in os.environ}))",
-        *configuration,
-        *private_authority,
-        env=environment,
-        environment_context=context,
-        parent_death_signal=os.name != "nt",
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == (configuration if context == "trusted_developer" else {})
-    assert result.supervisor.final_process_group_quiescent
-    assert environment == {"PATH": os.defpath, **configuration, **private_authority}
-
-
-@pytest.mark.parametrize(
-    "context,environment,message",
-    [
-        ("trusted_developer", None, "explicitly captured environment"),
-        ("unknown", {}, "environment context"),
-        ("trusted_developer", {}, "must carry PATH"),
-    ],
-)
-def test_invalid_command_environment_context_refuses_before_process_birth(
-    context: str,
-    environment: dict[str, str] | None,
-    message: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def unavailable_spawn(*args: object, **kwargs: object) -> Never:
-        pytest.fail("invalid environment context reached native process birth")
-
-    monkeypatch.setattr(subprocess, "Popen", unavailable_spawn)
-    with pytest.raises(ValueError, match=message):
-        run_command(
-            "selected-native-tool",
-            env=environment,
-            environment_context=cast(CommandEnvironmentContext, context),
-        )
-
-
 def test_command_never_exports_case_variant_of_process_local_access_capability(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch,
 ) -> None:
     monkeypatch.setenv("oh_goon_local_access_token", "case-variant-secret")
     result = run_command(

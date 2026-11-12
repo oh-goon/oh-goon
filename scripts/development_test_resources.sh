@@ -16,24 +16,6 @@ oh_goon_test_resolved_cpus() {
   printf '%s\n' "$value"
 }
 
-oh_goon_test_exec() {
-  local cpus=$1 profile=$2 scratch_owner
-  shift 2
-  if [[ "$profile" == ram ]]; then
-    # Native caller settings also transport the outer profile's admitted cache.
-    # Nested Make commands reuse it without another scratch discovery/allocation.
-    if [[ -v NODE_COMPILE_CACHE || -v NODE_DISABLE_COMPILE_CACHE ]]; then
-      exec "$@"
-    fi
-    scratch_owner="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/backend/.venv/bin/oh-goon-local-test-ram"
-    if [[ -x "$scratch_owner" ]]; then
-      exec "$scratch_owner" --resolved-cpus "$cpus" -- "$@"
-    fi
-    printf 'Local test RAM cache: unavailable before work (locked backend environment not prepared); retaining original storage\n' >&2
-  fi
-  exec "$@"
-}
-
 oh_goon_test_is_linux() {
   [[ "$OSTYPE" == linux* ]]
 }
@@ -221,7 +203,7 @@ oh_goon_test_resources_main() {
   fi
   if oh_goon_test_cpu_budget_verified "$cpus" "$root" "$directory"; then
     printf 'Test CPU budget: at most %s CPUs (verified inherited cgroup quota)\n' "$cpus" >&2
-    oh_goon_test_exec "$cpus" "$profile" "$@"
+    exec "$@"
     return $?
   fi
   if ((child)); then

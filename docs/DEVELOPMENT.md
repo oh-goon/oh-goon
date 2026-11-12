@@ -259,53 +259,46 @@ rejected before work. Unknown profile names are rejected. Without this opt-in,
 the existing local and hosted defaults remain unchanged. Run major checks
 sequentially: separate invocations still own separate quotas.
 
-The profile experiments with Node's native compile cache in a private,
-512-MiB maximum tmpfs. It does not prefill RAM. Admission uses the existing
-native resource observations, reserves desktop and worker headroom, and
-declines allocation when effective available memory or required native
-facilities cannot be established. Only a cache keeper enters the private
-user/mount namespace; the original workload retains its user, groups,
-namespaces, working directory and native test owners. Node accesses the mount
-through the live keeper's `/proc` path. Normal cleanup waits for the original
-process group to become quiescent, then closes the keeper and its disposable
-cache. If native process cleanup cannot establish quiescence, the optional
-cache is withdrawn, the original scratch root is retained, and cleanup is
-reported incomplete. Existing open filesystem references retain their native
-kernel lifetime; this failure does not trigger another test execution.
-Node owns cache creation, source-byte invalidation and runtime version keys.
-Caller-selected `NODE_COMPILE_CACHE` or `NODE_DISABLE_COMPILE_CACHE` settings are
-preserved instead of allocating another cache.
+The profile can retain decoded Hashmarks source packets during one architecture
+check, through the existing source-snapshot owner. This avoids decoding the same
+immutable native evidence for several policy checks. It does not cache test
+results, infer new repository meaning or persist evidence between invocations.
+The lifecycle inventory also consumes native binding facts directly instead of
+building unused local AST projections; that work reduction applies in both modes.
 
-The trusted developer launch preserves captured database, league, SQLite journal
-and progress-channel settings. Ordinary Step launches still strip those settings;
-local-access, strict-executor and execution-guard authority remain non-exportable
-in both contexts. SIGINT and SIGTERM reach the native workload as their original
-signal through the existing bounded process supervisor. The cache keeper remains
-alive while the workload handles its signal and settles.
+Decoded retention is opt-in. The architecture execution owner verifies the
+transported positive CPU budget and native quota, then uses the existing native
+resource observations to require at least 16 GiB of effective available memory.
+Unknown host/cgroup memory limits or insufficient headroom decline retention
+before architecture work; observations and policy checks still run normally.
+The retained canonical UTF-8 payloads have a combined 64-MiB ceiling. This bounds
+encoded evidence, **not Python heap size**: decoded objects use more memory.
+Packets that do not fit are decoded without retention, with the same validation
+and results. There is no eviction/reselection algorithm or cross-run cache.
 
-An unavailable mount, insufficient RAM or denied permissions causes an explicit
-fallback **before work** to the original storage and cache settings, with the CPU
-limit retained. Once the workload starts, a failure, cancellation, OOM or full
-cache is reported through the original native result; it is never retried as a
-successful disk fallback. Cleanup diagnostics remain separate from that result.
-Failures while preparing the optional directory, pipes or keeper release the
-resources already acquired before a single pre-work fallback. An unidentified
-root or unverified process cleanup is retained and reported incomplete.
-This profile does not move `TMPDIR`, HOME, XDG state, pytest fixtures, SQLite,
-workspaces, resume receipts, logs, coverage or other authoritative evidence.
-Vitest keeps its existing threads, sequential files, isolation and worker
-settings. Its filesystem module cache and result-cache locations are unchanged.
-The native coverage command sets `NODE_DISABLE_COMPILE_CACHE=1` before Vitest
-starts, following [Node's coverage guidance](https://nodejs.org/download/release/v22.22.1/docs/api/module.html#module-compile-cache).
+Every access still validates the requested language, parser capability,
+completeness and freshness. The exact producer identity, canonical packet and
+captured source bytes remain bound together. Independent invocation lifetimes
+observe source again, including equal-size edits with preserved timestamps.
+Public evidence reads remain detached. Context exit releases retained packets
+and closes the existing native source scope on success or failure.
 
-Treat cache population and reuse as separate measurements. Compare fresh native
-runs of the same source, exact test membership, toolchain, workers and verified
-CPU quota, including setup and cache creation; do not time resumed pytest PASS
-receipts. An OS page cache, or an already RAM-backed `/tmp`, can make a storage
-change immaterial. A compile-cache comparison also changes native caching policy;
-it does not establish a RAM-versus-disk speedup. Report negative experiments and
-unmeasured metrics explicitly. This opt-in does not establish APP, browser,
-release, privileged/native or WSL qualification; ordinary CI remains unchanged.
+The resource wrapper executes the original native command directly after CPU
+admission, preserving caller configuration, native stdin/output/descriptors and
+signal behavior. Node/Vitest cache settings remain caller-owned and unchanged;
+the earlier tmpfs/Node compile-cache keeper is not part of this implementation.
+There is no global relocation of TMPDIR, HOME, XDG state, SQLite, workspaces,
+fixtures, logs, coverage, receipts or other authoritative evidence. Native tools
+retain selection, isolation, status and coverage authority. Ordinary local and
+hosted defaults do not retain decoded packets.
+
+Measure complete native invocations, including source observation and scope
+teardown, at unchanged source, membership, toolchain, workers and verified CPU
+quota. Record heap/RSS separately from encoded retention. Do not time resumed
+pytest PASS receipts or attribute unconditional work reduction to a RAM-mode
+comparison. The profile does not establish APP, browser, release, privileged
+native or WSL qualification. The negative cache experiments below remain useful
+findings even when another optimization succeeds.
 
 ##### Cache experiment evidence
 

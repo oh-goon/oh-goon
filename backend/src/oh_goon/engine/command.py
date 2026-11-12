@@ -8,7 +8,6 @@ import io
 import json
 import os
 import select
-import signal
 import socket
 import subprocess
 import sys
@@ -38,9 +37,6 @@ from oh_goon.engine.command_process_tree import (
     native_child_reaping_supported,
     owns_native_child_reaping,
     terminate_owned_process_tree,
-)
-from oh_goon.engine.command_runtime_authority import (
-    CommandEnvironmentContext as CommandEnvironmentContext,
 )
 from oh_goon.engine.command_runtime_authority import (
     RuntimeAuthorityBinding as RuntimeAuthorityBinding,
@@ -266,7 +262,6 @@ class CommandCancelledError(RuntimeError):
         stdout: str = "",
         stderr: str = "",
         standard_isolation: PlanStandardIsolationEvidence | None = None,
-        signal_number: int = signal.SIGTERM,
     ) -> None:
         super().__init__(message)
         self.supervisor = supervisor
@@ -276,7 +271,6 @@ class CommandCancelledError(RuntimeError):
         self.stdout = stdout
         self.stderr = stderr
         self.standard_isolation = standard_isolation
-        self.signal_number = signal_number
         self.stdout_evidence: PlanOutputEvidence | None = None
         self.stdout_truncated = False
 
@@ -573,7 +567,6 @@ def _start_supervised_command(
     *,
     cwd: Path | None,
     env: Mapping[str, str] | None,
-    environment_context: CommandEnvironmentContext,
     stream_output: CommandOutputObserver | None,
     process_observer: CommandProcessObserver | None,
     merge_stderr: bool,
@@ -586,7 +579,7 @@ def _start_supervised_command(
     preserve_native_executable_path: bool,
     retain_output_tail: bool,
 ) -> _StartedCommand:
-    child_env = sanitized_child_environment(argv, env, context=environment_context)
+    child_env = sanitized_child_environment(argv, env)
     physical_execution_id = new_physical_execution_id()
     if process_observer is not None:
         process_observer(
@@ -699,9 +692,7 @@ def run_command(
     timeout: float | None = 10.0,
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
-    environment_context: CommandEnvironmentContext = "step",
     cancel_requested: Callable[[], bool] | None = None,
-    cancellation_signal: Callable[[], int | None] | None = None,
     termination_requested: CommandTerminationObserver | None = None,
     stream_output: CommandOutputObserver | None = None,
     process_observer: CommandProcessObserver | None = None,
@@ -725,17 +716,9 @@ def run_command(
     preserve_native_executable_path=False and retains the sealed launch owner.
     Terminal output and explicit tail capture retain a bounded diagnostic tail;
     stdout_evidence hashes and counts the original complete raw stream.
-    Trusted developer launchers may explicitly preserve caller database, league,
-    journal and progress settings from a captured environment. Process-local
-    access and strict-execution authority remain non-exportable in that context.
-    POSIX launchers can transport SIGINT or SIGTERM through cancellation_signal;
-    ordinary boolean cancellation retains SIGTERM and the same bounded cleanup.
     """
 
     argv = tuple(args)
-    if cancellation_signal is not None:
-        if os.name == "nt" or not callable(cancellation_signal):
-            raise ValueError("native cancellation signals require a POSIX signal observer")
     if process_observer is None:
         process_observer = _command_process_observer.get()
     if parent_death_signal is None:
@@ -764,7 +747,6 @@ def run_command(
         argv,
         cwd=cwd,
         env=env,
-        environment_context=environment_context,
         stream_output=stream_output,
         process_observer=process_observer,
         merge_stderr=merge_stderr,
@@ -805,14 +787,14 @@ def run_command(
             if started_command.output_errors:
                 raise started_command.output_errors[0]
             if termination_requested is not None:
-                termination_signal = termination_requested()
-                if termination_signal is not None:
+                signal = termination_requested()
+                if signal is not None:
                     request = TerminationRequest(
                         execution_id=physical_execution_id,
                         generation=1,
-                        cause=termination_signal.cause,
-                        reason=termination_signal.reason,
-                        grace_seconds=termination_signal.grace_seconds,
+                        cause=signal.cause,
+                        reason=signal.reason,
+                        grace_seconds=signal.grace_seconds,
                     )
                     raise _terminate_for_authority_loss(
                         process,
@@ -824,10 +806,7 @@ def run_command(
                         process_observer=process_observer,
                         parent_guard=parent_guard,
                     )
-            requested_signal = cancellation_signal() if cancellation_signal is not None else None
-            if requested_signal is not None or (
-                cancel_requested is not None and cancel_requested()
-            ):
+            if cancel_requested is not None and cancel_requested():
                 raise _cancel_command(
                     process,
                     readers,
@@ -837,7 +816,6 @@ def run_command(
                     process_identity=process_identity,
                     process_observer=process_observer,
                     parent_guard=parent_guard,
-                    signal_number=signal.SIGTERM if requested_signal is None else requested_signal,
                 )
             _raise_if_output_limited(
                 process, readers, capture, authority_receipt, argv=argv, parent_guard=parent_guard
@@ -1231,7 +1209,6 @@ def _cancel_command(
     process_identity: str | None,
     process_observer: CommandProcessObserver | None,
     parent_guard: CommandParentGuard | None = None,
-    signal_number: int = signal.SIGTERM,
 ) -> CommandCancelledError:
     request = TerminationRequest(
         execution_id=physical_execution_id,
@@ -1239,7 +1216,6 @@ def _cancel_command(
         cause="cancel",
         reason="cancellation_requested",
         grace_seconds=TERMINATION_GRACE_SECONDS,
-        signal_number=signal_number,
     )
     if process_observer is not None:
         process_observer(
@@ -1262,7 +1238,6 @@ def _cancel_command(
     return CommandCancelledError(
         f"Command cancelled: {' '.join(args)}",
         runtime_authority=runtime_authority,
-        signal_number=signal_number,
         supervisor=CommandSupervisorReceipt(
             process_group_cleanup_requested=True,
             cleanup_reason="cancel",

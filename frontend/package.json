@@ -21,7 +21,7 @@
     "architecture:dependencies": "depcruise --config .dependency-cruiser.cjs src",
     "deadcode": "knip --include files,dependencies,unlisted,unresolved",
     "architecture": "npm run architecture:dependencies && npm run deadcode",
-    "test:coverage": "NODE_DISABLE_COMPILE_CACHE=1 vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text",
+    "test:coverage": "vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text",
     "i18n:parity": "node check-i18n-keys.mjs",
     "quality:check": "uv run --frozen --project ../backend oh-goon-quality-ratchet check --area frontend",
     "quality:raise": "uv run --frozen --project ../backend oh-goon-quality-ratchet raise --area frontend",

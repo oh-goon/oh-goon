@@ -62,6 +62,10 @@ BOUNDED_TEMPLATE_PROOF = "bounded shipped stdlib project proof"
 BOUNDED_API_PROOF = "bounded HTTP API boundary proof"
 BOUNDED_FRONTEND_PROOF = "bounded frontend boundary proof"
 BUILD_PROOF_TESTS = ("scripts/tests/test_release_build_boundary.py",)
+CONSOLE_INSTALLATION_TEST = (
+    "scripts/tests/test_release_build_boundary.py"
+    "::test_native_backend_installation_materializes_loadable_console_scripts"
+)
 TEMPLATE_PROOF_TESTS = (
     "scripts/tests/test_python_project_checks.py::test_native_shipped_stdlib_unittest_projects",
     "backend/tests/integration/services/test_catalog_template_startability.py",
@@ -232,17 +236,22 @@ def get_bounded_owner_proofs(
     if build_inputs and "backend/uv.lock" not in changed:
         before = tomllib.loads(_owner_base_bytes(root, base, "backend/pyproject.toml").decode())
         after = tomllib.loads(_owner_source_bytes(root, "backend/pyproject.toml").decode())
+        console_only = build_inputs == {"backend/pyproject.toml"} and _console_scripts_only_change(
+            before, after
+        )
         contained = _contained_editable_mapping(root, after)
         # Only native Hatch's editable source mapping is outside dependency intent.
         # Every other declaration, including nested build/uv policy, stays equal.
         for document in (before, after):
             build = document.get("tool", {}).get("hatch", {}).get("build", {})
             build.pop("dev-mode-dirs", None)
-        if before == after and contained:
+        if (before == after and contained) or console_only:
             add(
                 BOUNDED_BUILD_PROOF,
                 build_inputs,
-                BUILD_PROOF_TESTS,
+                (*BUILD_PROOF_TESTS, CONSOLE_INSTALLATION_TEST)
+                if console_only
+                else BUILD_PROOF_TESTS,
                 ("python", "package", "architecture"),
             )
 
@@ -348,6 +357,29 @@ def get_bounded_owner_proofs(
         "consumer_coverage": "not-claimed",
         "routes": routes,
     }
+
+
+def _console_scripts_only_change(before: Mapping[str, Any], after: Mapping[str, Any]) -> bool:
+    """Bound native entry-point packaging proof to its exact declaration field."""
+    before_project, after_project = before.get("project"), after.get("project")
+    if not isinstance(before_project, dict) or not isinstance(after_project, dict):
+        return False
+    projects = (before_project, after_project)
+    declarations = [project.get("scripts", {}) for project in projects]
+    if declarations[0] == declarations[1] or any(
+        not isinstance(scripts, dict)
+        or any(
+            not isinstance(name, str) or not isinstance(value, str)
+            for name, value in scripts.items()
+        )
+        for scripts in declarations
+    ):
+        return False
+    without_scripts = [
+        {**document, "project": {key: value for key, value in project.items() if key != "scripts"}}
+        for document, project in zip((before, after), projects, strict=True)
+    ]
+    return without_scripts[0] == without_scripts[1]
 
 
 def require_bounded_owner_proofs(

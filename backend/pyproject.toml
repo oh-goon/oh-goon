@@ -33,7 +33,6 @@ build = [
 oh-goon-daily-regression = "oh_goon.repository_tooling.daily_regression:main"
 oh-goon-verify-gate = "oh_goon.repository_tooling.verification_gate_control:main"
 oh-goon-python-project-checks = "oh_goon.repository_tooling.python_project_checks:main"
-oh-goon-local-test-ram = "oh_goon.repository_tooling.local_test_ram:main"
 oh-goon-trust-census = "oh_goon.repository_tooling.trust_authority_census:main"
 oh-goon-offline-custody-review = "oh_goon.repository_tooling.offline_custody_review:main"
 oh-goon-custody-host-observe = "oh_goon.repository_tooling.custody_host_observation:main"

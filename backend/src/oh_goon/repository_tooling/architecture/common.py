@@ -110,7 +110,12 @@ def source_binding_packet(
     evidence packet API continues to return detached copies to its callers.
     """
     snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
-    packet = snapshot.source_packets.get(evidence) if snapshot is not None else None
+    packet = (
+        snapshot.source_packets.get(evidence)
+        if snapshot is not None and snapshot.packet_cache_bytes
+        else None
+    )
+    retained = packet is not None
     if packet is None:
         packet = evidence.packet()
     languages = (language,) if isinstance(language, str) else language
@@ -132,8 +137,13 @@ def source_binding_packet(
             "Architecture source bindings are unavailable or incomplete: "
             + str(packet.get("reason") or packet.get("availability"))
         )
-    if snapshot is not None:
-        snapshot.source_packets[evidence] = packet
+    if snapshot is not None and not retained:
+        remaining = snapshot.packet_cache_bytes - snapshot.source_packet_bytes
+        if 0 < len(evidence.canonical_packet_json) <= remaining:
+            byte_count = len(evidence.canonical_packet_json.encode("utf-8"))
+            if byte_count <= remaining:
+                snapshot.source_packets[evidence] = packet
+                snapshot.source_packet_bytes += byte_count
     return packet
 
 
@@ -269,6 +279,8 @@ def python_semantic_facts(
 class _PythonSourceSnapshot:
     lifetime: ExitStack
     root: Path | None = None
+    packet_cache_bytes: int = 0
+    source_packet_bytes: int = 0
     captures: dict[Path, bytes] = field(default_factory=dict)
     trees: dict[Path, ast.Module] = field(default_factory=dict)
     evidence: dict[Path, HashmarksSourceEvidence] = field(default_factory=dict)
@@ -288,13 +300,29 @@ _SOURCE_CHECKOUT_ROOT = Path(__file__).resolve().parents[5]
 
 
 @contextmanager
-def python_source_snapshot(root: Path | None = None) -> Generator[None]:
-    """Retain exact native source packets and local structural trees once."""
+def python_source_snapshot(
+    root: Path | None = None, *, packet_cache_bytes: int = 0
+) -> Generator[None]:
+    """Keep captures for one invocation, with optional bounded packet retention.
+
+    The budget counts canonical UTF-8 packet bytes, not decoded Python heap
+    usage. Nested scopes keep their outer lifetime and its original budget.
+    """
+    if (
+        not isinstance(packet_cache_bytes, int)
+        or isinstance(packet_cache_bytes, bool)
+        or packet_cache_bytes < 0
+    ):
+        raise ValueError("Architecture packet cache byte budget must be a nonnegative integer")
     if _PYTHON_SOURCE_SNAPSHOT.get() is not None:
         yield
         return
     with ExitStack() as lifetime:
-        snapshot = _PythonSourceSnapshot(lifetime, root.resolve() if root is not None else None)
+        snapshot = _PythonSourceSnapshot(
+            lifetime,
+            root.resolve() if root is not None else None,
+            packet_cache_bytes=packet_cache_bytes,
+        )
         token = _PYTHON_SOURCE_SNAPSHOT.set(snapshot)
         try:
             yield
