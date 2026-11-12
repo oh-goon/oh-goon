@@ -283,14 +283,14 @@ wheels = [
 
 [[package]]
 name = "hashmarks"
-version = "0.36.2"
-source = { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.36.2/hashmarks-0.36.2-py3-none-any.whl" }
+version = "0.36.3"
+source = { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.36.3/hashmarks-0.36.3-py3-none-any.whl" }
 dependencies = [
     { name = "node-semver" },
     { name = "packaging" },
 ]
 wheels = [
-    { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.36.2/hashmarks-0.36.2-py3-none-any.whl", hash = "sha256:1dd144168af52ef21fdd61bae6ccbffbcb345e6ea655522a9f1a687651ecf2d4" },
+    { url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.36.3/hashmarks-0.36.3-py3-none-any.whl", hash = "sha256:190910a5e675d9269744d57af0fc87957fe3488545b69348a1d6d05334022811" },
 ]
 
 [package.optional-dependencies]
@@ -549,7 +549,7 @@ quality = [
 requires-dist = [
     { name = "cryptography", specifier = ">=46.0.4" },
     { name = "fastapi", specifier = ">=0.128.2" },
-    { name = "hashmarks", extras = ["syntax"], url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.36.2/hashmarks-0.36.2-py3-none-any.whl" },
+    { name = "hashmarks", extras = ["syntax"], url = "https://github.com/Hugloss/Hashmarks/releases/download/v0.36.3/hashmarks-0.36.3-py3-none-any.whl" },
     { name = "httpx2", extras = ["ws"], specifier = ">=2.12" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pyyaml", specifier = ">=6.0.3" },
