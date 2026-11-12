@@ -200,3 +200,9 @@ def test_low_memory_retention_decline_preserves_architecture_failure(
     monkeypatch.setattr(owner, "CHECKS", (check,))
     assert owner.main() == 1
     assert effects == ["started"]
+
+
+@pytest.mark.parametrize("profile", ["RAM", "unknown", " "])
+def test_receiving_architecture_owner_refuses_an_unknown_profile(profile: str) -> None:
+    with pytest.raises(ValueError, match="Unknown local test profile"):
+        owner.source_packet_cache_budget({"OH_GOON_LOCAL_TEST_PROFILE": profile})

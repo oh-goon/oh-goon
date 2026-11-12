@@ -85,8 +85,11 @@ SOURCE_PACKET_MINIMUM_AVAILABLE_BYTES = 16 * 1024**3
 
 def source_packet_cache_budget(environment: Mapping[str, str]) -> int:
     """Admit optional decoded retention from actual native resource facts."""
-    if environment.get("OH_GOON_LOCAL_TEST_PROFILE") != "ram":
+    profile = environment.get("OH_GOON_LOCAL_TEST_PROFILE", "")
+    if not profile:
         return 0
+    if profile != "ram":
+        raise ValueError("Unknown local test profile")
     budget = resolve_pytest_resource_budget(1, environ=environment)
     if (
         budget.configured_cpus < 1
