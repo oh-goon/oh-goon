@@ -14,6 +14,47 @@ RAM allocation, storage relocation, cache or fixture-sharing change is justified
 by this audit.** The initial 20% feedback-time goal remains unmet. A negative
 result is retained evidence, not a reason to repeat the same experiment unchanged.
 
+The subsequent [HUG-212 acceptance repair](#container-acceptance-bootstrap-and-cleanup)
+updates the audited stale bootstrap to `make init` and preserves owned state when
+native Compose teardown fails. Its controlled native Docker proof reproduced
+the old state-deletion defect and verified retention after repair, followed by
+verified probe cleanup. The source-frozen measurements below remain historical;
+full image/build/browser acceptance and performance remain unverified.
+
+## Container acceptance bootstrap and cleanup
+
+The locked Playwright container consumes the npm-selected image version and
+uses `make init` for the existing locked uv/npm bootstrap and CLI smoke. Its
+original `make acceptance-release` entrypoint retains full release/browser
+acceptance. A native Make bootstrap proof does not qualify the assembled image
+or that complete journey.
+
+Product container acceptance owns a private temporary state/repository root and
+one explicit Compose project. It runs the original build, installed-origin,
+product, persistence, replacement and Game Tape readback flow. Final native
+`compose down --remove-orphans --rmi local` must succeed before the owner removes
+the root. Its CLI attempt is bounded to 60 seconds and streams Docker diagnostics.
+A failed, unavailable, timed-out or interrupted teardown leaves state in place
+and reports its path and project. Existing product issues remain visible;
+primary exceptions and cancellation keep their identity, with cleanup notes also
+rendered by the CLI. Successful container teardown followed by a filesystem
+cleanup failure reports possibly partial removal, without hiding the original
+failure or claiming intact retained state.
+
+When cleanup is unproven, use native Compose with the reported project, original
+Compose file/configuration and original bound directories to complete teardown.
+Remove that owned retained root only after native teardown succeeds. The owner
+does not automatically retry, prune by age or delete state beneath a possibly
+active container.
+
+[HUG-212](https://linear.app/hugloss/issue/HUG-212) retains the bounded native
+cleanup reproduction and regression evidence. The controlled Docker fixture
+qualifies this teardown/storage lifetime only; it does not establish full
+product/release acceptance. Matching Playwright image assembly and full browser
+acceptance remain separately selected. Host CLI cgroups do not establish
+Docker/BuildKit daemon quotas; any container/build performance experiment needs
+its own native resource observations.
+
 ## Measurement context and limits
 
 Fresh measurements used main `bb8030f8c86f38205a5b82780d9f95f94d1c2fa8`, tree
@@ -267,24 +308,24 @@ reuse live state or native results.
    caching an installed environment or trained model would remove tested work.
    F07/F08 have no demonstrated profile benefit, and the examined native cache
    has a stale-input defect. Do not repeat those approaches unchanged.
-4. **Repair and qualify acceptance prerequisites before browser/container
+4. **Qualify the remaining acceptance prerequisites before browser/container
    optimization.** Missing matching browsers and reviewed visual baselines leave
-   F12–F14 unverified. At F15, [the Dockerfile](../../docker/playwright/Dockerfile)
-   calls `make setup`; native dispatch returned 2 because no such target exists.
-   Do not add a legacy alias: use the actual bootstrap owner and prove the locked
-   image entry boundary. Host cgroups cannot establish Docker/BuildKit/Compose
-   CPU quotas; actual daemon-created workloads need their own native witness.
-5. **Close cleanup observation at the existing Compose owner.** Source inspection
-   of [container acceptance](../../backend/src/oh_goon/repository_tooling/release/accept_container.py)
-   found that `_cleanup_compose` discards cleanup status/output before temporary
-   state can be deleted. A live leak was not reproduced. Add a focused valid
-   baseline plus cleanup-failure/cancellation proof at that owner before any
-   scratch-placement claim; retain active state and report teardown failure
-   truthfully. Do not add another lifecycle or scheduler.
+   F12–F14 unverified. HUG-212 repaired F15's stale `make setup` caller through
+   native Make dispatch and bootstrap-failure proof. The actual locked image
+   build/entry and complete browser journey remain unverified. Host CLI quotas
+   cannot establish Docker/BuildKit daemon quotas; actual daemon-created
+   workloads need their own native witness.
+5. **Preserve the repaired Compose cleanup lifetime.** HUG-212's bounded native
+   Docker fixture reproduced a failed teardown leaving an active container after
+   its state was deleted. The repaired owner retains state on uncertain teardown,
+   preserves primary issues/exceptions/cancellation, and reports filesystem
+   cleanup failures separately. This proof does not qualify the full product
+   persistence/replacement journey or justify scratch relocation. Keep its
+   original storage semantics; add no parallel lifecycle or scheduler.
 
-[HUG-212](https://linear.app/hugloss/issue/HUG-212) owns the concrete acceptance
-bootstrap repair and cleanup investigation in items 4–5, separately from a
-performance adoption claim.
+[HUG-212](https://linear.app/hugloss/issue/HUG-212) records the concrete acceptance
+repair and its bounded qualification in items 4–5, separately from a performance
+adoption claim.
 
 HUG-211 remains a conditional owner-specific experiment, not blanket RAM rollout.
 [HUG-12](https://linear.app/hugloss/issue/HUG-12) retains CPU/WSL qualification,

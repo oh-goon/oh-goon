@@ -21,6 +21,6 @@ ENV CI=1 \
     UV_PYTHON=/usr/bin/python3.12 \
     UV_PYTHON_DOWNLOADS=never
 RUN test "$(uv run --locked --project backend oh-goon-browser-acceptance-container version)" = "$PLAYWRIGHT_VERSION"
-RUN make setup
+RUN make init
 
 CMD ["make", "acceptance-release"]
