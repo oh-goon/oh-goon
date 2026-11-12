@@ -246,6 +246,281 @@ Coverage gates retain file batches and their original coverage sources. Native c
 
 Batch JSON reports include the resolved budget and observed enforcement facts, native collection duration, whole-run CPU time, and the peak RSS of waited-for children where the host provides those observations. Child peak RSS is not the sum of concurrently resident processes. PID-bound cgroup observations also report CPU-quota throttling counter changes and lifetime memory/task peaks when available; a shared cgroup may include other work, and concurrent task peaks do not count total child creation. Resource diagnostics do not change selected membership, result verdicts, process deadlines or receipt authority. Reduced concurrency can increase elapsed time; a timeout remains unverified and is never converted to PASS or hidden by an automatic timeout extension.
 
+#### Opt-in RAM-first local tests
+
+```bash
+OH_GOON_LOCAL_TEST_PROFILE=ram make test
+OH_GOON_LOCAL_TEST_PROFILE=ram OH_GOON_TEST_CPUS=2 make check
+```
+
+The `ram` profile defaults an **unset** CPU setting to a verified two-CPU
+quota. Explicit positive CPU limits remain supported; an explicit zero is
+rejected before work. Unknown profile names are rejected. Without this opt-in,
+the existing local and hosted defaults remain unchanged. Run major checks
+sequentially: separate invocations still own separate quotas.
+
+The profile selects a one-use handoff of Hashmarks source packets during
+architecture checks. The required native operation already returns a parsed
+packet. After binding its canonical evidence, captured source bytes and loaded
+producer identity, the integration delivers that packet directly to the
+immediate policy consumer. This avoids decoding the canonical JSON merely to
+recover the same representation. Canonical evidence remains intact, and public
+packet reads remain detached copies.
+
+The receiving architecture owner verifies the transported positive CPU budget
+against its actual PID-bound native quota before selecting this transport.
+Normal mode keeps its original canonical transport. Both modes avoid an unused
+AST projection in the lifecycle inventory. Native parser capability, language,
+completeness, freshness, source-byte and policy checks remain enforced. The
+producer and policy authority are checked after a successful delivery callback;
+callback failure propagates without another observation route.
+
+No decoded-packet table, cross-run cache, RAM disk or additional retained-memory
+budget is allocated. The handoff consumes data already allocated by the required
+native observation, so it does not require an additional RAM reservation or
+introduce a new mandatory memory footprint. Later independent consumers still
+read canonical evidence; invocation boundaries observe source again, including
+equal-size edits with preserved timestamps. Nested scopes keep their outer
+transport choice. Context exit closes the original source scope on success or
+failure.
+
+The resource wrapper executes the original native command directly after CPU
+admission, preserving caller configuration, native stdin/output/descriptors and
+signal behavior. Node/Vitest cache settings remain caller-owned and unchanged;
+the earlier tmpfs/Node compile-cache keeper and decoded-packet-retention pilots
+are not part of this implementation. There is no global relocation of TMPDIR,
+HOME, XDG state, SQLite, workspaces, fixtures, logs, coverage, receipts or other
+authoritative evidence. Native tools retain selection, isolation, status and
+coverage authority. Ordinary local and hosted defaults are unchanged.
+
+Measure complete native invocations, including source observation and scope
+teardown, at unchanged source, membership, toolchain, workers and verified CPU
+quota. Record native process CPU and heap/RSS alongside elapsed time. Do not time resumed
+pytest PASS receipts or attribute unconditional work reduction to a RAM-mode
+comparison. The profile does not establish APP, browser, release, privileged
+native or WSL qualification. The negative cache experiments below remain useful
+findings even when another optimization succeeds.
+
+##### Measured one-use packet handoff
+
+At frozen commit
+[`d401cf991c54dbe810612b6f959c4c376cec0675`](https://github.com/oh-goon/oh-goon/commit/d401cf991c54dbe810612b6f959c4c376cec0675),
+canonical source identity
+`sha256:080f25364e11f2169ad2d2e3f6b295deb0d70b409d45560c80132bfce3aecc20`,
+the complete native architecture command ran all 24 checks in three paired
+ordinary/RAM trials, alternating mode order. Every invocation passed. Both
+modes used the same current implementation and source, locks, command settings
+and verified two-CPU quota. Each invocation owned a fresh process and snapshot;
+whole elapsed includes quota admission, interpreter/imports, observations,
+policy checks and scope closure. No pytest PASS resume or result reuse occurred.
+
+| Pair | Ordinary seconds | RAM-profile seconds |
+| --- | ---: | ---: |
+| 1 | 78.215891 | 74.552611 |
+| 2 | 78.086898 | 74.873401 |
+| 3 | 78.320363 | 74.694666 |
+| Mean | 78.207717 | 74.706892 |
+
+Mean elapsed decreased 4.48%; mean process CPU decreased from 78.163333 to
+74.666667 seconds (4.47%). Mean maximum RSS was 1,673,480 versus 1,671,464 KiB,
+both about 1.60 GiB. This is native GNU time's process-lifetime/waited-process
+high-water observation, not aggregate process-tree or cgroup memory. It does
+not establish a meaningful memory reduction. Cgroup aggregate peak, peak
+temperature and interactive responsiveness were not measured for this
+frontdoor experiment.
+
+Source and lock bytes and the declared command settings were held constant,
+but the experiment did not capture a separate producer/toolchain identity
+attestation on every trial. These results establish a modest observed benefit
+for this complete 24-check command at the frozen source. The 20% target was not
+met. They do not establish a guaranteed whole-`make test` improvement or qualify
+later source. Both modes already included the unconditional removal of the
+unused lifecycle AST projection, so that earlier work reduction is not counted
+as a RAM-profile gain here.
+
+##### Whole-workflow compatibility measurements
+
+The same frozen `d401cf991c54dbe810612b6f959c4c376cec0675` source also ran
+three paired trials per representative lane, alternating ordinary/RAM order.
+Each short scope contained two fresh native processes; there was no
+profile-owned cache or claim of OS page-cache coldness. Each aggregate scope
+was one original `make test` invocation with its own quota, not an artificial
+shared snapshot. All timing includes admission, setup, execution and cleanup;
+no pytest PASS resume was used.
+
+| Native workload | Ordinary mean seconds | RAM-profile mean seconds | Exact native accounting |
+| --- | ---: | ---: | --- |
+| Python recipient-binding, two fresh invocations | 5.613 | 5.596 | 6 cases per invocation, identical case/status vectors |
+| Vitest node, two fresh invocations | 3.871 | 3.889 | 26 cases per invocation, identical case/status vectors |
+| Vitest jsdom, two fresh invocations | 8.753 | 8.795 | 13 cases per invocation, identical case/status vectors |
+| Original `make test`, one fresh invocation | 485.056 | 481.500 | 1,153 cases per invocation, identical case/status vectors; selected static owners passed |
+
+The short Python/node/jsdom lanes do not invoke the architecture handoff, and
+their changes were within about half a percent with mixed pair directions.
+No material acceleration is claimed for those lanes. Every selected native
+case passed; no member was missing, duplicated, added, skipped or resumed.
+The six aggregate invocations also preserved the same source, toolchain,
+producer and two-worker/two-CPU bindings recorded by the native reports.
+
+Aggregate ordinary/RAM paired elapsed seconds were 483.984/480.701,
+485.489/481.970 and 485.696/481.830. Mean elapsed decreased 0.73%; process CPU
+means were 818.507/814.007 seconds, 0.55% lower. Mean peak process RSS stayed
+about 1.60 GiB. This is a small observed whole-workflow saving at this frozen
+source and host, not a guaranteed improvement or a statistical-significance
+claim. The 20% target was not met. These were selected feedback portfolios,
+not complete frontend/browser/daily/release or APP/WSL qualification.
+
+Native cgroup lifetime peaks and counters retain their disclosed scope in the
+reports; they must not be added to process RSS or called per-trial aggregate
+memory. The aggregate diagnostic parent was outside Make's native scope;
+use the native pytest receipt for that scope. Per-trial command-scoped swap/OOM
+observations were not uniformly available. Page-cache coldness, actual cache
+hits, true temperature peaks and per-trial desktop responsiveness remain
+unmeasured. The prior separate “responsive but high temp” observation is not
+qualification of every new trial.
+
+Independent accounting validated all 24 scopes, including 6,918 completed
+aggregate case attempts across six fresh Make runs, with distinct native
+execution identities and exact case/status vectors. The retained summary is
+`current-performance-summary.json`, SHA-256
+`55d04c0f765ef0b9aaf2dc131cff4977f19f79996ab6fd748332115d4e9c15df`;
+its independent accounting receipt is SHA-256
+`05261a4581a38098ba2c9c4ea12ce16a8e4134395ab91a2a4c89eedf3eada622`.
+Native logs, reports and one-off drivers remain outside source under
+`/home/hugo/.oh-goon-hug-209-evidence-20261109/continuation-20261112/`.
+These pinned observations are evidence for future optimization work; later
+source/tool/host changes need new measurements rather than inheriting a pass.
+
+##### Cache experiment evidence
+
+Read these observations before repeating the cache prototypes. They describe
+specific source, tools and workloads; they do not establish current-candidate
+performance or a general RAM-versus-disk result. [PR #187](https://github.com/oh-goon/oh-goon/pull/187)
+retains the experiment context and subsequent qualification work.
+
+The native Node compile-cache pilot used frozen commit
+[`35fdf8e38bf876e9597ea885b8cbbfd8d4c502e5`](https://github.com/oh-goon/oh-goon/commit/35fdf8e38bf876e9597ea885b8cbbfd8d4c502e5),
+canonical source identity
+`sha256:195d1652222e324775a9ac6b91216b32fef776e7c39cf01ad0f507d6af1686e6`.
+Python 3.14.8, uv 0.13.3, Node 22.22.1, npm 10.9.2, pytest 9.0.2,
+Vitest 4.1.10 and Hashmarks 0.36.2 were held fixed. Three paired trials per
+lane alternated baseline/profile order under a verified two-CPU quota, with
+unchanged native membership, worker settings and statuses, and no pytest PASS
+resume. Whole-scope elapsed includes admission, population and cleanup:
+
+| Native workload | Baseline mean seconds | Profile mean seconds | Observation |
+| --- | ---: | ---: | --- |
+| Six recipient-binding cases, two fresh invocations | 5.84 | 6.72 | 15.2% slower |
+| Vitest node: 26 cases in three files, two fresh invocations | 3.95 | 4.81 | 22.0% slower |
+| Vitest jsdom: 13 cases in two files, two fresh invocations | 8.86 | 9.30 | 4.9% slower |
+| Original `make test`: 842 selected pytest cases plus selected static owners | 409.52 | 412.58 | 0.75% slower; paired median approximately unchanged |
+
+The Python file was `backend/tests/unit/services/test_recipient_pass_semantic_parity.py`
+with `-k 'not unmigrated'`. Node files were `MutationController.test.ts`,
+`readResources.test.ts` and `runStepUrl.test.ts`; jsdom files were
+`CatalogPage.test.tsx` and `GameTapeOutputs.test.tsx`. Aggregate Vitest work ran
+through its owning Python boundary test; this was not the complete frontend or
+browser suite. Each short lane compared a new cache followed by another fresh
+native process in that same scope. Each aggregate Make invocation owned and
+discarded its own cache; no warm cache was retained across Make invocations.
+
+Aggregate process CPU means were 632.36 → 637.89 seconds. Isolated warm-command
+savings (about 4.2% node and 6.3% jsdom) did not recover whole-scope overhead.
+The Linux host already had tmpfs-backed `/tmp`, so this experiment changed
+native caching policy and storage together. It showed no material acceleration
+and did not meet the 20% target. Available swap/OOM and thermal-throttling
+counters did not increase in the bounded lanes. Cache hits, OS page-cache
+coldness, peak temperatures and per-trial desktop responsiveness were not
+measured. “Responsive but high temp” was a separate earlier validation
+observation, not a result for every trial. Later runtime changes require new
+measurements rather than inheriting these timings.
+
+A separate diagnostic pair at commit `eead8a1e3a13f478a71a5e8f1a30a52adf82fbae`
+tested the real frontend static sequence, `npm run typecheck` followed by
+`npm run lint`, after native TypeScript preparation. Both modes used the same
+source, tools, sequence and verified two-CPU quota. Whole-scope time was
+22.64 seconds normally and 23.38 seconds with the RAM profile; process CPU was
+39.44 and 40.20 seconds respectively. The child commands were approximately
+9.79 and 12.8 seconds in both modes, so this pair did not identify a beneficiary
+that recovered profile setup/cleanup. This is one diagnostic pair, not repeated
+performance qualification or a statistically established regression. Do not
+expand the same cache to this sequence on the strength of unused RAM.
+
+At commit `2aa383de2fb6b70d2ca4e721a300ab6f7e1675a5`, a separate bounded
+retention pilot kept up to 64 MiB of decoded packets' canonical UTF-8 payloads
+within the existing architecture snapshot, after conservative memory admission.
+Three paired invocations of the **complete 24-check architecture command**
+alternated ordinary/profile order with identical source, implementation, tools
+and two-CPU quota. Ordinary elapsed seconds were 78.718, 78.784 and 78.654;
+profile seconds were 78.858, 79.422 and 79.283. Means were 78.72 and 79.19:
+no acceleration was demonstrated, and retained dictionaries increased RSS.
+Encoded payload size was not a Python heap bound. This retention strategy was
+removed rather than expanding its cap or adding eviction heuristics.
+
+The same pilot also compared an isolated lifecycle inventory against the
+pre-optimization implementation while both inspected one fixed subject tree.
+All 926 member requests, producer identity, native packets, source bytes and
+qualified/conditional results matched. Removing an unused AST projection reduced
+inventory mean elapsed 43.85 to 30.93 seconds and peak RSS about 1.41 to 0.59 GiB.
+The retention mode was slower at 33.44 seconds and about 0.87 GiB. Later policies
+may still need AST projections, so these isolated figures do **not** establish a
+whole-architecture or RAM-mode benefit. Measure the actual complete frontdoor
+before promoting a local phase speedup to a workflow claim.
+
+The Vitest 4.1.10 experimental filesystem module cache also failed a native
+configuration-invalidation control. In an isolated temporary project using the
+locked frontend `node_modules`, keep these files unchanged:
+
+```ts
+// subject.tsx
+const first = (tag: string) => 'first:' + tag;
+const second = (tag: string) => 'second:' + tag;
+export const got = <div />;
+// subject.test.ts
+import { it, expect } from 'vitest';
+import { got } from './subject';
+it('honors current JSX configuration', () => expect(got).toBe(process.env.EXPECTED));
+```
+
+Use `package.json` with `{"type":"module"}` and a `vitest.config.ts` exporting
+`defineConfig({test:{environment:'node',pool:'threads',fileParallelism:false}})`
+from `vitest/config`. Start with this `tsconfig.json`:
+
+```json
+{"compilerOptions":{"jsx":"react","jsxFactory":"first","target":"ES2022"}}
+```
+
+Run a fresh native CLI process for each row below, from that temporary project,
+using the same cache directory outside the source checkout. `EXPECTED` selects
+the assertion value, not transform configuration:
+
+```bash
+EXPECTED=first:div DEBUG=vitest:cache:fs node node_modules/vitest/vitest.mjs run \
+  --config vitest.config.ts --experimental.fsModuleCache=true \
+  --experimental.fsModuleCachePath="$oh_goon_experiment_cache" subject.test.ts
+```
+
+| Configuration and native flag | Expected value | Native result |
+| --- | --- | --- |
+| `jsxFactory: "first"`, cache enabled | `first:div` | PASS; two cache writes |
+| Change only `jsxFactory` to `"second"`, reuse enabled cache | `second:div` | FAIL; observed stale `first:div`, two cache reads |
+| Same changed input, `--experimental.fsModuleCache=false` | `second:div` | PASS; no cache reads or writes |
+
+The valid initial run and uncached changed-input control distinguish stale
+transforms from an invalid fixture. This cache is unsuitable for the profile
+with that installed implementation. Do not add a repository-owned digest or
+invalidation algorithm around it: native Vitest owns transform-cache validity.
+Dispose of the fixture/cache only after all native CLI processes have returned;
+retain bounded reproduction output separately when investigating a new version.
+
+Revisit either approach only when a concrete input changes: a native cache fix,
+a measured repeated-work bottleneck in another representative workload, or
+different actual storage backing. First rerun the relevant source/configuration
+and corrupt-cache controls, then measure at least three comparable paired
+whole-workflow trials. Freeze source, membership, tools, CPU and workers; include
+setup/cleanup and preserve unmeasured fields. Unused RAM alone is not evidence
+that repeating an unchanged experiment will help.
+
 ### Private local check logs
 
 The check/test/verify/certify logging wrapper selects the prepared backend

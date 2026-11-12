@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import select
 import shlex
@@ -59,11 +60,16 @@ def _native_runner(tmp_path: Path, status: int = 0) -> tuple[Path, Path]:
     return directory, calls
 
 
-def _environment(cpus: str | None, path: Path | None = None) -> dict[str, str]:
+def _environment(
+    cpus: str | None, path: Path | None = None, profile: str | None = None
+) -> dict[str, str]:
     environment = os.environ.copy()
     environment.pop("OH_GOON_TEST_CPUS", None)
+    environment.pop("OH_GOON_LOCAL_TEST_PROFILE", None)
     if cpus is not None:
         environment["OH_GOON_TEST_CPUS"] = cpus
+    if profile is not None:
+        environment["OH_GOON_LOCAL_TEST_PROFILE"] = profile
     if path is not None:
         environment["PATH"] = str(path)
     return environment
@@ -90,11 +96,12 @@ def _run(
     cpus: str | None = "2",
     path: Path | None = None,
     setup: str = "",
+    profile: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         _command(cgroup, *arguments, setup=setup),
         cwd=tmp_path,
-        env=_environment(cpus, path),
+        env=_environment(cpus, path, profile),
         capture_output=True,
         text=True,
         timeout=10,
@@ -468,17 +475,18 @@ def test_inherited_cpu_quota_keeps_private_memory_and_task_constraints_in_place(
 
 
 @pytest.mark.process
-@pytest.mark.parametrize("cpus", ["0", "2"])
+@pytest.mark.parametrize("cpus,profile", [("0", None), ("2", None), (None, "ram")])
 def test_exec_preserves_process_identity_and_sigint_for_owned_descendants(
-    tmp_path: Path, cgroup: tuple[Path, Path], cpus: str
+    tmp_path: Path, cgroup: tuple[Path, Path], cpus: str | None, profile: str | None
 ) -> None:
     _, directory = cgroup
     (directory / "cpu.max").write_text("200000 100000\n")
     program = (
         "import os,subprocess,sys\n"
         "child=subprocess.Popen([sys.executable,'-S','-c','import time; time.sleep(30)'])\n"
-        "print(os.getpid(), child.pid, flush=True)\n"
-        "try: child.wait()\n"
+        "try:\n"
+        " print(os.getpid(), child.pid, flush=True)\n"
+        " child.wait()\n"
         "except KeyboardInterrupt:\n"
         " child.wait(timeout=5)\n"
         " print('descendant-closed', flush=True)\n"
@@ -487,7 +495,7 @@ def test_exec_preserves_process_identity_and_sigint_for_owned_descendants(
     process = subprocess.Popen(
         _command(cgroup, sys.executable, "-S", "-c", program),
         cwd=tmp_path,
-        env=_environment(cpus),
+        env=_environment(cpus, profile=profile),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -511,3 +519,207 @@ def test_exec_preserves_process_identity_and_sigint_for_owned_descendants(
             process.stdout.close()
         if process.stderr is not None:
             process.stderr.close()
+
+
+@pytest.mark.parametrize("cpus,resolved", [(None, "2"), ("0003", "3")])
+def test_ram_profile_transports_default_or_positive_override_to_native_scope(
+    tmp_path: Path, cgroup: tuple[Path, Path], cpus: str | None, resolved: str
+) -> None:
+    binary, calls = _native_runner(tmp_path)
+    arguments = ("/selected/workload", "literal $() argument")
+
+    result = _run(tmp_path, cgroup, *arguments, cpus=cpus, path=binary, profile="ram")
+
+    assert result.returncode == 0, result.stderr
+    forwarded = calls.read_text().splitlines()
+    assert forwarded[0] == resolved
+    assert f"CPUQuota={int(resolved) * 100}%" in forwarded
+    assert forwarded[10:] == [
+        str(WRAPPER),
+        "--oh-goon-cgroup-child",
+        resolved,
+        "--local-test-profile",
+        "ram",
+        "--",
+        *arguments,
+    ]
+    assert "verified" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "profile,cpus",
+    [("unknown", None), ("RAM", None), ("ram", "0"), ("ram", "0000")],
+)
+def test_invalid_local_profile_or_unlimited_ram_budget_refuses_before_effects(
+    tmp_path: Path, cgroup: tuple[Path, Path], profile: str, cpus: str | None
+) -> None:
+    binary, calls = _native_runner(tmp_path)
+    marker = tmp_path / "started"
+
+    result = _run(
+        tmp_path,
+        cgroup,
+        "/bin/sh",
+        "-c",
+        'printf started > "$1"',
+        "sh",
+        str(marker),
+        cpus=cpus,
+        path=binary,
+        profile=profile,
+    )
+
+    assert result.returncode == 2
+    assert "PROFILE CONFIGURATION ERROR" in result.stderr
+    assert not calls.exists() and not marker.exists()
+
+
+def test_ram_profile_does_not_fall_back_when_native_cpu_control_is_unavailable(
+    tmp_path: Path, cgroup: tuple[Path, Path]
+) -> None:
+    root, _directory = cgroup
+    (root / "cgroup.controllers").write_text("memory pids\n")
+    binary, calls = _native_runner(tmp_path)
+    marker = tmp_path / "started"
+
+    result = _run(
+        tmp_path,
+        cgroup,
+        "/bin/sh",
+        "-c",
+        'printf started > "$1"',
+        "sh",
+        str(marker),
+        cpus=None,
+        path=binary,
+        profile="ram",
+    )
+
+    assert result.returncode == 3
+    assert "UNENFORCED" in result.stderr
+    assert not calls.exists() and not marker.exists()
+
+
+def test_receiving_ram_child_uses_the_transported_positive_cpu_budget(
+    tmp_path: Path, cgroup: tuple[Path, Path]
+) -> None:
+    _root, directory = cgroup
+    (directory / "cpu.max").write_text("200000 100000\n")
+
+    result = _run(
+        tmp_path,
+        cgroup,
+        "--oh-goon-cgroup-child",
+        "3",
+        "--local-test-profile",
+        "ram",
+        "--",
+        "/bin/sh",
+        "-c",
+        'printf "%s|%s" "$OH_GOON_TEST_CPUS" "$OH_GOON_LOCAL_TEST_PROFILE"',
+        cpus="invalid ambient default",
+        profile="ram",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "3|ram"
+
+
+@pytest.mark.parametrize(
+    "profile,transported",
+    [
+        ("ram", ()),
+        (None, ("--local-test-profile", "ram")),
+        ("ram", ("--local-test-profile", "unknown")),
+    ],
+)
+def test_receiving_child_refuses_missing_or_changed_resolved_profile_before_work(
+    tmp_path: Path,
+    cgroup: tuple[Path, Path],
+    profile: str | None,
+    transported: tuple[str, ...],
+) -> None:
+    binary, calls = _native_runner(tmp_path)
+    marker = tmp_path / "started"
+
+    result = _run(
+        tmp_path,
+        cgroup,
+        "--oh-goon-cgroup-child",
+        "2",
+        *transported,
+        "--",
+        "/bin/sh",
+        "-c",
+        'printf started > "$1"',
+        "sh",
+        str(marker),
+        cpus=None,
+        path=binary,
+        profile=profile,
+    )
+
+    assert result.returncode == 2
+    assert "PROFILE CONFIGURATION ERROR" in result.stderr
+    assert not calls.exists() and not marker.exists()
+
+
+@pytest.mark.parametrize(
+    "native_settings",
+    [
+        {},
+        {"NODE_COMPILE_CACHE": "caller cache"},
+        {"NODE_COMPILE_CACHE": ""},
+        {"NODE_DISABLE_COMPILE_CACHE": "1"},
+    ],
+)
+def test_nested_ram_wrappers_preserve_native_budget_source_environment_and_io(
+    tmp_path: Path, cgroup: tuple[Path, Path], native_settings: dict[str, str]
+) -> None:
+    _root, directory = cgroup
+    (directory / "cpu.max").write_text("200000 100000\n")
+    binary, calls = _native_runner(tmp_path)
+    selected = {
+        "OH_GOON_CALLER_SOURCE_REVISION": "sha256:" + "a" * 64,
+        "OH_GOON_DB": str(tmp_path / "selected.sqlite3"),
+        "OH_GOON_LEAGUE_FILE": str(tmp_path / "selected-league.json"),
+        "OH_GOON_SQLITE_JOURNAL_MODE": "DELETE",
+        **native_settings,
+        "TMPDIR": "/selected/disk/temp",
+        "HOME": "/selected/home",
+        "XDG_CACHE_HOME": "/selected/cache",
+    }
+    environment = _environment(None, binary, "ram") | selected
+    program = (
+        "import json,os,sys; "
+        "print(json.dumps({'cpus':os.environ['OH_GOON_TEST_CPUS'],"
+        "'profile':os.environ['OH_GOON_LOCAL_TEST_PROFILE'],'cwd':os.getcwd(),"
+        "'literal':sys.argv[1],'input':sys.stdin.read(),"
+        f"'selected':{{key:os.environ[key] for key in {tuple(selected)!r}}}}})); "
+        "sys.stderr.write('original-workload-error\\n'); sys.exit(17)"
+    )
+    inner = _command(
+        cgroup, sys.executable, "-S", "-c", program, "literal $() argument"
+    )
+
+    result = subprocess.run(
+        _command(cgroup, *inner),
+        cwd=tmp_path,
+        env=environment,
+        input="original input\n",
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 17, result.stderr
+    assert json.loads(result.stdout) == {
+        "cpus": "2",
+        "profile": "ram",
+        "cwd": str(tmp_path),
+        "literal": "literal $() argument",
+        "input": "original input\n",
+        "selected": selected,
+    }
+    assert "original-workload-error" in result.stderr
+    assert not calls.exists()

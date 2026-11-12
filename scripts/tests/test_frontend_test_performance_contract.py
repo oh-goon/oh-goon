@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
+import pytest
+
+from oh_goon.engine.command import run_command
+from oh_goon.repository_tooling.frontend_test_results import (
+    collect_native_vitest,
+    require_native_vitest_files,
+    vitest_outcomes,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend"
@@ -101,3 +111,87 @@ def test_init_delegates_frontend_materialization_directly_to_native_npm() -> Non
     assert "frontend_install.sh" not in body
     assert "frontend-dependencies-check" not in body
     assert "setup-smoke:" not in makefile
+
+
+@pytest.fixture
+def native_frontend_toolchain() -> None:
+    """Declare native locked npm capability without setup during collection."""
+
+
+@pytest.mark.process
+@pytest.mark.native_resources
+def test_ram_profile_preserves_authored_node_and_dom_native_membership(
+    tmp_path: Path, native_frontend_toolchain: None
+) -> None:
+    files = (
+        "src/domain/concurrency/MutationController.test.ts",
+        "src/domain/reads/readResources.test.ts",
+        "src/app/pages/runStepUrl.test.ts",
+        "src/app/pages/CatalogPage.test.tsx",
+        "src/features/game-tape/components/GameTapeOutputs.test.tsx",
+    )
+    targets = tuple("frontend/" + path for path in files)
+    collection = collect_native_vitest(ROOT, targets)
+    projects = {row["file"]: row["projectName"] for row in collection["selected"]}
+    assert set(projects.values()) == {"node", "dom"}
+    signatures: list[list[tuple[str, str, str, str]]] = []
+    counts: list[dict[str, int]] = []
+    for mode in ("baseline", "ram"):
+        directory = tmp_path / mode
+        directory.mkdir(mode=0o700)
+        report = directory / "vitest.json"
+        environment = {
+            **os.environ,
+            "OH_GOON_TEST_CPUS": "2",
+            "OH_GOON_VITEST_JSON_REPORT": str(report),
+        }
+        environment.pop("OH_GOON_LOCAL_TEST_PROFILE", None)
+        if mode == "ram":
+            environment.pop("OH_GOON_TEST_CPUS")
+            environment["OH_GOON_LOCAL_TEST_PROFILE"] = "ram"
+        native = run_command(
+            "bash",
+            str(ROOT / "scripts/development_test_resources.sh"),
+            "npm",
+            "run",
+            "test",
+            "--",
+            *("./" + path for path in files),
+            env=environment,
+            cwd=FRONTEND,
+            timeout=120,
+            require_process_group_quiescence=True,
+            parent_death_signal=True,
+            max_capture_bytes_per_stream=64 * 1024,
+            retain_output_tail=True,
+        )
+        assert native.returncode == 0, (native.stdout, native.stderr)
+        assert native.supervisor.final_process_group_quiescent is True
+        assert "at most 2 CPUs (verified inherited cgroup quota)" in native.stderr
+        with report.open("rb") as source:
+            encoded = source.read(4 * 1024 * 1024 + 1)
+        assert len(encoded) <= 4 * 1024 * 1024
+        payload = json.loads(encoded)
+        complete, passed, native_counts = vitest_outcomes(payload)
+        assert complete and passed
+        assert native_counts["numPassedTests"] == native_counts["numTotalTests"] > 0
+        assert require_native_vitest_files(
+            payload,
+            project_root=FRONTEND,
+            expected_files=targets,
+            collection=collection,
+        ) == set(targets)
+        cases: list[tuple[str, str, str, str]] = []
+        project_counts = {"node": 0, "dom": 0}
+        for result in payload["testResults"]:
+            path = "frontend/" + Path(result["name"]).relative_to(FRONTEND).as_posix()
+            for assertion in result["assertionResults"]:
+                cases.append(
+                    (projects[path], path, assertion["fullName"], assertion["status"])
+                )
+                project_counts[projects[path]] += 1
+        assert all(value > 0 for value in project_counts.values())
+        signatures.append(sorted(cases))
+        counts.append(native_counts)
+    assert signatures[0] == signatures[1]
+    assert counts[0] == counts[1]

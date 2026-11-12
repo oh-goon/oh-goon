@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import sys
+from collections.abc import Mapping
 from typing import Protocol
 
 from oh_goon.repository_tooling.architecture._hashmarks_verification_boundary_contract import (
@@ -75,6 +77,27 @@ from oh_goon.repository_tooling.architecture.trust_authority_registry_contract i
 from oh_goon.repository_tooling.architecture.x0_single_execution_contract import (
     check_x0_single_execution_path,
 )
+from oh_goon.repository_tooling.pytest_resource_budget import resolve_pytest_resource_budget
+
+
+def captured_source_packets_enabled(environment: Mapping[str, str]) -> bool:
+    """Verify transported profile authority before selecting the native handoff."""
+    profile = environment.get("OH_GOON_LOCAL_TEST_PROFILE", "")
+    if not profile:
+        return False
+    if profile != "ram":
+        raise ValueError("Unknown local test profile")
+    budget = resolve_pytest_resource_budget(1, environ=environment)
+    if (
+        budget.configured_cpus < 1
+        or budget.cgroup_usage_started is None
+        or not budget.cgroup_usage_started.pid_bound
+        or budget.cgroup_cpu_capacity is None
+        or not 0 < budget.cgroup_cpu_capacity <= budget.configured_cpus
+    ):
+        raise ValueError("RAM architecture requires its resolved positive native CPU quota")
+    print("RAM architecture source packets: one-use native handoff", file=sys.stderr)
+    return True
 
 
 class ArchitectureCheck(Protocol):
@@ -113,7 +136,12 @@ CHECKS: tuple[ArchitectureCheck, ...] = (
 
 
 def main() -> int:
-    with python_source_snapshot():
+    try:
+        captured_packets = captured_source_packets_enabled(dict(os.environ))
+    except ValueError as error:
+        print(f"RAM architecture refused: {error}", file=sys.stderr)
+        return 3
+    with python_source_snapshot(captured_packets=captured_packets):
         failures = [(check.__name__, violation) for check in CHECKS for violation in check()]
     if not failures:
         print("Architecture checks passed")

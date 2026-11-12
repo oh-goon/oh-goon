@@ -18,6 +18,7 @@ from oh_goon.repository_tooling.architecture.common import (
     python_ast,
     python_semantic_facts,
     python_source_snapshot,
+    source_binding_packet,
     source_import_spelling,
 )
 from oh_goon.repository_tooling.architecture.hashmarks_harness_boundary_contract import (
@@ -817,7 +818,7 @@ def _check_run_worker_custody_sources(package: Path) -> list[Violation]:
         references.update(_literal_dynamic_imports(facts))
         references.update(
             source_import_spelling(fact["target"])
-            for fact in facts.evidence.packet()["facts"]
+            for fact in source_binding_packet(facts.evidence, language="python")["facts"]
             if fact.get("kind") in {"alias-binding", "reference", "call-site"}
             and fact.get("qualification") == "conditional"
             and isinstance(fact.get("target"), dict)
@@ -997,7 +998,7 @@ def _check_agent_workload_canonical_owner(root: Path, package: Path) -> list[Vio
         # than dropping it through the unconditional convenience projection.
         conditional_imports = {
             source_import_spelling(fact["target"])
-            for fact in facts.evidence.packet()["facts"]
+            for fact in source_binding_packet(facts.evidence, language="python")["facts"]
             if fact.get("kind") in {"alias-binding", "reference"}
             and fact.get("qualification") == "conditional"
             and isinstance(fact.get("target"), dict)

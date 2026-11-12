@@ -13,6 +13,7 @@ from oh_goon.repository_tooling.architecture.common import (
     python_semantic_facts,
     python_source_snapshot,
     source_binding_name,
+    source_binding_packet,
     source_import_spelling,
 )
 from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT, ROOT
@@ -68,7 +69,7 @@ def _imports(
     observed = facts or python_semantic_facts(path, imported_only=True, tree=tree)
     package_root = package_root or BACKEND_PACKAGE_ROOT
     result: set[str] = set()
-    for fact in observed.evidence.packet()["facts"]:
+    for fact in source_binding_packet(observed.evidence, language="python")["facts"]:
         syntax = fact.get("import_syntax")
         if fact.get("kind") != "import-binding" or not isinstance(syntax, dict):
             continue
@@ -162,7 +163,7 @@ def _literal_fromlist(
         offsets.append(offsets[-1] + len(line))
     literals = {
         (row["range"]["start_byte"], row["range"]["end_byte"]): row["literal"]
-        for row in facts.evidence.packet()["facts"]
+        for row in source_binding_packet(facts.evidence, language="python")["facts"]
         if row["kind"] == "literal-expression"
         and row.get("qualification") == "qualified"
         and not row.get("conditions")
@@ -352,7 +353,7 @@ def _package_boundary_violations_in_snapshot(package_root: Path) -> tuple[Violat
                         package_root,
                     )
                     == _PUBLIC_HASHMARKS_API
-                    for fact in facts.evidence.packet()["facts"]
+                    for fact in source_binding_packet(facts.evidence, language="python")["facts"]
                 ),
             )
         )
