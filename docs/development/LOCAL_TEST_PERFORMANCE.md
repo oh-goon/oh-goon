@@ -192,19 +192,28 @@ leaving one legacy prose assertion out; it is not the full file/owner.
 
 The selected-Make membership was **42 backend unit + 1,111 tooling cases**;
 no dependency-complete, backend integration, cross-owner integration or standalone
-project cases were in that selection. Vitest ran in the separate paired lanes.
-The aggregate is a real selected `make test` invocation with its static phases,
-not the complete frontend/backend/integration portfolio. A fresh-main or
+project cases were in that selection. One selected tooling case,
+`test_ram_profile_preserves_authored_node_and_dom_native_membership`, ran the
+three authored node and two DOM files under both child modes and checked their
+native membership/outcomes. These nested compatibility invocations are included
+in aggregate cost; their individual cases are not additional top-level pytest
+members. Vitest also ran in the separately timed paired lanes.
+The aggregate is a real selected `make test` invocation with Python/architecture
+static phases and nested Vitest compatibility, not the complete
+frontend/backend/integration portfolio. It had no directly admitted frontend
+lane or frontend build. A fresh-main or
 documentation-only `make test` selects different work and is not a comparable
 backbone timing. Its frozen CPU mean was 818.51→814.01s; the architecture mean
 was 78.16→74.67s with roughly unchanged 1.60 GiB waited-process peak RSS.
 
 A single combined workflow containing Vitest, backend/tooling and static/build
-has **not been comparatively measured** by these trials. Separate paired lanes
-do not fill that requirement. HUG-211 must retain this unverified feedback-time
-question before claiming a combined workflow benefit; do not extrapolate or
-repeat the expensive selected-Make experiment as if it supplied missing Vitest
-membership. Frozen short-lane ordinary/profile CPU means were 5.027/5.037s
+has **not been comparatively measured in full** by these trials. The missing
+frontend/build phase remains unverified; an empty directly admitted frontend
+set does not mean no Vitest child ran. Separate paired lanes do not fill the
+complete workflow requirement. HUG-211 must retain this feedback-time question
+before claiming a complete combined workflow benefit; do not extrapolate or
+repeat the expensive selected-Make experiment as if its nested Vitest evidence
+were absent. Frozen short-lane ordinary/profile CPU means were 5.027/5.037s
 (unit), 4.950/4.923s (node) and 12.757/12.823s (DOM); their waited-process RSS
 means were 87,320/87,229, 436,123/444,041 and 578,259/578,759 KiB respectively.
 
