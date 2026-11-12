@@ -53,7 +53,6 @@ def test_native_backend_installation_materializes_loadable_console_scripts() -> 
             "--offline",
             "--frozen",
             "--no-dev",
-            "--no-sources",
             "--no-python-downloads",
             env={**os.environ, "UV_PROJECT_ENVIRONMENT": str(environment)},
             timeout=120,
