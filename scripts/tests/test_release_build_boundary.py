@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 import sys
+import tempfile
 import tomllib
 import types
 
@@ -18,6 +19,14 @@ from oh_goon.repository_tooling.release.build_wheel import (
     staged_template_catalogs,
 )
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.engine.command import (
+    CommandAuthorityTerminatedError,
+    CommandCancelledError,
+    CommandOutputLimitExceeded,
+    CommandSupervisionTerminated,
+    CommandTimeoutExpired,
+    run_command,
+)
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.source_snapshot import snapshot_source_directory
 from oh_goon.services.template_plan_drafts import (
@@ -26,6 +35,87 @@ from oh_goon.services.template_plan_drafts import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.process
+def test_native_backend_installation_materializes_loadable_console_scripts() -> None:
+    """Native uv, Hatch and importlib retain entry-point installation authority."""
+    directory = Path(tempfile.mkdtemp(prefix="oh-goon-native-console-proof-"))
+    environment = directory / "venv"
+    settled = True
+    try:
+        settled = False
+        result = run_command(
+            "uv",
+            "sync",
+            "--project",
+            str(ROOT / "backend"),
+            "--offline",
+            "--frozen",
+            "--no-dev",
+            "--no-sources",
+            "--no-python-downloads",
+            env={**os.environ, "UV_PROJECT_ENVIRONMENT": str(environment)},
+            timeout=120,
+            require_process_group_quiescence=True,
+            parent_death_signal=sys.platform == "linux",
+            max_capture_bytes_per_stream=64 * 1024,
+            retain_output_tail=True,
+        )
+        settled = result.supervisor.final_process_group_quiescent
+        assert settled and result.returncode == 0, (result.stdout, result.stderr)
+        declaration = tomllib.loads((ROOT / "backend/pyproject.toml").read_text())
+        scripts = declaration["project"]["scripts"]
+        python = environment / (
+            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        )
+        settled = False
+        result = run_command(
+            str(python),
+            "-I",
+            "-c",
+            """
+from importlib.metadata import distribution
+from pathlib import Path
+import json, os, sys
+
+expected = json.loads(sys.argv[1])
+entries = [entry for entry in distribution('oh-goon').entry_points if entry.group == 'console_scripts']
+assert len(entries) == len(expected)
+assert {entry.name: entry.value for entry in entries} == expected
+for entry in entries:
+    wrapper = Path(sys.executable).parent / (entry.name + ('.exe' if os.name == 'nt' else ''))
+    assert wrapper.is_file() and os.access(wrapper, os.X_OK), entry.name
+    assert callable(entry.load()), entry.name
+print(json.dumps(sorted(entry.name for entry in entries)))
+""",
+            json.dumps(scripts),
+            timeout=120,
+            require_process_group_quiescence=True,
+            parent_death_signal=sys.platform == "linux",
+            max_capture_bytes_per_stream=64 * 1024,
+            retain_output_tail=True,
+        )
+        settled = result.supervisor.final_process_group_quiescent
+        assert settled and result.returncode == 0, (result.stdout, result.stderr)
+        assert json.loads(result.stdout) == sorted(scripts)
+    except (
+        CommandAuthorityTerminatedError,
+        CommandCancelledError,
+        CommandOutputLimitExceeded,
+        CommandSupervisionTerminated,
+        CommandTimeoutExpired,
+    ) as error:
+        settled = error.supervisor.final_process_group_quiescent
+        raise
+    finally:
+        if settled:
+            shutil.rmtree(directory)
+        else:
+            print(
+                f"Native console proof retained: process cleanup unverified: {directory}",
+                file=sys.stderr,
+            )
 
 
 def _hatch_build_module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
