@@ -3883,6 +3883,13 @@ def _bounded_owner_case(
             + 'dev-mode-dirs = ["src", "../templates/goons/general/native-fixture/src"]\n'
         )
         paths = ["backend/pyproject.toml", "backend/hatch_build.py"]
+    elif kind == "console":
+        source = root / "backend/pyproject.toml"
+        source.write_text(
+            source.read_text()
+            + '\n[project.scripts]\nnative-owner-cli = "native_owner_fixture:main"\n'
+        )
+        paths = ["backend/pyproject.toml"]
     elif kind == "api":
         paths = [
             "backend/src/oh_goon/api/routes/native_fixture.py",
@@ -3985,7 +3992,7 @@ def _bounded_owner_execution(
     return plan, files, members, browser
 
 
-@pytest.mark.parametrize("kind", ("build", "api", "frontend", "template"))
+@pytest.mark.parametrize("kind", ("build", "console", "api", "frontend", "template"))
 def test_bounded_owner_proof_keeps_unknown_consumers_and_requires_its_native_owners(
     bounded_owner_repository: tuple[Path, str], kind: str
 ) -> None:
@@ -3996,6 +4003,7 @@ def test_bounded_owner_proof_keeps_unknown_consumers_and_requires_its_native_own
         proof["routes"][0]["obligation"]
         == {
             "build": gate.BOUNDED_BUILD_PROOF,
+            "console": gate.BOUNDED_BUILD_PROOF,
             "api": gate.BOUNDED_API_PROOF,
             "frontend": gate.BOUNDED_FRONTEND_PROOF,
             "template": gate.BOUNDED_TEMPLATE_PROOF,
@@ -4011,6 +4019,69 @@ def test_bounded_owner_proof_keeps_unknown_consumers_and_requires_its_native_own
     assert admitted == set(proof["routes"][0]["paths"])
     assert proof["consumer_coverage"] == "not-claimed"
     assert evidence["observations"] == original_observations
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "dependency",
+        "pytest-config",
+        "uv-policy",
+        "builder",
+        "lock",
+        "mapping",
+        "hook",
+        "project",
+    ),
+)
+def test_console_entrypoint_proof_cannot_admit_other_native_configuration(
+    bounded_owner_repository: tuple[Path, str], fault: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "console")
+    assert proof["routes"]
+    manifest = root / "backend/pyproject.toml"
+    content = manifest.read_text()
+    if fault == "dependency":
+        content = content.replace("dependencies = []", 'dependencies = ["unexpected"]')
+    elif fault == "pytest-config":
+        content = content.replace('addopts = "-q"', 'addopts = "--ignore=tests"')
+    elif fault == "uv-policy":
+        content += '\n[tool.uv]\nindex-url = "https://example.invalid/simple"\n'
+    elif fault == "builder":
+        content = content.replace(
+            'build-backend = "hatchling.build"', 'build-backend = "other.build"'
+        )
+    elif fault == "lock":
+        paths.append("backend/uv.lock")
+    elif fault == "mapping":
+        content = content.replace(
+            "[tool.hatch.build]\n", '[tool.hatch.build]\ndev-mode-dirs = ["src"]\n'
+        )
+    elif fault == "hook":
+        paths.append("backend/hatch_build.py")
+    else:
+        content = content.replace(
+            'name = "native-owner-fixture"', 'name = "another-project"'
+        )
+    manifest.write_text(content)
+    assert gate.get_bounded_owner_proofs(root, base, paths, evidence)["routes"] == []
+
+
+def test_console_entrypoint_proof_requires_fresh_installation_member(
+    bounded_owner_repository: tuple[Path, str],
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "console")
+    plan, files, members, browser = _bounded_owner_execution(paths, evidence, proof)
+    gate.require_bounded_owner_proofs(
+        plan, evidence, files, members, browser, expected=proof
+    )
+    members.remove(gate.CONSOLE_INSTALLATION_TEST)
+    with pytest.raises(ValueError, match="required native test"):
+        gate.require_bounded_owner_proofs(
+            plan, evidence, files, members, browser, expected=proof
+        )
 
 
 @pytest.mark.parametrize(
@@ -4330,7 +4401,7 @@ def _bounded_merge_proof(
         producer_implementation_identity="sha256:" + "b" * 64,
         bounded_owner_proofs=copy.deepcopy(proof),
     )
-    if kind == "build":
+    if kind in {"build", "console"}:
         evidence["observations"][0]["changed_set"] = {
             "changes": [{"classification": {"kind": "verification-support"}}]
         }
@@ -4447,7 +4518,7 @@ def _validate_bounded_merge(
     )
 
 
-@pytest.mark.parametrize("kind", ("build", "template", "api", "frontend"))
+@pytest.mark.parametrize("kind", ("build", "console", "template", "api", "frontend"))
 def test_bounded_owner_merge_gate_uses_original_native_receipts_without_promoting_consumers(
     bounded_owner_repository: tuple[Path, str], kind: str
 ) -> None:

@@ -132,6 +132,12 @@ a candidate can consume it.
   declarations. Mappings must resolve to committed, canonical, contained authored
   source; generated environments and excluded source never qualify. Existing
   native package, standard-wheel/archive and installed-wheel checks are required.
+  The same owner admits a change confined to `[project.scripts]`, with every
+  other TOML declaration and the native lock unchanged and no simultaneous
+  build-hook change. A fresh locked native uv installation must materialize the
+  exact console-script registry and executable wrappers; native `importlib`
+  must load each registered callable. This does not qualify repository consumer
+  completeness or reinterpret pytest applicability as a direct reference.
 - The **bounded shipped stdlib project proof** requires the original compiler and
   captured standalone Python project, with explicit empty runtime dependencies
   and no optional/group/uv overrides. Its own locked uv environment runs native
