@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -55,9 +56,8 @@ def _cleanup_compose(compose: tuple[str, ...], *, root: Path, env: dict[str, str
         (*compose, "down", "--remove-orphans", "--rmi", "local"),
         cwd=root,
         env=env,
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        check=True,
+        timeout=60,
     )
 
 
@@ -180,8 +180,10 @@ def accept_container(
         dockerfile = _validated_dockerfile(root, dockerfile)
     except ValueError as exc:
         return (str(exc),)
-    with tempfile.TemporaryDirectory(prefix="oh-goon-container-accept-") as temporary:
-        temp = Path(temporary)
+    temp = Path(tempfile.mkdtemp(prefix="oh-goon-container-accept-"))
+    settled = True
+    failure: BaseException | None = None
+    try:
         data = temp / "data"
         repositories = temp / "repositories"
         data.mkdir()
@@ -206,47 +208,102 @@ def accept_container(
             "--file",
             str(compose_file),
         )
-        try:
-            subprocess.run((*compose, "build", "oh-goon"), cwd=root, env=env, check=True)
-            subprocess.run((*compose, "up", "-d", "oh-goon"), cwd=root, env=env, check=True)
-            _wait_http(f"{base}/healthz")
-            if provenance_issues := _verify_container_package_origin(compose, root=root, env=env):
-                return provenance_issues
-            subprocess.run(
-                ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
-                cwd=root / "frontend",
-                check=True,
-            )
-            subprocess.run(("npm", "run", "browser:install"), cwd=root / "frontend", check=True)
-            _request_json(
-                "POST",
-                f"{base}/api/locations",
-                access_token=access_token,
-                payload={"path": "/repositories"},
-            )
-            run_id = exercise_product_runtime(
+        settled = False
+        issues.extend(
+            _exercise_container_runtime(
+                compose,
                 root=root,
-                base_url=base,
+                env=env,
+                data=data,
                 acceptance_repository=acceptance_repository,
-                server_repository_path="/repositories/acceptance-repo",
-                browser_repository_path="/repositories",
+                base=base,
                 access_token=access_token,
             )
-            subprocess.run((*compose, "down"), cwd=root, env=env, check=True)
-            if not (data / "oh-goon.db").is_file():
-                return ("container did not persist SQLite database on the host",)
-            subprocess.run((*compose, "up", "-d", "oh-goon"), cwd=root, env=env, check=True)
-            _wait_http(f"{base}/healthz")
-            locations = _request_json("GET", f"{base}/api/locations", access_token=access_token)
-            if "/repositories" not in locations.get("locations", []):
-                return ("replacement container did not restore persisted League configuration",)
-            persisted_run = _request_json(
-                "GET", f"{base}/api/fleet/runs/{run_id}", access_token=access_token
-            )
-            if persisted_run.get("fleet_run_id") != run_id:
-                return ("replacement container did not restore persisted SQLite Game Tape state",)
-        finally:
-            _cleanup_compose(compose, root=root, env=env)
+        )
+    except BaseException as exc:
+        failure = exc
+        raise
+    finally:
+        if not settled:
+            try:
+                _cleanup_compose(compose, root=root, env=env)
+            except BaseException as exc:
+                message = (
+                    f"Container cleanup failed; native teardown is unproven. "
+                    f"Retained acceptance state: {temp}; project: {project_name}: {exc}"
+                )
+                if failure is not None:
+                    failure.add_note(message)
+                elif isinstance(exc, Exception):
+                    issues.append(message)
+                else:
+                    exc.add_note(message)
+                    raise
+            else:
+                settled = True
+        if settled:
+            try:
+                shutil.rmtree(temp)
+            except BaseException as exc:
+                message = f"Acceptance state cleanup failed; removal may be partial: {temp}: {exc}"
+                if failure is not None:
+                    failure.add_note(message)
+                elif isinstance(exc, Exception):
+                    issues.append(message)
+                else:
+                    exc.add_note(message)
+                    raise
+    return tuple(issues)
+
+
+def _exercise_container_runtime(
+    compose: tuple[str, ...],
+    *,
+    root: Path,
+    env: dict[str, str],
+    data: Path,
+    acceptance_repository: Path,
+    base: str,
+    access_token: str,
+) -> tuple[str, ...]:
+    subprocess.run((*compose, "build", "oh-goon"), cwd=root, env=env, check=True)
+    subprocess.run((*compose, "up", "-d", "oh-goon"), cwd=root, env=env, check=True)
+    _wait_http(f"{base}/healthz")
+    if provenance_issues := _verify_container_package_origin(compose, root=root, env=env):
+        return provenance_issues
+    subprocess.run(
+        ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
+        cwd=root / "frontend",
+        check=True,
+    )
+    subprocess.run(("npm", "run", "browser:install"), cwd=root / "frontend", check=True)
+    _request_json(
+        "POST",
+        f"{base}/api/locations",
+        access_token=access_token,
+        payload={"path": "/repositories"},
+    )
+    run_id = exercise_product_runtime(
+        root=root,
+        base_url=base,
+        acceptance_repository=acceptance_repository,
+        server_repository_path="/repositories/acceptance-repo",
+        browser_repository_path="/repositories",
+        access_token=access_token,
+    )
+    subprocess.run((*compose, "down"), cwd=root, env=env, check=True)
+    if not (data / "oh-goon.db").is_file():
+        return ("container did not persist SQLite database on the host",)
+    subprocess.run((*compose, "up", "-d", "oh-goon"), cwd=root, env=env, check=True)
+    _wait_http(f"{base}/healthz")
+    locations = _request_json("GET", f"{base}/api/locations", access_token=access_token)
+    if "/repositories" not in locations.get("locations", []):
+        return ("replacement container did not restore persisted League configuration",)
+    persisted_run = _request_json(
+        "GET", f"{base}/api/fleet/runs/{run_id}", access_token=access_token
+    )
+    if persisted_run.get("fleet_run_id") != run_id:
+        return ("replacement container did not restore persisted SQLite Game Tape state",)
     return ()
 
 
@@ -259,7 +316,7 @@ def main() -> int:
     try:
         issues = accept_container(ROOT, dockerfile=args.dockerfile)
     except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
-        issues = (str(exc),)
+        issues = (str(exc), *getattr(exc, "__notes__", ()))
     if issues:
         print("Container acceptance failed:", file=sys.stderr)
         for issue in issues:

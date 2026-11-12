@@ -3,17 +3,99 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 
 import pytest
 
+from oh_goon.engine.command import run_command
 from oh_goon.repository_tooling.release.browser_acceptance_container import (
     BrowserAcceptanceEnvironmentError,
     locked_playwright_version,
     playwright_image,
     run_browser_acceptance_container,
 )
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("failed_owner", [None, "uv", "npm"])
+def test_authored_container_bootstrap_runs_native_materialization_and_smoke(
+    tmp_path: Path, failed_owner: str | None
+) -> None:
+    dockerfile = (ROOT / "docker/playwright/Dockerfile").read_text(encoding="utf-8")
+    # Execute the authored shell-form bootstrap, leaving target resolution to Make.
+    bootstrap_commands = [
+        line.removeprefix("RUN ")
+        for line in dockerfile.splitlines()
+        if line.startswith("RUN make ")
+    ]
+    assert len(bootstrap_commands) == 1
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "frontend").mkdir()
+    shutil.copy2(ROOT / "Makefile", repo / "Makefile")
+    for script in ("run_step.sh", "command_banner.sh"):
+        shutil.copy2(ROOT / "scripts" / script, repo / "scripts" / script)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    events = tmp_path / "events"
+    for name, script in {
+        "uv": """#!/bin/sh
+set -eu
+[ "$1" = sync ]
+printf '%s\\n' backend >> "$BOOTSTRAP_EVENTS"
+[ "${FAIL_OWNER:-}" != uv ] || exit 73
+mkdir -p backend/.venv/bin
+cat > backend/.venv/bin/oh-goon <<'CLI'
+#!/bin/sh
+set -eu
+[ "$1" = --help ]
+printf '%s\\n' smoke >> "$BOOTSTRAP_EVENTS"
+CLI
+chmod +x backend/.venv/bin/oh-goon
+""",
+        "npm": """#!/bin/sh
+set -eu
+[ "$1" = ci ]
+printf '%s\\n' frontend >> "$BOOTSTRAP_EVENTS"
+[ "${FAIL_OWNER:-}" != npm ] || exit 74
+mkdir -p node_modules
+""",
+    }.items():
+        executable = tools / name
+        executable.write_text(script, encoding="utf-8")
+        executable.chmod(0o755)
+    environment = {
+        **os.environ,
+        "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
+        "MAKEFLAGS": "",
+        "BOOTSTRAP_EVENTS": str(events),
+        "FAIL_OWNER": failed_owner or "",
+    }
+    result = run_command(
+        "sh",
+        "-eu",
+        "-c",
+        bootstrap_commands[0],
+        cwd=repo,
+        env=environment,
+        timeout=15,
+        max_capture_bytes_per_stream=64 * 1024,
+        require_process_group_quiescence=True,
+        parent_death_signal=True,
+    )
+    assert (result.returncode == 0) is (failed_owner is None), (
+        result.stdout + result.stderr
+    )
+    observed = events.read_text(encoding="utf-8").splitlines()
+    expected = ["backend", "frontend", "smoke"]
+    if failed_owner is not None:
+        expected = expected[: {"uv": 1, "npm": 2}[failed_owner]]
+    assert observed == expected
 
 
 def _write_lock(root: Path) -> None:
