@@ -22,8 +22,9 @@ from oh_goon.repository_tooling.architecture._launch_contract_status import (
 )
 from oh_goon.repository_tooling.architecture.common import (
     Violation,
-    python_semantic_facts,
+    python_source_bindings,
     python_source_snapshot,
+    source_binding_packet,
     source_import_spelling,
 )
 
@@ -63,13 +64,15 @@ def _runtime_authority_source_uses(root: Path) -> dict[str, _LifecycleSourceUses
     observed: dict[str, _LifecycleSourceUses] = {}
     with python_source_snapshot(root):
         for path in (root / "backend/src/oh_goon").rglob("*.py"):
-            facts = python_semantic_facts(path, imported_only=True)
+            evidence = python_source_bindings(path)
             admitted = tuple(
-                row for row in facts.evidence.packet()["facts"] if _is_lifecycle_source_use(row)
+                row
+                for row in source_binding_packet(evidence, language="python")["facts"]
+                if _is_lifecycle_source_use(row)
             )
             if admitted:
                 observed[path.relative_to(root).as_posix()] = _LifecycleSourceUses(
-                    facts.evidence,
+                    evidence,
                     tuple(row for row in admitted if row["qualification"] == "qualified"),
                     tuple(row for row in admitted if row["qualification"] == "conditional"),
                 )

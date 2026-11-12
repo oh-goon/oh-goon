@@ -104,8 +104,15 @@ class PythonSemanticFacts:
 def source_binding_packet(
     evidence: HashmarksSourceEvidence, *, language: str | tuple[str, ...]
 ) -> dict[str, Any]:
-    """Require a bounded complete syntax observation, not complete semantics."""
-    packet = evidence.packet()
+    """Validate the exact producer packet retained by this architecture lifetime.
+
+    Policy consumes these owned observations without mutating them. The public
+    evidence packet API continues to return detached copies to its callers.
+    """
+    snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
+    packet = snapshot.source_packets.get(evidence) if snapshot is not None else None
+    if packet is None:
+        packet = evidence.packet()
     languages = (language,) if isinstance(language, str) else language
     parser = packet.get("parser") or {}
     if (
@@ -125,6 +132,8 @@ def source_binding_packet(
             "Architecture source bindings are unavailable or incomplete: "
             + str(packet.get("reason") or packet.get("availability"))
         )
+    if snapshot is not None:
+        snapshot.source_packets[evidence] = packet
     return packet
 
 
@@ -263,6 +272,7 @@ class _PythonSourceSnapshot:
     captures: dict[Path, bytes] = field(default_factory=dict)
     trees: dict[Path, ast.Module] = field(default_factory=dict)
     evidence: dict[Path, HashmarksSourceEvidence] = field(default_factory=dict)
+    source_packets: dict[HashmarksSourceEvidence, dict[str, Any]] = field(default_factory=dict)
     semantic_facts: dict[tuple[Path, bool, ast.Module], PythonSemanticFacts] = field(
         default_factory=dict
     )

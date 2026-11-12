@@ -14,6 +14,7 @@ from oh_goon.repository_tooling.architecture.common import (
     python_ast,
     python_semantic_facts,
     python_source_snapshot,
+    source_binding_packet,
 )
 from oh_goon.repository_tooling.architecture.shell_semantics import (
     ShellCommand,
@@ -660,7 +661,7 @@ def _check_local_executor_control_state(root: Path) -> list[Violation]:
             fact["kind"] in {"reference", "literal-expression"}
             and (fact["range"]["start_byte"], fact["range"]["end_byte"]) in ranges
             and _forbidden_control_literal(fact)
-            for fact in facts.evidence.packet()["facts"]
+            for fact in source_binding_packet(facts.evidence, language="python")["facts"]
         )
         targets = {id(call): name for name, call in facts.calls}
         for fact, call in facts.call_observations:

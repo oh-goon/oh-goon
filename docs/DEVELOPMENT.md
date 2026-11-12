@@ -351,6 +351,17 @@ measured. “Responsive but high temp” was a separate earlier validation
 observation, not a result for every trial. Later runtime changes require new
 measurements rather than inheriting these timings.
 
+A separate diagnostic pair at commit `eead8a1e3a13f478a71a5e8f1a30a52adf82fbae`
+tested the real frontend static sequence, `npm run typecheck` followed by
+`npm run lint`, after native TypeScript preparation. Both modes used the same
+source, tools, sequence and verified two-CPU quota. Whole-scope time was
+22.64 seconds normally and 23.38 seconds with the RAM profile; process CPU was
+39.44 and 40.20 seconds respectively. The child commands were approximately
+9.79 and 12.8 seconds in both modes, so this pair did not identify a beneficiary
+that recovered profile setup/cleanup. This is one diagnostic pair, not repeated
+performance qualification or a statistically established regression. Do not
+expand the same cache to this sequence on the strength of unused RAM.
+
 The Vitest 4.1.10 experimental filesystem module cache also failed a native
 configuration-invalidation control. In an isolated temporary project using the
 locked frontend `node_modules`, keep these files unchanged:

@@ -11,6 +11,7 @@ from oh_goon.repository_tooling.architecture.common import (
     python_ast,
     python_semantic_facts,
     python_source_snapshot,
+    source_binding_packet,
 )
 from oh_goon.repository_tooling.architecture.typescript_semantics import (
     project_typescript,
@@ -128,3 +129,46 @@ def test_typescript_projection_reuses_only_exact_inputs_within_one_invocation(
         assert project_typescript(first, path="source.ts").uses("localStorage")
     assert observations[-1] == ("source.ts", first)
     assert len(observations) == 4
+
+
+def test_source_packet_reuse_keeps_language_validation_and_detached_public_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.integrations.hashmarks import (
+        HashmarksSourceEvidence,
+        observe_source_bindings_text,
+    )
+
+    evidence = observe_source_bindings_text("fetch('/api');", path="source.ts")
+    native = HashmarksSourceEvidence.packet
+    observations: list[HashmarksSourceEvidence] = []
+
+    def observe(self: HashmarksSourceEvidence) -> dict[str, Any]:
+        observations.append(self)
+        return native(self)
+
+    monkeypatch.setattr(HashmarksSourceEvidence, "packet", observe)
+    with python_source_snapshot():
+        packet = source_binding_packet(evidence, language="typescript")
+        assert packet["facts"]
+        assert (
+            source_binding_packet(evidence, language=("typescript", "javascript"))
+            is packet
+        )
+        assert observations == [evidence]
+        with pytest.raises(ValueError, match="unavailable or incomplete"):
+            source_binding_packet(evidence, language="python")
+        assert observations == [evidence]
+        detached = evidence.packet()
+        detached["facts"].clear()
+        detached["availability"] = "unavailable"
+        assert source_binding_packet(evidence, language="typescript")["facts"]
+        assert (
+            source_binding_packet(evidence, language="typescript")["availability"]
+            == "observed"
+        )
+    assert len(observations) == 2
+    with python_source_snapshot():
+        refreshed = source_binding_packet(evidence, language="typescript")
+        assert refreshed == packet and refreshed is not packet
+    assert len(observations) == 3

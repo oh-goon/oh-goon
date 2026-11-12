@@ -10,6 +10,7 @@ from oh_goon.repository_tooling.architecture.common import (
     python_ast,
     python_semantic_facts,
     python_source_snapshot,
+    source_binding_packet,
     source_import_spelling,
 )
 from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT
@@ -220,7 +221,7 @@ def _annotation_references(path: Path, annotation: ast.expr) -> set[str]:
     end = offsets[annotation.end_lineno - 1] + annotation.end_col_offset
     return {
         source_import_spelling(target)
-        for fact in facts.evidence.packet()["facts"]
+        for fact in source_binding_packet(facts.evidence, language="python")["facts"]
         if fact.get("kind") in {"reference", "forward-annotation-reference"}
         and fact.get("qualification") in {"qualified", "conditional"}
         and set(fact.get("conditions", ())) <= {"type-syntax"}
@@ -262,7 +263,7 @@ def _imports(path: Path, *, package: str) -> set[str]:
     facts = python_semantic_facts(path, imported_only=True, tree=python_ast(path))
     return {
         resolve_name("." * syntax.get("level", 0) + syntax.get("module", ""), package)
-        for fact in facts.evidence.packet()["facts"]
+        for fact in source_binding_packet(facts.evidence, language="python")["facts"]
         if fact.get("kind") == "import-binding"
         and isinstance(syntax := fact.get("import_syntax"), dict)
     }
