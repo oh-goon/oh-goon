@@ -307,6 +307,104 @@ it does not establish a RAM-versus-disk speedup. Report negative experiments and
 unmeasured metrics explicitly. This opt-in does not establish APP, browser,
 release, privileged/native or WSL qualification; ordinary CI remains unchanged.
 
+##### Cache experiment evidence
+
+Read these observations before repeating the cache prototypes. They describe
+specific source, tools and workloads; they do not establish current-candidate
+performance or a general RAM-versus-disk result. [PR #187](https://github.com/oh-goon/oh-goon/pull/187)
+retains the experiment context and subsequent qualification work.
+
+The native Node compile-cache pilot used frozen commit
+[`35fdf8e38bf876e9597ea885b8cbbfd8d4c502e5`](https://github.com/oh-goon/oh-goon/commit/35fdf8e38bf876e9597ea885b8cbbfd8d4c502e5),
+canonical source identity
+`sha256:195d1652222e324775a9ac6b91216b32fef776e7c39cf01ad0f507d6af1686e6`.
+Python 3.14.8, uv 0.13.3, Node 22.22.1, npm 10.9.2, pytest 9.0.2,
+Vitest 4.1.10 and Hashmarks 0.36.2 were held fixed. Three paired trials per
+lane alternated baseline/profile order under a verified two-CPU quota, with
+unchanged native membership, worker settings and statuses, and no pytest PASS
+resume. Whole-scope elapsed includes admission, population and cleanup:
+
+| Native workload | Baseline mean seconds | Profile mean seconds | Observation |
+| --- | ---: | ---: | --- |
+| Six recipient-binding cases, two fresh invocations | 5.84 | 6.72 | 15.2% slower |
+| Vitest node: 26 cases in three files, two fresh invocations | 3.95 | 4.81 | 22.0% slower |
+| Vitest jsdom: 13 cases in two files, two fresh invocations | 8.86 | 9.30 | 4.9% slower |
+| Original `make test`: 842 selected pytest cases plus selected static owners | 409.52 | 412.58 | 0.75% slower; paired median approximately unchanged |
+
+The Python file was `backend/tests/unit/services/test_recipient_pass_semantic_parity.py`
+with `-k 'not unmigrated'`. Node files were `MutationController.test.ts`,
+`readResources.test.ts` and `runStepUrl.test.ts`; jsdom files were
+`CatalogPage.test.tsx` and `GameTapeOutputs.test.tsx`. Aggregate Vitest work ran
+through its owning Python boundary test; this was not the complete frontend or
+browser suite. Each short lane compared a new cache followed by another fresh
+native process in that same scope. Each aggregate Make invocation owned and
+discarded its own cache; no warm cache was retained across Make invocations.
+
+Aggregate process CPU means were 632.36 → 637.89 seconds. Isolated warm-command
+savings (about 4.2% node and 6.3% jsdom) did not recover whole-scope overhead.
+The Linux host already had tmpfs-backed `/tmp`, so this experiment changed
+native caching policy and storage together. It showed no material acceleration
+and did not meet the 20% target. Available swap/OOM and thermal-throttling
+counters did not increase in the bounded lanes. Cache hits, OS page-cache
+coldness, peak temperatures and per-trial desktop responsiveness were not
+measured. “Responsive but high temp” was a separate earlier validation
+observation, not a result for every trial. Later runtime changes require new
+measurements rather than inheriting these timings.
+
+The Vitest 4.1.10 experimental filesystem module cache also failed a native
+configuration-invalidation control. In an isolated temporary project using the
+locked frontend `node_modules`, keep these files unchanged:
+
+```ts
+// subject.tsx
+const first = (tag: string) => 'first:' + tag;
+const second = (tag: string) => 'second:' + tag;
+export const got = <div />;
+// subject.test.ts
+import { it, expect } from 'vitest';
+import { got } from './subject';
+it('honors current JSX configuration', () => expect(got).toBe(process.env.EXPECTED));
+```
+
+Use `package.json` with `{"type":"module"}` and a `vitest.config.ts` exporting
+`defineConfig({test:{environment:'node',pool:'threads',fileParallelism:false}})`
+from `vitest/config`. Start with this `tsconfig.json`:
+
+```json
+{"compilerOptions":{"jsx":"react","jsxFactory":"first","target":"ES2022"}}
+```
+
+Run a fresh native CLI process for each row below, from that temporary project,
+using the same cache directory outside the source checkout. `EXPECTED` selects
+the assertion value, not transform configuration:
+
+```bash
+EXPECTED=first:div DEBUG=vitest:cache:fs node node_modules/vitest/vitest.mjs run \
+  --config vitest.config.ts --experimental.fsModuleCache=true \
+  --experimental.fsModuleCachePath="$oh_goon_experiment_cache" subject.test.ts
+```
+
+| Configuration and native flag | Expected value | Native result |
+| --- | --- | --- |
+| `jsxFactory: "first"`, cache enabled | `first:div` | PASS; two cache writes |
+| Change only `jsxFactory` to `"second"`, reuse enabled cache | `second:div` | FAIL; observed stale `first:div`, two cache reads |
+| Same changed input, `--experimental.fsModuleCache=false` | `second:div` | PASS; no cache reads or writes |
+
+The valid initial run and uncached changed-input control distinguish stale
+transforms from an invalid fixture. This cache is unsuitable for the profile
+with that installed implementation. Do not add a repository-owned digest or
+invalidation algorithm around it: native Vitest owns transform-cache validity.
+Dispose of the fixture/cache only after all native CLI processes have returned;
+retain bounded reproduction output separately when investigating a new version.
+
+Revisit either approach only when a concrete input changes: a native cache fix,
+a measured repeated-work bottleneck in another representative workload, or
+different actual storage backing. First rerun the relevant source/configuration
+and corrupt-cache controls, then measure at least three comparable paired
+whole-workflow trials. Freeze source, membership, tools, CPU and workers; include
+setup/cleanup and preserve unmeasured fields. Unused RAM alone is not evidence
+that repeating an unchanged experiment will help.
+
 ### Private local check logs
 
 The check/test/verify/certify logging wrapper selects the prepared backend
