@@ -47,8 +47,8 @@ enforcement stops before test execution. Direct focused `uv run ... pytest`
 commands remain native and do not acquire the Make-owned CPU scope.
 
 The opt-in `OH_GOON_LOCAL_TEST_PROFILE=ram` instead defaults an unset CPU
-setting to two and rejects zero. Its optional bounded architecture packet retention
-and pre-run memory admission are described in the
+setting to two and rejects zero. Its one-use captured-packet handoff
+and native CPU admission are described in the
 [local test resource budget](../docs/DEVELOPMENT.md#opt-in-ram-first-local-tests).
 
 Backend and integration Make gates use the existing bounded pytest batches,

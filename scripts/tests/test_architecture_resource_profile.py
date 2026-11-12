@@ -6,7 +6,6 @@ import pytest
 
 from oh_goon.repository_tooling import check_architecture as owner
 from oh_goon.repository_tooling.pytest_resource_budget import (
-    PytestCgroupObservation,
     PytestCgroupUsageSnapshot,
     PytestResourceBudget,
     resolve_pytest_resource_budget,
@@ -19,15 +18,8 @@ def admitted_budget(monkeypatch: pytest.MonkeyPatch) -> PytestResourceBudget:
     budget = replace(
         native,
         cgroup_cpu_capacity=2,
-        host_available_memory_bytes=32 * 1024**3,
-        available_memory_bytes=32 * 1024**3,
         cgroup_usage_started=PytestCgroupUsageSnapshot(
             "native", True, None, None, None
-        ),
-        cgroups=(
-            PytestCgroupObservation(
-                "native", "200000 100000", 2, None, 0, True, None, True
-            ),
         ),
     )
     monkeypatch.setattr(
@@ -36,103 +28,54 @@ def admitted_budget(monkeypatch: pytest.MonkeyPatch) -> PytestResourceBudget:
     return budget
 
 
-def test_ordinary_architecture_does_not_admit_retention_or_probe_profile_resources(
+def test_ordinary_architecture_keeps_original_transport_without_profile_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def unexpected(*args: object, **kwargs: object) -> PytestResourceBudget:
-        pytest.fail("ordinary architecture requested profile resource admission")
+        pytest.fail("ordinary architecture requested profile admission")
 
     monkeypatch.setattr(owner, "resolve_pytest_resource_budget", unexpected)
-    assert owner.source_packet_cache_budget({}) == 0
+    assert owner.captured_source_packets_enabled({}) is False
 
 
-def test_admitted_ram_profile_uses_bounded_retention_independently_of_node_settings(
+@pytest.mark.parametrize("available", [None, 0, 1024**3])
+def test_one_use_handoff_does_not_require_extra_memory_or_node_cache(
     admitted_budget: PytestResourceBudget,
+    monkeypatch: pytest.MonkeyPatch,
+    available: int | None,
 ) -> None:
+    budget = replace(
+        admitted_budget,
+        host_available_memory_bytes=available,
+        available_memory_bytes=available,
+    )
+    monkeypatch.setattr(
+        owner, "resolve_pytest_resource_budget", lambda *args, **kwargs: budget
+    )
     assert (
-        owner.source_packet_cache_budget(
+        owner.captured_source_packets_enabled(
             {
                 "OH_GOON_LOCAL_TEST_PROFILE": "ram",
                 "OH_GOON_TEST_CPUS": "2",
                 "NODE_DISABLE_COMPILE_CACHE": "1",
             }
         )
-        == owner.SOURCE_PACKET_CACHE_BYTES
+        is True
     )
 
 
 @pytest.mark.parametrize(
     "fault",
     [
-        "host",
-        "effective",
-        "host-unknown",
-        "effective-unknown",
-        "limits",
-        "high",
-        "current",
-        "high-headroom",
-        "no-groups",
+        "unresolved",
+        "unknown-quota",
+        "quota-too-high",
+        "nonpositive-quota",
+        "unbound",
+        "unknown-pid",
     ],
 )
-def test_ram_retention_declines_unknown_or_insufficient_memory(
-    admitted_budget: PytestResourceBudget, monkeypatch: pytest.MonkeyPatch, fault: str
-) -> None:
-    budget = admitted_budget
-    row = budget.cgroups[0]
-    if fault == "host":
-        budget = replace(
-            budget,
-            host_available_memory_bytes=owner.SOURCE_PACKET_MINIMUM_AVAILABLE_BYTES - 1,
-        )
-    elif fault == "effective":
-        budget = replace(
-            budget,
-            available_memory_bytes=owner.SOURCE_PACKET_MINIMUM_AVAILABLE_BYTES - 1,
-        )
-    elif fault == "host-unknown":
-        budget = replace(budget, host_available_memory_bytes=None)
-    elif fault == "effective-unknown":
-        budget = replace(budget, available_memory_bytes=None)
-    elif fault == "limits":
-        budget = replace(budget, cgroups=(replace(row, memory_limit_observed=False),))
-    elif fault == "high":
-        budget = replace(budget, cgroups=(replace(row, memory_high_observed=False),))
-    elif fault == "current":
-        budget = replace(
-            budget,
-            cgroups=(
-                replace(row, memory_max_bytes=32 * 1024**3, memory_current_bytes=None),
-            ),
-        )
-    elif fault == "high-headroom":
-        budget = replace(
-            budget,
-            cgroups=(
-                replace(
-                    row,
-                    memory_high_bytes=32 * 1024**3,
-                    memory_current_bytes=17 * 1024**3,
-                ),
-            ),
-        )
-    else:
-        budget = replace(budget, cgroups=())
-    monkeypatch.setattr(
-        owner, "resolve_pytest_resource_budget", lambda *args, **kwargs: budget
-    )
-    assert (
-        owner.source_packet_cache_budget(
-            {"OH_GOON_LOCAL_TEST_PROFILE": "ram", "OH_GOON_TEST_CPUS": "2"}
-        )
-        == 0
-    )
-
-
-@pytest.mark.parametrize(
-    "fault", ["unresolved", "unknown-quota", "quota-too-high", "unbound", "unknown-pid"]
-)
-def test_ram_profile_refuses_unverified_cpu_authority_before_architecture_work(
+def test_ram_profile_refuses_unverified_cpu_authority(
     admitted_budget: PytestResourceBudget, monkeypatch: pytest.MonkeyPatch, fault: str
 ) -> None:
     budget = admitted_budget
@@ -144,18 +87,17 @@ def test_ram_profile_refuses_unverified_cpu_authority_before_architecture_work(
         budget = replace(budget, cgroup_cpu_capacity=None)
     elif fault == "quota-too-high":
         budget = replace(budget, cgroup_cpu_capacity=3)
+    elif fault == "nonpositive-quota":
+        budget = replace(budget, cgroup_cpu_capacity=0)
     elif fault == "unbound":
-        budget = replace(
-            budget,
-            cgroup_usage_started=replace(usage, pid_bound=False),
-        )
+        budget = replace(budget, cgroup_usage_started=replace(usage, pid_bound=False))
     else:
         budget = replace(budget, cgroup_usage_started=None)
     monkeypatch.setattr(
         owner, "resolve_pytest_resource_budget", lambda *args, **kwargs: budget
     )
     with pytest.raises(ValueError, match="positive native CPU quota"):
-        owner.source_packet_cache_budget(
+        owner.captured_source_packets_enabled(
             {"OH_GOON_LOCAL_TEST_PROFILE": "ram", "OH_GOON_TEST_CPUS": "2"}
         )
 
@@ -176,19 +118,13 @@ def test_unverified_ram_cpu_refuses_before_any_architecture_check(
         return []
 
     monkeypatch.setattr(owner, "CHECKS", (check,))
-    assert owner.main() == 3
-    assert effects == []
+    assert owner.main() == 3 and effects == []
 
 
-def test_low_memory_retention_decline_preserves_architecture_failure(
+def test_native_handoff_does_not_hide_architecture_failure(
     admitted_budget: PytestResourceBudget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OH_GOON_LOCAL_TEST_PROFILE", "ram")
-    monkeypatch.setattr(
-        owner,
-        "resolve_pytest_resource_budget",
-        lambda *args, **kwargs: replace(admitted_budget, available_memory_bytes=1),
-    )
     effects: list[str] = []
 
     def check() -> list[owner.Violation]:
@@ -198,11 +134,10 @@ def test_low_memory_retention_decline_preserves_architecture_failure(
         ]
 
     monkeypatch.setattr(owner, "CHECKS", (check,))
-    assert owner.main() == 1
-    assert effects == ["started"]
+    assert owner.main() == 1 and effects == ["started"]
 
 
 @pytest.mark.parametrize("profile", ["RAM", "unknown", " "])
 def test_receiving_architecture_owner_refuses_an_unknown_profile(profile: str) -> None:
     with pytest.raises(ValueError, match="Unknown local test profile"):
-        owner.source_packet_cache_budget({"OH_GOON_LOCAL_TEST_PROFILE": profile})
+        owner.captured_source_packets_enabled({"OH_GOON_LOCAL_TEST_PROFILE": profile})

@@ -259,42 +259,43 @@ rejected before work. Unknown profile names are rejected. Without this opt-in,
 the existing local and hosted defaults remain unchanged. Run major checks
 sequentially: separate invocations still own separate quotas.
 
-The profile can retain decoded Hashmarks source packets during one architecture
-check, through the existing source-snapshot owner. This avoids decoding the same
-immutable native evidence for several policy checks. It does not cache test
-results, infer new repository meaning or persist evidence between invocations.
-The lifecycle inventory also consumes native binding facts directly instead of
-building unused local AST projections; that work reduction applies in both modes.
+The profile selects a one-use handoff of Hashmarks source packets during
+architecture checks. The required native operation already returns a parsed
+packet. After binding its canonical evidence, captured source bytes and loaded
+producer identity, the integration delivers that packet directly to the
+immediate policy consumer. This avoids decoding the canonical JSON merely to
+recover the same representation. Canonical evidence remains intact, and public
+packet reads remain detached copies.
 
-Decoded retention is opt-in. The architecture execution owner verifies the
-transported positive CPU budget and native quota, then uses the existing native
-resource observations to require at least 16 GiB of effective available memory.
-Unknown host/cgroup memory limits or insufficient headroom decline retention
-before architecture work; observations and policy checks still run normally.
-The retained canonical UTF-8 payloads have a combined 64-MiB ceiling. This bounds
-encoded evidence, **not Python heap size**: decoded objects use more memory.
-Packets that do not fit are decoded without retention, with the same validation
-and results. There is no eviction/reselection algorithm or cross-run cache.
+The receiving architecture owner verifies the transported positive CPU budget
+against its actual PID-bound native quota before selecting this transport.
+Normal mode keeps its original canonical transport. Both modes avoid an unused
+AST projection in the lifecycle inventory. Native parser capability, language,
+completeness, freshness, source-byte and policy checks remain enforced. The
+producer and policy authority are checked after a successful delivery callback;
+callback failure propagates without another observation route.
 
-Every access still validates the requested language, parser capability,
-completeness and freshness. The exact producer identity, canonical packet and
-captured source bytes remain bound together. Independent invocation lifetimes
-observe source again, including equal-size edits with preserved timestamps.
-Public evidence reads remain detached. Context exit releases retained packets
-and closes the existing native source scope on success or failure.
+No decoded-packet table, cross-run cache, RAM disk or additional retained-memory
+budget is allocated. The handoff consumes data already allocated by the required
+native observation, so it does not require an additional RAM reservation or
+introduce a new mandatory memory footprint. Later independent consumers still
+read canonical evidence; invocation boundaries observe source again, including
+equal-size edits with preserved timestamps. Nested scopes keep their outer
+transport choice. Context exit closes the original source scope on success or
+failure.
 
 The resource wrapper executes the original native command directly after CPU
 admission, preserving caller configuration, native stdin/output/descriptors and
 signal behavior. Node/Vitest cache settings remain caller-owned and unchanged;
-the earlier tmpfs/Node compile-cache keeper is not part of this implementation.
-There is no global relocation of TMPDIR, HOME, XDG state, SQLite, workspaces,
-fixtures, logs, coverage, receipts or other authoritative evidence. Native tools
-retain selection, isolation, status and coverage authority. Ordinary local and
-hosted defaults do not retain decoded packets.
+the earlier tmpfs/Node compile-cache keeper and decoded-packet-retention pilots
+are not part of this implementation. There is no global relocation of TMPDIR,
+HOME, XDG state, SQLite, workspaces, fixtures, logs, coverage, receipts or other
+authoritative evidence. Native tools retain selection, isolation, status and
+coverage authority. Ordinary local and hosted defaults are unchanged.
 
 Measure complete native invocations, including source observation and scope
 teardown, at unchanged source, membership, toolchain, workers and verified CPU
-quota. Record heap/RSS separately from encoded retention. Do not time resumed
+quota. Record native process CPU and heap/RSS alongside elapsed time. Do not time resumed
 pytest PASS receipts or attribute unconditional work reduction to a RAM-mode
 comparison. The profile does not establish APP, browser, release, privileged
 native or WSL qualification. The negative cache experiments below remain useful
@@ -354,6 +355,27 @@ source, tools, sequence and verified two-CPU quota. Whole-scope time was
 that recovered profile setup/cleanup. This is one diagnostic pair, not repeated
 performance qualification or a statistically established regression. Do not
 expand the same cache to this sequence on the strength of unused RAM.
+
+At commit `2aa383de2fb6b70d2ca4e721a300ab6f7e1675a5`, a separate bounded
+retention pilot kept up to 64 MiB of decoded packets' canonical UTF-8 payloads
+within the existing architecture snapshot, after conservative memory admission.
+Three paired invocations of the **complete 24-check architecture command**
+alternated ordinary/profile order with identical source, implementation, tools
+and two-CPU quota. Ordinary elapsed seconds were 78.718, 78.784 and 78.654;
+profile seconds were 78.858, 79.422 and 79.283. Means were 78.72 and 79.19:
+no acceleration was demonstrated, and retained dictionaries increased RSS.
+Encoded payload size was not a Python heap bound. This retention strategy was
+removed rather than expanding its cap or adding eviction heuristics.
+
+The same pilot also compared an isolated lifecycle inventory against the
+pre-optimization implementation while both inspected one fixed subject tree.
+All 927 member requests, producer identity, native packets, source bytes and
+qualified/conditional results matched. Removing an unused AST projection reduced
+inventory mean elapsed 43.85 to 30.93 seconds and peak RSS about 1.41 to 0.59 GiB.
+The retention mode was slower at 33.44 seconds and about 0.87 GiB. Later policies
+may still need AST projections, so these isolated figures do **not** establish a
+whole-architecture or RAM-mode benefit. Measure the actual complete frontdoor
+before promoting a local phase speedup to a workflow claim.
 
 The Vitest 4.1.10 experimental filesystem module cache also failed a native
 configuration-invalidation control. In an isolated temporary project using the

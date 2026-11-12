@@ -104,20 +104,16 @@ class PythonSemanticFacts:
 def source_binding_packet(
     evidence: HashmarksSourceEvidence, *, language: str | tuple[str, ...]
 ) -> dict[str, Any]:
-    """Validate the exact producer packet retained by this architecture lifetime.
+    """Validate a detached canonical packet without retaining another representation."""
+    packet = evidence.packet()
+    _validate_source_binding_packet(packet, language=language)
+    return packet
 
-    Policy consumes these owned observations without mutating them. The public
-    evidence packet API continues to return detached copies to its callers.
-    """
-    snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
-    packet = (
-        snapshot.source_packets.get(evidence)
-        if snapshot is not None and snapshot.packet_cache_bytes
-        else None
-    )
-    retained = packet is not None
-    if packet is None:
-        packet = evidence.packet()
+
+def _validate_source_binding_packet(
+    packet: dict[str, Any], *, language: str | tuple[str, ...]
+) -> None:
+    """Keep native qualification checks identical for both transport forms."""
     languages = (language,) if isinstance(language, str) else language
     parser = packet.get("parser") or {}
     if (
@@ -137,14 +133,6 @@ def source_binding_packet(
             "Architecture source bindings are unavailable or incomplete: "
             + str(packet.get("reason") or packet.get("availability"))
         )
-    if snapshot is not None and not retained:
-        remaining = snapshot.packet_cache_bytes - snapshot.source_packet_bytes
-        if 0 < len(evidence.canonical_packet_json) <= remaining:
-            byte_count = len(evidence.canonical_packet_json.encode("utf-8"))
-            if byte_count <= remaining:
-                snapshot.source_packets[evidence] = packet
-                snapshot.source_packet_bytes += byte_count
-    return packet
 
 
 def source_import_spelling(target: dict[str, Any]) -> str:
@@ -221,8 +209,7 @@ def python_semantic_facts(
     key = (path.resolve(), imported_only, selected_tree)
     if snapshot is not None and key in snapshot.semantic_facts:
         return snapshot.semantic_facts[key]
-    evidence = python_source_bindings(path)
-    packet = source_binding_packet(evidence, language="python")
+    evidence, packet = python_source_observation(path)
     if evidence.source_bytes != raw:
         raise ValueError("Producer source bytes differ from captured Python structure")
     offsets = [0]
@@ -279,12 +266,10 @@ def python_semantic_facts(
 class _PythonSourceSnapshot:
     lifetime: ExitStack
     root: Path | None = None
-    packet_cache_bytes: int = 0
-    source_packet_bytes: int = 0
+    captured_packets: bool = False
     captures: dict[Path, bytes] = field(default_factory=dict)
     trees: dict[Path, ast.Module] = field(default_factory=dict)
     evidence: dict[Path, HashmarksSourceEvidence] = field(default_factory=dict)
-    source_packets: dict[HashmarksSourceEvidence, dict[str, Any]] = field(default_factory=dict)
     semantic_facts: dict[tuple[Path, bool, ast.Module], PythonSemanticFacts] = field(
         default_factory=dict
     )
@@ -301,19 +286,15 @@ _SOURCE_CHECKOUT_ROOT = Path(__file__).resolve().parents[5]
 
 @contextmanager
 def python_source_snapshot(
-    root: Path | None = None, *, packet_cache_bytes: int = 0
+    root: Path | None = None, *, captured_packets: bool = False
 ) -> Generator[None]:
-    """Keep captures for one invocation, with optional bounded packet retention.
+    """Keep one source lifetime and optionally consume native packets at first use.
 
-    The budget counts canonical UTF-8 packet bytes, not decoded Python heap
-    usage. Nested scopes keep their outer lifetime and its original budget.
+    No decoded packet table is retained. Nested scopes keep their outer lifetime
+    and its selected transport; later independent reads use canonical evidence.
     """
-    if (
-        not isinstance(packet_cache_bytes, int)
-        or isinstance(packet_cache_bytes, bool)
-        or packet_cache_bytes < 0
-    ):
-        raise ValueError("Architecture packet cache byte budget must be a nonnegative integer")
+    if type(captured_packets) is not bool:
+        raise ValueError("Architecture captured-packet transport must be a boolean")
     if _PYTHON_SOURCE_SNAPSHOT.get() is not None:
         yield
         return
@@ -321,7 +302,7 @@ def python_source_snapshot(
         snapshot = _PythonSourceSnapshot(
             lifetime,
             root.resolve() if root is not None else None,
-            packet_cache_bytes=packet_cache_bytes,
+            captured_packets=captured_packets,
         )
         token = _PYTHON_SOURCE_SNAPSHOT.set(snapshot)
         try:
@@ -331,39 +312,63 @@ def python_source_snapshot(
 
 
 def python_source_bindings(path: Path) -> HashmarksSourceEvidence:
-    """Reuse one exact producer observation within the architecture lifetime."""
-    resolved = path.resolve()
+    """Retain the existing evidence-only interface for independent consumers."""
     snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
+    resolved = path.resolve()
     if snapshot is not None and resolved in snapshot.evidence:
         return snapshot.evidence[resolved]
+    evidence, _packet = python_source_observation(path)
+    return evidence
+
+
+def python_source_observation(path: Path) -> tuple[HashmarksSourceEvidence, dict[str, Any]]:
+    """Deliver a selected source observation directly to its immediate consumer."""
+    if _PYTHON_SOURCE_SNAPSHOT.get() is None:
+        with python_source_snapshot():
+            return python_source_observation(path)
+    resolved = path.resolve()
+    snapshot = _PYTHON_SOURCE_SNAPSHOT.get()
+    assert snapshot is not None
+    if resolved in snapshot.evidence:
+        evidence = snapshot.evidence[resolved]
+        return evidence, source_binding_packet(evidence, language="python")
     root = (
         snapshot.root
-        if snapshot is not None
-        and snapshot.root is not None
-        and resolved.is_relative_to(snapshot.root)
+        if snapshot.root is not None and resolved.is_relative_to(snapshot.root)
         else _SOURCE_CHECKOUT_ROOT
         if resolved.is_relative_to(_SOURCE_CHECKOUT_ROOT)
         else resolved.parent
     )
-    scope = None
-    if snapshot is not None:
-        if root not in snapshot.native_scopes:
-            snapshot.native_scopes[root] = snapshot.lifetime.enter_context(
-                hashmarks_source_scope(root)
-            )
-        scope = snapshot.native_scopes[root]
+    if root not in snapshot.native_scopes:
+        snapshot.native_scopes[root] = snapshot.lifetime.enter_context(hashmarks_source_scope(root))
+    scope = snapshot.native_scopes[root]
     relative = resolved.relative_to(root).as_posix()
-    evidence = observe_source_bindings(root, (relative,), scope=scope)[relative]
-    source_binding_packet(evidence, language="python")
+    captured: list[tuple[HashmarksSourceEvidence, dict[str, Any]]] = []
+
+    def receive(member: str, evidence: HashmarksSourceEvidence, packet: dict[str, Any]) -> None:
+        if member != relative or captured:
+            raise ValueError("Native source observation differs from its selected member")
+        captured.append((evidence, packet))
+
+    if snapshot.captured_packets:
+        evidence = observe_source_bindings(root, (relative,), scope=scope, on_observation=receive)[
+            relative
+        ]
+        if len(captured) != 1 or captured[0][0] is not evidence:
+            raise ValueError("Native source observation has no exact evidence binding")
+        packet = captured[0][1]
+        _validate_source_binding_packet(packet, language="python")
+    else:
+        evidence = observe_source_bindings(root, (relative,), scope=scope)[relative]
+        packet = source_binding_packet(evidence, language="python")
     if evidence.source_bytes is None:
         raise ValueError("Architecture Python source bytes are unavailable")
-    if snapshot is not None:
-        captured = snapshot.captures.get(resolved)
-        if captured is not None and captured != evidence.source_bytes:
-            raise ValueError("Producer source bytes differ from captured Python structure")
-        snapshot.captures.setdefault(resolved, evidence.source_bytes)
-        snapshot.evidence[resolved] = evidence
-    return evidence
+    previous = snapshot.captures.get(resolved)
+    if previous is not None and previous != evidence.source_bytes:
+        raise ValueError("Producer source bytes differ from captured Python structure")
+    snapshot.captures.setdefault(resolved, evidence.source_bytes)
+    snapshot.evidence[resolved] = evidence
+    return evidence, packet
 
 
 def python_ast(path: Path) -> ast.Module:

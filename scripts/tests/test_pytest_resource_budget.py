@@ -68,48 +68,6 @@ def test_cpu_configuration_defaults_and_explicit_limits() -> None:
     assert configured_cpu_budget({"OH_GOON_TEST_CPUS": "4096"}) == 4096
 
 
-@pytest.mark.parametrize("control", ["max", "high"])
-@pytest.mark.parametrize(
-    "text,expected,observed",
-    [
-        (None, None, False),
-        ("max\n", None, True),
-        ("4294967296\n", 4294967296, True),
-        ("invalid\n", None, False),
-        ("9" * 8193, None, False),
-    ],
-)
-def test_memory_controls_keep_unlimited_distinct_from_unavailable(
-    native_files: tuple[Path, Path],
-    control: str,
-    text: str | None,
-    expected: int | None,
-    observed: bool,
-) -> None:
-    proc, cgroup = native_files
-    target = cgroup / "user.slice/tests.scope" / f"memory.{control}"
-    target.unlink(missing_ok=True)
-    if text is not None:
-        target.write_text(text, encoding="utf-8")
-    budget = resolve_pytest_resource_budget(
-        2, environ={"OH_GOON_TEST_CPUS": "2"}, proc_root=proc, cgroup_root=cgroup
-    )
-    leaf = budget.cgroups[0]
-    if control == "max":
-        assert (leaf.memory_max_bytes, leaf.memory_limit_observed) == (
-            expected,
-            observed,
-        )
-    else:
-        assert (leaf.memory_high_bytes, leaf.memory_high_observed) == (
-            expected,
-            observed,
-        )
-    # These observations support optional scratch admission. Existing ordinary
-    # worker estimation still retains its original conservative CPU ceiling.
-    assert budget.worker_ceiling == 2
-
-
 def test_disabled_configured_ceiling_still_respects_native_affinity(
     native_files: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:

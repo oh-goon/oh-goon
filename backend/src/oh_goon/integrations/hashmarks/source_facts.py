@@ -113,10 +113,18 @@ def observe_source_bindings(
     scope: object | None = None,
     limit: int = 100_000,
     max_bytes: int = _SOURCE_BYTES,
+    on_observation: Callable[[str, HashmarksSourceEvidence, dict[str, Any]], None] | None = None,
 ) -> dict[str, HashmarksSourceEvidence]:
-    """Observe explicit members through the producer's canonical source owner."""
+    """Observe explicit members and optionally hand off their original native packet.
+
+    The callback receives a call-owned mutable packet after its immutable evidence
+    and captured bytes have been bound. Public evidence reads remain detached.
+    A callback failure stops observation; it never selects another evidence route.
+    """
     if isinstance(paths, str) or len(set(paths)) != len(paths):
         raise ValueError("Source bindings require distinct explicit member paths")
+    if on_observation is not None and not callable(on_observation):
+        raise ValueError("Source observation receiver must be callable")
     with _selected_scope(root, scope) as selected:
         result: dict[str, HashmarksSourceEvidence] = {}
         for path in paths:
@@ -131,7 +139,13 @@ def observe_source_bindings(
                 )
                 if member != packet["member"] or raw is None or len(raw) > max_bytes:
                     raise ValueError("Source bytes differ from their producer binding observation")
-            result[path] = _evidence(packet, selected, source_bytes=raw)
+            evidence = _evidence(packet, selected, source_bytes=raw)
+            if on_observation is not None:
+                on_observation(path, evidence, packet)
+                if require_loaded_hashmarks_runtime() != selected.producer:
+                    raise ValueError("Source observation producer changed during observation")
+                selected.verify_policy()
+            result[path] = evidence
         return result
 
 

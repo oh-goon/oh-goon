@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +13,7 @@ from hashmarks.codemap.providers import TreeSitterRangeProvider
 from hashmarks.codemap.repository_source import RepositorySource
 
 from oh_goon.integrations.hashmarks import (
+    HashmarksSourceEvidence,
     capture_source_member,
     hashmarks_source_scope,
     observe_make_shell_declarations,
@@ -124,8 +128,14 @@ def test_source_change_before_structural_bytes_transport_refuses(
         return packet
 
     monkeypatch.setattr(RepositorySource, "bindings", change_after_bindings)
+    delivered: list[str] = []
     with pytest.raises(ValueError, match="Source bytes differ"):
-        observe_source_bindings(tmp_path, ("source.py",))
+        observe_source_bindings(
+            tmp_path,
+            ("source.py",),
+            on_observation=lambda path, _evidence, _packet: delivered.append(path),
+        )
+    assert delivered == []
 
 
 def test_growth_during_binding_byte_transport_cannot_accumulate_beyond_the_bound(
@@ -346,3 +356,138 @@ def test_unresolved_shell_never_becomes_known_command_words() -> None:
 def test_text_capture_rejects_noncanonical_member_authority(path: str) -> None:
     with pytest.raises(ValueError, match="relative member"):
         observe_source_bindings_text("value = 1", path=path)
+
+
+def test_native_packet_delivery_preserves_canonical_evidence_and_public_detachment(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "source.py"
+    source = b"import subprocess\nsubprocess.run([])\n"
+    path.write_bytes(source)
+    delivered: list[tuple[str, HashmarksSourceEvidence, dict[str, Any]]] = []
+
+    def receive(member: str, evidence: HashmarksSourceEvidence, packet: dict[str, Any]) -> None:
+        assert evidence.source_bytes == source
+        assert evidence.producer_implementation_identity == require_loaded_hashmarks_runtime()
+        assert packet == evidence.packet()
+        assert packet["facts"]
+        delivered.append((member, evidence, packet))
+        packet["facts"].clear()
+
+    with hashmarks_source_scope(tmp_path) as scope:
+        result = observe_source_bindings(
+            tmp_path, ("source.py",), scope=scope, on_observation=receive
+        )
+        assert len(delivered) == 1 and delivered[0][0] == "source.py"
+        assert delivered[0][1] is result["source.py"]
+        assert delivered[0][2]["facts"] == []
+        detached = result["source.py"].packet()
+        assert detached["facts"]
+        detached["facts"].clear()
+        assert result["source.py"].packet()["facts"]
+        assert observe_source_bindings(tmp_path, ("source.py",), scope=scope)["source.py"].packet()[
+            "facts"
+        ]
+
+
+def test_native_packet_receiver_does_not_obtain_repository_private_source(tmp_path: Path) -> None:
+    secret = "PRIVATE_SOURCE_MUST_NOT_ENTER_EVIDENCE"
+    (tmp_path / "private.py").write_text(f"SECRET = {secret!r}\n")
+    (tmp_path / ".hashmarks-context.toml").write_text(
+        '[[rule]]\npattern = "private.py"\nindex = false\nvisibility = "deny"\n'
+    )
+    delivered: list[tuple[HashmarksSourceEvidence, dict[str, Any]]] = []
+    result = observe_source_bindings(
+        tmp_path,
+        ("private.py",),
+        on_observation=lambda _path, evidence, packet: delivered.append((evidence, packet)),
+    )
+    assert len(delivered) == 1 and delivered[0][0] is result["private.py"]
+    evidence, packet = delivered[0]
+    assert evidence.source_bytes is None and packet["facts"] == []
+    assert packet["availability"] == "unavailable"
+    assert secret not in json.dumps(packet)
+    assert evidence.packet() == packet
+
+
+def test_invalid_native_packet_receiver_refuses_before_scope_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.integrations.hashmarks import source_facts as owner
+
+    monkeypatch.setattr(
+        owner,
+        "hashmarks_source_scope",
+        lambda _root: pytest.fail("invalid receiver opened a scope"),
+    )
+    invalid: Any = object()
+    with pytest.raises(ValueError, match="receiver must be callable"):
+        observe_source_bindings(tmp_path, ("source.py",), on_observation=invalid)
+
+
+def test_native_packet_receiver_failure_stops_work_and_closes_its_owned_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.integrations.hashmarks import source_facts as owner
+
+    for name in ("first.py", "second.py"):
+        (tmp_path / name).write_text("value = 1\n")
+    native = owner.hashmarks_source_scope
+    scopes: list[object] = []
+    delivered: list[str] = []
+
+    @contextmanager
+    def observe(root: Path) -> Iterator[object]:
+        with native(root) as scope:
+            scopes.append(scope)
+            yield scope
+
+    def fail(member: str, _evidence: HashmarksSourceEvidence, _packet: dict[str, Any]) -> None:
+        delivered.append(member)
+        raise RuntimeError("native packet receiver failed")
+
+    monkeypatch.setattr(owner, "hashmarks_source_scope", observe)
+    with pytest.raises(RuntimeError, match="receiver failed"):
+        observe_source_bindings(tmp_path, ("first.py", "second.py"), on_observation=fail)
+    assert delivered == ["first.py"] and len(scopes) == 1
+    with pytest.raises(ValueError, match="active"):
+        observe_source_bindings(tmp_path, ("first.py",), scope=scopes[0])
+
+
+def test_native_packet_receiver_failure_keeps_a_caller_owned_scope_usable(tmp_path: Path) -> None:
+    (tmp_path / "source.py").write_text("value = 1\n")
+
+    def fail(*_arguments: object) -> None:
+        raise RuntimeError("native packet receiver failed")
+
+    with hashmarks_source_scope(tmp_path) as scope:
+        with pytest.raises(RuntimeError, match="receiver failed"):
+            observe_source_bindings(tmp_path, ("source.py",), scope=scope, on_observation=fail)
+        assert (
+            observe_source_bindings(tmp_path, ("source.py",), scope=scope)["source.py"].source_bytes
+            == b"value = 1\n"
+        )
+
+
+@pytest.mark.parametrize("fault", ["producer", "policy"])
+def test_native_packet_receiver_cannot_continue_after_observation_authority_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    from oh_goon.integrations.hashmarks import source_facts as owner
+
+    for name in ("first.py", "second.py"):
+        (tmp_path / name).write_text("value = 1\n")
+    delivered: list[str] = []
+
+    def change(member: str, _evidence: HashmarksSourceEvidence, _packet: dict[str, Any]) -> None:
+        delivered.append(member)
+        if fault == "producer":
+            monkeypatch.setattr(owner, "require_loaded_hashmarks_runtime", lambda: "foreign")
+        else:
+            (tmp_path / ".hashmarks-context.toml").write_text(
+                '[[rule]]\npattern = "second.py"\nindex = false\nvisibility = "deny"\n'
+            )
+
+    with pytest.raises(ValueError, match="producer changed|policy changed"):
+        observe_source_bindings(tmp_path, ("first.py", "second.py"), on_observation=change)
+    assert delivered == ["first.py"]
