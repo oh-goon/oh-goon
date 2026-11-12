@@ -419,6 +419,15 @@ def _prompt(
             + " --query-file <private-query-file>",
             "task_evidence": shlex.join((*producer, "--tool", "task_evidence"))
             + " --query-file <private-query-file>",
+            "correlate_evidence": shlex.join((*producer, "--tool", "correlate_evidence"))
+            + " --query-file <private-query-file>",
+            "correlation_instruction": (
+                "Supply a JSON request object for Hashmarks CodeMap.correlation.observe: "
+                "bundles contain structured diagnostic anchors; optional path_mappings "
+                "translate external paths into captured repository paths. Preserve source "
+                "equivalence, ambiguity and omissions. Correspondence does not establish "
+                "causation, execution, coverage or a passing result."
+            ),
         },
         "output_contract": agent_phase_output_contract(step)
         if step.workload.role != "report"

@@ -26,6 +26,12 @@ def parse_batch_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     )
     parser.add_argument("--pytest-config", type=Path, default=Path("backend/pyproject.toml"))
     parser.add_argument(
+        "--source-root",
+        type=Path,
+        default=None,
+        help="explicit admitted checkout for source identity and native correctness receipts",
+    )
+    parser.add_argument(
         "--fail-fast",
         action="store_true",
         help="stop native pytest on first failure, cancel active batches and leave queued work unstarted",

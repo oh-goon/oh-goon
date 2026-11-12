@@ -1387,6 +1387,8 @@ def execute_change(
                 "oh_goon.repository_tooling.test_batches",
                 "--pytest-config",
                 "backend/pyproject.toml",
+                "--source-root",
+                str(root),
                 "--qualified",
                 "--fail-fast",
                 "--show-output",

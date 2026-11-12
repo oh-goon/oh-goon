@@ -151,6 +151,11 @@ bash scripts/development_test_resources.sh \
 ```
 
 Native pytest owns collection, parameter identities, markers and results.
+Development verification passes its admitted checkout through the batch runner's
+`--source-root`; the native receipt hashes that source. An explicitly selected
+root must contain the native working directory and pytest configuration before
+collection begins. Standalone batch commands retain their repository default
+when this option is omitted.
 A focused result is **FOCUSED / NOT_FULLY_VERIFIED**. Candidate-bound selected
 checks produce **MERGE_PROOF_READY**; the independent trusted-base aggregate
 alone establishes **MERGE_VERIFIED** for its exact candidate and obligations.

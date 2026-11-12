@@ -57,11 +57,20 @@ def repository_observation(
 ) -> dict[str, Any]:
     from hashmarks.evidence_presentation import present_repository_evidence
 
+    correlation_request = None
+    if tool == "correlate_evidence":
+        if not query:
+            raise ValueError("Evidence correlation requires a structured request")
+        correlation_request = json.loads(query)
+        if not isinstance(correlation_request, dict):
+            raise ValueError("Evidence correlation requires a JSON request object")
     state = state_directory if state_directory is not None else root / "evidence-state"
     with repository_evidence_scope(
         root / "repo", state_dir=state, artifact_db=state / "artifacts.sqlite3"
     ) as scope:
         native = scope.native
+        if correlation_request is not None:
+            native.index.sync()
         with native.reads.session():
             envelope = {
                 "producer": "Hashmarks",
@@ -71,6 +80,16 @@ def repository_observation(
                 "path_prefix": "repo/",
                 "repository_absence": "not-claimed",
             }
+            if correlation_request is not None:
+                try:
+                    correlation = native.correlation.observe(**correlation_request)
+                except TypeError as exc:
+                    raise ValueError(f"Invalid evidence correlation request: {exc}") from exc
+                return {
+                    **envelope,
+                    "correlation": correlation,
+                    "presentation": present_repository_evidence(correlation, format="compact"),
+                }
             if tool == "task_evidence":
                 if not query:
                     raise ValueError("Task evidence requires the original task")
@@ -205,7 +224,9 @@ def prompt_observation(
                 "repository_absence",
             )
         }
-        for kind in ("retrieval", "source"):
+        for kind in ("retrieval", "source", "correlation"):
+            if kind == "correlation" and kind not in packet:
+                continue
             native = packet.get(kind)
             if native is None:
                 projected[kind] = None
@@ -236,7 +257,9 @@ def prompt_observation(
 def agent_evidence_main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--tool", choices=("task_evidence", "search_text", "list_paths"), required=True
+        "--tool",
+        choices=("task_evidence", "search_text", "list_paths", "correlate_evidence"),
+        required=True,
     )
     query = parser.add_mutually_exclusive_group()
     query.add_argument("--query")

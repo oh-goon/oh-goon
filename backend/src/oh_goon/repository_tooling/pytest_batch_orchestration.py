@@ -965,6 +965,7 @@ def run_batch_cli(
             pytest_config=args.pytest_config,
             pytest_args=(*args.pytest_arg, *(("--maxfail=1",) if args.fail_fast else ())),
             resume_environment=tuple(args.resume_env),
+            source_root=args.source_root,
         )
     except (OSError, RuntimeError, ValueError) as exc:
         parser.error(str(exc))

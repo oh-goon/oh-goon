@@ -80,10 +80,26 @@ assert pathlib.Path(working['root']) == pathlib.Path.cwd()
 assert working['root'] != prompt['captured_repository']
 assert working['repository_access'] == ('read_only' if mode in {'review', 'wrong-review'} else 'write')
 if mode == 'helper-shadowing':
-    import shlex, subprocess
+    import shlex, subprocess, tempfile
     evidence = subprocess.run(shlex.split(prompt['repository_tools']['list']), capture_output=True, text=True, check=True)
     assert json.loads(evidence.stdout)['producer'] == 'Hashmarks'
     assert 'repo/main.py' in json.loads(evidence.stdout)['paths']
+    with tempfile.TemporaryDirectory() as scratch:
+        query = pathlib.Path(scratch, 'diagnostic.json')
+        query.write_text(json.dumps({'bundles': [{
+            'bundle_id': 'native-diagnostic', 'producer': {'kind': 'fixture'},
+            'anchors': [{'anchor_id': 'frame', 'path': 'main.py', 'line': 2}],
+        }], 'include_relationships': False}))
+        command = prompt['repository_tools']['correlate_evidence'].replace('<private-query-file>', shlex.quote(str(query)))
+        result = subprocess.run(shlex.split(command), capture_output=True, text=True, check=True)
+    packet = json.loads(result.stdout)
+    assert packet['capture_identity'] == prompt['identity']['candidate_identity']
+    correlation = packet['correlation']
+    frame = correlation['bundles'][0]['anchors'][0]
+    assert frame['resolution']['symbol']['name'] == 'answer'
+    assert frame['source_equivalence']['state'] == 'unknown'
+    assert correlation['causation'] == 'not-inferred'
+    assert correlation['execution_effect'] == 'none'
 configuration = json.loads(pathlib.Path(os.environ['OPENCODE_CONFIG_DIR'], 'opencode.json').read_text())
 provider = configuration['providers']['oh-goon']
 base = provider['settings']['baseURL']

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from hashmarks import CodeMap
@@ -350,3 +351,179 @@ def test_empty_retrieval_never_becomes_a_repository_absence_claim(tmp_path: Path
 def test_incomplete_tool_output_cannot_become_model_evidence(output: str) -> None:
     with pytest.raises(FleetPlanInvalid):
         prompt_observation(output, expected_capture_identity="candidate")
+
+
+def _correlation_request(path: str, **claims: object) -> dict[str, Any]:
+    return {
+        "bundles": [
+            {
+                "bundle_id": "native-failure",
+                "producer": {"kind": "diagnostic"},
+                "scope": {"run": "original-run", "step": "verify", "attempt": 1},
+                "completeness": "incomplete",
+                "truncation": "truncated",
+                "anchors": [{"anchor_id": "frame", "path": path, "line": 2, **claims}],
+            }
+        ],
+        "path_mappings": [{"external_prefix": "/runtime", "repository_prefix": ""}],
+        "include_relationships": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("name", "source"),
+    [
+        ("worker.py", "def worker():\n    return 1\n"),
+        ("worker.ts", "export function worker() {\n    return 1;\n}\n"),
+    ],
+)
+def test_diagnostic_correlation_preserves_source_equivalence_and_original_observation(
+    tmp_path: Path, name: str, source: str
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    member = repo / name
+    member.write_text(source, encoding="utf-8")
+    request = _correlation_request("/runtime/" + name)
+
+    def observe(capture: str) -> dict[str, Any]:
+        return repository_observation(
+            tmp_path,
+            tool="correlate_evidence",
+            query=json.dumps(request),
+            capture_identity=capture,
+        )
+
+    unknown = observe("first-capture")["correlation"]
+    anchor = unknown["bundles"][0]["anchors"][0]
+    assert anchor["resolution"]["repository_path"] == name
+    assert anchor["resolution"]["state"] == "resolved-unique"
+    assert anchor["source_equivalence"]["state"] == "unknown"
+    evidence = unknown["repository_evidence"]["bindings"][0]["evidence"][0]
+    request["bundles"][0]["anchors"][0]["member_revision"] = evidence["member_revision"]
+    original = observe("first-capture")
+    before = json.dumps(original, sort_keys=True)
+    correlation = original["correlation"]
+    assert correlation["bundles"][0]["anchors"][0]["source_equivalence"]["state"] == "proven"
+    assert correlation["bundles"][0]["scope"] == request["bundles"][0]["scope"]
+    assert correlation["bundles"][0]["truncation"] == "truncated"
+    assert correlation["completeness"]["state"] == "incomplete"
+    assert correlation["completeness"]["negative_evidence"] == "not-admissible"
+    assert correlation["causation"] == "not-inferred"
+    assert correlation["execution_effect"] == "none"
+    projection = json.loads(
+        prompt_observation(json.dumps(original), expected_capture_identity="first-capture")
+    )
+    assert projection["correlation"] == present_repository_evidence(correlation, format="compact")
+    with pytest.raises(FleetPlanInvalid, match="capture differs"):
+        prompt_observation(json.dumps(original), expected_capture_identity="different-capture")
+    with pytest.raises(FleetPlanInvalid, match="exceeds the prompt budget"):
+        prompt_observation(
+            json.dumps(original), expected_capture_identity="first-capture", max_chars=100
+        )
+
+    member.write_text(source.replace("return 1", "return 2"), encoding="utf-8")
+    changed = observe("second-capture")["correlation"]
+    assert changed["bundles"][0]["anchors"][0]["source_equivalence"]["state"] == "mismatch"
+    assert json.dumps(original, sort_keys=True) == before
+    member.unlink()
+    deleted = observe("third-capture")["correlation"]
+    assert deleted["bundles"][0]["anchors"][0]["resolution"]["state"] == "unresolved"
+
+
+def test_diagnostic_correlation_preserves_ambiguity_and_distinct_nearby_locations(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "left.py").write_text("def same():\n    return 1\n\ndef unrelated():\n    return 2\n")
+    (repo / "right.py").write_text("def same():\n    return 3\n")
+    request = _correlation_request("/runtime/left.py")
+    request["bundles"][0]["anchors"] = [
+        {"anchor_id": "ambiguous", "symbol": "same"},
+        {"anchor_id": "failure", "path": "/runtime/left.py", "line": 2},
+        {"anchor_id": "nearby", "path": "/runtime/left.py", "line": 5},
+        {"anchor_id": "missing", "path": "/runtime/deleted.py", "line": 2, "symbol": "same"},
+    ]
+    packet = repository_observation(
+        tmp_path,
+        tool="correlate_evidence",
+        query=json.dumps(request),
+        capture_identity="capture",
+    )["correlation"]
+    anchors = {row["anchor_id"]: row for row in packet["bundles"][0]["anchors"]}
+    assert anchors["ambiguous"]["resolution"]["state"] == "resolved-ambiguous"
+    assert {row["path"] for row in anchors["ambiguous"]["resolution"]["candidates"]} == {
+        "left.py",
+        "right.py",
+    }
+    assert anchors["failure"]["resolution"]["symbol"]["name"] == "same"
+    assert anchors["nearby"]["resolution"]["symbol"]["name"] == "unrelated"
+    assert anchors["missing"]["resolution"]["state"] == "unresolved"
+    assert all(row["source_equivalence"]["state"] == "unknown" for row in anchors.values())
+    assert packet["causation"] == "not-inferred"
+
+
+@pytest.mark.parametrize("query", ["{invalid", "[]", '{"unknown": true}', '{"bundles": null}'])
+def test_invalid_diagnostic_request_is_rejected(tmp_path: Path, query: str) -> None:
+    (tmp_path / "repo").mkdir()
+    with pytest.raises(ValueError):
+        repository_observation(
+            tmp_path, tool="correlate_evidence", query=query, capture_identity="capture"
+        )
+
+
+@pytest.mark.process
+def test_diagnostic_query_file_uses_existing_native_tool_transport(tmp_path: Path) -> None:
+    import subprocess
+
+    root = tmp_path / "captured"
+    (root / "repo").mkdir(parents=True)
+    member = root / "repo" / "worker.py"
+    member.write_text("def worker():\n    return 1\n")
+    request = tmp_path / "diagnostic.json"
+    request.write_text(json.dumps(_correlation_request("/runtime/worker.py")))
+    with (
+        (tmp_path / "correlation.json").open("w+b") as output,
+        (tmp_path / "correlation-errors.txt").open("w+b") as errors,
+    ):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-m",
+                "oh_goon.integrations.hashmarks",
+                "--root",
+                str(root),
+                "--state-directory",
+                str(tmp_path / "state"),
+                "--tool",
+                "correlate_evidence",
+                "--query-file",
+                str(request),
+                "--capture-identity",
+                "original-capture",
+            ],
+            cwd=tmp_path,
+            stdout=output,
+            stderr=errors,
+            timeout=30,
+            check=False,
+        )
+        output.seek(0)
+        data = output.read(1_048_577)
+        errors.seek(0)
+        diagnostics = errors.read(65_537)
+    assert len(diagnostics) <= 65_536
+    assert result.returncode == 0, diagnostics.decode("utf-8", errors="replace")
+    assert len(data) <= 1_048_576
+    packet = json.loads(data)
+    assert packet["capture_identity"] == "original-capture"
+    assert (
+        packet["correlation"]["bundles"][0]["anchors"][0]["resolution"]["repository_path"]
+        == "worker.py"
+    )
+    assert packet["presentation"] == present_repository_evidence(
+        packet["correlation"], format="compact"
+    )
+    assert member.read_text() == "def worker():\n    return 1\n"
