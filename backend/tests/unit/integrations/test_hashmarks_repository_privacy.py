@@ -80,6 +80,28 @@ def test_public_repository_tools_and_exact_source_reads_keep_private_members_den
     assert evidence.packet()["member"]["state"] == "unsupported"
     assert evidence.packet()["member"]["reason"] == "repository-evidence-denied"
 
+    correlation = repository_observation(
+        repository.parent,
+        tool="correlate_evidence",
+        query=json.dumps(
+            {
+                "bundles": [
+                    {
+                        "bundle_id": "diagnostic",
+                        "producer": {"kind": "test"},
+                        "anchors": [{"anchor_id": "private", "path": _PRIVATE_MEMBER, "line": 2}],
+                    }
+                ],
+                "include_relationships": False,
+            }
+        ),
+        capture_identity="synthetic-capture",
+    )["correlation"]
+    assert _CANARY not in json.dumps(correlation)
+    anchor = correlation["bundles"][0]["anchors"][0]
+    assert anchor["source_equivalence"]["state"] == "unknown"
+    assert anchor["resolution"]["state"] == "unresolved"
+
 
 def test_repository_deny_rules_survive_and_late_allow_rules_cannot_widen_private_scope(
     tmp_path: Path,

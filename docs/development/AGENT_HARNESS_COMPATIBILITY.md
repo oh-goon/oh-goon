@@ -27,6 +27,14 @@ SQLite claim; HUG-181/HUG-183 retain broader qualification.
 The historical installed observations below do not qualify the worker cutover
 or create a CLI/service compatibility route around its required atomic claim.
 
+Frozen-source diagnostic correlation uses the same private-query-file Hashmarks
+command already available to native Agent prompts. Disposition: **retain** the
+existing context, protocol, settlement and filesystem adaptations; the command
+adds no native protocol or mount authority. Real producer and subprocess checks
+qualify its source/uncertainty/privacy handoff. Installed-harness use of the new
+follow-up remains **unqualified** until exercised for that selected mode; earlier
+installed results do not establish it.
+
 Resource-admission disposition: **retain** the protocol, settlement and
 reserved-directory adaptations below. Capped standard execution now verifies
 that native scope placement retains the caller's aggregate limits; see the

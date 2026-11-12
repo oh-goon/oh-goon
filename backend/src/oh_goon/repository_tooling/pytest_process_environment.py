@@ -116,11 +116,19 @@ def resolve_pytest_invocation(
     pytest_config: Path = Path("backend/pyproject.toml"),
     pytest_args: tuple[str, ...] = (),
     resume_environment: tuple[str, ...] = (),
+    source_root: Path | None = None,
 ) -> PytestInvocation:
     if any(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None for name in resume_environment):
         raise ValueError("resume-env requires an environment variable name")
     cwd = Path.cwd().resolve()
     config = (cwd / pytest_config).resolve()
+    selected_source = ROOT if source_root is None else source_root.resolve(strict=True)
+    if source_root is not None and (
+        not selected_source.is_dir()
+        or not cwd.is_relative_to(selected_source)
+        or not config.is_relative_to(selected_source)
+    ):
+        raise ValueError("Native pytest invocation must remain within its selected source root")
     from oh_goon.core.file_digest import sha256_file
 
     try:
@@ -142,7 +150,7 @@ def resolve_pytest_invocation(
         prefix = (sys.executable, "-m", "pytest")
     return PytestInvocation(
         cwd,
-        ROOT,
+        selected_source,
         config,
         pytest_args,
         prefix,

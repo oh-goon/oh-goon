@@ -1242,6 +1242,156 @@ def test_supported_hashmarks_adapter_returns_real_source_qualified_links(
     )
 
 
+@pytest.mark.process
+@pytest.mark.parametrize("suffix", ("py", "ts"))
+def test_copied_fixture_evidence_reaches_exact_native_execution_in_admitted_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str
+) -> None:
+    root = tmp_path / "source"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    fixture = f"backend/tests/fixtures/application/value.{suffix}"
+    copier = "backend/tests/test_copy.py"
+    independent = "backend/tests/test_independent.py"
+    contents = {
+        "py": "VALUE = 42\n",
+        "ts": "export const VALUE = 42;\n",
+    }
+    files = {
+        ".gitignore": "__pycache__/\n",
+        "backend/pyproject.toml": (
+            '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
+            'markers = ["daily", "slow", "certification"]\n'
+        ),
+        copier: (
+            "from pathlib import Path\nfrom shutil import copytree\n"
+            "ROOT = Path(__file__).resolve().parents[2]\n"
+            "def test_copied_input(tmp_path):\n"
+            '    target = copytree(ROOT / "backend/tests/fixtures/application", tmp_path / "app")\n'
+            '    assert (target / "value.py").read_text() == "VALUE = 42\\n"\n'
+            '    assert (target / "value.ts").read_text() == "export const VALUE = 42;\\n"\n'
+        ),
+        independent: (
+            "import pytest\n"
+            "def test_independent():\n    assert False\n"
+            "@pytest.mark.daily\ndef test_daily():\n    assert False\n"
+        ),
+        **{
+            f"backend/tests/fixtures/application/value.{kind}": content.replace(
+                "42", "41"
+            )
+            if kind == suffix
+            else content
+            for kind, content in contents.items()
+        },
+    }
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    owner._git(root, "init", "-q")
+    owner._git(root, "add", ".")
+    owner._git(
+        root,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "copied fixture baseline",
+    )
+    baseline = run_command(
+        sys.executable,
+        "-I",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "-c",
+        "backend/pyproject.toml",
+        copier,
+        cwd=root,
+        timeout=30,
+        require_process_group_quiescence=True,
+    )
+    assert baseline.returncode == 1 and "1 failed" in baseline.stdout
+    assert baseline.supervisor.final_process_group_quiescent is True
+
+    (root / fixture).write_text(contents[suffix], encoding="utf-8")
+    (root / independent).write_text(
+        files[independent].replace("assert False", "assert True", 1), encoding="utf-8"
+    )
+    plan = owner.admit_change(root, base="HEAD")
+    assert plan.changed_paths == tuple(sorted((fixture, independent)))
+    assert plan.pytest == tuple(sorted((copier, independent)))
+    assert plan.unverified == ()
+    assert VERIFICATION_SUPPORT_OBLIGATION in plan.obligations
+    row = next(
+        row for row in plan.evidence["observations"] if row["changed_path"] == fixture
+    )
+    assert row["qualification"]["completeness"] == "incomplete"
+    assert row["qualification"]["negative_evidence_admissible"] is False
+    assert plan.evidence["owner_coverage"] == "not-claimed"
+    assert bounded_verification_support_targets(row) == frozenset({copier})
+    owner.require_merge_selection(root, plan)
+
+    result = owner.execute_change(
+        root, plan, mode="merge", workers=1, phase="behavioral"
+    )
+
+    assert result["status"] == "CHECKS_PASSED", result
+    native = result["outcomes"][0]["native_report"]
+    selected = sorted(
+        (copier + "::test_copied_input", independent + "::test_independent")
+    )
+    assert (
+        native["source_identity"]
+        == plan.source_identity
+        == canonical_source_identity(root)
+    )
+    assert native["native_collection"]["deselected"] == [independent + "::test_daily"]
+    receipt = native["membership_receipt"]
+    assert receipt["selected"] == receipt["passed"] == selected
+    assert receipt["terminal_success"] is True
+    assert (
+        receipt["terminal_membership_identity"]
+        == receipt["selected_membership_identity"]
+    )
+    assert receipt["missing"] == receipt["duplicates"] == receipt["extras"] == []
+    require_verification_support_proof(
+        plan.model_dump(mode="json"), plan.evidence, {copier, independent}
+    )
+    with pytest.raises(ValueError, match="executed qualified consumer"):
+        require_verification_support_proof(
+            plan.model_dump(mode="json"), plan.evidence, {independent}
+        )
+    (root / fixture).write_text(contents[suffix].replace("42", "43"), encoding="utf-8")
+    with pytest.raises(ValueError, match="source changed after admission"):
+        owner.execute_change(root, plan, mode="merge", workers=1, phase="behavioral")
+    (root / copier).write_text(
+        files[copier].replace(
+            'tmp_path / "app")',
+            'tmp_path / "app", ignore=lambda _directory, names: names)',
+        ),
+        encoding="utf-8",
+    )
+    uncertain = owner.admit_change(root, base="HEAD")
+    unknown = next(
+        row
+        for row in uncertain.evidence["observations"]
+        if row["changed_path"] == fixture
+    )
+    assert unknown["state"] == "UNAVAILABLE"
+    assert unknown["qualification"]["negative_evidence_admissible"] is False
+    assert f"NO_QUALIFIED_VERIFIER:{fixture}" in uncertain.unverified
+    assert independent in uncertain.pytest
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(root, uncertain)
+
+
 def test_supported_hashmarks_adapter_reconciles_stale_contributor_without_partial_rows(
     tmp_path: Path,
 ) -> None:

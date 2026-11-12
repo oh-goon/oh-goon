@@ -314,12 +314,23 @@ evidence; responses retain provenance, freshness, completeness, ambiguity,
 unsupported state and omissions. Unavailable producer precision remains unknown
 or refused, never repaired with ambient Git, filesystem or traceback heuristics.
 
-Game Tape, diagnostics and Scout may project those qualified facts beside
-execution evidence. Correlation obtained after admission cannot change the active
-Run's frozen verification membership, acquire custody or establish a terminal
-result. A supported producer capability and its consumer conformance must exist
-before that correlation is advertised; this boundary does not claim a new runtime
-correlation feature.
+Native Agent prompts expose `correlate_evidence` through the existing supervised
+Hashmarks command over the frozen captured repository. Its private query file
+contains the JSON keyword request for the public `CodeMap.correlation.observe`
+operation: `bundles`, with optional producer-owned path mappings, relationship
+bounds and previous correlation. Hashmarks validates that request and owns source
+resolution and equivalence. A mapped path alone leaves source equivalence unknown;
+only the producer's supported typed source claims can establish a match or mismatch.
+The complete packet and native presentation retain the capture/loaded-producer
+binding, caller-claimed diagnostic provenance, ambiguity, completeness and omissions.
+Prompt disclosure either fits the native projection intact or refuses it.
+
+This headless follow-up command does not collect diagnostics or add automatic
+correlation to Runs. Game Tape, diagnostics and Scout may project qualified facts
+beside execution evidence through their existing owners. Correlation obtained
+after admission cannot change the active Run's frozen verification membership,
+acquire custody, establish causation or establish a terminal result. Installed
+harness conformance remains specific to the selected implementation and mode.
 
 ## Relevant development admission
 
@@ -344,6 +355,15 @@ justified bounded execution-policy fallback. That policy cannot supply missing
 repository meaning or strengthen unknown producer scope. Policy protection is a named execution-policy
 obligation, not a Hashmarks-inferred relationship. See the
 [CI contract](../CI_CD_CONTRACT.md#repository-checks-on-github).
+
+The bounded fixture journey qualifies Python and TypeScript descendants copied
+by supported default `shutil.copytree` syntax through the released producer,
+development admission and real native pytest accounting. Consumer scope remains
+incomplete, and an independently changed verifier retains its own obligation.
+The batch receives the explicitly admitted checkout as its source root rather
+than observing the tool's installation checkout. This proof does not qualify
+arbitrary copy syntax, complete consumer coverage, TypeScript execution or every
+Fleet/native environment.
 
 Native reconciliation and task preparation happen before the composite read scope.
 Dependency observation captures its bounded source inventory once and reuses

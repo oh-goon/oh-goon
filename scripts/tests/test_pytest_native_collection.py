@@ -20,6 +20,48 @@ from oh_goon.repository_tooling.pytest_process_environment import (
 pytestmark = pytest.mark.process
 
 
+@pytest.mark.parametrize("outside", ("cwd", "configuration"))
+def test_explicit_source_root_rejects_foreign_native_context_before_collection(
+    tmp_path: Path, outside: str
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    config = (foreign if outside == "configuration" else source) / "pyproject.toml"
+    config.write_text("[tool.pytest.ini_options]\n")
+    canary = tmp_path / "collected"
+    (source / "test_canary.py").write_text(
+        f"from pathlib import Path\nPath({str(canary)!r}).touch()\ndef test_canary(): pass\n"
+    )
+    report = tmp_path / "report.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "oh_goon.repository_tooling.test_batches",
+            "--source-root",
+            str(foreign if outside == "cwd" else source),
+            "--pytest-config",
+            str(config),
+            "--report-path",
+            str(report),
+            "--workers",
+            "1",
+            "test_canary.py",
+        ],
+        cwd=source,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "must remain within its selected source root" in result.stderr
+    assert not canary.exists()
+    assert not report.exists()
+
+
 @pytest.mark.parametrize("quiescent", [None, False])
 def test_collection_json_cannot_override_missing_native_process_settlement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quiescent: bool | None
