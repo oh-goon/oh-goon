@@ -60,7 +60,7 @@ Use the smallest real browser proof when the changed behavior needs one.
 Complete frontend and browser portfolios remain daily/release qualification;
 `npm run check` is available explicitly, not mandatory for every local edit.
 
-For a fresh or existing checkout, root `make init` delegates locked frontend materialization directly to native `npm ci`. Browser engines are release/focused-journey dependencies and remain separate; run `make -C .. browser-setup` when they are needed. The dependency-independent ice-theme contrast floor is part of `make -C .. frontend-check`; the complete release browser matrix plus reviewed Chromium screenshots is `make -C .. frontend-browser-release`.
+For a fresh or existing checkout, root `make init` delegates locked frontend materialization directly to native `npm ci`. Browser engines are release/focused-journey dependencies and remain separate; run `make -C .. browser-setup` when they are needed. The dependency-independent ice-theme contrast floor is part of `make -C .. frontend-check`; the complete release browser matrix plus reviewed Chromium screenshots is `npm run browser:release`.
 
 ## Frontend boundaries
 

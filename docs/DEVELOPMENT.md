@@ -248,6 +248,11 @@ Batch JSON reports include the resolved budget and observed enforcement facts, n
 
 #### Opt-in RAM-first local tests
 
+The [local test performance guide](development/LOCAL_TEST_PERFORMANCE.md)
+classifies all 21 test families, records bounded two-CPU measurements and
+unverified browser/container/strict boundaries, and ranks further work. Read it
+before extending the profile or repeating the cache experiments below.
+
 ```bash
 OH_GOON_LOCAL_TEST_PROFILE=ram make test
 OH_GOON_LOCAL_TEST_PROFILE=ram OH_GOON_TEST_CPUS=2 make check
