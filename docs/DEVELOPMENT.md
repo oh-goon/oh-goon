@@ -301,6 +301,96 @@ comparison. The profile does not establish APP, browser, release, privileged
 native or WSL qualification. The negative cache experiments below remain useful
 findings even when another optimization succeeds.
 
+##### Measured one-use packet handoff
+
+At frozen commit
+[`d401cf991c54dbe810612b6f959c4c376cec0675`](https://github.com/oh-goon/oh-goon/commit/d401cf991c54dbe810612b6f959c4c376cec0675),
+canonical source identity
+`sha256:080f25364e11f2169ad2d2e3f6b295deb0d70b409d45560c80132bfce3aecc20`,
+the complete native architecture command ran all 24 checks in three paired
+ordinary/RAM trials, alternating mode order. Every invocation passed. Both
+modes used the same current implementation and source, locks, command settings
+and verified two-CPU quota. Each invocation owned a fresh process and snapshot;
+whole elapsed includes quota admission, interpreter/imports, observations,
+policy checks and scope closure. No pytest PASS resume or result reuse occurred.
+
+| Pair | Ordinary seconds | RAM-profile seconds |
+| --- | ---: | ---: |
+| 1 | 78.215891 | 74.552611 |
+| 2 | 78.086898 | 74.873401 |
+| 3 | 78.320363 | 74.694666 |
+| Mean | 78.207717 | 74.706892 |
+
+Mean elapsed decreased 4.48%; mean process CPU decreased from 78.163333 to
+74.666667 seconds (4.47%). Mean maximum RSS was 1,673,480 versus 1,671,464 KiB,
+both about 1.60 GiB. This is native GNU time's process-lifetime/waited-process
+high-water observation, not aggregate process-tree or cgroup memory. It does
+not establish a meaningful memory reduction. Cgroup aggregate peak, peak
+temperature and interactive responsiveness were not measured for this
+frontdoor experiment.
+
+Source and lock bytes and the declared command settings were held constant,
+but the experiment did not capture a separate producer/toolchain identity
+attestation on every trial. These results establish a modest observed benefit
+for this complete 24-check command at the frozen source. The 20% target was not
+met. They do not establish a guaranteed whole-`make test` improvement or qualify
+later source. Both modes already included the unconditional removal of the
+unused lifecycle AST projection, so that earlier work reduction is not counted
+as a RAM-profile gain here.
+
+##### Whole-workflow compatibility measurements
+
+The same frozen `d401cf991c54dbe810612b6f959c4c376cec0675` source also ran
+three paired trials per representative lane, alternating ordinary/RAM order.
+Each short scope contained two fresh native processes; there was no
+profile-owned cache or claim of OS page-cache coldness. Each aggregate scope
+was one original `make test` invocation with its own quota, not an artificial
+shared snapshot. All timing includes admission, setup, execution and cleanup;
+no pytest PASS resume was used.
+
+| Native workload | Ordinary mean seconds | RAM-profile mean seconds | Exact native accounting |
+| --- | ---: | ---: | --- |
+| Python recipient-binding, two fresh invocations | 5.613 | 5.596 | 6 cases per invocation, identical case/status vectors |
+| Vitest node, two fresh invocations | 3.871 | 3.889 | 26 cases per invocation, identical case/status vectors |
+| Vitest jsdom, two fresh invocations | 8.753 | 8.795 | 13 cases per invocation, identical case/status vectors |
+| Original `make test`, one fresh invocation | 485.056 | 481.500 | 1,153 cases per invocation, identical case/status vectors; selected static owners passed |
+
+The short Python/node/jsdom lanes do not invoke the architecture handoff, and
+their changes were within about half a percent with mixed pair directions.
+No material acceleration is claimed for those lanes. Every selected native
+case passed; no member was missing, duplicated, added, skipped or resumed.
+The six aggregate invocations also preserved the same source, toolchain,
+producer and two-worker/two-CPU bindings recorded by the native reports.
+
+Aggregate ordinary/RAM paired elapsed seconds were 483.984/480.701,
+485.489/481.970 and 485.696/481.830. Mean elapsed decreased 0.73%; process CPU
+means were 818.507/814.007 seconds, 0.55% lower. Mean peak process RSS stayed
+about 1.60 GiB. This is a small observed whole-workflow saving at this frozen
+source and host, not a guaranteed improvement or a statistical-significance
+claim. The 20% target was not met. These were selected feedback portfolios,
+not complete frontend/browser/daily/release or APP/WSL qualification.
+
+Native cgroup lifetime peaks and counters retain their disclosed scope in the
+reports; they must not be added to process RSS or called per-trial aggregate
+memory. The aggregate diagnostic parent was outside Make's native scope;
+use the native pytest receipt for that scope. Per-trial command-scoped swap/OOM
+observations were not uniformly available. Page-cache coldness, actual cache
+hits, true temperature peaks and per-trial desktop responsiveness remain
+unmeasured. The prior separate “responsive but high temp” observation is not
+qualification of every new trial.
+
+Independent accounting validated all 24 scopes, including 6,918 completed
+aggregate case attempts across six fresh Make runs, with distinct native
+execution identities and exact case/status vectors. The retained summary is
+`current-performance-summary.json`, SHA-256
+`55d04c0f765ef0b9aaf2dc131cff4977f19f79996ab6fd748332115d4e9c15df`;
+its independent accounting receipt is SHA-256
+`05261a4581a38098ba2c9c4ea12ce16a8e4134395ab91a2a4c89eedf3eada622`.
+Native logs, reports and one-off drivers remain outside source under
+`/home/hugo/.oh-goon-hug-209-evidence-20261109/continuation-20261112/`.
+These pinned observations are evidence for future optimization work; later
+source/tool/host changes need new measurements rather than inheriting a pass.
+
 ##### Cache experiment evidence
 
 Read these observations before repeating the cache prototypes. They describe
@@ -369,7 +459,7 @@ removed rather than expanding its cap or adding eviction heuristics.
 
 The same pilot also compared an isolated lifecycle inventory against the
 pre-optimization implementation while both inspected one fixed subject tree.
-All 927 member requests, producer identity, native packets, source bytes and
+All 926 member requests, producer identity, native packets, source bytes and
 qualified/conditional results matched. Removing an unused AST projection reduced
 inventory mean elapsed 43.85 to 30.93 seconds and peak RSS about 1.41 to 0.59 GiB.
 The retention mode was slower at 33.44 seconds and about 0.87 GiB. Later policies
