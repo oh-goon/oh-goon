@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import select
@@ -11,7 +12,7 @@ import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 from typing import Any, cast
 
 import pytest
@@ -194,6 +195,114 @@ def test_preflight_failure_falls_back_once_but_cancellation_never_retries(
         assert len(calls) == 1 and result.returncode < 0
 
 
+@pytest.mark.parametrize("requested", [None, signal.SIGINT, signal.SIGTERM])
+def test_prestart_cancellation_preserves_signal_without_allocating_or_executing(
+    admitted: PytestResourceBudget,
+    monkeypatch: pytest.MonkeyPatch,
+    requested: int | None,
+) -> None:
+    monkeypatch.setattr(
+        tempfile,
+        "mkdtemp",
+        lambda **kwargs: pytest.fail("cancelled command allocated scratch"),
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_command",
+        lambda *args, **kwargs: pytest.fail("cancelled command started work"),
+    )
+    result = owner.run_profiled_command(
+        ("native",),
+        resolved_cpus=2,
+        cancel_requested=lambda: True,
+        cancellation_signal=lambda: requested,
+    )
+    assert result.returncode == -(signal.SIGTERM if requested is None else requested)
+    assert result.cache == "cancelled" and result.cleanup == "not-required"
+
+
+@pytest.mark.parametrize(
+    "fault", ["pipe-exhausted", "cache-directory-denied", "keeper-start-denied"]
+)
+def test_partial_cache_setup_failure_releases_resources_before_single_fallback(
+    admitted: PytestResourceBudget,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    roots: list[Path] = []
+    descriptors: list[int] = []
+    calls: list[tuple[str, ...]] = []
+    observed_faults: list[str] = []
+    native_mkdtemp = tempfile.mkdtemp
+    native_pipe2 = os.pipe2
+    native_mkdir = Path.mkdir
+
+    def allocate(**kwargs: Any) -> str:
+        root = native_mkdtemp(prefix=kwargs["prefix"], dir=tmp_path)
+        roots.append(Path(root))
+        return root
+
+    def pipe2(flags: int) -> tuple[int, int]:
+        if fault == "pipe-exhausted":
+            observed_faults.append(fault)
+            raise OSError(errno.EMFILE, "Too many open files")
+        pair = native_pipe2(flags)
+        descriptors.extend(pair)
+        return pair
+
+    def mkdir(path: Path, *args: Any, **kwargs: Any) -> None:
+        if fault == "cache-directory-denied" and roots and path == roots[0] / "cache":
+            observed_faults.append(fault)
+            raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        native_mkdir(path, *args, **kwargs)
+
+    def run(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        assert argv == ("native", "literal argument")
+        assert kwargs["env"] == {"PATH": os.defpath}
+        return CommandResult(23, "", "")
+
+    def start_denied(self: Thread) -> None:
+        observed_faults.append("keeper-start-denied")
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", allocate)
+    monkeypatch.setattr(os, "pipe2", pipe2)
+    monkeypatch.setattr(Path, "mkdir", mkdir)
+    monkeypatch.setattr(owner, "run_command", run)
+    if fault == "keeper-start-denied":
+        monkeypatch.setattr(Thread, "start", start_denied)
+    try:
+        result = owner.run_profiled_command(
+            ("native", "literal argument"),
+            resolved_cpus=2,
+            environment={"PATH": os.defpath},
+        )
+        assert result.returncode == 23 and result.cache == "fallback"
+        assert result.cleanup == result.native_process_cleanup == "verified"
+        assert observed_faults == [fault]
+        assert calls == [("native", "literal argument")]
+        assert roots and not any(root.exists() for root in roots)
+        for descriptor in descriptors:
+            with pytest.raises(OSError) as closed:
+                os.fstat(descriptor)
+            assert closed.value.errno == errno.EBADF
+    finally:
+        # Failed implementations must not leave the regression's resources behind.
+        for descriptor in descriptors:
+            try:
+                os.close(descriptor)
+            except OSError as error:
+                if error.errno != errno.EBADF:
+                    raise
+        for root in roots:
+            if (root / "cache").exists():
+                (root / "cache").rmdir()
+            if root.exists():
+                root.rmdir()
+
+
 def _ready_keeper(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -251,6 +360,32 @@ def _ready_keeper(
 
     monkeypatch.setattr(owner, "run_command", run)
     return calls, roots
+
+
+def test_late_preflight_error_releases_cache_before_original_execution(
+    admitted: PytestResourceBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls, roots = _ready_keeper(monkeypatch)
+    original = cast(Callable[..., CommandResult], vars(owner)["run_command"])
+    observations: list[str] = []
+
+    def access(_path: Path) -> bool:
+        observations.append("access-error")
+        raise OSError(errno.EIO, "cache probe failed")
+
+    def run(*argv: str, **kwargs: Any) -> CommandResult:
+        if argv[0] == "native":
+            assert "NODE_COMPILE_CACHE" not in kwargs["env"]
+            assert roots and not any(root.exists() for root in roots)
+        return original(*argv, **kwargs)
+
+    monkeypatch.setattr(owner, "_cache_access", access)
+    monkeypatch.setattr(owner, "run_command", run)
+    result = owner.run_profiled_command(("native",), resolved_cpus=2)
+    assert result.returncode == 17 and result.cache == "fallback"
+    assert result.cleanup == result.native_process_cleanup == "verified"
+    assert observations == ["access-error"]
+    assert sum(argv[0] == "native" for argv in calls) == 1
 
 
 @pytest.mark.parametrize("fault", ["access", "process-cleanup", "file-cleanup"])
@@ -364,6 +499,84 @@ raise SystemExit(19)
             record_property(f"ram_mount_{mode}", "PASS" if owned else "NOT_RUN")
             record_property(
                 f"node_compile_cache_{mode}", observed["node_qualification"]
+            )
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+
+@pytest.mark.process
+@pytest.mark.native_resources
+@pytest.mark.parametrize("cache_disabled", [False, True])
+def test_ram_profile_preserves_native_configuration_and_read_only_path_resolution(
+    tmp_path: Path, cache_disabled: bool
+) -> None:
+    script = """
+import json, os
+from oh_goon.runtime.database import default_database_path
+from oh_goon.runtime.league_folders import default_league_preferences_path
+names=('OH_GOON_DB','OH_GOON_LEAGUE_FILE','OH_GOON_SQLITE_JOURNAL_MODE','OH_GOON_PROGRESS_FD')
+selected={name:os.environ.get(name) for name in names}
+print(json.dumps(dict(environment=selected,database=str(default_database_path()),league=str(default_league_preferences_path()))))
+if selected['OH_GOON_PROGRESS_FD'] is not None:
+ os.write(int(selected['OH_GOON_PROGRESS_FD']),b'native-progress')
+"""
+    for mode in ("baseline", "ram"):
+        read_fd, write_fd = os.pipe()
+        selected = {
+            "OH_GOON_DB": "state/../configured/development.sqlite",
+            "OH_GOON_LEAGUE_FILE": "preferences/../configured/league.yml",
+            "OH_GOON_SQLITE_JOURNAL_MODE": "DELETE",
+            "OH_GOON_PROGRESS_FD": str(write_fd),
+        }
+        environment = (
+            _native_environment()
+            | selected
+            | {
+                "XDG_DATA_HOME": str(tmp_path / "unselected-data"),
+                "XDG_CONFIG_HOME": str(tmp_path / "unselected-config"),
+            }
+        )
+        command = [sys.executable, "-c", script]
+        if cache_disabled:
+            environment["NODE_DISABLE_COMPILE_CACHE"] = "1"
+        if mode == "ram":
+            environment["OH_GOON_LOCAL_TEST_PROFILE"] = "ram"
+            if cache_disabled:
+                # Exercise the receiving owner's declined branch even though the
+                # shell normally reuses caller-native cache settings by exec.
+                command = [
+                    str(ROOT / "backend/.venv/bin/oh-goon-local-test-ram"),
+                    "--resolved-cpus",
+                    "2",
+                    "--",
+                    *command,
+                ]
+        try:
+            result = subprocess.run(
+                ["bash", str(ROOT / "scripts/development_test_resources.sh"), *command],
+                cwd=tmp_path,
+                env=environment,
+                pass_fds=(write_fd,),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert result.returncode == 0, result.stderr
+            assert json.loads(result.stdout) == {
+                "environment": selected,
+                "database": str(tmp_path / "configured/development.sqlite"),
+                "league": str(tmp_path / "configured/league.yml"),
+            }
+            assert select.select([read_fd], [], [], 1)[0]
+            assert os.read(read_fd, 15) == b"native-progress"
+            if mode == "ram":
+                receipt = _profile_receipt(result.stderr)
+                assert receipt["native_exit_code"] == 0
+                if cache_disabled:
+                    assert receipt["cache"] == "declined"
+            assert not list(tmp_path.iterdir()), (
+                "path inspection created application state"
             )
         finally:
             os.close(read_fd)
@@ -511,6 +724,100 @@ def test_optional_cache_sigterm_settles_original_and_admitted_keeper(
             process.communicate(timeout=10)
         for descriptor in descriptors:
             os.close(descriptor)
+
+
+@pytest.mark.process
+@pytest.mark.native_resources
+@pytest.mark.parametrize("cache_disabled", [False, True])
+def test_ram_profile_delivers_sigint_to_native_handler_and_waits_for_cleanup(
+    tmp_path: Path, cache_disabled: bool
+) -> None:
+    script = """
+import json, os, pathlib, signal, sys
+ready,closed=map(pathlib.Path,sys.argv[1:])
+received=[]
+def interrupt(signum,frame):
+ received.append(signum)
+ raise SystemExit(128+signum)
+signal.signal(signal.SIGINT,interrupt)
+signal.signal(signal.SIGTERM,interrupt)
+try:
+ pending=ready.with_suffix('.partial')
+ pending.write_text(json.dumps(dict(pid=os.getpid(),cache=os.environ.get('NODE_COMPILE_CACHE'))))
+ pending.replace(ready)
+ while True: signal.pause()
+finally:
+ cache=os.environ.get('NODE_COMPILE_CACHE')
+ closed.write_text(json.dumps(dict(received=received,cleanup=True,cache_accessible=cache is None or pathlib.Path(cache).is_dir())))
+"""
+    for mode in ("baseline", "ram"):
+        marker = tmp_path / f"{mode}-started.json"
+        closed = tmp_path / f"{mode}-closed.json"
+        environment = _native_environment()
+        command = [sys.executable, "-c", script, str(marker), str(closed)]
+        if cache_disabled:
+            environment["NODE_DISABLE_COMPILE_CACHE"] = "1"
+        if mode == "ram":
+            environment["OH_GOON_LOCAL_TEST_PROFILE"] = "ram"
+            if cache_disabled:
+                command = [
+                    str(ROOT / "backend/.venv/bin/oh-goon-local-test-ram"),
+                    "--resolved-cpus",
+                    "2",
+                    "--",
+                    *command,
+                ]
+        process = subprocess.Popen(
+            ["bash", str(ROOT / "scripts/development_test_resources.sh"), *command],
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        descriptors: list[int] = []
+        try:
+            deadline = time.monotonic() + 10
+            while (
+                not marker.exists()
+                and process.poll() is None
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.02)
+            assert marker.exists(), process.communicate(timeout=5)
+            started = json.loads(marker.read_text())
+            descriptors.append(os.pidfd_open(started["pid"]))
+            if started["cache"] is not None:
+                descriptors.append(os.pidfd_open(int(Path(started["cache"]).parts[2])))
+            os.killpg(process.pid, signal.SIGINT)
+            _stdout, stderr = process.communicate(timeout=15)
+            assert process.returncode in {-signal.SIGINT, 128 + signal.SIGINT}, stderr
+            assert json.loads(closed.read_text()) == {
+                "received": [signal.SIGINT],
+                "cleanup": True,
+                "cache_accessible": True,
+            }
+            if mode == "ram":
+                receipt = _profile_receipt(stderr)
+                assert receipt["native_exit_code"] in {
+                    -signal.SIGINT,
+                    128 + signal.SIGINT,
+                }
+                assert (started["cache"] is not None) == (receipt["cache"] == "owned")
+                if cache_disabled:
+                    assert receipt["cache"] == "declined"
+            for descriptor in descriptors:
+                poll = select.poll()
+                poll.register(descriptor, select.POLLIN)
+                assert poll.poll(1000), (
+                    "owned native process survived interrupt cleanup"
+                )
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate(timeout=10)
+            for descriptor in descriptors:
+                os.close(descriptor)
 
 
 @pytest.mark.process

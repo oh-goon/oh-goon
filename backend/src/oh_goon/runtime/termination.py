@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import signal
 from dataclasses import asdict, dataclass
 from typing import Literal
 
@@ -19,6 +20,7 @@ class TerminationRequest:
     cause: TerminationCause
     reason: str
     grace_seconds: float = 1.0
+    signal_number: int = signal.SIGTERM
 
     def __post_init__(self) -> None:
         if not self.execution_id:
@@ -29,11 +31,20 @@ class TerminationRequest:
             raise ValueError("termination request requires reason")
         if not 0 <= self.grace_seconds <= 60:
             raise ValueError("termination grace must be between 0 and 60 seconds")
+        if not isinstance(self.signal_number, int) or self.signal_number not in (
+            signal.SIGTERM,
+            signal.SIGINT,
+        ):
+            raise ValueError("termination signal must be SIGTERM or SIGINT")
 
     @property
     def request_identity(self) -> str:
+        payload = asdict(self)
+        if self.signal_number == signal.SIGTERM:
+            # Keep existing TERM authorities byte-for-byte compatible with v1.
+            payload.pop("signal_number")
         raw = json.dumps(
-            {"schema": "oh-goon.termination-request/v1", **asdict(self)},
+            {"schema": "oh-goon.termination-request/v1", **payload},
             sort_keys=True,
             separators=(",", ":"),
         ).encode()
@@ -42,6 +53,8 @@ class TerminationRequest:
 
 @dataclass(frozen=True, slots=True)
 class ProcessTreeTerminationReceipt:
+    """Bounded cleanup evidence; term_requested means graceful termination was requested."""
+
     request_identity: str
     term_requested: bool
     grace_seconds: float

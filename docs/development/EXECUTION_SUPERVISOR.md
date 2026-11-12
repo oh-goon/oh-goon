@@ -145,6 +145,15 @@ EOF or cancellation.
 
 `oh_goon.engine.command.run_command` is the common process owner. It owns process-group creation, output draining, cancellation, timeout cleanup, and non-exportable control environment.
 
+Ordinary boolean cancellation keeps its SIGTERM → grace → SIGKILL contract.
+Trusted POSIX developer launchers may explicitly forward SIGINT or SIGTERM through
+that same owner. The resolved termination request binds the signal; default
+SIGTERM requests retain their existing v1 identity. The historical receipt field
+`term_requested` records that graceful termination was requested, with the actual
+signal bound by the request identity. An explicit captured developer environment
+may preserve local database, league, journal and progress configuration while
+Step defaults and non-exportable security authority remain unchanged.
+
 After its canonical claim, the fresh Run worker explicitly binds this command
 owner's child-custody default. Native Git, uv, preparation and Step commands all
 receive that lifetime; an explicit independent lifetime remains explicit. A

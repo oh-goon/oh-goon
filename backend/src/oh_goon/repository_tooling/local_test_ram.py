@@ -53,9 +53,11 @@ def _cleanup(root: Path, identity: tuple[int, int]) -> bool:
         current = root.lstat()
         if root.is_symlink() or (current.st_dev, current.st_ino) != identity:
             raise OSError("owned scratch identity changed")
-        if set(root.iterdir()) != {root / "cache"}:
+        entries = set(root.iterdir())
+        if entries - {root / "cache"}:
             raise OSError("unexpected entries in owned scratch")
-        (root / "cache").rmdir()
+        if root / "cache" in entries:
+            (root / "cache").rmdir()
         root.rmdir()
         return True
     except OSError:
@@ -115,6 +117,7 @@ def run_profiled_command(
     resolved_cpus: int,
     environment: Mapping[str, str] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
+    cancellation_signal: Callable[[], int | None] | None = None,
 ) -> RamCacheResult:
     """Give one unchanged native workload an optional cache, never a new context.
 
@@ -136,6 +139,15 @@ def run_profiled_command(
     ):
         raise ValueError("RAM test profile CPU quota is unverified in the receiving process")
 
+    def cancelled() -> bool:
+        return (cancel_requested is not None and cancel_requested()) or (
+            cancellation_signal is not None and cancellation_signal() is not None
+        )
+
+    def cancellation_returncode() -> int:
+        requested = cancellation_signal() if cancellation_signal is not None else None
+        return -(signal.SIGTERM if requested is None else requested)
+
     def execute(
         argv: Sequence[str],
         selected_env: Mapping[str, str],
@@ -150,9 +162,10 @@ def run_profiled_command(
             result = run_command(
                 *argv,
                 env=selected_env,
+                environment_context="trusted_developer",
                 timeout=None,
-                cancel_requested=lambda: (cancel_requested is not None and cancel_requested())
-                or (abort_if is not None and abort_if()),
+                cancel_requested=lambda: cancelled() or (abort_if is not None and abort_if()),
+                cancellation_signal=cancellation_signal,
                 stream_output=_stream,
                 require_process_group_quiescence=True,
                 parent_death_signal=True,
@@ -161,14 +174,14 @@ def run_profiled_command(
                 retain_output_tail=True,
             )
         except CommandCancelledError as error:
-            return -signal.SIGTERM, error.supervisor.final_process_group_quiescent
+            return -error.signal_number, error.supervisor.final_process_group_quiescent
         except OSError as error:
             print(f"Native command could not start: {error.strerror}", file=sys.stderr)
             return (127 if isinstance(error, FileNotFoundError) else 126), True
         return result.returncode, result.supervisor.final_process_group_quiescent
 
-    if cancel_requested is not None and cancel_requested():
-        return RamCacheResult(-signal.SIGTERM, "cancelled", "not-required")
+    if cancelled():
+        return RamCacheResult(cancellation_returncode(), "cancelled", "not-required")
     reason = "caller-native-setting"
     eligible = not any(name in env for name in ("NODE_COMPILE_CACHE", "NODE_DISABLE_COMPILE_CACHE"))
     needed = HEADROOM_BYTES + budget.worker_ceiling * ESTIMATED_WORKER_MEMORY_BYTES + CACHE_BYTES
@@ -210,6 +223,22 @@ def run_profiled_command(
             "verified" if settled else "incomplete",
         )
 
+    identity: tuple[int, int] | None = None
+    stop = Event()
+    done = Event()
+    started = Event()
+    keeper_results: list[CommandResult | CommandCancelledError | BaseException] = []
+    keeper_pid: list[int] = []
+    keeper_fds: list[int] = []
+    keeper_identity: list[str] = []
+    read_fd: int | None = None
+    write_fd: int | None = None
+    thread: Thread | None = None
+    native_settled = True
+    cleanup = False
+    code = 1
+    cache = "fallback"
+
     try:
         root = Path(tempfile.mkdtemp(prefix="oh-goon-node-cache-", dir="/tmp"))
     except OSError:
@@ -223,20 +252,6 @@ def run_profiled_command(
             "verified" if settled else "incomplete",
             "verified" if settled else "incomplete",
         )
-    metadata = root.lstat()
-    identity = metadata.st_dev, metadata.st_ino
-    stop = Event()
-    done = Event()
-    started = Event()
-    keeper_results: list[CommandResult | CommandCancelledError | BaseException] = []
-    keeper_pid: list[int] = []
-    keeper_fds: list[int] = []
-    keeper_identity: list[str] = []
-    read_fd, write_fd = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
-    native_settled = True
-    cleanup = False
-    code = 1
-    cache = "fallback"
 
     def process(event: CommandProcessLifecycleEvent) -> None:
         if event.kind == "PROCESS_STARTED":
@@ -250,6 +265,7 @@ def run_profiled_command(
     def keep() -> None:
         try:
             assert unshare is not None and mount is not None
+            assert identity is not None and write_fd is not None
             keeper_results.append(
                 run_command(
                     unshare,
@@ -273,8 +289,9 @@ def run_profiled_command(
                     timeout=None,
                     pass_fds=(write_fd,),
                     process_observer=process,
-                    cancel_requested=lambda: stop.is_set()
-                    or (cancel_requested is not None and cancel_requested()),
+                    # Keep the cache alive while the native workload handles
+                    # its signal and settles. Only its owner closes this lease.
+                    cancel_requested=stop.is_set,
                     require_process_group_quiescence=True,
                     parent_death_signal=True,
                     max_capture_bytes_per_stream=8192,
@@ -285,42 +302,54 @@ def run_profiled_command(
         finally:
             done.set()
 
-    thread = Thread(target=keep, name="oh-goon-node-cache-keeper")
     try:
-        (root / "cache").mkdir(mode=0o700)
-        thread.start()
-        deadline = time.monotonic() + 15
-        ready = b""
-        while not done.is_set() and time.monotonic() < deadline:
-            if cancel_requested is not None and cancel_requested():
-                break
-            if select.select([read_fd], [], [], 0.02)[0]:
-                ready = os.read(read_fd, 1024)
-                break
         valid = False
-        if ready and started.is_set() and not done.is_set():
-            binding = json.loads(ready)
-            birth = observe_process_birth(keeper_pid[0])
-            poll = select.poll()
-            poll.register(keeper_fds[0], select.POLLIN)
-            valid = (
-                binding == {"pid": keeper_pid[0]}
-                and birth is not None
-                and f"{birth.boot_id}:{birth.start_ticks}" == keeper_identity[0]
-                and not poll.poll(0)
-            )
-            valid = (
-                valid
-                and _cache_access(Path(f"/proc/{keeper_pid[0]}/root{root}/cache"))
-                and not poll.poll(0)
-                and not done.is_set()
+        try:
+            metadata = root.lstat()
+            identity = metadata.st_dev, metadata.st_ino
+            read_fd, write_fd = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
+            (root / "cache").mkdir(mode=0o700)
+            thread = Thread(target=keep, name="oh-goon-node-cache-keeper")
+            thread.start()
+            deadline = time.monotonic() + 15
+            ready = b""
+            while not done.is_set() and time.monotonic() < deadline:
+                if cancelled():
+                    break
+                if select.select([read_fd], [], [], 0.02)[0]:
+                    ready = os.read(read_fd, 1024)
+                    break
+            if ready and started.is_set() and not done.is_set():
+                binding = json.loads(ready)
+                birth = observe_process_birth(keeper_pid[0])
+                poll = select.poll()
+                poll.register(keeper_fds[0], select.POLLIN)
+                valid = (
+                    binding == {"pid": keeper_pid[0]}
+                    and birth is not None
+                    and f"{birth.boot_id}:{birth.start_ticks}" == keeper_identity[0]
+                    and not poll.poll(0)
+                )
+                valid = (
+                    valid
+                    and _cache_access(Path(f"/proc/{keeper_pid[0]}/root{root}/cache"))
+                    and not poll.poll(0)
+                    and not done.is_set()
+                )
+        except (OSError, RuntimeError) as error:
+            # This handler covers optional preflight only. A native execution
+            # failure below must never be turned into another invocation.
+            valid = False
+            print(
+                f"RAM compile cache setup unavailable before work ({type(error).__name__})",
+                file=sys.stderr,
             )
         keeper_cancelled = bool(keeper_results) and (
             isinstance(keeper_results[0], CommandCancelledError)
             or (isinstance(keeper_results[0], CommandResult) and keeper_results[0].returncode < 0)
         )
-        if keeper_cancelled or (cancel_requested is not None and cancel_requested()):
-            code, cache = -signal.SIGTERM, "cancelled"
+        if keeper_cancelled or cancelled():
+            code, cache = cancellation_returncode(), "cancelled"
         elif valid:
             cache = "owned"
             selected_env = {**env, "NODE_COMPILE_CACHE": f"/proc/{keeper_pid[0]}/root{root}/cache"}
@@ -328,8 +357,9 @@ def run_profiled_command(
                 f"RAM compile cache: private tmpfs, {CACHE_BYTES} bytes maximum; native Node cache validity",
                 file=sys.stderr,
             )
+            native_settled = False
             code, native_settled = execute(command, selected_env, abort_if=done.is_set)
-            if done.is_set() and not (cancel_requested is not None and cancel_requested()):
+            if done.is_set() and not cancelled():
                 cache = "lost"
                 print("RAM compile cache keeper lost during native work; no retry", file=sys.stderr)
         else:
@@ -342,17 +372,24 @@ def run_profiled_command(
         # unqualified result, close this evictable cache but retain its root and
         # report incomplete cleanup; do not invent a background lease/reaper.
         stop.set()
-        if thread.ident is not None:
+        if thread is not None and thread.ident is not None:
             thread.join()
+        descriptor_cleanup = True
         for descriptor in (read_fd, write_fd, *keeper_fds):
-            os.close(descriptor)
-        settled = (
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    descriptor_cleanup = False
+                    print("RAM compile cache descriptor cleanup incomplete", file=sys.stderr)
+        never_started = thread is None or thread.ident is None
+        settled = never_started or (
             bool(keeper_results)
             and isinstance(keeper_results[0], (CommandResult, CommandCancelledError))
             and keeper_results[0].supervisor.final_process_group_quiescent
         )
-        if native_settled and settled:
-            cleanup = _cleanup(root, identity)
+        if native_settled and settled and identity is not None:
+            cleanup = _cleanup(root, identity) and descriptor_cleanup
         else:
             print(
                 f"RAM compile cache retained: process cleanup unverified: {root}", file=sys.stderr
@@ -360,8 +397,10 @@ def run_profiled_command(
     if cache == "fallback":
         if not settled:
             return RamCacheResult(1, "unavailable", "incomplete")
-        if cancel_requested is not None and cancel_requested():
-            return RamCacheResult(-signal.SIGTERM, "cancelled", "verified")
+        if cancelled():
+            return RamCacheResult(
+                cancellation_returncode(), "cancelled", "verified" if cleanup else "incomplete"
+            )
         code, native_settled = execute(command, env)
     return RamCacheResult(
         code,
@@ -425,7 +464,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         try:
             outcome = run_profiled_command(
-                command, resolved_cpus=selected.resolved_cpus, cancel_requested=requested.is_set
+                command,
+                resolved_cpus=selected.resolved_cpus,
+                cancel_requested=requested.is_set,
+                cancellation_signal=lambda: received[0] if received else None,
             )
         except ValueError as error:
             print(f"RAM test profile refused: {error}", file=sys.stderr)

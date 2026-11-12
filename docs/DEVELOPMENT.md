@@ -276,11 +276,21 @@ Node owns cache creation, source-byte invalidation and runtime version keys.
 Caller-selected `NODE_COMPILE_CACHE` or `NODE_DISABLE_COMPILE_CACHE` settings are
 preserved instead of allocating another cache.
 
+The trusted developer launch preserves captured database, league, SQLite journal
+and progress-channel settings. Ordinary Step launches still strip those settings;
+local-access, strict-executor and execution-guard authority remain non-exportable
+in both contexts. SIGINT and SIGTERM reach the native workload as their original
+signal through the existing bounded process supervisor. The cache keeper remains
+alive while the workload handles its signal and settles.
+
 An unavailable mount, insufficient RAM or denied permissions causes an explicit
 fallback **before work** to the original storage and cache settings, with the CPU
 limit retained. Once the workload starts, a failure, cancellation, OOM or full
 cache is reported through the original native result; it is never retried as a
 successful disk fallback. Cleanup diagnostics remain separate from that result.
+Failures while preparing the optional directory, pipes or keeper release the
+resources already acquired before a single pre-work fallback. An unidentified
+root or unverified process cleanup is retained and reported incomplete.
 This profile does not move `TMPDIR`, HOME, XDG state, pytest fixtures, SQLite,
 workspaces, resume receipts, logs, coverage or other authoritative evidence.
 Vitest keeps its existing threads, sequential files, isolation and worker

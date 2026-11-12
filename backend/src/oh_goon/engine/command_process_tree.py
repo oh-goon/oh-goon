@@ -231,13 +231,17 @@ def terminate_owned_process_tree(
     *,
     parent_guard: CommandParentGuard | None = None,
 ) -> ProcessTreeTerminationReceipt:
-    """Apply one bounded TERM -> grace -> KILL authority and prove final quiescence.
+    """Apply one bounded graceful signal -> grace -> KILL authority and prove quiescence.
 
     The caller supplies the admitted execution identity/generation in ``request``.
     This owner acts only on the already-owned process group represented by ``process``.
     """
     escalated = _terminate_process_group(
-        process, close_pipes=True, grace_seconds=request.grace_seconds, parent_guard=parent_guard
+        process,
+        close_pipes=True,
+        grace_seconds=request.grace_seconds,
+        parent_guard=parent_guard,
+        signal_number=request.signal_number,
     )
     quiescent = os.name == "nt" or not _process_group_exists(process.pid, parent_guard=parent_guard)
     if quiescent and parent_guard is not None:
@@ -258,11 +262,16 @@ def _terminate_process_group(
     close_pipes: bool = True,
     grace_seconds: float = TERMINATION_GRACE_SECONDS,
     parent_guard: CommandParentGuard | None = None,
+    signal_number: int = signal.SIGTERM,
 ) -> bool:
+    if os.name == "nt" and signal_number != signal.SIGTERM:
+        raise ValueError("native cancellation signals require POSIX process groups")
     forced = (
         _terminate_windows(process, grace_seconds)
         if os.name == "nt"
-        else _terminate_posix(process, grace_seconds, parent_guard=parent_guard)
+        else _terminate_posix(
+            process, grace_seconds, parent_guard=parent_guard, signal_number=signal_number
+        )
     )
     process.wait()
     if close_pipes:
@@ -288,12 +297,13 @@ def _terminate_posix(
     grace_seconds: float,
     *,
     parent_guard: CommandParentGuard | None = None,
+    signal_number: int = signal.SIGTERM,
 ) -> bool:
     group = process.pid
     if not _process_group_exists(group, parent_guard=parent_guard):
         return False
     try:
-        os.killpg(group, signal.SIGTERM)
+        os.killpg(group, signal_number)
     except ProcessLookupError:
         return False
     deadline = time.monotonic() + grace_seconds
