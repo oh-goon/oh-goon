@@ -57,7 +57,17 @@ class CliArgumentParser(argparse.ArgumentParser):
 
     def print_help(self, file: SupportsWrite[str] | None = None) -> None:
         if json_requested() and file is None:
-            print(json.dumps({"schema": "oh-goon.cli-help/v1", "usage": self.format_help()}))
+            # Native argparse gained color in Python 3.14. Force plain help
+            # inside JSON even when the caller forces terminal coloring.
+            native_color = getattr(self, "color", None)
+            try:
+                if native_color is not None:
+                    self.color = False
+                usage = self.format_help()
+            finally:
+                if native_color is not None:
+                    self.color = native_color
+            print(json.dumps({"schema": "oh-goon.cli-help/v1", "usage": usage}))
         else:
             super().print_help(file)
 

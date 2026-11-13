@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import errno
 import io
 import json
@@ -16,6 +17,7 @@ import pytest
 
 from oh_goon.cli import main
 from oh_goon.cli_result import MAX_CLI_JSON_BYTES, CliTermination, invoke_cli
+from oh_goon.engine.command import run_command
 
 
 def test_storage_prune_json_requires_confirmation_before_effects(
@@ -277,6 +279,47 @@ def test_help_and_version_json_are_single_versioned_values(
     assert main(arguments) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["schema"].startswith("oh-goon.cli-") and result["_cli"]["exit_code"] == 0
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("color_environment", ["FORCE_COLOR", "PYTHON_COLORS"])
+def test_native_forced_color_is_retained_for_human_help_and_disabled_in_json_help(
+    tmp_path: Path, color_environment: str
+) -> None:
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in {"FORCE_COLOR", "PYTHON_COLORS", "NO_COLOR"}
+    }
+    environment[color_environment] = "1"
+    executable = str(Path(sys.executable).with_name("oh-goon"))
+
+    def help_output(*arguments: str) -> str:
+        completed = run_command(
+            executable,
+            "doctor",
+            "--help",
+            *arguments,
+            cwd=tmp_path,
+            env=environment,
+            timeout=15,
+            max_capture_bytes_per_stream=65_536,
+            require_process_group_quiescence=True,
+            parent_death_signal=True,
+        )
+        assert completed.returncode == 0 and completed.stderr == ""
+        assert completed.supervisor.final_process_group_quiescent
+        return completed.stdout
+
+    # Python versions before native argparse color support still exercise both
+    # public modes; human output follows their original plain formatter.
+    human = help_output()
+    assert "usage:" in human
+    assert ("\x1b" in human) is hasattr(argparse.ArgumentParser(), "color")
+    report = json.loads(help_output("--json"))
+    assert report["schema"] == "oh-goon.cli-help/v1"
+    assert report["_cli"]["exit_code"] == 0
+    assert "usage:" in report["usage"] and "\x1b" not in report["usage"]
 
 
 @pytest.mark.skipif(not hasattr(os, "pidfd_open"), reason="native Linux signal owner required")

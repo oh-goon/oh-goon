@@ -152,6 +152,11 @@ def test_waited_public_run_cancels_owned_process_and_reopens_terminal_evidence(
             assert len(receipt_text) <= 65536
             receipt = json.loads(receipt_text)
             assert len(receipt_text.strip().splitlines()) == 1
+            assert receipt["_cli"]["schema"] == "oh-goon.cli/v1"
+            assert receipt["_cli"]["exit_code"] == expected_exit
+            assert receipt["_cli"]["exit_kind"] == (
+                "INTERRUPTED" if termination == signal.SIGINT else "TERMINATED"
+            )
             assert receipt["status"] == "interrupted"
             assert receipt["cancellation_requested"] is True
             assert receipt["cleanup"] == "not-established-by-interruption"
@@ -164,6 +169,8 @@ def test_waited_public_run_cancels_owned_process_and_reopens_terminal_evidence(
             steps = json.loads(cli("runs", "steps", run_id, "--json"))
             handoff = json.loads(cli("runs", "handoff", run_id, "--json"))
             assert status["status"] == "CANCELLED" and status["outcome"] == "CANCELLED"
+            assert status["_cli"]["exit_code"] == 0
+            assert status["_cli"]["exit_kind"] == "SUCCESS"
             assert steps["repositories"][0]["steps"][0]["status"] == "CANCELLED"
             assert steps["repositories"][0]["steps"][1]["status"] == "NOT_RUN"
             assert handoff["status"] == "CANCELLED"
