@@ -226,6 +226,9 @@ It never chooses a global latest Run or guesses a scope from the current
 directory. A historical failed Run can be read successfully without granting
 retry, repair or replay authority.
 
+The page limit bounds returned history entries. Opening a fresh CLI process
+still verifies the retained Journal before returning that page.
+
 ```bash
 oh-goon runs logs RUN_ID --after 0 --json
 oh-goon runs logs RUN_ID --after 0 --follow
