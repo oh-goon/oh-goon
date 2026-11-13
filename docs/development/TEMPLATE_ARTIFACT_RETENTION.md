@@ -158,6 +158,10 @@ paths or arbitrary exception text.
 
 ### Concrete shipped choices
 
+- [`general/catalog-render`](../../templates/goons/general/catalog-render/goon.yml):
+  the reviewed Backstage descriptor is retained for explicit export after the
+  owned Step workspace is disposed. Retention does not publish it to Backstage
+  or write it into the selected repository.
 - [`general/orders-taskflow`](../../templates/goons/general/orders-taskflow/goon.yml):
   DATA and TOTAL keep their existing output evidence; the final JSON result
   is content-store-retained for export after attempt disposal. Scalar outputs

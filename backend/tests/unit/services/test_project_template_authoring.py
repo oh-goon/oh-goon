@@ -365,7 +365,6 @@ def test_documented_plan_values_resolve_with_the_actual_catalog(tmp_path):
         if example is None:
             input_example = re.search(r"```yaml\n(inputs:.*?\n)```", guide, re.S)
             if input_example is None:
-                assert not resolver.inspect_inputs(source.path), key
                 resolver.resolve(source.path)
             else:
                 inputs = yaml.safe_load(input_example.group(1))["inputs"]

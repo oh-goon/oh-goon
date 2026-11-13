@@ -1,6 +1,8 @@
 # Private code discovery → reviewed Backstage catalog
 
-Classification: **runnable with prerequisites, synthetic example**. Hashmarks supplies repository evidence, native Git supplies commit facts, a human approves catalog ownership and metadata, and Oh-Goon executes and retains the result. There is no model/provider Step or automatic Backstage publication. This CLI demonstration and the **Explore code** UI use the same shipped `general/catalog-render` Python Goon and formatter; the guided journey is [HUG-208](https://linear.app/hugloss/issue/HUG-208/showcase-p1-guide-private-code-discovery-catalog-review-and-original).
+Classification: runnable-with-prerequisites
+
+This is a synthetic example. Hashmarks supplies repository evidence, native Git supplies commit facts, a human approves catalog ownership and metadata, and Oh-Goon executes and retains the result. There is no model/provider Step or automatic Backstage publication. This CLI demonstration and the **Explore code** UI use the same shipped `general/catalog-render` Python Goon and formatter; the guided journey is [HUG-208](https://linear.app/hugloss/issue/HUG-208/showcase-p1-guide-private-code-discovery-catalog-review-and-original).
 
 ## Operator guide
 
