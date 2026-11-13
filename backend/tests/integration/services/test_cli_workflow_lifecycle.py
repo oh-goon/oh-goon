@@ -475,6 +475,95 @@ def test_packet_b_reads_two_original_runs_with_exact_scope_and_no_mutations(
     assert [_snapshot(path) for path in (*repositories, *workflows)] == before_sources
 
 
+def test_corrected_workflow_requires_current_lock_and_admits_a_fresh_run(
+    tmp_path: Path,
+) -> None:
+    environment = _environment(tmp_path / "state")
+    repository = tmp_path / "app"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q", str(repository)], check=True, timeout=10)
+    script = repository / "check.sh"
+    script.write_text("exit 7\n")
+    goon = repository / "goon.yml"
+    goon.write_text(yaml.safe_dump({"steps": [{"id": "check", "run": "sh check.sh"}]}))
+    workflow = tmp_path / "workflow"
+    workflow.mkdir()
+    (workflow / "run.yml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 2,
+                "source": {"kind": "repository-goon"},
+                "target": {"repository": "../app"},
+            }
+        )
+    )
+    _cli(
+        environment,
+        tmp_path,
+        "workflow",
+        "prepare",
+        str(workflow),
+        "--register-target",
+        "--no-input",
+        "--json",
+    )
+    first = json.loads(
+        _cli(environment, tmp_path, "run", str(workflow), "--no-input", "--json", expected=1)
+    )
+    original_id = first["fleet_run_id"]
+    original = json.loads(_cli(environment, tmp_path, "runs", "explain", original_id, "--json"))
+    assert original["outcome"] != "SUCCESS"
+    assert original["why_not"] is not None
+    action = original["why_not"]["safe_next_action"]
+    assert "fresh" in action and "new Run ID" in action and "oh-goon run" in action
+
+    # Correcting executable intent invalidates its first canonical lock. The
+    # refused invocation must create neither a Run nor repository effects.
+    script.write_text("printf 'corrected\\n' >> effect.txt\n")
+    goon.write_text(yaml.safe_dump({"steps": [{"id": "check", "run": "sh check.sh --fixed"}]}))
+    database = tmp_path / "state/runtime.sqlite"
+    before_refusal = _database_snapshot(database)
+    lock = workflow / "goon.lock"
+    original_lock = lock.read_bytes()
+    refused = json.loads(
+        _cli(environment, tmp_path, "run", str(workflow), "--no-input", "--json", expected=2)
+    )
+    assert refused["_cli"]["exit_kind"] == "COMMAND_ERROR"
+    assert _database_snapshot(database) == before_refusal
+    assert lock.read_bytes() == original_lock
+    assert not (repository / "effect.txt").exists()
+
+    _cli(environment, tmp_path, "workflow", "prepare", str(workflow), "--no-input", "--json")
+    assert lock.read_bytes() != original_lock
+    corrected = json.loads(
+        _cli(environment, tmp_path, "run", str(workflow), "--no-input", "--json")
+    )
+    assert corrected["fleet_run_id"] != original_id
+    assert corrected["outcome"] == "SUCCESS"
+    assert (repository / "effect.txt").read_text() == "corrected\n"
+    before_readback = _database_snapshot(database)
+    retained = json.loads(_cli(environment, tmp_path, "runs", "explain", original_id, "--json"))
+    for field in (
+        "fleet_run_id",
+        "status",
+        "outcome",
+        "why_not",
+        "source_admissions",
+        "recorded_steps",
+    ):
+        assert retained[field] == original[field]
+    for run_id in (original_id, corrected["fleet_run_id"]):
+        shown = json.loads(_cli(environment, tmp_path, "runs", "show", run_id, "--json"))
+        tape = json.loads(_cli(environment, tmp_path, "runs", "tape", run_id, "--json"))
+        assert shown["rerun_from_run_id"] is None
+        assert shown["readmitted_from_run_id"] is None
+        assert tape["execution"]["rerun_from_run_id"] is None
+    human = _cli(environment, tmp_path, "runs", "explain", original_id)
+    assert action in human and original_id in human
+    assert _database_snapshot(database) == before_readback
+    assert (repository / "effect.txt").read_text() == "corrected\n"
+
+
 @pytest.mark.parametrize("refusal", ["last-scope", "json-follow"])
 def test_packet_b_invalid_readback_options_refuse_before_any_state_open(
     tmp_path: Path, refusal: str

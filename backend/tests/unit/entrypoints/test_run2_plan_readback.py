@@ -12,6 +12,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.errors import InvalidRequest
+from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 
 
@@ -50,6 +51,7 @@ class _OriginalRuns:
                 ),
             ),
             outcome=FleetRunOutcome.SUCCESS,
+            execution=DirectFleetExecutionAdmission(),
         )
 
     def agent_campaign(self, run_id: str) -> dict[str, Any]:
@@ -124,6 +126,8 @@ def test_status_projects_existing_owner_outcome_and_identity(
     data = json.loads(capsys.readouterr().out)
     assert data == {
         "schema": "oh-goon.plan-run-status/v1",
+        "rerun_from_run_id": None,
+        "readmitted_from_run_id": None,
         "fleet_run_id": "run-x",
         "plan_id": "p",
         "status": "COMPLETED",

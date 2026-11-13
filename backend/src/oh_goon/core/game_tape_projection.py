@@ -17,7 +17,7 @@ from oh_goon.core.game_tape_run_facts import (
 from oh_goon.core.game_tape_step_projection import project_steps
 from oh_goon.core.game_tape_storage import project_storage_maintenance
 from oh_goon.core.game_tape_timing import repository_time_bounds
-from oh_goon.core.models.fleet_plan_evidence import FleetPlanResult
+from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepTeardownEvidence, FleetPlanResult
 from oh_goon.core.models.game_tape import (
     GameTape,
     GameTapeProducerImplementationProvenance,
@@ -46,6 +46,12 @@ from oh_goon.core.models.run_events import (
 )
 from oh_goon.core.models.shard_execution import CanonicalShardResultEvidence
 from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.vocabulary import (
+    FleetRunEventType,
+    FleetRunFailureStage,
+    FleetRunStatus,
+    GameTapeStatus,
+)
 
 
 def project_game_tape(detail: FleetRunDetail) -> GameTape:
@@ -94,7 +100,7 @@ def project_game_tape(detail: FleetRunDetail) -> GameTape:
             and target.plan.execution.purpose == "cicd"
             and isinstance(detail.execution, StrictFleetExecutionAdmission)
         ),
-        why_not=_why_not(detail),
+        why_not=_why_not(detail, repositories),
         play_by_play=project_execution_ledger(detail),
         repositories=repositories,
         artifact_observation=detail.artifact_observation,
@@ -336,34 +342,111 @@ def _plan_result(report: OperationReport) -> FleetPlanResult | None:
     return evidence.plan if isinstance(evidence, FleetPlanOperationEvidence) else None
 
 
-def _why_not(detail: FleetRunDetail) -> GameTapeWhyNotDiagnostic | None:
+def _why_not(
+    detail: FleetRunDetail, repositories: tuple[GameTapeRepositoryExecution, ...] = ()
+) -> GameTapeWhyNotDiagnostic | None:
+    """Explain retained facts without granting new admission or history replay."""
     failure = getattr(detail.run, "failure", None)
-    if failure is None:
+    steps = tuple(step for repository in repositories for step in repository.steps)
+    uncertain = (
+        any(repository.status is GameTapeStatus.INTERRUPTED for repository in repositories)
+        or any(
+            step.status
+            not in {GameTapeStatus.PLANNED, GameTapeStatus.NOT_RUN, GameTapeStatus.SKIPPED}
+            and (step.settlement.cleanup != "VERIFIED" or step.settlement.outcome == "INCOMPLETE")
+            for step in steps
+        )
+        or any(
+            isinstance(step.teardown, FailedPlanStepTeardownEvidence)
+            for report in (detail.operations if repositories else ())
+            if (result := _plan_result(report)) is not None
+            for step in result.steps
+        )
+    )
+    inspection = (
+        "Inspect retained settlement, cleanup, completed effects and Journal evidence with the "
+        "original matching runtime's recovery owner. Do not start another Run or replay history "
+        "until uncertainty and partial effects are resolved; preserve the original Run."
+    )
+    fresh = (
+        "Inspect completed effects and correct the cause. Run 'oh-goon workflow prepare run.yml' "
+        "only if the current source/lock owner requires it. Request 'oh-goon run run.yml' as a "
+        "fresh admission with a new Run ID and current source, target and consent checks; this "
+        "grants no history replay."
+        if isinstance(getattr(detail.run, "target", None), FleetPlanTarget)
+        else "Inspect completed effects and correct the cause. Request a fresh admission through "
+        "the original owner with a new Run ID and current source, target and consent "
+        "checks; this grants no history replay."
+    )
+    if failure is not None:
+        uncertain = (
+            uncertain
+            or failure.stage is FleetRunFailureStage.RECOVERY
+            or failure.code
+            in {
+                "EXTERNAL_EFFECT_OUTCOME_UNKNOWN",
+                "REPOSITORY_EFFECT_OUTCOME_UNKNOWN",
+                "RUN_PARTIALLY_COMMITTED_BY_RESTART",
+                "RUN_INTERRUPTED_BY_RESTART",
+            }
+        )
+        code, stage, retryable, message = (
+            failure.code,
+            str(failure.stage),
+            failure.retryable,
+            failure.message,
+        )
+        if uncertain:
+            action = inspection
+        elif code == "EXECUTION_AUTHORITY_DIVERGENCE":
+            action = "Do not reuse the diverged materialization. " + fresh
+        elif code == "EXECUTOR_PLACEMENT_LOST":
+            action = (
+                "Review placement. Historical readmission needs its exact original policy and "
+                "replay authority; if unavailable, refuse it. " + fresh
+            )
+        else:
+            action = fresh
+    elif not detail.run.status.terminal:
         return None
-    authority_related = failure.code in {
+    elif detail.run.status is FleetRunStatus.CANCELLED:
+        code, stage, retryable, message = (
+            FleetRunEventType.RUN_CANCELLED.value,
+            FleetRunFailureStage.EXECUTION.value,
+            False,
+            "The Run was cancelled; cancellation alone does not establish physical cleanup.",
+        )
+        observed_cancellation = any(step.cancellation is not None for step in steps)
+        action = (
+            inspection
+            if uncertain
+            or (getattr(detail.run, "started_at", None) is not None and not observed_cancellation)
+            else fresh
+        )
+    else:
+        failed = next((step for step in steps if step.status is GameTapeStatus.FAILED), None)
+        if failed is None:
+            return None
+        code, stage, retryable, message = (
+            failed.failure.reason_code
+            if failed.failure is not None and failed.failure.reason_code
+            else FleetRunEventType.STEP_FAILED.value,
+            FleetRunFailureStage.EXECUTION.value,
+            False,
+            "A recorded Step failed; inspect its original settlement and completed effects.",
+        )
+        action = inspection if uncertain else fresh
+    authority_related = code in {
         "EXECUTION_AUTHORITY_DIVERGENCE",
         "EXECUTOR_PLACEMENT_LOST",
         "EXECUTOR_READMISSION_NOT_ALLOWED",
         "EXECUTOR_ADMISSION_BLOCKED",
     }
-    if failure.code == "EXECUTION_AUTHORITY_DIVERGENCE":
-        action = (
-            "Inspect the selected step's execution-authority evidence, then rerun from a fresh "
-            "admission. Do not reuse the diverged materialization."
-        )
-    elif failure.code == "EXECUTOR_PLACEMENT_LOST":
-        action = (
-            "Restore the admitted executor or start a fresh run so placement can be admitted again."
-        )
-    elif failure.retryable:
-        action = "Retry only after the reported blocking condition has changed."
-    else:
-        action = "Inspect the failure evidence before starting a new run."
     return GameTapeWhyNotDiagnostic(
-        code=failure.code,
-        stage=str(failure.stage),
-        retryable=failure.retryable,
+        code=code,
+        stage=stage,
+        retryable=retryable,
         authority_owner="execution_authority" if authority_related else "fleet_run",
-        message=failure.message,
+        message=message,
         safe_next_action=action,
     )

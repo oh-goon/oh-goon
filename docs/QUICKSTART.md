@@ -229,6 +229,31 @@ retry, repair or replay authority.
 The page limit bounds returned history entries. Opening a fresh CLI process
 still verifies the retained Journal before returning that page.
 
+### Decide what to do after a failed or cancelled Run
+
+Start with `oh-goon runs explain RUN_ID`. Its guidance comes from the original
+Game Tape and preserves unknown settlement and cleanup. A recorded `retryable`
+failure is advisory; it grants no replay, repair or execution authority.
+
+| Recorded situation | Next action |
+| --- | --- |
+| Invalid configuration, source, target or lock | Correct the reported input. Use `workflow prepare` only when its source/lock/registration owner requires it, then explicitly start a fresh Run. |
+| Failed Step with verified settlement and cleanup | Inspect completed effects, correct the problem and review the current source, targets and consent before starting a fresh Run. A failed Step does not prove that no effects occurred. |
+| Successful terminal Run | Keep the original result. Any intentionally repeated work is a new admission with current source and authorization. |
+| Active Run or cancellation request without final settlement | Observe the original Run and use its original owner to finish or cancel it. An acknowledgement does not establish physical quiescence. |
+| Cancelled Run with verified settlement and cleanup | Review completed effects and current authorization before explicitly starting a fresh Run. |
+| Restart, partial commit, unknown effects, incomplete teardown or ambiguous Journal commit | Preserve the original evidence. Inspect and settle work through its original recovery owner before deciding whether new execution is safe. |
+| Lost strict executor placement | Inspect completed effects first. Placement readmission is limited by the original lifecycle and exact parent/child policy; missing native replay authority must refuse before creating a child. |
+| Denied or exhausted agent repair | Inspect the original findings and obtain fresh explicit consent and limits if further repair is wanted. Previous repair consent is not inherited. |
+| Missing or unavailable history | Select the correct state root and exact Run ID, and preserve unavailable evidence. Missing history does not establish that execution never happened. |
+
+An ordinary correction followed by `oh-goon run path/to/run.yml` receives a new
+Run ID and revalidates the current lock, source, target and authorization. It is
+not a history replay. `runs list`, `show`, `explain` and `handoff` expose recorded
+`rerun_from_run_id` and `readmitted_from_run_id` lineage; null means no such
+parent was recorded, not that effects are absent or replay is permitted. Existing
+history rerun/readmission APIs retain their original admission restrictions.
+
 ```bash
 oh-goon runs logs RUN_ID --after 0 --json
 oh-goon runs logs RUN_ID --after 0 --follow

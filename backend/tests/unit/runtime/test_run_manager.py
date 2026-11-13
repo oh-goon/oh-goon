@@ -9,9 +9,18 @@ import pytest
 from oh_goon.core.errors import ExecutionBusy, StateConflict
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.run import FleetRunStatus
-from oh_goon.core.vocabulary import FleetRunEventType, FleetRunSource, OperationAction
+from oh_goon.core.vocabulary import (
+    EffectAttemptStatus,
+    FleetRunEventType,
+    FleetRunFailureStage,
+    FleetRunSource,
+    GameTapeStatus,
+    OperationAction,
+)
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
+from oh_goon.runtime.fault_injection import FaultPoint, RaisingFaultInjector
 from oh_goon.services.fleet_run_execution import FleetRunExecution
 from tests.factories.local_state import local_state
 from tests.factories.operation_reports import make_operation_report
@@ -90,6 +99,69 @@ def test_generic_fleet_start_rejects_unprepared_plan_execution(tmp_path: Path) -
 
     with pytest.raises(StateConflict, match="FleetPlanService"):
         manager.start(OperationAction.EXECUTE_PLAN)
+
+
+@pytest.mark.parametrize("commit_lost", [False, True], ids=["committed", "uncommitted-effect"])
+def test_uncommitted_non_plan_effect_keeps_original_recovery_guidance(
+    tmp_path: Path, commit_lost: bool
+) -> None:
+    root = tmp_path / "repos"
+    make_repository(root, "effect")
+    database = LocalDatabase(tmp_path / "state.db")
+    state = local_state(database)
+    state.add_location(root)
+    marker = root / "effect" / "effect-marker"
+
+    class MarkerRunner:
+        def run(
+            self,
+            repository: Path,
+            action: OperationAction,
+            *,
+            fleet_run_id: str | None = None,
+            cancel_requested: Callable[[], bool] | None = None,
+        ) -> OperationExecution:
+            with marker.open("a", encoding="utf-8") as output:
+                output.write("effect\n")
+            return OperationExecution(
+                stdout="",
+                stderr="",
+                report=make_operation_report(repository, action, fleet_run_id=fleet_run_id),
+            )
+
+    # The existing stack simulates worker custody, but uses original Run,
+    # Journal and effect-settlement owners plus a real filesystem mutation.
+    _, manager, _, _ = fleet_stack(
+        state,
+        MarkerRunner(),
+        faults=RaisingFaultInjector({FaultPoint.BEFORE_OPERATION_COMMIT}) if commit_lost else None,
+    )
+    try:
+        admitted = manager.start(OperationAction.VERIFY, fleet_run_id="non-plan-effect")
+        detail = manager.wait_for_terminal(admitted.fleet_run_id, timeout=5)
+        assert marker.read_text(encoding="utf-8") == "effect\n"
+        assert detail.run.target is None
+        assert detail.game_tape.repositories[0].steps == ()
+        attempts = RepositoryEffectAttemptStore(database).all()
+        if not commit_lost:
+            assert detail.run.status is FleetRunStatus.COMPLETED
+            assert len(detail.operations) == 1 and attempts == []
+            assert detail.game_tape.why_not is None
+            return
+        assert detail.run.status is FleetRunStatus.FAILED
+        assert detail.run.failure.stage is FleetRunFailureStage.EXECUTION
+        assert detail.run.failure.code == "UNEXPECTED_RUN_FAILURE"
+        assert detail.operations == ()
+        assert len(attempts) == 1 and attempts[0].status is EffectAttemptStatus.OUTCOME_UNKNOWN
+        assert detail.game_tape.repositories[0].status is GameTapeStatus.INTERRUPTED
+        diagnostic = detail.game_tape.why_not
+        assert diagnostic is not None
+        assert diagnostic.code == detail.run.failure.code
+        assert "Do not start" in diagnostic.safe_next_action
+        assert "original" in diagnostic.safe_next_action
+        assert "fresh admission" not in diagnostic.safe_next_action
+    finally:
+        manager.shutdown()
 
 
 def test_manager_owns_one_async_fleet_run_and_returns_journal_detail(tmp_path: Path) -> None:
