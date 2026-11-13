@@ -290,7 +290,9 @@ reply is published; exception messages and private staging paths are withheld.
 | `130` / `143` | The invocation was interrupted by SIGINT / SIGTERM. |
 
 Progress/operator hints use stderr. JSON uses ASCII escapes independently of
-terminal width, locale, color or TTY. Framework diagnostics do not echo raw
+terminal width, locale, color or TTY. Help embedded in JSON stays plain even
+when `FORCE_COLOR` or `PYTHON_COLORS` requests terminal coloring; human help
+retains the native parser's color policy. Framework diagnostics do not echo raw
 exceptions, private task values or dotenv contents. The original execution
 owner still applies its declared secret redaction; this is not a promise to
 redact arbitrary application data deliberately published as outputs.
