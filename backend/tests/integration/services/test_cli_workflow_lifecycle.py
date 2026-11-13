@@ -755,19 +755,32 @@ def test_run_readback_does_not_recover_interrupted_history_or_reconcile_scope(
         assert _database_snapshot(database.path) != before_database
         return
 
-    for command in ("show", "events", "logs", "steps", "outputs", "tape", "handoff"):
+    for command in (
+        "list",
+        "show",
+        "explain",
+        "events",
+        "logs",
+        "steps",
+        "outputs",
+        "tape",
+        "handoff",
+    ):
         report = json.loads(
             _cli(
                 environment,
                 tmp_path,
                 "runs",
                 command,
-                run_id,
+                *((run_id,) if command != "list" else ()),
                 "--json",
                 expected=3 if command == "logs" else 0,
             )
         )
-        if command == "show":
+        if command == "list":
+            assert [item["fleet_run_id"] for item in report["items"]] == [run_id]
+            assert report["items"][0]["status"] == "RUNNING"
+        elif command in {"show", "explain"}:
             assert report["status"] == "RUNNING"
         elif command == "logs":
             assert report["available"] is False

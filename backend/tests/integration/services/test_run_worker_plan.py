@@ -71,9 +71,10 @@ def test_native_training_plan_has_worker_custody_and_canonical_outputs(
         runtime.locations.add(repository.parent)
         runtime.plans.lock(plan_path)
         target = runtime.plans.prepare_execution_target(plan_path, repository=repository)
+        repository_id = RepositoryIdentity.model_validate({"path": repository}).repository_id
         run = runtime.runs.start_prepared_plan(
             target,
-            repository_ids={RepositoryIdentity.model_validate({"path": repository}).repository_id},
+            repository_ids={repository_id},
             fleet_run_id=f"training-{source.value.lower()}",
             source=source,
         )
@@ -92,9 +93,19 @@ def test_native_training_plan_has_worker_custody_and_canonical_outputs(
         assert lease[1] != os.getpid()
         assert observe_process_birth(lease[1]) is not None
         assert lease[2] != foundation.database.session_id
+        current = runtime.runs.get(run.fleet_run_id)
+        assert current.run.status.value == "RUNNING"
+        scope = ("--repository-id", repository_id, "--plan-id", target.plan.plan_id)
         with foundation.database.transaction() as connection:
-            before_doctor = tuple(connection.iterdump())
-        for arguments in (("doctor", "--json"), ("doctor", "--runtime", "--json")):
+            before_observers = tuple(connection.iterdump())
+        for arguments in (
+            ("doctor", "--json"),
+            ("doctor", "--runtime", "--json"),
+            ("runs", "list", "--limit", "1", *scope, "--json"),
+            ("runs", "show", run.fleet_run_id, "--json"),
+            ("runs", "show", "--last", *scope, "--json"),
+            ("runs", "explain", run.fleet_run_id, "--json"),
+        ):
             with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
                 observed = subprocess.run(
                     [str(Path(sys.executable).with_name("oh-goon")), *arguments],
@@ -108,16 +119,25 @@ def test_native_training_plan_has_worker_custody_and_canonical_outputs(
                 output.seek(0)
                 errors.seek(0)
                 stdout, stderr = output.read(65_537), errors.read(65_537)
-            assert observed.returncode in (0, 2), stderr
+            assert observed.returncode in ((0, 2) if arguments[0] == "doctor" else (0,)), stderr
             assert not stderr
             assert len(stdout) <= 65_536
-            diagnosis = json.loads(stdout)
-            assert diagnosis["scope"] == ("runtime" if "--runtime" in arguments else "tools")
-            assert diagnosis["paths"]["database"] == str(foundation.database.path)
-            if "--runtime" in arguments:
-                assert "runtime_safety" in diagnosis
+            report = json.loads(stdout)
+            if arguments[0] == "doctor":
+                assert report["scope"] == ("runtime" if "--runtime" in arguments else "tools")
+                assert report["paths"]["database"] == str(foundation.database.path)
+                if "--runtime" in arguments:
+                    assert "runtime_safety" in report
+            else:
+                if arguments[1] == "list":
+                    assert len(report["items"]) == 1
+                    assert report["next_before_revision"] is None
+                    report = report["items"][0]
+                assert report["fleet_run_id"] == current.run.fleet_run_id
+                assert report["status"] == current.run.status.value
+                assert report["outcome"] == current.outcome.value
             with foundation.database.transaction() as connection:
-                assert tuple(connection.iterdump()) == before_doctor
+                assert tuple(connection.iterdump()) == before_observers
             assert observe_process_birth(lease[1]) is not None
             assert not (repository / "metrics.json").exists()
         (repository / "release").touch()

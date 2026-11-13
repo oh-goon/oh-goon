@@ -68,6 +68,31 @@ def test_exact_plan_and_repository_scope_page_survives_fresh_journal(tmp_path: P
     )
     assert [item.run.fleet_run_id for item in page.items] == ["selected-new"]
     assert page.next_before_revision == page.items[0].admitted_revision
+
+    target = structural_fleet_plan_target(selected)
+    intent = FleetRunAdmissionIntent(
+        target=target,
+        capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+        execution=DirectFleetExecutionAdmission(),
+        repository_admissions=repository_admissions_for(target, [first]),
+    )
+    admit_run(
+        journal,
+        "selected-after-first-page",
+        intent,
+        fleet_repository_scope({first.repository_id}),
+        [first],
+    )
+    terminalize_run(journal, "selected-after-first-page", FleetRunTerminalIntent.CANCEL)
+
+    # A later admission changes the fresh first page, while the old cursor must
+    # still advance through its exact scope without repeating or skipping Runs.
+    restarted = Journal(LocalDatabase(database, read_only=True))
+    current = restarted.read_view().run_history(
+        limit=1, repository_id=first.repository_id, plan_id=selected.plan_id
+    )
+    assert [item.run.fleet_run_id for item in current.items] == ["selected-after-first-page"]
+    assert current.items[0].admitted_revision > page.journal_revision
     older = restarted.read_view().run_history(
         limit=1,
         before_revision=page.next_before_revision,
@@ -76,6 +101,7 @@ def test_exact_plan_and_repository_scope_page_survives_fresh_journal(tmp_path: P
     )
     assert [item.run.fleet_run_id for item in older.items] == ["selected-old"]
     assert older.next_before_revision is None
+    assert older.journal_revision == current.journal_revision > page.journal_revision
     assert restarted.read_view().run_history(plan_id="quality").items == ()
 
 
