@@ -109,6 +109,7 @@ class _Owner:
         self.history_calls: list[dict[str, object]] = []
         self.reads: list[str] = []
         self.cursors: list[int] = []
+        self.cancel_requests: list[str] = []
         self.batches: list[GameTapeLiveOutputBatch] = []
 
     def history(self, **options: object) -> FleetRunHistoryPage:
@@ -124,6 +125,9 @@ class _Owner:
         assert run_id == self.detail.run.fleet_run_id
         self.cursors.append(after)
         return self.batches.pop(0)
+
+    def cancel(self, run_id: str) -> None:
+        self.cancel_requests.append(run_id)
 
 
 def _invoke(owner: _Owner, command: str, **options: object) -> int:
@@ -425,6 +429,23 @@ def test_follow_unavailable_does_not_reconnect_or_sleep(
     assert _invoke(owner, "logs", follow=True, as_json=False) == 3
     assert "Transient output unavailable" in capsys.readouterr().out
     assert owner.cursors == [0]
+
+
+def test_follow_stops_without_cancelling_when_original_output_becomes_unavailable(
+    detail: FleetRunDetail,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _Owner(detail)
+    owner.batches = [_batch("ACTIVE", 1), _batch("UNAVAILABLE", 0)]
+    polls: list[float] = []
+    monkeypatch.setattr("oh_goon.cli_plan_run_readback.time.sleep", polls.append)
+
+    assert _invoke(owner, "logs", follow=True, as_json=False) == 3
+    assert capsys.readouterr().out.count("recorded chunk 1") == 1
+    assert owner.cursors == [0, 1]
+    assert owner.batches == [] and len(polls) == 1
+    assert owner.cancel_requests == [] and owner.reads == []
 
 
 @pytest.mark.parametrize("terminated", [False, True])

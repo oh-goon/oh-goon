@@ -261,9 +261,11 @@ oh-goon runs logs RUN_ID --after 0 --follow
 
 JSON snapshots carry the original `next_sequence`, retained cursor and dropped
 chunk count. Advance with that cursor. Text follow is available only while the
-original live-output owner is active, and stops when it seals or becomes
-unavailable. Ctrl-C stops following; it does not cancel the Run. A fresh CLI
-after that owner closes can report `UNAVAILABLE`; use durable `runs explain`,
+original live-output owner can serve the selected Run, and stops when it seals
+or becomes unavailable. Ctrl-C stops following; it does not cancel the Run.
+Buffers are process-local. A separate CLI cannot attach to another process's
+buffer and reports `UNAVAILABLE` even while that Run is active; closing its
+original owner also loses that transient access. Use durable `runs explain`,
 `runs events` or `runs handoff` for recorded facts. `--follow --json` refuses;
 JSON consumers use bounded snapshots rather than an unbounded transcript.
 
