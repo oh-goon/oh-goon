@@ -9,10 +9,147 @@ merge prerequisite. [Make's command map](MAKE_TARGET_SURFACE.yml),
 [the CI/CD contract](../CI_CD_CONTRACT.md), native tool configuration and the
 existing execution owners remain authoritative.
 
-The shipped profile has a measured, modest architecture benefit. **No additional
-RAM allocation, storage relocation, cache or fixture-sharing change is justified
-by this audit.** The initial 20% feedback-time goal remains unmet. A negative
-result is retained evidence, not a reason to repeat the same experiment unchanged.
+The current implementation also removes repeated import-evidence decoding in
+architecture consumers. The measured improvement and supported family
+dispositions below retain native cache, execution and result authority.
+**No RAM disk, dedicated memory reservation, storage relocation or shared mutable
+fixture is introduced.** The initial 20% feedback-time goal remains unmet. A negative result
+is retained evidence, not a reason to repeat the same experiment unchanged.
+
+## Measured import transport and supported rollout
+
+HUG-211's 2026-11-13 comparison uses baseline
+`39e54c9a13557a111f2a951051421c9d69c3966d` and implementation
+`4519d1a5b61442236c3192f04473215ca287139f`, with loaded Hashmarks 0.36.3
+implementation identity
+`sha256:d4e82a0658e8c8d1fe04e93bdacbe73281e11126473ee21b3544d3746e337d94`.
+These are frozen experiment identities; the later documentation edit does not
+inherit their exact-source qualification. Native locks, frontend source and
+configuration, tools, native worker settings and the physical checkout were
+unchanged between the compared implementations.
+The deliberate difference is three implementation files and two regression-test
+owners; architecture analyzes each version's own captured source. The three
+timed backend/tooling test files and all frontend inputs remain unchanged.
+
+The existing `PythonSemanticFacts` lifetime now retains a frozen tuple containing
+five primitive import-declaration fields from its already validated native
+observation. Package-boundary imports, wildcard checks and the database census
+consume that view. They previously decoded and scanned the complete canonical
+packet again just to read those declarations. Current-source profiling located
+2,779 such decodes and 10.847 instrumented seconds; that profiling cost is not
+an end-to-end saving. Conditional, unknown and rebound declarations remain in
+the syntax view. Binding/call qualification, source-byte/schema checks and full
+provenance stay with the original native evidence; independent public packet
+reads remain detached. No raw packet table, new resolver or cache key is added.
+
+This work reduction applies to both ordinary and RAM-profile transports. The
+implementation experiment holds `OH_GOON_LOCAL_TEST_PROFILE=ram` and
+`OH_GOON_TEST_CPUS=2` fixed: **it does not attribute the change to toggling RAM**.
+Each trial starts fresh native processes. The same clean checkout switches
+between the two committed implementations only between settled scopes. Three
+pairs alternate old/new, new/old, old/new, preserving native caches. Warm-up
+runs are retained separately; OS page-cache coldness was not controlled.
+
+Each measured workflow executes the existing owners sequentially inside one
+verified two-CPU scope:
+
+1. `make architecture`, including its complete source observation and teardown.
+2. The existing qualified pytest batch runner on
+   `backend/tests/unit/integrations/test_hashmarks_source_facts.py`,
+   `scripts/tests/test_architecture_source_snapshot.py` and
+   `scripts/tests/test_runtime_authority_registry.py`: test granularity, two
+   requested workers, batch size 64, 180s batch timeout, marker
+   `not certification and not slow and not daily`, no resume.
+3. `make frontend-functional-certification`: native typecheck, frontend
+   architecture, i18n parity, all authored Vitest tests and actual Vite build.
+
+This is an **explicit composed owner-workflow**, not a fabricated `make test`
+selection. Every invocation passed the same 141 backend/tooling cases and
+384 Vitest cases across all 77 native project files (36 node, 41 DOM), with
+identical build paths, sizes and content digests. Native frontend threads,
+sequential files, isolation and cache settings remain unchanged; two requested
+pytest workers is not a claim of two frontend workers. The new transport's
+separate harness/database proof passed 113 cases; the final 14 projection cases
+are a subset of that proof, not additional unique coverage.
+
+| Complete composed trial | Baseline seconds | Candidate seconds |
+| --- | ---: | ---: |
+| 1 | 161.01 | 149.85 |
+| 2 | 159.53 | 149.08 |
+| 3 | 162.15 | 149.10 |
+
+| Measured owner / metric | Baseline mean | Candidate mean | Observed reduction |
+| --- | ---: | ---: | ---: |
+| Complete composed workflow, wall seconds | 160.897 | 149.343 | 7.18% |
+| Complete composed workflow, CPU seconds | 192.623 | 181.103 | 5.98% |
+| Complete architecture command, wall seconds | 78.033 | 65.977 | 15.45% |
+| Complete architecture command, CPU seconds | 77.877 | 65.877 | 15.41% |
+| Whole-workflow waited-process peak RSS, KiB | 1,672,316 | 1,671,297 | About unchanged |
+
+The improvement is localized to architecture. Backend/tooling and functional
+frontend/build phase means were slightly slower, so these results establish
+no separate frontend or backend-suite acceleration. GNU whole-command timing
+includes controller startup, source guards, original commands, result accounting
+and closure inside the pre-admitted outer CPU scope; the outer scope's admission
+is preparation. Initial `make init`, driver Git switching and separate priming
+runs are also outside that feedback timing. Per-phase timing includes each
+original command's own startup
+and cleanup. RSS is a waited-process lifetime maximum, not aggregate concurrent
+memory. Three pairs establish observed results on this host, not general-host
+or statistical-significance guarantees. The user reported **Responsive** during
+the current measurement window; true peak temperature and continuous interactive
+behavior were not measured.
+
+A separate same-source ordinary/RAM pilot at `39e54c9a` passed the same native
+scope and build comparison: GNU whole time 158.80/154.09s. It is one pair and
+does not establish a new RAM-toggle adoption claim. The old HUG-209/HUG-210
+numbers below remain frozen to their earlier sources and producer identities.
+
+The V8 scheduling hypothesis was stopped as **NO_OP**: inside the actual native
+two-CPU scope, Node reports `availableParallelism() = 2`, so Vitest's native
+coverage processing default is already two. No coverage tests were run for an
+identical proposed cap. Native Vite fixture readiness already warms its entry
+imports; no additional warmup or browser installation is justified from that
+source inspection alone.
+
+### Supported family dispositions
+
+Each row is the supported local-profile disposition, not a whole-family test
+PASS. `NATIVE_CACHE_ONLY` admits no additional RAM cache, relocation or shared
+fixture. `DISK_REQUIRED` protects the actual storage/effect contract without
+claiming that its full journey ran. Missing qualification stays `UNVERIFIED`.
+
+| Family | Disposition | Scope and boundary |
+| --- | --- | --- |
+| F01 Backend fast pytest | `NATIVE_CACHE_ONLY` | Unique mutable fixtures and native uv/pytest authority remain. The measured 141-case joint scope is bounded, not the complete fast owner. |
+| F02 Complete/dependency-complete pytest | `UNVERIFIED` | Complete and process portfolios were not measured; no selection, lane or result-reuse change. |
+| F03 Tooling / Repository Understanding | `NATIVE_CACHE_ONLY` | The joint scope is bounded; no shared mutable repository, SECRET grader truth or PASS cache. The measured architecture command is F19. |
+| F04 Backend / cross-owner integration | `DISK_REQUIRED` | Preserve real API/DB/WAL/fsync/restart/process behavior. Historical bounded proof does not qualify the complete current family. |
+| F05 Iris / orders | `NATIVE_CACHE_ONLY` | Preserve fresh independent locked uv environments and actual training/CLI work; no environment, model-result or PASS reuse. HUG-210 timings remain historical. |
+| F06 Templates / package smoke | `NATIVE_CACHE_ONLY` | Genuine installation, entrypoints, locks and startability remain native-owned; complete current wheel/template qualification was not selected. |
+| F07 Vitest node | `NATIVE_CACHE_ONLY` | All 36 configured node files ran in the measured full functional frontend. No separate node-only gain or new cache setting is claimed. |
+| F08 Vitest jsdom | `NATIVE_CACHE_ONLY` | All 41 DOM files ran. Per-file DOM, timers, globals, mocks, sessions and cleanup remain isolated; no shared live fixture. |
+| F09 Native Node helpers | `NATIVE_CACHE_ONLY` | Keep real socket/process effects and native cache authority; no new payload selected. Earlier helper timings are not a current paired result. |
+| F10 Vitest V8 coverage | `NATIVE_CACHE_ONLY` | The proposed processing cap is already the native default under two CPUs. Complete current coverage/floor qualification was not selected. |
+| F11 Python / SQLite / Journal coverage | `DISK_REQUIRED` | Preserve tested DB behavior, fresh subprocess coverage/combine and same-filesystem durable publication; complete current coverage was not selected. |
+| F12 Playwright functional / targeted | `UNVERIFIED` | Matching browser engines are not materialized; no install, collection or launch selected. Vitest does not qualify this owner. |
+| F13 Playwright visual | `UNVERIFIED` | Matching engines and reviewed baseline qualification remain missing; no screenshots or automatic baseline authoring. |
+| F14 Installed runtime browser | `UNVERIFIED` | No qualified installed runtime/access/data/browser/restart journey; source build and DOM tests do not replace it. |
+| F15 Locked browser container | `UNVERIFIED` | HUG-212 repaired known bootstrap/cleanup defects. Actual locked image assembly, full browser journey and build-daemon CPU qualification remain unverified. |
+| F16 Product / wheel / container acceptance | `DISK_REQUIRED` | Preserve physical installation, persistence, replacement and Game Tape readback. The controlled cleanup fixture does not qualify full acceptance. |
+| F17 APP / native / strict lifecycle | `UNVERIFIED` | No APP, custody, signer, installed-model, fs-verity, VM/Kubernetes or WSL qualification selected. |
+| F18 Scale / stress / retention | `UNVERIFIED` | No load/pressure campaign selected; retain original dataset, storage, concurrency, restart and retention semantics. HUG-90 owns pressure qualification. |
+| F19 Static / architecture / generation / build | `OPTIMIZED_MEASURED` | The import transport improves the named complete architecture command and composed workflow above. Other static/generator/build owners acquire no blanket speedup claim. |
+| F20 Hosted PR / daily / release CI | `NATIVE_CACHE_ONLY` | GitHub scheduling, native caches, selection and required checks stay unchanged; no hosted performance result or complete daily/release PASS. |
+| F21 Reports / receipts / promoted artifacts | `DISK_REQUIRED` | Durable/private/atomic evidence and active leases stay original-owned; no sole RAM copy, cached PASS or generic age-based cleanup. |
+
+[HUG-211 Resources](https://linear.app/hugloss/issue/HUG-211) retain native
+membership/outcome reports, build digests, commands, time reports, source/tool
+identities and independent readback. Revisit an unchanged rejected approach only
+after a relevant fact changes: an upstream native cache fix, a measured named
+bottleneck, qualified missing capability or different actual storage backing.
+Unused RAM or a new session is not new evidence. HUG-12, HUG-90 and HUG-115 retain
+their CPU/WSL, pressure and semantic result-reuse qualification responsibilities.
 
 The subsequent [HUG-212 acceptance repair](#container-acceptance-bootstrap-and-cleanup)
 updates the audited stale bootstrap to `make init` and preserves owned state when
@@ -55,7 +192,7 @@ acceptance remain separately selected. Host CLI cgroups do not establish
 Docker/BuildKit daemon quotas; any container/build performance experiment needs
 its own native resource observations.
 
-## Measurement context and limits
+## HUG-210 frozen measurement context and limits
 
 Fresh measurements used main `bb8030f8c86f38205a5b82780d9f95f94d1c2fa8`, tree
 `d1f7022382f092cfa718c08177a8c88e254a4218`, canonical source
@@ -104,7 +241,7 @@ The attachment `hug-210-native-family-evidence-20261112.zip` has SHA-256
 `bdeaf621b83c8aa42e6dc8b9f7fbfd669ec669301a6e577a6b2ffe7fc992fe6a`;
 its manifest binds all 272 retained files by path, size and content digest.
 
-## All 21 families
+## HUG-210 source-frozen family inventory
 
 These categories describe source-recognized entrypoints, **not 21 suites that
 all passed**. `REPEATED_SETUP_CANDIDATE` names work to profile, not an admitted
@@ -247,14 +384,14 @@ documentation-only `make test` selects different work and is not a comparable
 backbone timing. Its frozen CPU mean was 818.51→814.01s; the architecture mean
 was 78.16→74.67s with roughly unchanged 1.60 GiB waited-process peak RSS.
 
-A single combined workflow containing Vitest, backend/tooling and static/build
-has **not been comparatively measured in full** by these trials. The missing
-frontend/build phase remains unverified; an empty directly admitted frontend
-set does not mean no Vitest child ran. Separate paired lanes do not fill the
-complete workflow requirement. HUG-211 must retain this feedback-time question
-before claiming a complete combined workflow benefit; do not extrapolate or
-repeat the expensive selected-Make experiment as if its nested Vitest evidence
-were absent. Frozen short-lane ordinary/profile CPU means were 5.027/5.037s
+HUG-209's frozen trials did **not** measure a complete combined frontend/build
+workflow. An empty directly admitted frontend set does not erase their nested
+Vitest children, and separate paired lanes do not add a build to those receipts.
+The [HUG-211 composed comparison above](#measured-import-transport-and-supported-rollout)
+supplies that separate measurement through existing owners; it does not
+retroactively expand HUG-209's selected `make test` scope. Do not repeat the old
+experiment as if its valid nested Vitest evidence were absent. Frozen short-lane
+ordinary/profile CPU means were 5.027/5.037s
 (unit), 4.950/4.923s (node) and 12.757/12.823s (DOM); their waited-process RSS
 means were 87,320/87,229, 436,123/444,041 and 578,259/578,759 KiB respectively.
 
@@ -327,7 +464,7 @@ reuse live state or native results.
 repair and its bounded qualification in items 4–5, separately from a performance
 adoption claim.
 
-HUG-211 remains a conditional owner-specific experiment, not blanket RAM rollout.
+Further owner-specific rollout remains conditional on measured benefit.
 [HUG-12](https://linear.app/hugloss/issue/HUG-12) retains CPU/WSL qualification,
 [HUG-90](https://linear.app/hugloss/issue/HUG-90) pressure/OOM/I/O qualification,
 and [HUG-115](https://linear.app/hugloss/issue/HUG-115) pytest semantic reuse
