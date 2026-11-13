@@ -139,6 +139,101 @@ def test_noisy_native_pytest_report_preserves_membership_and_result(
         assert "actual native failure" in result.stdout
 
 
+@pytest.mark.skipif(os.name != "posix", reason="requires native POSIX signal status")
+@pytest.mark.parametrize(
+    "signal_termination", (True, False), ids=("sigkill", "thread-exhaustion")
+)
+def test_native_environment_retry_respects_process_exit_authority(
+    tmp_path: Path, signal_termination: bool
+) -> None:
+    import json
+    import signal
+    import subprocess
+
+    first_attempt = tmp_path / "first-attempt"
+    retried = tmp_path / "retried"
+    test_file = tmp_path / "test_native_exit.py"
+    test_file.write_text(
+        "import os, signal\nfrom pathlib import Path\n"
+        "def test_native_exit():\n"
+        f"    first = Path({str(first_attempt)!r})\n"
+        "    if not first.exists():\n"
+        "        first.write_text(str(os.getpid()))\n"
+        '        print("RuntimeError: can\'t start new thread", flush=True)\n'
+        + (
+            "        os.kill(os.getpid(), signal.SIGKILL)\n"
+            if signal_termination
+            else '        raise RuntimeError("can\'t start new thread")\n'
+        )
+        + f"    Path({str(retried)!r}).write_text(str(os.getpid()))\n",
+        encoding="utf-8",
+    )
+    report = tmp_path / "report.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "oh_goon.repository_tooling.test_batches",
+            str(test_file),
+            "--qualified",
+            "--granularity=tests",
+            "--batch-size=1",
+            "--workers=1",
+            "--batch-timeout=20",
+            "--suite-timeout=60",
+            "--no-timeout-bisection",
+            "--environment-retries=1",
+            "--marker=",
+            "--pytest-arg=-s",
+            "--report-path",
+            str(report),
+            "--resume-state-root",
+            str(tmp_path / "state"),
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=30,
+        check=False,
+    )
+    assert first_attempt.exists(), result.stdout
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    membership = payload["membership_receipt"]
+    selected = [f"{test_file}::test_native_exit"]
+    assert payload["source_identity"].startswith("sha256:")
+    assert payload["test_plan_identity"].startswith("sha256:")
+    assert payload["toolchain_identity"].startswith("sha256:")
+    assert not payload["resume_enabled"]
+    assert membership["selected"] == selected
+    assert membership["attempted"] == selected
+    assert not membership["resumed"]
+    assert not membership["duplicates"] and not membership["extras"]
+    batch = payload["batches"][0]
+    if signal_termination:
+        assert result.returncode != 0, result.stdout
+        assert payload["status"] == "FAIL"
+        assert not membership["terminal_success"]
+        assert not membership["passed"] and not membership["completed"]
+        assert membership["missing"] == selected
+        assert not retried.exists()
+        assert batch["returncode"] == -signal.SIGKILL
+        assert batch["attempt_count"] == 1
+        assert batch["environment_retry_count"] == 0
+        assert "ENVIRONMENT RETRY" not in result.stdout
+        assert "PYTEST BATCH RESULT: PASS" not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout
+        assert payload["status"] == "PASS" and membership["terminal_success"]
+        assert membership["passed"] == membership["completed"] == selected
+        assert not membership["missing"]
+        assert retried.exists()
+        assert batch["returncode"] == 0
+        assert batch["attempt_count"] == 2
+        assert batch["environment_retry_count"] == 1
+        assert "ENVIRONMENT RETRY" in result.stdout
+
+
 def test_noisy_batch_timeout_keeps_partial_capture_evidence_and_failure() -> None:
     captures: list[BatchOutputCapture] = []
     rc, output, _elapsed = _run_command(

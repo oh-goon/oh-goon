@@ -228,7 +228,7 @@ _SUITE_BUDGET_STOP_PREFIXES = (
 def _resource_pressure_failure(returncode: int, output: str) -> bool:
     """Classify host process/thread exhaustion separately from product assertions."""
 
-    if returncode in (0, 5, 124):
+    if returncode <= 0 or returncode in (5, 124):
         return False
     return any(pattern in output for pattern in _RESOURCE_PRESSURE_PATTERNS)
 
