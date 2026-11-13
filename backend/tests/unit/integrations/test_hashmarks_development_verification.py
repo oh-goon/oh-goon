@@ -124,6 +124,103 @@ def test_nested_manifest_change_rebinds_verifier_to_current_source_root(
     assert after[alternate]["changed_set"]["authority"] == "repository-evidence-only"
 
 
+def test_native_multi_edit_rename_preserves_shared_verifier_and_member_qualifications(
+    nested_repository: Path,
+) -> None:
+    from oh_goon.integrations.hashmarks import (
+        capture_source_member,
+    )
+    from oh_goon.integrations.hashmarks import (
+        nominate_changed_verification as observe_verification,
+    )
+
+    original = "backend/src/sample/feature.py"
+    renamed = "backend/src/sample/renamed.py"
+    other = "backend/src/sample/other.py"
+    shared = "backend/tests/test_combined.py"
+    (nested_repository / shared).write_text(
+        "from sample.feature import answer as first\n"
+        "from sample.other import answer as second\n"
+        "def test_combined():\n    assert first() + second() == 42\n",
+        encoding="utf-8",
+    )
+
+    before = observe_verification(nested_repository, (original, other))
+    initial = {row["changed_path"]: row for row in before["observations"]}
+    shared_target = {"path": shared, "test_symbol": None}
+    previous_verifier = capture_source_member(nested_repository, shared).packet()
+    for path in (original, other):
+        observation = initial[path]
+        change = observation["changed_set"]["changes"][0]
+        assert observation["state"] == "LINKED"
+        assert change["source"]["member"]["state"] == "known-present"
+        assert observation["qualification"] == change["consumer_scope"]
+        assert observation["qualification"]["negative_evidence_admissible"] is False
+        assert shared_target in [
+            row["nomination"]["verification_target"] for row in observation["nominations"]
+        ]
+        assert [
+            row["nomination"]["source_member_revision"]
+            for row in observation["nominations"]
+            if row["nomination"]["verification_target"] == shared_target
+        ] == [previous_verifier["member_revision"]]
+
+    (nested_repository / original).write_text("def answer():\n    return 40\n", encoding="utf-8")
+    (nested_repository / other).write_text("def answer():\n    return 2\n", encoding="utf-8")
+    (nested_repository / original).rename(nested_repository / renamed)
+    (nested_repository / "backend/tests/test_feature.py").write_text(
+        "from sample.renamed import answer\ndef test_answer():\n    assert answer() == 40\n",
+        encoding="utf-8",
+    )
+    (nested_repository / "backend/tests/test_other.py").write_text(
+        "from sample.other import answer\ndef test_answer():\n    assert answer() == 2\n",
+        encoding="utf-8",
+    )
+    shared_verifier = nested_repository / shared
+    shared_verifier.write_text(
+        shared_verifier.read_text(encoding="utf-8").replace("sample.feature", "sample.renamed"),
+        encoding="utf-8",
+    )
+
+    after = observe_verification(nested_repository, (original, renamed, other))
+    current = {row["changed_path"]: row for row in after["observations"]}
+    assert list(current) == [original, renamed, other]
+    assert (
+        current[original]["changed_set"]["changes"][0]["source"]["member"]["state"]
+        == "known-absent"
+    )
+    assert current[original]["state"] == "UNAVAILABLE"
+    assert current[original]["nominations"] == []
+    current_verifier = capture_source_member(nested_repository, shared).packet()
+    assert current_verifier["member_revision"] != previous_verifier["member_revision"]
+    shared_nominations = []
+    for path in (renamed, other):
+        observation = current[path]
+        change = observation["changed_set"]["changes"][0]
+        assert observation["state"] == "LINKED"
+        assert change["source"]["member"]["state"] == "known-present"
+        previous = initial[original if path == renamed else path]
+        assert (
+            change["source"]["member"]["member_revision"]
+            != previous["changed_set"]["changes"][0]["source"]["member"]["member_revision"]
+        )
+        assert observation["qualification"] == change["consumer_scope"]
+        assert observation["qualification"]["negative_evidence_admissible"] is False
+        nominations = [
+            row["nomination"]
+            for row in observation["nominations"]
+            if row["nomination"]["verification_target"] == shared_target
+        ]
+        assert len(nominations) == 1
+        assert nominations[0]["authority"] == "repository-evidence-only"
+        assert nominations[0]["execution_authority"] == "external"
+        assert nominations[0]["source_member_revision"] == current_verifier["member_revision"]
+        shared_nominations.append(nominations[0])
+    assert shared_nominations[0] == shared_nominations[1]
+    assert before["owner_coverage"] == after["owner_coverage"] == "not-claimed"
+    assert observe_verification(nested_repository, (original, renamed, other)) == after
+
+
 def test_public_nominations_keep_native_bounded_verifiers_and_residual_qualifications(
     nested_repository: Path,
 ) -> None:
