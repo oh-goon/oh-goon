@@ -19,6 +19,7 @@ from oh_goon.core.models.recovery import InvariantSeverity, PlainInvariantFindin
 from oh_goon.core.models.runtime_safety import DegradedRuntimeSafetyProof, ProvenRuntimeSafetyProof
 from oh_goon.core.models.tool_health import MissingRequiredToolHealth, ReadyToolHealth, SystemHealth
 from oh_goon.core.vocabulary import RuntimeSafetyStatus, ToolStatus
+from oh_goon.engine.command import run_command
 from oh_goon.runtime.database import (
     DATABASE_SCHEMA_VERSION,
     DatabasePathIdentityLost,
@@ -281,3 +282,97 @@ def test_fresh_cli_doctor_keeps_database_bytes_and_never_initializes_missing_sta
         assert not (control / "league.yml").exists()
         assert not (control / "content-store").exists()
         assert not (control / "diagnostics").exists()
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("runtime", [False, True], ids=["basic", "schema-changed-runtime"])
+def test_fresh_doctor_keeps_state_diagnosis_when_native_version_bytes_are_malformed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runtime: bool
+) -> None:
+    paths = _paths(tmp_path, monkeypatch)
+    database = paths["database"]
+    database.parent.mkdir()
+    LocalDatabase(database)
+    with sqlite3.connect(database) as connection:
+        connection.execute(f"PRAGMA user_version = {DATABASE_SCHEMA_VERSION - 1}")
+    canary = "DOCTOR_PRIVATE_VERSION_CANARY"
+    for name in ("league", "providers"):
+        paths[name].write_text(canary, encoding="utf-8")
+    before = {
+        str(path.relative_to(database.parent)): path.read_bytes() if path.is_file() else None
+        for path in database.parent.rglob("*")
+    }
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    git = tools / "git"
+    for name, version in (("git", "git version fixture"), ("uv", "uv healthy fixture")):
+        executable = tools / name
+        executable.write_text(f"#!{sys.executable}\nprint({version!r})\n", encoding="utf-8")
+        executable.chmod(0o700)
+    environment = dict(os.environ)
+    environment["PATH"] = str(tools)
+    arguments = ("doctor", "--runtime", "--json") if runtime else ("doctor", "--json")
+
+    def invoke() -> tuple[int, dict[str, object]]:
+        completed = run_command(
+            sys.executable,
+            "-I",
+            "-c",
+            "from oh_goon.cli import main; raise SystemExit(main())",
+            *arguments,
+            cwd=tmp_path,
+            env=environment,
+            timeout=15,
+            max_capture_bytes_per_stream=65_536,
+            require_process_group_quiescence=True,
+            parent_death_signal=True,
+        )
+        assert completed.supervisor.final_process_group_quiescent
+        assert completed.stderr == "" and canary not in completed.stdout
+        return completed.returncode, json.loads(completed.stdout)
+
+    baseline_exit, baseline = invoke()
+    assert baseline_exit == (2 if runtime else 0)
+    assert baseline["scope"] == ("runtime" if runtime else "tools")
+    if runtime:
+        # The original SQLite authority rejects the changed header identity
+        # before schema inspection; tool diagnosis must preserve that refusal.
+        assert baseline["code"] == "STATE_IDENTITY_UNAVAILABLE"
+    git.write_text(
+        f"#!{sys.executable}\nimport os\nos.write(1, {canary.encode()!r} + bytes([255]))\n",
+        encoding="utf-8",
+    )
+
+    observed_exit, observed = invoke()
+    assert observed_exit == 2
+    assert observed.get("schema") == baseline["schema"], observed
+    assert observed["paths"] == baseline["paths"]
+    assert observed["scope"] == baseline["scope"]
+    if runtime:
+        assert observed["status"] == "blocked"
+        assert observed["code"] == baseline["code"]
+        assert observed["safe_next_action"] == baseline["safe_next_action"]
+    else:
+        assert observed["status"] == "setup_required"
+    assert observed["tools"] == [
+        {
+            "name": "git",
+            "required": True,
+            "status": "BROKEN",
+            "version": None,
+            "detail": "Native version probe output could not be decoded",
+            "reason_code": "TOOL_BROKEN",
+        },
+        {
+            "name": "uv",
+            "required": True,
+            "status": "READY",
+            "version": "uv healthy fixture",
+            "detail": None,
+            "reason_code": "NONE",
+        },
+    ]
+    assert {
+        str(path.relative_to(database.parent)): path.read_bytes() if path.is_file() else None
+        for path in database.parent.rglob("*")
+    } == before

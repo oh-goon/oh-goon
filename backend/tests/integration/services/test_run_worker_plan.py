@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from threading import Event
 from time import monotonic
@@ -42,7 +43,7 @@ def test_native_training_plan_has_worker_custody_and_canonical_outputs(
         "import json, os, time\n"
         "from pathlib import Path\n"
         "Path('ready').write_text(str(os.getpid()))\n"
-        "deadline = time.monotonic() + 20\n"
+        "deadline = time.monotonic() + 45\n"
         "while not Path('release').exists():\n"
         "    if time.monotonic() > deadline: raise TimeoutError('test release unavailable')\n"
         "    time.sleep(0.01)\n"
@@ -91,6 +92,34 @@ def test_native_training_plan_has_worker_custody_and_canonical_outputs(
         assert lease[1] != os.getpid()
         assert observe_process_birth(lease[1]) is not None
         assert lease[2] != foundation.database.session_id
+        with foundation.database.transaction() as connection:
+            before_doctor = tuple(connection.iterdump())
+        for arguments in (("doctor", "--json"), ("doctor", "--runtime", "--json")):
+            with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+                observed = subprocess.run(
+                    [str(Path(sys.executable).with_name("oh-goon")), *arguments],
+                    cwd=tmp_path,
+                    stdin=subprocess.DEVNULL,
+                    stdout=output,
+                    stderr=errors,
+                    timeout=15,
+                    check=False,
+                )
+                output.seek(0)
+                errors.seek(0)
+                stdout, stderr = output.read(65_537), errors.read(65_537)
+            assert observed.returncode in (0, 2), stderr
+            assert not stderr
+            assert len(stdout) <= 65_536
+            diagnosis = json.loads(stdout)
+            assert diagnosis["scope"] == ("runtime" if "--runtime" in arguments else "tools")
+            assert diagnosis["paths"]["database"] == str(foundation.database.path)
+            if "--runtime" in arguments:
+                assert "runtime_safety" in diagnosis
+            with foundation.database.transaction() as connection:
+                assert tuple(connection.iterdump()) == before_doctor
+            assert observe_process_birth(lease[1]) is not None
+            assert not (repository / "metrics.json").exists()
         (repository / "release").touch()
         detail = runtime.runs.wait_for_terminal(run.fleet_run_id, timeout=20)
         assert detail.outcome is FleetRunOutcome.SUCCESS

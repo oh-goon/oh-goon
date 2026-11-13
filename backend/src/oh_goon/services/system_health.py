@@ -60,6 +60,13 @@ class SystemHealthService:
             )
         except OSError:
             return cls._missing(name, required=required)
+        except UnicodeError:
+            return BrokenToolHealth(
+                name=name,
+                required=required,
+                status=ToolStatus.BROKEN,
+                detail="Native version probe output could not be decoded",
+            )
         except (TimeoutExpired, CommandOutputLimitExceeded) as exc:
             return BrokenToolHealth(
                 name=name,
