@@ -169,6 +169,35 @@ def test_native_tool_version_probe_has_bounded_failure_without_private_output(
     assert "PRIVATE_VERSION_CANARY" not in observed.model_dump_json()
 
 
+@pytest.mark.process
+@pytest.mark.parametrize("stream", [1, 2], ids=["stdout", "stderr"])
+def test_malformed_native_version_output_keeps_other_tool_observations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stream: int
+) -> None:
+    malformed = tmp_path / "git"
+    healthy = tmp_path / "uv"
+    malformed.write_text(
+        f"#!{sys.executable}\nimport os\nos.write({stream}, b'PRIVATE_VERSION_CANARY' + bytes([255]))\n",
+        encoding="utf-8",
+    )
+    healthy.write_text(f"#!{sys.executable}\nprint('uv healthy fixture')\n", encoding="utf-8")
+    for executable in (malformed, healthy):
+        executable.chmod(0o700)
+
+    monkeypatch.setattr(SystemHealthService, "REQUIRED", (str(healthy),))
+    baseline = SystemHealthService.inspect_tools()
+    assert baseline[0].status is ToolStatus.READY and baseline[0].version == "uv healthy fixture"
+
+    monkeypatch.setattr(SystemHealthService, "REQUIRED", (str(malformed), str(healthy)))
+    observations = SystemHealthService.inspect_tools()
+    assert [tool.status for tool in observations] == [ToolStatus.BROKEN, ToolStatus.READY]
+    assert observations[0].reason_code.value == "TOOL_BROKEN"
+    assert observations[0].version is None
+    assert observations[0].detail == "Native version probe output could not be decoded"
+    assert observations[1] == baseline[0]
+    assert "PRIVATE_VERSION_CANARY" not in "".join(tool.model_dump_json() for tool in observations)
+
+
 @pytest.mark.parametrize("supervision", ["terminated", "unsettled_result"])
 def test_unproven_version_probe_does_not_hide_other_native_tool_diagnostics(
     monkeypatch: pytest.MonkeyPatch, supervision: str

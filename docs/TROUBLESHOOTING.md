@@ -38,8 +38,9 @@ reading private configuration bodies. `oh-goon doctor --runtime --json` is a
 separate observation of existing state: a `STATE_*` refusal preserves the store,
 and a successful observation uses the original runtime health findings. Neither
 doctor command authorizes reset, repair or recovery. Native version probes have
-a five-second deadline and bounded output; a stalled/noisy tool is reported as
-broken rather than blocking diagnosis indefinitely.
+a five-second deadline and bounded output. A stalled/noisy tool or undecodable
+version output is reported as broken, while the other tool facts, selected paths
+and original state diagnosis remain available.
 
 Stop new admission and use the matching original runtime's lifecycle/recovery owners to settle active Runs, incomplete campaigns, leases, workspace owners and uncertain effects. If any ownership remains unresolved, cutover stays blocked. After resolution, preserve the old state and schema metadata read-only outside the active state directory, then explicitly select a fresh generation. See the [execution-state cutover contract](development/AGENT_RUNTIME_OWNERS.md#execution-state-cutover-and-recovery).
 
