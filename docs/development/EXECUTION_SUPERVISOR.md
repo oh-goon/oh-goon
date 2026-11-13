@@ -133,9 +133,13 @@ successful ordinary Run cannot satisfy this boundary. The maintained
 [live-kernel refusal witnesses](../../backend/tests/native/test_co_r3u2b2b2a_native_refusal.py)
 prove non-issuance on the exercised host; they do not qualify strict execution.
 Likewise, a CI/CD-labelled test using `standard_local=True` proves the ordinary
-worker route only. Attested OpenSandbox VM execution has separate provider
-admission and does not use this local cgroup gate. Its availability and physical
-conformance are not established by local refusal witnesses. HUG-183 still requires
+worker route only. OpenSandbox VM execution has separate attested transport, but
+the current authenticated Fleet
+[effect-authority hook](../../backend/src/oh_goon/services/fleet_run_lifecycle.py)
+accepts only the original local LACE provisioner with Bubblewrap and explicitly
+refuses a remote substitute. Transport support or remote attestation alone
+therefore cannot establish canonical strict-Run convergence. Remote deployment
+availability and physical conformance remain untested here. HUG-183 still requires
 an actual strict admission, placement, claimed worker and native effect in one
 qualified, explicitly selected deployment.
 
