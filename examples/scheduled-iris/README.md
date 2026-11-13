@@ -1,6 +1,8 @@
 # Recurring Iris training
 
-Classification: trusted-local example with prerequisites. This uses the existing
+Classification: runnable-with-prerequisites
+
+This trusted-local example uses the existing
 Schedule clock and the original Fleet Run/Step/artifact owners. It reuses the
 complete [Iris project and single-command Plan](../../templates/plans/ml/iris-training/README.md);
 it introduces no scheduler Step or model registry.

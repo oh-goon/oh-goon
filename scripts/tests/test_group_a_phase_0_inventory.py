@@ -15,7 +15,13 @@ ROOT_SRC = ROOT / "backend/src/oh_goon"
 # Do not treat a POST read-only preview as a workload start.
 EXPECTED_MUTATION_ROUTES = {
     "fleet_runs": frozenset(
-        {"start_fleet_run", "readmit_fleet_run", "rerun_fleet_run", "cancel_fleet_run"}
+        {
+            "start_fleet_run",
+            "readmit_fleet_run",
+            "rerun_fleet_run",
+            "cancel_fleet_run",
+            "export_run_artifact",
+        }
     ),
     "fleet_executors": frozenset(
         {

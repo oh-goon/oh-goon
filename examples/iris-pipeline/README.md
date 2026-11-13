@@ -1,8 +1,8 @@
 # Iris ingest → train → evaluate → publish
 
-Classification: runnable with prerequisites, trusted-local teaching example.
+Classification: runnable-with-prerequisites
 
-This workflow selects the **same** complete Python project at
+This trusted-local teaching workflow selects the **same** complete Python project at
 [`templates/goons/ml/iris-train`](../../templates/goons/ml/iris-train/README.md).
 Its separate `iris-pipeline` entrypoint composes native scikit-learn and joblib
 across four ordinary Steps. The existing `iris-train` command and single-step

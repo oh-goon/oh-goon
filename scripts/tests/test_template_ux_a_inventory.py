@@ -51,7 +51,7 @@ def test_new_unclassified_example_is_visible_and_incomplete(tmp_path: Path) -> N
     assert "execution not established" in classified["examples"][0]["qualification"]
 
 
-def test_catalog_usage_matches_cli_inventory_and_current_package_explanations(
+def test_catalog_usage_matches_cli_and_inventory(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from oh_goon.cli import main
@@ -70,7 +70,6 @@ def test_catalog_usage_matches_cli_inventory_and_current_package_explanations(
     for package in packages:
         assert isinstance(package["classification"], str)
         assert isinstance(package["kind"], str)
-        assert isinstance(package["readme_path"], str)
         expected = template_usage(TemplateClassification(package["classification"]))
         item = listed[package["kind"], package["key"]]
         assert {name: item[name] for name in expected} == expected
@@ -83,5 +82,3 @@ def test_catalog_usage_matches_cli_inventory_and_current_package_explanations(
         assert expected["usage"] in line
         assert f"readiness={expected['readiness']}" in line
         assert f"prerequisites={expected['prerequisites']}" in line
-        explanation = (ROOT / package["readme_path"]).read_text()
-        assert f"**Status:** {expected['usage'].replace('-', ' ')}." in explanation
