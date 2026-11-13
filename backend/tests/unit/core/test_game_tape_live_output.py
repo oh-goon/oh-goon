@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 import oh_goon.runtime.game_tape_live_output as live_output_module
+from oh_goon.core.game_tape_policy import GAME_TAPE_MAX_CHUNKS_PER_RUN
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 
 
@@ -38,7 +41,9 @@ def test_live_output_is_bounded_queryable_and_sealed_for_terminal_handoff() -> N
     assert store.snapshot("run-1").state == "UNAVAILABLE"
 
 
-def test_live_output_expires_lazily_after_terminal_retention(monkeypatch) -> None:
+def test_live_output_expires_lazily_after_terminal_retention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
     current = [now]
     monkeypatch.setattr(live_output_module, "utc_now", lambda: current[0])
@@ -53,6 +58,39 @@ def test_live_output_expires_lazily_after_terminal_retention(monkeypatch) -> Non
     expired = store.snapshot("run-1")
     assert expired.available is False
     assert expired.state == "UNAVAILABLE"
+
+
+def test_live_output_retention_preserves_omissions_and_non_consuming_cursors() -> None:
+    store = GameTapeLiveOutputStore()
+    store.open_run("bounded-run")
+    for sequence in range(1, GAME_TAPE_MAX_CHUNKS_PER_RUN + 3):
+        store.append("bounded-run", "repository", "step", 1, "stdout", f"chunk-{sequence}\n")
+
+    first = store.snapshot("bounded-run")
+    assert len(first.chunks) == GAME_TAPE_MAX_CHUNKS_PER_RUN
+    assert first.dropped_chunk_count == 2 and first.retained_from_sequence == 3
+    assert first.next_sequence == GAME_TAPE_MAX_CHUNKS_PER_RUN + 2
+    assert tuple(chunk.sequence for chunk in first.chunks) == tuple(
+        range(first.retained_from_sequence, first.next_sequence + 1)
+    )
+    assert store.snapshot("bounded-run", after=1) == first
+
+    suffix = store.snapshot("bounded-run", after=GAME_TAPE_MAX_CHUNKS_PER_RUN)
+    assert tuple(chunk.sequence for chunk in suffix.chunks) == (
+        GAME_TAPE_MAX_CHUNKS_PER_RUN + 1,
+        GAME_TAPE_MAX_CHUNKS_PER_RUN + 2,
+    )
+    assert suffix.next_sequence == first.next_sequence
+    assert suffix.dropped_chunk_count == first.dropped_chunk_count
+    assert store.snapshot("bounded-run") == first
+    assert store.snapshot("bounded-run", after=first.next_sequence).chunks == ()
+
+    store.append("bounded-run", "repository", "step", 1, "stderr", "later\n")
+    continued = store.snapshot("bounded-run", after=first.next_sequence)
+    assert tuple(chunk.sequence for chunk in continued.chunks) == (first.next_sequence + 1,)
+    assert continued.chunks[0].text == "later\n" and continued.chunks[0].stream == "stderr"
+    assert continued.dropped_chunk_count == 3 and continued.retained_from_sequence == 4
+    assert len(store.snapshot("bounded-run").chunks) == GAME_TAPE_MAX_CHUNKS_PER_RUN
 
 
 def test_live_output_tracks_stream_lines_and_locates_retained_failure_line() -> None:
