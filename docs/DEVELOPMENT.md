@@ -241,7 +241,7 @@ The `check`, `test`, `verify` and `certify` frontdoors budget their complete ori
 
 Hosted GitHub workflows default to the runner's native CPU capacity. Set the repository Actions variable `OH_GOON_TEST_CPUS` to a positive integer to opt into the same native limit; only then do jobs prepare the systemd user manager and export its runtime-directory and D-Bus connection. Their existing matrix still owns job scheduling.
 
-The wrapper supports the conventional unified `/sys/fs/cgroup` layout only after proving that the mapped leaf contains its own PID. It reuses an inherited CPU limit that is already sufficient, preserves caller-specific PID ceilings in a new scope, and refuses scope movement when private memory limits cannot be preserved. Those limits include finite `memory.max`, `memory.high`, `memory.swap.max`, `memory.swap.high` and `memory.zswap.max` controls, when the kernel exposes them. Limits inherited from the shared `app.slice` ancestry remain in place. A quota covers ordinary descendants in that scope; work launched by an external daemon retains that daemon's resource authority. The profile does not change system-wide power or thermal settings.
+The wrapper supports the conventional unified `/sys/fs/cgroup` layout only after proving that the mapped leaf contains its own PID. It reuses an inherited CPU limit that is already sufficient, carries observed PID ceilings into a new scope, and refuses scope movement when private memory limits cannot be preserved. Carrying a numeric PID ceiling is not proof that a sibling scope preserves the caller's shared aggregate process boundary. Those memory limits include finite `memory.max`, `memory.high`, `memory.swap.max`, `memory.swap.high` and `memory.zswap.max` controls, when the kernel exposes them. Limits inherited from the shared `app.slice` ancestry remain in place. A quota covers ordinary descendants in that scope; work launched by an external daemon retains that daemon's resource authority. The profile does not change system-wide power or thermal settings.
 
 The pytest batch runner resolves its worker budget before collection. It intersects requested workers with the configured CPU budget, native affinity and cgroup CPU capacity, and an initial memory-headroom estimate. The memory estimate bounds concurrency; it is not a memory limit or a guarantee against exhaustion. Zero (including the unset default) disables only the configured CPU ceiling: native capacity and the memory guard still apply. Fixed worker selection lasts for that invocation; there is no live pressure controller or thermal governor.
 
@@ -250,6 +250,27 @@ Previously monolithic Python Make gates use the existing batch runner with their
 Coverage gates retain file batches and their original coverage sources. Native coverage combines child data before writing the requested reports and evaluating the selected policy once. The SQLite and Journal gates reuse existing owner regressions, treat resource and unraisable cleanup warnings as failures, and report coverage without a percentage gate. Their separate state-directory data files preserve the complete Python measurement, whose JSON remains the input to the existing quality ratchet. See [Python coverage ownership](development/TEST_QUALITY.md#python-coverage-ownership). Successful member receipts do not replace coverage observations. Coverage runs disable timeout refinement and environment retries: a timed-out or resource-failed measured attempt remains non-PASS because correctness receipts cannot establish that its native coverage was saved.
 
 Batch JSON reports include the resolved budget and observed enforcement facts, native collection duration, whole-run CPU time, and the peak RSS of waited-for children where the host provides those observations. Child peak RSS is not the sum of concurrently resident processes. PID-bound cgroup observations also report CPU-quota throttling counter changes and lifetime memory/task peaks when available; a shared cgroup may include other work, and concurrent task peaks do not count total child creation. Resource diagnostics do not change selected membership, result verdicts, process deadlines or receipt authority. Reduced concurrency can increase elapsed time; a timeout remains unverified and is never converted to PASS or hidden by an automatic timeout extension.
+
+The same bounded observations retain native memory/swap/PID usage and limits,
+event-counter changes, per-device I/O statistics and memory/I/O pressure totals.
+Snapshots require the same cgroup directory identity and PID membership; a changed
+or unproven scope supplies no deltas. Native `max` means unlimited, while `null`
+means unavailable or invalid. Current usage is an instantaneous gauge; peaks cover
+the cgroup lifetime, and PSI totals are cumulative microseconds. Rolling pressure
+averages and per-test aggregate memory are not measured. Only the documented
+cumulative I/O fields receive deltas; optional native debug fields remain raw
+observations. See the [Linux cgroup-v2 interfaces](https://docs.kernel.org/admin-guide/cgroup-v2.html).
+
+An increased OOM counter describes the observed cgroup, which may contain other
+work; it does not identify a particular failed test or prove which memory limit
+caused a kill. Inspect the native child status, missing/completed membership and
+available counters together. A native signal exit remains non-success and cannot
+enter thread-exhaustion retries because of text in its output. Missing completion
+evidence cannot become a PASS receipt. CPU quotas do not bound RAM, swap or disk:
+reduce concurrency or repair the selected native resource/storage constraint
+before rerunning a resource failure. A separately selected qualification service
+can measure its own explicit limits; it does not qualify ordinary caller-boundary
+inheritance or add default memory limits to local tests.
 
 #### Opt-in RAM-first local tests
 

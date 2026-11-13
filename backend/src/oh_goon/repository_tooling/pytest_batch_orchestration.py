@@ -933,10 +933,14 @@ def _finish_batch_run(args: argparse.Namespace, plan: _BatchPlan, state: _BatchR
     )
     cgroup_counters = observed_cgroup["cpu_stat_deltas"]
     throttled = cgroup_counters.get("throttled_usec") if isinstance(cgroup_counters, dict) else None
+    memory_events = observed_cgroup["memory_events_deltas"]
+    oom_kills = memory_events.get("oom_kill") if isinstance(memory_events, dict) else None
     print(
         "=== PYTEST OBSERVED CGROUP === "
         f"throttled-usec={throttled} | "
         f"memory-peak-bytes={observed_cgroup['memory_peak_bytes']} | "
+        f"oom-kill-count-change={oom_kills} | "
+        f"swap-current-bytes={observed_cgroup['swap_current_bytes']} | "
         f"peak-concurrent-tasks={observed_cgroup['peak_tasks']} | "
         f"{observed_cgroup['availability']} "
         "(entire cgroup, possibly shared; lifetime peaks; not child creations)",

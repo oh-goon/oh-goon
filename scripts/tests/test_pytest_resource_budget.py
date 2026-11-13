@@ -331,3 +331,418 @@ def test_missing_cgroup_statistics_remain_unknown(
     assert observed["memory_peak_bytes"] is None
     assert observed["peak_tasks"] is None
     assert observed["scope"] == "entire_observed_cgroup"
+
+
+def _telemetry(leaf: Path, fields: dict[str, str]) -> None:
+    for name, value in fields.items():
+        (leaf / name).write_text(value, encoding="utf-8")
+
+
+def _pressure(some: int, full: int, average: str = "0.00") -> str:
+    return (
+        f"some avg10={average} avg60=0.00 avg300=0.00 total={some}\n"
+        f"full avg10=0.00 avg60=0.00 avg300=0.00 total={full}\n"
+    )
+
+
+def test_native_pressure_metrics_keep_limits_gauges_totals_and_peaks_distinct(
+    native_files: tuple[Path, Path],
+) -> None:
+    _proc, cgroup = native_files
+    leaf = cgroup / "user.slice/tests.scope"
+    _telemetry(
+        leaf,
+        {
+            "memory.current": "400\n",
+            "memory.high": "max\n",
+            "memory.max": "1024\n",
+            "memory.peak": "800\n",
+            "memory.swap.current": "0\n",
+            "memory.swap.high": "max\n",
+            "memory.swap.max": "max\n",
+            "memory.swap.peak": "100\n",
+            "pids.current": "4\n",
+            "pids.max": "max\n",
+            "pids.peak": "7\n",
+            "memory.events": "oom 2\noom_kill 1\nhigh 0\n",
+            "memory.events.local": "oom 0\noom_kill 0\nhigh 0\n",
+            "memory.swap.events": "high 0\nmax 1\nfail 2\n",
+            "pids.events": "max 0\n",
+            "memory.pressure": _pressure(100, 20),
+            "io.pressure": _pressure(50, 10),
+            "io.stat": "8:0 rbytes=100 wbytes=200 rios=1 wios=2 dbytes=0 dios=0 depth=4 missed=8 total=10\n",
+        },
+    )
+    before = read_pytest_cgroup_usage(leaf)
+    _telemetry(
+        leaf,
+        {
+            "memory.current": "200\n",
+            "memory.high": "512\n",
+            "memory.max": "max\n",
+            "memory.peak": "900\n",
+            "memory.swap.current": "10\n",
+            "memory.swap.high": "0\n",
+            "memory.swap.max": "0\n",
+            "memory.swap.peak": "110\n",
+            "pids.current": "3\n",
+            "pids.max": "16\n",
+            "pids.peak": "8\n",
+            "memory.events": "high 3\noom_kill 2\noom 3\n",
+            "memory.events.local": "oom 0\noom_kill 0\nhigh 0\n",
+            "memory.swap.events": "high 0\nmax 2\nfail 4\n",
+            "pids.events": "max 1\n",
+            "memory.pressure": _pressure(180, 30, "1.50"),
+            "io.pressure": _pressure(50, 12),
+            "io.stat": "8:0 wbytes=250 rbytes=180 rios=3 wios=4 dbytes=0 dios=0 depth=1 missed=2 total=3\n",
+        },
+    )
+    observed = pytest_cgroup_diagnostics(before, read_pytest_cgroup_usage(leaf))
+    assert observed["pid_bound"] is True
+    assert observed["directory_identity"] == {
+        "device": leaf.stat().st_dev,
+        "inode": leaf.stat().st_ino,
+    }
+    assert (
+        observed["baseline_memory_current_bytes"],
+        observed["memory_current_bytes"],
+    ) == (400, 200)
+    assert (observed["baseline_memory_high_bytes"], observed["memory_high_bytes"]) == (
+        "max",
+        512,
+    )
+    assert (observed["baseline_memory_max_bytes"], observed["memory_max_bytes"]) == (
+        1024,
+        "max",
+    )
+    assert (
+        observed["swap_current_bytes"],
+        observed["swap_max_bytes"],
+        observed["swap_high_bytes"],
+    ) == (10, 0, 0)
+    assert observed["memory_peak_bytes"] == 900 and observed["swap_peak_bytes"] == 110
+    assert (
+        observed["current_tasks"] == 3
+        and observed["task_limit"] == 16
+        and observed["peak_tasks"] == 8
+    )
+    assert observed["memory_events_deltas"] == {"oom": 1, "oom_kill": 1, "high": 3}
+    assert observed["memory_events_local_deltas"] == {
+        "oom": 0,
+        "oom_kill": 0,
+        "high": 0,
+    }
+    assert observed["swap_events_deltas"] == {"high": 0, "max": 1, "fail": 2}
+    assert observed["pids_events_deltas"] == {"max": 1}
+    assert observed["memory_pressure_total_usec_deltas"] == {"some": 80, "full": 10}
+    assert observed["io_pressure_total_usec_deltas"] == {"some": 0, "full": 2}
+    assert observed["pressure_averages_measured"] is False
+    assert observed["io_stat_deltas"] == {
+        "8:0": {
+            "rbytes": 80,
+            "wbytes": 50,
+            "rios": 2,
+            "wios": 2,
+            "dbytes": 0,
+            "dios": 0,
+        }
+    }
+    assert observed["io_stat"] == {
+        "8:0": {
+            "rbytes": 180,
+            "wbytes": 250,
+            "rios": 3,
+            "wios": 4,
+            "dbytes": 0,
+            "dios": 0,
+            "depth": 1,
+            "missed": 2,
+            "total": 3,
+        }
+    }
+    assert observed["may_include_other_processes"] is True
+    assert "no per-test" in str(observed["oom_attribution"])
+
+
+def test_native_iocost_decimal_gauge_preserves_cumulative_io(
+    native_files: tuple[Path, Path],
+) -> None:
+    _proc, cgroup = native_files
+    leaf = cgroup / "user.slice/tests.scope"
+    _telemetry(
+        leaf,
+        {
+            "io.stat": "8:0 rbytes=100 wbytes=200 rios=1 wios=2 dbytes=0 dios=0 cost.vrate=100.00\n"
+        },
+    )
+    before = read_pytest_cgroup_usage(leaf)
+    _telemetry(
+        leaf,
+        {
+            "io.stat": "8:0 rbytes=180 wbytes=250 rios=3 wios=4 dbytes=0 dios=0 cost.vrate=55.50\n"
+        },
+    )
+    observed = pytest_cgroup_diagnostics(before, read_pytest_cgroup_usage(leaf))
+    assert observed["baseline_io_stat"] == {
+        "8:0": {
+            "rbytes": 100,
+            "wbytes": 200,
+            "rios": 1,
+            "wios": 2,
+            "dbytes": 0,
+            "dios": 0,
+            "cost.vrate": "100.00",
+        }
+    }
+    assert observed["io_stat"] == {
+        "8:0": {
+            "rbytes": 180,
+            "wbytes": 250,
+            "rios": 3,
+            "wios": 4,
+            "dbytes": 0,
+            "dios": 0,
+            "cost.vrate": "55.50",
+        }
+    }
+    assert observed["io_stat_deltas"] == {
+        "8:0": {
+            "rbytes": 80,
+            "wbytes": 50,
+            "rios": 2,
+            "wios": 2,
+            "dbytes": 0,
+            "dios": 0,
+        }
+    }
+
+
+def test_missing_limits_and_io_are_not_zero_or_unlimited(
+    native_files: tuple[Path, Path],
+) -> None:
+    _proc, cgroup = native_files
+    leaf = cgroup / "user.slice/tests.scope"
+    _telemetry(leaf, {"memory.swap.current": "0\n", "memory.high": "max\n"})
+    before = read_pytest_cgroup_usage(leaf)
+    observed = pytest_cgroup_diagnostics(before, read_pytest_cgroup_usage(leaf))
+    assert observed["memory_high_bytes"] == "max"
+    assert observed["swap_current_bytes"] == 0
+    assert observed["swap_max_bytes"] is None
+    assert observed["io_stat"] is observed["io_stat_deltas"] is None
+    assert observed["memory_events_deltas"] is None
+    (leaf / "io.stat").write_text("", encoding="utf-8")
+    empty = read_pytest_cgroup_usage(leaf)
+    assert (
+        pytest_cgroup_diagnostics(empty, read_pytest_cgroup_usage(leaf))[
+            "io_stat_deltas"
+        ]
+        == {}
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "contents", "attribute"),
+    [
+        ("cpu.stat", "usage_usec 1\nusage_usec 2\n", "cpu_stat"),
+        ("cpu.stat", "usage_usec 1\nbroken\n", "cpu_stat"),
+        ("memory.events", "oom 1\noom 2\n", "memory_events"),
+        ("memory.events.local", "oom -1\n", "memory_events_local"),
+        ("memory.swap.events", "max 0\ninvalid\n", "swap_events"),
+        ("pids.events", "max 0\n" + "x" * 8193, "pids_events"),
+        ("memory.high", "unlimited\n", "memory_high_bytes"),
+        ("memory.swap.max", "-1\n", "swap_max_bytes"),
+        ("io.stat", "8:0 rbytes=0 rbytes=1\n", "io_stat"),
+        ("io.stat", "8:0 rbytes=0\n8:0 wbytes=1\n", "io_stat"),
+        ("io.stat", "8:0 rbytes=0 wbytes=bad\n", "io_stat"),
+        ("io.stat", "8:0 rbytes=1.00 cost.vrate=100.00\n", "io_stat"),
+        ("io.stat", "8:0 rbytes=0 cost.vrate=bad\n", "io_stat"),
+        ("io.stat", "08:0 rbytes=0\n", "io_stat"),
+        (
+            "memory.pressure",
+            _pressure(0, 0) + "full avg10=0 avg60=0 avg300=0 total=0\n",
+            "memory_pressure_usec",
+        ),
+        (
+            "memory.pressure",
+            _pressure(0, 0).replace("avg10=0.00", "avg10=nan"),
+            "memory_pressure_usec",
+        ),
+        (
+            "io.pressure",
+            _pressure(0, 0).replace("total=0", "total=-1"),
+            "io_pressure_usec",
+        ),
+        (
+            "io.pressure",
+            _pressure(0, 0).replace("total=0", "total=0 total=1"),
+            "io_pressure_usec",
+        ),
+        ("io.pressure", "some avg10=0 avg60=0 total=0\n", "io_pressure_usec"),
+    ],
+)
+def test_malformed_native_metrics_remain_unavailable(
+    native_files: tuple[Path, Path], name: str, contents: str, attribute: str
+) -> None:
+    _proc, cgroup = native_files
+    leaf = cgroup / "user.slice/tests.scope"
+    _telemetry(leaf, {name: contents})
+    snapshot = read_pytest_cgroup_usage(leaf)
+    assert snapshot.pid_bound is True
+    assert getattr(snapshot, attribute) is None
+    assert snapshot.memory_current_bytes == 0
+
+
+def test_resets_missing_counters_and_new_devices_do_not_invent_zero_deltas(
+    native_files: tuple[Path, Path],
+) -> None:
+    _proc, cgroup = native_files
+    leaf = cgroup / "user.slice/tests.scope"
+    _telemetry(
+        leaf,
+        {
+            "cpu.stat": "usage_usec 100\n",
+            "memory.events": "oom 3\noom_kill 2\n",
+            "memory.peak": "1000\n",
+            "memory.swap.peak": "100\n",
+            "pids.peak": "10\n",
+            "memory.pressure": _pressure(100, 20),
+            "io.stat": "8:0 rbytes=100 wbytes=200\n",
+        },
+    )
+    before = read_pytest_cgroup_usage(leaf)
+    _telemetry(
+        leaf,
+        {
+            "cpu.stat": "usage_usec 1\n",
+            "memory.events": "oom 1\nnew 0\n",
+            "memory.peak": "500\n",
+            "memory.swap.peak": "50\n",
+            "pids.peak": "5\n",
+            "memory.pressure": _pressure(10, 30),
+            "io.stat": "8:0 rbytes=90 wbytes=250\n8:16 rbytes=0\n",
+        },
+    )
+    observed = pytest_cgroup_diagnostics(before, read_pytest_cgroup_usage(leaf))
+    assert observed["cpu_stat_deltas"] == {
+        "usage_usec": None,
+        "nr_periods": None,
+        "nr_throttled": None,
+        "throttled_usec": None,
+    }
+    assert observed["memory_events_deltas"] == {
+        "oom": None,
+        "oom_kill": None,
+        "new": None,
+    }
+    assert observed["memory_pressure_total_usec_deltas"] == {"some": None, "full": 10}
+    assert (
+        observed["memory_peak_bytes"]
+        is observed["swap_peak_bytes"]
+        is observed["peak_tasks"]
+        is None
+    )
+    assert observed["io_stat_deltas"] == {
+        "8:0": {
+            "rbytes": None,
+            "wbytes": 50,
+            "rios": None,
+            "wios": None,
+            "dbytes": None,
+            "dios": None,
+        },
+        "8:16": None,
+    }
+
+
+def test_same_path_cgroup_replacement_cannot_supply_counter_continuity(
+    native_files: tuple[Path, Path],
+) -> None:
+    _proc, cgroup = native_files
+    leaf = cgroup / "user.slice/tests.scope"
+    _telemetry(leaf, {"cpu.stat": "usage_usec 10\n"})
+    before = read_pytest_cgroup_usage(leaf)
+    leaf.rename(leaf.with_name("retired.scope"))
+    leaf.mkdir()
+    _telemetry(
+        leaf, {"cgroup.procs": str(os.getpid()) + "\n", "cpu.stat": "usage_usec 20\n"}
+    )
+    observed = pytest_cgroup_diagnostics(before, read_pytest_cgroup_usage(leaf))
+    assert observed["pid_bound"] is False
+    assert observed["cpu_stat_deltas"] is None
+    assert observed["memory_events_deltas"] is None
+    assert "continuity" in str(observed["availability"])
+
+
+def test_cgroup_samples_from_another_observer_cannot_claim_pid_continuity(
+    native_files: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _proc, cgroup = native_files
+    leaf = cgroup / "user.slice/tests.scope"
+    before = read_pytest_cgroup_usage(leaf)
+    previous = os.getpid()
+    monkeypatch.setattr(os, "getpid", lambda: previous + 1)
+    _telemetry(leaf, {"cgroup.procs": str(previous + 1) + "\n"})
+    after = read_pytest_cgroup_usage(leaf)
+    assert before.pid_bound is after.pid_bound is True
+    observed = pytest_cgroup_diagnostics(before, after)
+    assert observed["pid_bound"] is False and observed["memory_current_bytes"] is None
+
+
+@pytest.mark.parametrize("change", ["directory", "pid", "final-membership"])
+def test_native_sample_refuses_changes_during_metric_reads(
+    native_files: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    from typing import Any
+
+    _proc, cgroup = native_files
+    leaf = cgroup / "user.slice/tests.scope"
+    _telemetry(leaf, {"cpu.stat": "usage_usec 10\n"})
+    native_open = os.open
+    changed = []
+    memberships = []
+
+    def open_file(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        descriptor = native_open(path, flags, *args, **kwargs)
+        if Path(path).name == "cgroup.procs" and kwargs.get("dir_fd") is not None:
+            memberships.append(path)
+        if kwargs.get("dir_fd") is not None and (
+            (Path(path).name == "cpu.stat" and change != "final-membership")
+            or (
+                Path(path).name == "cgroup.procs"
+                and len(memberships) == 2
+                and change == "final-membership"
+            )
+        ):
+            changed.append(change)
+            if change in {"directory", "final-membership"}:
+                leaf.rename(leaf.with_name("retired.scope"))
+                leaf.mkdir()
+                _telemetry(leaf, {"cgroup.procs": str(os.getpid()) + "\n"})
+            else:
+                _telemetry(leaf, {"cgroup.procs": str(os.getpid() + 1) + "\n"})
+        return descriptor
+
+    monkeypatch.setattr(os, "open", open_file)
+    snapshot = read_pytest_cgroup_usage(leaf)
+    assert changed == [change]
+    assert snapshot.pid_bound is False and snapshot.cpu_stat is None
+
+
+@pytest.mark.parametrize("membership", ["//outside", "///outside", "/../outside"])
+def test_uncontained_membership_is_rejected_before_any_leaf_read(
+    native_files: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, membership: str
+) -> None:
+    from oh_goon.repository_tooling import pytest_resource_budget as owner
+
+    proc, cgroup = native_files
+    (proc / "self/cgroup").write_text(f"0::{membership}\n", encoding="utf-8")
+
+    def forbidden_read(_path: Path) -> None:
+        raise AssertionError("uncontained cgroup membership reached a leaf read")
+
+    monkeypatch.setattr(owner, "read_pytest_cgroup_usage", forbidden_read)
+    budget = resolve_pytest_resource_budget(
+        2, environ={}, proc_root=proc, cgroup_root=cgroup
+    )
+    assert budget.cgroups == () and budget.cgroup_cpu_capacity is None
+    assert "not a contained absolute path" in budget.cgroup_observation_status
