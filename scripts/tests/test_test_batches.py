@@ -210,6 +210,15 @@ def test_resource_pressure_classifier_is_narrow() -> None:
     assert not _resource_pressure_failure(124, "Resource temporarily unavailable")
 
 
+@pytest.mark.parametrize("returncode", (-9, -11), ids=("sigkill", "sigsegv"))
+def test_native_signal_status_cannot_be_classified_as_retryable_pressure(
+    returncode: int,
+) -> None:
+    assert not _resource_pressure_failure(
+        returncode, "RuntimeError: can't start new thread"
+    )
+
+
 def test_fail_fast_consumes_completed_failure_before_replenishing_successful_worker(
     tmp_path: Path,
 ) -> None:
