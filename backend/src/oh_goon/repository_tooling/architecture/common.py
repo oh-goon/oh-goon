@@ -82,6 +82,21 @@ class Violation:
 
 
 @dataclass(frozen=True, slots=True)
+class PythonImportDeclaration:
+    """Authored native syntax, including conditional and unknown import rows.
+
+    This view does not qualify a binding or runtime target. Full native
+    qualifications and provenance remain in the parent facts' canonical evidence.
+    """
+
+    module: str | None
+    name: str | None
+    level: int
+    local_name: str | None
+    spelling: str
+
+
+@dataclass(frozen=True, slots=True)
 class PythonSemanticFacts:
     """Producer source bindings projected into existing architecture policy.
 
@@ -95,6 +110,7 @@ class PythonSemanticFacts:
     calls: tuple[tuple[str, ast.Call], ...]
     references: frozenset[str]
     imports: frozenset[str]
+    import_declarations: tuple[PythonImportDeclaration, ...]
     string_literals: tuple[str, ...]
     classes: tuple[ast.ClassDef, ...]
     call_observations: tuple[tuple[dict[str, Any], ast.Call], ...]
@@ -148,6 +164,34 @@ def source_import_name(fact: dict[str, Any]) -> str | None:
     """Retain an authored import declaration independently of later rebinding."""
     syntax = fact.get("import_syntax")
     return source_import_spelling(syntax) if isinstance(syntax, dict) else None
+
+
+def _python_import_declaration(fact: dict[str, Any]) -> PythonImportDeclaration:
+    syntax = fact.get("import_syntax")
+    if not isinstance(syntax, dict) or not {"module", "name", "level", "local_name"}.issubset(
+        syntax
+    ):
+        raise ValueError("Architecture Python import declaration is malformed")
+    module, name, level, local_name = (
+        syntax["module"],
+        syntax["name"],
+        syntax["level"],
+        syntax["local_name"],
+    )
+    properties = syntax.get("properties", [])
+    if (
+        (module is not None and not isinstance(module, str))
+        or (name is not None and not isinstance(name, str))
+        or type(level) is not int
+        or level < 0
+        or (local_name is not None and not isinstance(local_name, str))
+        or not isinstance(properties, list)
+        or any(not isinstance(item, str) for item in properties)
+    ):
+        raise ValueError("Architecture Python import declaration is malformed")
+    spelling = source_import_name(fact)
+    assert spelling is not None
+    return PythonImportDeclaration(module, name, level, local_name, spelling)
 
 
 def source_binding_name(fact: dict[str, Any], *, imported_only: bool) -> str | None:
@@ -224,6 +268,7 @@ def python_semantic_facts(
     observations: list[tuple[dict[str, Any], ast.Call]] = []
     references: set[str] = set()
     imports: set[str] = set()
+    import_declarations: list[PythonImportDeclaration] = []
     strings: list[str] = []
     for fact in packet["facts"]:
         name = source_binding_name(fact, imported_only=imported_only)
@@ -238,9 +283,9 @@ def python_semantic_facts(
         elif fact.get("kind") == "reference" and name is not None:
             references.add(name)
         elif fact.get("kind") == "import-binding":
-            imported = source_import_name(fact)
-            if imported is not None:
-                imports.add(imported)
+            declaration = _python_import_declaration(fact)
+            import_declarations.append(declaration)
+            imports.add(declaration.spelling)
         if (
             fact.get("kind") == "literal-expression"
             and fact.get("qualification") == "qualified"
@@ -252,6 +297,7 @@ def python_semantic_facts(
         calls=tuple(calls),
         references=frozenset(references),
         imports=frozenset(imports),
+        import_declarations=tuple(import_declarations),
         string_literals=tuple(strings),
         classes=tuple(node for node in ast.walk(selected_tree) if isinstance(node, ast.ClassDef)),
         call_observations=tuple(observations),

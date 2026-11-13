@@ -642,3 +642,126 @@ def test_hashmarks_harness_and_verification_boundaries_are_independent_architect
     assert check_hashmarks_verification_boundary_contract in CHECKS
     harness_source = Path(contract.__file__).read_text(encoding="utf-8")
     assert "check_hashmarks_verification_boundary_contract" not in harness_source
+
+
+@pytest.mark.parametrize("captured_packets", [False, True])
+def test_import_consumers_reuse_detached_native_declarations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured_packets: bool
+) -> None:
+    from dataclasses import FrozenInstanceError
+    from typing import Any
+
+    from oh_goon.integrations.hashmarks import HashmarksSourceEvidence
+    from oh_goon.repository_tooling.architecture import common
+
+    package = _configure_package(tmp_path, monkeypatch)
+    owner = package / "owner.py"
+    owner.write_text(
+        "from .integrations.hashmarks import observe as selected\n"
+        "selected = None\n"
+        "if enabled:\n    from .integrations.hashmarks import *\n",
+        encoding="utf-8",
+    )
+    native_packet = HashmarksSourceEvidence.packet
+    reads: list[HashmarksSourceEvidence] = []
+
+    def packet(evidence: HashmarksSourceEvidence) -> dict[str, Any]:
+        reads.append(evidence)
+        return native_packet(evidence)
+
+    with common.python_source_snapshot(tmp_path, captured_packets=captured_packets):
+        for path in package.rglob("*.py"):
+            common.python_semantic_facts(
+                path, imported_only=True, tree=common.python_ast(path)
+            )
+        facts = common.python_semantic_facts(owner, imported_only=True)
+        baseline = contract._package_boundary_violations(package)
+        assert any(
+            row.path == owner and "wildcard imports" in row.message for row in baseline
+        )
+        original = facts.evidence.packet()
+        detached = facts.evidence.packet()
+        for row in detached["facts"]:
+            if row.get("kind") == "import-binding":
+                row["import_syntax"]["module"] = "unrelated"
+        with pytest.raises(FrozenInstanceError):
+            setattr(facts.import_declarations[0], "module", "unrelated")
+        assert facts.evidence.packet() == original
+        monkeypatch.setattr(HashmarksSourceEvidence, "packet", packet)
+        assert contract._imports(owner, package_root=package, facts=facts) == {
+            "oh_goon.integrations.hashmarks",
+            "oh_goon.integrations.hashmarks.observe",
+        }
+        assert contract._package_boundary_violations(package) == baseline
+        assert reads == []
+
+
+@pytest.mark.parametrize("captured_packets", [False, True])
+@pytest.mark.parametrize(
+    "mutation", ["schema", "level", "local-name", "properties", "spelling"]
+)
+def test_import_projection_keeps_native_spelling_and_refuses_malformed_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_packets: bool,
+    mutation: str,
+) -> None:
+    import json
+    from dataclasses import replace
+    from collections.abc import Sequence
+    from typing import Any
+
+    from oh_goon.integrations.hashmarks import (
+        HashmarksSourceEvidence,
+        observe_source_bindings,
+    )
+    from oh_goon.repository_tooling.architecture import common
+
+    source = tmp_path / "source.py"
+    source.write_text("from .package import selected as alias\n", encoding="utf-8")
+    native = observe_source_bindings
+
+    def observe(
+        root: Path, paths: Sequence[str], **kwargs: Any
+    ) -> dict[str, HashmarksSourceEvidence]:
+        receiver = kwargs.pop("on_observation", None)
+        originals = native(root, paths, **kwargs)
+        result: dict[str, HashmarksSourceEvidence] = {}
+        for member, evidence in originals.items():
+            packet = evidence.packet()
+            declaration = next(
+                row for row in packet["facts"] if row["kind"] == "import-binding"
+            )
+            syntax = declaration["import_syntax"]
+            if mutation == "schema":
+                packet["schema"] = "unsupported-source-schema"
+            elif mutation == "level":
+                syntax["level"] = "1"
+            elif mutation == "local-name":
+                syntax["local_name"] = []
+            elif mutation == "properties":
+                syntax["properties"] = ["retained", 1]
+            else:
+                syntax["properties"] = ["retained"]
+            transferred = replace(evidence, canonical_packet_json=json.dumps(packet))
+            if receiver is not None:
+                receiver(member, transferred, packet)
+            result[member] = transferred
+        return result
+
+    monkeypatch.setattr(common, "observe_source_bindings", observe)
+    with common.python_source_snapshot(tmp_path, captured_packets=captured_packets):
+        if mutation == "spelling":
+            facts = common.python_semantic_facts(source, imported_only=True)
+            declaration = facts.import_declarations[0]
+            assert (
+                declaration.module,
+                declaration.level,
+                declaration.name,
+                declaration.local_name,
+            ) == ("package", 1, "selected", "alias")
+            assert declaration.spelling == ".package.selected.retained"
+            assert facts.imports == frozenset({".package.selected.retained"})
+        else:
+            with pytest.raises(ValueError, match="malformed|unavailable or incomplete"):
+                common.python_semantic_facts(source, imported_only=True)
