@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from oh_goon.core.errors import ErrorKind
 from oh_goon.core.game_tape_comparison import compare_game_tapes
 from oh_goon.core.game_tape_run_facts import (
     project_issue_focus,
@@ -21,11 +22,14 @@ from oh_goon.core.models.fleet_plan import (
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
     FailedPlanStepExecution,
+    FailedPlanStepTeardownEvidence,
     FleetPlanResult,
     PlanEgressEvidence,
+    PlanExecutionInputEvidence,
     PlanIsolationBackendEvidence,
     PlanOutputEvidence,
     PlanResourceEvidence,
+    PlanSnapshotEvidence,
     PlanStandardIsolationEvidence,
     PlanStepAttemptEvidence,
     PlanStepSettlementEvidence,
@@ -69,6 +73,7 @@ from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
+    FleetRunFailureStage,
     FleetRunOutcome,
     FleetRunStatus,
     GameTapeEventType,
@@ -1020,3 +1025,189 @@ def test_unreported_step_lifecycle_uses_canonical_facts_without_inventing_result
             and projected.runtime_progress.process_state == "UNKNOWN"
         )
     assert detail.operations == ()
+    if boundary == "ongoing":
+        assert tape.why_not is None
+    else:
+        assert tape.why_not is not None
+        assert "original" in tape.why_not.safe_next_action
+        assert "Do not start" in tape.why_not.safe_next_action
+        if boundary == "cancel":
+            assert tape.why_not.code == FleetRunEventType.RUN_CANCELLED.value
+
+
+def _settled_step_detail(
+    tmp_path: Path,
+    settlement: PlanStepSettlementEvidence,
+    *,
+    teardown_failed: bool = False,
+) -> FleetRunDetail:
+    repository = RepositoryIdentity.model_validate({"path": tmp_path / "repo"})
+    plan = ResolvedFleetPlan.create(
+        name="fresh-admission-guidance",
+        description="",
+        execution=MaintenanceExecutionPolicy(),
+        steps=(ResolvedCommandStep(step_id="check", argv=("check",)),),
+    )
+    target = _target(plan)
+    now = utc_now()
+    completed = settlement.outcome == "SUCCESS"
+    step_fields: dict[str, Any] = {
+        "step_id": "check",
+        "kind": "command",
+        "settlement": settlement,
+        "stdout_evidence": _output(""),
+        "stderr_evidence": _output(""),
+        "repository_state_before": "captured",
+        "repository_state_after": "captured",
+        "teardown": FailedPlanStepTeardownEvidence(
+            attempt_roots_observed=1, reason_code="ROOT_REMAINS"
+        )
+        if teardown_failed
+        else None,
+    }
+    step = (
+        CompletedPlanStepExecution(**step_fields)
+        if completed
+        else FailedPlanStepExecution(returncode=7, **step_fields)
+    )
+    failed = not completed or teardown_failed
+    # Typed retained strict-result facts, not a native placement/issuer proof.
+    inputs = (
+        PlanExecutionInputEvidence(
+            repository_id=repository.repository_id,
+            source_authority_id="repository-source-authority-" + "0" * 64,
+            base_workspace=PlanSnapshotEvidence(sha256="1" * 64, byte_count=1, entry_count=1),
+            runtime_root=PlanSnapshotEvidence(sha256="2" * 64, byte_count=1, entry_count=1),
+            isolation_backend=PlanIsolationBackendEvidence(
+                backend_id="projection-fixture",
+                configuration_id="projection-fixture",
+                kernel_boundary="shared_host_kernel",
+                remote_execution=False,
+                experimental=False,
+            ),
+        )
+        if teardown_failed
+        else None
+    )
+    report = make_operation_report(
+        repository,
+        OperationAction.EXECUTE_PLAN,
+        Verdict.FAILED if failed else Verdict.READY,
+        ReasonCode.TESTS_FAILED if failed else ReasonCode.READY,
+        fleet_run_id="guidance-run",
+        target=target,
+        evidence=FleetPlanOperationEvidence(
+            kind="FLEET_PLAN",
+            plan=FleetPlanResult(plan_id=plan.plan_id, steps=(step,), execution_inputs=inputs),
+        ),
+    )
+    run = CompletedFleetRun(
+        status=FleetRunStatus.COMPLETED,
+        fleet_run_id="guidance-run",
+        target=target,
+        capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+        repository_scope=fleet_repository_scope(None),
+        targets=(repository,),
+        accepted_at=now,
+        started_at=now,
+        finished_at=now,
+        progress=FleetRunProgress(
+            total=1, succeeded=0 if failed else 1, failed=int(failed), needs_attention=int(failed)
+        ),
+    )
+    return FleetRunDetail(
+        run=run,
+        execution=DirectFleetExecutionAdmission(),
+        repository_admissions=repository_admissions_for(target, (repository,)),
+        operations=(report,),
+    )
+
+
+@pytest.mark.parametrize("cleanup", ["VERIFIED", "UNVERIFIED", "UNAVAILABLE"])
+def test_failed_step_guidance_distinguishes_fresh_admission_from_unknown_cleanup(
+    tmp_path: Path, cleanup: str
+) -> None:
+    settlement = PlanStepSettlementEvidence.model_validate(
+        {"outcome": "FAILED", "cleanup": cleanup, "reason": "FAILED_EXIT"}
+    )
+    detail = _settled_step_detail(tmp_path, settlement)
+    tape = detail.game_tape
+    assert detail.outcome is FleetRunOutcome.ATTENTION_REQUIRED
+    assert tape.repositories[0].steps[0].settlement == settlement
+    diagnostic = tape.why_not
+    assert diagnostic is not None
+    assert diagnostic.code == ReasonCode.TESTS_FAILED.value
+    assert diagnostic.retryable is False
+    if cleanup == "VERIFIED":
+        assert "oh-goon run run.yml" in diagnostic.safe_next_action
+        assert "new Run ID" in diagnostic.safe_next_action
+        assert "completed effects" in diagnostic.safe_next_action
+        assert "only if" in diagnostic.safe_next_action
+    else:
+        assert "Do not start" in diagnostic.safe_next_action
+        assert "original" in diagnostic.safe_next_action
+        assert "oh-goon run" not in diagnostic.safe_next_action
+
+
+def test_failed_teardown_precedes_successful_process_settlement_guidance(tmp_path: Path) -> None:
+    settlement = PlanStepSettlementEvidence(
+        outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+    )
+    detail = _settled_step_detail(tmp_path, settlement, teardown_failed=True)
+    diagnostic = detail.game_tape.why_not
+    assert diagnostic is not None
+    assert "Do not start" in diagnostic.safe_next_action
+    assert "oh-goon run" not in diagnostic.safe_next_action
+    assert detail.game_tape.repositories[0].steps[0].settlement == settlement
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        FleetRunFailure.recovery("Controller restarted before settlement"),
+        FleetRunFailure.uncertain_repository_effects(1),
+        FleetRunFailure.partial_recovery(completed=1, total=2),
+        FleetRunFailure(
+            code="EXTERNAL_EFFECT_OUTCOME_UNKNOWN",
+            kind=ErrorKind.CONFLICT,
+            stage=FleetRunFailureStage.EXECUTION,
+            message="Original remote mutation acknowledgement is unavailable",
+        ),
+    ],
+    ids=["interrupted", "unknown-effect", "partial-commit", "remote-acknowledgement"],
+)
+def test_uncertain_run_failure_guidance_preserves_original_facts_and_blocks_blind_replay(
+    tmp_path: Path, failure: FleetRunFailure
+) -> None:
+    detail = _settled_step_detail(
+        tmp_path,
+        PlanStepSettlementEvidence(outcome="FAILED", cleanup="VERIFIED", reason="FAILED_EXIT"),
+    )
+    run = FailedFleetRun(
+        **detail.run.model_dump(exclude={"status"}, exclude_computed_fields=True),
+        status=FleetRunStatus.FAILED,
+        failure=failure,
+    )
+    detail = detail.model_copy(update={"run": run})
+    diagnostic = detail.game_tape.why_not
+    assert diagnostic is not None
+    assert (diagnostic.code, diagnostic.stage, diagnostic.retryable, diagnostic.message) == (
+        failure.code,
+        str(failure.stage),
+        failure.retryable,
+        failure.message,
+    )
+    assert "Do not start" in diagnostic.safe_next_action
+    assert "original" in diagnostic.safe_next_action
+    assert "oh-goon run" not in diagnostic.safe_next_action
+
+
+def test_verified_success_keeps_failure_guidance_absent(tmp_path: Path) -> None:
+    detail = _settled_step_detail(
+        tmp_path,
+        PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
+    )
+    assert detail.outcome is FleetRunOutcome.SUCCESS
+    assert detail.game_tape.why_not is None

@@ -15,8 +15,14 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_plan_run_readback import run_plan_readback
 from oh_goon.cli_result import CliTermination
 from oh_goon.core.errors import ErrorKind, InvalidRequest
+from oh_goon.core.models.fleet_executor import FleetExecutorPlacement, PlanExecutorCapacityEvidence
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
-from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
+from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
+from oh_goon.core.models.fleet_plan_execution_policy import (
+    CicdExecutionPolicy,
+    VerificationExecutionPolicy,
+)
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.game_tape_live_output import (
     GameTapeLiveOutputBatch,
     GameTapeLiveOutputChunk,
@@ -30,11 +36,16 @@ from oh_goon.core.models.run import (
     FleetRunHistoryPage,
     FleetRunProgress,
 )
-from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, fleet_repository_scope
+from oh_goon.core.models.run_admission import (
+    DirectFleetExecutionAdmission,
+    StrictFleetExecutionAdmission,
+    fleet_repository_scope,
+)
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import (
     FleetRunFailureStage,
+    FleetRunSource,
     FleetRunStatus,
     GameTapeFailureNavigationState,
     OperationAction,
@@ -186,6 +197,96 @@ def test_list_preserves_original_cursor_and_compact_facts(
         {"limit": 1, "before_revision": 10, "repository_id": None, "plan_id": None}
     ]
     assert owner.reads == []
+
+
+@pytest.mark.parametrize("parent_kind", ["fresh", "rerun", "readmission"])
+@pytest.mark.parametrize("command", ["show", "list", "explain", "handoff"])
+@pytest.mark.parametrize("as_json", [True, False], ids=["json", "human"])
+def test_readback_preserves_recorded_replay_lineage_without_granting_control(
+    detail: FleetRunDetail,
+    capsys: pytest.CaptureFixture[str],
+    parent_kind: str,
+    command: str,
+    as_json: bool,
+) -> None:
+    rerun_parent = "original-run" if parent_kind == "rerun" else None
+    readmission_parent = "original-run" if parent_kind == "readmission" else None
+    if parent_kind == "readmission":
+        plan = ResolvedFleetPlan.create(
+            name="strict-history",
+            description="",
+            execution=CicdExecutionPolicy(
+                trust_repository_code=True,
+                resources=CicdResourcePolicy(cpu_millis=1000, memory_mib=1024, max_processes=256),
+            ),
+            steps=(ResolvedCommandStep(step_id="check", argv=("true",), timeout_seconds=10),),
+        )
+        target = structural_fleet_plan_target(plan)
+        backend = PlanIsolationBackendEvidence(
+            backend_id="remote-fixture",
+            configuration_id="fixture-generation",
+            kernel_boundary="virtual_machine",
+            remote_execution=True,
+            experimental=False,
+        )
+        execution = StrictFleetExecutionAdmission(
+            placement=FleetExecutorPlacement(
+                isolation_backend=backend,
+                executor_capacity=PlanExecutorCapacityEvidence(
+                    fleet_run_id=detail.run.fleet_run_id,
+                    pool_id="fixture-pool",
+                    placement_policy="priority_rendezvous_fifo_v2",
+                    placement_rank=0,
+                    executor_priority=0,
+                    executor_id="fixture-executor",
+                    executor_generation=1,
+                    source="remote_operator_attested",
+                    backend_configuration_id=backend.configuration_id,
+                    capacity_cpu_millis=4000,
+                    capacity_memory_bytes=4 * 1024 * 1024 * 1024,
+                    requested_parallelism=1,
+                    admitted_parallelism=1,
+                    per_attempt_cpu_millis=1000,
+                    per_attempt_memory_bytes=1024 * 1024 * 1024,
+                ),
+                executor_trust_epoch=0,
+            ),
+            readmitted_from_run_id=readmission_parent,
+        )
+        detail = FleetRunDetail(
+            run=detail.run.model_copy(
+                update={
+                    "source": FleetRunSource.CICD,
+                    "target": target,
+                    "capability": capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+                }
+            ),
+            execution=execution,
+            repository_admissions=repository_admissions_for(target, list(detail.run.targets)),
+        )
+    else:
+        detail = FleetRunDetail(
+            run=detail.run,
+            execution=DirectFleetExecutionAdmission(rerun_from_run_id=rerun_parent),
+            repository_admissions=detail.repository_admissions,
+        )
+    owner = _Owner(detail)
+    assert _invoke(owner, command, as_json=as_json) == 0
+    output = capsys.readouterr().out
+    if as_json:
+        report = json.loads(output)
+        if command == "list":
+            report = report["items"][0]
+        assert report["fleet_run_id"] == detail.run.fleet_run_id
+        assert report["rerun_from_run_id"] == rerun_parent
+        assert report["readmitted_from_run_id"] == readmission_parent
+    else:
+        assert detail.run.fleet_run_id in output
+        assert ("Rerun of Run: original-run" in output) == (rerun_parent is not None)
+        assert ("Placement readmission of Run: original-run" in output) == (
+            readmission_parent is not None
+        )
+    assert owner.reads == ([] if command == "list" else [detail.run.fleet_run_id])
 
 
 def test_last_selects_exact_plan_repository_scope_before_one_original_read(

@@ -21,12 +21,31 @@ from oh_goon.core.errors import FleetDomainError, InvalidRequest, RunNotFound
 from oh_goon.core.models.game_tape import GameTape, GameTapeStepExecution
 from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
 from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.models.run_admission import (
+    FleetExecutionAdmission,
+    fleet_readmission_parent,
+    fleet_rerun_parent,
+)
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import GameTapeStatus
 
 
 def _print_json(value: object) -> None:
     print(json.dumps(value, sort_keys=True, ensure_ascii=False))
+
+
+def _recorded_run_lineage(execution: FleetExecutionAdmission) -> dict[str, str | None]:
+    return {
+        "rerun_from_run_id": fleet_rerun_parent(execution),
+        "readmitted_from_run_id": fleet_readmission_parent(execution),
+    }
+
+
+def _print_run_lineage(execution: FleetExecutionAdmission) -> None:
+    if (parent := fleet_rerun_parent(execution)) is not None:
+        print(f"Rerun of Run: {parent}")
+    if (parent := fleet_readmission_parent(execution)) is not None:
+        print(f"Placement readmission of Run: {parent}")
 
 
 def run_completion_facts(detail: FleetRunDetail) -> dict[str, object]:
@@ -204,6 +223,7 @@ def _status(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     result = {
         "schema": "oh-goon.plan-run-status/v1",
         "fleet_run_id": detail.run.fleet_run_id,
+        **_recorded_run_lineage(detail.execution),
         "plan_id": plan.plan_id if plan is not None else None,
         "status": detail.run.status.value,
         "outcome": detail.outcome.value,
@@ -216,6 +236,7 @@ def _status(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         print(f"Plan ID: {result['plan_id'] or 'unknown'}")
         print(f"Status: {result['status']}")
         print(f"Outcome: {result['outcome']}")
+        _print_run_lineage(detail.execution)
         print(f"Progress: {detail.run.progress.completed}/{detail.run.progress.total}")
     return 0
 
@@ -238,6 +259,7 @@ def _history(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             {
                 "admitted_revision": item.admitted_revision,
                 "fleet_run_id": run.fleet_run_id,
+                **_recorded_run_lineage(item.execution),
                 "plan_id": target.plan.plan_id if isinstance(target, FleetPlanTarget) else None,
                 "plan_name": target.plan.name if isinstance(target, FleetPlanTarget) else None,
                 "source": run.source.value,
@@ -271,6 +293,7 @@ def _history(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             )
             if row["plan_id"] is not None:
                 print(f"  Plan ID: {row['plan_id']}")
+            _print_run_lineage(item.execution)
             print(
                 "  Repositories: "
                 + ", ".join(
@@ -387,6 +410,7 @@ def _explain(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         print(f"Fleet Run ID: {detail.run.fleet_run_id}")
         print(f"Status: {detail.run.status.value} | Outcome: {detail.outcome.value}")
         print(f"Game Tape status: {detail.game_tape.status.value}")
+        _print_run_lineage(detail.execution)
         print_run_completion(detail)
     return 0
 
@@ -634,6 +658,7 @@ def run_handoff_projection(detail: FleetRunDetail) -> dict[str, Any]:
     return {
         "schema": "oh-goon.plan-run-handoff/v1",
         "fleet_run_id": detail.run.fleet_run_id,
+        **_recorded_run_lineage(detail.execution),
         "journal_revision": detail.journal_revision,
         "artifact_observation": (
             tape.artifact_observation.model_dump(mode="json")
@@ -698,6 +723,7 @@ def _handoff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         print(f"Plan ID: {result['plan_id'] or 'unknown'}")
         print(f"Status: {result['status']} | Outcome: {result['outcome']}")
         print(f"Game Tape status: {result['game_tape_status']}")
+        _print_run_lineage(detail.execution)
         print(
             f"Issues: {result['issue_count']} (displayed: {len(result['issue_focus'])}, "
             f"hidden: {result['hidden_issue_count']})"
