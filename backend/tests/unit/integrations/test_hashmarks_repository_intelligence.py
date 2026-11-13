@@ -294,6 +294,77 @@ def test_context_disclosure_is_identity_only_and_never_leaks_payload() -> None:
     assert not hasattr(disclosure, "canonical_payload_json")
 
 
+@pytest.mark.parametrize("reported_paths", [(), ("renamed.py",)])
+def test_native_diagnostic_locality_requires_reported_change_scope_through_public_api(
+    tmp_path: Path, reported_paths: tuple[str, ...]
+) -> None:
+    from hashmarks.codemap.diagnostic_observation import (
+        RepositoryGenerationBinding,
+        diagnostic_observation_delta,
+        external_diagnostic_observation,
+    )
+
+    from oh_goon.integrations.hashmarks import (
+        bind_hashmarks_repository_evidence as bind_evidence,
+    )
+
+    # A matching ambient file cannot supply the missing producer change scope.
+    (tmp_path / "renamed.py").write_text("def answer():\n    return 42\n", encoding="utf-8")
+    binding = RepositoryGenerationBinding("repository:synthetic", 7)
+    before = external_diagnostic_observation(
+        producer="synthetic-pyright",
+        binding=binding,
+        diagnostics=[],
+        outcome="fail",
+        scope_paths=("renamed.py",),
+        collection_state="fresh-partial",
+    )
+    after = external_diagnostic_observation(
+        producer="synthetic-pyright",
+        binding=binding,
+        diagnostics=[
+            {
+                "tool": "pyright",
+                "rule": "synthetic",
+                "path": "renamed.py",
+                "line": 1,
+                "message": "synthetic diagnostic",
+            }
+        ],
+        outcome="fail",
+        scope_paths=("renamed.py",),
+        collection_state="fresh-partial",
+    )
+    delta = diagnostic_observation_delta(before, after, changed_paths=reported_paths)
+    diagnostics = delta["diagnostics"]
+    assert isinstance(diagnostics, dict)
+    locality = diagnostics["path_locality"]
+    assert locality["rows"][0]["locality"] == (
+        "on-reported-changed-path" if reported_paths else "unknown"
+    )
+    assert locality["change_set_completeness"] == "unknown"
+    assert locality["causality"] == "not-asserted"
+    assert locality["execution_effect"] == "none"
+    original = json.dumps(delta, sort_keys=True)
+
+    verified = bind_evidence(
+        delta,
+        repository_generation_identity=SOURCE,
+        producer_artifact_identity=ARTIFACT,
+        input_provenance_identity=PROVENANCE,
+    )
+
+    assert verified.kind is HashmarksEvidenceKind.DIAGNOSTIC_DELTA
+    assert verified.repository_generation_identity == SOURCE
+    assert (
+        verified.producer_implementation_identity == TEST_HASHMARKS_PRODUCER_IMPLEMENTATION_IDENTITY
+    )
+    assert verified.payload()["diagnostics"]["path_locality"] == locality
+    assert verified.producer_projection()["diagnostic_path_locality"] == locality
+    assert verified.disclosure_metadata().payload_disclosed is False
+    assert json.dumps(delta, sort_keys=True) == original
+
+
 def _repository_snapshot(identity: str = "4") -> dict[str, object]:
     return {
         "schema": "hashmarks.repository-intelligence-snapshot.v1",

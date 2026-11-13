@@ -123,6 +123,26 @@ Local, CI/CD, scheduled, agentic, ML and application-source Runs converge on thi
 same custody boundary. Spawn-to-claim and claimed-bootstrap timings are bounded
 diagnostic observations; they grant no execution or completion authority.
 
+For the inspected local Bubblewrap/LACE backend, strict native effects require
+independent kernel custody as well as the deployment's enrolled Fleet authority. The current
+[cgroup effect owner](../../backend/src/oh_goon/integrations/_fleet_plan_cgroup_resources.py)
+refuses allocation, attachment and teardown unconditionally: it has no production
+branch that admits independently provisioned kernel custody.
+Installed Bubblewrap, a writable delegated cgroup, a complete-looking scope or a
+successful ordinary Run cannot satisfy this boundary. The maintained
+[live-kernel refusal witnesses](../../backend/tests/native/test_co_r3u2b2b2a_native_refusal.py)
+prove non-issuance on the exercised host; they do not qualify strict execution.
+Likewise, a CI/CD-labelled test using `standard_local=True` proves the ordinary
+worker route only. OpenSandbox VM execution has separate attested transport, but
+the current authenticated Fleet
+[effect-authority hook](../../backend/src/oh_goon/services/fleet_run_lifecycle.py)
+accepts only the original local LACE provisioner with Bubblewrap and explicitly
+refuses a remote substitute. Transport support or remote attestation alone
+therefore cannot establish canonical strict-Run convergence. Remote deployment
+availability and physical conformance remain untested here. HUG-183 still requires
+an actual strict admission, placement, claimed worker and native effect in one
+qualified, explicitly selected deployment.
+
 Native ingress also captures the existing scoped Git command owner's exact
 workspace and resolved native selection. The worker restores that same owner
 with its admitted isolation backend and the canonical workspace pin; it never
