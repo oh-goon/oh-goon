@@ -15,7 +15,6 @@ from oh_goon.repository_tooling.architecture.common import (
     python_ast,
     python_semantic_facts,
     python_source_snapshot,
-    source_binding_packet,
 )
 
 # These owners have different, explicitly limited capabilities. None is a
@@ -48,17 +47,13 @@ def database_authority_census(root: Path) -> list[tuple[str, int, str]]:
             relative = path.relative_to(package).as_posix()
             tree = python_ast(path)
             facts = python_semantic_facts(path, imported_only=True, tree=tree)
-            packet = source_binding_packet(facts.evidence, language="python")
             sqlite_imported = any(
                 name == "sqlite3" or name.startswith("sqlite3.") for name in facts.imports
             )
             candidate_names = {"connect"} | {
-                syntax["local_name"]
-                for fact in packet["facts"]
-                if fact.get("kind") == "import-binding"
-                and isinstance(syntax := fact.get("import_syntax"), dict)
-                and syntax.get("module") == "sqlite3"
-                and syntax.get("name") == "connect"
+                declaration.local_name
+                for declaration in facts.import_declarations
+                if declaration.module == "sqlite3" and declaration.name == "connect"
             }
             qualified_calls = {id(call) for _name, call in facts.calls}
             for fact, call in facts.call_observations:

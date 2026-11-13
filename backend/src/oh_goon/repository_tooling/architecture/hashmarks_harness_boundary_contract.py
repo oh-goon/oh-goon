@@ -14,7 +14,6 @@ from oh_goon.repository_tooling.architecture.common import (
     python_source_snapshot,
     source_binding_name,
     source_binding_packet,
-    source_import_spelling,
 )
 from oh_goon.repository_tooling.architecture.repository_layout import BACKEND_PACKAGE_ROOT, ROOT
 
@@ -69,15 +68,12 @@ def _imports(
     observed = facts or python_semantic_facts(path, imported_only=True, tree=tree)
     package_root = package_root or BACKEND_PACKAGE_ROOT
     result: set[str] = set()
-    for fact in source_binding_packet(observed.evidence, language="python")["facts"]:
-        syntax = fact.get("import_syntax")
-        if fact.get("kind") != "import-binding" or not isinstance(syntax, dict):
-            continue
-        base = "." * syntax["level"] + (syntax["module"] or "")
+    for declaration in observed.import_declarations:
+        base = "." * declaration.level + (declaration.module or "")
         if base:
             result.add(_owned_package_spelling(path, base, package_root))
-        if syntax["name"] != "*":
-            result.add(_owned_package_spelling(path, source_import_spelling(syntax), package_root))
+        if declaration.name != "*":
+            result.add(_owned_package_spelling(path, declaration.spelling, package_root))
     result.discard("")
     return result
 
@@ -344,16 +340,14 @@ def _package_boundary_violations_in_snapshot(package_root: Path) -> tuple[Violat
                 path_imports | _package_policy_references(path, facts, package_root),
                 exports,
                 wildcard=any(
-                    fact.get("kind") == "import-binding"
-                    and fact.get("import_syntax", {}).get("name") == "*"
+                    declaration.name == "*"
                     and _owned_package_spelling(
                         path,
-                        "." * fact["import_syntax"]["level"]
-                        + (fact["import_syntax"]["module"] or ""),
+                        "." * declaration.level + (declaration.module or ""),
                         package_root,
                     )
                     == _PUBLIC_HASHMARKS_API
-                    for fact in source_binding_packet(facts.evidence, language="python")["facts"]
+                    for declaration in facts.import_declarations
                 ),
             )
         )

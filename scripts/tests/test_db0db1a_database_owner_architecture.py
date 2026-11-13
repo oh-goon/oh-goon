@@ -197,3 +197,36 @@ def test_clean_source_keeps_current_database_architecture_active(
         diagnostic in issue.message
         for issue in check_canonical_database_owner(tmp_path)
     )
+
+
+@pytest.mark.parametrize("captured_packets", [False, True])
+def test_connection_census_reuses_existing_native_import_declarations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured_packets: bool
+) -> None:
+    from typing import Any
+
+    from oh_goon.integrations.hashmarks import HashmarksSourceEvidence
+    from oh_goon.repository_tooling.architecture import common
+
+    package = tmp_path / "backend/src/oh_goon"
+    package.mkdir(parents=True)
+    source = package / "candidate.py"
+    source.write_text(
+        "from sqlite3 import connect as dial\n"
+        "def writer(path):\n    return dial(path)\n",
+        encoding="utf-8",
+    )
+    native_packet = HashmarksSourceEvidence.packet
+    reads: list[HashmarksSourceEvidence] = []
+
+    def packet(evidence: HashmarksSourceEvidence) -> dict[str, Any]:
+        reads.append(evidence)
+        return native_packet(evidence)
+
+    with common.python_source_snapshot(tmp_path, captured_packets=captured_packets):
+        common.python_semantic_facts(source, imported_only=True)
+        monkeypatch.setattr(HashmarksSourceEvidence, "packet", packet)
+        assert database_authority_census(tmp_path) == [
+            ("candidate.py", 3, "connection")
+        ]
+        assert reads == []
