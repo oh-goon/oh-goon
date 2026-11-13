@@ -348,15 +348,20 @@ def _why_not(
     """Explain retained facts without granting new admission or history replay."""
     failure = getattr(detail.run, "failure", None)
     steps = tuple(step for repository in repositories for step in repository.steps)
-    uncertain = any(
-        step.status not in {GameTapeStatus.PLANNED, GameTapeStatus.NOT_RUN, GameTapeStatus.SKIPPED}
-        and (step.settlement.cleanup != "VERIFIED" or step.settlement.outcome == "INCOMPLETE")
-        for step in steps
-    ) or any(
-        isinstance(step.teardown, FailedPlanStepTeardownEvidence)
-        for report in (detail.operations if repositories else ())
-        if (result := _plan_result(report)) is not None
-        for step in result.steps
+    uncertain = (
+        any(repository.status is GameTapeStatus.INTERRUPTED for repository in repositories)
+        or any(
+            step.status
+            not in {GameTapeStatus.PLANNED, GameTapeStatus.NOT_RUN, GameTapeStatus.SKIPPED}
+            and (step.settlement.cleanup != "VERIFIED" or step.settlement.outcome == "INCOMPLETE")
+            for step in steps
+        )
+        or any(
+            isinstance(step.teardown, FailedPlanStepTeardownEvidence)
+            for report in (detail.operations if repositories else ())
+            if (result := _plan_result(report)) is not None
+            for step in result.steps
+        )
     )
     inspection = (
         "Inspect retained settlement, cleanup, completed effects and Journal evidence with the "
