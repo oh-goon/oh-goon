@@ -96,8 +96,11 @@ uses the same application through a local pinned Git fixture; it does not
 qualify a live remote host or private Git authentication.
 
 The [native integration proof](../../tests/integration/test_iris_pipeline.py)
-keeps a local success, evaluation failure, native application guards and invalid
-binding in ordinary feedback. Its longer pinned-Git/seed/history and complete
+keeps a local success followed by a rejected evaluation, native application
+guards and invalid binding in ordinary feedback. The later failed Run cannot
+export a model, and fresh-process exports of the earlier successful Run must
+remain byte-identical after the application and workflow are removed. Its
+longer pinned-Git/seed/history and complete
 failure-stage permutations retain daily cadence. Both use the copied
 application/workflow through the installed source-checkout CLI and retain
 native artifact and fresh-process history checks. This
