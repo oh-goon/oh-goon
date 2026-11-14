@@ -78,3 +78,11 @@ adapter is a separate manual comparison, never an OH-Goon acceptance prerequisit
 stay outside the checkout and are cleaned on completion. The required hosted
 integration check and ordinary `make release-check` select this target; canonical
 strict integration rings continue to consume their already prepared environment.
+
+Relevant verification uses that same configured project owner for nominated
+standalone pytest cases. Native UV prepares the project's locked development
+environment; the original native collector and membership owner retain exact
+case identities and results separately from backend pytest. Unknown project
+contexts remain unverified. The trusted merge aggregate checks native context,
+source, cleanup and exact case membership rather than accepting a project-level
+exit code or JUnit total as complete proof.

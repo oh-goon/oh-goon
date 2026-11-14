@@ -385,7 +385,25 @@ Source/base fences and positive native process-group quiescence protect setup
 and collection. This uses the existing merge gate and collector/process owners.
 
 That independent ordinary-membership proof covers the three repository pytest
-contexts above. The configured frontend retains its existing positive Vitest
+contexts above. Configured standalone pytest projects retain the original
+`python_project_checks` census and native UV owner. Their nominated cases are
+collected and executed in a private environment prepared from that project's
+committed lock and explicit development group. The existing collector runs
+without the backend SDK in that environment; the backend membership owner
+classifies native setup/call/teardown observations and preserves exact
+repository-relative class and parameter identities in the same verification
+plan. Backend pytest never imports these application tests as a fallback.
+
+The trusted aggregate checks the project/configuration/lock/collector context,
+native interpreter and process cleanup, source identity, and exact selected and
+passed membership. It also independently collects the configured project's
+ordinary test roots when project-test Python sources change. Only genuinely
+collected changed cases gain this execution obligation; fixture filenames do
+not create it. Skipped, xfailed, extra, missing or duplicated cases cannot
+establish a complete project proof. Unsupported or unavailable contexts retain
+`NATIVE_PROJECT_CONTEXT_REQUIRED`; there is no complete-suite execution fallback.
+
+The configured frontend retains its existing positive Vitest
 self-nomination obligation; source syntax alone does not prove native frontend
 membership or complete owner coverage. Test-shaped template fixtures or another
 project do not acquire an obligation from their spelling. A nomination requiring
