@@ -224,8 +224,14 @@ class NativePytestCollection:
         )
 
 
+def native_pytest_address(root: Path, selector: str) -> str:
+    """Resolve the file while preserving pytest's opaque class/parameter suffix."""
+    filename, separator, suffix = selector.partition("::")
+    return str(root / filename) + separator + suffix
+
+
 def native_collection_request(
-    paths: tuple[Path, ...],
+    paths: tuple[Path | str, ...],
     *,
     invocation: PytestInvocation,
     excludes: tuple[str, ...] = (),
@@ -273,7 +279,7 @@ def native_collection_request(
 
 
 def collect_native_pytest(
-    paths: tuple[Path, ...],
+    paths: tuple[Path | str, ...],
     *,
     excludes: tuple[str, ...] = (),
     marker: str | None = None,
