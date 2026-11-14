@@ -32,9 +32,11 @@ def current_application_launch_receipt() -> ApplicationLaunchReceipt:
         raise ValueError("Fleet admission requires the exact observed backend launch generation")
     if backend.startup is None or backend.startup.value is not LaunchFactState.SATISFIED:
         raise ValueError("Fleet admission requires positive backend startup evidence")
-    process = backend.process
+    process = backend.runtime_process
     if process is None or process.birth_identity is None:
-        raise ValueError("Fleet admission requires positive backend process-birth evidence")
+        raise RunControlOwnerUnavailable(
+            "Fleet admission requires positive backend runtime process-birth evidence"
+        )
     birth = process.birth_identity.value
     if observe_process_birth(os.getpid()) != birth:
         raise RunControlOwnerUnavailable(

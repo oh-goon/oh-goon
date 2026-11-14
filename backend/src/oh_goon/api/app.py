@@ -53,9 +53,9 @@ from oh_goon.runtime.local_launch_owner import record_backend_startup_complete_f
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     runtime = application()
     _app.state.diagnostics = runtime.diagnostics
-    runtime.start_background()
-    record_backend_startup_complete_from_environment()
     try:
+        runtime.start_background()
+        record_backend_startup_complete_from_environment()
         yield
     finally:
         runtime.shutdown(wait_for_runs=False)

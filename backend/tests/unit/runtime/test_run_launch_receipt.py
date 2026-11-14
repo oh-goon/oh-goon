@@ -73,6 +73,7 @@ def _managed_store(tmp_path: Path) -> tuple[LocalLaunchEventStore, LaunchIntent]
         timestamp=T0 + timedelta(seconds=3),
         service="backend",
         service_generation=1,
+        payload={"runtime_pid": birth.pid, "runtime_birth_identity": birth.to_payload()},
     )
     return store, intent
 

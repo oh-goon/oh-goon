@@ -78,9 +78,9 @@ def _control_target(receipt: ManagedApplicationLaunchReceipt, state_path: Path) 
         or backend.service_generation != receipt.backend_service_generation
         or backend.state("startup") is not LaunchFactState.SATISFIED
         or backend.state("readiness") is not LaunchFactState.SATISFIED
-        or backend.process is None
-        or backend.process.birth_identity is None
-        or backend.process.birth_identity.value != birth
+        or backend.runtime_process is None
+        or backend.runtime_process.birth_identity is None
+        or backend.runtime_process.birth_identity.value != birth
         or observe_process_birth(birth.pid) != birth
         or backend.bound_endpoint is None
         or backend.bound_endpoint.host.value != receipt.observed_host

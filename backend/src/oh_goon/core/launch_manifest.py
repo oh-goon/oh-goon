@@ -163,6 +163,7 @@ class LaunchServiceObservation:
     startup: ObservedFact[LaunchFactState] | None = None
     readiness: ObservedFact[LaunchFactState] | None = None
     health: ObservedFact[LaunchFactState] | None = None
+    runtime_process: LaunchProcessObservation | None = None
 
     def __post_init__(self) -> None:
         if not self.service:
@@ -174,6 +175,11 @@ class LaunchServiceObservation:
             and self.process.pid.service_generation != self.service_generation
         ):
             raise ValueError("process observation belongs to another service generation")
+        if (
+            self.runtime_process is not None
+            and self.runtime_process.pid.service_generation != self.service_generation
+        ):
+            raise ValueError("runtime process observation belongs to another service generation")
         if self.bound_endpoint is not None:
             observed_generation = self.bound_endpoint.host.service_generation
             if observed_generation != self.service_generation:
@@ -315,7 +321,11 @@ def _json_compatible(value: object) -> object:
     if isinstance(value, StrEnum):
         return value.value
     if isinstance(value, dict):
-        return {key: _json_compatible(item) for key, item in value.items()}
+        return {
+            key: _json_compatible(item)
+            for key, item in value.items()
+            if key != "runtime_process" or item is not None
+        }
     if isinstance(value, (list, tuple)):
         return [_json_compatible(item) for item in value]
     return value
@@ -327,6 +337,10 @@ def _service_observed_facts(service: LaunchServiceObservation) -> tuple[Observed
         facts.append(service.process.pid)
         if service.process.birth_identity is not None:
             facts.append(service.process.birth_identity)
+    if service.runtime_process is not None:
+        facts.append(service.runtime_process.pid)
+        if service.runtime_process.birth_identity is not None:
+            facts.append(service.runtime_process.birth_identity)
     if service.bound_endpoint is not None:
         facts.extend((service.bound_endpoint.host, service.bound_endpoint.port))
     for fact in (service.startup, service.readiness, service.health):

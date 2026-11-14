@@ -16,16 +16,19 @@ import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
-from oh_goon.core.process_birth import observe_process_liveness
+from oh_goon.core.process_birth import observe_process_birth, observe_process_liveness
+from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.local_launch_access import LocalLaunchAccessStore
+from oh_goon.runtime.local_launch_plan import LocalLaunchPlan, LocalServicePlan
 from oh_goon.runtime.local_launch_state import LocalLaunchEventStore
+from oh_goon.runtime.local_launch_supervisor import start_contributor_launch
 
 pytestmark = [
     pytest.mark.process,
@@ -193,7 +196,7 @@ def _cli(
     return result
 
 
-def _await_file(path: Path, process: subprocess.Popen[bytes], *, timeout: float = 30) -> None:
+def _await_file(path: Path, process: subprocess.Popen[Any], *, timeout: float = 30) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         assert process.poll() is None, "original native owner exited before its observation"
@@ -212,9 +215,16 @@ class NativeOwner:
     launch_id: str
     owner_generation: int
     token: str
-    process: subprocess.Popen[bytes]
+    process: subprocess.Popen[Any]
 
-    def http(self, method: str, path: str, body: bytes | None = None) -> dict[str, Any]:
+    def http(
+        self,
+        method: str,
+        path: str,
+        body: bytes | None = None,
+        *,
+        expected: tuple[int, ...] = (200, 202),
+    ) -> dict[str, Any]:
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
         try:
             connection.request(
@@ -229,7 +239,7 @@ class NativeOwner:
             response = connection.getresponse()
             payload = response.read(2 * 1024 * 1024 + 1)
             assert len(payload) <= 2 * 1024 * 1024
-            assert response.status in {200, 202}, (response.status, payload[:1024])
+            assert response.status in expected, (response.status, payload[:1024])
             result = json.loads(payload)
             assert isinstance(result, dict)
             return result
@@ -521,3 +531,221 @@ def test_second_cli_refuses_unmanaged_run_and_original_terminal_still_cancels(
         assert result["cleanup"] == "not-established-by-interruption"
         fresh = _cli(tmp_path, environment, "runs", "show", run_id)
         assert fresh["status"] == "CANCELLED"
+
+
+def _reload_team(root: Path, name: str) -> Path:
+    repository = root / name
+    repository.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repository)], check=True, timeout=10)
+    (repository / "README.md").write_text("# Native reload cancellation subject\n")
+    (repository / "goon.yml").write_text("steps:\n- id: wait\n  run: sh wait.sh\n")
+    (repository / "wait.sh").write_text(
+        "#!/bin/sh\n"
+        "sleep 60 & child=$!\n"
+        'printf \'%s %s\\n\' "$$" "$child" > cancellation-native.pid\n'
+        'test -z "$OH_GOON_LOCAL_ACCESS_TOKEN" || exit 19\n'
+        'wait "$child"\n'
+    )
+    return repository
+
+
+def _start_team(owner: NativeOwner, repository: Path, run_id: str) -> NativeOwner:
+    teams = owner.http("GET", "/api/league")["teams"]
+    team = next(value for value in teams if value["repository"]["path"] == str(repository))
+    state = owner.http(
+        "POST",
+        "/api/league/team-runs",
+        json.dumps(
+            {
+                "repository": str(repository),
+                "fleet_run_id": run_id,
+                "expected_pipeline_sha256": team["pipeline"]["sha256"],
+                "expected_repository_instance_id": team["repository_instance_id"],
+            }
+        ).encode(),
+    )
+    assert state["fleet_run_id"] == run_id
+    _await_file(repository / "cancellation-native.pid", owner.process)
+    return replace(owner, run_id=run_id)
+
+
+def test_native_reload_keeps_wrapper_and_rebinds_only_new_run_controller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.api.local_access import new_local_access_token
+    from oh_goon.application import ApplicationRuntime
+
+    environment = _environment(tmp_path)
+    repositories = tmp_path / "repositories"
+    first_target = _reload_team(repositories, "first")
+    second_target = _reload_team(repositories, "second")
+    # Prepare the exact Team locks through the ordinary service before any server
+    # or Run exists. All admissions below go through the real unmodified API.
+    with monkeypatch.context() as selected:
+        for name, value in environment.items():
+            if name.startswith(("OH_GOON_", "XDG_")):
+                selected.setenv(name, value)
+        runtime = ApplicationRuntime.build(startup_purpose="workflow")
+        try:
+            runtime.locations.add(repositories)
+            for target in (first_target, second_target):
+                runtime.plans.lock(target / "goon.yml")
+        finally:
+            runtime.shutdown(wait_for_runs=False)
+
+    watch = tmp_path / "native-reload-watch"
+    watch.mkdir()
+    trigger = watch / "native_reload_trigger.py"
+    trigger.write_text("GENERATION = 1\n")
+    with socket.socket() as selection:
+        selection.bind(("127.0.0.1", 0))
+        port = selection.getsockname()[1]
+    repository_root = Path(__file__).resolve().parents[4]
+    entrypoint = Path(sys.executable).with_name("oh-goon-local-dev-backend")
+    service = LocalServicePlan(
+        service="backend",
+        generation=1,
+        command=(
+            str(entrypoint),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--reload",
+            "--reload-dir",
+            str(watch),
+            "--log-level",
+            "warning",
+        ),
+        cwd=watch,
+        host="127.0.0.1",
+        port=port,
+        readiness_path="/healthz",
+        readiness_status=204,
+    )
+    launch = start_contributor_launch(
+        root=repository_root,
+        env=environment,
+        plan=LocalLaunchPlan(profile="contributor-dev", services=(service,)),
+        token=new_local_access_token(),
+    )
+    observations = launch.owner.store
+    process = launch.processes[0]
+    transport = NativeOwner(
+        tmp_path,
+        environment,
+        port,
+        "not-admitted",
+        launch.owner.identity.launch_id,
+        launch.owner.identity.owner_generation,
+        launch.token,
+        process,
+    )
+    active: list[NativeOwner] = []
+    runtime_pids: list[int] = []
+    try:
+        backend = observations.manifest(transport.launch_id).observed.services[0]
+        assert backend.process is not None and backend.process.birth_identity is not None
+        assert backend.runtime_process is not None
+        assert backend.runtime_process.birth_identity is not None
+        wrapper_birth = backend.process.birth_identity.value
+        first_birth = backend.runtime_process.birth_identity.value
+        assert wrapper_birth.pid == process.pid and first_birth.pid != process.pid
+        runtime_pids.append(first_birth.pid)
+        first = _start_team(transport, first_target, "native-reload-first")
+        active.append(first)
+        first_receipt = first.detail()["application_launch"]
+        assert first_receipt["backend_pid"] == first_birth.pid
+        cancelled = _cli(tmp_path, environment, "runs", "cancel", first.run_id)
+        assert cancelled["code"] == "CANCELLATION_REQUESTED"
+        assert _terminal(first)["run"]["status"] == "CANCELLED"
+        first_events = first.http("GET", f"/api/fleet/runs/{first.run_id}/events")["events"]
+        first_tape = _cli(tmp_path, environment, "runs", "tape", first.run_id)
+        assert (
+            first_tape["repositories"][0]["steps"][0]["cancellation"]["settlement"]["cleanup"]
+            == "VERIFIED"
+        )
+
+        trigger.write_text("GENERATION = 2\n")
+        changed = trigger.stat().st_mtime + 2
+        os.utime(trigger, (changed, changed))
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            backend = observations.manifest(transport.launch_id).observed.services[0]
+            current = backend.runtime_process
+            if current is not None and current.birth_identity is not None:
+                second_birth = current.birth_identity.value
+                if (
+                    second_birth != first_birth
+                    and observe_process_birth(second_birth.pid) == second_birth
+                ):
+                    break
+            assert process.poll() is None, launch.diagnostic_tail()
+            time.sleep(0.05)
+        else:
+            pytest.fail(
+                "native uvicorn did not replace its actual API child within the reload bound"
+            )
+        assert backend.process is not None and backend.process.birth_identity is not None
+        assert backend.process.birth_identity.value == wrapper_birth
+        assert observe_process_birth(process.pid) == wrapper_birth
+        assert observe_process_liveness(first_birth.pid) is False
+        runtime_pids.append(second_birth.pid)
+        assert first.detail()["application_launch"] == first_receipt
+
+        second = _start_team(transport, second_target, "native-reload-second")
+        active.append(second)
+        second_receipt = second.detail()["application_launch"]
+        assert second_receipt["backend_pid"] == second_birth.pid
+        assert second_receipt["launch_id"] == first_receipt["launch_id"]
+        assert second_receipt["backend_generation"] == first_receipt["backend_generation"]
+        assert second_receipt["backend_start_ticks"] != first_receipt["backend_start_ticks"]
+
+        database = LocalDatabase(Path(environment["OH_GOON_DB"]), read_only=True)
+        with database.transaction() as connection:
+            state = database.capture_append_context(connection)
+        second_events = second.http("GET", f"/api/fleet/runs/{second.run_id}/events")["events"]
+        refused = first.http(
+            "POST",
+            f"/api/fleet/runs/{first.run_id}/cancel",
+            json.dumps(
+                {"application_launch": first_receipt, "state": state.model_dump(mode="json")}
+            ).encode(),
+            expected=(409,),
+        )
+        assert refused["code"] == "CONTROL_OWNER_UNAVAILABLE"
+        assert (
+            second.http("GET", f"/api/fleet/runs/{second.run_id}/events")["events"] == second_events
+        )
+        assert first.http("GET", f"/api/fleet/runs/{first.run_id}/events")["events"] == first_events
+        assert second.detail()["run"]["status"] == "RUNNING"
+        cancelled = _cli(tmp_path, environment, "runs", "cancel", second.run_id)
+        assert cancelled["code"] == "CANCELLATION_REQUESTED"
+        assert _terminal(second)["run"]["status"] == "CANCELLED"
+        second_tape = _cli(tmp_path, environment, "runs", "tape", second.run_id)
+        assert (
+            second_tape["repositories"][0]["steps"][0]["cancellation"]["settlement"]["cleanup"]
+            == "VERIFIED"
+        )
+        for target in (first_target, second_target):
+            pids = [
+                int(value) for value in (target / "cancellation-native.pid").read_text().split()
+            ]
+            assert all(observe_process_liveness(pid) is False for pid in pids)
+    finally:
+        try:
+            for owner in active:
+                if owner.detail()["run"]["status"] not in {
+                    "CANCELLED",
+                    "COMPLETED",
+                    "FAILED",
+                    "INTERRUPTED",
+                }:
+                    owner.http("POST", f"/api/fleet/runs/{owner.run_id}/cancel")
+        finally:
+            launch.stop()
+            for child in launch.processes:
+                if child.stdout is not None:
+                    child.stdout.close()
+        assert process.poll() is not None
+        assert all(observe_process_liveness(pid) is False for pid in runtime_pids)

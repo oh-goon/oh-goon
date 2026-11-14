@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -18,7 +19,7 @@ from oh_goon.core.process_birth import ProcessBirthIdentity
 T0 = datetime(2026, 9, 3, 20, 0, tzinfo=UTC)
 
 
-def _event(sequence: int, kind: LaunchEventKind, **kwargs) -> LaunchEvent:
+def _event(sequence: int, kind: LaunchEventKind, **kwargs: Any) -> LaunchEvent:
     if kind is LaunchEventKind.SERVICE_SPAWNED:
         payload = kwargs.get("payload")
         if (
@@ -318,6 +319,98 @@ def test_service_ready_requires_startup_complete_and_freezes_runtime_facts() -> 
     )
     with pytest.raises(ValueError, match="after service.ready"):
         validate_launch_event_stream((resolved, spawned, startup, ready, late_bound))
+
+
+@pytest.mark.parametrize(
+    "invalid", ["duplicate", "retired-runtime", "missing-runtime", "stale-generation"]
+)
+def test_native_reload_keeps_the_service_generation_but_refuses_runtime_replay(
+    invalid: str,
+) -> None:
+    first = ProcessBirthIdentity(pid=20, boot_id="runtime-boot", start_ticks=10)
+    second = ProcessBirthIdentity(pid=21, boot_id="runtime-boot", start_ticks=11)
+    events = (
+        _event(1, LaunchEventKind.LAUNCH_RESOLVED),
+        _event(
+            2,
+            LaunchEventKind.SERVICE_SPAWNED,
+            service="backend",
+            service_generation=1,
+            payload={"pid": 10},
+        ),
+        _event(
+            3,
+            LaunchEventKind.SERVICE_STARTUP_COMPLETE,
+            service="backend",
+            service_generation=1,
+            payload={"runtime_pid": first.pid, "runtime_birth_identity": first.to_payload()},
+        ),
+        _event(4, LaunchEventKind.SERVICE_READY, service="backend", service_generation=1),
+        _event(5, LaunchEventKind.LAUNCH_READY),
+        _event(
+            6,
+            LaunchEventKind.SERVICE_STARTUP_COMPLETE,
+            service="backend",
+            service_generation=1,
+            payload={"runtime_pid": second.pid, "runtime_birth_identity": second.to_payload()},
+        ),
+    )
+    assert validate_launch_event_stream(events) == events
+    assert project_launch_lifecycle(events).state is LaunchLifecycleState.READY
+    birth = first if invalid == "retired-runtime" else second
+    payload = {"runtime_pid": birth.pid, "runtime_birth_identity": birth.to_payload()}
+    if invalid == "missing-runtime":
+        payload = {}
+    appended = _event(
+        7,
+        LaunchEventKind.SERVICE_STARTUP_COMPLETE,
+        service="backend",
+        service_generation=2 if invalid == "stale-generation" else 1,
+        payload=payload,
+    )
+    expected = {
+        "duplicate": "replay",
+        "retired-runtime": "replay",
+        "missing-runtime": "once per service generation",
+        "stale-generation": "stale service generation",
+    }
+    with pytest.raises(ValueError, match=expected[invalid]):
+        validate_launch_event_stream((*events, appended))
+
+
+@pytest.mark.parametrize(
+    "invalid", ["missing-pid", "missing-birth", "foreign-pid", "unsupported-birth"]
+)
+def test_runtime_startup_requires_complete_native_process_birth(invalid: str) -> None:
+    birth = ProcessBirthIdentity(pid=20, boot_id="runtime-boot", start_ticks=10).to_payload()
+    baseline: dict[str, object] = {"runtime_pid": 20, "runtime_birth_identity": birth}
+    assert (
+        _event(
+            1,
+            LaunchEventKind.SERVICE_STARTUP_COMPLETE,
+            service="backend",
+            service_generation=1,
+            payload=baseline,
+        ).payload
+        == baseline
+    )
+    payload = dict(baseline)
+    if invalid == "missing-pid":
+        payload.pop("runtime_pid")
+    elif invalid == "missing-birth":
+        payload.pop("runtime_birth_identity")
+    elif invalid == "foreign-pid":
+        payload["runtime_pid"] = 21
+    else:
+        payload["runtime_birth_identity"] = {**birth, "provider": "unqualified"}
+    with pytest.raises(ValueError):
+        _event(
+            1,
+            LaunchEventKind.SERVICE_STARTUP_COMPLETE,
+            service="backend",
+            service_generation=1,
+            payload=payload,
+        )
 
 
 def test_failed_generation_may_restart_only_at_next_exact_generation() -> None:

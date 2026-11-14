@@ -68,6 +68,11 @@ not own Run admission, recovery or durable truth.
 original managed backend recorded in `FleetRunDetail.application_launch`.
 Managed receipt issuance proves the admitting process is that backend;
 an inherited launch context cannot label a child as the original controller.
+Launch observations keep the spawned launcher/reloader process separate from
+the actual backend runtime process reported at API startup. Native Uvicorn owns
+development reloads; each replacement API process reports its own birth under
+the existing service generation. Run receipts retain the exact API process
+that admitted them, so a replacement cannot receive control for its predecessor.
 The existing launch owner proves the current generation, observed loopback
 endpoint and backend process birth; its generation-bound local-access store
 supplies HTTP authorization. No ambient endpoint or token selects a controller.

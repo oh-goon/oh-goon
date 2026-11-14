@@ -2,6 +2,25 @@
 
 This document began as the Phase 0 local-launch ownership inventory. The opening inventory below is **historical baseline evidence**, not the current runtime contract. Current source has since landed the Launch Manifest/runtime bridge, deterministic current-launch binding, process-birth identity, attach/reuse admission, observed-endpoint navigation, structured launch logs, and birth-proven stop control. Later sections record those landed closures. The [repository README](../../README.md) describes the development checkout. Archive-local `CHECKPOINT_NOT_RELEASE.md` records belong to their original checkpoints and are not required in a GitHub clone.
 
+## Backend runtime identity and Run control
+
+`service.spawned` records the native launcher/reloader in `observed.process`.
+Backend `service.startup_complete` separately records the actual API process's
+own native birth in `observed.runtime_process`. Uvicorn owns development reloads;
+each replacement API child reports its birth under the existing service
+generation. A repeated or previously retired birth cannot be replayed, and
+the original wrapper identity remains available to its process supervisor.
+
+Managed Run admission binds to that exact API runtime identity. An inherited
+launch context cannot impersonate its parent, and startup records without a
+runtime birth cannot supply a managed Run receipt. Second-terminal cancellation
+uses the original Run's immutable receipt, current launch facts, private
+generation-bound capability and physical SQLite context. A replacement backend
+cannot accept control for its predecessor. See [execution supervision](EXECUTION_SUPERVISOR.md#second-terminal-cancellation)
+and the [operator command](../QUICKSTART.md#request-cancellation-from-another-terminal).
+Backend startup-report failure closes the original application runtime through
+the same lifespan cleanup as ordinary shutdown.
+
 ## Historical Phase 0 entry paths
 
 ### Contributor development
