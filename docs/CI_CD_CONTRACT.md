@@ -147,6 +147,11 @@ a candidate can consume it.
 - The **bounded HTTP API boundary proof** requires actual changed native API
   integration tests, backend static checks and generated-contract freshness for
   unresolved route inputs. Passing an unrelated or empty test cannot substitute.
+- The **bounded Python CI example proof** covers only the existing adapter and
+  copied GitHub/GitLab recipe files. It requires the native CI adapter acceptance
+  cases, native Bash provider delegation/exit tests, Python static checks and
+  architecture. Provider syntax and local shell proof retain their scope;
+  actual hosted qualification remains source- and provider-specific.
 - The **bounded frontend boundary proof** requires an unchanged native frontend
   tool configuration, actual changed component tests, a native-collected Chromium
   journey and the existing frontend static/i18n/contract checks for unresolved
