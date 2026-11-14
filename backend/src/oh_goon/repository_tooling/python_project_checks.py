@@ -11,14 +11,17 @@ import stat
 import sys
 import tempfile
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from types import MappingProxyType, SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 from oh_goon.engine.command import (
     CommandCancelledError,
     CommandProcessLifecycleEvent,
     CommandTimeoutExpired,
+    observe_command_processes,
     run_command,
 )
 from oh_goon.integrations.exact_file_write import publish_text_file
@@ -34,6 +37,9 @@ from oh_goon.repository_tooling.pytest_execution_report import (
 from oh_goon.repository_tooling.pytest_process_environment import without_test_report_environment
 from oh_goon.runtime.template_discovery import discover_template_packages
 
+if TYPE_CHECKING:
+    from oh_goon.repository_tooling.pytest_process_environment import PytestInvocation
+
 ROOT = Path(__file__).resolve().parents[4]
 _PROJECTS = (
     ("iris", "templates/goons/ml/iris-train", ("tests",)),
@@ -44,6 +50,719 @@ _PROJECTS = (
     ),
 )
 PROJECT_REPORT_SCHEMA = "oh-goon.python-project-checks/v1"
+NATIVE_PROJECT_OWNER = "Native project pytest"
+
+
+def project_for_pytest_target(root: Path, target: str) -> str | None:
+    """Select only an existing configured owner's execution context, never tests."""
+    filename = target.partition("::")[0]
+    path = Path(filename)
+    if (
+        not filename
+        or path.is_absolute()
+        or path.as_posix() != filename
+        or ".." in path.parts
+        or "\\" in filename
+        or "\n" in filename
+    ):
+        return None
+    for _name, relative, tests in _PROJECTS:
+        for test in tests:
+            owned = Path(relative) / test
+            if path == owned or path.is_relative_to(owned):
+                return relative
+    return None
+
+
+def configured_project_pytest_targets(root: Path, project: str) -> tuple[str, ...]:
+    for _name, relative, tests in _PROJECTS:
+        if relative == project:
+            targets = tuple((Path(relative) / test).as_posix() for test in tests)
+            if all(project_for_pytest_target(root, target) == relative for target in targets):
+                return targets
+    raise ValueError("Native pytest project context is not configured")
+
+
+def _project_context(
+    root: Path, project: str, marker: str | None, source_identity: str
+) -> dict[str, Any]:
+    from oh_goon.core.file_digest import sha256_file
+    from oh_goon.repository_tooling.release.package_slim import canonical_source_identity
+
+    configured_project_pytest_targets(root, project)
+    if marker is not None and (not isinstance(marker, str) or not marker):
+        raise ValueError("Native project marker context is invalid")
+    if canonical_source_identity(root) != source_identity:
+        raise ValueError("Native project source changed after admission")
+    directory = root / project
+    if not directory.is_dir() or directory.resolve(strict=True) != directory:
+        raise ValueError("Native project context has an aliased root")
+    for name in ("pyproject.toml", "uv.lock"):
+        path = directory / name
+        if not path.is_file() or path.resolve(strict=True) != path:
+            raise ValueError("Native project authority must be regular source files")
+    return {
+        "project": project,
+        "pyproject_sha256": sha256_file(directory / "pyproject.toml"),
+        "uv_lock_sha256": sha256_file(directory / "uv.lock"),
+        "collector_sha256": sha256_file(Path(__file__).with_name("pytest_member_selection.py")),
+        "group": "dev",
+        "marker": marker,
+        "source_identity": source_identity,
+    }
+
+
+@contextmanager
+def _project_session(
+    root: Path, project: str, marker: str | None, source_identity: str
+) -> Iterator[dict[str, Any]]:
+    root = root.resolve(strict=True)
+    context = _project_context(root, project, marker, source_identity)
+    scratch = Path(tempfile.mkdtemp(prefix="oh-goon-native-project-"))
+    quiescent = True
+    failure: BaseException | None = None
+    session: dict[str, Any] = {
+        "context": context,
+        "scratch": scratch,
+        "cleanup": "INCOMPLETE",
+        "native_execution": [],
+    }
+
+    def observe(event: CommandProcessLifecycleEvent) -> None:
+        nonlocal quiescent
+        if event.kind == "PROCESS_STARTING":
+            quiescent = False
+        elif event.kind == "DESCENDANTS_QUIESCENT":
+            quiescent = True
+
+    try:
+        if scratch.resolve().is_relative_to(root):
+            raise ValueError("Native project environment must remain outside source")
+        environment = scratch / "environment"
+        child_env = without_test_report_environment(os.environ)
+        for name in (
+            "OH_GOON_PYTEST_PROJECT_EXECUTION_OUTPUT",
+            "OH_GOON_PYTEST_PROJECT_ADMISSION",
+            "OH_GOON_PYTEST_COLLECTION_OUTPUT",
+            "OH_GOON_PYTEST_EXPECTED_ENVIRONMENT",
+            "OH_GOON_PYTEST_PROJECT_MARKER",
+        ):
+            child_env.pop(name, None)
+        child_env.update(UV_PROJECT_ENVIRONMENT=str(environment), PYTHONDONTWRITEBYTECODE="1")
+        with observe_command_processes(observe):
+            sync = run_command(
+                *_project_prepare_command(root, project),
+                cwd=root,
+                env=child_env,
+                timeout=180,
+                require_process_group_quiescence=True,
+                parent_death_signal=True,
+                max_capture_bytes_per_stream=64 * 1024,
+                retain_output_tail=True,
+            )
+            session["native_execution"].append(
+                {
+                    "phase": "prepare",
+                    "argv": list(sync.argv),
+                    "returncode": sync.returncode,
+                    "process_group_quiescent": sync.supervisor.final_process_group_quiescent,
+                }
+            )
+            if (
+                sync.returncode
+                or not quiescent
+                or not sync.supervisor.final_process_group_quiescent
+            ):
+                raise ValueError("Native project preparation failed or process cleanup is unproven")
+            collector = Path(__file__).with_name("pytest_member_selection.py").resolve()
+            invocation = _project_invocation(root, context, environment, child_env)
+            session.update(
+                environment=environment,
+                invocation=invocation,
+                collector=collector,
+                child_environment=child_env,
+            )
+            yield session
+            if context != _project_context(root, project, marker, source_identity):
+                raise ValueError("Native project context changed during verification")
+    except BaseException as exc:
+        failure = exc
+        raise
+    finally:
+        if quiescent:
+            try:
+                shutil.rmtree(scratch)
+                session["cleanup"] = "VERIFIED"
+            except OSError as exc:
+                if failure is None:
+                    raise
+                failure.add_note(f"Native project cleanup failed: {exc}")
+        else:
+            message = f"Native project environment retained: process cleanup unproven: {scratch}"
+            if failure is not None:
+                failure.add_note(message)
+            else:
+                raise RuntimeError(message)
+
+
+def _project_invocation(
+    root: Path,
+    context: Mapping[str, Any],
+    environment: Path,
+    child_env: Mapping[str, str],
+    *,
+    collector: Path | None = None,
+) -> PytestInvocation:
+    from oh_goon.repository_tooling.pytest_process_environment import PytestInvocation
+
+    collector = collector or Path(__file__).with_name("pytest_member_selection.py").resolve()
+    return PytestInvocation(
+        cwd=root,
+        source_root=root,
+        config_file=root / context["project"] / "pyproject.toml",
+        pytest_args=("-p", "no:cacheprovider"),
+        command_prefix=(str(environment / "bin/python"), "-I", "-B", str(collector)),
+        environment=MappingProxyType(child_env),
+        qualified=True,
+        config_identity=context["pyproject_sha256"],
+    )
+
+
+def _validated_project_collector(root: Path, context: Mapping[str, Any], value: Any) -> Path:
+    from oh_goon.core.file_digest import sha256_file
+
+    if not isinstance(value, str):
+        raise ValueError("Native project collector is unavailable")
+    collector = Path(value)
+    allowed = {
+        Path(__file__).with_name("pytest_member_selection.py"),
+        root / "backend/src/oh_goon/repository_tooling/pytest_member_selection.py",
+    }
+    if (
+        collector not in allowed
+        or not collector.is_file()
+        or collector.resolve(strict=True) != collector
+        or sha256_file(collector) != context["collector_sha256"]
+    ):
+        raise ValueError("Native project collector bytes or location changed")
+    return collector
+
+
+def _project_prepare_command(root: Path, project: str) -> tuple[str, ...]:
+    return (
+        "uv",
+        "sync",
+        "--project",
+        str(root / project),
+        "--frozen",
+        "--no-default-groups",
+        "--group",
+        "dev",
+        "--no-python-downloads",
+    )
+
+
+def _project_execution_command(
+    root: Path,
+    context: Mapping[str, Any],
+    environment: Path,
+    selected: Sequence[str],
+    *,
+    collector: Path | None = None,
+) -> list[str]:
+    command = [
+        *_project_invocation(root, context, environment, {}, collector=collector).command_prefix,
+        "-c",
+        str(root / context["project"] / "pyproject.toml"),
+        "-p",
+        "__main__",
+        "-p",
+        "no:cacheprovider",
+    ]
+    command.extend(str(root / member) for member in selected)
+    return command
+
+
+def _require_native_execution(
+    value: Any, phases: tuple[str, ...], commands: Sequence[Sequence[str]]
+) -> None:
+    if (
+        not isinstance(value, list)
+        or len(value) != len(phases)
+        or any(
+            not isinstance(row, Mapping)
+            or row.get("phase") != phase
+            or row.get("argv") != list(command)
+            or row.get("process_group_quiescent") is not True
+            or type(row.get("returncode")) is not int
+            or row["returncode"] != 0
+            for row, phase, command in zip(value, phases, commands, strict=True)
+        )
+    ):
+        raise ValueError("Native project process cleanup or outcome is unproven")
+
+
+def _runtime_identity(
+    runtime: Mapping[str, Any], environment: Path, collector: Path
+) -> dict[str, str]:
+    from oh_goon.core.file_digest import sha256_file
+
+    if (
+        Path(str(runtime.get("prefix", ""))) != environment
+        or Path(str(runtime.get("executable", ""))) != environment / "bin/python"
+        or Path(str(runtime.get("collector", ""))).resolve() != collector
+    ):
+        raise ValueError("Native project collection used another interpreter or collector")
+    return {
+        "python_version": str(runtime["python_version"]),
+        "pytest_version": str(runtime["pytest_version"]),
+        "interpreter_sha256": sha256_file((environment / "bin/python").resolve(strict=True)),
+    }
+
+
+def collect_project_pytest(
+    root: Path, targets: Sequence[str], *, marker: str | None, source_identity: str
+) -> list[dict[str, Any]]:
+    from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
+
+    root = root.resolve(strict=True)
+    grouped: dict[str, list[str]] = {}
+    for target in targets:
+        project = project_for_pytest_target(root, target)
+        if project is None:
+            raise ValueError("Native pytest target has no configured project context")
+        grouped.setdefault(project, []).append(target)
+    packets: list[dict[str, Any]] = []
+    for project, selected in sorted(grouped.items()):
+        with _project_session(root, project, marker, source_identity) as session:
+            collection = collect_native_pytest(
+                tuple(root / target for target in sorted(set(selected))),
+                additional_marker=marker,
+                invocation=session["invocation"],
+                plugin_module="__main__",
+                expected_environment=session["environment"],
+            )
+            packet = {
+                "project": project,
+                "context": session["context"],
+                "collection": collection.payload(),
+                "runtime": dict(collection.runtime or {}),
+                "request": dict(collection.request or {}),
+                "environment": str(session["environment"]),
+                "native_execution": session["native_execution"],
+            }
+            packet["runtime_identity"] = _runtime_identity(
+                packet["runtime"], session["environment"], session["collector"]
+            )
+        packet["cleanup"] = session["cleanup"]
+        packets.append(packet)
+    return packets
+
+
+def require_project_pytest_admission(
+    root: Path, admissions: Sequence[Mapping[str, Any]], *, source_identity: str
+) -> set[str]:
+    root = root.resolve(strict=True)
+    members: set[str] = set()
+    projects: set[str] = set()
+    for packet in admissions:
+        project, context = packet.get("project"), packet.get("context")
+        if (
+            not isinstance(project, str)
+            or not isinstance(context, Mapping)
+            or project in projects
+            or packet.get("cleanup") != "VERIFIED"
+        ):
+            raise ValueError("Native project admission has invalid or duplicate context")
+        if context != _project_context(root, project, context.get("marker"), source_identity):
+            raise ValueError("Native project admission is stale or has changed context")
+        projects.add(project)
+        collection = packet.get("collection", {})
+        if not isinstance(collection, Mapping):
+            raise ValueError("Native project collection is malformed")
+        selected, deselected = collection.get("selected", []), collection.get("deselected", [])
+        if not isinstance(selected, list) or not selected or not isinstance(deselected, list):
+            raise ValueError("Native project admission has no exact selected membership")
+        seen: set[str] = set()
+        for row in (*selected, *deselected):
+            if (
+                not isinstance(row, Mapping)
+                or not isinstance(row.get("selector"), str)
+                or not isinstance(row.get("file"), str)
+                or row["selector"].split("::", 1)[0] != row["file"]
+                or project_for_pytest_target(root, row["selector"]) != project
+                or row["selector"] in seen
+            ):
+                raise ValueError("Native project collection is duplicated or outside its context")
+            seen.add(row["selector"])
+        current = {row["selector"] for row in selected}
+        if members & current:
+            raise ValueError("Native project admission duplicates an executable member")
+        members.update(current)
+        from oh_goon.repository_tooling.pytest_member_selection import native_collection_request
+
+        runtime, request = packet.get("runtime", {}), packet.get("request", {})
+        identity = packet.get("runtime_identity", {})
+        environment = Path(str(packet.get("environment", "")))
+        if not all(isinstance(row, Mapping) for row in (runtime, request, identity)):
+            raise ValueError("Native project native authority is malformed")
+        paths = request.get("paths")
+        if (
+            environment.is_relative_to(root)
+            or not environment.is_absolute()
+            or identity.get("python_version") != runtime.get("python_version")
+            or identity.get("pytest_version") != runtime.get("pytest_version")
+            or runtime.get("additional_marker") != context["marker"]
+            or not isinstance(runtime.get("marker_expression"), str)
+            or not isinstance(identity.get("interpreter_sha256"), str)
+            or len(identity["interpreter_sha256"]) != 64
+            or Path(str(runtime.get("prefix", ""))) != environment
+            or Path(str(runtime.get("executable", ""))) != environment / "bin/python"
+            or not isinstance(paths, list)
+            or not paths
+            or any(
+                not isinstance(path, str)
+                or not Path(path).is_relative_to(root)
+                or project_for_pytest_target(root, str(Path(path).relative_to(root))) != project
+                for path in paths
+            )
+        ):
+            raise ValueError("Native project admission lost its native execution authority")
+        collector = _validated_project_collector(root, context, runtime.get("collector"))
+        invocation = _project_invocation(
+            root, context, environment, os.environ, collector=collector
+        )
+        resolved_request = native_collection_request(
+            tuple(Path(path) for path in paths),
+            invocation=invocation,
+            additional_marker=context["marker"],
+            plugin_module="__main__",
+            expected_environment=environment,
+        )
+        correctness = request.get("correctness_context")
+        if (
+            not isinstance(correctness, str)
+            or not correctness.startswith("native-pytest-invocation:")
+            or len(correctness.removeprefix("native-pytest-invocation:")) != 64
+        ):
+            raise ValueError("Native project correctness context is unavailable")
+        # This identity was resolved by the original native collection owner.
+        # A later trusted controller must not reinterpret another process's
+        # PATH/HOME/plugin inputs using its own ambient defaults.
+        resolved_request["correctness_context"] = correctness
+        if request != resolved_request:
+            raise ValueError("Native project collection request changed after admission")
+        _require_native_execution(
+            packet.get("native_execution"), ("prepare",), (_project_prepare_command(root, project),)
+        )
+    return members
+
+
+def _project_native_report(
+    raw: Mapping[str, Any],
+    selected: tuple[str, ...],
+    directory: Path,
+    *,
+    source_identity: str,
+    returncode: int,
+) -> dict[str, Any]:
+    from oh_goon.repository_tooling import pytest_batch_receipts as owner
+    from oh_goon.repository_tooling.pytest_execution_membership import (
+        ExecutionMembershipStore,
+        execution_attempt_identity,
+        execution_run_identity,
+        logical_membership_identity,
+    )
+    from oh_goon.repository_tooling.pytest_execution_report import execution_report_schema
+    from oh_goon.repository_tooling.pytest_member_selection import read_native_collection
+
+    identity = logical_membership_identity(selected)
+    run = execution_run_identity(suite_identity=source_identity, execution_plan_identity=identity)
+    attempt = execution_attempt_identity(
+        run_identity=run,
+        root_batch_identity=identity,
+        root_attempt=0,
+        launch_ordinal=0,
+        members=selected,
+    )
+    store = ExecutionMembershipStore(
+        directory,
+        suite_identity=source_identity,
+        execution_plan_identity=identity,
+        run_identity=run,
+    )
+    items = raw.get("items", [])
+    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        raise ValueError("Native project execution collection is malformed")
+    if any(
+        not isinstance(item.get("nodeid"), str)
+        or not isinstance(item.get("selector"), str)
+        or not isinstance(item.get("file"), str)
+        or item["selector"].partition("::")[0] != item["file"]
+        for item in items
+    ):
+        raise ValueError("Native project execution addressing is malformed")
+    by_node = {item["nodeid"]: item["selector"] for item in items}
+    if len(by_node) != len(items) or len(set(by_node.values())) != len(items):
+        raise ValueError("Native project execution collection has duplicate members")
+    states: dict[str, dict[str, Any]] = {}
+    observed: dict[str, set[str]] = {}
+    previous_states = {node: owner._ITEM_STATE.get(node) for node in by_node}
+    previous_outcomes = {node: owner._ITEM_OUTCOME.get(node) for node in by_node}
+    try:
+        for node, member in by_node.items():
+            owner._ITEM_STATE.pop(node, None)
+            owner._ITEM_OUTCOME.pop(node, None)
+            if member not in selected:
+                store.record_extra(node, attempt_identity=attempt)
+        started = raw.get("started", [])
+        if (
+            not isinstance(started, list)
+            or any(not isinstance(node, str) for node in started)
+            or len(started) != len(set(started))
+        ):
+            raise ValueError("Native project start observations are malformed or duplicated")
+        for node in started:
+            if node not in by_node:
+                raise ValueError("Native project started an uncollected item")
+            store.record_started(
+                by_node[node], attempt_identity=attempt, observed_batch_identity=identity
+            )
+            states[node] = {"failed": False, "non_passed": False}
+        phases = raw.get("phases", [])
+        if not isinstance(phases, list):
+            raise ValueError("Native project phase observations are malformed")
+        for phase in phases:
+            if (
+                not isinstance(phase, dict)
+                or phase.get("nodeid") not in states
+                or phase.get("when") not in {"setup", "call", "teardown"}
+                or phase.get("outcome") not in {"passed", "failed", "skipped"}
+                or phase.get("failed") is not (phase["outcome"] == "failed")
+                or phase.get("skipped") is not (phase["outcome"] == "skipped")
+                or (phase.get("wasxfail") is not None and phase.get("wasxfail") is not True)
+            ):
+                raise ValueError("Native project phase observations are malformed")
+            node, when = phase["nodeid"], phase["when"]
+            seen = observed.setdefault(node, set())
+            if (
+                when in seen
+                or "teardown" in seen
+                or (when != "setup" and "setup" not in seen)
+                or (when == "setup" and seen)
+            ):
+                raise ValueError("Native project phase observations are duplicated")
+            seen.add(when)
+            owner._observe_report(SimpleNamespace(**phase), states[node])
+            if when == "teardown":
+                store.record_terminal(
+                    by_node[node],
+                    attempt_identity=attempt,
+                    observed_batch_identity=identity,
+                    status=owner._terminal_status(states[node]),
+                    pytest_outcomes=[
+                        {"nodeid": node, "outcome": owner._ITEM_OUTCOME.get(node, "UNREPORTED")}
+                    ],
+                )
+        receipt, _path = store.finalize(
+            selected=selected, resumed=(), suite_passed=returncode == 0, recovery_lineage=()
+        )
+    finally:
+        for node in by_node:
+            owner._ITEM_STATE.pop(node, None)
+            owner._ITEM_OUTCOME.pop(node, None)
+            previous_state, previous_outcome = previous_states[node], previous_outcomes[node]
+            if previous_state is not None:
+                owner._ITEM_STATE[node] = previous_state
+            if previous_outcome is not None:
+                owner._ITEM_OUTCOME[node] = previous_outcome
+    actual = [item["selector"] for item in items]
+    deselected = [item["selector"] for item in raw.get("deselected", [])]
+    return {
+        "schema": execution_report_schema(),
+        "status": "PASS" if returncode == 0 else "FAIL",
+        "source_identity": source_identity,
+        "membership_receipt": read_native_collection(_path),
+        "native_collection": {"discovered": actual + deselected, "deselected": deselected},
+    }
+
+
+def execute_project_pytest(
+    root: Path, admissions: Sequence[Mapping[str, Any]], *, source_identity: str
+) -> list[dict[str, Any]]:
+    from oh_goon.core.file_digest import sha256_file
+    from oh_goon.repository_tooling.pytest_member_selection import (
+        read_native_collection,
+        write_native_collection,
+    )
+    from oh_goon.repository_tooling.verification_gate_control import require_native_pytest_pass
+
+    root = root.resolve(strict=True)
+    require_project_pytest_admission(root, admissions, source_identity=source_identity)
+    outcomes: list[dict[str, Any]] = []
+    for packet in admissions:
+        project = packet["project"]
+        selected = tuple(sorted(row["selector"] for row in packet["collection"]["selected"]))
+        with _project_session(
+            root, project, packet["context"]["marker"], source_identity
+        ) as session:
+            interpreter = (session["environment"] / "bin/python").resolve(strict=True)
+            if sha256_file(interpreter) != packet["runtime_identity"]["interpreter_sha256"]:
+                raise ValueError("Native project interpreter changed before execution")
+            admission_file, report_file = (
+                session["scratch"] / "admission.json",
+                session["scratch"] / "execution.json",
+            )
+            write_native_collection(
+                admission_file,
+                {"selected": list(selected), "additional_marker": packet["context"]["marker"]},
+            )
+            child_env = {
+                **session["child_environment"],
+                "OH_GOON_PYTEST_PROJECT_EXECUTION_OUTPUT": str(report_file),
+                "OH_GOON_PYTEST_PROJECT_ADMISSION": str(admission_file),
+                "OH_GOON_PYTEST_EXPECTED_ENVIRONMENT": str(session["environment"]),
+            }
+            if packet["context"]["marker"] is not None:
+                child_env["OH_GOON_PYTEST_PROJECT_MARKER"] = packet["context"]["marker"]
+            command = _project_execution_command(
+                root, session["context"], session["environment"], selected
+            )
+            result = run_command(
+                *command,
+                cwd=root,
+                env=child_env,
+                timeout=600,
+                require_process_group_quiescence=True,
+                parent_death_signal=True,
+                max_capture_bytes_per_stream=64 * 1024,
+                retain_output_tail=True,
+            )
+            session["native_execution"].append(
+                {
+                    "phase": "execute",
+                    "argv": list(result.argv),
+                    "returncode": result.returncode,
+                    "process_group_quiescent": result.supervisor.final_process_group_quiescent,
+                }
+            )
+            if not result.supervisor.final_process_group_quiescent:
+                raise ValueError("Native project execution process cleanup is unproven")
+            raw = read_native_collection(report_file)
+            runtime = raw["runtime"]
+            runtime_identity = _runtime_identity(
+                runtime, session["environment"], session["collector"]
+            )
+            if (
+                runtime_identity != packet["runtime_identity"]
+                or runtime.get("additional_marker") != packet["context"]["marker"]
+                or runtime.get("marker_expression") != packet["runtime"]["marker_expression"]
+                or raw.get("exitstatus") != result.returncode
+            ):
+                raise ValueError("Native project toolchain or exit observation changed")
+            native = _project_native_report(
+                raw,
+                selected,
+                session["scratch"] / "receipts",
+                source_identity=source_identity,
+                returncode=result.returncode,
+            )
+            try:
+                require_native_pytest_pass(native, expected_source=source_identity)
+                passed = True
+            except ValueError:
+                native["status"] = "FAIL"
+                passed = False
+            outcome = {
+                "owner": NATIVE_PROJECT_OWNER,
+                "project": project,
+                "context": session["context"],
+                "returncode": result.returncode or (0 if passed else 1),
+                "native_report": native,
+                "native_execution": session["native_execution"],
+                "runtime": runtime,
+                "runtime_identity": runtime_identity,
+                "environment": str(session["environment"]),
+            }
+        outcome["cleanup"] = session["cleanup"]
+        outcomes.append(outcome)
+    return outcomes
+
+
+def require_project_pytest_outcomes(
+    root: Path,
+    admissions: Sequence[Mapping[str, Any]],
+    outcomes: Sequence[Mapping[str, Any]],
+    *,
+    source_identity: str,
+) -> tuple[set[str], set[str]]:
+    from oh_goon.repository_tooling.verification_gate_control import require_native_pytest_pass
+
+    root = root.resolve(strict=True)
+    require_project_pytest_admission(root, admissions, source_identity=source_identity)
+    expected = {packet["project"]: packet for packet in admissions}
+    if len(outcomes) != len(expected):
+        raise ValueError("Native project owners are missing or extra")
+    files: set[str] = set()
+    members: set[str] = set()
+    seen: set[str] = set()
+    for outcome in outcomes:
+        project = outcome.get("project")
+        if (
+            not isinstance(project, str)
+            or project not in expected
+            or project in seen
+            or outcome.get("owner") != NATIVE_PROJECT_OWNER
+            or outcome.get("returncode") != 0
+            or outcome.get("cleanup") != "VERIFIED"
+        ):
+            raise ValueError("Native project owner is missing, duplicated or non-PASS")
+        packet = expected[project]
+        environment = Path(str(outcome.get("environment", "")))
+        runtime = outcome.get("runtime", {})
+        if not isinstance(runtime, Mapping):
+            raise ValueError("Native project runtime is malformed")
+        if (
+            outcome.get("context") != packet["context"]
+            or outcome.get("runtime_identity") != packet["runtime_identity"]
+            or not environment.is_absolute()
+            or environment.is_relative_to(root)
+            or runtime.get("prefix") != str(environment)
+            or runtime.get("executable") != str(environment / "bin/python")
+            or runtime.get("additional_marker") != packet["context"]["marker"]
+            or runtime.get("marker_expression") != packet["runtime"]["marker_expression"]
+        ):
+            raise ValueError("Native project execution context or process cleanup changed")
+        collector = _validated_project_collector(root, packet["context"], runtime.get("collector"))
+        _require_native_execution(
+            outcome.get("native_execution"),
+            ("prepare", "execute"),
+            (
+                _project_prepare_command(root, project),
+                _project_execution_command(
+                    root,
+                    packet["context"],
+                    environment,
+                    sorted(row["selector"] for row in packet["collection"]["selected"]),
+                    collector=collector,
+                ),
+            ),
+        )
+        native = outcome.get("native_report", {})
+        if not isinstance(native, Mapping):
+            raise ValueError("Native project report is malformed")
+        found = require_native_pytest_pass(native, expected_source=source_identity)
+        executed = set(native["membership_receipt"]["selected"])
+        if (
+            executed != {row["selector"] for row in packet["collection"]["selected"]}
+            or members & executed
+        ):
+            raise ValueError("Native project executed membership differs from admission")
+        seen.add(project)
+        files.update(found)
+        members.update(executed)
+    return files, members
+
 
 _UNITTEST_OBSERVER = r"""
 import json, pathlib, sys, unittest

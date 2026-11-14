@@ -11,17 +11,23 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from oh_goon.engine.command import run_command
-from oh_goon.repository_tooling.pytest_process_environment import (
-    PytestInvocation,
-    resolve_pytest_invocation,
-)
+if TYPE_CHECKING:
+    from oh_goon.repository_tooling.pytest_process_environment import PytestInvocation
 
 _COLLECTION_ENV = "OH_GOON_PYTEST_COLLECTION_OUTPUT"
 _COLLECTION_ENVIRONMENT = "OH_GOON_PYTEST_EXPECTED_ENVIRONMENT"
 _DESELECTED: list[dict[str, str]] = []
+_PROJECT_EXECUTION_ENV = "OH_GOON_PYTEST_PROJECT_EXECUTION_OUTPUT"
+_PROJECT_ADMISSION_ENV = "OH_GOON_PYTEST_PROJECT_ADMISSION"
+_PROJECT_OUTPUT: Path | None = None
+_PROJECT_EXPECTED: tuple[str, ...] | None = None
+_PROJECT_MARKER_ENV = "OH_GOON_PYTEST_PROJECT_MARKER"
+_PROJECT_MARKER: str | None = None
+_PROJECT_STARTED: list[str] = []
+_PROJECT_PHASES: list[dict[str, Any]] = []
+_PROJECT_OBSERVATION_BYTES = 0
 
 
 def register_resume_marker(config: Any) -> None:
@@ -32,6 +38,11 @@ def register_resume_marker(config: Any) -> None:
 
 def pytest_configure(config: Any) -> None:
     register_resume_marker(config)
+    if _PROJECT_MARKER is not None:
+        native = config.option.markexpr
+        config.option.markexpr = (
+            f"({native}) and ({_PROJECT_MARKER})" if native else _PROJECT_MARKER
+        )
 
 
 def collected_item(item: Any, root: Path) -> dict[str, str]:
@@ -49,14 +60,87 @@ def collected_item(item: Any, root: Path) -> dict[str, str]:
     return row
 
 
+def _bound_project_observation(value: Any) -> None:
+    global _PROJECT_OBSERVATION_BYTES
+    _PROJECT_OBSERVATION_BYTES += len(json.dumps(value, ensure_ascii=True)) + 2
+    if _PROJECT_OBSERVATION_BYTES > 16 * 1024 * 1024 - 4096:
+        import pytest
+
+        pytest.exit("Native project observation exceeds its transport bound", returncode=2)
+
+
 def pytest_deselected(items: list[Any]) -> None:
-    if os.environ.get(_COLLECTION_ENV):
-        _DESELECTED.extend(collected_item(item, Path.cwd().resolve()) for item in items)
+    if os.environ.get(_COLLECTION_ENV) or _PROJECT_OUTPUT is not None:
+        for item in items:
+            row = collected_item(item, Path.cwd().resolve())
+            if _PROJECT_OUTPUT is not None:
+                _bound_project_observation(row)
+            _DESELECTED.append(row)
+
+
+def pytest_collection_finish(session: Any) -> None:
+    if _PROJECT_EXPECTED is None:
+        return
+    import pytest
+
+    actual = []
+    for item in session.items:
+        row = {"nodeid": item.nodeid, **collected_item(item, Path.cwd().resolve())}
+        _bound_project_observation(row)
+        actual.append(row["selector"])
+    if len(actual) != len(set(actual)) or set(actual) != set(_PROJECT_EXPECTED):
+        raise pytest.UsageError("Native project collection changed after admission")
+
+
+def pytest_runtest_logstart(nodeid: str, location: Any) -> None:
+    if _PROJECT_OUTPUT is not None:
+        _bound_project_observation(nodeid)
+        _PROJECT_STARTED.append(nodeid)
+
+
+def pytest_runtest_logreport(report: Any) -> None:
+    if _PROJECT_OUTPUT is None:
+        return
+    # Transport native observations only. The existing controller's receipt
+    # owner retains final category and exact membership authority.
+    phase = {
+        "nodeid": report.nodeid,
+        "when": report.when,
+        "outcome": report.outcome,
+        "failed": report.failed,
+        "skipped": report.skipped,
+        "wasxfail": True if getattr(report, "wasxfail", None) is not None else None,
+    }
+    _bound_project_observation(phase)
+    _PROJECT_PHASES.append(phase)
 
 
 def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
     import pytest
 
+    if _PROJECT_OUTPUT is not None:
+        write_native_collection(
+            _PROJECT_OUTPUT,
+            {
+                "items": [
+                    {"nodeid": item.nodeid, **collected_item(item, Path.cwd().resolve())}
+                    for item in session.items
+                ],
+                "deselected": _DESELECTED,
+                "started": _PROJECT_STARTED,
+                "phases": _PROJECT_PHASES,
+                "exitstatus": int(exitstatus),
+                "runtime": {
+                    "executable": sys.executable,
+                    "prefix": sys.prefix,
+                    "collector": __file__,
+                    "python_version": sys.version,
+                    "pytest_version": pytest.__version__,
+                    "additional_marker": _PROJECT_MARKER,
+                    "marker_expression": session.config.option.markexpr,
+                },
+            },
+        )
     destination = os.environ.get(_COLLECTION_ENV)
     if not destination or exitstatus not in (0, 5):
         return
@@ -71,6 +155,8 @@ def pytest_sessionfinish(session: Any, exitstatus: int) -> None:
                 "collector": __file__,
                 "python_version": sys.version,
                 "pytest_version": pytest.__version__,
+                "additional_marker": _PROJECT_MARKER,
+                "marker_expression": session.config.option.markexpr,
             },
         },
     )
@@ -146,6 +232,7 @@ def native_collection_request(
     marker: str | None = None,
     plugin_module: str = "oh_goon.repository_tooling.pytest_member_selection",
     expected_environment: Path | None = None,
+    additional_marker: str | None = None,
 ) -> dict[str, Any]:
     """Resolve one exact native collection request without executing it."""
     command = [
@@ -177,6 +264,7 @@ def native_collection_request(
         "paths": [str(path) for path in paths],
         "excludes": list(excludes),
         "marker": marker,
+        **({"additional_marker": additional_marker} if additional_marker is not None else {}),
         "plugin_module": plugin_module,
         "expected_environment": str(expected_environment)
         if expected_environment is not None
@@ -194,14 +282,23 @@ def collect_native_pytest(
     environment: Mapping[str, str] | None = None,
     plugin_module: str = "oh_goon.repository_tooling.pytest_member_selection",
     expected_environment: Path | None = None,
+    additional_marker: str | None = None,
 ) -> NativePytestCollection:
     """Run native collection with exactly the execution configuration/environment."""
+    from oh_goon.engine.command import run_command
+    from oh_goon.repository_tooling.pytest_process_environment import resolve_pytest_invocation
+
     with tempfile.TemporaryDirectory(prefix="oh-goon-pytest-collection-") as directory:
         output = Path(directory) / "collection.json"
         invocation = invocation or resolve_pytest_invocation()
         if environment is not None:
             invocation = replace(invocation, environment=MappingProxyType(dict(environment)))
         child_environment = dict(invocation.environment)
+        child_environment.pop(_PROJECT_MARKER_ENV, None)
+        if additional_marker is not None:
+            if plugin_module != "__main__":
+                raise ValueError("Additional project markers require native collector hooks")
+            child_environment[_PROJECT_MARKER_ENV] = additional_marker
         child_environment[_COLLECTION_ENV] = str(output)
         if expected_environment is not None:
             child_environment[_COLLECTION_ENVIRONMENT] = str(expected_environment)
@@ -212,6 +309,7 @@ def collect_native_pytest(
             marker=marker,
             plugin_module=plugin_module,
             expected_environment=expected_environment,
+            additional_marker=additional_marker,
         )
         command = request["argv"]
         try:
@@ -276,6 +374,26 @@ if __name__ == "__main__":
     selected_environment = os.environ.get(_COLLECTION_ENVIRONMENT)
     if selected_environment and Path(sys.prefix).resolve() != Path(selected_environment).resolve():
         raise SystemExit("Native collection Python environment does not match its authority")
+    _PROJECT_MARKER = os.environ.pop(_PROJECT_MARKER_ENV, None)
+    project_output = os.environ.pop(_PROJECT_EXECUTION_ENV, None)
+    project_admission = os.environ.pop(_PROJECT_ADMISSION_ENV, None)
+    if (project_output is None) != (project_admission is None):
+        raise SystemExit("Native project observations require their exact admission")
+    if project_output is not None:
+        assert project_admission is not None
+        _PROJECT_OUTPUT = Path(project_output)
+        admitted = read_native_collection(Path(project_admission))
+        if admitted.get("additional_marker") != _PROJECT_MARKER:
+            raise SystemExit("Native project marker does not match its authority")
+        expected = admitted["selected"]
+        if (
+            not isinstance(expected, list)
+            or not expected
+            or any(not isinstance(item, str) for item in expected)
+            or len(expected) != len(set(expected))
+        ):
+            raise SystemExit("Native project admission has invalid membership")
+        _PROJECT_EXPECTED = tuple(expected)
     import pytest
 
     raise SystemExit(pytest.main(sys.argv[1:]))

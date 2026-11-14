@@ -1493,6 +1493,43 @@ def validate_merge_proof(
     evidence = plan.get("evidence", {})
     if not isinstance(evidence, Mapping):
         raise ValueError("Producer evidence has an invalid shape")
+    project_targets = plan.get("project_pytest", [])
+    project_admissions = evidence.get("project_pytest_admission", [])
+    if (
+        not isinstance(project_targets, list)
+        or any(not isinstance(target, str) or not target for target in project_targets)
+        or len(project_targets) != len(set(project_targets))
+        or not isinstance(project_admissions, list)
+        or any(
+            not isinstance(packet, Mapping)
+            or not isinstance(packet.get("collection"), Mapping)
+            or not isinstance(packet.get("context"), Mapping)
+            for packet in project_admissions
+        )
+    ):
+        raise ValueError("Native project pytest admission has an invalid shape")
+    executable_projects = [
+        packet for packet in project_admissions if packet.get("collection", {}).get("selected")
+    ]
+    if bool(project_targets) != bool(executable_projects):
+        raise ValueError("Native project pytest membership has no matching admission")
+    if project_targets:
+        if root is None:
+            raise ValueError("Native project pytest requires independent source authority")
+        from oh_goon.repository_tooling.development_verification import _MERGE_MARKER
+        from oh_goon.repository_tooling.python_project_checks import (
+            require_project_pytest_admission,
+        )
+
+        if any(
+            packet.get("context", {}).get("marker") != _MERGE_MARKER
+            for packet in executable_projects
+        ):
+            raise ValueError("Native project pytest changed its ordinary cadence marker")
+        if require_project_pytest_admission(
+            root, executable_projects, source_identity=plan["source_identity"]
+        ) != set(project_targets):
+            raise ValueError("Native project pytest differs from admitted selected membership")
     retained_owner_proofs = evidence.get("bounded_owner_proofs")
     if (
         root is None
@@ -1569,7 +1606,9 @@ def validate_merge_proof(
     )
     if (
         behavior_required
-        and not (behavioral_pytest or plan.get("frontend") or plan.get("browser"))
+        and not (
+            behavioral_pytest or project_targets or plan.get("frontend") or plan.get("browser")
+        )
         and not (contract_only or static_only)
     ):
         raise ValueError("Executable changes have no behavioral proof")
@@ -1609,6 +1648,7 @@ def validate_merge_proof(
         raise ValueError("Native browser evidence has no admitted membership")
     if plan.get("pytest"):
         expected.append("Native pytest")
+    expected.extend("Native project pytest" for _packet in executable_projects)
     if sorted(owners) != sorted(expected):
         raise ValueError("Required check owners are missing, duplicated or extra")
     if static_projects:
@@ -1632,6 +1672,24 @@ def validate_merge_proof(
                     )
     executed_files: set[str] = set()
     executed_members: set[str] = set()
+    if executable_projects:
+        assert root is not None
+        from oh_goon.repository_tooling.python_project_checks import (
+            require_project_pytest_outcomes,
+        )
+
+        project_files, project_members = require_project_pytest_outcomes(
+            root,
+            executable_projects,
+            [row for row in outcomes if row["owner"] == "Native project pytest"],
+            source_identity=plan["source_identity"],
+        )
+        if project_members != set(project_targets):
+            raise ValueError("Native project execution omitted or added admitted members")
+        if project_members & set(plan.get("pytest", [])):
+            raise ValueError("Native pytest execution contexts duplicate admitted members")
+        executed_files.update(project_files)
+        executed_members.update(project_members)
     browser_files: set[str] = set()
     for row in outcomes:
         if row["owner"] == "Frontend browser":
@@ -1980,6 +2038,91 @@ def _require_ordinary_changed_test_execution(
         or not {item["selector"] for item in selected} <= executed_members
     ):
         raise ValueError("Changed tests have no meaningful execution proof")
+
+
+def _require_changed_project_test_execution(
+    root: Path,
+    *,
+    changed_paths: Sequence[str],
+    source_identity: str,
+    executed_files: frozenset[str],
+    executed_members: frozenset[str],
+) -> dict[str, Any]:
+    """Observe configured project membership under the original native UV owner.
+
+    Whole configured test roots are collected, then projected to changed files.
+    An explicitly requested helper file must not acquire a test obligation that
+    ordinary pytest discovery would not establish.
+    """
+    from oh_goon.repository_tooling import python_project_checks as owner
+    from oh_goon.repository_tooling.development_verification import _MERGE_MARKER
+
+    projects = {
+        project
+        for path in changed_paths
+        if Path(path).suffix == ".py"
+        and (project := owner.project_for_pytest_target(root, path)) is not None
+    }
+    targets = tuple(
+        target
+        for project in sorted(projects)
+        for target in owner.configured_project_pytest_targets(root, project)
+    )
+    if not targets:
+        return {"source_identity": source_identity, "contexts": []}
+    if (
+        Path(getsourcefile(owner.collect_project_pytest) or "").resolve()
+        != Path(__file__).with_name("python_project_checks.py").resolve()
+    ):
+        raise ValueError("Native project observation imported outside its trusted owner")
+    packets = owner.collect_project_pytest(
+        root, targets, marker=_MERGE_MARKER, source_identity=source_identity
+    )
+    return _require_project_changed_membership(
+        packets,
+        changed_paths=changed_paths,
+        source_identity=source_identity,
+        executed_files=executed_files,
+        executed_members=executed_members,
+    )
+
+
+def _require_project_changed_membership(
+    packets: Sequence[Mapping[str, Any]],
+    *,
+    changed_paths: Sequence[str],
+    source_identity: str,
+    executed_files: frozenset[str],
+    executed_members: frozenset[str],
+) -> dict[str, Any]:
+    """Require the changed projection of independently observed native cases."""
+    changed = set(changed_paths)
+    selected = [
+        item
+        for packet in packets
+        for item in packet["collection"]["selected"]
+        if item["file"] in changed
+    ]
+    if (
+        not {item["file"] for item in selected} <= executed_files
+        or not {item["selector"] for item in selected} <= executed_members
+    ):
+        raise ValueError("Changed native project tests have no meaningful execution proof")
+    return {
+        "source_identity": source_identity,
+        "contexts": [
+            {
+                "project": packet["project"],
+                "context": packet["context"],
+                "selected": [
+                    item for item in packet["collection"]["selected"] if item["file"] in changed
+                ],
+                "ordinary_selected_count": len(packet["collection"]["selected"]),
+                "ordinary_deselected_count": len(packet["collection"]["deselected"]),
+            }
+            for packet in packets
+        ],
+    }
 
 
 def _trusted_other_changed_verifiers(root: Path, paths: Sequence[str]) -> frozenset[str]:
@@ -2736,6 +2879,13 @@ def main() -> int:
                 executed_members=executed_members,
                 required_files=required_files,
             )
+        _require_changed_project_test_execution(
+            args.root,
+            changed_paths=tuple(path for path in changed_paths if path not in removed_paths),
+            source_identity=plan["source_identity"],
+            executed_files=executed_files,
+            executed_members=executed_members,
+        )
         if not other_verifiers <= executed_files:
             raise ValueError("Changed tests have no meaningful execution proof")
         if (

@@ -17,14 +17,13 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
 from oh_goon.engine import command as command_owner
 from oh_goon.integrations import hashmarks as public_evidence
 from oh_goon.integrations.hashmarks import development_verification as asset_owner
 from oh_goon.integrations.hashmarks import runtime_contract
 from oh_goon.repository_tooling import _dependency_lock_portability as lock_owner
-from oh_goon.repository_tooling import verification_gate_control as gate
 from oh_goon.repository_tooling import development_verification as admission_owner
+from oh_goon.repository_tooling import verification_gate_control as gate
 from oh_goon.repository_tooling.release import package_slim
 from oh_goon.repository_tooling.verification_gate_control import (
     DOCUMENTATION_ASSET_OBLIGATION,
@@ -1930,6 +1929,134 @@ def test_native_pytest_files_match_admitted_proof(fault: str) -> None:
         )
     with pytest.raises(ValueError, match="Admitted pytest files"):
         _validate(plan, result)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        None,
+        "admission",
+        "selection",
+        "execution",
+        "owner",
+        "backend-overlap",
+        "source",
+        "marker",
+    ),
+)
+def test_native_project_owner_joins_exact_cases_into_the_same_merge_proof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None
+) -> None:
+    from oh_goon.repository_tooling import python_project_checks as projects
+
+    path = "templates/goons/ml/iris-train/tests/test_training.py"
+    member = path + "::test_result"
+    plan, result = _proof(test_file=path)
+    original_native = copy.deepcopy(result["outcomes"][0])
+    packet: dict[str, Any] = {
+        "project": "templates/goons/ml/iris-train",
+        "context": {"marker": admission_owner._MERGE_MARKER},
+        "collection": {
+            "selected": [{"file": path, "selector": member}],
+            "deselected": [],
+        },
+    }
+    plan["pytest"] = []
+    plan["project_pytest"] = [member]
+    plan["evidence"]["project_pytest_admission"] = [packet]
+    result["outcomes"][0]["owner"] = "Native project pytest"
+    calls: list[str] = []
+
+    def admission(root: Path, packets: Any, *, source_identity: str) -> set[str]:
+        assert root == tmp_path and packets == [packet]
+        assert source_identity == plan["source_identity"]
+        calls.append("admission")
+        return {member}
+
+    def execution(
+        root: Path, packets: Any, outcomes: Any, *, source_identity: str
+    ) -> tuple[set[str], set[str]]:
+        assert root == tmp_path and packets == [packet]
+        assert source_identity == plan["source_identity"]
+        assert len(outcomes) == 1 and outcomes[0]["owner"] == "Native project pytest"
+        calls.append("execution")
+        return {path}, {member + "[foreign]" if fault == "execution" else member}
+
+    monkeypatch.setattr(projects, "require_project_pytest_admission", admission)
+    monkeypatch.setattr(projects, "require_project_pytest_outcomes", execution)
+    if fault == "admission":
+        plan["evidence"]["project_pytest_admission"] = []
+    elif fault == "selection":
+        plan["project_pytest"] = [member + "[foreign]"]
+    elif fault == "marker":
+        packet["context"]["marker"] = None
+    elif fault == "owner":
+        result["outcomes"].append(copy.deepcopy(result["outcomes"][0]))
+    elif fault == "backend-overlap":
+        plan["pytest"] = [member]
+        result["outcomes"].append(original_native)
+    result["plan"] = copy.deepcopy(plan)
+
+    def validate() -> tuple[frozenset[str], frozenset[str]]:
+        return validate_merge_proof(
+            plan,
+            result,
+            candidate=plan["candidate"],
+            base=plan["base"],
+            changed_paths=plan["changed_paths"],
+            control_base=None,
+            root=None if fault == "source" else tmp_path,
+            observed_owner_proofs={
+                "authority": "oh-goon-execution-policy",
+                "routes": [],
+            },
+        )
+
+    if fault is None:
+        files, members = validate()
+        assert files == {path} and members == {member}
+        assert calls == ["admission", "execution"]
+    else:
+        with pytest.raises(ValueError, match="Native project|Required check|duplicate"):
+            validate()
+
+
+@pytest.mark.parametrize("omitted", (False, True))
+def test_independent_project_collection_protects_changed_cases_without_filename_rules(
+    omitted: bool,
+) -> None:
+    path = "templates/goons/ml/iris-train/tests/behavior_cases.py"
+    helper = "templates/goons/ml/iris-train/tests/test_fixture.py"
+    member = path + "::Behavior::test_native[param]"
+    packets = [
+        {
+            "project": "templates/goons/ml/iris-train",
+            "context": {"source_identity": "sha256:" + "a" * 64},
+            "collection": {
+                "selected": [{"file": path, "selector": member}],
+                "deselected": [],
+            },
+        }
+    ]
+
+    def require() -> dict[str, Any]:
+        return gate._require_project_changed_membership(
+            packets,
+            changed_paths=(path, helper),
+            source_identity="sha256:" + "a" * 64,
+            executed_files=frozenset() if omitted else frozenset({path}),
+            executed_members=frozenset() if omitted else frozenset({member}),
+        )
+
+    if omitted:
+        with pytest.raises(ValueError, match="Changed native project tests"):
+            require()
+    else:
+        receipt = require()
+        assert (
+            receipt["contexts"][0]["selected"] == packets[0]["collection"]["selected"]
+        )
+        assert helper not in {row["file"] for row in receipt["contexts"][0]["selected"]}
 
 
 @pytest.mark.parametrize(
