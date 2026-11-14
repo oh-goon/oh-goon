@@ -10,7 +10,6 @@ from types import SimpleNamespace
 from typing import Any, Literal
 
 import pytest
-
 from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.integrations.hashmarks import validate_required_dependency_introductions
 from oh_goon.integrations.hashmarks.development_verification import (
@@ -1491,10 +1490,313 @@ def test_standalone_project_nominations_never_use_the_backend_interpreter(
         return evidence
 
     plan = owner.admit_change(repository, base="HEAD", nominator=nominate)
-    assert not plan.pytest
+    assert not plan.pytest and not plan.project_pytest
+    assert "project_pytest_admission" not in plan.evidence
     assert any(
         reason.startswith("NATIVE_PROJECT_CONTEXT_REQUIRED:")
         for reason in plan.unverified
+    )
+
+
+def _configured_project_test(repository: Path) -> str:
+    relative = "templates/goons/ml/iris-train"
+    project = repository / relative
+    (project / "tests").mkdir(parents=True)
+    for name in ("pyproject.toml", "uv.lock", "goon.yml"):
+        (project / name).write_bytes((owner.ROOT / relative / name).read_bytes())
+    (project / "tests/test_training.py").write_text(
+        "def test_training():\n    assert True\n"
+    )
+    owner._git(repository, "add", relative)
+    owner._git(
+        repository,
+        "-c",
+        "user.name=Verifier",
+        "-c",
+        "user.email=verifier@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "native project authority",
+    )
+    target = relative + "/tests/test_dataset.py"
+    (repository / target).write_text("def test_dataset():\n    assert True\n")
+    return target
+
+
+def _project_test_evidence(paths: tuple[str, ...]) -> dict[str, Any]:
+    evidence = _evidence(paths)
+    for row in evidence["observations"]:
+        if row["changed_path"].startswith("templates/goons/ml/iris-train/"):
+            row["state"] = "CHANGED_TEST"
+            row["nominations"] = [
+                {
+                    "workspace_prefix": "templates/goons/ml/iris-train/",
+                    "nomination": {
+                        "available": True,
+                        "runner_evidence": "pytest",
+                        "verification_target": {"path": "tests/test_dataset.py"},
+                    },
+                }
+            ]
+    return evidence
+
+
+def _project_collection(
+    _root: Path, targets: tuple[str, ...], *, marker: str, source_identity: str
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "project": "templates/goons/ml/iris-train",
+            "context": {"marker": marker, "source_identity": source_identity},
+            "collection": {
+                "selected": [
+                    {
+                        "file": target,
+                        "selector": target + "::TestDataset::test_native[valid]",
+                    }
+                    for target in targets
+                ],
+                "deselected": [],
+            },
+        }
+    ]
+
+
+def test_configured_project_advice_is_collected_once_in_its_native_context(
+    repository: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = _configured_project_test(repository)
+    backend = repository / "backend/tests/unit/services/test_changed.py"
+    backend.parent.mkdir(parents=True)
+    backend.write_text("def test_changed():\n    assert True\n")
+    observed: list[tuple[str, ...]] = []
+
+    def collect(
+        root: Path, targets: tuple[str, ...], **options: Any
+    ) -> list[dict[str, Any]]:
+        assert root == repository
+        assert options == {
+            "marker": owner._MERGE_MARKER,
+            "source_identity": "sha256:" + "a" * 64,
+        }
+        observed.append(targets)
+        return _project_collection(root, targets, **options)
+
+    monkeypatch.setattr(owner.python_project_checks, "collect_project_pytest", collect)
+    plan = owner.admit_change(
+        repository,
+        base="HEAD",
+        nominator=lambda _root, paths: _project_test_evidence(paths),
+    )
+
+    assert observed == [(target,)]
+    assert plan.project_pytest == (target + "::TestDataset::test_native[valid]",)
+    assert plan.pytest and all(
+        path.startswith("backend/tests/") for path in plan.pytest
+    )
+    assert not plan.unverified
+    assert (
+        plan.evidence["project_pytest_admission"][0]["collection"]["selected"][0][
+            "file"
+        ]
+        == target
+    )
+    assert (
+        plan.evidence["observations"]
+        == _project_test_evidence(plan.changed_paths)["observations"]
+    )
+    owner.require_merge_selection(repository, plan)
+
+
+@pytest.mark.parametrize("failure", ("unavailable", "no-packets"))
+def test_unavailable_project_collection_refuses_without_backend_fallback(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    target = _configured_project_test(repository)
+
+    def collect(*_args: Any, **_options: Any) -> list[dict[str, Any]]:
+        if failure == "unavailable":
+            raise ValueError("native project environment unavailable")
+        return []
+
+    monkeypatch.setattr(owner.python_project_checks, "collect_project_pytest", collect)
+    monkeypatch.setattr(
+        owner,
+        "collect_native_pytest",
+        lambda *_args, **_options: pytest.fail(
+            "project advice reached backend collection"
+        ),
+    )
+    plan = owner.admit_change(
+        repository,
+        base="HEAD",
+        nominator=lambda _root, paths: _project_test_evidence(paths),
+    )
+
+    assert not plan.pytest and not plan.project_pytest
+    assert f"NATIVE_PROJECT_CONTEXT_REQUIRED:{target}" in plan.unverified
+    assert "project_pytest_admission" not in plan.evidence
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
+
+
+@pytest.mark.parametrize("remaining", ("empty", "deselected", "other-test"))
+def test_project_changed_test_requires_its_own_selected_native_members(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, remaining: str
+) -> None:
+    target = _configured_project_test(repository)
+
+    def collect(
+        root: Path, targets: tuple[str, ...], **options: Any
+    ) -> list[dict[str, Any]]:
+        packets = _project_collection(root, targets, **options)
+        row = packets[0]["collection"]["selected"].pop()
+        if remaining == "deselected":
+            packets[0]["collection"]["deselected"].append(row)
+        elif remaining == "other-test":
+            other = "templates/goons/ml/iris-train/tests/test_training.py"
+            packets[0]["collection"]["selected"].append(
+                {"file": other, "selector": other + "::test_training"}
+            )
+        return packets
+
+    monkeypatch.setattr(owner.python_project_checks, "collect_project_pytest", collect)
+    plan = owner.admit_change(
+        repository,
+        base="HEAD",
+        nominator=lambda _root, paths: _project_test_evidence(paths),
+    )
+
+    assert f"CHANGED_TEST_HAS_NO_NATIVE_MEMBERS:{target}" in plan.unverified
+    assert target not in {member.split("::", 1)[0] for member in plan.project_pytest}
+    assert "project_pytest_admission" in plan.evidence
+    with pytest.raises(ValueError, match="SELECTION_UNVERIFIED"):
+        owner.require_merge_selection(repository, plan)
+
+
+@pytest.mark.parametrize(
+    "fault", ("marker", "missing-admission", "missing-member", "duplicate-member")
+)
+def test_project_plan_context_or_membership_drift_refuses_before_execution(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    _configured_project_test(repository)
+    monkeypatch.setattr(
+        owner.python_project_checks, "collect_project_pytest", _project_collection
+    )
+    plan = owner.admit_change(
+        repository,
+        base="HEAD",
+        nominator=lambda _root, paths: _project_test_evidence(paths),
+    )
+    members = set(plan.project_pytest)
+    monkeypatch.setattr(
+        owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
+    )
+    monkeypatch.setattr(
+        owner.python_project_checks,
+        "require_project_pytest_admission",
+        lambda *_args, **_options: members,
+    )
+    owner.require_current_plan(repository, plan)
+    evidence = copy.deepcopy(plan.evidence)
+    if fault == "marker":
+        evidence["project_pytest_admission"][0]["context"]["marker"] = "daily"
+        invalid = plan.model_copy(update={"evidence": evidence})
+    elif fault == "missing-admission":
+        evidence.pop("project_pytest_admission")
+        invalid = plan.model_copy(update={"evidence": evidence})
+    else:
+        invalid = plan.model_copy(
+            update={
+                "project_pytest": ()
+                if fault == "missing-member"
+                else (*plan.project_pytest, *plan.project_pytest)
+            }
+        )
+
+    def forbidden(*_args: Any, **_options: Any) -> Any:
+        pytest.fail("changed native project authority reached execution")
+
+    monkeypatch.setattr(owner, "_commands", forbidden)
+    monkeypatch.setattr(
+        owner.python_project_checks, "execute_project_pytest", forbidden
+    )
+    with pytest.raises(ValueError, match="Native project"):
+        owner.execute_change(repository, invalid, mode="focused", workers=1)
+
+
+def test_project_execution_and_aggregation_delegate_the_same_admitted_membership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = "templates/goons/ml/iris-train/tests/test_dataset.py"
+    source = "sha256:" + "c" * 64
+    admissions = _project_collection(
+        tmp_path, (target,), marker=owner._MERGE_MARKER, source_identity=source
+    )
+    member = admissions[0]["collection"]["selected"][0]["selector"]
+    plan = _phase_test_plan().model_copy(
+        update={
+            "static": (),
+            "pytest": (),
+            "frontend": (),
+            "project_pytest": (member,),
+            "evidence": {"project_pytest_admission": admissions},
+        }
+    )
+    native = _phase_test_parts(plan.model_copy(update={"pytest": (member,)}))[1][
+        "outcomes"
+    ][-1]["native_report"]
+    outcome = {
+        "owner": "Native project pytest",
+        "project": admissions[0]["project"],
+        "context": admissions[0]["context"],
+        "returncode": 0,
+        "native_report": native,
+    }
+    executed = []
+    validated = []
+
+    def execute(
+        root: Path, packets: list[dict[str, Any]], **options: Any
+    ) -> list[dict[str, Any]]:
+        executed.append((root, packets, options))
+        return [outcome]
+
+    def validate(
+        root: Path,
+        packets: list[dict[str, Any]],
+        outcomes: list[dict[str, Any]],
+        **options: Any,
+    ) -> tuple[set[str], set[str]]:
+        validated.append((root, packets, outcomes, options))
+        return {target}, {member}
+
+    monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
+    monkeypatch.setattr(owner.python_project_checks, "execute_project_pytest", execute)
+    monkeypatch.setattr(
+        owner.python_project_checks, "require_project_pytest_outcomes", validate
+    )
+    monkeypatch.setattr(
+        owner,
+        "run_command",
+        lambda *_args, **_options: pytest.fail(
+            "project tests must not use backend Python"
+        ),
+    )
+    result = owner.execute_change(
+        tmp_path, plan, mode="merge", workers=1, phase="behavioral"
+    )
+    assert result["status"] == "CHECKS_PASSED" and result["outcomes"] == [outcome]
+    part = {**result, "phase": "behavioral", "plan": plan.model_dump(mode="json")}
+    assert owner.aggregate_change(tmp_path, plan, [part], mode="merge") == result
+    assert executed == [(tmp_path, admissions, {"source_identity": source})]
+    assert len(validated) == 2
+    assert all(
+        row == (tmp_path, admissions, [outcome], {"source_identity": source})
+        for row in validated
     )
 
 

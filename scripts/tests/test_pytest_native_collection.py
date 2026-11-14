@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import subprocess
-import sys
 import json
 import os
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
-from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
+from oh_goon.engine import command as command_owner
 from oh_goon.repository_tooling import pytest_member_selection as collection_owner
+from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
 from oh_goon.repository_tooling.pytest_process_environment import (
     resolve_pytest_invocation,
 )
@@ -84,7 +84,7 @@ def test_collection_json_cannot_override_missing_native_process_settlement(
             else SimpleNamespace(final_process_group_quiescent=quiescent),
         )
 
-    monkeypatch.setattr(collection_owner, "run_command", unsettled)
+    monkeypatch.setattr(command_owner, "run_command", unsettled)
     with pytest.raises(ValueError, match="Native pytest collection failed"):
         collect_native_pytest(
             (), invocation=resolve_pytest_invocation(pytest_config=config)

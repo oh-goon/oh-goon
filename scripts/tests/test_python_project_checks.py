@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import tempfile
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
-
 from oh_goon.engine.command import (
     CommandCancelledError,
     CommandProcessLifecycleEvent,
@@ -565,3 +567,435 @@ def test_native_tiny_projects_retain_failed_and_independent_passing_junit(
                 failure.get("message", "").startswith("[XPASS(strict)]")
                 for failure in native.findall(".//failure")
             )
+
+
+@pytest.fixture(scope="module")
+def native_project_context(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    from oh_goon.repository_tooling.release.package_slim import (
+        canonical_source_identity,
+    )
+
+    root = tmp_path_factory.mktemp("native-project-source")
+    relative = "templates/goons/general/orders-taskflow"
+    project = root / relative
+    shutil.copytree(
+        python_project_checks.ROOT / relative,
+        project,
+        ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache"),
+    )
+    (project / "tests/test_context.py").write_text(
+        "import importlib.util\nimport pytest\nfrom orders_pipeline import __name__ as package\n"
+        "@pytest.mark.parametrize('value', [1, 2])\n"
+        "def test_native(value):\n"
+        "    assert package == 'orders_pipeline' and value > 0\n"
+        "    assert importlib.util.find_spec('oh_goon') is None\n"
+        "def test_skip(): pytest.skip('native skip')\n"
+        "@pytest.mark.xfail(reason='native expected failure')\n"
+        "def test_xfail(): assert False\n"
+        "def test_failure(): assert False\n"
+        "@pytest.mark.airflow\ndef test_optional_airflow(): assert False\n"
+        "@pytest.mark.daily\ndef test_daily(): assert False\n"
+    )
+    candidate_collector = (
+        root / "backend/src/oh_goon/repository_tooling/pytest_member_selection.py"
+    )
+    candidate_collector.parent.mkdir(parents=True)
+    shutil.copyfile(
+        Path(python_project_checks.__file__).with_name("pytest_member_selection.py"),
+        candidate_collector,
+    )
+    developer = project / ".venv/developer"
+    developer.parent.mkdir()
+    developer.write_text("caller-owned")
+    source = canonical_source_identity(root)
+    target = relative + "/tests/test_context.py"
+    admission = python_project_checks.collect_project_pytest(
+        root, [target + "::test_native"], marker=None, source_identity=source
+    )
+    from oh_goon.repository_tooling import pytest_member_selection
+
+    raw: dict[str, Any] = {}
+    original = pytest_member_selection.read_native_collection
+
+    def observe(path: Path) -> dict[str, Any]:
+        packet = original(path)
+        if "phases" in packet:
+            raw.update(copy.deepcopy(packet))
+        return packet
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(pytest_member_selection, "read_native_collection", observe)
+        outcomes = python_project_checks.execute_project_pytest(
+            root, admission, source_identity=source
+        )
+    return dict(
+        root=root,
+        project=relative,
+        target=target,
+        source=source,
+        admission=admission,
+        outcomes=outcomes,
+        raw=raw,
+        candidate_collector=candidate_collector,
+        developer=developer,
+    )
+
+
+@pytest.mark.process
+def test_native_project_selected_cases_use_frozen_project_not_backend(
+    native_project_context: dict[str, Any],
+) -> None:
+    case = native_project_context
+    files, members = python_project_checks.require_project_pytest_outcomes(
+        case["root"],
+        case["admission"],
+        case["outcomes"],
+        source_identity=case["source"],
+    )
+    assert files == {case["target"]}
+    assert members == {
+        case["target"] + "::test_native[1]",
+        case["target"] + "::test_native[2]",
+    }
+    assert case["developer"].read_text() == "caller-owned"
+    for row in case["admission"] + case["outcomes"]:
+        assert not Path(row["environment"]).exists()
+        assert row["cleanup"] == "VERIFIED"
+    native = case["outcomes"][0]["native_report"]["membership_receipt"]
+    assert set(native["selected"]) == members
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("member", ["test_skip", "test_xfail", "test_failure"])
+def test_native_project_nonpassing_members_never_qualify(
+    native_project_context: dict[str, Any], member: str
+) -> None:
+    case = native_project_context
+    admission = python_project_checks.collect_project_pytest(
+        case["root"],
+        [case["target"] + "::" + member],
+        marker=None,
+        source_identity=case["source"],
+    )
+    outcomes = python_project_checks.execute_project_pytest(
+        case["root"], admission, source_identity=case["source"]
+    )
+    assert outcomes[0]["returncode"] != 0
+    with pytest.raises(ValueError):
+        python_project_checks.require_project_pytest_outcomes(
+            case["root"], admission, outcomes, source_identity=case["source"]
+        )
+    assert not Path(outcomes[0]["environment"]).exists()
+
+
+@pytest.mark.parametrize(
+    "alteration",
+    [
+        "missing",
+        "extra",
+        "duplicate",
+        "project",
+        "context",
+        "environment",
+        "cleanup",
+        "process",
+        "status",
+        "selected",
+        "request",
+    ],
+)
+def test_native_project_results_reject_changed_authority_or_membership(
+    native_project_context: dict[str, Any], alteration: str
+) -> None:
+    case = native_project_context
+    admissions, outcomes = (
+        copy.deepcopy(case["admission"]),
+        copy.deepcopy(case["outcomes"]),
+    )
+    # Every mutation starts from the same real, independently validated execution.
+    python_project_checks.require_project_pytest_outcomes(
+        case["root"], admissions, outcomes, source_identity=case["source"]
+    )
+    if alteration == "missing":
+        outcomes.clear()
+    elif alteration == "extra":
+        outcomes.append(copy.deepcopy(outcomes[0]))
+    elif alteration == "duplicate":
+        admissions.append(copy.deepcopy(admissions[0]))
+    elif alteration == "project":
+        outcomes[0]["project"] = "outside"
+    elif alteration == "context":
+        outcomes[0]["context"]["uv_lock_sha256"] = "0" * 64
+    elif alteration == "environment":
+        outcomes[0]["runtime"]["prefix"] = str(case["root"])
+    elif alteration == "cleanup":
+        outcomes[0]["cleanup"] = "INCOMPLETE"
+    elif alteration == "process":
+        outcomes[0]["native_execution"][-1]["process_group_quiescent"] = False
+    elif alteration == "status":
+        outcomes[0]["native_report"]["status"] = "FAIL"
+    elif alteration == "selected":
+        outcomes[0]["native_report"]["membership_receipt"]["selected"].pop()
+    else:
+        admissions[0]["request"]["argv"].append("--override-ini=addopts=-x")
+    with pytest.raises(ValueError):
+        python_project_checks.require_project_pytest_outcomes(
+            case["root"], admissions, outcomes, source_identity=case["source"]
+        )
+
+
+def test_native_project_census_survives_missing_metadata_and_refuses_unknown(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.repository_tooling.release.package_slim import (
+        canonical_source_identity,
+    )
+
+    project = "templates/goons/ml/iris-train"
+    target = project + "/tests/test_missing.py::test_case[value]"
+    assert python_project_checks.project_for_pytest_target(tmp_path, target) == project
+    assert python_project_checks.configured_project_pytest_targets(
+        tmp_path, project
+    ) == (project + "/tests",)
+    assert (
+        python_project_checks.project_for_pytest_target(
+            tmp_path, "outside/tests/test_other.py"
+        )
+        is None
+    )
+    assert (
+        python_project_checks.project_for_pytest_target(tmp_path, "../" + target)
+        is None
+    )
+    assert (
+        python_project_checks.project_for_pytest_target(tmp_path, "/" + target) is None
+    )
+    with pytest.raises(ValueError, match="context"):
+        python_project_checks.collect_project_pytest(
+            tmp_path,
+            [target],
+            marker=None,
+            source_identity=canonical_source_identity(tmp_path),
+        )
+
+
+@pytest.mark.process
+def test_native_project_all_deselected_remains_observation_not_execution(
+    native_project_context: dict[str, Any],
+) -> None:
+    case = native_project_context
+    observed = python_project_checks.collect_project_pytest(
+        case["root"],
+        [case["target"] + "::test_native"],
+        marker="native_absent_marker",
+        source_identity=case["source"],
+    )
+    assert observed[0]["collection"]["selected"] == []
+    assert len(observed[0]["collection"]["deselected"]) == 2
+    with pytest.raises(ValueError, match="no exact selected"):
+        python_project_checks.execute_project_pytest(
+            case["root"], observed, source_identity=case["source"]
+        )
+
+
+@pytest.mark.parametrize(
+    "alteration", ["setup", "call", "teardown", "duplicate-phase", "not-started"]
+)
+def test_project_transport_cannot_qualify_incomplete_native_phase_observations(
+    native_project_context: dict[str, Any], tmp_path: Path, alteration: str
+) -> None:
+    from oh_goon.repository_tooling.verification_gate_control import (
+        require_native_pytest_pass,
+    )
+
+    case = native_project_context
+    raw = copy.deepcopy(case["raw"])
+    members = tuple(
+        row["selector"] for row in case["admission"][0]["collection"]["selected"]
+    )
+    baseline = python_project_checks._project_native_report(
+        raw,
+        members,
+        tmp_path / "baseline",
+        source_identity=case["source"],
+        returncode=0,
+    )
+    require_native_pytest_pass(baseline, expected_source=case["source"])
+    if alteration in {"setup", "call", "teardown"}:
+        raw["phases"] = [row for row in raw["phases"] if row["when"] != alteration]
+    elif alteration == "duplicate-phase":
+        raw["phases"].append(copy.deepcopy(raw["phases"][0]))
+    else:
+        raw["started"].pop()
+    with pytest.raises(ValueError):
+        broken = python_project_checks._project_native_report(
+            raw,
+            members,
+            tmp_path / "broken",
+            source_identity=case["source"],
+            returncode=0,
+        )
+        require_native_pytest_pass(broken, expected_source=case["source"])
+
+
+def test_project_cleanup_failure_preserves_original_preparation_error(
+    native_project_context: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = native_project_context
+    scratch = tmp_path / "owned"
+    scratch.mkdir()
+    original_rmtree = shutil.rmtree
+
+    def failed(*args: Any, **kwargs: Any) -> Any:
+        raise ValueError("original native preparation failure")
+
+    def cleanup(path: Path) -> None:
+        raise PermissionError("owned cleanup unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(tempfile, "mkdtemp", lambda **kwargs: str(scratch))
+        patch.setattr(python_project_checks, "run_command", failed)
+        patch.setattr(shutil, "rmtree", cleanup)
+        with pytest.raises(ValueError, match="original native preparation") as raised:
+            python_project_checks.collect_project_pytest(
+                case["root"],
+                [case["target"]],
+                marker=None,
+                source_identity=case["source"],
+            )
+        assert any("cleanup failed" in note for note in raised.value.__notes__)
+    assert scratch.exists()
+    original_rmtree(scratch)
+
+
+@pytest.mark.parametrize("changed", [None, "foreign-path", "wrong-bytes"])
+def test_project_collector_identity_is_portable_only_between_trusted_and_candidate_source(
+    native_project_context: dict[str, Any],
+    tmp_path: Path,
+    changed: str | None,
+) -> None:
+    case = native_project_context
+    admissions, outcomes = (
+        copy.deepcopy(case["admission"]),
+        copy.deepcopy(case["outcomes"]),
+    )
+    collector = case["candidate_collector"]
+    if changed == "foreign-path":
+        collector = tmp_path / "foreign.py"
+        shutil.copyfile(case["candidate_collector"], collector)
+    for row in admissions + outcomes:
+        previous = row["runtime"]["collector"]
+        row["runtime"]["collector"] = str(collector)
+        if "request" in row:
+            for field in ("argv", "command_prefix"):
+                row["request"][field] = [
+                    str(collector) if part == previous else part
+                    for part in row["request"][field]
+                ]
+        for native in row["native_execution"]:
+            native["argv"] = [
+                str(collector) if part == previous else part for part in native["argv"]
+            ]
+    if changed == "wrong-bytes":
+        wrong = (
+            tmp_path
+            / "backend/src/oh_goon/repository_tooling/pytest_member_selection.py"
+        )
+        wrong.parent.mkdir(parents=True)
+        wrong.write_bytes(
+            case["candidate_collector"].read_bytes() + b"\n# changed hook bytes\n"
+        )
+        with pytest.raises(ValueError, match="collector bytes"):
+            python_project_checks._validated_project_collector(
+                tmp_path, admissions[0]["context"], str(wrong)
+            )
+        return
+    if changed:
+        with pytest.raises(ValueError, match="collector bytes"):
+            python_project_checks.require_project_pytest_outcomes(
+                case["root"], admissions, outcomes, source_identity=case["source"]
+            )
+    else:
+        files, members = python_project_checks.require_project_pytest_outcomes(
+            case["root"], admissions, outcomes, source_identity=case["source"]
+        )
+        assert files == {case["target"]} and len(members) == 2
+
+
+@pytest.mark.process
+def test_project_additional_marker_preserves_native_pytest_config_and_cadence(
+    native_project_context: dict[str, Any],
+) -> None:
+    case = native_project_context
+    admission = python_project_checks.collect_project_pytest(
+        case["root"],
+        [case["target"]],
+        marker="not daily and not certification and not slow",
+        source_identity=case["source"],
+    )
+    packet = admission[0]
+    excluded = {row["selector"] for row in packet["collection"]["deselected"]}
+    assert excluded == {
+        case["target"] + "::test_optional_airflow",
+        case["target"] + "::test_daily",
+    }
+    selected = {row["selector"] for row in packet["collection"]["selected"]}
+    assert case["target"] + "::test_native[1]" in selected
+    assert (
+        packet["runtime"]["marker_expression"]
+        == "(not airflow) and (not daily and not certification and not slow)"
+    )
+    assert packet["request"]["marker"] is None
+    assert (
+        packet["request"]["additional_marker"]
+        == "not daily and not certification and not slow"
+    )
+
+
+@pytest.mark.process
+def test_changed_prepared_interpreter_refuses_before_selected_tests(
+    native_project_context: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.core.file_digest import sha256_file
+
+    case = native_project_context
+    original_session = python_project_checks._project_session
+    original_command = python_project_checks.run_command
+    executed: list[tuple[str, ...]] = []
+    environments: list[Path] = []
+
+    @contextmanager
+    def changed_interpreter(*args: Any, **kwargs: Any) -> Iterator[dict[str, Any]]:
+        with original_session(*args, **kwargs) as session:
+            environment = session["environment"]
+            environments.append(environment)
+            selected = environment / "bin/python"
+            changed = session["scratch"] / "changed-python"
+            shutil.copy2(selected.resolve(strict=True), changed)
+            # The executable still runs native Python, but its selected bytes
+            # no longer match the interpreter admitted during collection.
+            with changed.open("ab") as stream:
+                stream.write(b"\nchanged native interpreter identity\n")
+            selected.unlink()
+            selected.symlink_to(changed)
+            assert (
+                sha256_file(changed)
+                != case["admission"][0]["runtime_identity"]["interpreter_sha256"]
+            )
+            yield session
+
+    def observe_command(*args: str, **kwargs: Any) -> CommandResult:
+        if args[0] != "uv":
+            executed.append(args)
+        return original_command(*args, **kwargs)
+
+    monkeypatch.setattr(python_project_checks, "_project_session", changed_interpreter)
+    monkeypatch.setattr(python_project_checks, "run_command", observe_command)
+    with pytest.raises(ValueError, match="interpreter changed before execution"):
+        python_project_checks.execute_project_pytest(
+            case["root"], case["admission"], source_identity=case["source"]
+        )
+    assert not executed
+    assert environments and all(not path.exists() for path in environments)
