@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from tests.factories.capabilities import capability_snapshot
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_run_cancel import run_cancel_command
@@ -29,7 +30,6 @@ from oh_goon.core.models.run_launch import ManagedApplicationLaunchReceipt
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import FleetRunStatus, OperationAction
 from oh_goon.runtime.database import ExistingDatabaseAppendContext
-from tests.factories.capabilities import capability_snapshot
 
 
 @contextmanager
