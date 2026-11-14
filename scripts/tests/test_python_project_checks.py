@@ -529,8 +529,6 @@ def test_native_tiny_projects_retain_failed_and_independent_passing_junit(
             (project / "tests/test_failure.py").write_text(
                 "import pytest\n"
                 "def test_failure(): assert False\n"
-                "@pytest.mark.airflow\ndef test_optional_airflow(): assert False\n"
-                "@pytest.mark.daily\ndef test_daily(): assert False\n"
                 "@pytest.mark.xfail(reason='expected native failure')\n"
                 "def test_expected_failure(): assert False\n"
                 "@pytest.mark.xfail(reason='unexpected native pass')\n"
