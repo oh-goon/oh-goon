@@ -228,21 +228,42 @@ def _project_invocation(
     )
 
 
-def _validated_project_collector(root: Path, context: Mapping[str, Any], value: Any) -> Path:
+def _recorded_project_root(value: Any) -> Path:
+    if not isinstance(value, str) or "\x00" in value:
+        raise ValueError("Native project producer root is malformed")
+    root = Path(value)
+    if not root.is_absolute() or str(root) != value or ".." in root.parts or value.startswith("//"):
+        raise ValueError("Native project producer root is not canonical")
+    return root
+
+
+def _validated_project_collector(
+    root: Path,
+    context: Mapping[str, Any],
+    value: Any,
+    *,
+    source_root: Path,
+    code_root: Any,
+) -> Path:
     from oh_goon.core.file_digest import sha256_file
 
-    if not isinstance(value, str):
-        raise ValueError("Native project collector is unavailable")
-    collector = Path(value)
-    allowed = {
-        Path(__file__).with_name("pytest_member_selection.py"),
-        root / "backend/src/oh_goon/repository_tooling/pytest_member_selection.py",
-    }
+    producer_code = _recorded_project_root(code_root)
+    if producer_code not in {source_root, Path(__file__).resolve().parents[4]}:
+        raise ValueError("Native project collector controller is unqualified")
+    relative = Path("backend/src/oh_goon/repository_tooling/pytest_member_selection.py")
+    collector = producer_code / relative
+    # Producer paths are provenance, not locations to reopen on another host.
+    # Revalidate the equivalent captured hook or the current trusted controller.
+    current = (
+        root / relative
+        if producer_code == source_root
+        else Path(__file__).with_name("pytest_member_selection.py")
+    )
     if (
-        collector not in allowed
-        or not collector.is_file()
-        or collector.resolve(strict=True) != collector
-        or sha256_file(collector) != context["collector_sha256"]
+        value != str(collector)
+        or not current.is_file()
+        or current.resolve(strict=True) != current
+        or sha256_file(current) != context["collector_sha256"]
     ):
         raise ValueError("Native project collector bytes or location changed")
     return collector
@@ -349,6 +370,7 @@ def collect_project_pytest(
             )
             packet = {
                 "project": project,
+                "code_root": str(ROOT),
                 "context": session["context"],
                 "collection": collection.payload(),
                 "runtime": dict(collection.runtime or {}),
@@ -411,9 +433,10 @@ def require_project_pytest_admission(
         environment = Path(str(packet.get("environment", "")))
         if not all(isinstance(row, Mapping) for row in (runtime, request, identity)):
             raise ValueError("Native project native authority is malformed")
+        producer_root = _recorded_project_root(request.get("source_root"))
         paths = request.get("paths")
         if (
-            environment.is_relative_to(root)
+            environment.is_relative_to(producer_root)
             or not environment.is_absolute()
             or identity.get("python_version") != runtime.get("python_version")
             or identity.get("pytest_version") != runtime.get("pytest_version")
@@ -432,14 +455,20 @@ def require_project_pytest_admission(
                 raise ValueError("Native project collection addressing is malformed")
             filename, separator, suffix = path.partition("::")
             file = Path(filename)
-            if not file.is_relative_to(root) or str(file) != filename:
+            if not file.is_relative_to(producer_root) or str(file) != filename:
                 raise ValueError("Native project collection file escaped its context")
-            selector = file.relative_to(root).as_posix() + separator + suffix
+            selector = file.relative_to(producer_root).as_posix() + separator + suffix
             if project_for_pytest_target(root, selector) != project:
                 raise ValueError("Native project collection file changed its context")
-        collector = _validated_project_collector(root, context, runtime.get("collector"))
+        collector = _validated_project_collector(
+            root,
+            context,
+            runtime.get("collector"),
+            source_root=producer_root,
+            code_root=packet.get("code_root"),
+        )
         invocation = _project_invocation(
-            root, context, environment, os.environ, collector=collector
+            producer_root, context, environment, os.environ, collector=collector
         )
         resolved_request = native_collection_request(
             tuple(paths),
@@ -462,7 +491,9 @@ def require_project_pytest_admission(
         if request != resolved_request:
             raise ValueError("Native project collection request changed after admission")
         _require_native_execution(
-            packet.get("native_execution"), ("prepare",), (_project_prepare_command(root, project),)
+            packet.get("native_execution"),
+            ("prepare",),
+            (_project_prepare_command(producer_root, project),),
         )
     return members
 
@@ -685,6 +716,8 @@ def execute_project_pytest(
             outcome = {
                 "owner": NATIVE_PROJECT_OWNER,
                 "project": project,
+                "source_root": str(root),
+                "code_root": str(ROOT),
                 "context": session["context"],
                 "returncode": result.returncode or (0 if passed else 1),
                 "native_report": native,
@@ -733,6 +766,7 @@ def require_project_pytest_outcomes(
         ):
             raise ValueError("Native project owner is missing, duplicated or non-PASS")
         packet = expected[project]
+        producer_root = _recorded_project_root(outcome.get("source_root"))
         environment = Path(str(outcome.get("environment", "")))
         runtime = outcome.get("runtime", {})
         if not isinstance(runtime, Mapping):
@@ -741,21 +775,27 @@ def require_project_pytest_outcomes(
             outcome.get("context") != packet["context"]
             or outcome.get("runtime_identity") != packet["runtime_identity"]
             or not environment.is_absolute()
-            or environment.is_relative_to(root)
+            or environment.is_relative_to(producer_root)
             or runtime.get("prefix") != str(environment)
             or runtime.get("executable") != str(environment / "bin/python")
             or runtime.get("additional_marker") != packet["context"]["marker"]
             or runtime.get("marker_expression") != packet["runtime"]["marker_expression"]
         ):
             raise ValueError("Native project execution context or process cleanup changed")
-        collector = _validated_project_collector(root, packet["context"], runtime.get("collector"))
+        collector = _validated_project_collector(
+            root,
+            packet["context"],
+            runtime.get("collector"),
+            source_root=producer_root,
+            code_root=outcome.get("code_root"),
+        )
         _require_native_execution(
             outcome.get("native_execution"),
             ("prepare", "execute"),
             (
-                _project_prepare_command(root, project),
+                _project_prepare_command(producer_root, project),
                 _project_execution_command(
-                    root,
+                    producer_root,
                     packet["context"],
                     environment,
                     sorted(row["selector"] for row in packet["collection"]["selected"]),

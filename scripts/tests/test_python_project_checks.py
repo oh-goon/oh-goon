@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import shutil
 import tempfile
@@ -719,6 +720,174 @@ def test_native_project_preserves_opaque_parametrized_class_addresses(
     )
 
 
+@pytest.fixture(scope="module")
+def relocated_project_proof(
+    native_project_context: dict[str, Any], tmp_path_factory: pytest.TempPathFactory
+) -> dict[str, Any]:
+    from oh_goon.repository_tooling.release.package_slim import (
+        canonical_source_identity,
+    )
+
+    case = native_project_context
+    scratch = tmp_path_factory.mktemp("relocated-native-project")
+    producer, receiver = scratch / "producer", scratch / "receiver"
+    ignore = shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache")
+    shutil.copytree(case["root"], producer, ignore=ignore)
+    owner = producer / "backend/src/oh_goon/repository_tooling/python_project_checks.py"
+    shutil.copyfile(python_project_checks.__file__, owner)
+    source = canonical_source_identity(producer)
+    specification = importlib.util.spec_from_file_location(
+        "native_project_producer", owner
+    )
+    assert specification is not None and specification.loader is not None
+    native_owner = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(native_owner)
+    members = {
+        case["target"] + f"::TestNativeAddress::test_address[{parameter}]"
+        for parameter in ("https://example.invalid/a//b", "path//to//file")
+    }
+    admissions = native_owner.collect_project_pytest(
+        producer, sorted(members), marker="not daily", source_identity=source
+    )
+    outcomes = native_owner.execute_project_pytest(
+        producer, admissions, source_identity=source
+    )
+    assert native_owner.require_project_pytest_outcomes(
+        producer, admissions, outcomes, source_identity=source
+    ) == ({case["target"]}, members)
+    assert admissions[0]["code_root"] == outcomes[0]["code_root"] == str(producer)
+    assert outcomes[0]["source_root"] == str(producer)
+    shutil.copytree(producer, receiver, ignore=ignore)
+    assert canonical_source_identity(receiver) == source
+    shutil.rmtree(producer)
+    assert not producer.exists()
+    return dict(
+        root=receiver,
+        producer=producer,
+        source=source,
+        admissions=admissions,
+        outcomes=outcomes,
+        members=members,
+        project=case["project"],
+        target=case["target"],
+    )
+
+
+@pytest.mark.process
+def test_real_native_project_proof_survives_removed_producer_checkout(
+    relocated_project_proof: dict[str, Any],
+) -> None:
+    case = relocated_project_proof
+    assert not case["producer"].exists()
+    assert python_project_checks.require_project_pytest_outcomes(
+        case["root"],
+        case["admissions"],
+        case["outcomes"],
+        source_identity=case["source"],
+    ) == ({case["target"]}, case["members"])
+
+
+@pytest.mark.process
+def test_relocated_admission_executes_current_receiver_native_context(
+    relocated_project_proof: dict[str, Any],
+) -> None:
+    case = relocated_project_proof
+    assert not case["producer"].exists()
+    outcomes = python_project_checks.execute_project_pytest(
+        case["root"], case["admissions"], source_identity=case["source"]
+    )
+    assert outcomes[0]["source_root"] == str(case["root"])
+    assert outcomes[0]["source_root"] != str(case["producer"])
+    assert python_project_checks.require_project_pytest_outcomes(
+        case["root"], case["admissions"], outcomes, source_identity=case["source"]
+    ) == ({case["target"]}, case["members"])
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        "source",
+        "config",
+        "marker",
+        "collector",
+        "outside-source",
+        "code-root",
+        "execution-root",
+        "cwd",
+        "config-reference",
+        "execute-reference",
+        "prepare-reference",
+        "foreign-controller",
+    ],
+)
+def test_relocated_native_project_proof_rejects_changed_authority(
+    relocated_project_proof: dict[str, Any],
+    tmp_path: Path,
+    changed: str,
+) -> None:
+    case = relocated_project_proof
+    receiver = tmp_path / "receiver"
+    shutil.copytree(case["root"], receiver)
+    admissions, outcomes = (
+        copy.deepcopy(case["admissions"]),
+        copy.deepcopy(case["outcomes"]),
+    )
+    python_project_checks.require_project_pytest_outcomes(
+        receiver, admissions, outcomes, source_identity=case["source"]
+    )
+    if changed == "source":
+        (receiver / case["target"]).write_text("def test_changed(): assert False\n")
+    elif changed == "config":
+        with (receiver / case["project"] / "pyproject.toml").open("a") as stream:
+            stream.write("\n# changed native project configuration\n")
+    elif changed == "marker":
+        admissions[0]["context"]["marker"] = "not slow"
+    elif changed == "collector":
+        admissions[0]["context"]["collector_sha256"] = "0" * 64
+    elif changed == "outside-source":
+        original = admissions[0]["request"]["paths"][0]
+        admissions[0]["request"]["paths"][0] = (
+            str(tmp_path / "outside.py") + "::" + original.partition("::")[2]
+        )
+    elif changed == "code-root":
+        admissions[0]["code_root"] = str(tmp_path / "foreign-code")
+    elif changed == "execution-root":
+        outcomes[0]["source_root"] = str(tmp_path / "foreign-source")
+    elif changed == "cwd":
+        admissions[0]["request"]["cwd"] = str(receiver)
+    elif changed == "config-reference":
+        admissions[0]["request"]["config_file"] = str(receiver / "outside.toml")
+    elif changed == "execute-reference":
+        outcomes[0]["native_execution"][-1]["argv"][-1] = str(receiver / "outside.py")
+    elif changed == "foreign-controller":
+        foreign = tmp_path / "foreign-controller"
+        collector = str(
+            foreign
+            / "backend/src/oh_goon/repository_tooling/pytest_member_selection.py"
+        )
+        for row in admissions + outcomes:
+            previous = row["runtime"]["collector"]
+            row["code_root"] = str(foreign)
+            row["runtime"]["collector"] = collector
+            if "request" in row:
+                for key in ("command_prefix", "argv"):
+                    row["request"][key] = [
+                        collector if part == previous else part
+                        for part in row["request"][key]
+                    ]
+            for command in row["native_execution"]:
+                command["argv"] = [
+                    collector if part == previous else part for part in command["argv"]
+                ]
+    else:
+        command = admissions[0]["native_execution"][0]["argv"]
+        command[command.index("--project") + 1] = str(receiver / "outside")
+    with pytest.raises(ValueError):
+        python_project_checks.require_project_pytest_outcomes(
+            receiver, admissions, outcomes, source_identity=case["source"]
+        )
+
+
 @pytest.mark.process
 @pytest.mark.parametrize("member", ["test_skip", "test_xfail", "test_failure"])
 def test_native_project_nonpassing_members_never_qualify(
@@ -942,6 +1111,7 @@ def test_project_collector_identity_is_portable_only_between_trusted_and_candida
     for row in admissions + outcomes:
         previous = row["runtime"]["collector"]
         row["runtime"]["collector"] = str(collector)
+        row["code_root"] = str(case["root"])
         if "request" in row:
             for field in ("argv", "command_prefix"):
                 row["request"][field] = [
@@ -963,7 +1133,11 @@ def test_project_collector_identity_is_portable_only_between_trusted_and_candida
         )
         with pytest.raises(ValueError, match="collector bytes"):
             python_project_checks._validated_project_collector(
-                tmp_path, admissions[0]["context"], str(wrong)
+                tmp_path,
+                admissions[0]["context"],
+                str(wrong),
+                source_root=tmp_path,
+                code_root=str(tmp_path),
             )
         return
     if changed:
