@@ -5,6 +5,8 @@ from dataclasses import replace
 import pytest
 
 from oh_goon.repository_tooling import check_architecture as owner
+from oh_goon.repository_tooling.architecture.common import Violation
+from oh_goon.repository_tooling.architecture.repository_layout import ROOT
 from oh_goon.repository_tooling.pytest_resource_budget import (
     PytestCgroupUsageSnapshot,
     PytestResourceBudget,
@@ -113,7 +115,7 @@ def test_unverified_ram_cpu_refuses_before_any_architecture_check(
     )
     effects: list[str] = []
 
-    def check() -> list[owner.Violation]:
+    def check() -> list[Violation]:
         effects.append("started")
         return []
 
@@ -127,11 +129,9 @@ def test_native_handoff_does_not_hide_architecture_failure(
     monkeypatch.setenv("OH_GOON_LOCAL_TEST_PROFILE", "ram")
     effects: list[str] = []
 
-    def check() -> list[owner.Violation]:
+    def check() -> list[Violation]:
         effects.append("started")
-        return [
-            owner.Violation(owner.ROOT / "backend/pyproject.toml", "observed violation")
-        ]
+        return [Violation(ROOT / "backend/pyproject.toml", "observed violation")]
 
     monkeypatch.setattr(owner, "CHECKS", (check,))
     assert owner.main() == 1 and effects == ["started"]

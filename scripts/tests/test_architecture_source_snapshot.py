@@ -218,12 +218,15 @@ def test_native_packet_handoff_requires_its_exact_delivery_binding(
 ) -> None:
     from dataclasses import replace
     from collections.abc import Callable, Sequence
-    from oh_goon.integrations.hashmarks import HashmarksSourceEvidence
+    from oh_goon.integrations.hashmarks import (
+        HashmarksSourceEvidence,
+        observe_source_bindings,
+    )
     from oh_goon.repository_tooling.architecture import common
 
     path = tmp_path / "source.py"
     path.write_text("value = 1\n")
-    native = common.observe_source_bindings
+    native = observe_source_bindings
 
     def observe(
         root: Path,
