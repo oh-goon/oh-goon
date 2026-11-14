@@ -10,6 +10,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from tempfile import TemporaryFile
 from typing import Any
 
 import pytest
@@ -22,7 +23,6 @@ PLAN = RECIPE / "plan.yml"
 SCRIPT = ROOT / RECIPE / "run.sh"
 WHEEL = "airflow_oh_goon_orders-0.1.0-py3-none-any.whl"
 pytestmark = [
-    pytest.mark.daily,
     pytest.mark.skipif(
         os.name != "posix" or shutil.which("uv") is None or shutil.which("git") is None,
         reason="native POSIX Git and uv required",
@@ -138,6 +138,44 @@ def _json(path: Path) -> Any:
     return json.loads(path.read_text())
 
 
+def _state_environment(state: Path, environment: dict[str, str]) -> dict[str, str]:
+    return {
+        **environment,
+        "OH_GOON_DB": str(state / "runtime.sqlite"),
+        "OH_GOON_LEAGUE_FILE": str(state / "league.yml"),
+        "XDG_CONFIG_HOME": str(state / "config"),
+        "XDG_DATA_HOME": str(state / "data"),
+        "XDG_STATE_HOME": str(state / "state"),
+    }
+
+
+def _cli_json(
+    state: Path,
+    environment: dict[str, str],
+    *arguments: str,
+    expected: int = 0,
+) -> dict[str, Any]:
+    with TemporaryFile() as output, TemporaryFile() as errors:
+        result = subprocess.run(
+            [str(ROOT / "backend/.venv/bin/oh-goon"), *arguments, "--json"],
+            cwd=state.parent,
+            env=_state_environment(state, environment),
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=errors,
+            timeout=30,
+        )
+        assert output.tell() <= 1024 * 1024 and errors.tell() <= 128 * 1024
+        output.seek(0)
+        errors.seek(0)
+        value = json.loads(output.read())
+        diagnostic = errors.read().decode(errors="replace")
+    assert result.returncode == expected, (value, diagnostic)
+    assert isinstance(value, dict)
+    assert value["_cli"]["exit_code"] == expected
+    return value
+
+
 def _recorded_results(
     results: Path, commit: str, *, expected_steps: int = 3
 ) -> tuple[str, list[dict[str, Any]]]:
@@ -159,6 +197,82 @@ def _recorded_results(
     return run_id, steps
 
 
+def test_ci_helper_registers_only_its_target_and_keeps_native_lock_and_privacy_boundaries(
+    tmp_path: Path, ci_cache: Path
+) -> None:
+    repository = _repository(tmp_path)
+    sibling = repository.with_name("unselected project")
+    sibling.mkdir()
+    _git(sibling, "init", "-q")
+    (sibling / "README.md").write_text("# Unselected repository\n")
+    privacy_test = repository / APPLICATION / "tests/test_ci_environment.py"
+    privacy_test.write_text(
+        "import os\n\n\n"
+        "def test_control_capability_is_not_a_workload_environment():\n"
+        '    assert "OH_GOON_LOCAL_ACCESS_TOKEN" not in os.environ\n'
+    )
+    commit = _commit(repository)
+    ambient = tmp_path / "unselected-state"
+    ambient.mkdir()
+    canary = "PRIVATE_CI_LOCAL_ACCESS_CANARY"
+    environment = {
+        **_environment(ci_cache),
+        "OH_GOON_DB": str(ambient / "runtime.sqlite"),
+        "OH_GOON_LEAGUE_FILE": str(ambient / "league.yml"),
+        "OH_GOON_LOCAL_ACCESS_TOKEN": canary,
+        "XDG_CONFIG_HOME": str(ambient / "config"),
+        "XDG_DATA_HOME": str(ambient / "data"),
+        "XDG_STATE_HOME": str(ambient / "state"),
+    }
+    state, results = tmp_path / "state", tmp_path / "results"
+    _run(repository, state, environment)
+    _collect(state, results, environment)
+    run_id, steps = _recorded_results(results, commit)
+    assert all(step["status"] == "PASSED" for step in steps)
+    inventory = _cli_json(state, environment, "league", "scan")
+    assert [Path(team["repository"]["path"]) for team in inventory["teams"]] == [repository]
+    assert not list(ambient.iterdir())
+    assert not (repository / APPLICATION / ".venv").exists()
+    history = _cli_json(state, environment, "runs", "list")
+    assert [item["fleet_run_id"] for item in history["items"]] == [run_id]
+
+    selection = state / "workflow/run.yml"
+    locked = state / "workflow/goon.lock"
+    lock_bytes = locked.read_bytes()
+    locked.unlink()
+    missing = _cli_json(state, environment, "run", str(selection), "--no-input", expected=2)
+    assert missing.get("fleet_run_id") is None and not locked.exists()
+    locked.write_bytes(lock_bytes)
+
+    # This is another valid Git source, so an implicit refresh would run work
+    # successfully rather than merely failing to resolve a nonexistent revision.
+    implementation = repository / APPLICATION / "src/orders_pipeline/operations.py"
+    implementation.write_text(implementation.read_text() + "\n# Reviewed next source.\n")
+    next_commit = _commit(repository)
+    selected = _json(selection)
+    selected["source"]["ref"] = next_commit
+    selection.write_text(json.dumps(selected) + "\n")
+    stale = _cli_json(state, environment, "run", str(selection), "--no-input", expected=2)
+    assert stale.get("fleet_run_id") is None
+    assert locked.read_bytes() == lock_bytes
+    assert _cli_json(state, environment, "runs", "list") == history
+    assert _json(results / "run.json")["fleet_run_id"] == run_id
+    assert {source["commit"] for source in yaml.safe_load(lock_bytes)["execution_sources"]} == {
+        commit
+    }
+    public_files = [
+        state / "run.json",
+        locked,
+        state.with_suffix(".run.log"),
+        results.with_suffix(".collect.log"),
+        *(path for path in results.rglob("*") if path.is_file()),
+    ]
+    for public in public_files:
+        assert public.stat().st_size <= 1024 * 1024
+        assert canary.encode() not in public.read_bytes(), public.name
+
+
+@pytest.mark.daily
 def test_ci_helper_builds_native_wheels_and_keeps_commit_bound_portable_results(
     tmp_path: Path, ci_cache: Path
 ) -> None:
@@ -252,7 +366,14 @@ def test_ci_helper_builds_native_wheels_and_keeps_commit_bound_portable_results(
     assert _json(output / ".showcase/result.json") == {"total_order_value": "1236.70"}
 
 
-@pytest.mark.parametrize("failure", ["lint", "test", "locked-metadata"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param("lint", marks=pytest.mark.daily),
+        "test",
+        pytest.param("locked-metadata", marks=pytest.mark.daily),
+    ],
+)
 def test_ci_helper_preserves_native_failure_and_skips_wheel(
     tmp_path: Path, ci_cache: Path, failure: str
 ) -> None:
@@ -306,13 +427,23 @@ def test_ci_helper_preserves_native_failure_and_skips_wheel(
     assert _git(repository, "status", "--porcelain") == ""
 
 
-def test_ci_collect_refuses_a_pre_run_source_error_without_inventing_history(
-    tmp_path: Path, ci_cache: Path
+@pytest.mark.parametrize("invalid", ["missing-source", "missing-input"])
+def test_ci_collect_refuses_pre_run_configuration_without_inventing_history(
+    tmp_path: Path, ci_cache: Path, invalid: str
 ) -> None:
     repository = _repository(tmp_path)
+    plan = RECIPE / "missing.yml" if invalid == "missing-source" else PLAN
+    if invalid == "missing-input":
+        goon = repository / RECIPE / "goons/python/checks/goon.yml"
+        declaration = yaml.safe_load(goon.read_text())
+        declaration["inputs"] = {"required_ci_note": {"type": "string"}}
+        goon.write_text(yaml.safe_dump(declaration, sort_keys=False))
+        _commit(repository)
     environment = _environment(ci_cache)
     state, results = tmp_path / "state", tmp_path / "results"
-    _run(repository, state, environment, expected=2, plan=RECIPE / "missing.yml")
+    refusal = _run(repository, state, environment, expected=2, plan=plan)
+    if invalid == "missing-input":
+        assert "MISSING_REQUIRED_INPUT" in refusal
     assert not (state / "run.json").exists()
     message = _collect(state, results, environment, expected=1)
     assert "No submitted Run" in message
@@ -320,6 +451,7 @@ def test_ci_collect_refuses_a_pre_run_source_error_without_inventing_history(
     assert not list(results.rglob(WHEEL))
 
 
+@pytest.mark.daily
 def test_ci_collect_preserves_same_basename_artifacts_from_distinct_steps(
     tmp_path: Path, ci_cache: Path
 ) -> None:
@@ -359,6 +491,7 @@ def test_ci_collect_preserves_same_basename_artifacts_from_distinct_steps(
     assert _json(results / "outputs.json")["schema"] == "oh-goon.plan-run-outputs/v1"
 
 
+@pytest.mark.daily
 def test_ci_collect_does_not_mistake_diagnostic_reports_for_a_distribution(
     tmp_path: Path, ci_cache: Path
 ) -> None:

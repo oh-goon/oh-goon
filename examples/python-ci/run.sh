@@ -47,25 +47,14 @@ case "$task_mode" in
     mkdir -m 700 -- "$task_state"
     mkdir -m 700 -- "$task_state/workflow"
     bind_state
-    "$task_cli" league add-folder "$task_repository" >&2
-    "$task_cli" league scan --json > "$task_state/league.json"
-    "$task_python" -I - "$task_state/league.json" "$task_repository" "$task_plan" \
+    "$task_python" -I - "$task_repository" "$task_plan" \
       "$task_revision" "$task_state/workflow/run.yml" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-inventory_path, repository, plan, revision, destination = sys.argv[1:]
-with Path(inventory_path).open(encoding="utf-8") as source:
-    inventory = json.load(source)
-root = Path(repository).resolve()
-matches = [
-    team["repository"]
-    for team in inventory["teams"]
-    if Path(team["repository"]["path"]).resolve() == root
-]
-if len(matches) != 1:
-    raise SystemExit("Expected exactly one included registered workload repository")
+repository, plan, revision, destination = sys.argv[1:]
+root = Path(repository)
 selection = {
     "version": 2,
     "source": {
@@ -81,14 +70,14 @@ with Path(destination).open("x", encoding="utf-8") as output:
     json.dump(selection, output, indent=2)
     output.write("\n")
 PY
-    "$task_cli" workflow prepare "$task_state/workflow/run.yml" >&2
+    "$task_cli" workflow prepare "$task_state/workflow/run.yml" --register-target --no-input >&2
     git -C "$task_tool" rev-parse HEAD > "$task_state/tool-commit.txt"
     git -C "$task_tool" status --porcelain=v1 --untracked-files=normal > "$task_state/tool-status.txt"
     "$task_cli" --version > "$task_state/tool-version.txt"
     uv --version > "$task_state/uv-version.txt"
     # No shell cancellation adapter: the CLI becomes the step entry process.
     # Its original Run owner handles native signals and determines the result.
-    exec "$task_cli" run "$task_state/workflow/run.yml" --json > "$task_state/run.json"
+    exec "$task_cli" run "$task_state/workflow/run.yml" --json --no-input > "$task_state/run.json"
     ;;
   collect)
     [[ $# -eq 3 ]] || usage

@@ -464,8 +464,11 @@ trusted-base merge controller as evidence.
 
 PR, merge-group and main-health concurrency are separate. Superseded PR work is
 cancelled; main pushes execute only distinct installed-source/CLI smoke. The
-complete Python CI example is a daily reusable/manual workflow, not an additional
-complete journey on every ordinary update. Package/build smoke is admitted when
+complete Python CI example is a daily reusable/manual workflow with an explicit
+opt-in push trigger under `codex/python-ci-proof/**`. Qualification branches
+retain actual successful or failed job status and original Run receipts;
+ordinary PR updates keep their affected verification portfolio. Package/build
+smoke is admitted when
 its actual distribution boundary changes; ordinary docs do not assemble a release.
 
 PR verification starts on opening, a head update, reopening, and ready/draft

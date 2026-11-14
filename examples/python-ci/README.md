@@ -53,11 +53,11 @@ bash examples/python-ci/run.sh collect "$task_tool" "$task_job/state" "$task_job
 for SIGTERM. CI runs `collect` in its separate always-run/after-script phase so
 a failing Run still has inspectable results without hiding its failure.
 
-The adapter registers this actual application repository, verifies it in the
-public inventory, writes a path-selected v2 `git-plan` for the exact commit and
-calls `workflow prepare` then waited `run`. It does not copy database IDs by hand, create an
-empty target repository or implement another execution loop. State must be a
-new directory. Tool installation, state and caches stay outside the captured
+The adapter writes a path-selected v2 `git-plan` for the exact native Git commit,
+then calls `workflow prepare --register-target --no-input` and waited `run`.
+The original prepare owner registers only that selected application repository.
+No manual database ID or second registration/inventory interpretation is needed.
+State must be a new directory. Tool installation, state and caches stay outside the captured
 application; managed execution leaves the developer environment and checkout
 untouched.
 
@@ -79,13 +79,31 @@ project values and commit the result:
    `.github/workflows/python-ci.yml`, or use [gitlab-ci.yml](gitlab-ci.yml) as
    `.gitlab-ci.yml`. Set the Plan path to `ci/oh-goon/plan.yml`, the adapter path
    to `ci/oh-goon/run.sh`, and select the Oh-Goon source revision you intend to
-   install. Pin a reviewed full commit SHA for repeatable tool installation.
+   install. The supplied files select reviewed commit
+   `714a03c4d0c7347df68ba8745040743d598ba374`; replace it only with another
+   reviewed full commit SHA. Native Git must confirm the selected checkout.
 
 The hosted examples install the CLI in a separate checkout and keep one fresh
 state directory per job. They use backend-only native uv setup and read-only
-source access. Supply your own repository credentials through the platform if
-your selected sources require authentication. The GitLab example expects a
-Linux shell runner with the documented tools; it does not configure a runner.
+source access. GitHub uses the declared official uv/Python 3.12 container pinned
+by OCI index digest. Its native apt setup adds Bash, Git, Make and CA certificates;
+no frontend, npm or browser installation is selected. GitHub owns the container
+and [job shell](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/run-jobs-in-a-container),
+while uv owns Python dependency preparation.
+
+After CLI setup, `environment.json` records native Python/platform facts and
+checks that Node, npm and browser commands are absent from this job's `PATH`.
+This is scoped command-availability evidence for the declared container;
+GitHub's infrastructure may use Node outside that product environment.
+Supply repository credentials through the platform's native checkout/Git/uv
+authority when selected sources require authentication. Keep credentials out of
+recipe values, locks, diagnostics and promoted artifacts.
+
+The GitLab file is **NOT_QUALIFIED**. It requires a disposable Linux Bash shell runner
+tagged `linux-shell`, with Bash, Git, GNU Make, Python 3.12 and uv 0.12.5 already
+available, repository checkout credentials supplied by GitLab, a private writable
+job directory and functioning artifact upload. It configures no runner and
+inherits none of the GitHub container's qualification.
 
 Run `uv lock` intentionally after changing application dependencies and commit
 the resulting native lock. The checks Goon requests `lock_mode: locked`: native
@@ -111,6 +129,8 @@ contains:
 - `toolchain.json`: observed CLI source revision, dirty flag and native tool
   versions. These observations are diagnostics; the original Run evidence owns
   the execution result.
+- `environment.json` on GitHub: the bounded native command-availability and
+  Python/platform observation from the declared job container.
 
 The wheel can be installed with native uv into an independent environment.
 Ruff JSON and JUnit XML are explicitly retained because CI readers need their
@@ -153,14 +173,45 @@ and the [GitLab shell executor](https://docs.gitlab.com/runner/executors/shell/)
 own their signal delivery and final process termination.
 
 The [GitHub qualification workflow](../../.github/workflows/python-ci-example.yml)
-executes this recipe against its exact checked-out commit and uploads its
-portable results. The native acceptance tests in
-`backend/tests/integration/services/test_ci_python_example.py` exercise successful
-builds at two commits, installed wheel behavior, failure propagation, stale uv
-metadata refusal and independent historical collection. Separate native CLI
-tests exercise SIGINT/SIGTERM, terminal cancellation, child-process exit and
-scratch removal. A green hosted success does not qualify whole-job cancellation
-or the GitLab hosting environment; those require their own observed runs.
+executes this same recipe against its exact checked-out commit and uploads its
+portable results. It remains callable by daily verification and manually. A push
+to an explicitly selected `codex/python-ci-proof/**` branch also runs this native
+workflow; ordinary PR branches gain no extra complete-job gate.
+
+To observe failure propagation, use a separate qualification branch containing
+a deliberately failing application pytest test, committed before the push. Run
+the unchanged Plan against that actual commit. The GitHub job must fail with the
+original CLI exit, retain the failed pytest Step and JUnit artifact, skip the
+wheel build, and collect the same original Run through its always-run step.
+Keep that failure fixture out of a production merge. There is no expected-failure
+wrapper, alternate Run loop or job result conversion. Source-specific success
+and failure receipts belong with [HUG-94](https://linear.app/hugloss/issue/HUG-94);
+a later source or hosting environment needs its own observed proof.
+
+The native acceptance tests in
+`backend/tests/integration/services/test_ci_python_example.py` exercise fresh
+registration, noninteractive execution, native failure/refusal boundaries,
+source-bound builds, installed wheel behavior and independent historical
+collection. Separate native CLI tests exercise SIGINT/SIGTERM, terminal
+cancellation, child-process exit and scratch removal. Whole-job hosted
+cancellation and GitLab execution remain **NOT_QUALIFIED** until observed on
+those providers.
+
+### Optional training workflow and strict execution
+
+The [Iris training walkthrough](../../templates/goons/ml/iris-train/README.md)
+provides a separate ordinary trusted-local ML workflow through the same public
+CLI and Fleet Run lifecycle. Its model/metrics declarations use the existing
+artifact/content-store owner; follow that walkthrough for ML output readback.
+This CI adapter promotes a Python distribution and requires its declared wheel
+on success.
+
+Strict CI/CD is **NOT_QUALIFIED** by these examples. It additionally needs the
+original enrolled executor, admitted runtime/custody and resource guarantees,
+authorized source delivery and content-store prerequisites described by the
+[execution contract](../../docs/CI_CD_CONTRACT.md). A missing strict prerequisite
+must remain refused; ordinary verification does not acquire strict isolation
+or certification from a successful hosted job.
 
 The [TaskFlow walkthrough](../airflow-taskflow-showcase/README.md) uses this same
 application's business operations and retained JSON result.

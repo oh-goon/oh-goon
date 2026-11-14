@@ -1,3 +1,4 @@
+# NOT_QUALIFIED: GitLab hosted/shell execution has not been observed for this example.
 # Copy to .gitlab-ci.yml. Use a disposable Linux shell runner tagged linux-shell,
 # prepared with Bash, Git, GNU Make, uv 0.12.5 and Python 3.12.
 stages: [test]
@@ -5,7 +6,7 @@ stages: [test]
 variables:
   UV_PYTHON: "3.12"
   # Select a reviewed immutable commit for repeatable tool installation.
-  OH_GOON_REF: main
+  OH_GOON_REF: "714a03c4d0c7347df68ba8745040743d598ba374"
   OH_GOON_JOB_ROOT: "/tmp/oh-goon-$CI_PROJECT_ID-$CI_JOB_ID"
 
 python:
@@ -14,9 +15,11 @@ python:
   interruptible: true
   allow_failure: false
   before_script:
+    - '[[ "$OH_GOON_REF" =~ ^[0-9a-f]{40}$ ]]'
     - mkdir -m 700 -- "$OH_GOON_JOB_ROOT"
     - git clone https://github.com/oh-goon/oh-goon.git "$OH_GOON_JOB_ROOT/tool"
     - git -C "$OH_GOON_JOB_ROOT/tool" checkout --detach "$OH_GOON_REF"
+    - test "$(git -C "$OH_GOON_JOB_ROOT/tool" rev-parse HEAD)" = "$OH_GOON_REF"
     - make -C "$OH_GOON_JOB_ROOT/tool" backend-install
   script:
     - |

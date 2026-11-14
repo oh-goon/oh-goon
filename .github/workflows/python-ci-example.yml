@@ -2,6 +2,8 @@ name: Python CI example
 
 "on":
   workflow_dispatch:
+  push:
+    branches: ["codex/python-ci-proof/**"]
   workflow_call:
     inputs:
       source_sha:
@@ -20,27 +22,59 @@ jobs:
     name: python-ci-example
     runs-on: ubuntu-26.04
     timeout-minutes: 20
+    container:
+      image: ghcr.io/astral-sh/uv:0.12.5-python3.12-trixie-slim@sha256:4677e08839853fe91c523b593f822ec1e87c7b91ba4c6b30929016b2e0933cd5
+    defaults:
+      run:
+        shell: bash
     env:
       UV_PYTHON: "3.12"
+      UV_PYTHON_DOWNLOADS: never
       SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
     steps:
+      - name: Validate selected source before setup
+        run: '[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - name: Prepare native CLI prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends bash ca-certificates git make
+          rm -rf /var/lib/apt/lists/*
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          version: "0.12.5"
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
       - name: Prepare exact candidate CLI outside the workload
         run: |
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git clone --no-hardlinks "$GITHUB_WORKSPACE" "$RUNNER_TEMP/oh-goon-tool"
           git -C "$RUNNER_TEMP/oh-goon-tool" checkout --detach "$SOURCE_SHA"
+          test "$(git -C "$RUNNER_TEMP/oh-goon-tool" rev-parse HEAD)" = "$SOURCE_SHA"
           make -C "$RUNNER_TEMP/oh-goon-tool" backend-install
+      - name: Observe the CLI job environment
+        run: |
+          "$RUNNER_TEMP/oh-goon-tool/backend/.venv/bin/python" -I - "$RUNNER_TEMP/oh-goon-ci-environment.json" <<'PYTHON'
+          import json
+          import platform
+          import shutil
+          import sys
+          from pathlib import Path
+
+          names = ("node", "nodejs", "npm", "npx", "chromium", "chromium-browser", "google-chrome", "firefox")
+          commands = {name: shutil.which(name) is not None for name in names}
+          if any(commands.values()):
+              raise SystemExit("The declared Python-only job unexpectedly exposes Node or browser commands")
+          observation = {
+              "python_version": sys.version,
+              "platform": platform.platform(),
+              "command_available_on_path": commands,
+              "authority": "diagnostic observations inside the declared job container; not host-wide absence or isolation proof",
+          }
+          with Path(sys.argv[1]).open("x", encoding="utf-8") as output:
+              json.dump(observation, output, indent=2)
+              output.write("\n")
+          PYTHON
       - name: Execute the committed Python CI example
         run: |
           exec bash examples/python-ci/run.sh run \
@@ -52,6 +86,12 @@ jobs:
           bash examples/python-ci/run.sh collect \
             "$RUNNER_TEMP/oh-goon-tool" "$RUNNER_TEMP/oh-goon-ci-state" \
             "$RUNNER_TEMP/oh-goon-ci-results"
+      - name: Retain the job environment observation
+        if: ${{ always() }}
+        run: |
+          if [ -d "$RUNNER_TEMP/oh-goon-ci-results" ]; then
+            cp "$RUNNER_TEMP/oh-goon-ci-environment.json" "$RUNNER_TEMP/oh-goon-ci-results/environment.json"
+          fi
       - name: Upload recorded results
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
