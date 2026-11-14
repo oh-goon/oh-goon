@@ -16,7 +16,7 @@ from contextlib import closing, contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import yaml
@@ -1083,7 +1083,7 @@ def test_workflow_run_cannot_recover_previous_work_to_admit_its_selection(
 
 def _guarded_workflow_preview(
     environment: dict[str, str], cwd: Path, workflow: Path, *, expected: int = 0
-) -> dict[str, object]:
+) -> dict[str, Any]:
     """A fresh observer cannot hide native execution behind successful presentation."""
     program = """
 import os, sys
@@ -1159,6 +1159,103 @@ def test_current_target_preview_is_a_fresh_readonly_process_without_run_authorit
     assert not (repository / "executed.txt").exists()
     assert not (workflow / "goon.lock").exists()
     assert not Path(environment["OH_GOON_DB"]).exists()
+    assert _snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("condition", ["strict-policy", "stale-lock"])
+def test_current_target_preview_keeps_unprobed_authority_and_lock_limits(
+    tmp_path: Path, condition: str
+) -> None:
+    environment, workflow, repository = _local_preview_workflow(tmp_path)
+    baseline = _guarded_workflow_preview(environment, tmp_path, workflow)
+    original_plan_id = baseline["current_target_preview"]["plan_id"]
+    goon = repository / "goon.yml"
+    lock = workflow / "goon.lock"
+    original_lock = None
+    if condition == "strict-policy":
+        goon.write_text(
+            yaml.safe_dump(
+                {
+                    "execution": {"purpose": "cicd"},
+                    "steps": [{"id": "check", "run": "sh check.sh"}],
+                }
+            )
+        )
+    else:
+        _cli(environment, tmp_path, "workflow", "prepare", str(workflow), "--json")
+        original_lock = lock.read_bytes()
+        goon.write_text("steps:\n- id: check\n  run: sh check.sh --changed\n")
+    before = _snapshot(tmp_path)
+    report = _guarded_workflow_preview(environment, tmp_path, workflow)
+    current = report["current_target_preview"]
+    assert report["execution_authorized"] is False and current["plan_id"] is not None
+    assert current["proof_limits"]["native_capabilities"] == "UNVERIFIED"
+    assert current["proof_limits"]["executor"] == "NOT_PROBED"
+    assert current["proof_limits"]["lock_freshness"] == "NOT_VERIFIED"
+    if condition == "strict-policy":
+        assert current["execution_policy"]["purpose"] == "cicd"
+        assert not lock.exists() and not Path(environment["OH_GOON_DB"]).exists()
+    else:
+        assert current["plan_id"] != original_plan_id
+        assert lock.read_bytes() == original_lock
+    assert not (repository / "executed.txt").exists()
+    assert _snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("condition", ["excluded-target", "replaced-reviewed-target"])
+def test_current_target_preview_refuses_original_target_selection_mismatch(
+    tmp_path: Path, condition: str
+) -> None:
+    from oh_goon.core.product_identity import repository_subject_instance_id
+
+    environment, workflow, repository = _local_preview_workflow(tmp_path)
+    baseline = _guarded_workflow_preview(environment, tmp_path, workflow)
+    assert baseline["execution_authorized"] is False
+    if condition == "excluded-target":
+        _cli(environment, tmp_path, "workflow", "prepare", str(workflow), "--json")
+        _cli(
+            environment,
+            tmp_path,
+            "exclude",
+            str(repository),
+            "--expected-repository-instance-id",
+            repository_subject_instance_id(repository),
+        )
+        expected_code = "CONFIG_TARGET_UNAVAILABLE"
+    else:
+        review = json.loads(
+            _cli(
+                environment,
+                tmp_path,
+                "workflow",
+                "inspect",
+                str(workflow),
+                "--review-source",
+                "--json",
+            )
+        )
+        authority = review["target"]["source_authority"]
+        selection = workflow / "run.yml"
+        data = yaml.safe_load(selection.read_text())
+        data["target"]["reviewed_source"] = authority
+        selection.write_text(yaml.safe_dump(data))
+        reviewed = _guarded_workflow_preview(environment, tmp_path, workflow)
+        assert (
+            reviewed["current_target_preview"]["targets"][0]["repository_instance_id"]
+            == authority["subject_instance_id"]
+        )
+        repository.rename(tmp_path / "original-reviewed-repository")
+        repository.mkdir()
+        subprocess.run(["git", "init", "-q", str(repository)], check=True, timeout=10)
+        (repository / "goon.yml").write_text("steps:\n- id: check\n  run: sh check.sh\n")
+        (repository / "check.sh").write_text("printf replaced > executed.txt\n")
+        assert repository_subject_instance_id(repository) != authority["subject_instance_id"]
+        expected_code = "REVIEWED_SOURCE_STALE"
+    before = _snapshot(tmp_path)
+    report = _guarded_workflow_preview(environment, tmp_path, workflow, expected=2)
+    assert report["code"] == expected_code
+    assert report.get("fleet_run_id") is None
+    assert not (repository / "executed.txt").exists()
     assert _snapshot(tmp_path) == before
 
 

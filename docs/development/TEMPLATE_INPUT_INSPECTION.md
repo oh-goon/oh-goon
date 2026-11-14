@@ -156,6 +156,11 @@ integrity or freshness has not been established. A successful command exit means
 the observation was reported; inspect its states and diagnostics. Invalid source
 selection or unavailable source capture still refuses the command.
 
+Current exclusions and an explicitly selected reviewed-source instance remain
+binding during preview. Replacing that reviewed repository refuses the
+observation. Without a previously bound instance, a fresh preview may observe a
+replacement's new instance; that observation still grants no Run authority.
+
 Preview has no acquisition, refresh, registration or repair flags. Git
 Plan/Goon/application sources report source acquisition required even with a
 cached pin: their original Git owner materializes leases and worktrees, which
