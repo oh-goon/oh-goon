@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import timedelta
 from pathlib import Path
+
+import pytest
 
 from oh_goon.core.errors import ExecutionBusy, ScheduleDefinitionStale
 from oh_goon.core.models.schedule import ScheduleDeleteRequest, ScheduleFailure, ScheduleReplace
@@ -12,6 +15,7 @@ from oh_goon.core.vocabulary import ScheduleFailureStage
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
+from oh_goon.services.schedule_timing import schedule_timing_decision
 from tests.factories.schedules import persist_active_schedule, schedule_create
 
 
@@ -237,3 +241,42 @@ def test_schedule_definition_restart_preserves_exact_verified_execution_identity
     assert reopened.target == created.target
     assert reopened.target.identity == created.target.identity
     assert reopened.target.execution_digest == created.target.execution_digest
+
+
+@pytest.mark.parametrize("has_terminal", (False, True))
+def test_reopened_overdue_schedule_preserves_original_interval_anchor(
+    tmp_path: Path, has_terminal: bool
+) -> None:
+    path = tmp_path / "overdue-schedule.db"
+    database = LocalDatabase(path)
+    definitions = ScheduleDefinitionStore(database)
+    executions = ScheduleExecutionStore(database)
+    definition = definitions.create("overdue", schedule_create(interval_minutes=1))
+    latest = None
+    if has_terminal:
+        active = persist_active_schedule(database, executions, definition)
+        latest = executions.compare_and_set(
+            active,
+            fail_schedule_run(
+                active,
+                ScheduleFailure.from_exception(
+                    ExecutionBusy("capacity unavailable"),
+                    stage=ScheduleFailureStage.ADMISSION,
+                ),
+                finished_at=utc_now(),
+            ),
+        )
+        assert isinstance(latest, FailedScheduleRun)
+    anchor = definition.created_at if latest is None else latest.finished_at
+    reopened_database = LocalDatabase(path)
+    reopened = ScheduleDefinitionStore(reopened_database).get(definition.schedule_id)
+    history = ScheduleExecutionStore(reopened_database).executions(definition.schedule_id, limit=1)
+    assert reopened == definition
+    assert history == ([] if latest is None else [latest])
+
+    decision = schedule_timing_decision(
+        reopened, history[0] if history else None, now=anchor + timedelta(days=7)
+    )
+
+    assert decision.due
+    assert decision.due_at == anchor + timedelta(minutes=1)

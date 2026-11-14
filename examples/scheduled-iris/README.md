@@ -141,21 +141,48 @@ into a successful training result. Always use its original outcome and Step
 evidence. Editing a caller file or moving a Git ref alone does not replace the
 Schedule's frozen selection or refresh its pins.
 
+## Cancel an admitted training Run
+
+Pause the Schedule first when you also want to prevent later automatic work.
+Then use the admitted `fleet_run_id` from the occurrence's repository page and
+send cancellation to the same foreground application that admitted it:
+
+```sh
+fleet_run_id=ACTUAL_FLEET_RUN_ID
+curl --fail --silent --show-error --header @"$task_schedule_private/header" --request POST "http://127.0.0.1:8011/api/fleet/runs/$fleet_run_id/cancel" --output "$task_schedule_private/cancellation.json"
+oh-goon runs tape "$fleet_run_id" --json
+```
+
+Read the occurrence page again to see its original child Run settle. A pause
+does not cancel admitted work, and requesting cancellation is not proof that
+native work has stopped. Use the terminal Run/Step and cleanup evidence;
+unresolved cleanup remains unresolved. Diagnostic metrics retained before
+cancellation do not make the training successful. This uses the running
+application's existing Run control; it does not attach another CLI execution
+owner or create a replacement occurrence.
+
 ## Qualification boundary
 
 The [native example proof](../../tests/integration/test_scheduled_iris_example.py)
 uses the actual foreground process and public CLI/API. The real wall-clock
-recurrence variant has daily cadence; ordinary feedback covers creation,
-first-interval observation, public pause control and a deliberately failed Iris
-occurrence explicitly started through the API. That manual occurrence verifies
-failure/readback semantics, not automatic recurrence. Existing bounded Schedule
-owner tests cover timing and admission races without pretending their controlled
-clocks are a public-process wall-clock proof.
+recurrence and automatic failed-training variants have daily cadence; ordinary
+feedback covers creation, first-interval observation, public pause control,
+an API-started failed occurrence and cancellation of live native training.
+The manual failure verifies failure/readback semantics, not automatic recurrence.
+The separate automatic
+failure waits for the full initial interval and preserves its non-successful
+native training outcome. Existing bounded Schedule owner tests cover timing
+and admission races without pretending their controlled clocks are a
+public-process wall-clock proof. SQLite reopen cases preserve the original due
+anchor after multiple missed intervals. The cancellation fixture repeats the
+native Iris command finitely to provide an observable training window; it
+requires a completed fit, a live training process, cancellation through the
+original application and native process-session quiescence.
 
 There is no cron/catch-up promise or automatic process startup. With no product
 process running, no clock is evaluated; on restart, the existing owner observes
-the saved definition and latest terminal occurrence. Strict custody, physical
-cancellation races, multiple missed intervals on other hosts, private Git,
+the saved definition and latest terminal occurrence. Strict custody, arbitrary
+detached-process containment, multiple missed intervals on other hosts, private Git,
 installed-release and WSL/container qualification require their own evidence.
 Stop the foreground process with its normal terminal interrupt after pausing
 the demonstration. Schedule operator CLI expansion remains HUG-128.
