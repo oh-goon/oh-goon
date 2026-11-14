@@ -11,11 +11,22 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from iris_train.dataset import DatasetError, load_captured_dataset
+
+
+def _dataset(value: str) -> str:
+    if value not in {"builtin", "captured"}:
+        raise argparse.ArgumentTypeError("expected builtin or captured dataset")
+    return value
+
 
 def main() -> int:
     """Train native scikit-learn's Iris pipeline and retain its actual parameters."""
 
     parser = argparse.ArgumentParser(prog="iris-train")
+    parser.add_argument(
+        "--dataset", type=_dataset, default="builtin", metavar="{builtin,captured}"
+    )
     parser.add_argument("--random-seed", type=int, required=True)
     parser.add_argument("--test-size-percent", type=int, required=True)
     parser.add_argument("--minimum-accuracy-percent", type=int, required=True)
@@ -31,21 +42,32 @@ def main() -> int:
             parser.error(
                 f"--{name.replace('_', '-')} must be between {lower} and {upper}"
             )
-    data, labels = load_iris(return_X_y=True)
-    train_data, test_data, train_labels, test_labels = train_test_split(
-        data,
-        labels,
-        test_size=args.test_size_percent / 100,
-        stratify=labels,
-        random_state=args.random_seed,
-    )
-    scaler = StandardScaler()
-    classifier = LogisticRegression(
-        max_iter=args.max_iterations, random_state=args.random_seed
-    )
-    pipeline = make_pipeline(scaler, classifier)
-    pipeline.fit(train_data, train_labels)
-    accuracy = pipeline.score(test_data, test_labels)
+    dataset_sha256 = None
+    try:
+        if args.dataset == "captured":
+            data, labels, dataset_sha256 = load_captured_dataset()
+        else:
+            data, labels = load_iris(return_X_y=True)
+        train_data, test_data, train_labels, test_labels = train_test_split(
+            data,
+            labels,
+            test_size=args.test_size_percent / 100,
+            stratify=labels,
+            random_state=args.random_seed,
+        )
+        scaler = StandardScaler()
+        classifier = LogisticRegression(
+            max_iter=args.max_iterations, random_state=args.random_seed
+        )
+        pipeline = make_pipeline(scaler, classifier)
+        pipeline.fit(train_data, train_labels)
+        accuracy = pipeline.score(test_data, test_labels)
+    except DatasetError:
+        parser.error(DatasetError.code)
+    except (ValueError, TypeError, OverflowError):
+        if args.dataset == "captured":
+            parser.error(DatasetError.code)
+        raise
     output = Path("ml-output")
     output.mkdir(exist_ok=True)
     metrics = {
@@ -58,6 +80,8 @@ def main() -> int:
         "test_examples": len(test_data),
         "scikit_learn_version": sklearn.__version__,
     }
+    if dataset_sha256 is not None:
+        metrics["dataset_sha256"] = dataset_sha256
     parameters = {
         "scaler_mean": scaler.mean_.tolist(),
         "scaler_scale": scaler.scale_.tolist(),

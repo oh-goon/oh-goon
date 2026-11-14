@@ -1,6 +1,11 @@
 runtime: python
 uv: {lock_mode: frozen}
 inputs:
+  dataset:
+    type: choice
+    choices: [builtin, captured]
+    default: builtin
+    description: Builtin Iris data or the fixed captured package resource
   random_seed:
     type: integer
     min: 0
@@ -26,7 +31,7 @@ inputs:
     default: 300
     description: Maximum estimator iterations passed to the training command
 steps:
-- run: iris-train --random-seed ${{ inputs.random_seed }} --test-size-percent ${{ inputs.test_size_percent }} --minimum-accuracy-percent
+- run: iris-train --dataset ${{ inputs.dataset }} --random-seed ${{ inputs.random_seed }} --test-size-percent ${{ inputs.test_size_percent }} --minimum-accuracy-percent
     ${{ inputs.minimum_accuracy_percent }} --max-iterations ${{ inputs.max_iterations }}
   artifacts:
   - path: ml-output/iris-training-metrics.json

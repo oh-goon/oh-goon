@@ -82,6 +82,25 @@ file as bytes; it does not parse CSV/JSON or certify those bytes as a valid
 dataset. Applications should bound/stream their reads and return non-success
 without printing private rows when their own validation fails.
 
+The [Iris application](../../templates/goons/ml/iris-train/README.md) provides a
+bounded example: `iris-train --dataset captured` reads its fixed package-local
+`data/training.json` resource. The application owns that format, file limit and
+safe validation errors. The Goon's finite dataset choice selects application
+behavior; it does not grant a host path, URL or retained-content reference.
+The default `builtin` choice retains native scikit-learn's bundled Iris data.
+Private resource values stay out of arguments and scalar Step outputs. This
+does not extend the staged `iris-pipeline` commands' explicitly public data
+packet contract.
+
+To use authored data, select the complete project as an independent application
+through the existing [Goon application contract](GOON_AUTHORING.md), or use a
+project-owned copy of the complete Python Goon. Placing data beside a registered
+target does not replace the shipped catalog project's resource. After changing
+an included resource, explicitly prepare the changed source and its new lock
+before starting a new Run. Successful metrics record the consumed resource's
+byte SHA alongside the original Run/Step and captured-project identities; the
+application hash describes consumed bytes rather than granting new authority.
+
 #### Privacy and evidence
 
 Selected dataset bytes intentionally travel in the private captured source and
@@ -103,6 +122,12 @@ Focused proof is owned by the existing
 [source snapshot tests](../../backend/tests/unit/integrations/test_source_snapshot.py),
 [repository-scoped content tests](../../backend/tests/unit/integrations/test_fleet_content_store.py)
 and [retained-cache isolation tests](../../backend/tests/unit/integrations/test_fleet_plan_cache_isolation.py).
-Two separate installed-CLI training Runs, dataset-specific failure/privacy
-handling, private remote credentials and deployment/host-specific isolation still
-need their own actual qualification; these owner checks do not establish them.
+The [native training-data proof](../../tests/integration/test_training_data.py)
+uses separate installed source-checkout CLI Runs over two deliberately captured
+resource versions, stale-lock refusal followed by explicit preparation, and
+fresh-process retained history/export. It checks dataset-specific failures and
+absence of a synthetic private record-ID canary from public readback and
+artifacts. This qualifies the captured-resource application path; it does not
+establish arbitrary-output redaction, private remote acquisition credentials,
+installed-release parity or deployment/host-specific isolation. Those guarantees
+still require their original owners' actual qualification.

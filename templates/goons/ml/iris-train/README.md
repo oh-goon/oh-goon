@@ -48,6 +48,40 @@ refused before training or output creation. Repeating the same seed reproduces
 the parameters in the same native environment; a seed change can produce
 different parameters even when accuracy is unchanged.
 
+## Select a captured dataset
+
+`iris-train` keeps native scikit-learn Iris data as its default `--dataset builtin`.
+The Goon exposes the finite `dataset` choice: `builtin` or `captured`. Selecting
+`captured` reads only this project's `src/iris_train/data/training.json` resource;
+it accepts no dataset pathname or URL and never falls back to builtin data when
+the resource is missing or invalid.
+
+The UTF-8 JSON object contains exactly `data`, `target` and optionally `record_ids`.
+`data` has at least 30 rows of four finite numbers; `target` has the same number
+of integer labels, each 0, 1 or 2. Optional `record_ids` has one string per row,
+at most 256 UTF-8 bytes each. Identifiers are validated and then ignored by
+training and reporting. The entire resource is limited to 64 KiB. Duplicate
+keys, invalid encoding, nonfinite numbers, runtime symlinks and special files refuse
+with `IRIS_DATASET_INVALID` before model outputs are created. Safe captured
+resource access requires native no-follow directory/file opens and nonblocking
+regular-file observation; unavailable platform support refuses rather than
+using a weaker reader.
+
+Native scikit-learn still owns splitting, fitting and scoring. Successful
+captured-data metrics add `dataset_sha256`, the SHA-256 of the exact read bytes,
+alongside the actual training/test counts. Builtin metrics remain unchanged.
+Raw rows and record identifiers are not printed or put in scalar outputs.
+Fitted parameters and aggregate metrics remain intentional artifacts, not a
+claim of general statistical privacy or sandbox isolation.
+
+Place the resource inside the selected complete project/application before
+capture and explicitly prepare after changing its bytes. Included resources
+change the original project and execution-lock identities. Select
+`inputs: {dataset: captured}` in a workflow using this Goon; use the original
+Run/artifact owners to compare distinct Runs and retain earlier results. The
+separate `iris-pipeline` command keeps its public-data scalar contract and does
+not consume this private resource.
+
 ## Develop the staged pipeline
 
 The same project also installs `iris-pipeline`, with separate `ingest`, `train`,
