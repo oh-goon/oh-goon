@@ -228,6 +228,8 @@ def test_iris_pipeline_retains_real_models_across_seed_changes(
             "publish",
         ]
         assert [s["status"] for s in steps] == ["PASSED"] * 4
+        assert len({s["step_id"] for s in steps}) == 4
+        assert len({s["step_execution_id"] for s in steps}) == 4
         assert [s["output_names"] for s in steps] == [
             ["DATA"],
             ["MODEL"],
@@ -236,8 +238,16 @@ def test_iris_pipeline_retains_real_models_across_seed_changes(
         ]
         assert len({s["outputs"][0]["sha256"] for s in steps[:3]}) == 3
         assert all(0 < s["outputs"][0]["byte_count"] <= 16_384 for s in steps[:3])
+        assert all(
+            s["outputs"][0].get("producer_execution_identity") is None
+            for s in steps[:3]
+        )
+        assert len({s["project_source"]["content_sha256"] for s in steps}) == 1
         assert all(s["settlement"]["cleanup"] == "VERIFIED" for s in steps)
         assert all(s["uv"]["lock_mode"] == "frozen" for s in steps)
+        assert all(
+            s["uv"]["source"] == "captured" and s["uv"]["group"] is None for s in steps
+        )
         assert not any(s["artifacts"] for s in steps[:3])
         files = _export(cli, run_id, steps[-1]["step_id"], tmp_path / f"export-{seed}")
         measured = json.loads(files[ARTIFACTS[0]].read_text())
@@ -277,6 +287,34 @@ def test_iris_pipeline_retains_real_models_across_seed_changes(
             _steps(history[0][1])[0]["outputs"][0]["sha256"]
             != _steps(history[1][1])[0]["outputs"][0]["sha256"]
         )
+
+    # A later failure in this same workflow must not reuse any earlier model.
+    configuration = yaml.safe_load(selected.read_text())
+    configuration["inputs"] = {"random_seed": 42, "minimum_accuracy_percent": 100}
+    selected.write_text(yaml.safe_dump(configuration, sort_keys=False))
+    cli("workflow", "prepare", str(selected), "--no-input")
+    failed = cli("run", str(selected), "--no-input", expected=1)
+    assert failed["status"] == "COMPLETED" and failed["outcome"] == "ATTENTION_REQUIRED"
+    failed_id = failed["fleet_run_id"]
+    assert failed_id not in {run_id for run_id, _, _ in history}
+    failed_tape = cli("runs", "tape", failed_id)
+    failed_steps = _steps(failed_tape)
+    assert [s["status"] for s in failed_steps] == [
+        "PASSED",
+        "PASSED",
+        "FAILED",
+        "SKIPPED",
+    ]
+    assert failed_steps[2]["exit_code"] == 1
+    assert {s["step_execution_id"] for s in failed_steps}.isdisjoint(
+        s["step_execution_id"] for _, original, _ in history for s in _steps(original)
+    )
+    failed_outputs = cli("runs", "outputs", failed_id)
+    assert all(
+        artifact["status"] != "PRESENT" and artifact.get("retained_object") is None
+        for step in failed_outputs["repositories"][0]["steps"]
+        for artifact in step["artifacts"]
+    )
     assert (developer / "pyvenv.cfg").read_bytes() == developer_configuration
     assert not (application / "ml-output").exists()
     assert not (application / "ml-pipeline").exists()
@@ -290,7 +328,7 @@ def test_iris_pipeline_retains_real_models_across_seed_changes(
     )
     shutil.rmtree(selected.parent)
     shutil.rmtree(application)
-    for index, (run_id, original, _) in enumerate(history):
+    for index, (run_id, original, original_files) in enumerate(history):
         reopened = cli("runs", "tape", run_id)
         for key in ("status", "execution_reference", "configuration", "repositories"):
             assert reopened[key] == original[key]
@@ -299,6 +337,25 @@ def test_iris_pipeline_retains_real_models_across_seed_changes(
         )
         assert json.loads(replay[ARTIFACTS[0]].read_text()) == metrics[index]
         assert json.loads(replay[ARTIFACTS[1]].read_text()) == parameters[index]
+        assert all(
+            replay[path].read_bytes() == original_files[path].read_bytes()
+            for path in ARTIFACTS
+        )
+    assert cli("runs", "tape", failed_id)["repositories"] == failed_tape["repositories"]
+    forbidden = tmp_path / "failed-publish.joblib"
+    cli(
+        "runs",
+        "export-artifact",
+        failed_id,
+        "--step",
+        failed_steps[-1]["step_id"],
+        "--path",
+        ARTIFACTS[2],
+        "--output",
+        str(forbidden),
+        expected=2,
+    )
+    assert not forbidden.exists()
 
 
 # Evaluation is the bounded ordinary Run-level stopping proof. Direct native
@@ -554,6 +611,8 @@ def test_iris_pipeline_rejects_resealed_contradictory_split_metadata(
     "fault",
     [
         "binding",
+        "duplicate-step",
+        pytest.param("wrong-recipient", marks=pytest.mark.daily),
         pytest.param("missing-output", marks=pytest.mark.daily),
         pytest.param("output-budget", marks=pytest.mark.daily),
     ],
@@ -571,12 +630,18 @@ def test_iris_pipeline_invalid_dataflow_has_no_publish_authority(
         declaration["steps"][1]["run"] = (
             "iris-pipeline train --data ${{ steps.missing.outputs.DATA }} --max-iterations 300"
         )
+    elif fault == "duplicate-step":
+        declaration["steps"][1]["id"] = declaration["steps"][0]["id"]
+    elif fault == "wrong-recipient":
+        declaration["steps"][2]["run"] = declaration["steps"][2]["run"].replace(
+            "${{ steps.ingest.outputs.DATA }}", "${{ steps.train.outputs.MODEL }}"
+        )
     elif fault == "missing-output":
         declaration["steps"][0]["outputs"]["DATA"]["path"] = "ml-pipeline/missing.json"
     else:
         declaration["steps"][0]["outputs"]["DATA"]["max_bytes"] = 1
     goon.write_text(yaml.safe_dump(declaration, sort_keys=False))
-    if fault == "binding":
+    if fault in {"binding", "duplicate-step"}:
         refused = _native(
             [
                 str(Path(sys.executable).with_name("oh-goon")),
@@ -597,6 +662,14 @@ def test_iris_pipeline_invalid_dataflow_has_no_publish_authority(
         tape = cli("runs", "tape", result["fleet_run_id"])
         steps = _steps(tape)
         assert result["outcome"] != "SUCCESS"
+        if fault == "wrong-recipient":
+            assert [step["status"] for step in steps] == [
+                "PASSED",
+                "PASSED",
+                "FAILED",
+                "SKIPPED",
+            ]
+            assert steps[2]["exit_code"] != 0
         assert steps[-1]["status"] == "SKIPPED"
         assert all(a["status"] != "PRESENT" for s in steps for a in s["artifacts"])
     assert not (application / "ml-output").exists()
