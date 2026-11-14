@@ -73,6 +73,10 @@ class _PlanSourceIdentity(TypedDict, total=False):
 
 def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int | None:
     if args.command == "runs":
+        if args.runs_command == "cancel":
+            from oh_goon.cli_run_cancel import run_cancel_command
+
+            return run_cancel_command(runtime, args)
         return (
             _export_artifact(runtime, args)
             if args.runs_command == "export-artifact"

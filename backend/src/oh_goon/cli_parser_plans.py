@@ -113,7 +113,7 @@ def add_workflow_commands[_Parser: argparse.ArgumentParser](
         help="Authorize this bounded repair Run using the selected explicit scope",
     )
     runs = subparsers.add_parser(
-        "runs", help="Read retained Run and Game Tape evidence by exact Run ID"
+        "runs", help="Read Run evidence or request cancellation from its original live owner"
     )
     _add_run_readback_commands(runs.add_subparsers(dest="runs_command", required=True))
 
@@ -186,6 +186,15 @@ def _add_run_readback_commands[_Parser: argparse.ArgumentParser](
     history.add_argument("--before-revision", type=_admission_revision)
     history.add_argument("--limit", type=_event_page_limit, default=20)
     history.add_argument("--json", action="store_true", dest="as_json")
+    cancel = plan_subparsers.add_parser(
+        "cancel",
+        help="Request cancellation of one exact Run from its proven original live owner",
+        description="Request cancellation through the original live application owner. "
+        "An acknowledgement does not establish process cleanup. Runs admitted by a "
+        "standalone CLI have no reachable control endpoint; use that original terminal's Ctrl-C.",
+    )
+    cancel.add_argument("fleet_run_id", help="Exact recorded Run identity; --last is not supported")
+    cancel.add_argument("--json", action="store_true", dest="as_json")
     status = plan_subparsers.add_parser(
         "show", help="Read one durable Fleet Run projection by exact Run ID"
     )

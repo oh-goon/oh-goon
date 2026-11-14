@@ -5,7 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from oh_goon.api.dependencies import fleet_run_control_plane
 from oh_goon.api.schemas.catalog_showcase import RunArtifactExportRequest
-from oh_goon.api.schemas.fleet import AgentCampaignResult, FleetRunChildRequest, FleetRunRequest
+from oh_goon.api.schemas.fleet import (
+    AgentCampaignResult,
+    FleetRunCancellationRequest,
+    FleetRunChildRequest,
+    FleetRunRequest,
+)
 from oh_goon.core.errors import FleetDomainError
 from oh_goon.core.models.catalog_showcase import RunArtifactExport
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
@@ -256,8 +261,15 @@ def rerun_fleet_run(
 )
 def cancel_fleet_run(
     fleet_run_id: str,
+    request: FleetRunCancellationRequest | None = None,
     control_plane: FleetRunControlPlane = Depends(fleet_run_control_plane),
 ) -> FleetRunState:
+    if request is not None:
+        return control_plane.cancel(
+            fleet_run_id,
+            expected_launch=request.application_launch,
+            expected_state=request.state,
+        )
     return control_plane.cancel(fleet_run_id)
 
 

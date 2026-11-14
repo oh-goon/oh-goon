@@ -115,6 +115,7 @@ class _LaunchStreamState:
     owner_observed_seen: bool = False
     service_generations: dict[str, int] = field(default_factory=dict)
     service_states: dict[str, set[LaunchEventKind]] = field(default_factory=dict)
+    service_runtime_births: dict[str, set[ProcessBirthIdentity]] = field(default_factory=dict)
 
     def accept(self, event: LaunchEvent) -> None:
         self._accept_envelope(event)
@@ -165,6 +166,19 @@ class _LaunchStreamState:
             raise ValueError("service runtime event belongs to stale service generation")
         if LaunchEventKind.SERVICE_FAILED in state:
             raise ValueError("service generation cannot transition after service.failed")
+        if (
+            event.event is LaunchEventKind.SERVICE_STARTUP_COMPLETE
+            and "runtime_birth_identity" in event.payload
+        ):
+            birth = ProcessBirthIdentity.from_payload(event.payload["runtime_birth_identity"])
+            seen = self.service_runtime_births.setdefault(event.service, set())
+            if birth in seen:
+                raise ValueError("service startup cannot replay an observed runtime process birth")
+            seen.add(birth)
+            # Native reload may replace the serving child while retaining the
+            # same spawned reloader and its service-scoped readiness facts.
+            state.add(event.event)
+            return
         if event.event in state:
             raise ValueError(
                 f"{event.event.value} may only be asserted once per service generation"
@@ -186,6 +200,7 @@ class _LaunchStreamState:
             raise ValueError("service.spawned must advance service generation exactly once")
         self.service_generations[event.service] = event.service_generation
         self.service_states[event.service] = {LaunchEventKind.SERVICE_SPAWNED}
+        self.service_runtime_births[event.service] = set()
 
     @staticmethod
     def _accept_current_service_fact(kind: LaunchEventKind, state: set[LaunchEventKind]) -> None:
@@ -290,6 +305,19 @@ def _validate_event_payload(event: LaunchEventKind, payload: Mapping[str, object
         _validate_process_payload(event.value, payload, birth_required=True)
     elif event is LaunchEventKind.SERVICE_SPAWNED:
         _validate_process_payload(event.value, payload, birth_required=True)
+    elif event is LaunchEventKind.SERVICE_STARTUP_COMPLETE:
+        runtime_fields = {"runtime_pid", "runtime_birth_identity"}
+        if runtime_fields & payload.keys():
+            if not runtime_fields <= payload.keys():
+                raise ValueError("service.startup_complete requires complete runtime process birth")
+            _validate_process_payload(
+                event.value,
+                {
+                    "pid": payload["runtime_pid"],
+                    "birth_identity": payload["runtime_birth_identity"],
+                },
+                birth_required=True,
+            )
     elif event is LaunchEventKind.SERVICE_BOUND:
         host = payload.get("host")
         port = payload.get("port")

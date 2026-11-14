@@ -85,6 +85,7 @@ from oh_goon.core.models.run_admission import (
     requested_fleet_repository_scope,
 )
 from oh_goon.core.models.run_events import FleetRunEventBatch
+from oh_goon.core.models.run_launch import ManagedApplicationLaunchReceipt
 from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget, OperationTarget
@@ -115,6 +116,7 @@ from oh_goon.integrations.exact_file_write import (
     publish_prepared_file,
 )
 from oh_goon.integrations.fleet_content_store import FleetContentStore
+from oh_goon.runtime.database import ExistingDatabaseAppendContext
 from oh_goon.runtime.execution import ExecutionTicket, RunExecutionSupervisor
 from oh_goon.runtime.execution.run_supervisor import RunWorkerAdmission, RunWorkerLaunch
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
@@ -825,8 +827,21 @@ class FleetRunControlPlane:
                 if admission is not None:
                     self._supervisor.abandon_admission(admission)
 
-    def cancel(self, fleet_run_id: str) -> FleetRunState:
-        return self._lifecycle.cancel(fleet_run_id)
+    def cancellation_observation(
+        self, fleet_run_id: str
+    ) -> tuple[FleetRunDetail, ExistingDatabaseAppendContext]:
+        return self._lifecycle.cancellation_observation(fleet_run_id)
+
+    def cancel(
+        self,
+        fleet_run_id: str,
+        *,
+        expected_launch: ManagedApplicationLaunchReceipt | None = None,
+        expected_state: ExistingDatabaseAppendContext | None = None,
+    ) -> FleetRunState:
+        return self._lifecycle.cancel(
+            fleet_run_id, expected_launch=expected_launch, expected_state=expected_state
+        )
 
     def get(
         self,

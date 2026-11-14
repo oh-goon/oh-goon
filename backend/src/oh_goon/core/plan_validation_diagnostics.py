@@ -16,6 +16,7 @@ from oh_goon.core.errors import (
     FleetPlanSourceAcquisitionRequired,
     ReviewedRepositorySourceStale,
     RunConfigurationInvalid,
+    RunControlOwnerUnavailable,
     RuntimeSafetyBlocked,
 )
 
@@ -124,6 +125,15 @@ def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
             "'oh-goon workflow inspect run.yml --review-source --json', repeat discovery "
             "and metadata review, then update target.reviewed_source and prepare the workflow. "
             "Relocking alone does not approve changed source."
+        )
+    elif isinstance(exc, RunControlOwnerUnavailable):
+        code = exc.code
+        inputs = []
+        stage = "run_admission"
+        action = (
+            "Use the original managed backend, or remove inherited OH_GOON_LAUNCH_ID, "
+            "OH_GOON_LAUNCH_OWNER_GENERATION and OH_GOON_LAUNCH_BACKEND_GENERATION from "
+            "the new CLI environment before requesting a fresh Run. Inspect existing Runs first."
         )
     elif isinstance(exc, (DurableStateBusy, ExecutionBusy)):
         code = "PLAN_RESOLUTION_REJECTED"

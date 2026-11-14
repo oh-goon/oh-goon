@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace as dataclass_replace
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -42,7 +43,7 @@ INTENT = LaunchIntent(
 )
 
 
-def _event(sequence: int, event: LaunchEventKind, **kwargs) -> LaunchEvent:
+def _event(sequence: int, event: LaunchEventKind, **kwargs: Any) -> LaunchEvent:
     if event is LaunchEventKind.SERVICE_SPAWNED:
         payload = kwargs.get("payload")
         if (
@@ -117,6 +118,97 @@ def test_projection_preserves_provenance_for_every_positive_service_fact() -> No
     assert backend.readiness is not None and backend.readiness.asserted_by == "backend-runtime"
     assert backend.health is None
     assert backend.state("health") is LaunchFactState.UNKNOWN
+
+
+def test_runtime_startup_is_distinct_from_the_spawned_reloader_and_refreshes_on_reload() -> None:
+    first = ProcessBirthIdentity(pid=42, boot_id="runtime-boot", start_ticks=10)
+    second = ProcessBirthIdentity(pid=43, boot_id="runtime-boot", start_ticks=11)
+    events = list(_backend_ready_events())
+    events[3] = _event(
+        4,
+        LaunchEventKind.SERVICE_STARTUP_COMPLETE,
+        service="backend",
+        service_generation=1,
+        asserted_by="actual-backend-runtime",
+        payload={"runtime_pid": first.pid, "runtime_birth_identity": first.to_payload()},
+    )
+    before = project_launch_manifest(identity=IDENTITY, intent=INTENT, events=events)
+    events.extend(
+        (
+            _event(6, LaunchEventKind.LAUNCH_READY),
+            _event(
+                7,
+                LaunchEventKind.SERVICE_STARTUP_COMPLETE,
+                service="backend",
+                service_generation=1,
+                asserted_by="replacement-backend-runtime",
+                payload={"runtime_pid": second.pid, "runtime_birth_identity": second.to_payload()},
+            ),
+        )
+    )
+    after = project_launch_manifest(identity=IDENTITY, intent=INTENT, events=events)
+    original = before.observed.services[0]
+    replacement = after.observed.services[0]
+    assert (
+        original.runtime_process is not None and original.runtime_process.birth_identity is not None
+    )
+    assert original.runtime_process.birth_identity.value == first
+    assert replacement.runtime_process is not None
+    assert replacement.runtime_process.birth_identity is not None
+    assert replacement.runtime_process.birth_identity.value == second
+    assert replacement.runtime_process.pid.asserted_by == "replacement-backend-runtime"
+    assert replacement.runtime_process.pid.owner_generation == IDENTITY.owner_generation
+    assert replacement.runtime_process.pid.service_generation == 1
+    assert replacement.process == original.process
+    assert replacement.process is not None and replacement.process.pid.value == 41
+    assert replacement.service_generation == 1
+    assert replacement.state("readiness") is LaunchFactState.SATISFIED
+    assert after.lifecycle.state is LaunchLifecycleState.READY
+    assert replacement.startup is not None
+    assert replacement.startup.asserted_by == "replacement-backend-runtime"
+    serialized = after.to_payload()["observed"]
+    assert isinstance(serialized, dict)
+    assert serialized["services"][0]["runtime_process"]["pid"]["value"] == second.pid
+    legacy = project_launch_manifest(
+        identity=IDENTITY, intent=INTENT, events=_backend_ready_events()
+    ).to_payload()["observed"]
+    assert isinstance(legacy, dict)
+    assert "runtime_process" not in legacy["services"][0]
+
+
+@pytest.mark.parametrize("invalid", ["owner-generation", "service-generation"])
+def test_runtime_process_facts_cannot_escape_their_launch_and_service_generation(
+    invalid: str,
+) -> None:
+    birth = ProcessBirthIdentity(pid=42, boot_id="runtime-boot", start_ticks=10)
+    events = list(_backend_ready_events())
+    events[3] = _event(
+        4,
+        LaunchEventKind.SERVICE_STARTUP_COMPLETE,
+        service="backend",
+        service_generation=1,
+        payload={"runtime_pid": birth.pid, "runtime_birth_identity": birth.to_payload()},
+    )
+    manifest = project_launch_manifest(identity=IDENTITY, intent=INTENT, events=events)
+    backend = manifest.observed.services[0]
+    runtime = backend.runtime_process
+    assert runtime is not None and runtime.birth_identity is not None
+    if invalid == "owner-generation":
+        pid_fact = dataclass_replace(runtime.pid, owner_generation=99)
+        birth_fact = dataclass_replace(runtime.birth_identity, owner_generation=99)
+    else:
+        pid_fact = dataclass_replace(runtime.pid, service_generation=99)
+        birth_fact = dataclass_replace(runtime.birth_identity, service_generation=99)
+    foreign = dataclass_replace(
+        runtime,
+        pid=pid_fact,
+        birth_identity=birth_fact,
+    )
+    with pytest.raises(ValueError, match="another .*generation"):
+        service = dataclass_replace(backend, runtime_process=foreign)
+        dataclass_replace(
+            manifest, observed=dataclass_replace(manifest.observed, services=(service,))
+        )
 
 
 def test_launch_ready_requires_all_required_services_ready() -> None:

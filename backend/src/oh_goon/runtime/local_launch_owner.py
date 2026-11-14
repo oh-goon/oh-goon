@@ -154,6 +154,13 @@ class LocalLaunchOwner:
         )
 
     def startup_complete(self, service: str, generation: int) -> LaunchManifest:
+        payload: dict[str, object] = {}
+        if service == BACKEND_SERVICE:
+            pid = os.getpid()
+            birth = observe_process_birth(pid)
+            if birth is None or birth.pid != pid:
+                raise ValueError("backend startup requires its own native runtime process birth")
+            payload = {"runtime_pid": pid, "runtime_birth_identity": birth.to_payload()}
         return self.store.append(
             self.identity.launch_id,
             event=LaunchEventKind.SERVICE_STARTUP_COMPLETE,
@@ -161,6 +168,7 @@ class LocalLaunchOwner:
             timestamp=_now(),
             service=service,
             service_generation=generation,
+            payload=payload,
         )
 
     def ready(self, service: str, generation: int) -> LaunchManifest:

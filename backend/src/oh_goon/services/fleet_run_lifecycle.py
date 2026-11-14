@@ -15,6 +15,7 @@ from oh_goon.core.errors import (
     FleetPlanInvalid,
     InvalidRunTransition,
     JournalConflict,
+    RunControlOwnerUnavailable,
     StateConflict,
 )
 from oh_goon.core.models.capability import CapabilitySnapshot
@@ -36,7 +37,7 @@ from oh_goon.core.models.run_admission import (
     PlanRepositoryAdmissionEvidence,
     StrictFleetExecutionAdmission,
 )
-from oh_goon.core.models.run_launch import ApplicationLaunchReceipt
+from oh_goon.core.models.run_launch import ApplicationLaunchReceipt, ManagedApplicationLaunchReceipt
 from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import (
@@ -49,7 +50,7 @@ from oh_goon.core.run_identity import require_fleet_run_detail_binding
 from oh_goon.core.vocabulary import FleetRunSource, FleetRunTerminalIntent
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.integrations.fleet_plan_repository_scope import admitted_active_plan
-from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.database import ExistingDatabaseAppendContext, LocalDatabase
 from oh_goon.runtime.enforcer_lace_restart_reclaim_fence import (
     require_no_original_lace_intent_before_reclamation_in,
 )
@@ -1614,14 +1615,74 @@ class FleetRunLifecycle:
         """Start the session-owned Fleet run and replay only its exact lost commit response."""
         return _begin_owned_run(self._journal, session)
 
-    def cancel(self, fleet_run_id: str) -> FleetRunState:
+    def cancellation_observation(
+        self, fleet_run_id: str
+    ) -> tuple[FleetRunDetail, ExistingDatabaseAppendContext]:
+        """Read the original Run and selected database identity in one observation cut."""
+        with self._database.transaction() as connection:
+            detail = self._journal.read_view_from_connection(connection).required_run_detail(
+                fleet_run_id
+            )
+            return detail, self._database.capture_append_context(connection)
+
+    def _require_cancellation_owner_in(
+        self,
+        connection: sqlite3.Connection,
+        detail: FleetRunDetail,
+        expected_launch: ManagedApplicationLaunchReceipt,
+        expected_state: ExistingDatabaseAppendContext,
+    ) -> None:
+        """Fence an external request before the original cancellation transaction mutates."""
+        current_state = self._database.capture_append_context(connection)
+        # Observer session and revision are not a writer capability. Require the
+        # exact original physical/schema authority and allow intervening progress.
+        state_fields = (
+            "path",
+            "device",
+            "inode",
+            "filesystem",
+            "schema_version",
+            "schema_cookie",
+            "database_identity_cookie",
+            "journal_mode",
+        )
+        if (
+            any(
+                getattr(current_state, name) != getattr(expected_state, name)
+                for name in state_fields
+            )
+            or expected_state.durable_revision > current_state.durable_revision
+        ):
+            raise RunControlOwnerUnavailable("The selected original Run state is unavailable")
+        try:
+            current_launch = current_application_launch_receipt()
+        except (OSError, ValueError):
+            raise RunControlOwnerUnavailable("The original Run controller is unavailable") from None
+        if detail.application_launch != expected_launch or current_launch != expected_launch:
+            raise RunControlOwnerUnavailable("The original Run controller is unavailable")
+
+    def cancel(
+        self,
+        fleet_run_id: str,
+        *,
+        expected_launch: ManagedApplicationLaunchReceipt | None = None,
+        expected_state: ExistingDatabaseAppendContext | None = None,
+    ) -> FleetRunState:
         """Cancel atomically and replay canonical cancellation after an ambiguous commit response."""
+        if (expected_launch is None) != (expected_state is None):
+            raise RunControlOwnerUnavailable("Run cancellation requires both owner and state")
+        owner_validated = expected_launch is None
         try:
             with self._database.transaction(write=True) as connection:
                 detail = self._journal.read_view_from_connection(connection).required_run_detail(
                     fleet_run_id
                 )
                 state = detail.run
+                if expected_launch is not None and expected_state is not None:
+                    self._require_cancellation_owner_in(
+                        connection, detail, expected_launch, expected_state
+                    )
+                    owner_validated = True
                 if state.status.cancel_request_satisfied:
                     return state
                 if state.status.terminal:
@@ -1657,6 +1718,8 @@ class FleetRunLifecycle:
                 )
                 self._executor_pool.release_run_in(connection, fleet_run_id)
         except BaseException:
+            if not owner_validated:
+                raise
             failed_detail = self._journal.read_view().run_detail(fleet_run_id)
             if failed_detail is None or not failed_detail.run.status.cancel_request_satisfied:
                 raise

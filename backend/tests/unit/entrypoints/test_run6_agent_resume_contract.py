@@ -17,6 +17,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.errors import InvalidRequest
+from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 
 
@@ -122,6 +123,7 @@ class _CanonicalRuns:
                 ),
             ),
             outcome=FleetRunOutcome.FAILED,
+            execution=DirectFleetExecutionAdmission(),
             game_tape=self.tape,
             repository_admissions=(),
             journal_revision=100,

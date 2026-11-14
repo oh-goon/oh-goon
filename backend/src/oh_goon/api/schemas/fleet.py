@@ -12,9 +12,11 @@ from oh_goon.core.models.agent_repair import (
 )
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import requested_fleet_repository_scope
+from oh_goon.core.models.run_launch import ManagedApplicationLaunchReceipt
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.vocabulary import OperationAction
+from oh_goon.runtime.database import ExistingDatabaseAppendContext
 
 
 class FleetRunRequest(BaseModel):
@@ -56,6 +58,13 @@ class FleetRunChildRequest(BaseModel):
     """Identity for a fresh Run derived from backend-owned durable Run authority."""
 
     new_fleet_run_id: str = Field(min_length=1)
+
+
+class FleetRunCancellationRequest(BaseModel):
+    """Expected original owner/state observations; local access still authorizes HTTP."""
+
+    application_launch: ManagedApplicationLaunchReceipt
+    state: ExistingDatabaseAppendContext
 
 
 class AgentCampaignInvocationResult(BaseModel):

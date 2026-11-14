@@ -77,9 +77,18 @@ def project_launch_manifest(
                 )
             case LaunchEventKind.SERVICE_STARTUP_COMPLETE:
                 service = _current_service(observed, event)
+                runtime_process = service.runtime_process
+                if "runtime_birth_identity" in event.payload:
+                    runtime_process = _process_observation(
+                        event,
+                        service_generation=event.service_generation,
+                        pid_key="runtime_pid",
+                        birth_key="runtime_birth_identity",
+                    )
                 observed[cast(str, event.service)] = replace(
                     service,
                     startup=_state_fact(event, LaunchFactState.SATISFIED),
+                    runtime_process=runtime_process,
                 )
             case LaunchEventKind.SERVICE_READY:
                 service = _current_service(observed, event)
@@ -125,7 +134,11 @@ def _spawned_observation(event: LaunchEvent) -> LaunchServiceObservation:
 
 
 def _process_observation(
-    event: LaunchEvent, *, service_generation: int | None
+    event: LaunchEvent,
+    *,
+    service_generation: int | None,
+    pid_key: str = "pid",
+    birth_key: str = "birth_identity",
 ) -> LaunchProcessObservation:
     common: _FactSource = {
         "asserted_by": event.asserted_by,
@@ -133,7 +146,7 @@ def _process_observation(
         "owner_generation": event.owner_generation,
         "service_generation": service_generation,
     }
-    birth_payload = event.payload.get("birth_identity")
+    birth_payload = event.payload.get(birth_key)
     birth = None
     if birth_payload is not None:
         birth = ObservedFact(
@@ -141,7 +154,7 @@ def _process_observation(
             **common,
         )
     return LaunchProcessObservation(
-        pid=ObservedFact(value=int(cast(int, event.payload["pid"])), **common),
+        pid=ObservedFact(value=int(cast(int, event.payload[pid_key])), **common),
         birth_identity=birth,
     )
 

@@ -62,6 +62,33 @@ channel or supervisor diagnostic cannot manufacture a
 terminal Run result. Native harness sessions remain below Step/Attempt and do
 not own Run admission, recovery or durable truth.
 
+### Second-terminal cancellation
+
+`oh-goon runs cancel RUN_ID` opens observation-only state and addresses the
+original managed backend recorded in `FleetRunDetail.application_launch`.
+Managed receipt issuance proves the admitting process is that backend;
+an inherited launch context cannot label a child as the original controller.
+Launch observations keep the spawned launcher/reloader process separate from
+the actual backend runtime process reported at API startup. Native Uvicorn owns
+development reloads; each replacement API process reports its own birth under
+the existing service generation. Run receipts retain the exact API process
+that admitted them, so a replacement cannot receive control for its predecessor.
+The existing launch owner proves the current generation, observed loopback
+endpoint and backend process birth; its generation-bound local-access store
+supplies HTTP authorization. No ambient endpoint or token selects a controller.
+The existing cancellation API accepts an optional expected launch and the
+original SQLite observation context. `FleetRunLifecycle.cancel` verifies them
+inside its original write transaction before cancellation or idempotent replay,
+including the receiving backend's own native process birth. A copied state
+file or restarted backend cannot redirect the request to a different owner.
+
+The original lifecycle still owns lease cancellation, Journal ordering,
+recovery-only custody refusal and terminalization. The CLI sends once and
+reports confirmation separately from physical cleanup. An unmanaged waited
+CLI Run has no such endpoint and returns `CONTROL_OWNER_UNAVAILABLE`; Ctrl-C
+in the original terminal retains its existing cancellation path. An ambiguous
+transport response stays unconfirmed and requires original Run readback.
+
 ### Controlled shutdown
 
 `ApplicationRuntime.shutdown()` first quiesces admission, then stops Schedule

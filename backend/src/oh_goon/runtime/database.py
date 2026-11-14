@@ -335,6 +335,9 @@ class LocalDatabase:
     ) -> ExistingDatabaseAppendContext:
         """Capture this admitted owner inside the caller's already verified cut."""
         active = getattr(self._connection_scope, "active_cut", None)
+        if active is None:
+            observer = getattr(self._connection_scope, "active_observer_cut", None)
+            active = (observer, False) if observer is not None else None
         if active is None or active[0] is not connection or not connection.in_transaction:
             raise RuntimeError("Original LocalDatabase transaction required for append context")
         identity = self._path_identity
@@ -1230,7 +1233,12 @@ class LocalDatabase:
                 connection.execute("BEGIN")
                 try:
                     self._prove_admitted_sqlite_identity(connection, context=context)
-                    yield connection
+                    previous = getattr(self._connection_scope, "active_observer_cut", None)
+                    self._connection_scope.active_observer_cut = connection
+                    try:
+                        yield connection
+                    finally:
+                        self._connection_scope.active_observer_cut = previous
                 finally:
                     connection.rollback()
         except sqlite3.DatabaseError as exc:

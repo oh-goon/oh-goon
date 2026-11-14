@@ -127,6 +127,10 @@ class InvalidRunTransition(StateConflict):
     code = "INVALID_RUN_TRANSITION"
 
 
+class RunControlOwnerUnavailable(StateConflict):
+    code = "CONTROL_OWNER_UNAVAILABLE"
+
+
 class RunNotFound(ResourceNotFound):
     code = "RUN_NOT_FOUND"
 
