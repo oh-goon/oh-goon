@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
+
+from oh_goon.core.errors import RunControlOwnerUnavailable
 from oh_goon.core.launch_manifest import LaunchFactState
 from oh_goon.core.models.run_launch import (
     ApplicationLaunchReceipt,
     ManagedApplicationLaunchReceipt,
     UnmanagedApplicationLaunchReceipt,
 )
+from oh_goon.core.process_birth import observe_process_birth
 from oh_goon.runtime.local_launch_context import LocalLaunchRuntimeContext
 from oh_goon.runtime.local_launch_owner import BACKEND_SERVICE
 from oh_goon.runtime.local_launch_state import LocalLaunchEventStore
@@ -32,6 +36,10 @@ def current_application_launch_receipt() -> ApplicationLaunchReceipt:
     if process is None or process.birth_identity is None:
         raise ValueError("Fleet admission requires positive backend process-birth evidence")
     birth = process.birth_identity.value
+    if observe_process_birth(os.getpid()) != birth:
+        raise RunControlOwnerUnavailable(
+            "Fleet admission requires its own managed backend process identity"
+        )
     endpoint = backend.bound_endpoint
     return ManagedApplicationLaunchReceipt(
         launch_id=manifest.identity.launch_id,

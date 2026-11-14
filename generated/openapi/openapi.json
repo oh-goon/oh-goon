@@ -6060,6 +6060,87 @@
         "title": "ExecutorTrustState",
         "type": "string"
       },
+      "ExistingDatabaseAppendContext": {
+        "additionalProperties": false,
+        "description": "One captured database cut for a noninitializing, single-use final append.",
+        "properties": {
+          "database_identity_cookie": {
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "title": "Database Identity Cookie",
+            "type": "integer"
+          },
+          "device": {
+            "minimum": 0.0,
+            "title": "Device",
+            "type": "integer"
+          },
+          "durable_revision": {
+            "minimum": 0.0,
+            "title": "Durable Revision",
+            "type": "integer"
+          },
+          "filesystem": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filesystem"
+          },
+          "inode": {
+            "minimum": 1.0,
+            "title": "Inode",
+            "type": "integer"
+          },
+          "journal_mode": {
+            "enum": [
+              "DELETE",
+              "WAL"
+            ],
+            "title": "Journal Mode",
+            "type": "string"
+          },
+          "path": {
+            "format": "path",
+            "title": "Path",
+            "type": "string"
+          },
+          "schema_cookie": {
+            "minimum": 1.0,
+            "title": "Schema Cookie",
+            "type": "integer"
+          },
+          "schema_version": {
+            "default": 94,
+            "minimum": 1.0,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "session_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "device",
+          "inode",
+          "schema_cookie",
+          "database_identity_cookie",
+          "journal_mode",
+          "durable_revision",
+          "session_id"
+        ],
+        "title": "ExistingDatabaseAppendContext",
+        "type": "object"
+      },
       "ExitCodeNotDeclaredPlanRetryDecisionEvidence": {
         "additionalProperties": false,
         "properties": {
@@ -8742,6 +8823,23 @@
             "$ref": "#/components/schemas/ExcludedFleetRepository"
           }
         ]
+      },
+      "FleetRunCancellationRequest": {
+        "description": "Expected original owner/state observations; local access still authorizes HTTP.",
+        "properties": {
+          "application_launch": {
+            "$ref": "#/components/schemas/ManagedApplicationLaunchReceipt"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ExistingDatabaseAppendContext"
+          }
+        },
+        "required": [
+          "application_launch",
+          "state"
+        ],
+        "title": "FleetRunCancellationRequest",
+        "type": "object"
       },
       "FleetRunChildRequest": {
         "description": "Identity for a fresh Run derived from backend-owned durable Run authority.",
@@ -37808,6 +37906,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FleetRunCancellationRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "content": {

@@ -229,6 +229,27 @@ retry, repair or replay authority.
 The page limit bounds returned history entries. Opening a fresh CLI process
 still verifies the retained Journal before returning that page.
 
+### Request cancellation from another terminal
+
+```bash
+oh-goon runs cancel RUN_ID --json
+oh-goon runs explain RUN_ID
+```
+
+Use the exact Run ID and the same selected state root. Cancellation reaches
+the live managed backend that admitted that Run, using its recorded launch
+generation and private local-access capability. It never selects `--last` or
+starts a controller. A confirmed request preserves the original Run identity;
+it does not establish that native descendants or cleanup have finished.
+Inspect the original Game Tape for settlement and cleanup evidence.
+
+A Run started by a waited `oh-goon run` has no managed control endpoint.
+`CONTROL_OWNER_UNAVAILABLE` leaves it unchanged; use Ctrl-C in its original
+terminal. The same refusal preserves work when the recorded backend has
+stopped or changed generation. `CONTROL_REQUEST_UNCONFIRMED` means a request
+may have reached the owner: inspect the Run before deciding what to do next.
+The CLI does not automatically resend, adopt a worker or signal native PIDs.
+
 ### Decide what to do after a failed or cancelled Run
 
 Start with `oh-goon runs explain RUN_ID`. Its guidance comes from the original
