@@ -631,7 +631,7 @@ def test_iris_pipeline_invalid_dataflow_has_no_publish_authority(
             "iris-pipeline train --data ${{ steps.missing.outputs.DATA }} --max-iterations 300"
         )
     elif fault == "duplicate-step":
-        declaration["steps"][1]["id"] = declaration["steps"][0]["id"]
+        declaration["steps"].append({"id": declaration["steps"][0]["id"], "run": "true"})
     elif fault == "wrong-recipient":
         declaration["steps"][2]["run"] = declaration["steps"][2]["run"].replace(
             "${{ steps.ingest.outputs.DATA }}", "${{ steps.train.outputs.MODEL }}"
