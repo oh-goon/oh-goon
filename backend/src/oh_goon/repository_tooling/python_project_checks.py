@@ -270,6 +270,8 @@ def _project_execution_command(
     *,
     collector: Path | None = None,
 ) -> list[str]:
+    from oh_goon.repository_tooling.pytest_member_selection import native_pytest_address
+
     command = [
         *_project_invocation(root, context, environment, {}, collector=collector).command_prefix,
         "-c",
@@ -279,7 +281,7 @@ def _project_execution_command(
         "-p",
         "no:cacheprovider",
     ]
-    command.extend(str(root / member) for member in selected)
+    command.extend(native_pytest_address(root, member) for member in selected)
     return command
 
 
@@ -323,7 +325,10 @@ def _runtime_identity(
 def collect_project_pytest(
     root: Path, targets: Sequence[str], *, marker: str | None, source_identity: str
 ) -> list[dict[str, Any]]:
-    from oh_goon.repository_tooling.pytest_member_selection import collect_native_pytest
+    from oh_goon.repository_tooling.pytest_member_selection import (
+        collect_native_pytest,
+        native_pytest_address,
+    )
 
     root = root.resolve(strict=True)
     grouped: dict[str, list[str]] = {}
@@ -336,7 +341,7 @@ def collect_project_pytest(
     for project, selected in sorted(grouped.items()):
         with _project_session(root, project, marker, source_identity) as session:
             collection = collect_native_pytest(
-                tuple(root / target for target in sorted(set(selected))),
+                tuple(native_pytest_address(root, target) for target in sorted(set(selected))),
                 additional_marker=marker,
                 invocation=session["invocation"],
                 plugin_module="__main__",
@@ -420,20 +425,24 @@ def require_project_pytest_admission(
             or Path(str(runtime.get("executable", ""))) != environment / "bin/python"
             or not isinstance(paths, list)
             or not paths
-            or any(
-                not isinstance(path, str)
-                or not Path(path).is_relative_to(root)
-                or project_for_pytest_target(root, str(Path(path).relative_to(root))) != project
-                for path in paths
-            )
         ):
             raise ValueError("Native project admission lost its native execution authority")
+        for path in paths:
+            if not isinstance(path, str):
+                raise ValueError("Native project collection addressing is malformed")
+            filename, separator, suffix = path.partition("::")
+            file = Path(filename)
+            if not file.is_relative_to(root) or str(file) != filename:
+                raise ValueError("Native project collection file escaped its context")
+            selector = file.relative_to(root).as_posix() + separator + suffix
+            if project_for_pytest_target(root, selector) != project:
+                raise ValueError("Native project collection file changed its context")
         collector = _validated_project_collector(root, context, runtime.get("collector"))
         invocation = _project_invocation(
             root, context, environment, os.environ, collector=collector
         )
         resolved_request = native_collection_request(
-            tuple(Path(path) for path in paths),
+            tuple(paths),
             invocation=invocation,
             additional_marker=context["marker"],
             plugin_module="__main__",
@@ -684,6 +693,12 @@ def execute_project_pytest(
                 "runtime_identity": runtime_identity,
                 "environment": str(session["environment"]),
             }
+            if not passed or result.returncode:
+                outcome["native_diagnostic"] = {
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "stdout_truncated": result.stdout_truncated,
+                }
         outcome["cleanup"] = session["cleanup"]
         outcomes.append(outcome)
     return outcomes

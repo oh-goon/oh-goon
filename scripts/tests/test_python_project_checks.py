@@ -595,6 +595,9 @@ def native_project_context(tmp_path_factory: pytest.TempPathFactory) -> dict[str
         "def test_failure(): assert False\n"
         "@pytest.mark.airflow\ndef test_optional_airflow(): assert False\n"
         "@pytest.mark.daily\ndef test_daily(): assert False\n"
+        "class TestNativeAddress:\n"
+        "    @pytest.mark.parametrize('value', ['https://example.invalid/a//b', 'path//to//file'])\n"
+        "    def test_address(self, value): assert value\n"
     )
     candidate_collector = (
         root / "backend/src/oh_goon/repository_tooling/pytest_member_selection.py"
@@ -663,6 +666,57 @@ def test_native_project_selected_cases_use_frozen_project_not_backend(
         assert row["cleanup"] == "VERIFIED"
     native = case["outcomes"][0]["native_report"]["membership_receipt"]
     assert set(native["selected"]) == members
+
+
+@pytest.mark.parametrize(
+    "parameter", ["https://example.invalid/a//b", "path//to//file"]
+)
+def test_native_pytest_address_resolves_only_the_file(
+    tmp_path: Path, parameter: str
+) -> None:
+    from oh_goon.repository_tooling.pytest_member_selection import native_pytest_address
+
+    suffix = f"::TestNativeAddress::test_address[{parameter}]"
+    assert native_pytest_address(tmp_path, "tests/test_context.py" + suffix) == (
+        str(tmp_path / "tests/test_context.py") + suffix
+    )
+
+
+@pytest.mark.process
+def test_native_project_preserves_opaque_parametrized_class_addresses(
+    native_project_context: dict[str, Any],
+) -> None:
+    case = native_project_context
+    members = {
+        case["target"] + f"::TestNativeAddress::test_address[{parameter}]"
+        for parameter in ("https://example.invalid/a//b", "path//to//file")
+    }
+    admission = python_project_checks.collect_project_pytest(
+        case["root"], sorted(members), marker=None, source_identity=case["source"]
+    )
+    assert {
+        row["selector"] for row in admission[0]["collection"]["selected"]
+    } == members
+    paths = [
+        str(case["root"] / case["target"]) + member[len(case["target"]) :]
+        for member in sorted(members)
+    ]
+    assert admission[0]["request"]["paths"] == paths
+    outcomes = python_project_checks.execute_project_pytest(
+        case["root"], admission, source_identity=case["source"]
+    )
+    files, executed = python_project_checks.require_project_pytest_outcomes(
+        case["root"], admission, outcomes, source_identity=case["source"]
+    )
+    assert files == {case["target"]} and executed == members
+    assert outcomes[0]["native_execution"][-1]["argv"][-2:] == paths
+    receipt = outcomes[0]["native_report"]["membership_receipt"]
+    assert set(receipt["selected"]) == set(receipt["passed"]) == members
+    assert all(
+        "::TestNativeAddress::test_address[" in item["nodeid"]
+        for row in receipt["effective_pytest_outcomes"]
+        for item in row["pytest_outcomes"]
+    )
 
 
 @pytest.mark.process
