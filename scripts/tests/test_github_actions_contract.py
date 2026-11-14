@@ -19,6 +19,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+from oh_goon.engine.command import CommandProcessLifecycleEvent, run_command
 from oh_goon.repository_tooling.pytest_batch_cli import parse_batch_args
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1777,3 +1778,196 @@ def test_merge_control_uses_only_the_trusted_base_and_keeps_its_failure(
     ):
         assert arguments[arguments.index(flag) + 1] == value
     assert not (tmp_path / "injected").exists()
+
+
+def _python_ci_example(name: str) -> dict[str, Any]:
+    value = yaml.safe_load((ROOT / "examples/python-ci" / name).read_text())
+    assert isinstance(value, dict)
+    return value
+
+
+def _python_ci_adapter_step(steps: list[dict[str, Any]], mode: str) -> dict[str, Any]:
+    def invokes_adapter(step: dict[str, Any]) -> bool:
+        tokens = shlex.split(str(step.get("run", "")), comments=True)
+        return any(
+            tokens[index : index + 2] == ["examples/python-ci/run.sh", mode]
+            for index in range(len(tokens) - 1)
+        )
+
+    (selected,) = [step for step in steps if invokes_adapter(step)]
+    return selected
+
+
+def _python_ci_shell_fixture(
+    tmp_path: Path, run_status: int, collect_status: int
+) -> dict[str, str]:
+    workspace = tmp_path / "workload $literal space"
+    adapter = workspace / "examples/python-ci/run.sh"
+    adapter.parent.mkdir(parents=True)
+    records = tmp_path / "adapter-calls"
+    records.mkdir()
+    adapter.write_text(
+        "#!/bin/bash\nset -eu\n"
+        'case "$1" in run|collect) ;; *) exit 97 ;; esac\n'
+        'printf "%s\\0" "$$" "$PWD" "$@" >> "$ADAPTER_CALLS/$1"\n'
+        'case "$1" in run) exit "$RUN_STATUS" ;; collect) exit "$COLLECT_STATUS" ;; esac\n'
+    )
+    return {
+        "PATH": os.defpath,
+        "GITHUB_WORKSPACE": str(workspace),
+        "CI_PROJECT_DIR": str(workspace),
+        "RUNNER_TEMP": str(tmp_path / "runner $(touch injected) space"),
+        "OH_GOON_JOB_ROOT": str(tmp_path / "gitlab $literal job"),
+        "ADAPTER_CALLS": str(records),
+        "RUN_STATUS": str(run_status),
+        "COLLECT_STATUS": str(collect_status),
+        "AFTER_PHASE": str(tmp_path / "unexpected-continuation"),
+    }
+
+
+def _python_ci_shell_phase(
+    command: str, environment: dict[str, str]
+) -> tuple[int, int]:
+    """Execute an authored shell phase; provider predicates remain provider-owned."""
+    bash = shutil.which("bash", path=environment["PATH"])
+    assert bash is not None
+    events: list[CommandProcessLifecycleEvent] = []
+    result = run_command(
+        bash,
+        "--noprofile",
+        "--norc",
+        "-e",
+        "-o",
+        "pipefail",
+        "-c",
+        command,
+        cwd=Path(environment["GITHUB_WORKSPACE"]),
+        env=environment,
+        timeout=10,
+        max_capture_bytes_per_stream=65536,
+        require_process_group_quiescence=True,
+        process_observer=events.append,
+    )
+    (started,) = [event for event in events if event.kind == "PROCESS_STARTED"]
+    assert started.pid is not None
+    assert result.supervisor.final_process_group_quiescent
+    return result.returncode, started.pid
+
+
+def _python_ci_adapter_call(
+    environment: dict[str, str], mode: str
+) -> tuple[int, str, list[str]]:
+    parts = (Path(environment["ADAPTER_CALLS"]) / mode).read_bytes().split(b"\0")
+    assert parts[-1] == b""
+    return int(parts[0]), parts[1].decode(), [value.decode() for value in parts[2:-1]]
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "run_status,collect_status",
+    [(0, 0), (1, 0), (2, 0), (130, 0), (143, 0), (0, 19), (1, 19)],
+)
+def test_python_ci_github_preserves_native_entry_pid_and_each_phase_failure(
+    tmp_path: Path, run_status: int, collect_status: int
+) -> None:
+    job = _python_ci_example("github-actions.yml")["jobs"]["python"]
+    steps = job["steps"]
+    run = _python_ci_adapter_step(steps, "run")
+    collect = _python_ci_adapter_step(steps, "collect")
+    (upload,) = [
+        step
+        for step in steps
+        if step.get("uses", "").startswith("actions/upload-artifact@")
+    ]
+    assert steps.index(run) < steps.index(collect) < steps.index(upload)
+    for step in (collect, upload):
+        assert re.fullmatch(r"\$\{\{\s*always\(\)\s*\}\}|always\(\)", step["if"])
+    assert not any(
+        value.get("continue-on-error", False) for value in (job, run, collect, upload)
+    )
+    environment = _python_ci_shell_fixture(tmp_path, run_status, collect_status)
+    continuation = '\nprintf returned > "$AFTER_PHASE"\n'
+    run_result, entry_pid = _python_ci_shell_phase(
+        run["run"] + continuation, environment
+    )
+    assert run_result == run_status
+    run_pid, cwd, arguments = _python_ci_adapter_call(environment, "run")
+    assert run_pid == entry_pid
+    assert cwd == environment["GITHUB_WORKSPACE"]
+    assert arguments == [
+        "run",
+        environment["RUNNER_TEMP"] + "/oh-goon-tool",
+        environment["GITHUB_WORKSPACE"],
+        "examples/python-ci/plan.yml",
+        environment["RUNNER_TEMP"] + "/oh-goon-ci-state",
+    ]
+    assert not Path(environment["AFTER_PHASE"]).exists()
+    # This invokes the independent authored collection phase even after run failure.
+    # GitHub, rather than this test, owns always() and the overall job result.
+    collect_result, _ = _python_ci_shell_phase(collect["run"], environment)
+    assert collect_result == collect_status
+    _, cwd, arguments = _python_ci_adapter_call(environment, "collect")
+    assert cwd == environment["GITHUB_WORKSPACE"]
+    assert arguments == [
+        "collect",
+        environment["RUNNER_TEMP"] + "/oh-goon-tool",
+        environment["RUNNER_TEMP"] + "/oh-goon-ci-state",
+        environment["RUNNER_TEMP"] + "/oh-goon-ci-results",
+    ]
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "run_status,collect_status,expected",
+    [(0, 0, 0), (1, 0, 1), (2, 0, 2), (143, 0, 143), (0, 19, 19), (1, 19, 1)],
+)
+def test_python_ci_gitlab_preserves_run_failure_and_failed_collection_after_success(
+    tmp_path: Path, run_status: int, collect_status: int, expected: int
+) -> None:
+    job = _python_ci_example("gitlab-ci.yml")["python"]
+    assert job["allow_failure"] is False
+    assert job["artifacts"]["when"] == "always"
+    environment = _python_ci_shell_fixture(tmp_path, run_status, collect_status)
+    result, _ = _python_ci_shell_phase("\n".join(job["script"]), environment)
+    assert result == expected
+    _, run_cwd, run = _python_ci_adapter_call(environment, "run")
+    _, collect_cwd, collect = _python_ci_adapter_call(environment, "collect")
+    assert run_cwd == collect_cwd == environment["CI_PROJECT_DIR"]
+    assert run == [
+        "run",
+        environment["OH_GOON_JOB_ROOT"] + "/tool",
+        environment["CI_PROJECT_DIR"],
+        "examples/python-ci/plan.yml",
+        environment["OH_GOON_JOB_ROOT"] + "/state",
+    ]
+    assert collect == [
+        "collect",
+        environment["OH_GOON_JOB_ROOT"] + "/tool",
+        environment["OH_GOON_JOB_ROOT"] + "/state",
+        environment["CI_PROJECT_DIR"] + "/ci-artifacts",
+    ]
+
+
+@pytest.mark.process
+def test_python_ci_native_controls_expose_lost_exec_and_failure_masking(
+    tmp_path: Path,
+) -> None:
+    github = _python_ci_example("github-actions.yml")["jobs"]["python"]
+    authored_run = _python_ci_adapter_step(github["steps"], "run")["run"]
+    continuation = '\nprintf returned > "$AFTER_PHASE"\n'
+    baseline = _python_ci_shell_fixture(tmp_path / "native-exec", 0, 0)
+    status, entry = _python_ci_shell_phase(authored_run + continuation, baseline)
+    assert status == 0 and _python_ci_adapter_call(baseline, "run")[0] == entry
+    assert not Path(baseline["AFTER_PHASE"]).exists()
+    without_exec = re.sub(r"(?m)^(\s*)exec\s+", r"\1", authored_run, count=1)
+    assert without_exec != authored_run
+    mutation = _python_ci_shell_fixture(tmp_path / "lost-exec", 0, 0)
+    status, entry = _python_ci_shell_phase(without_exec + continuation, mutation)
+    assert status == 0 and _python_ci_adapter_call(mutation, "run")[0] != entry
+    assert Path(mutation["AFTER_PHASE"]).exists()
+
+    gitlab = "\n".join(_python_ci_example("gitlab-ci.yml")["python"]["script"])
+    failed = _python_ci_shell_fixture(tmp_path / "native-failure", 23, 0)
+    assert _python_ci_shell_phase(gitlab, failed)[0] == 23
+    masked = _python_ci_shell_fixture(tmp_path / "masked-failure", 23, 0)
+    assert _python_ci_shell_phase("(\n" + gitlab + "\n) || true\n", masked)[0] == 0

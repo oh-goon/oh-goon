@@ -61,6 +61,11 @@ BOUNDED_BUILD_PROOF = "bounded native build proof"
 BOUNDED_TEMPLATE_PROOF = "bounded shipped stdlib project proof"
 BOUNDED_API_PROOF = "bounded HTTP API boundary proof"
 BOUNDED_FRONTEND_PROOF = "bounded frontend boundary proof"
+BOUNDED_CI_EXAMPLE_PROOF = "bounded native CI example proof"
+CI_EXAMPLE_PROOF_TESTS = (
+    "backend/tests/integration/services/test_ci_python_example.py",
+    "scripts/tests/test_github_actions_contract.py",
+)
 BUILD_PROOF_TESTS = ("scripts/tests/test_release_build_boundary.py",)
 CONSOLE_INSTALLATION_TEST = (
     "scripts/tests/test_release_build_boundary.py"
@@ -310,6 +315,41 @@ def get_bounded_owner_proofs(
             api_tests,
             ("python", "generated", "architecture"),
         )
+
+    ci_example_paths = {
+        path
+        for path in changed
+        if path
+        in {
+            "examples/python-ci/run.sh",
+            "examples/python-ci/github-actions.yml",
+            "examples/python-ci/gitlab-ci.yml",
+        }
+        and needs_boundary(path)
+    }
+    if ci_example_paths:
+        try:
+            for path in CI_EXAMPLE_PROOF_TESTS:
+                _owner_source_bytes(root, path)
+        except (OSError, ValueError):
+            pass
+        else:
+            current_sources: set[str] = set()
+            for path in ci_example_paths:
+                try:
+                    _owner_source_bytes(root, path)
+                except (OSError, ValueError):
+                    continue
+                current_sources.add(path)
+            # Native adapter execution and provider shell wiring protect this
+            # exact boundary. They do not establish complete consumer knowledge
+            # or qualify another provider/host from local execution.
+            add(
+                BOUNDED_CI_EXAMPLE_PROOF,
+                current_sources,
+                CI_EXAMPLE_PROOF_TESTS,
+                ("python", "architecture"),
+            )
 
     frontend_tests = tuple(
         sorted(set(_changed_owner_tests(evidence, "frontend/src/", "vitest")) & changed)

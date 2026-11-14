@@ -2028,7 +2028,7 @@ def test_independent_project_collection_protects_changed_cases_without_filename_
     path = "templates/goons/ml/iris-train/tests/behavior_cases.py"
     helper = "templates/goons/ml/iris-train/tests/test_fixture.py"
     member = path + "::Behavior::test_native[param]"
-    packets = [
+    packets: list[dict[str, Any]] = [
         {
             "project": "templates/goons/ml/iris-train",
             "context": {"source_identity": "sha256:" + "a" * 64},
@@ -4030,6 +4030,24 @@ def _bounded_owner_case(
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content)
         tests = [_bounded_owner_test(paths[1], "pytest")]
+    elif kind == "ci-example":
+        paths = [
+            "examples/python-ci/run.sh",
+            "examples/python-ci/github-actions.yml",
+            "examples/python-ci/gitlab-ci.yml",
+            *gate.CI_EXAMPLE_PROOF_TESTS,
+        ]
+        for relative in paths:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "def test_native_ci_boundary():\n    assert True\n"
+                if relative.endswith(".py")
+                else "# Synthetic native CI owner input.\n"
+            )
+        tests = [
+            _bounded_owner_test(path, "pytest") for path in gate.CI_EXAMPLE_PROOF_TESTS
+        ]
     elif kind == "frontend":
         paths = [
             "frontend/src/app/nativeStyles.ts",
@@ -4119,7 +4137,9 @@ def _bounded_owner_execution(
     return plan, files, members, browser
 
 
-@pytest.mark.parametrize("kind", ("build", "console", "api", "frontend", "template"))
+@pytest.mark.parametrize(
+    "kind", ("build", "console", "api", "frontend", "template", "ci-example")
+)
 def test_bounded_owner_proof_keeps_unknown_consumers_and_requires_its_native_owners(
     bounded_owner_repository: tuple[Path, str], kind: str
 ) -> None:
@@ -4134,6 +4154,7 @@ def test_bounded_owner_proof_keeps_unknown_consumers_and_requires_its_native_own
             "api": gate.BOUNDED_API_PROOF,
             "frontend": gate.BOUNDED_FRONTEND_PROOF,
             "template": gate.BOUNDED_TEMPLATE_PROOF,
+            "ci-example": gate.BOUNDED_CI_EXAMPLE_PROOF,
         }[kind]
     )
     original_observations = copy.deepcopy(evidence["observations"])
@@ -4146,6 +4167,67 @@ def test_bounded_owner_proof_keeps_unknown_consumers_and_requires_its_native_own
     assert admitted == set(proof["routes"][0]["paths"])
     assert proof["consumer_coverage"] == "not-claimed"
     assert evidence["observations"] == original_observations
+
+
+def test_ci_example_owner_proof_is_available_before_nominations(
+    bounded_owner_repository: tuple[Path, str],
+) -> None:
+    root, base = bounded_owner_repository
+    paths, _evidence, proof = _bounded_owner_case(root, base, "ci-example")
+
+    assert gate.get_bounded_owner_proofs(root, base, paths, {}) == proof
+    assert proof["routes"][0]["pytest"] == sorted(gate.CI_EXAMPLE_PROOF_TESTS)
+
+
+@pytest.mark.parametrize("proof_file", gate.CI_EXAMPLE_PROOF_TESTS)
+def test_ci_example_owner_proof_requires_both_native_boundaries(
+    bounded_owner_repository: tuple[Path, str], proof_file: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "ci-example")
+    plan, files, members, browser = _bounded_owner_execution(paths, evidence, proof)
+    gate.require_bounded_owner_proofs(
+        plan, evidence, files, members, browser, expected=proof
+    )
+
+    files.remove(proof_file)
+    with pytest.raises(ValueError, match="Bounded native owner proof"):
+        gate.require_bounded_owner_proofs(
+            plan, evidence, files, members, browser, expected=proof
+        )
+
+
+@pytest.mark.parametrize("proof_file", gate.CI_EXAMPLE_PROOF_TESTS)
+def test_ci_example_owner_proof_requires_current_canonical_native_test_inputs(
+    bounded_owner_repository: tuple[Path, str], proof_file: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "ci-example")
+    assert proof["routes"]
+    (root / proof_file).unlink()
+
+    assert gate.get_bounded_owner_proofs(root, base, paths, evidence)["routes"] == []
+
+
+@pytest.mark.parametrize("fault", ("missing", "alias"))
+def test_ci_example_owner_proof_does_not_admit_unavailable_or_aliased_source(
+    bounded_owner_repository: tuple[Path, str], fault: str
+) -> None:
+    root, base = bounded_owner_repository
+    paths, evidence, proof = _bounded_owner_case(root, base, "ci-example")
+    source = root / "examples/python-ci/run.sh"
+    source.unlink()
+    if fault == "alias":
+        outside = root.parent / "foreign-run.sh"
+        outside.write_text("# A foreign owner.\n")
+        source.symlink_to(outside)
+
+    observed = gate.get_bounded_owner_proofs(root, base, paths, evidence)
+
+    assert "examples/python-ci/run.sh" in proof["routes"][0]["paths"]
+    assert "examples/python-ci/run.sh" not in {
+        path for route in observed["routes"] for path in route["paths"]
+    }
 
 
 @pytest.mark.parametrize(
@@ -4645,7 +4727,9 @@ def _validate_bounded_merge(
     )
 
 
-@pytest.mark.parametrize("kind", ("build", "console", "template", "api", "frontend"))
+@pytest.mark.parametrize(
+    "kind", ("build", "console", "template", "api", "frontend", "ci-example")
+)
 def test_bounded_owner_merge_gate_uses_original_native_receipts_without_promoting_consumers(
     bounded_owner_repository: tuple[Path, str], kind: str
 ) -> None:
@@ -4664,11 +4748,12 @@ def test_bounded_owner_merge_gate_uses_original_native_receipts_without_promotin
     "fault",
     ("missing-claim", "overclaimed-authority", "another-source", "source-drift"),
 )
+@pytest.mark.parametrize("kind", ("build", "ci-example"))
 def test_bounded_owner_merge_gate_reobserves_source_before_accepting_claims(
-    bounded_owner_repository: tuple[Path, str], fault: str
+    bounded_owner_repository: tuple[Path, str], fault: str, kind: str
 ) -> None:
     root, base = bounded_owner_repository
-    plan, result = _bounded_merge_proof(root, base, "build")
+    plan, result = _bounded_merge_proof(root, base, kind)
     _validate_bounded_merge(root, plan, result)
     if fault == "missing-claim":
         plan["evidence"].pop("bounded_owner_proofs")
@@ -4678,6 +4763,8 @@ def test_bounded_owner_merge_gate_reobserves_source_before_accepting_claims(
         plan["evidence"]["bounded_owner_proofs"]["routes"][0]["paths"] = [
             "backend/unrelated.py"
         ]
+    elif kind == "ci-example":
+        (root / "examples/python-ci/run.sh").unlink()
     else:
         manifest = root / "backend/pyproject.toml"
         manifest.write_text(
@@ -4687,6 +4774,37 @@ def test_bounded_owner_merge_gate_reobserves_source_before_accepting_claims(
         )
 
     with pytest.raises(ValueError, match="Bounded native owner proof"):
+        _validate_bounded_merge(root, plan, result)
+
+
+@pytest.mark.parametrize(
+    "unrelated",
+    (
+        "examples/python-ci/another-script.sh",
+        "examples/python-ci/plan.yml",
+        "examples/another-ci/run.sh",
+    ),
+)
+def test_ci_example_merge_gate_does_not_waive_adjacent_sources(
+    bounded_owner_repository: tuple[Path, str], unrelated: str
+) -> None:
+    root, base = bounded_owner_repository
+    plan, result = _bounded_merge_proof(root, base, "ci-example")
+    _validate_bounded_merge(root, plan, result)
+    path = root / unrelated
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# Another current source.\n")
+    plan["changed_paths"].append(unrelated)
+    plan["evidence"]["observations"].append(
+        {
+            "changed_path": unrelated,
+            "state": "UNAVAILABLE",
+            "stale": False,
+            "nominations": [],
+        }
+    )
+
+    with pytest.raises(ValueError, match="Source-qualified consumer evidence"):
         _validate_bounded_merge(root, plan, result)
 
 
@@ -4894,7 +5012,7 @@ def test_bounded_owner_build_mapping_cannot_admit_committed_state_outside_source
     assert gate.get_bounded_owner_proofs(root, base, paths, evidence)["routes"] == []
 
 
-@pytest.mark.parametrize("kind", ("api", "frontend"))
+@pytest.mark.parametrize("kind", ("api", "frontend", "ci-example"))
 @pytest.mark.parametrize("stale", ("row", "packet"))
 def test_bounded_owner_fallback_cannot_admit_stale_source_observations(
     bounded_owner_repository: tuple[Path, str], kind: str, stale: str
@@ -4954,9 +5072,17 @@ def test_bounded_owner_qualified_component_inputs_do_not_gain_a_browser_fallback
 
 
 @pytest.mark.parametrize(
-    "change", ("build-mapping", "dependency", "mixed", "unsafe-mapping")
+    "change",
+    (
+        "build-mapping",
+        "dependency",
+        "mixed",
+        "unsafe-mapping",
+        "ci-example",
+        "ci-example-source-drift",
+    ),
 )
-def test_main_build_declaration_admission_uses_fresh_source_before_native_effects(
+def test_main_bounded_owner_admission_uses_fresh_source_before_native_effects(
     bounded_owner_repository: tuple[Path, str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -4964,22 +5090,26 @@ def test_main_build_declaration_admission_uses_fresh_source_before_native_effect
     change: str,
 ) -> None:
     root, base = bounded_owner_repository
-    plan, result = _bounded_merge_proof(root, base, "build")
-    manifest = root / "backend/pyproject.toml"
-    content = manifest.read_text()
-    if change in {"dependency", "mixed"}:
-        content = content.replace("dependencies = []", 'dependencies = ["new-library"]')
-        if change == "dependency":
-            content = content[: content.index("dev-mode-dirs")]
-    elif change == "unsafe-mapping":
-        (root.parent / "outside").mkdir()
-        content = (
-            content[: content.index("dev-mode-dirs")]
-            + 'dev-mode-dirs = ["../../outside"]\n'
-        )
-    manifest.write_text(content)
-    hook = root / "backend/hatch_build.py"
-    hook.write_text(hook.read_text() + "# Reviewed native build hook change.\n")
+    kind = "ci-example" if change.startswith("ci-example") else "build"
+    plan, result = _bounded_merge_proof(root, base, kind)
+    if kind == "build":
+        manifest = root / "backend/pyproject.toml"
+        content = manifest.read_text()
+        if change in {"dependency", "mixed"}:
+            content = content.replace(
+                "dependencies = []", 'dependencies = ["new-library"]'
+            )
+            if change == "dependency":
+                content = content[: content.index("dev-mode-dirs")]
+        elif change == "unsafe-mapping":
+            (root.parent / "outside").mkdir()
+            content = (
+                content[: content.index("dev-mode-dirs")]
+                + 'dev-mode-dirs = ["../../outside"]\n'
+            )
+        manifest.write_text(content)
+        hook = root / "backend/hatch_build.py"
+        hook.write_text(hook.read_text() + "# Reviewed native build hook change.\n")
     env = {
         **os.environ,
         "GIT_AUTHOR_NAME": "Synthetic Native Owner",
@@ -4988,7 +5118,7 @@ def test_main_build_declaration_admission_uses_fresh_source_before_native_effect
         "GIT_COMMITTER_EMAIL": "native-owner@example.invalid",
     }
     for arguments in (
-        ("add", "backend/pyproject.toml", "backend/hatch_build.py"),
+        ("add", "."),
         (
             "-c",
             "core.hooksPath=/dev/null",
@@ -5077,9 +5207,14 @@ def test_main_build_declaration_admission_uses_fresh_source_before_native_effect
                         {"file": member.split("::", 1)[0], "selector": member}
                         for member in native["membership_receipt"]["passed"]
                         if member.split("::", 1)[0] in required_files
-                    ]
-                    if name == "tooling"
-                    else [],
+                        and member.startswith(
+                            {
+                                "backend": "backend/",
+                                "tooling": "scripts/",
+                                "cross-owner": "tests/",
+                            }[name]
+                        )
+                    ],
                 }
                 for name in ("backend", "tooling", "cross-owner")
             ],
@@ -5113,7 +5248,7 @@ def test_main_build_declaration_admission_uses_fresh_source_before_native_effect
 
     status = gate.main()
 
-    accepted = change == "build-mapping"
+    accepted = change in {"build-mapping", "ci-example", "ci-example-source-drift"}
     assert status == (0 if accepted else 1)
     assert effects == (["native-environment"] if accepted else [])
     output = capsys.readouterr().out
@@ -5121,3 +5256,21 @@ def test_main_build_declaration_admission_uses_fresh_source_before_native_effect
         assert "MERGE_VERIFIED:" in output
     else:
         assert "Dependency declarations lack an admitted native lock scope" in output
+
+    if change == "ci-example-source-drift":
+        original_identity = package_slim.canonical_source_identity
+        source = root / "examples/python-ci/run.sh"
+
+        def changed_source_identity(selected_root: Path) -> str:
+            assert selected_root == root
+            source.write_text(source.read_text() + "# Changed after Git observation.\n")
+            return original_identity(selected_root)
+
+        monkeypatch.setattr(
+            package_slim, "canonical_source_identity", changed_source_identity
+        )
+        assert gate.main() == 1
+        assert effects == ["native-environment"]
+        assert (
+            "Candidate contents differ from selected proof" in capsys.readouterr().out
+        )
