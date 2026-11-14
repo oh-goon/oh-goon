@@ -2057,11 +2057,6 @@ def _require_changed_project_test_execution(
     from oh_goon.repository_tooling import python_project_checks as owner
     from oh_goon.repository_tooling.development_verification import _MERGE_MARKER
 
-    if (
-        Path(getsourcefile(owner.collect_project_pytest) or "").resolve()
-        != Path(__file__).with_name("python_project_checks.py").resolve()
-    ):
-        raise ValueError("Native project observation imported outside its trusted owner")
     projects = {
         project
         for path in changed_paths
@@ -2075,6 +2070,11 @@ def _require_changed_project_test_execution(
     )
     if not targets:
         return {"source_identity": source_identity, "contexts": []}
+    if (
+        Path(getsourcefile(owner.collect_project_pytest) or "").resolve()
+        != Path(__file__).with_name("python_project_checks.py").resolve()
+    ):
+        raise ValueError("Native project observation imported outside its trusted owner")
     packets = owner.collect_project_pytest(
         root, targets, marker=_MERGE_MARKER, source_identity=source_identity
     )
