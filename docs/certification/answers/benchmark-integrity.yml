@@ -65,8 +65,8 @@ equivalence_families:
   question_id: Q96
   variants:
   - id: EQ006-A
-    prompt: Map dependency read and write authority across init, setup, diagnostic-dependency-check,
-      sync, init, verify, and certify. Which operations may materialize state
+    prompt: Map dependency read and write authority across init, diagnostic-dependency-check,
+      sync, verify, and certify. Which operations may materialize state
       and which only consume or verify it?
   - id: EQ006-B
     prompt: For each dependency-related front door, distinguish mutation authority
