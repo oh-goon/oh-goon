@@ -135,6 +135,94 @@ def test_native_defaults_do_not_request_inference_or_installation() -> None:
     assert NativeAgentProfile().timeout_seconds == 7200
 
 
+@pytest.mark.parametrize("backend", ["local", "bubblewrap"])
+def test_pi_rpc_requires_explicit_selection_without_changing_existing_profile_wire(
+    backend: str,
+) -> None:
+    profile = NativeAgentProfile.model_validate({"backend": backend})
+    explicit = NativeAgentProfile.model_validate({"backend": backend, "pi_rpc": False})
+    assert profile.pi_rpc is False
+    assert "pi_rpc" not in profile.model_dump(mode="json")
+    assert explicit.model_dump_json() == profile.model_dump_json()
+
+
+def test_pi_rpc_catalog_preserves_the_explicit_capability_in_serialized_authority() -> None:
+    config = AgentProvidersConfig.model_validate_json(
+        json.dumps(
+            {
+                "providers": {
+                    "broker": {
+                        "api": "openai-chat-completions",
+                        "base_url": "http://127.0.0.1:12345/v1",
+                    }
+                },
+                "models": {"approved": {"provider": "broker", "model": "native-model"}},
+                "native_profiles": {
+                    "rpc": {
+                        "backend": "bubblewrap",
+                        "allowed_agents": ["pi"],
+                        "inference_profile": "approved",
+                        "pi_rpc": True,
+                    }
+                },
+            }
+        )
+    )
+    serialized = config.model_dump_json()
+    reloaded = AgentProvidersConfig.model_validate_json(serialized)
+    assert reloaded.native_profiles["rpc"].pi_rpc is True
+    assert json.loads(serialized)["native_profiles"]["rpc"]["pi_rpc"] is True
+    payload = json.loads(serialized)
+    payload["models"] = {}
+    with pytest.raises(ValidationError, match="reference a declared model profile"):
+        AgentProvidersConfig.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "conflict",
+    [
+        "local",
+        "shared-agents",
+        "foreign-agent",
+        "empty-agents",
+        "broker",
+        "owner",
+        "login",
+        "service",
+    ],
+)
+def test_pi_rpc_rejects_profiles_without_its_admitted_native_and_broker_boundary(
+    conflict: str,
+) -> None:
+    profile: dict[str, object] = {
+        "backend": "bubblewrap",
+        "allowed_agents": ["pi"],
+        "inference_profile": "approved",
+        "pi_rpc": True,
+    }
+    assert NativeAgentProfile.model_validate(profile).pi_rpc is True
+    if conflict == "local":
+        profile["backend"] = "local"
+    elif conflict == "shared-agents":
+        profile["allowed_agents"] = ["pi", "codex"]
+    elif conflict == "foreign-agent":
+        profile["allowed_agents"] = ["opencode"]
+    elif conflict == "empty-agents":
+        profile["allowed_agents"] = []
+    elif conflict == "broker":
+        profile["inference_profile"] = None
+    elif conflict == "owner":
+        profile["sandbox_owner"] = "execution_backend"
+    else:
+        profile["codex_login" if conflict == "login" else "codex_service"] = {
+            "home": "/private/native",
+            "model": "native",
+            "reasoning_effort": "ultra",
+        }
+    with pytest.raises(ValidationError, match="Pi RPC"):
+        NativeAgentProfile.model_validate(profile)
+
+
 @pytest.mark.parametrize("conflict", ["bubblewrap", "broker"])
 def test_codex_login_never_implicitly_downgrades_broker_policy(conflict: str) -> None:
     profile: dict[str, object] = {

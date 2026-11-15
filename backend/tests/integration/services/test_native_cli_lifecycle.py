@@ -30,8 +30,10 @@ from oh_goon.core.models.agent_providers import (
 )
 from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run_events import ProcessStartedEvent, ProcessStartingEvent
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import FleetRunEventType, FleetRunOutcome, FleetRunStatus
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
@@ -313,12 +315,21 @@ def test_native_terminal_sequence_is_accepted_once_by_original_run(
 
 @pytest.mark.certification
 @pytest.mark.parametrize("scenario", ("success", "error", "cancel", "timeout"))
-@pytest.mark.parametrize("agent", ("opencode", "pi", "codex"))
+@pytest.mark.parametrize(
+    ("agent", "pi_rpc"),
+    (
+        pytest.param("opencode", False, id="opencode"),
+        pytest.param("pi", False, id="pi"),
+        pytest.param("pi", True, id="pi-rpc"),
+        pytest.param("codex", False, id="codex"),
+    ),
+)
 def test_installed_native_terminal_claim_respects_original_run_settlement(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     scenario: str,
     agent: Literal["opencode", "pi", "codex"],
+    pi_rpc: bool,
 ) -> None:
     executable = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}")
     runtime_root = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}_RUNTIME_ROOT")
@@ -473,6 +484,7 @@ def test_installed_native_terminal_claim_respects_original_run_settlement(
                                 "allowed_agents": [agent],
                                 "workspace_roots": [str(workspace.parent)],
                                 "inference_profile": "selected",
+                                "pi_rpc": pi_rpc,
                                 "timeout_seconds": 15 if scenario == "timeout" else 45,
                             }
                         },
@@ -509,6 +521,15 @@ def test_installed_native_terminal_claim_respects_original_run_settlement(
                 assert not fixture_errors, fixture_errors
                 assert model_started.is_set() and model_requests == 1
                 step = detail.game_tape.repositories[0].steps[0]
+                assert isinstance(detail.run.target, FleetPlanTarget)
+                admitted_step = detail.run.target.plan.steps[0]
+                assert isinstance(admitted_step, ResolvedAgentStep)
+                assert admitted_step.workload.harness == "native"
+                assert admitted_step.workload.native_agent is not None
+                assert admitted_step.workload.native_agent.profile.pi_rpc is pi_rpc
+                if pi_rpc and scenario != "cancel":
+                    assert "--pi-rpc" in step.command
+                    assert step.command[step.command.index("--mode") + 1] == "rpc"
                 assert step.settlement is not None
                 assert (detail.outcome is FleetRunOutcome.SUCCESS) == (scenario == "success")
                 supervisor = None

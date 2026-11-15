@@ -271,6 +271,8 @@ def resolve_native_agent(
             raise AgentProviderError("Select a configured native execution profile")
     if name not in profile.allowed_agents:
         raise AgentProviderError("Selected native agent is not allowed by the execution profile")
+    if profile.pi_rpc and name != "pi":
+        raise AgentProviderError("Pi RPC requires Pi execution")
     try:
         selected_workspace = workspace.resolve(strict=True)
         if not selected_workspace.is_dir():

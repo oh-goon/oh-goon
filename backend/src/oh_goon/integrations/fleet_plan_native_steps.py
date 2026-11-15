@@ -101,6 +101,8 @@ def require_native_agent_compatibility(
     """Compatibility and path-separation checks shared by preflight and Step receiver."""
     if role not in {"report", "review", "adjudication", "proposal"}:
         raise FleetPlanInvalid("Native Agent result role is unsupported")
+    if selected.profile.pi_rpc and (selected.agent != "pi" or selected.interactive):
+        raise FleetPlanInvalid("Pi RPC requires noninteractive Pi execution")
     if (
         selected.agent in {"codex", "opencode"}
         and selected.definition.configuration_directory is not None
@@ -726,6 +728,7 @@ def execute_native_agent_step(
                 prompt_file=prompt_file,
                 workspace=repository,
                 interactive=selected.interactive,
+                rpc=selected.profile.pi_rpc,
             )
             if sandboxed:
                 base_url = "http://127.0.0.1:18743"
@@ -764,6 +767,7 @@ def execute_native_agent_step(
                         if terminal is not None
                         else ("--input-file", str(prompt_file))
                     ),
+                    *(("--pi-rpc",) if invocation.input_protocol == "pi_rpc" else ()),
                     "--",
                     *argv,
                 )

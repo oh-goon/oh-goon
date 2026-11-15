@@ -317,6 +317,7 @@ class NativeAgentProfile(ImmutableModel):
     timeout_seconds: float = Field(default=7200.0, gt=0, le=21600, allow_inf_nan=False, strict=True)
     resources: CicdResourcePolicy = Field(default_factory=CicdResourcePolicy)
     inference_profile: str | None = None
+    pi_rpc: bool = Field(default=False, exclude_if=lambda value: value is False)
     codex_login: CodexLoginConnection | None = None
     codex_service: CodexServiceConnection | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -324,6 +325,15 @@ class NativeAgentProfile(ImmutableModel):
 
     @model_validator(mode="after")
     def native_login_boundary(self) -> NativeAgentProfile:
+        if self.pi_rpc and (
+            self.backend != "bubblewrap"
+            or self.allowed_agents != ("pi",)
+            or self.inference_profile is None
+            or self.sandbox_owner != "harness"
+            or self.codex_login is not None
+            or self.codex_service is not None
+        ):
+            raise ValueError("Pi RPC requires a Pi-only Bubblewrap profile with broker inference")
         if self.sandbox_owner == "execution_backend" and self.backend != "bubblewrap":
             raise ValueError("Execution backend sandbox ownership requires Bubblewrap")
         if self.codex_service is not None:

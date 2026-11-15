@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from functools import partial
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -24,6 +24,7 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import CompletedPlanStepExecution
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
@@ -32,6 +33,7 @@ from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
+from oh_goon.integrations import fleet_plan_process_isolation as process_isolation
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import (
     StandardIsolatedProcessRequest,
@@ -99,8 +101,9 @@ def _fake_backend(tmp_path: Path) -> BubblewrapProcessIsolation:
     return BubblewrapProcessIsolation(str(executable))
 
 
+@pytest.mark.parametrize("streaming_input", [False, True])
 def test_profile_runner_transports_pinned_subject_resources_and_native_inputs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, streaming_input: bool
 ) -> None:
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -135,13 +138,19 @@ def test_profile_runner_transports_pinned_subject_resources_and_native_inputs(
     def cancel() -> bool:
         return False
 
+    class InputSource:
+        def read_input(self, max_bytes: int) -> bytes | None:
+            pytest.fail("input source was polled before the native command owner")
+
+    source = InputSource() if streaming_input else None
     result = runner(
         "/usr/bin/true",
         cwd=repository,
         timeout=7,
         cancel_requested=cancel,
         env={"PATH": os.defpath},
-        input_data=b"input",
+        input_data=None if streaming_input else b"input",
+        input_source=source,
         retain_output_tail=True,
         read_only_mounts=(mount,),
         read_only_workspace=True,
@@ -153,11 +162,42 @@ def test_profile_runner_transports_pinned_subject_resources_and_native_inputs(
         request.resources == resources
         and request.backend_configuration_id == selection.backend_configuration_id
     )
-    assert request.input_data == b"input" and request.read_only_workspace
+    assert request.input_data == (None if streaming_input else b"input")
+    assert request.input_source is source and request.read_only_workspace
     assert request.retain_output_tail
     assert mount in request.read_only_mounts
     assert options["timeout"] == 7 and options["cancel_requested"] is cancel
     assert events == ["pin", "verify", "verify", "release"]
+
+
+def test_local_profile_preserves_the_input_source_for_the_native_command_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="local",
+        definition=NativeAgentDefinition(executable="/usr/bin/true"),
+        profile=NativeAgentProfile(backend="local"),
+        executable_sha256="a" * 64,
+    )
+
+    class InputSource:
+        def read_input(self, max_bytes: int) -> bytes | None:
+            pytest.fail("input source was polled before the native command owner")
+
+    source = InputSource()
+    calls: list[dict[str, Any]] = []
+
+    def execute(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(kwargs)
+        return CommandResult(0, "native", "")
+
+    monkeypatch.setattr(process_isolation, "run_command", execute)
+    runner = native_profile_command_runner(tmp_path, selected, None, None)
+    assert runner("/usr/bin/true", input_source=source).stdout == "native"
+    assert len(calls) == 1
+    assert calls[0]["input_source"] is source
+    assert calls[0]["input_data"] is None and calls[0]["terminal"] is None
 
 
 @pytest.mark.parametrize("missing", ["backend", "pin", "configuration"])
@@ -583,10 +623,13 @@ def test_real_scoped_git_fingerprints_do_not_read_outside_workspace_links(tmp_pa
     assert regular.pyproject_sha256 == hashlib.sha256(b"[project]\nname='approved'\n").hexdigest()
 
 
-def _phase_context(phase, *, write_roots=("allowed",)):
+def _phase_context(
+    phase: Literal["review", "repair", "verification"],
+    *,
+    write_roots: tuple[str, ...] = ("allowed",),
+) -> AgentRepairContext:
     from datetime import UTC, datetime, timedelta
 
-    from oh_goon.core.models.agent_repair import AgentRepairContext
     from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits
 
     return AgentRepairContext(
@@ -618,9 +661,9 @@ def test_protected_runner_rechecks_exact_phase_roots_and_readonly_requests(
         _selection(backend),
         profile=NativeAgentProfile(backend="bubblewrap", sandbox_owner="execution_backend"),
     )
-    calls = []
+    calls: list[StandardIsolatedProcessRequest] = []
 
-    def execute(request, **kwargs):
+    def execute(request: StandardIsolatedProcessRequest, **kwargs: Any) -> CommandResult:
         calls.append(request)
         return CommandResult(0, "", "")
 
@@ -646,7 +689,7 @@ def test_protected_runner_rechecks_exact_phase_roots_and_readonly_requests(
 @pytest.mark.process
 @pytest.mark.parametrize("phase", ["review", "repair", "verification"])
 def test_original_executor_transports_phase_scope_without_leaking_repair_authority(
-    tmp_path: Path, phase: str
+    tmp_path: Path, phase: Literal["review", "repair", "verification"]
 ) -> None:
     executable = shutil.which("bwrap")
     if executable is None:
@@ -706,7 +749,7 @@ print(json.dumps(facts))
 
 @pytest.mark.parametrize("agent", ["codex", "opencode"])
 def test_forged_native_user_configuration_is_refused_before_mount_discovery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: Literal["codex", "opencode"]
 ) -> None:
     selected = replace(
         _selection(_fake_backend(tmp_path)),
@@ -740,7 +783,9 @@ def test_native_runner_cannot_receive_file_credentials_or_host_network(
     )
     if attempt == "removed_credential":
         with pytest.raises(TypeError, match="credential_file"):
-            runner("/usr/bin/true", credential_file=tmp_path / "synthetic-auth.json")
+            cast(Callable[..., CommandResult], runner)(
+                "/usr/bin/true", credential_file=tmp_path / "synthetic-auth.json"
+            )
     else:
         with pytest.raises(FleetPlanInvalid, match="supported admitted service transport"):
             runner("/usr/bin/true", host_network=True)

@@ -234,6 +234,48 @@ The complete context must fit the existing 65,536-byte phase context bound;
 oversize context rejects before new admission instead of silently clipping.
 No prior Run or ambient conversation is selected automatically.
 
+### Ephemeral Pi RPC
+
+A Pi-only managed profile may explicitly select `pi_rpc: true`:
+
+```json
+{
+  "native_profiles": {
+    "pi-rpc": {
+      "backend": "bubblewrap",
+      "allowed_agents": ["pi"],
+      "inference_profile": "approved-code",
+      "pi_rpc": true
+    }
+  }
+}
+```
+
+This is a fragment of the existing catalog; `approved-code` must name its
+configured model/provider connection. Select the public Pi executable and complete
+runtime through `native_agents` as usual, then use
+`oh-goon ai --agent pi --profile pi-rpc --headless --prompt-file task.txt`.
+Interactive, local, mixed-agent and unbrokered RPC profiles refuse before work.
+Omitting `pi_rpc` retains the existing native JSON transport.
+
+RPC still supplies `--no-session`. Within the existing admitted Step, the
+inference relay uses the original command input pump to correlate native state
+and leaf responses, submit the frozen prompt and wait for `agent_settled`.
+Prompt acceptance or `agent_end` cannot close the child early. A final native
+state response must retain the same ephemeral session ID before input closes
+and Pi disposes its runtime. Cancellation, deadlines and physical cleanup remain
+with the original command/Bubblewrap owners. Encoded requests share the existing
+one-MiB command input budget; native event framing is LF-only.
+
+Native control responses are not forwarded into public output or treated as
+accepted role results. Malformed, refused, mismatched or incomplete control
+responses fail the transport; they never trigger a JSON fallback or resubmit
+the prompt. Native session/leaf observations are provenance, not a persistent
+session selector, exact-open authorization or a verified result. Persistent and
+cross-Run Pi sessions remain unsupported. The selected installed-mode evidence
+and extension-origin limits are in the
+[harness inventory](development/AGENT_HARNESS_COMPATIBILITY.md#ephemeral-pi-rpc-transport--hug-139).
+
 ### Use an existing Codex sign-in
 
 Configure this profile once for trusted local coding tasks and select it with

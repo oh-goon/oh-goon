@@ -109,6 +109,7 @@ class NativeAgentCommand:
     argv: tuple[str, ...]
     input_file: Path | None
     environment: tuple[tuple[str, str], ...] = ()
+    input_protocol: Literal["text", "pi_rpc"] = "text"
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,6 +251,7 @@ def native_agent_command(
     prompt_file: Path,
     workspace: Path,
     interactive: bool,
+    rpc: bool = False,
 ) -> NativeAgentCommand:
     """Translate a frozen selection without parsing native model configuration.
 
@@ -257,6 +259,8 @@ def native_agent_command(
     Pi's additive system file preserves its native base prompt. Headless input
     stays file-backed rather than expanding private repository data in argv.
     """
+    if type(rpc) is not bool or rpc and (selected.agent != "pi" or interactive):
+        raise AgentProviderError("RPC input is supported only for noninteractive Pi")
     if selected.agent not in ("opencode", "pi", "codex"):
         raise AgentProviderError("Unsupported native command protocol")
     arguments = selected.definition.arguments
@@ -306,7 +310,7 @@ def native_agent_command(
             *(
                 ("--append-system-prompt", str(prompt_file))
                 if interactive
-                else ("--mode", "json", "--no-session")
+                else ("--mode", "rpc" if rpc else "json", "--no-session")
             ),
         )
     else:
@@ -328,6 +332,7 @@ def native_agent_command(
         argv=argv,
         input_file=None if interactive else prompt_file,
         environment=tuple(environment.items()),
+        input_protocol="pi_rpc" if rpc else "text",
     )
 
 
@@ -696,7 +701,7 @@ class NativeAgentEventParser:
     def _consume_line(self, line: str) -> None:
         if not line.strip():
             return
-        record = _event_record(line.removesuffix("\r"))
+        record = decode_native_agent_record(line.removesuffix("\r"))
         self._event_count += 1
         event_type = record.get("type")
         if self._agent == "opencode":
@@ -821,7 +826,7 @@ class NativeAgentEventParser:
                         self._observe("tool", name, item.get("id"))
 
 
-def _event_record(line: str) -> dict[str, Any]:
+def decode_native_agent_record(line: str) -> dict[str, Any]:
     def unique_pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in items:

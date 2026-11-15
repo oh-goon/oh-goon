@@ -4,10 +4,12 @@ import os
 import shutil
 import tomllib
 from collections.abc import Iterator, Mapping
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     AgentProvidersConfig,
@@ -22,6 +24,7 @@ from oh_goon.integrations.agent_native_execution import (
     native_agent_command,
     verify_native_agent_executable,
 )
+from oh_goon.integrations.fleet_plan_native_steps import require_native_agent_compatibility
 from oh_goon.runtime.agent_providers import (
     load_agent_providers,
     resolve_native_agent,
@@ -203,6 +206,77 @@ def test_native_inference_selects_public_snapshot_without_reading_credentials(
     assert selected.connection.selection.model == "exact-native-model"
     config.providers["host"].headers["X-Changed"] = "later"
     assert selected.connection.provider.headers == {}
+
+
+@pytest.mark.parametrize("pi_rpc", [False, True])
+def test_native_resolution_freezes_the_explicit_pi_rpc_profile(
+    tmp_path: Path, pi_rpc: bool
+) -> None:
+    program = executable(tmp_path / "pi")
+    config = AgentProvidersConfig.model_validate_json(
+        json.dumps(
+            {
+                "providers": {
+                    "broker": {
+                        "api": "openai-chat-completions",
+                        "base_url": "http://127.0.0.1:12345/v1",
+                    }
+                },
+                "models": {"approved": {"provider": "broker", "model": "native-model"}},
+                "native_agents": {"pi": {"executable": str(program)}},
+                "native_profiles": {
+                    "managed": {
+                        "backend": "bubblewrap",
+                        "allowed_agents": ["pi"],
+                        "inference_profile": "approved",
+                        "pi_rpc": pi_rpc,
+                    }
+                },
+            }
+        )
+    )
+    selected = resolve_native_agent(config, "pi", "managed", workspace=tmp_path, environment={})
+    require_native_agent_compatibility(selected)
+    config.native_profiles["managed"] = NativeAgentProfile()
+    assert selected.profile.pi_rpc is pi_rpc
+    assert selected.profile.model_dump(mode="json").get("pi_rpc", False) is pi_rpc
+    assert selected.profile.backend == "bubblewrap"
+    assert selected.connection is not None and selected.connection.selection.model == "native-model"
+
+
+@pytest.mark.parametrize("unsupported", ["interactive", "opencode", "codex"])
+def test_pi_rpc_receiver_refuses_interactive_or_foreign_agent_before_native_work(
+    tmp_path: Path, unsupported: str
+) -> None:
+    program = executable(tmp_path / "pi")
+    config = AgentProvidersConfig.model_validate(
+        {
+            "providers": {
+                "broker": {
+                    "api": "openai-chat-completions",
+                    "base_url": "http://127.0.0.1:12345/v1",
+                }
+            },
+            "models": {"approved": {"provider": "broker", "model": "native-model"}},
+            "native_agents": {"pi": {"executable": str(program)}},
+            "native_profiles": {
+                "rpc": {
+                    "backend": "bubblewrap",
+                    "allowed_agents": ["pi"],
+                    "inference_profile": "approved",
+                    "pi_rpc": True,
+                }
+            },
+        }
+    )
+    selected = resolve_native_agent(config, "pi", "rpc", workspace=tmp_path, environment={})
+    require_native_agent_compatibility(selected)
+    if unsupported == "interactive":
+        selected = replace(selected, interactive=True)
+    else:
+        selected = replace(selected, agent="opencode" if unsupported == "opencode" else "codex")
+    with pytest.raises(FleetPlanInvalid, match="Pi RPC"):
+        require_native_agent_compatibility(selected, terminal_available=True)
 
 
 def test_reloaded_catalog_changes_only_fresh_native_selection(tmp_path: Path) -> None:

@@ -111,9 +111,19 @@ def test_controlled_readonly_context_still_requires_typed_role_acceptance(
 
 
 @pytest.mark.certification
-@pytest.mark.parametrize("agent", ["opencode", "pi"])
+@pytest.mark.parametrize(
+    ("agent", "pi_rpc"),
+    (
+        pytest.param("opencode", False, id="opencode"),
+        pytest.param("pi", False, id="pi"),
+        pytest.param("pi", True, id="pi-rpc"),
+    ),
+)
 def test_installed_native_cli_reviews_through_the_read_only_boundary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: Literal["opencode", "pi"]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent: Literal["opencode", "pi"],
+    pi_rpc: bool,
 ) -> None:
     executable = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}")
     runtime_root = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}_RUNTIME_ROOT")
@@ -465,6 +475,7 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                                 "allowed_agents": [agent],
                                 "workspace_roots": [str(workspace.parent)],
                                 "inference_profile": "selected",
+                                "pi_rpc": pi_rpc,
                                 "timeout_seconds": 90,
                             }
                         },
@@ -535,6 +546,9 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                 assert reviews[0].summary == "Synthetic native read-only boundary probe completed."
                 assert set(reviews[0].reviewed_paths) == {"repo/source.py", "repo/original-root"}
                 receipt = step.attempts[0].standard_isolation
+                if pi_rpc:
+                    assert "--pi-rpc" in step.argv
+                    assert step.argv[step.argv.index("--mode") + 1] == "rpc"
                 assert receipt is not None and receipt.workspace_read_only
                 assert receipt.host_and_external_ip_networking == "denied"
                 assert receipt.scoped_write_roots == () and receipt.protected_paths == (".git",)
@@ -549,6 +563,8 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                 assert claims[0].settled and not claims[0].failed
                 protocol = read_protocol(detail)
                 records = [json.loads(line) for line in protocol["stdout"].split("\n") if line]
+                if pi_rpc:
+                    assert all(record["type"] != "response" for record in records)
                 assert claims[0].native_event_count == len(records)
                 assert_no_forged_root_claims(records)
                 assert forged_output is not None
