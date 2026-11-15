@@ -1,9 +1,132 @@
 from __future__ import annotations
 
 import shlex
+import json
 from pathlib import Path
 
 import pytest
+
+
+def _aligned_release_authoring_tree(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path, Path]:
+    from oh_goon.repository_tooling.release import stamp_release_version
+
+    paths = {
+        "VERSION_FILE": root / "VERSION",
+        "PYPROJECT": root / "backend/pyproject.toml",
+        "BACKEND_LOCK": root / "backend/uv.lock",
+        "FRONTEND_PACKAGE": root / "frontend/package.json",
+        "FRONTEND_LOCK": root / "frontend/package-lock.json",
+        "OPENAPI": root / "generated/openapi/openapi.json",
+        "GENERATED_FRONTEND": root / "generated/frontend",
+        "GOON_TOOL_AUTHORITY": root
+        / "backend/src/oh_goon/canonical_goon_tool_authority.json",
+    }
+    contents = {
+        "VERSION_FILE": "2.0.0\n",
+        "PYPROJECT": '[project]\nname="release-fixture"\nversion="2.0.0"\n',
+        "BACKEND_LOCK": "version = 1\npackage = []\n",
+        "FRONTEND_PACKAGE": '{"name":"release-fixture","version":"2.0.0"}\n',
+        "FRONTEND_LOCK": '{"name":"release-fixture","version":"2.0.0","lockfileVersion":3,"packages":{"":{"name":"release-fixture","version":"2.0.0"}}}\n',
+        "OPENAPI": '{"info":{"version":"2.0.0"}}\n',
+    }
+    for name, path in paths.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(stamp_release_version, name, path)
+        if name in contents:
+            path.write_text(contents[name], encoding="utf-8")
+    metadata = root / "docs/certification/questions/metadata.yml"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("source_version: 2.0.0\n", encoding="utf-8")
+    monkeypatch.setattr(stamp_release_version, "ROOT", root)
+    # These tests isolate version convergence; source-layout admission is covered
+    # independently and this deliberately small fixture is not a full checkout.
+    monkeypatch.setattr(
+        stamp_release_version, "assert_canonical_source_layout", lambda _root: None
+    )
+    monkeypatch.setattr(
+        stamp_release_version, "assert_public_source_privacy", lambda _root: None
+    )
+
+    def regenerate() -> None:
+        paths["OPENAPI"].write_text('{"info":{"version":"2.0.0"}}\n', encoding="utf-8")
+
+    monkeypatch.setattr(
+        stamp_release_version, "_regenerate_generated_authority", regenerate
+    )
+    return metadata, paths["FRONTEND_LOCK"], paths["BACKEND_LOCK"]
+
+
+@pytest.mark.parametrize(
+    "drift", ("certification", "lock-version", "lock-package-version")
+)
+def test_same_version_resume_repairs_owned_identity_drift_with_native_authoring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift: str
+) -> None:
+    from oh_goon.repository_tooling.release import stamp_release_version
+    from oh_goon.repository_tooling.release.source_version_coherence import (
+        source_version_issues,
+    )
+
+    metadata, frontend_lock, backend_lock = _aligned_release_authoring_tree(
+        tmp_path, monkeypatch
+    )
+    original_backend_lock = backend_lock.read_bytes()
+    # Establish a valid accepted control before changing precisely one fact.
+    stamp_release_version.set_version("2.0.0")
+    assert source_version_issues(tmp_path, "2.0.0") == ()
+    assert stamp_release_version.check() == 0
+
+    if drift == "certification":
+        metadata.write_text("source_version: 1.0.0\n", encoding="utf-8")
+    else:
+        payload = json.loads(frontend_lock.read_text(encoding="utf-8"))
+        if drift == "lock-version":
+            payload["version"] = "1.0.0"
+        else:
+            payload["packages"][""]["version"] = "1.0.0"
+        frontend_lock.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    assert len(source_version_issues(tmp_path, "2.0.0")) == 1
+    before_check = {
+        path: path.read_bytes() for path in (metadata, frontend_lock, backend_lock)
+    }
+    assert stamp_release_version.check() == 1
+    assert {path: path.read_bytes() for path in before_check} == before_check
+
+    stamp_release_version.set_version("2.0.0")
+
+    assert source_version_issues(tmp_path, "2.0.0") == ()
+    assert backend_lock.read_bytes() == original_backend_lock
+
+
+def test_same_version_regeneration_cannot_report_success_after_changing_owned_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.repository_tooling.release import stamp_release_version
+
+    metadata, frontend_lock, backend_lock = _aligned_release_authoring_tree(
+        tmp_path, monkeypatch
+    )
+    stamp_release_version.set_version("2.0.0")
+    originals = {
+        path: path.read_bytes() for path in (metadata, frontend_lock, backend_lock)
+    }
+    added_generated = tmp_path / "generated/frontend/added.ts"
+
+    def corrupt_generation() -> None:
+        metadata.write_text("source_version: 1.0.0\n", encoding="utf-8")
+        added_generated.parent.mkdir(parents=True, exist_ok=True)
+        added_generated.write_text("export {};\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        stamp_release_version, "_regenerate_generated_authority", corrupt_generation
+    )
+    with pytest.raises((ValueError, RuntimeError), match="release identity"):
+        stamp_release_version.set_version("2.0.0")
+
+    assert {path: path.read_bytes() for path in originals} == originals
+    assert not added_generated.exists()
 
 
 def test_set_version_resumes_without_reauthoring_when_native_versions_already_match(
@@ -27,7 +150,9 @@ def test_set_version_resumes_without_reauthoring_when_native_versions_already_ma
     package = frontend / "package.json"
     package.write_text('{"version":"2.0.0"}\n', encoding="utf-8")
     package_lock = frontend / "package-lock.json"
-    package_lock.write_text('{"version":"2.0.0"}\n', encoding="utf-8")
+    package_lock.write_text(
+        '{"version":"2.0.0","packages":{"":{"version":"2.0.0"}}}\n', encoding="utf-8"
+    )
 
     monkeypatch.setattr(stamp_release_version, "ROOT", tmp_path)
     monkeypatch.setattr(stamp_release_version, "VERSION_FILE", version)
@@ -117,7 +242,9 @@ def test_already_stamped_resume_does_not_require_dependency_freshness_reconcilia
     package = frontend / "package.json"
     package.write_text('{"version":"2.0.0"}\n', encoding="utf-8")
     package_lock = frontend / "package-lock.json"
-    package_lock.write_text('{"version":"2.0.0"}\n', encoding="utf-8")
+    package_lock.write_text(
+        '{"version":"2.0.0","packages":{"":{"version":"2.0.0"}}}\n', encoding="utf-8"
+    )
 
     monkeypatch.setattr(stamp_release_version, "ROOT", tmp_path)
     monkeypatch.setattr(stamp_release_version, "VERSION_FILE", version)
@@ -327,7 +454,9 @@ def test_source_identity_match_consumes_captured_dependency_receipt_without_rech
     package = frontend / "package.json"
     package.write_text('{"version":"2.0.0"}\n', encoding="utf-8")
     package_lock = frontend / "package-lock.json"
-    package_lock.write_text('{"version":"2.0.0"}\n', encoding="utf-8")
+    package_lock.write_text(
+        '{"version":"2.0.0","packages":{"":{"version":"2.0.0"}}}\n', encoding="utf-8"
+    )
 
     monkeypatch.setattr(stamp_release_version, "ROOT", tmp_path)
     monkeypatch.setattr(stamp_release_version, "VERSION_FILE", version)

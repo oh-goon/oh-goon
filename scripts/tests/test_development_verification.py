@@ -17,6 +17,7 @@ from oh_goon.integrations.hashmarks.development_verification import (
     observe_repository_assets,
 )
 from oh_goon.repository_tooling import development_verification as owner
+from oh_goon.repository_tooling import python_project_checks
 from oh_goon.repository_tooling.frontend_test_results import (
     native_frontend_temporary_base,
 )
@@ -1584,7 +1585,7 @@ def test_configured_project_advice_is_collected_once_in_its_native_context(
         observed.append(targets)
         return _project_collection(root, targets, **options)
 
-    monkeypatch.setattr(owner.python_project_checks, "collect_project_pytest", collect)
+    monkeypatch.setattr(python_project_checks, "collect_project_pytest", collect)
     plan = owner.admit_change(
         repository,
         base="HEAD",
@@ -1621,7 +1622,7 @@ def test_unavailable_project_collection_refuses_without_backend_fallback(
             raise ValueError("native project environment unavailable")
         return []
 
-    monkeypatch.setattr(owner.python_project_checks, "collect_project_pytest", collect)
+    monkeypatch.setattr(python_project_checks, "collect_project_pytest", collect)
     monkeypatch.setattr(
         owner,
         "collect_native_pytest",
@@ -1662,7 +1663,7 @@ def test_project_changed_test_requires_its_own_selected_native_members(
             )
         return packets
 
-    monkeypatch.setattr(owner.python_project_checks, "collect_project_pytest", collect)
+    monkeypatch.setattr(python_project_checks, "collect_project_pytest", collect)
     plan = owner.admit_change(
         repository,
         base="HEAD",
@@ -1684,7 +1685,7 @@ def test_project_plan_context_or_membership_drift_refuses_before_execution(
 ) -> None:
     _configured_project_test(repository)
     monkeypatch.setattr(
-        owner.python_project_checks, "collect_project_pytest", _project_collection
+        python_project_checks, "collect_project_pytest", _project_collection
     )
     plan = owner.admit_change(
         repository,
@@ -1696,7 +1697,7 @@ def test_project_plan_context_or_membership_drift_refuses_before_execution(
         owner, "require_loaded_hashmarks_runtime", lambda: "sha256:" + "b" * 64
     )
     monkeypatch.setattr(
-        owner.python_project_checks,
+        python_project_checks,
         "require_project_pytest_admission",
         lambda *_args, **_options: members,
     )
@@ -1721,9 +1722,7 @@ def test_project_plan_context_or_membership_drift_refuses_before_execution(
         pytest.fail("changed native project authority reached execution")
 
     monkeypatch.setattr(owner, "_commands", forbidden)
-    monkeypatch.setattr(
-        owner.python_project_checks, "execute_project_pytest", forbidden
-    )
+    monkeypatch.setattr(python_project_checks, "execute_project_pytest", forbidden)
     with pytest.raises(ValueError, match="Native project"):
         owner.execute_change(repository, invalid, mode="focused", workers=1)
 
@@ -1775,9 +1774,9 @@ def test_project_execution_and_aggregation_delegate_the_same_admitted_membership
         return {target}, {member}
 
     monkeypatch.setattr(owner, "require_current_plan", lambda *_args: None)
-    monkeypatch.setattr(owner.python_project_checks, "execute_project_pytest", execute)
+    monkeypatch.setattr(python_project_checks, "execute_project_pytest", execute)
     monkeypatch.setattr(
-        owner.python_project_checks, "require_project_pytest_outcomes", validate
+        python_project_checks, "require_project_pytest_outcomes", validate
     )
     monkeypatch.setattr(
         owner,
@@ -1997,14 +1996,29 @@ def test_qa_policy_change_admits_actual_required_producer_checks(
 
 
 @pytest.mark.parametrize("proof", ("complete", "missing", "deselected"))
-def test_private_answer_section_uses_grader_checks_without_repository_evidence(
-    repository: Path, monkeypatch: pytest.MonkeyPatch, proof: str
+@pytest.mark.parametrize(
+    ("relative", "material_check"),
+    (
+        (
+            "docs/certification/answers/11-startup-certification.yml",
+            "scripts/tests/test_repository_understanding_blueprint.py",
+        ),
+        (
+            "docs/certification/answers/benchmark-integrity.yml",
+            "scripts/tests/test_repository_understanding_benchmark_registry.py",
+        ),
+    ),
+)
+def test_private_grader_material_uses_checks_without_repository_evidence(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    proof: str,
+    relative: str,
+    material_check: str,
 ) -> None:
-    relative = "docs/certification/answers/11-startup-certification.yml"
     selected = repository / relative
     selected.parent.mkdir(parents=True)
     selected.write_text("grader-only answer truth\n", encoding="utf-8")
-    material_check = "scripts/tests/test_repository_understanding_blueprint.py"
     expected = (*VERIFICATION_POLICY_TESTS, material_check)
 
     def nominate(
@@ -2061,7 +2075,8 @@ def test_private_answer_section_uses_grader_checks_without_repository_evidence(
     "relative",
     (
         "docs/certification/answers/nested/11-startup-certification.yml",
-        "docs/certification/answers/benchmark-integrity.yml",
+        "docs/certification/answers/nested/benchmark-integrity.yml",
+        "docs/certification/answers/benchmark-integrity.yaml",
         "docs/certification/answers/question-audit.yml",
         "docs/certification/answers/question-lifecycle.yml",
         "docs/certification/answers/unknown.yml",

@@ -34,6 +34,10 @@ REAL_LIFECYCLE_QA_PATHS = (
 )
 REAL_LIFECYCLE_QA_TEST = "scripts/tests/test_real_lifecycle_qa_contract.py"
 GRADER_ANSWER_MATERIAL_TEST = "scripts/tests/test_repository_understanding_blueprint.py"
+BENCHMARK_REGISTRY_MATERIAL = "docs/certification/answers/benchmark-integrity.yml"
+BENCHMARK_REGISTRY_MATERIAL_TEST = (
+    "scripts/tests/test_repository_understanding_benchmark_registry.py"
+)
 
 _MAX_PUBLIC_DOCUMENTATION_ASSET_BYTES = 1024 * 1024
 DOCUMENTATION_ASSET_OBLIGATION = "bounded documentation-asset policy"
@@ -975,11 +979,20 @@ def is_grader_answer_section(path: str) -> bool:
     )
 
 
+def is_grader_answer_material(path: str) -> bool:
+    """Keep declared grader inputs outside repository-evidence nomination.
+
+    The benchmark registry has its own loader/challenge/privacy proof; it is not
+    admitted by the numbered section loader or ordinary documentation policy.
+    """
+    return is_grader_answer_section(path) or path == BENCHMARK_REGISTRY_MATERIAL
+
+
 def is_verification_policy_path(path: str) -> bool:
     """The existing contributor, verification and result-authority boundaries."""
     return (
         path in REAL_LIFECYCLE_QA_PATHS
-        or is_grader_answer_section(path)
+        or is_grader_answer_material(path)
         or path.startswith((".github/workflows/", "backend/src/oh_goon/repository_tooling/"))
         or Path(path).name == "AGENTS.md"
         or path
@@ -1023,6 +1036,7 @@ def required_policy_tests(paths: Sequence[str]) -> tuple[str, ...]:
             else ()
         )
         + ((GRADER_ANSWER_MATERIAL_TEST,) if any(map(is_grader_answer_section, paths)) else ())
+        + ((BENCHMARK_REGISTRY_MATERIAL_TEST,) if BENCHMARK_REGISTRY_MATERIAL in paths else ())
     )
 
 
@@ -1039,7 +1053,7 @@ def required_policy_obligations(paths: Sequence[str]) -> tuple[str, ...]:
         )
         + (
             ("grader answer-material protection",)
-            if any(map(is_grader_answer_section, paths))
+            if any(map(is_grader_answer_material, paths))
             else ()
         )
     )

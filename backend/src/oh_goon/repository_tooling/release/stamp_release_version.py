@@ -11,6 +11,10 @@ from pathlib import Path
 from oh_goon.core.source_layout_policy import assert_canonical_source_layout
 from oh_goon.repository_tooling._dependency_lock_portability import backend_lock_portability_issues
 from oh_goon.repository_tooling.public_dependency_privacy import assert_public_source_privacy
+from oh_goon.repository_tooling.release.source_version_coherence import (
+    observed_source_versions,
+    source_version_issues,
+)
 
 ROOT = Path(__file__).resolve().parents[5]
 VERSION_FILE = ROOT / "VERSION"
@@ -206,6 +210,14 @@ def _source_identity_matches(version: str, receipt: ReleaseDependencyReceipt) ->
         and _frontend_version() == version
         and _sha256_file(BACKEND_LOCK) == receipt.backend_lock_sha256
         and _sha256_file(FRONTEND_LOCK) == receipt.frontend_lock_sha256
+        # Native package versions alone do not establish that all metadata
+        # authored by stamp() converged. Generated OpenAPI is repaired below
+        # and must not force native reauthoring of an otherwise aligned source.
+        and all(
+            observed == version
+            for owner, observed in observed_source_versions(ROOT).items()
+            if owner != "generated/openapi/openapi.json"
+        )
     )
 
 
@@ -222,12 +234,14 @@ def check() -> int:
     expected = canonical_version()
     versions = observed_versions()
     drift = {name: value for name, value in versions.items() if value != expected}
-    if not drift:
+    coherence_issues = source_version_issues(ROOT, expected)
+    if not drift and not coherence_issues:
         print(f"Release identity is consistent at {expected}")
         return 0
-    if drift:
-        rendered = ", ".join(f"{name}={value!r}" for name, value in drift.items())
-        print(f"Release identity drift: expected {expected}; {rendered}")
+    rendered = "; ".join(
+        [*(f"{name}={value!r}" for name, value in drift.items()), *coherence_issues]
+    )
+    print(f"Release identity drift: expected {expected}; {rendered}")
     return 1
 
 
@@ -332,6 +346,11 @@ def set_version(value: str) -> None:
         if drift:
             rendered = ", ".join(f"{name}={observed!r}" for name, observed in drift.items())
             raise RuntimeError(f"release identity did not converge after authoring: {rendered}")
+        coherence_issues = source_version_issues(ROOT, value)
+        if coherence_issues:
+            raise RuntimeError(
+                "release identity did not converge after authoring: " + "; ".join(coherence_issues)
+            )
         if _sha256_file(BACKEND_LOCK) != post_receipt.backend_lock_sha256:
             raise RuntimeError(
                 "backend dependency receipt changed after generated-authority regeneration"

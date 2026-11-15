@@ -269,10 +269,14 @@ named **grader answer-material protection** obligation. They require the existin
 Repository Understanding loader/blueprint tests as well as verification-policy
 protection. The answer files stay outside Hashmarks nomination inputs and
 repository evidence; native grader checks validate their schemas and references
-against the admitted source. This bounded route claims no repository-consumer
-coverage and does not admit nested files, non-numbered filenames or separate
-audit, lifecycle and benchmark registries. Its policy must already be present in
-the immutable base controller before a changed answer bank can qualify.
+against the admitted source. This proof for numbered banks claims no repository
+consumer coverage and does not admit nested files, other filenames or separate
+audit and lifecycle registries. The exact sibling `benchmark-integrity.yml` uses
+the same grader-only protection with its own bounded current-registry loader,
+challenge-delivery, identity and public-manifest privacy tests, rather than the
+numbered section proof. Unrelated private registries remain unqualified. Both
+routes keep answer truth outside Hashmarks, and their policy must already be
+present in the immutable base controller before changed material can qualify.
 
 Merge-mode plan admission retains diagnostic JSON but refuses unresolved scope
 outside its bounded routes or missing required behavioral proof before publishing
