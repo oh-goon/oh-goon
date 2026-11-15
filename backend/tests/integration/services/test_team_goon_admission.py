@@ -52,6 +52,7 @@ def test_team_run_keeps_repository_instance_through_plan_preparation(
         runtime.plans.lock(goon)
         team = runtime.league.configured_team(repository)
         assert isinstance(team.pipeline, ConfiguredTeamPipeline)
+        pipeline_sha256 = team.pipeline.sha256
         original_bytes = goon.read_bytes()
         prepare = runtime.plans.prepare_execution_target
         prepared = False
@@ -73,7 +74,7 @@ def test_team_run_keeps_repository_instance_through_plan_preparation(
         def run() -> str:
             admitted = runtime.goon.run(
                 repository,
-                expected_pipeline_sha256=team.pipeline.sha256,
+                expected_pipeline_sha256=pipeline_sha256,
                 expected_repository_instance_id=team.repository_instance_id,
                 fleet_run_id=run_id,
             )
