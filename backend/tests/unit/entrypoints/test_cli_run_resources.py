@@ -9,8 +9,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-import oh_goon.cli_run_resources as resource_cli
 import pytest
+
+import oh_goon.cli_run_resources as resource_cli
 from oh_goon.cli_parser import build_parser
 from oh_goon.cli_run_resources import (
     CapturedRunResourceHandoff,
@@ -40,7 +41,6 @@ from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.journal import Journal, RunResourceObservationContext
 from oh_goon.services.run_configuration import RunConfigurationSnapshot, load_run_configuration
-
 from tests.factories.journal import admit_run, start_run, terminalize_run
 from tests.factories.run_resources import (
     run_resource_admission,
@@ -63,7 +63,6 @@ def test_resource_preflight_refusal_keeps_its_owner_and_private_cause(
     fault_kind: str,
 ) -> None:
     from oh_goon.cli import main
-
     from tests.factories.run_configuration import write_run_configuration
 
     configuration = write_run_configuration(tmp_path, monkeypatch)

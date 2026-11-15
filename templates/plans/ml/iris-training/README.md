@@ -66,8 +66,8 @@ The existing [whole-Run resource owner](../../../../docs/development/TEMPLATE_IN
 requires a compatible systemd/cgroup context and refuses to abandon a caller's
 existing limits. There is no uncapped fallback. This budget covers the executing
 CLI and its descendants, including native package setup; it is separate from
-test-suite CPU settings. A Step deadline belongs to its authored Goon's
-`timeout_seconds`; the Run budget does not select a wall-clock deadline.
+test-suite CPU settings. Ordinary command Steps retain the backend-owned command
+deadline; the Run budget does not select a wall-clock deadline.
 
 The waiting CLI displays bounded training activity before completion. Ctrl-C or
 SIGTERM requests cancellation through the existing Run owner. Reopen the exact

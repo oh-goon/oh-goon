@@ -11,14 +11,15 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
-from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
+from oh_goon.core.process_birth import ProcessBirthIdentity, observe_process_birth
 from tests.factories.run_resources import require_native_run_resource_context
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -158,6 +159,83 @@ def _training_step(tape: dict[str, Any]) -> dict[str, Any]:
     assert step["attempt_count"] <= 1 and not step["attempt_transitions"]
     assert step["uv"].get("group") is None
     return step
+
+
+def _native_timeout_workflow(workflow: TrainingWorkflow) -> TrainingWorkflow:
+    """Select the existing repository-native UV lane for a host utility wrapper."""
+    project = workflow.root / "repositories/native-timeout-training"
+    shutil.copytree(
+        IRIS_PROJECT,
+        project,
+        ignore=shutil.ignore_patterns(".venv", "__pycache__", ".pytest_cache", "ml-output"),
+    )
+    subprocess.run(
+        ["git", "init", "-q", str(project)], env=workflow.environment, check=True, timeout=10
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "add",
+            "README.md",
+            "pyproject.toml",
+            "uv.lock",
+            "src",
+            "tests",
+            "goon.yml",
+        ],
+        env=workflow.environment,
+        check=True,
+        timeout=10,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "-c",
+            "user.name=Training fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "captured native Iris project",
+        ],
+        env=workflow.environment,
+        check=True,
+        timeout=10,
+    )
+    (project / ".venv").mkdir()
+    (project / ".venv/developer-sentinel").write_text("developer environment is separate\n")
+    source = yaml.safe_load((workflow.package / "goon.yml").read_text())
+    package = workflow.selection.parent / "goons/general/native-training-timeout"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text(
+        "# general/native-training-timeout\n\nNative UV and timeout own execution.\n"
+    )
+    step = dict(source["steps"][0])
+    step["run"] = "uv run timeout --signal=TERM --kill-after=2s 8s " + step["run"]
+    step["artifacts"] = [{**artifact, "retention": "evidence"} for artifact in step["artifacts"]]
+    (package / "goon.yml").write_text(
+        yaml.safe_dump(
+            {
+                "uv": {"project": ".", "lock_mode": "frozen"},
+                "inputs": source["inputs"],
+                "steps": [step],
+            },
+            sort_keys=False,
+        )
+    )
+    workflow.selection.with_name("plan.yml").write_text(
+        "goons:\n- import: general/native-training-timeout\n  from: goons\n"
+    )
+    selected = yaml.safe_load(workflow.selection.read_text())
+    selected["target"] = {"repository": str(project)}
+    workflow.selection.write_text(yaml.safe_dump(selected, sort_keys=False))
+    return replace(workflow, repository=project)
 
 
 def test_relocated_training_cli_reopens_reproducible_and_failed_retained_models(
@@ -333,10 +411,19 @@ def _active_resource_processes(
         assert envelope["pids_max"] <= 256
         pids = [int(value) for value in read("cgroup.procs").splitlines()]
         assert envelope["process_birth"]["pid"] in pids
+        cli_birth = ProcessBirthIdentity.from_payload(envelope["process_birth"])
         handles = []
         try:
             for pid in pids:
-                handles.append(os.pidfd_open(pid))
+                try:
+                    handle = os.pidfd_open(pid)
+                except ProcessLookupError:
+                    if pid == cli_birth.pid:
+                        raise
+                    continue
+                handles.append(handle)
+                if pid == cli_birth.pid:
+                    assert observe_process_birth(pid) == cli_birth
             return envelope, handles
         except BaseException:
             for handle in handles:
@@ -363,9 +450,9 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
     control, _ = workflow.cli("run", str(workflow.selection))
     assert control["outcome"] == "SUCCESS"
     control_output = workflow.cli("runs", "outputs", control["fleet_run_id"])[0]
-    source = yaml.safe_load((workflow.package / "goon.yml").read_text())
-    source["steps"][0]["timeout_seconds"] = {"timeout": 8, "complete": 120}.get(stop, 60)
-    (workflow.package / "goon.yml").write_text(yaml.safe_dump(source, sort_keys=False))
+    if stop == "timeout":
+        workflow = _native_timeout_workflow(workflow)
+    assert not (workflow.repository / "ml-output").exists()
     workflow.prepare(training_rounds=10000)
     run_id: str | None = None
     handles: list[int] = []
@@ -384,21 +471,29 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
         try:
             deadline = time.monotonic() + 40
             while True:
+                history = workflow.cli("runs", "list")[0]["items"]
+                running = [row for row in history if row["status"] == "RUNNING"]
+                if running:
+                    assert len(running) == 1
+                    run_id = running[0]["fleet_run_id"]
+                    break
+                assert process.poll() is None
+                assert time.monotonic() < deadline, "original Run did not reach admission"
+            envelope, handles = _active_resource_processes(workflow.tape(run_id), run_id, resources)
+            while True:
                 stderr.seek(0)
                 progress = stderr.read(128 * 1024 + 1)
                 assert len(progress) <= 128 * 1024
-                if b"IRIS_TRAINING_STARTED rounds=10000" in progress:
+                if (
+                    b"IRIS_TRAINING_STARTED rounds=10000" in progress
+                    and b"IRIS_TRAINING_PROGRESS completed=1 total=10000" in progress
+                ):
                     break
                 assert process.poll() is None, progress[-8192:]
                 assert time.monotonic() < deadline, progress[-8192:]
                 time.sleep(0.05)
             assert process.poll() is None
             assert stdout.tell() == 0
-            history = workflow.cli("runs", "list")[0]["items"]
-            running = [row for row in history if row["status"] == "RUNNING"]
-            assert len(running) == 1
-            run_id = running[0]["fleet_run_id"]
-            envelope, handles = _active_resource_processes(workflow.tape(run_id), run_id, resources)
             if stop in {"SIGINT", "SIGTERM"}:
                 process.send_signal(getattr(signal, stop))
             expected_exit = {"SIGINT": 130, "SIGTERM": 143, "timeout": 1, "complete": 0}[stop]
@@ -438,13 +533,17 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
             assert (
                 step["settlement"]["outcome"]
                 == {
-                    "timeout": "TIMED_OUT",
+                    "timeout": "FAILED",
                     "complete": "SUCCESS",
                     "SIGINT": "CANCELLED",
                     "SIGTERM": "CANCELLED",
                 }[stop]
             )
             assert step["attempt_count"] == (1 if stop in {"timeout", "complete"} else 0)
+            if stop == "timeout":
+                assert step["exit_code"] == 124
+                assert step["project_source"] is None
+                assert step["uv"]["project"] == "."
             status = workflow.cli("runs", "show", run_id)[0]
             assert status["status"] == (
                 "COMPLETED" if stop in {"timeout", "complete"} else "CANCELLED"
@@ -491,9 +590,24 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
                             "invocation_wall_scope": "whole waited CLI invocation including admission and native preparation",
                             "recorded_step_duration_ms": step["duration_ms"],
                             "recorded_step_duration_scope": "recorded native command or cancellation settlement duration, not isolated fit time",
-                            "project_source_sha256": step["project_source"]["content_sha256"],
+                            "project_source_sha256": step["project_source"]["content_sha256"]
+                            if step["project_source"] is not None
+                            else None,
+                            "repository_head_sha": tape["repositories"][0]["fingerprint"][
+                                "repository_head_sha"
+                            ],
+                            "execution_lane": "repository-native UV with native timeout"
+                            if stop == "timeout"
+                            else "captured Python Goon package",
+                            "deadline_owner": "native timeout utility; exit124 is command failure, not backend TIMED_OUT"
+                            if stop == "timeout"
+                            else "normal backend command default",
+                            "first_training_fit_observed_before_settlement": True,
                             "native_uv_lock_sha256": hashlib.sha256(
-                                (workflow.package / "uv.lock").read_bytes()
+                                (
+                                    (workflow.repository if stop == "timeout" else workflow.package)
+                                    / "uv.lock"
+                                ).read_bytes()
                             ).hexdigest(),
                             "uv_group": step["uv"].get("group"),
                             "run_status": status["status"],
