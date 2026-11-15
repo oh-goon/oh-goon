@@ -1,4 +1,5 @@
 import { FleetRepositoryScope } from "@generated/enums";
+import type { ScheduleReplace, SharedPlanScheduleCreateRequest } from "@generated/models";
 import { decodeResponse, operations } from "@generated/operations";
 
 import { BrowserFixtureApiClient } from "../BrowserFixtureApiClient";
@@ -7,7 +8,194 @@ import { FIXTURE_PLANS, FIXTURE_SHA } from "./plans";
 import { DEFAULT_RUN_ID } from "./runIds";
 import { CATALOG_FIXTURE_CANDIDATE, CATALOG_FIXTURE_STEP_ID } from "./catalog";
 
+function reviewedScheduleRequest(): SharedPlanScheduleCreateRequest {
+  const repositoryId = FIXTURE_REPOSITORIES.payments.repository_id;
+  const target = FIXTURE_PLANS.target("python-quality");
+  return {
+    name: "Reviewed quality",
+    repository_ids: [repositoryId],
+    expected_repository_instance_ids: { [repositoryId]: fixtureRepositoryInstanceId(repositoryId) },
+    plan_key: "python-quality",
+    expected_plan_revision: FIXTURE_PLANS.document("python-quality").sha256,
+    expected_plan_id: target.plan.plan_id,
+    expected_execution_digest: target.identity.digest,
+    interval_minutes: 15,
+  };
+}
+
 describe("BrowserFixtureApiClient canonical fixture contracts", () => {
+  it("refuses a stale template digest before reporting a saved Plan", async () => {
+    const client = new BrowserFixtureApiClient();
+    const template = (await client.planTemplates()).templates?.[0];
+    expect(template).toBeDefined();
+    if (!template) return;
+    const control = await new BrowserFixtureApiClient().createSharedPlanFromTemplate(template.template_key, template.sha256);
+    expect(control.outcome).toBe("saved");
+    if (control.outcome !== "saved") return;
+    decodeResponse(operations.create_shared_plan_from_template.operationId, control.value);
+    await expect(client.createSharedPlanFromTemplate(template.template_key, "0".repeat(64))).resolves.toMatchObject({ outcome: "stale" });
+    const accepted = await client.createSharedPlanFromTemplate(template.template_key, template.sha256);
+    expect(accepted.outcome).toBe("saved");
+    if (accepted.outcome !== "saved") return;
+    decodeResponse(operations.create_shared_plan_from_template.operationId, accepted.value);
+    expect(accepted).toEqual(control);
+  });
+
+  it("creates a Schedule from the exact reviewed Plan and repository authority", async () => {
+    const client = new BrowserFixtureApiClient();
+    const request = reviewedScheduleRequest();
+    const accepted = await client.createScheduleFromSharedPlan("reviewed-quality", request);
+    expect(accepted.outcome).toBe("saved");
+    if (accepted.outcome !== "saved") return;
+    const definition = decodeResponse(operations.create_schedule_from_shared_plan.operationId, accepted.value);
+    expect(definition.repository_instance_ids).toEqual(request.expected_repository_instance_ids);
+    expect(definition.target.plan.plan_id).toBe(request.expected_plan_id);
+    expect(definition.target.identity.digest).toBe(request.expected_execution_digest);
+  });
+
+  it("keeps one Schedule when concurrent creates conflict on the same identity", async () => {
+    const client = new BrowserFixtureApiClient();
+    const request = reviewedScheduleRequest();
+    const results = await Promise.all([
+      client.createScheduleFromSharedPlan("concurrent-quality", request),
+      client.createScheduleFromSharedPlan("concurrent-quality", { ...request, name: "Different quality" }),
+    ]);
+    expect(results.map((result) => result.outcome).sort()).toEqual(["saved", "stale"]);
+    const saved = results.find((result) => result.outcome === "saved");
+    expect(saved?.outcome).toBe("saved");
+    if (saved?.outcome !== "saved") return;
+    const rows = (await client.schedules()).schedules?.filter((item) => item.definition.schedule_id === "concurrent-quality");
+    expect(rows).toHaveLength(1);
+    expect(rows?.[0]?.definition).toEqual(saved.value);
+  });
+
+  it("reuses an identical concurrent Schedule create without duplicating or resetting its row", async () => {
+    const client = new BrowserFixtureApiClient();
+    const request = reviewedScheduleRequest();
+    const before = await client.schedules();
+    const results = await Promise.all([
+      client.createScheduleFromSharedPlan("idempotent-quality", request),
+      client.createScheduleFromSharedPlan("idempotent-quality", request),
+    ]);
+    expect(results.every((result) => result.outcome === "saved")).toBe(true);
+    const [first, second] = results;
+    if (first?.outcome !== "saved" || second?.outcome !== "saved") return;
+    expect(second.value).toEqual(first.value);
+    const current = await client.schedules();
+    expect(current.schedules?.filter((item) => item.definition.schedule_id === "idempotent-quality")).toHaveLength(1);
+    expect(current.schedules?.filter((item) => item.definition.schedule_id !== "idempotent-quality")).toEqual(before.schedules);
+    await expect(client.createScheduleFromSharedPlan("idempotent-quality", request)).resolves.toMatchObject({ outcome: "saved", value: first.value });
+    expect(await client.schedules()).toEqual(current);
+  });
+
+  it.each(["replace", "delete"] as const)("refuses predecessor %s tokens after recreating a Schedule", async (operation) => {
+    const client = new BrowserFixtureApiClient();
+    const request = reviewedScheduleRequest();
+    const created = await client.createScheduleFromSharedPlan("recreated-quality", request);
+    expect(created.outcome).toBe("saved");
+    if (created.outcome !== "saved") return;
+    const predecessor = created.value;
+    const oldToken = { generation_id: predecessor.generation_id, record_version: predecessor.record_version };
+    await expect(client.deleteSchedule(predecessor.schedule_id, oldToken)).resolves.toMatchObject({ outcome: "saved" });
+    const recreated = await client.createScheduleFromSharedPlan(predecessor.schedule_id, request);
+    expect(recreated.outcome).toBe("saved");
+    if (recreated.outcome !== "saved") return;
+    expect(recreated.value.record_version).toBe(predecessor.record_version);
+    const current = await client.schedules();
+    const replace: ScheduleReplace = {
+      ...oldToken,
+      name: "Old generation replacement",
+      repository_ids: predecessor.repository_ids,
+      repository_instance_ids: predecessor.repository_instance_ids,
+      target: predecessor.target,
+      interval_minutes: predecessor.interval_minutes,
+      state: predecessor.state,
+    };
+    const stale = operation === "replace"
+      ? await client.updateSchedule(predecessor.schedule_id, replace)
+      : await client.deleteSchedule(predecessor.schedule_id, oldToken);
+    expect(stale.outcome).toBe("stale");
+    expect(await client.schedules()).toEqual(current);
+    expect(recreated.value.generation_id).not.toBe(predecessor.generation_id);
+    expect(recreated.value.record_version).toBe(0);
+    const updated = await client.updateSchedule(predecessor.schedule_id, {
+      ...replace, generation_id: recreated.value.generation_id, record_version: recreated.value.record_version,
+    });
+    expect(updated.outcome).toBe("saved");
+    if (updated.outcome !== "saved") return;
+    await expect(client.deleteSchedule(predecessor.schedule_id, {
+      generation_id: updated.value.generation_id, record_version: updated.value.record_version,
+    })).resolves.toMatchObject({ outcome: "saved" });
+    expect((await client.schedules()).schedules?.some((item) => item.definition.schedule_id === predecessor.schedule_id)).toBe(false);
+  });
+
+  it.each([
+    ["revision", "stale"],
+    ["plan-id", "write-error"],
+    ["execution-digest", "write-error"],
+    ["repository-instance", "stale"],
+    ["missing-instance", "write-error"],
+    ["extra-instance", "write-error"],
+    ["duplicate-repositories", "write-error"],
+    ["empty-repositories", "write-error"],
+  ] as const)("refuses Schedule creation with invalid %s without persisting it", async (field, outcome) => {
+    const client = new BrowserFixtureApiClient();
+    const request = reviewedScheduleRequest();
+    const repositoryId = request.repository_ids[0]!;
+    if (field === "revision") request.expected_plan_revision = "0".repeat(64);
+    if (field === "plan-id") request.expected_plan_id = "unreviewed-plan";
+    if (field === "execution-digest") request.expected_execution_digest = `sha256:${"0".repeat(64)}`;
+    if (field === "repository-instance") request.expected_repository_instance_ids = { [repositoryId]: "replacement-instance" };
+    if (field === "missing-instance") request.expected_repository_instance_ids = {};
+    if (field === "extra-instance") request.expected_repository_instance_ids.extra = "extra-instance";
+    if (field === "duplicate-repositories") request.repository_ids = [repositoryId, repositoryId];
+    if (field === "empty-repositories") request.repository_ids = [];
+    const before = await client.schedules();
+    await expect(client.createScheduleFromSharedPlan("unreviewed-quality", request)).resolves.toMatchObject({ outcome });
+    expect(await client.schedules()).toEqual(before);
+  });
+
+  it.each(["repositories", "instances", "target"] as const)("refuses Schedule metadata update that replaces %s authority", async (field) => {
+    const client = new BrowserFixtureApiClient();
+    const before = await client.schedules();
+    const definition = before.schedules?.[0]?.definition;
+    expect(definition).toBeDefined();
+    if (!definition) return;
+    const request: ScheduleReplace = {
+      generation_id: definition.generation_id,
+      record_version: definition.record_version,
+      name: `${definition.name} renamed`,
+      repository_ids: [...definition.repository_ids],
+      repository_instance_ids: { ...definition.repository_instance_ids },
+      target: structuredClone(definition.target),
+      interval_minutes: definition.interval_minutes,
+      state: definition.state,
+    };
+    if (field === "repositories") {
+      const repositoryId = FIXTURE_REPOSITORIES.web.repository_id;
+      request.repository_ids = [repositoryId];
+      request.repository_instance_ids = { [repositoryId]: fixtureRepositoryInstanceId(repositoryId) };
+    }
+    if (field === "instances") request.repository_instance_ids[request.repository_ids[0]!] = "replacement-instance";
+    if (field === "target") request.target.identity.digest = `sha256:${"0".repeat(64)}`;
+    await expect(client.updateSchedule(definition.schedule_id, request)).resolves.toMatchObject({ outcome: "write-error", recovery: "blocked" });
+    expect(await client.schedules()).toEqual(before);
+  });
+
+  it("refuses duplicated Shared Run targets even when an extra instance key masks their count", async () => {
+    const client = new BrowserFixtureApiClient();
+    const repositoryId = FIXTURE_REPOSITORIES.payments.repository_id;
+    const target = FIXTURE_PLANS.target("python-quality");
+    const runId = "fleet-duplicate-targets";
+    const result = await client.startSharedPlanRun(
+      runId, "python-quality", [repositoryId, repositoryId], target.plan.plan_id,
+      FIXTURE_PLANS.document("python-quality").sha256, target.identity.digest,
+      { [repositoryId]: fixtureRepositoryInstanceId(repositoryId), extra: "extra-instance" },
+    );
+    expect(result).toMatchObject({ outcome: "write-error", recovery: "blocked" });
+    await expect(client.fleetRunDetail(runId)).rejects.toThrow("Unknown fixture Run");
+  });
+
   it("preserves catalog source/preview authority and the original retained producer through generated contracts", async () => {
     const client = new BrowserFixtureApiClient();
     const repositoryId = FIXTURE_REPOSITORIES.catalog.repository_id;

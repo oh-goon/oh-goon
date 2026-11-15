@@ -2,6 +2,8 @@ import { useTranslation } from "react-i18next";
 
 import { OperationTargetKind, UvRecipeId } from "@generated/enums";
 import type { FleetSecuritySummary, OperationTarget } from "@generated/models";
+import { operations } from "@generated/operations";
+import { operationHref } from "@/domain/api/operationHref";
 import { StatusBadge } from "@/components/common/StatusBadge";
 
 interface Props {
@@ -31,7 +33,7 @@ export function SecurityCenter({ security, actionsDisabled, onRunRecipe, onExplo
           onClick={() => onRunRecipe({ kind: OperationTargetKind.RECIPE, recipe: UvRecipeId.AUDIT, args: [] }, repositoryIds)}>{t("security.audit")}</button>
         <button className="button button--secondary" type="button" disabled={actionsDisabled || (security?.repositories ?? 0) === 0}
           onClick={() => onRunRecipe({ kind: OperationTargetKind.RECIPE, recipe: UvRecipeId.SBOM, args: [] }, repositoryIds)}>{t("security.sbom")}</button>
-        {sbomRunId ? <a className="button button--secondary" href={`/api/fleet/security/sbom/${encodeURIComponent(sbomRunId)}`} download>{t("security.downloadSbom")}</a> : null}
+        {sbomRunId ? <a className="button button--secondary" href={operationHref(operations.fleet_sbom.operationId, { path: { fleet_run_id: sbomRunId } })} download>{t("security.downloadSbom")}</a> : null}
       </div>
       {findings.length === 0 ? <div className="attention-clear"><strong>{t("security.noFindings")}</strong></div> : (
         <div className="security-findings">

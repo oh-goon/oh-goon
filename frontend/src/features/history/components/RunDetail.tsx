@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { FleetRunDetail, FleetSummary, OperationReport } from "@generated/models";
+import { operations as apiOperations } from "@generated/operations";
+import { operationHref } from "@/domain/api/operationHref";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { fleetRunFailure, fleetRunFinishedAt, fleetRunStartedAt } from "@/domain/fleet/runLifecycle";
 import { OperationResultCard } from "@/features/history/components/OperationResultCard";
@@ -114,7 +116,7 @@ export function RunDetail({ detail, summary, actionsDisabled, onRunAgain, onRead
           {hasEnforcerReceipt ? (
             <a
               className="button button--secondary"
-              href={`/api/fleet/runs/${encodeURIComponent(run.fleet_run_id)}/enforcer.yml`}
+              href={operationHref(apiOperations.get_fleet_run_enforcer_receipt.operationId, { path: { fleet_run_id: run.fleet_run_id } })}
               download={`${run.fleet_run_id}-enforcer.yml`}
               title={t("history.enforcerReceiptHint")}
             >

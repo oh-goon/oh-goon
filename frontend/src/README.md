@@ -64,6 +64,10 @@ The shared mutation controller serializes writes. A synchronous Agent repair req
 
 Framework-light frontend facts and interfaces for API use, reads, mutations, identity, presentation and Fleet state. Domain code must not duplicate backend execution/admission/template semantics or generated operation metadata.
 
+Browser download links use `domain/api/operationHref.ts` to consume generated GET
+operations. That owner also supplies the API mount prefix to HTTP transport;
+feature components do not reconstruct endpoint paths or request facts.
+
 ### `features/`
 
 User-facing capability ownership. A feature keeps its private components/hooks/models beside itself and exposes one obvious composition entrypoint. Cross-feature interaction should go through existing app/domain contracts rather than imports into another feature's private implementation.
