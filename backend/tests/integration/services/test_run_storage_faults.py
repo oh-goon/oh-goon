@@ -1,9 +1,10 @@
-"""Real retained-artifact ENOSPC through the original claimed Run worker.
+"""Real retained-artifact and native uv-build ENOSPC in the claimed Run worker.
 
 Only an eight-MiB tmpfs in a disposable user/mount/PID namespace is filled.
 The database, Journal, native application and execution scratch stay on healthy
-storage. Failed native syscalls prove the fault site; their trace is not Run
-result authority and never captures application bytes.
+storage for artifact faults. The uv case bounds owned Run scratch instead, while
+its database, Journal and retained content stay healthy. Failed native syscalls
+prove the fault site; their trace is not Run result authority or application bytes.
 """
 
 from __future__ import annotations
@@ -29,8 +30,9 @@ import yaml
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.file_digest import sha256_file_with_size
-from oh_goon.core.models.fleet_plan_evidence import PresentPlanArtifact
+from oh_goon.core.models.fleet_plan_evidence import MissingPlanArtifact, PresentPlanArtifact
 from oh_goon.core.models.fleet_plan_step_primitives import PLAN_CONTRACT_RETURN_CODE
+from oh_goon.core.models.run_events import ProcessStartedEvent
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.process_birth import observe_process_birth
 from oh_goon.core.product_identity import repository_id
@@ -70,7 +72,35 @@ def main():
 """
 
 
-def _package(root: Path) -> None:
+_UV_BACKEND = """import json
+import os
+from pathlib import Path
+import zipfile
+
+def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+    project = Path(__file__).parent
+    if Path(FLAG).exists():
+        with Path(READY).open('w') as stream:
+            stream.write(json.dumps({'pid': os.getpid(), 'build_parent_pid': os.getppid(),
+                'cwd': str(project.resolve()),
+                'wheel_directory': str(Path(wheel_directory).resolve())}))
+        with Path(HOLD).open('rb') as stream:
+            stream.read(1)
+    filename = 'isolated_build-1.0.0-py3-none-any.whl'
+    with zipfile.ZipFile(Path(wheel_directory) / filename, 'w') as wheel:
+        wheel.writestr('isolated_app.py', (project / 'isolated_app.py').read_text())
+        wheel.writestr('isolated_build-1.0.0.dist-info/METADATA',
+            'Metadata-Version: 2.1\\nName: isolated-build\\nVersion: 1.0.0\\n')
+        wheel.writestr('isolated_build-1.0.0.dist-info/WHEEL',
+            'Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n')
+        wheel.writestr('isolated_build-1.0.0.dist-info/entry_points.txt',
+            '[console_scripts]\\nisolated-build = isolated_app:main\\n')
+        wheel.writestr('isolated_build-1.0.0.dist-info/RECORD', '')
+    return filename
+"""
+
+
+def _package(root: Path, *, uv_preparation: bool = False) -> None:
     from tests.factories.python_goon_projects import write_isolated_build_project
 
     repository = root / "repositories/target"
@@ -79,7 +109,20 @@ def _package(root: Path) -> None:
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
     package = root / "workflow/goons/general/isolated-build"
     write_isolated_build_project(package)
-    (package / "isolated_app.py").write_text(_PRODUCER)
+    producer = _PRODUCER
+    if uv_preparation:
+        producer = producer.replace(
+            "def main():\n",
+            f"def main():\n    Path({str(root / 'application-ran')!r}).write_text('ran')\n",
+        )
+        (package / "backend.py").write_text(
+            _UV_BACKEND.replace("FLAG", repr(str(root / "uv-fault-enabled")))
+            .replace("READY", repr(str(root / "build-ready")))
+            .replace("HOLD", repr(str(root / "build-hold")))
+        )
+        os.mkfifo(root / "build-ready")
+        os.mkfifo(root / "build-hold")
+    (package / "isolated_app.py").write_text(producer)
     for name in ("ready", "hold"):
         os.mkfifo(root / name)
     (package / "goon.yml").write_text(
@@ -166,7 +209,14 @@ def _witness(root: Path, boundary: str) -> None:
     layout = ApplicationStatePathLayout.from_database(Path(os.environ["OH_GOON_DB"]))
     # Staging and its atomic object destination must stay on the same native
     # filesystem. The reference record has its own same-directory publication.
-    mount = layout.content_store if boundary == "staging" else layout.content_store / "references"
+    uv_preparation = boundary == "uv-preparation"
+    mount = (
+        layout.run_workspaces
+        if uv_preparation
+        else layout.content_store
+        if boundary == "staging"
+        else layout.content_store / "references"
+    )
     mount.mkdir(parents=True, mode=0o700)
     subprocess.run(
         [
@@ -174,7 +224,7 @@ def _witness(root: Path, boundary: str) -> None:
             "-t",
             "tmpfs",
             "-o",
-            "size=8m,nr_inodes=512,mode=0700,nodev,nosuid,noexec",
+            "size=8m,nr_inodes=512,mode=0700,nodev,nosuid" + ("" if uv_preparation else ",noexec"),
             "tmpfs",
             str(mount),
         ],
@@ -189,7 +239,8 @@ def _witness(root: Path, boundary: str) -> None:
         if observed_path == str(mount):
             matches.append((fields[5].split(","), right.split()[0]))
     assert len(matches) == 1 and matches[0][1] == "tmpfs"
-    assert {"nodev", "nosuid", "noexec"}.issubset(matches[0][0])
+    assert {"nodev", "nosuid"}.issubset(matches[0][0])
+    assert ("noexec" in matches[0][0]) is not uv_preparation
     descriptor = os.open(mount, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         metadata, capacity = os.fstat(descriptor), os.fstatvfs(descriptor)
@@ -210,6 +261,7 @@ def _witness(root: Path, boundary: str) -> None:
     ready_fd: int | None = None
     pidfds: list[int] = []
     tracer: subprocess.Popen[bytes] | None = None
+    uv_boundary: dict[str, Any] | None = None
     trace_errors = (root / "trace.stderr").open("wb")
     try:
         runtime.locations.add(repository.parent)
@@ -227,15 +279,21 @@ def _witness(root: Path, boundary: str) -> None:
         store = FleetContentStore(layout.content_store)
         protected = store.get(artifact.retained_object.reference_id, owner_repository_id=owner)
         assert sha256_file_with_size(protected.path) == (artifact.sha256, artifact.byte_count)
+        if uv_preparation:
+            assert (root / "application-ran").read_text() == "ran"
+            (root / "application-ran").unlink()
+            (root / "uv-fault-enabled").touch()
         inputs: dict[str, Any] = {
             "size": 16 * 1024 if boundary == "staging" else 2,
-            "barrier": "yes",
+            "barrier": "no" if uv_preparation else "yes",
         }
         runtime.plans.lock(plan, inputs=inputs)
         fault_target = runtime.plans.prepare_execution_target(
             plan, repository=repository, inputs=inputs
         )
-        ready_fd = os.open(root / "ready", os.O_RDONLY | os.O_NONBLOCK)
+        ready_fd = os.open(
+            root / ("build-ready" if uv_preparation else "ready"), os.O_RDONLY | os.O_NONBLOCK
+        )
         started = runtime.runs.start_prepared_plan(
             fault_target, repository_ids={owner}, fleet_run_id=f"storage-{boundary}-fault"
         )
@@ -243,11 +301,16 @@ def _witness(root: Path, boundary: str) -> None:
         deadline = monotonic() + 45
         payload = b""
         while not payload:
-            assert monotonic() < deadline, "native application did not reach its barrier"
+            assert monotonic() < deadline, "native workload did not reach its selected barrier"
             if select.select([ready_fd], [], [], 0.05)[0]:
                 payload = os.read(ready_fd, 8192)
         native = json.loads(payload)
         assert Path(native["cwd"]).is_dir()
+        if uv_preparation:
+            wheel_directory = Path(native["wheel_directory"])
+            assert wheel_directory.is_relative_to(layout.run_workspaces)
+            assert wheel_directory.stat().st_dev == mount.stat().st_dev
+            assert not (root / "application-ran").exists()
         # This is the existing canonical worker claim, not a test-owned executor.
         database = LocalDatabase(Path(os.environ["OH_GOON_DB"]), read_only=True)
         lease = ExecutionCoordinator(database).active_lease()
@@ -266,9 +329,75 @@ def _witness(root: Path, boundary: str) -> None:
             SystemLeaseEnvironment().process_identity(lease.custody.owner_pid)
             == lease.custody.owner_identity
         )
-        pidfds.append(os.pidfd_open(native["pid"]))
         before = runtime.runs.events(running)
         assert any(event.event_type.value == "PROCESS_STARTING" for event in before.events)
+        native_pids: tuple[int, ...] = (native["pid"],)
+        if uv_preparation:
+            # Bind the held PEP517 backend to an already recorded uv process;
+            # its direct parent can be an intermediate native build helper.
+            ancestors: list[int] = []
+            ancestor = native["pid"]
+            for _ in range(8):
+                status = Path(f"/proc/{ancestor}/status").read_text()
+                ancestor = int(
+                    next(
+                        line.split()[1] for line in status.splitlines() if line.startswith("PPid:")
+                    )
+                )
+                if ancestor == lease.custody.owner_pid:
+                    break
+                ancestors.append(ancestor)
+            else:
+                raise AssertionError("held native backend has no bounded claimed-worker ancestry")
+            uv_events = [
+                event
+                for event in before.events
+                if type(event) is ProcessStartedEvent and event.pid in ancestors
+            ]
+            assert len(uv_events) == 1
+            uv_started = uv_events[0]
+            assert uv_started.process_identity is not None
+            uv_birth = observe_process_birth(uv_started.pid)
+            assert uv_birth is not None
+            uv_executable = Path(f"/proc/{uv_started.pid}/exe").resolve(strict=True)
+            uv_sha256, uv_bytes = sha256_file_with_size(uv_executable)
+            with tempfile.TemporaryFile() as version_output:
+                version = subprocess.run(
+                    [str(uv_executable), "--version"],
+                    stdout=version_output,
+                    stderr=subprocess.STDOUT,
+                    timeout=5,
+                    env={"PATH": os.defpath, "HOME": str(root)},
+                )
+                version_output.seek(0)
+                version_text = version_output.read(4097)
+            assert version.returncode == 0 and len(version_text) <= 4096
+            native_pids = (native["pid"], uv_started.pid)
+            uv_boundary = {
+                "backend_pid": native["pid"],
+                "build_parent_pid": native["build_parent_pid"],
+                "uv_pid": uv_started.pid,
+                "uv_physical_execution_id": uv_started.physical_execution_id,
+                "uv_journal_process_identity": uv_started.process_identity,
+                "uv_birth": uv_birth.to_payload(),
+                "uv_executable": str(uv_executable),
+                "uv_executable_sha256": uv_sha256,
+                "uv_executable_bytes": uv_bytes,
+                "uv_version": version_text.decode("utf-8").strip(),
+                "wheel_file": str(
+                    (
+                        Path(native["wheel_directory"]) / "isolated_build-1.0.0-py3-none-any.whl"
+                    ).relative_to(root)
+                ),
+            }
+            (root / "native-fault-boundary.json").write_text(
+                json.dumps(uv_boundary, sort_keys=True)
+            )
+        for pid in native_pids:
+            native_birth = observe_process_birth(pid)
+            assert native_birth is not None
+            pidfds.append(os.pidfd_open(pid))
+            assert observe_process_birth(pid) == native_birth
         reference_files = {
             path.relative_to(layout.content_store / "references")
             for path in (layout.content_store / "references").rglob("*")
@@ -276,8 +405,13 @@ def _witness(root: Path, boundary: str) -> None:
         }
         # Observe the already-launched worker only. Following future children
         # would perturb the original native preexec/startup custody handshake.
+        traced_pids = (
+            (lease.custody.owner_pid, *native_pids)
+            if uv_preparation
+            else (lease.custody.owner_pid,)
+        )
         thread_ids = sorted(
-            int(path.name) for path in Path(f"/proc/{lease.custody.owner_pid}/task").iterdir()
+            {int(path.name) for pid in traced_pids for path in Path(f"/proc/{pid}/task").iterdir()}
         )
         tracer = subprocess.Popen(
             [
@@ -299,10 +433,7 @@ def _witness(root: Path, boundary: str) -> None:
         )
         deadline = monotonic() + 5
         while True:
-            statuses = [
-                Path(f"/proc/{lease.custody.owner_pid}/task/{tid}/status").read_text()
-                for tid in thread_ids
-            ]
+            statuses = [Path(f"/proc/{tid}/status").read_text() for tid in thread_ids]
             tracer_pids = [
                 int(
                     next(
@@ -319,20 +450,35 @@ def _witness(root: Path, boundary: str) -> None:
                 "native worker trace did not attach"
             )
             select.select([], [], [], 0.01)
-        if boundary == "references":
+        if boundary == "references" or uv_preparation:
             filler_bytes = _fill_mount(mount)
-        with (root / "hold").open("wb") as channel:
+        with (root / ("build-hold" if uv_preparation else "hold")).open("wb") as channel:
             channel.write(b"x")
         failed = runtime.runs.wait_for_terminal(running, timeout=60)
         failed_step = failed.game_tape.repositories[0].steps[0]
         assert failed.run.status.value == "COMPLETED"
         assert failed.game_tape.status == "ATTENTION_REQUIRED"
         assert failed_step.settlement.outcome == "FAILED"
-        assert failed_step.exit_code == PLAN_CONTRACT_RETURN_CODE
-        assert failed_step.settlement.observed_returncode == 0
+        assert len(failed_step.attempts) == 1
+        if uv_preparation:
+            assert failed_step.exit_code not in (None, 0)
+            assert failed_step.settlement.observed_returncode == failed_step.exit_code
+            assert failed_step.attempts[0].returncode == failed_step.exit_code
+            assert failed_step.attempts[0].tool is not None and uv_boundary is not None
+            assert failed_step.attempts[0].tool.name == "uv"
+            assert failed_step.attempts[0].tool.sha256 == uv_boundary["uv_executable_sha256"]
+            preparation = failed_step.attempts[0].uv_preparation
+            assert preparation is not None
+            assert preparation.lock_mode == "frozen" and preparation.freshness == "not_checked"
+            assert failed_step.artifacts == (MissingPlanArtifact(path="model.bin"),)
+            assert not (root / "application-ran").exists()
+        else:
+            assert failed_step.exit_code == PLAN_CONTRACT_RETURN_CODE
+            assert failed_step.settlement.observed_returncode == 0
+            assert failed_step.attempts[0].returncode == 0
+            assert failed_step.artifacts == ()
         assert failed_step.settlement.cleanup == "VERIFIED"
-        assert len(failed_step.attempts) == 1 and failed_step.artifacts == ()
-        assert failed_step.attempts[0].returncode == 0
+        (mount / "owned-filler").unlink(missing_ok=True)
         assert not layout.run_workspaces.exists() or not list(layout.run_workspaces.iterdir())
         assert not list((layout.content_store / "staging").iterdir())
         assert not Path(native["cwd"]).exists()
@@ -355,8 +501,11 @@ def _witness(root: Path, boundary: str) -> None:
         assert _cli(root, "runs", "show", running)["outcome"] == "ATTENTION_REQUIRED"
         public_tape = _cli(root, "runs", "tape", running)
         assert public_tape["repositories"][0]["steps"][0]["settlement"]["outcome"] == "FAILED"
-        assert (
-            _cli(root, "runs", "outputs", running)["repositories"][0]["steps"][0]["artifacts"] == []
+        public_artifacts = _cli(root, "runs", "outputs", running)["repositories"][0]["steps"][0][
+            "artifacts"
+        ]
+        assert public_artifacts == (
+            [{"path": "model.bin", "status": "MISSING"}] if uv_preparation else []
         )
         exported = root / "control-export.bin"
         _cli(
@@ -379,6 +528,9 @@ def _witness(root: Path, boundary: str) -> None:
         assert failed_step.project_source == healthy_step.project_source
         report = {
             "boundary": boundary,
+            "fault_scope": "native uv wheel build before application"
+            if uv_preparation
+            else "retained artifact publication",
             "mount": facts,
             "healthy_run": control.fleet_run_id,
             "failed_run": running,
@@ -388,6 +540,10 @@ def _witness(root: Path, boundary: str) -> None:
             "run_status": recorded["status"],
             "cleanup": failed_step.settlement.cleanup,
             "filler_bytes": filler_bytes,
+            "uv_preparation": failed_step.attempts[0].uv_preparation.model_dump(mode="json")
+            if uv_preparation and failed_step.attempts[0].uv_preparation is not None
+            else None,
+            "uv_boundary": uv_boundary,
             "previous_artifact_sha256": artifact.sha256,
             "project_source_sha256": healthy_step.project_source.content_sha256,
             "native_lock_sha256": sha256_file_with_size(
@@ -414,8 +570,7 @@ def _witness(root: Path, boundary: str) -> None:
             subprocess.run(["umount", str(mount)], check=True)
 
 
-@pytest.mark.parametrize("boundary", ("staging", "references"))
-def test_claimed_run_reports_real_retention_enospc(tmp_path: Path, boundary: str) -> None:
+def _run_fault_witness(tmp_path: Path, boundary: str) -> None:
     probe = subprocess.run(
         [
             "unshare",
@@ -439,7 +594,7 @@ def test_claimed_run_reports_real_retention_enospc(tmp_path: Path, boundary: str
         )
     root = tmp_path / "storage-fault"
     root.mkdir(mode=0o700)
-    _package(root)
+    _package(root, uv_preparation=boundary == "uv-preparation")
     environment = _environment(root)
     trace = root / "kernel.trace"
     command = [
@@ -482,12 +637,24 @@ def test_claimed_run_reports_real_retention_enospc(tmp_path: Path, boundary: str
     with trace.open("rb") as stream:
         native_trace = stream.read(128 * 1024 + 1)
     assert len(native_trace) <= 128 * 1024
-    mount_path = str(root / "data/oh-goon/content-store" / boundary)
+    mount_path = str(
+        root
+        / "data/oh-goon"
+        / ("run-workspaces" if boundary == "uv-preparation" else f"content-store/{boundary}")
+    )
     failures = [
         line
         for line in native_trace.decode().splitlines()
         if "ENOSPC" in line and mount_path in line and "owned-filler" not in line
     ]
+    if boundary == "uv-preparation":
+        uv_boundary = json.loads((root / "native-fault-boundary.json").read_text())
+        failures = [
+            line
+            for line in failures
+            if re.match(rf"{uv_boundary['backend_pid']}\s+write\(", line)
+            and str(root / uv_boundary["wheel_file"]) in line
+        ]
     assert failures, "no product retention write returned native ENOSPC on the selected mount"
     result = json.loads((root / "result.json").read_text())
     result.update(
@@ -495,6 +662,15 @@ def test_claimed_run_reports_real_retention_enospc(tmp_path: Path, boundary: str
         failed_product_syscalls=[line.replace(str(root), "<fixture>") for line in failures],
     )
     print("RUN_STORAGE_REAL_ENOSPC=" + json.dumps(result, sort_keys=True), flush=True)
+
+
+@pytest.mark.parametrize("boundary", ("staging", "references"))
+def test_claimed_run_reports_real_retention_enospc(tmp_path: Path, boundary: str) -> None:
+    _run_fault_witness(tmp_path, boundary)
+
+
+def test_claimed_run_reports_real_uv_preparation_enospc(tmp_path: Path) -> None:
+    _run_fault_witness(tmp_path, "uv-preparation")
 
 
 if __name__ == "__main__":
