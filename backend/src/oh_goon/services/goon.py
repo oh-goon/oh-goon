@@ -79,6 +79,9 @@ class GoonService:
         return self._plans.run(
             team_pipeline_path(team.repository.path),
             repository_ids={team.repository.repository_id},
+            expected_repository_instance_ids={
+                team.repository.repository_id: team.repository_instance_id
+            },
             fleet_run_id=fleet_run_id,
             requested_priority=requested_priority,
             inputs=dict(inputs) if inputs is not None else None,

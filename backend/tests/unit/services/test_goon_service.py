@@ -71,6 +71,9 @@ def test_goon_run_delegates_to_the_same_canonical_plan_run_boundary(tmp_path: Pa
     plans.run.assert_called_once_with(
         repository / "goon.yml",
         repository_ids={team.repository.repository_id},
+        expected_repository_instance_ids={
+            team.repository.repository_id: team.repository_instance_id
+        },
         fleet_run_id="run-1",
         requested_priority=SchedulingPriority.NORMAL,
         inputs={"profile": "strict"},
