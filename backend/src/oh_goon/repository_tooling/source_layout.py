@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
-import stat
+import subprocess
+import tempfile
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 from oh_goon.core.source_layout_policy import (
     SourceLayoutIssue,
@@ -22,7 +24,6 @@ from oh_goon.core.source_layout_policy import (
 from oh_goon.core.source_layout_policy import (
     summarize_source_layout_issues as summarize_source_layout_issues,
 )
-from oh_goon.core.source_transport_metadata import is_disposable_source_transport_artifact_name
 from oh_goon.core.source_tree_policy import CANONICAL_BACKEND_LOCK as CANONICAL_BACKEND_LOCK
 from oh_goon.core.source_tree_policy import CANONICAL_BACKEND_VENV as CANONICAL_BACKEND_VENV
 from oh_goon.core.source_tree_policy import TRANSIENT_DIRECTORY_NAMES as TRANSIENT_DIRECTORY_NAMES
@@ -38,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[4]
 class SourceTransportArtifactCleanupError(ValueError):
     def __init__(self, path: Path) -> None:
         self.path = path
-        super().__init__("refusing non-regular source transport cleanup target")
+        super().__init__("refusing unsafe source transport cleanup target")
 
 
 def prepared_source_tree_issues(root: Path) -> tuple[SourceLayoutIssue, ...]:
@@ -103,33 +104,38 @@ def clean_generated_venvs(root: Path = ROOT) -> tuple[Path, ...]:
     return tuple(sorted(removed, key=lambda item: item.as_posix()))
 
 
-def clean_source_transport_artifacts(root: Path = ROOT) -> tuple[Path, ...]:
-    """Remove known disposable source transport artifacts without touching other files."""
+def _transport_result_paths(stream: BinaryIO) -> tuple[Path, ...]:
+    paths: list[Path] = []
+    pending = b""
+    while block := stream.read(65536):
+        pending += block
+        while b"\0" in pending:
+            raw, pending = pending.split(b"\0", 1)
+            paths.append(Path(os.fsdecode(raw)))
+    if pending:
+        raise OSError("native source transport cleanup returned an incomplete result")
+    return tuple(sorted(paths, key=lambda item: item.as_posix()))
 
-    root = root.resolve()
-    removed: list[Path] = []
-    for directory, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
-        current = Path(directory)
-        relative_dir = current.relative_to(root)
-        kept: list[str] = []
-        for name in dirnames:
-            relative = PurePosixPath(*relative_dir.parts, name)
-            if relative.parts and relative.parts[0] == ".git":
-                continue
-            if is_transient_source_path(relative):
-                continue
-            kept.append(name)
-        dirnames[:] = kept
-        for name in filenames:
-            if not is_disposable_source_transport_artifact_name(name):
-                continue
-            path = current / name
-            mode = path.lstat().st_mode
-            if not stat.S_ISREG(mode):
-                raise SourceTransportArtifactCleanupError(path.relative_to(root))
-            path.unlink()
-            removed.append(path.relative_to(root))
-    return tuple(sorted(removed, key=lambda item: item.as_posix()))
+
+def clean_source_transport_artifacts(root: Path = ROOT) -> tuple[Path, ...]:
+    """Use the same native eligibility/removal owner as pre-environment cleanup."""
+
+    owner = Path(__file__).with_name("source_transport_clean.sh")
+    with tempfile.TemporaryFile() as report, tempfile.TemporaryFile() as errors:
+        completed = subprocess.run(
+            ("bash", str(owner), str(root.resolve()), "--report0"),
+            stdin=subprocess.DEVNULL,
+            stdout=report,
+            stderr=errors,
+            check=False,
+        )
+        report.seek(0)
+        paths = _transport_result_paths(report)
+        if completed.returncode == 2 and len(paths) == 1:
+            raise SourceTransportArtifactCleanupError(paths[0])
+        if completed.returncode != 0:
+            raise OSError(f"native source transport cleanup failed (exit {completed.returncode})")
+        return paths
 
 
 def _venv_clean_command() -> int:
