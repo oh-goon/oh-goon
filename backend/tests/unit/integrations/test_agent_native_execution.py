@@ -236,6 +236,44 @@ def test_interactive_native_prompt_is_additive_file_input(
         }
 
 
+def test_explicit_pi_rpc_keeps_frozen_prompt_file_and_ephemeral_session(tmp_path: Path) -> None:
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("PRIVATE literal task\u2028and source")
+    command = native_agent_command(
+        selection("pi", arguments=("--model", "user/native-model")),
+        prompt_file=prompt,
+        workspace=tmp_path,
+        interactive=False,
+        rpc=True,
+    )
+    assert command.argv == (
+        "/native/pi",
+        "--model",
+        "user/native-model",
+        "--mode",
+        "rpc",
+        "--no-session",
+    )
+    assert command.input_file == prompt and command.input_protocol == "pi_rpc"
+    assert "PRIVATE" not in " ".join(command.argv)
+
+
+@pytest.mark.parametrize(
+    ("agent", "interactive"), [("codex", False), ("opencode", False), ("pi", True)]
+)
+def test_rpc_refuses_unsupported_harness_or_terminal_before_prompt_access(
+    tmp_path: Path, agent: NativeAgentName, interactive: bool
+) -> None:
+    with pytest.raises(AgentProviderError, match="noninteractive Pi"):
+        native_agent_command(
+            selection(agent),
+            prompt_file=tmp_path / "absent",
+            workspace=tmp_path,
+            interactive=interactive,
+            rpc=True,
+        )
+
+
 def test_interactive_codex_requires_managed_evidence_delivery(tmp_path: Path) -> None:
     prompt = tmp_path / "prompt"
     prompt.write_text("context")

@@ -98,9 +98,19 @@ def test_controlled_pi_retains_task_across_task_free_context_requests(
 
 
 @pytest.mark.certification
-@pytest.mark.parametrize("agent", ["pi", "opencode"])
+@pytest.mark.parametrize(
+    ("agent", "pi_rpc"),
+    (
+        pytest.param("pi", False, id="pi"),
+        pytest.param("pi", True, id="pi-rpc"),
+        pytest.param("opencode", False, id="opencode"),
+    ),
+)
 def test_installed_native_cli_preserves_frozen_context_through_compaction(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: Literal["pi", "opencode"]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    agent: Literal["pi", "opencode"],
+    pi_rpc: bool,
 ) -> None:
     executable = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}")
     runtime_root = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}_RUNTIME_ROOT")
@@ -344,6 +354,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                                 "allowed_agents": [agent],
                                 "workspace_roots": [str(repository.parent)],
                                 "inference_profile": "local",
+                                "pi_rpc": pi_rpc,
                                 "timeout_seconds": 45,
                             }
                         },
@@ -407,6 +418,9 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     "repo/source.py",
                 )
                 steps = detail.game_tape.repositories[0].steps
+                if pi_rpc:
+                    assert "--pi-rpc" in steps[0].command
+                    assert steps[0].command[steps[0].command.index("--mode") + 1] == "rpc"
                 assert steps[0].settlement.outcome == steps[1].settlement.outcome == "SUCCESS"
                 assert steps[1].native_agent_observations == ()
                 for step in steps:

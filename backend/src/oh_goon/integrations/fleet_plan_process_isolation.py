@@ -46,7 +46,7 @@ from oh_goon.integrations.source_snapshot import SourceSnapshotBinding, verify_c
 MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM = 1024 * 1024
 
 if TYPE_CHECKING:
-    from oh_goon.engine.command import CommandTerminal
+    from oh_goon.engine.command import CommandInputSource, CommandTerminal
     from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 
 
@@ -85,6 +85,7 @@ class StandardIsolatedProcessRequest:
     private_configuration_directory: Path | None = None
     terminal: CommandTerminal | None = field(default=None, repr=False)
     input_data: bytes | None = field(default=None, repr=False)
+    input_source: CommandInputSource | None = field(default=None, repr=False)
     resources: CicdResourcePolicy = field(default_factory=CicdResourcePolicy)
     read_only_workspace: bool = False
     allowed_write_roots: tuple[Path, ...] = ()
@@ -119,6 +120,11 @@ class StandardIsolatedProcessRequest:
             raise FleetPlanInvalid("Standard sandbox cwd is outside the approved workspace")
         if self.terminal is not None and self.input_data is not None:
             raise FleetPlanInvalid("Standard sandbox terminal and input bytes are exclusive")
+        if self.input_source is not None:
+            if not callable(getattr(self.input_source, "read_input", None)):
+                raise FleetPlanInvalid("Standard sandbox input source requires a callable reader")
+            if self.terminal is not None or self.input_data is not None:
+                raise FleetPlanInvalid("Standard sandbox input source requires exclusive input")
         if self.input_data is not None and (
             type(self.input_data) is not bytes or len(self.input_data) > 1024 * 1024
         ):
@@ -272,6 +278,7 @@ class NativeProfileCommandRunner:
         runtime_supervision: CommandRuntimeSupervision | None = None,
         terminal: CommandTerminal | None = None,
         input_data: bytes | None = None,
+        input_source: CommandInputSource | None = None,
         read_only_mounts: tuple[StandardReadOnlyMount, ...] = (),
         broker_directory: Path | None = None,
         private_configuration_directory: Path | None = None,
@@ -328,6 +335,7 @@ class NativeProfileCommandRunner:
                 runtime_supervision=runtime_supervision,
                 terminal=terminal,
                 input_data=input_data,
+                input_source=input_source,
                 max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
                 retain_output_tail=retain_output_tail,
                 preserve_native_executable_path=preserve_native_executable_path,
@@ -350,6 +358,7 @@ class NativeProfileCommandRunner:
                 private_configuration_directory=private_configuration_directory,
                 terminal=terminal,
                 input_data=input_data,
+                input_source=input_source,
                 resources=native_agent.profile.resources,
                 read_only_workspace=read_only_workspace,
                 allowed_write_roots=allowed_write_roots,

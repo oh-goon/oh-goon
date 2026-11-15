@@ -19,7 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.fleet_plan_step_primitives import PLAN_CONTRACT_RETURN_CODE
 from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES, CommandTerminal, run_command
+from oh_goon.integrations.agent_pi_rpc import PiRpcControl
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,17 +186,44 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=18743)
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--input-file", type=Path)
+    parser.add_argument("--pi-rpc", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
     command = options.command[1:] if options.command[:1] == ["--"] else options.command
     if not command or (options.interactive and options.input_file is not None):
         parser.error("supply a native command and exactly one terminal/input mode")
+    if options.pi_rpc and (options.interactive or options.input_file is None):
+        parser.error("Pi RPC requires noninteractive frozen prompt input")
     data = b""
     if options.input_file is not None:
         with options.input_file.open("rb") as stream:
             data = stream.read(MAX_COMMAND_INPUT_BYTES + 1)
         if len(data) > MAX_COMMAND_INPUT_BYTES:
             parser.error("native input exceeds the command owner's byte bound")
+    try:
+        rpc = PiRpcControl(data) if options.pi_rpc else None
+    except AgentProviderError as error:
+        print(str(error), file=sys.stderr)
+        return PLAN_CONTRACT_RETURN_CODE
+
+    def stream_output(stream: str, text: str) -> None:
+        if rpc is not None and stream == "stdout":
+            # Deliver each LF boundary separately so a later bad record cannot
+            # erase native events already observed earlier in this chunk.
+            parts = text.split("\n")
+            for index, part in enumerate(parts):
+                fragment = part + ("\n" if index < len(parts) - 1 else "")
+                try:
+                    records = rpc.feed_stdout(fragment)
+                except AgentProviderError:
+                    # The latched failure closes child input. It must also fail
+                    # the relay after native disposal, even if the child exits 0.
+                    return
+                for record in records:
+                    _write_all(1, record.encode("utf-8"))
+        else:
+            _write_all(1 if stream == "stdout" else 2, text.encode("utf-8"))
+
     with model_inference_relay(options.socket, port=options.port):
         terminal = _interactive_terminal() if options.interactive else contextlib.nullcontext(None)
         with terminal as transport:
@@ -201,20 +231,21 @@ def main(argv: list[str] | None = None) -> int:
                 *command,
                 timeout=None,
                 terminal=transport,
-                input_data=None if transport is not None else data,
+                input_data=None if transport is not None or rpc is not None else data,
+                input_source=rpc,
                 parent_death_signal=True,
                 preserve_native_executable_path=True,
                 retain_output_tail=transport is None,
                 require_process_group_quiescence=True,
                 max_capture_bytes_per_stream=MAX_COMMAND_INPUT_BYTES,
-                stream_output=(
-                    None
-                    if transport is not None
-                    else lambda stream, text: _write_all(
-                        1 if stream == "stdout" else 2, text.encode()
-                    )
-                ),
+                stream_output=(None if transport is not None else stream_output),
             )
+    if rpc is not None and result.returncode == 0:
+        try:
+            rpc.finish()
+        except AgentProviderError as error:
+            print(str(error), file=sys.stderr)
+            return PLAN_CONTRACT_RETURN_CODE
     return result.returncode if result.returncode >= 0 else 128 - result.returncode
 
 

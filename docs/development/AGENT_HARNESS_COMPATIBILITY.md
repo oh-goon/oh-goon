@@ -807,7 +807,7 @@ this does not grant product authority for an external persistent session mount.
 | Native observation | Qualification consequence |
 | --- | --- |
 | JSON emits the session header before the turn; fresh-process reopen preserves its ID and delivers the earlier conversation to the synthetic provider. | JSON supplies session identity, but no active-leaf or opened-existing acknowledgment. |
-| Correlated RPC `get_state` supplies session ID/file; `get_entries` supplies the active leaf. | **DG-01: select native RPC for pre-turn session and branch identity**, conditional on the existing supervised input-channel proof in HUG-139. The probe uses bounded one-shot requests; sustained bidirectional control remains unqualified. |
+| Correlated RPC `get_state` supplies session ID/file; `get_entries` supplies the active leaf. | **DG-01: select native RPC for pre-turn session and branch identity.** HUG-39's one-shot queries did not qualify a sustained channel; HUG-139's separately selected ephemeral transport and current evidence are recorded below. |
 | A new native identity and setup entries can exist without a session file after normal close. First user conversation creates the file. | Identity, close and persistence are separate facts. |
 | Missing/renamed explicit paths create fresh in-memory identities; an absent `--session-id` may create that very ID. Empty files are rewritten. | Neither selector is an exact-open refusal mechanism. Matching an ID alone cannot prove an old resource was opened. |
 | Wholly malformed nonempty files refuse; a valid session with a torn tail can load and gain a newline. A saved session can be selected from another requested cwd. | Format acceptance and header identity do not establish complete history, project authorization or unchanged bytes. No controller repair is added. |
@@ -821,6 +821,36 @@ durable-save acknowledgment. RPC is the minimum identity transport selected for
 the next work package, not permission to enable resume or a second process loop.
 Existing Run/Step/Journal admission, independent verification and the dependent
 HUG-40/41/43 work packages still own product enablement.
+
+### Ephemeral Pi RPC transport — HUG-139
+
+**Disposition:** retain default JSON and native terminal behavior; add the
+explicit `pi_rpc: true` capability only for a Pi-only, broker-backed Bubblewrap
+profile. Existing JSON qualification remains distinct. Persistent session
+selection/adoption stays refused; this transport always uses `--no-session`.
+
+The existing command owner supports bounded nonblocking input alongside its
+continuous output readers. Its same supervisor handles partial writes, native
+backpressure, EOF, cancellation, deadlines and process retirement. The existing
+inference relay correlates Pi RPC responses before submitting one frozen prompt.
+Native `agent_settled`, prompt acceptance and final unchanged session identity
+must all be observed before EOF. Pi owns disposal on EOF; no second process
+manager, native transcript format, retry loop or session store is introduced.
+Control responses remain private to this bounded transport. Correlated IDs are
+not producer authentication; the raw-fd extension stdout caveat above remains
+unqualified.
+
+Pi 1.3.0's selected public bundle and complete runtime were exercised on Linux
+with disposable configuration and synthetic providers. Four installed duplex
+probes cover literal Unicode/framing, native failure despite exit 0, active
+turn cancellation and a killed native child. Six original Run cases cover
+success/error/cancel/timeout,
+read-only native tools, independent verification, mandatory task/Skill/Hashmarks
+delivery and native overflow compaction. The prior JSON cases are retained as
+separate parameters. These scoped results do not qualify live accounts, another
+installed implementation, WSL/container modes, exact old-session refusal,
+unmanaged writers or persistent custody. Exact source, commands, physical
+receipts and remaining acceptance belong to HUG-139's retained evidence.
 
 After native backend setup, select the complete public release and effective
 entrypoint explicitly, outside personal authentication/configuration:

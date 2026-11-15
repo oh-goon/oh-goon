@@ -339,7 +339,9 @@ class BubblewrapProcessIsolation:
                 return
         try:
             result = self._execute_standard(
-                replace(request, argv=("/bin/true",), terminal=None, input_data=None),
+                replace(
+                    request, argv=("/bin/true",), terminal=None, input_data=None, input_source=None
+                ),
                 timeout=10.0,
                 cancel_requested=None,
                 stream_output=None,
@@ -756,6 +758,7 @@ class BubblewrapProcessIsolation:
                         runtime_supervision=runtime_supervision,
                         terminal=request.terminal,
                         input_data=request.input_data,
+                        input_source=request.input_source,
                         pass_fds=(status.fileno(),),
                         max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
                         retain_output_tail=request.retain_output_tail,

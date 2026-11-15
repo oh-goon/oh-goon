@@ -321,6 +321,19 @@ CommandProcessObserver = Callable[[CommandProcessLifecycleEvent], None]
 CommandTerminationObserver = Callable[[], TerminationSignal | None]
 
 
+class CommandInputSource(Protocol):
+    """Nonblocking bytes for one command's original stdin pipe.
+
+    Return at most ``max_bytes``, None while idle, or empty bytes for EOF.
+    The supervisor drains pending bytes before polling again or closing stdin.
+    Its pending chunk is bounded to 64 KiB and total input to 1 MiB. The caller
+    owns its source/queue and must bound queued data and never block this hook;
+    an output observer may enqueue later input from the existing reader thread.
+    """
+
+    def read_input(self, max_bytes: int) -> bytes | None: ...
+
+
 def _validate_terminal_size(size: tuple[int, int]) -> None:
     if (
         type(size) is not tuple
@@ -430,7 +443,7 @@ def _spawn_command_process(
     runtime_authority: RuntimeAuthorityBinding | None,
     pass_fds: tuple[int, ...],
     terminal_slave: int | None = None,
-    input_data: bytes | None = None,
+    pipe_input: bool = False,
     preserve_native_executable_path: bool = False,
 ) -> tuple[subprocess.Popen[str], RuntimeAuthorityReceipt, CommandParentGuard | None]:
     """Bind exact runtime authority and transfer it into one owned process birth."""
@@ -506,7 +519,7 @@ def _spawn_command_process(
                 executable=popen_executable,
                 stdin=terminal_slave
                 if terminal_slave is not None
-                else (subprocess.PIPE if input_data is not None else None),
+                else (subprocess.PIPE if pipe_input else None),
                 stdout=terminal_slave if terminal_slave is not None else subprocess.PIPE,
                 stderr=terminal_slave
                 if terminal_slave is not None
@@ -575,7 +588,7 @@ def _start_supervised_command(
     pass_fds: tuple[int, ...],
     max_capture_bytes_per_stream: int | None,
     terminal: CommandTerminal | None,
-    input_data: bytes | None,
+    pipe_input: bool,
     preserve_native_executable_path: bool,
     retain_output_tail: bool,
 ) -> _StartedCommand:
@@ -602,7 +615,7 @@ def _start_supervised_command(
             runtime_authority=runtime_authority,
             pass_fds=pass_fds,
             terminal_slave=terminal_slave,
-            input_data=input_data,
+            pipe_input=pipe_input,
             preserve_native_executable_path=preserve_native_executable_path,
         )
     except BaseException:
@@ -705,10 +718,11 @@ def run_command(
     runtime_supervision: CommandRuntimeSupervision | None = None,
     terminal: CommandTerminal | None = None,
     input_data: bytes | None = None,
+    input_source: CommandInputSource | None = None,
     preserve_native_executable_path: bool = True,
     retain_output_tail: bool = False,
 ) -> CommandResult:
-    """Run one owned command with optional live output and terminal transport.
+    """Run one owned command with optional live output and input transport.
 
     Ordinary commands retain their native executable path, including native
     invocation-name dispatch and self-respawn. This reports an observation,
@@ -716,6 +730,8 @@ def run_command(
     preserve_native_executable_path=False and retains the sealed launch owner.
     Terminal output and explicit tail capture retain a bounded diagnostic tail;
     stdout_evidence hashes and counts the original complete raw stream.
+    Immutable input_data and a nonblocking input_source use the same supervised
+    stdin pipe; either is exclusive with caller-owned terminal transport.
     """
 
     argv = tuple(args)
@@ -735,8 +751,10 @@ def run_command(
         type(input_data) is not bytes or len(input_data) > MAX_COMMAND_INPUT_BYTES
     ):
         raise ValueError("command input_data must be immutable bytes within 1 MiB")
-    if terminal is not None and input_data is not None:
-        raise ValueError("terminal and input_data are mutually exclusive")
+    if input_source is not None and not callable(getattr(input_source, "read_input", None)):
+        raise ValueError("command input_source requires a callable read_input hook")
+    if sum(value is not None for value in (terminal, input_data, input_source)) > 1:
+        raise ValueError("terminal, input_data and input_source are mutually exclusive")
     if max_capture_bytes_per_stream is not None and max_capture_bytes_per_stream < 1:
         raise ValueError("max_capture_bytes_per_stream must be positive when provided")
     if runtime_supervision is not None and timeout is not None:
@@ -755,7 +773,7 @@ def run_command(
         pass_fds=pass_fds,
         max_capture_bytes_per_stream=max_capture_bytes_per_stream,
         terminal=terminal,
-        input_data=input_data,
+        pipe_input=input_data is not None or input_source is not None,
         preserve_native_executable_path=preserve_native_executable_path,
         retain_output_tail=retain_output_tail,
     )
@@ -774,7 +792,9 @@ def run_command(
         if runtime_supervision is not None
         else None
     )
-    input_offset = 0
+    pending_input = memoryview(input_data if input_data is not None else b"")
+    input_eof = input_source is None
+    source_input_bytes = 0
     pending_terminal_input = b""
     terminal_size = terminal.initial_size if terminal is not None else None
     leader_exited_before_group_quiescence = False
@@ -821,20 +841,35 @@ def run_command(
                 process, readers, capture, authority_receipt, argv=argv, parent_guard=parent_guard
             )
             leader_running = process.poll() is None
-            if leader_running and input_data is not None and process.stdin is not None:
+            if leader_running and process.stdin is not None:
                 if not process.stdin.closed:
-                    try:
-                        input_offset += os.write(
-                            process.stdin.fileno(),
-                            memoryview(input_data)[
-                                input_offset : input_offset + _TERMINAL_CHUNK_BYTES
-                            ],
-                        )
-                    except BlockingIOError:
-                        pass
-                    except BrokenPipeError:
-                        process.stdin.close()
-                    if input_offset == len(input_data) and not process.stdin.closed:
+                    if not pending_input and not input_eof:
+                        assert input_source is not None
+                        available_input = input_source.read_input(_TERMINAL_CHUNK_BYTES)
+                        if available_input is not None:
+                            if (
+                                type(available_input) is not bytes
+                                or len(available_input) > _TERMINAL_CHUNK_BYTES
+                            ):
+                                raise ValueError(
+                                    "command input_source must return bounded bytes or None"
+                                )
+                            source_input_bytes += len(available_input)
+                            if source_input_bytes > MAX_COMMAND_INPUT_BYTES:
+                                raise ValueError("command input_source exceeded 1 MiB total input")
+                            input_eof = not available_input
+                            pending_input = memoryview(available_input)
+                    if pending_input:
+                        try:
+                            count = os.write(
+                                process.stdin.fileno(), pending_input[:_TERMINAL_CHUNK_BYTES]
+                            )
+                            pending_input = pending_input[count:]
+                        except BlockingIOError:
+                            pass
+                        except BrokenPipeError:
+                            process.stdin.close()
+                    if input_eof and not pending_input and not process.stdin.closed:
                         process.stdin.close()
             if leader_running and terminal is not None:
                 master = started_command.terminal_master

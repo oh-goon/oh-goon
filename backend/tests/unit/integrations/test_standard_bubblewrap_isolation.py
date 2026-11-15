@@ -17,6 +17,7 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from threading import Thread
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -621,8 +622,9 @@ def test_application_state_binding_cannot_be_replaced_by_another_runtime(
         )
 
 
+@pytest.mark.parametrize("streaming_input", [False, True])
 def test_standard_launch_retains_namespace_cancellation_and_private_paths(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, streaming_input: bool
 ) -> None:
     backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "repo"
@@ -630,9 +632,24 @@ def test_standard_launch_retains_namespace_cancellation_and_private_paths(
     selected_config = tmp_path / "native.json"
     selected_config.write_text("{}")
     calls: list[tuple[tuple[str, ...], dict[str, Any]]] = []
+    input_reads: list[int] = []
+
+    class InputSource:
+        def read_input(self, max_bytes: int) -> bytes | None:
+            input_reads.append(max_bytes)
+            return b"input"
+
+        def __repr__(self) -> str:
+            return "private input-source contents"
+
+    source = InputSource() if streaming_input else None
 
     def command(*argv: str, **kwargs: Any) -> CommandResult:
         calls.append((argv, kwargs))
+        current_source = kwargs.get("input_source")
+        if current_source is not None:
+            assert len(calls) == 2  # Workload, never the namespace capability probe.
+            assert current_source.read_input(7) == b"input"
         _native_exec_ack(argv)
         return CommandResult(returncode=0, stdout="done", stderr="")
 
@@ -646,11 +663,14 @@ def test_standard_launch_retains_namespace_cancellation_and_private_paths(
         workspace,
         argv=("/usr/bin/python3", str(workspace / "main.py")),
         env={"PATH": os.defpath, "HOME": "/host/home", "SSH_AUTH_SOCK": "/host/socket"},
-        input_data=b"input",
+        input_data=None if streaming_input else b"input",
+        input_source=source,
         read_only_mounts=(
             StandardReadOnlyMount(selected_config, PurePosixPath("/config/native/config.json")),
         ),
     )
+    assert not input_reads
+    assert "private input-source contents" not in repr(request)
     result = backend.execute(request, timeout=4, cancel_requested=cancellation)
     assert result.stdout == "done"
     assert len(calls) == 2  # Actual namespace preflight, then this workload.
@@ -659,7 +679,10 @@ def test_standard_launch_retains_namespace_cancellation_and_private_paths(
     assert "--die-with-parent" in argv
     assert argv[-2:] == ("/usr/bin/python3", "/workspace/main.py")
     assert options["cancel_requested"] is cancellation
-    assert options["input_data"] == b"input"
+    assert calls[0][1]["input_source"] is None
+    assert options["input_data"] == (None if streaming_input else b"input")
+    assert options["input_source"] is source
+    assert input_reads == ([7] if streaming_input else [])
     assert options["env"]["HOME"] == "/home/fleet"
     assert "SSH_AUTH_SOCK" not in options["env"]
     assert ("--ro-bind", str(selected_config), "/config/native/config.json") in tuple(
@@ -668,6 +691,33 @@ def test_standard_launch_retains_namespace_cancellation_and_private_paths(
     assert not any(str(Path.home()) == item for item in argv)
     private_home_index = argv.index("/home/fleet")
     assert not Path(argv[private_home_index - 1]).exists()
+
+
+@pytest.mark.parametrize("invalid", ["missing-reader", "noncallable-reader", "bytes", "terminal"])
+def test_invalid_input_source_never_reaches_native_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+
+    def read_input(max_bytes: int) -> bytes | None:
+        pytest.fail("invalid input source was polled")
+
+    changes: dict[str, Any] = {"input_source": SimpleNamespace(read_input=read_input)}
+    if invalid == "missing-reader":
+        changes["input_source"] = object()
+    elif invalid == "noncallable-reader":
+        changes["input_source"] = SimpleNamespace(read_input=None)
+    elif invalid == "bytes":
+        changes["input_data"] = b""
+    else:
+        changes["terminal"] = CommandTerminal(
+            read_input=lambda size: None, write_output=lambda data: None
+        )
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("invalid input reached native launch")
+    )
+    with pytest.raises(FleetPlanInvalid, match="input source"):
+        backend.execute(_request(backend, tmp_path, **changes), timeout=4, cancel_requested=None)
 
 
 def test_explicit_native_runtime_and_prompt_paths_map_at_the_process_boundary(
