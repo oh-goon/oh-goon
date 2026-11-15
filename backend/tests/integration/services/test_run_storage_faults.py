@@ -32,7 +32,11 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.core.file_digest import sha256_file_with_size
 from oh_goon.core.models.fleet_plan_evidence import MissingPlanArtifact, PresentPlanArtifact
 from oh_goon.core.models.fleet_plan_step_primitives import PLAN_CONTRACT_RETURN_CODE
-from oh_goon.core.models.run_events import ProcessStartedEvent
+from oh_goon.core.models.run_events import (
+    DescendantsQuiescentEvent,
+    ProcessExitedEvent,
+    ProcessStartedEvent,
+)
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.process_birth import observe_process_birth
 from oh_goon.core.product_identity import repository_id
@@ -359,6 +363,9 @@ def _witness(root: Path, boundary: str) -> None:
             assert uv_started.process_identity is not None
             uv_birth = observe_process_birth(uv_started.pid)
             assert uv_birth is not None
+            # Native command events retain boot/start identity; the Run-worker
+            # lease uses its separate provider-prefixed representation.
+            assert uv_started.process_identity == f"{uv_birth.boot_id}:{uv_birth.start_ticks}"
             uv_executable = Path(f"/proc/{uv_started.pid}/exe").resolve(strict=True)
             uv_sha256, uv_bytes = sha256_file_with_size(uv_executable)
             with tempfile.TemporaryFile() as version_output:
@@ -524,6 +531,38 @@ def _witness(root: Path, boundary: str) -> None:
         final_events = runtime.runs.events(running)
         assert final_events.run.fleet_run_id == running and not final_events.has_more
         assert sum(event.event_type.value == "RUN_COMPLETED" for event in final_events.events) == 1
+        if uv_preparation:
+            assert uv_boundary is not None
+            preparation_events = [
+                event
+                for event in final_events.events
+                if getattr(event, "physical_execution_id", None)
+                == uv_boundary["uv_physical_execution_id"]
+                and event.event_type.value
+                in {
+                    "PROCESS_STARTING",
+                    "PROCESS_STARTED",
+                    "PROCESS_EXITED",
+                    "DESCENDANTS_QUIESCENT",
+                }
+            ]
+            assert [event.event_type.value for event in preparation_events] == [
+                "PROCESS_STARTING",
+                "PROCESS_STARTED",
+                "PROCESS_EXITED",
+                "DESCENDANTS_QUIESCENT",
+            ]
+            exited = preparation_events[2]
+            assert isinstance(exited, ProcessExitedEvent)
+            assert exited.pid == uv_boundary["uv_pid"]
+            assert exited.process_identity == uv_boundary["uv_journal_process_identity"]
+            assert exited.returncode == failed_step.exit_code
+            quiescent = preparation_events[-1]
+            assert isinstance(quiescent, DescendantsQuiescentEvent)
+            assert (
+                quiescent.pid == exited.pid
+                and quiescent.process_identity == exited.process_identity
+            )
         assert healthy_step.project_source is not None
         assert failed_step.project_source == healthy_step.project_source
         report = {
