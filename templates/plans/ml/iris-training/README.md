@@ -44,6 +44,38 @@ bundled Iris data. Its exit code determines success. The default seed and
 threshold accept the measured held-out result; a 100% threshold with seed 42
 returns exit 1. A failed training Step stops later ordinary Steps in a Plan.
 
+## Observe a longer bounded workload
+
+Set `inputs.training_rounds` in the initialized `run.yml` to a finite count such
+as `1000`. This repeats genuine native fits on the same seeded split and retains
+the final fit. It provides a repeatable workload for progress and interruption;
+it does not make successive fits incremental learning.
+
+For an explicitly capped trusted-local Run, add this caller-selected budget while
+preserving the generated source, target and other caller choices:
+
+```yaml
+resources:
+  cpu_millis: 2000
+  memory_mib: 1024
+  max_processes: 256
+```
+
+Prepare the changed selection, then use the same waited `oh-goon run` command.
+The existing [whole-Run resource owner](../../../../docs/development/TEMPLATE_INPUT_INSPECTION.md#limit-a-local-run)
+requires a compatible systemd/cgroup context and refuses to abandon a caller's
+existing limits. There is no uncapped fallback. This budget covers the executing
+CLI and its descendants, including native package setup; it is separate from
+test-suite CPU settings. Ordinary command Steps retain the backend-owned command
+deadline; the Run budget does not select a wall-clock deadline.
+
+The waiting CLI displays bounded training activity before completion. Ctrl-C or
+SIGTERM requests cancellation through the existing Run owner. Reopen the exact
+Run with `runs show`, `runs steps`, `runs handoff` and `runs tape` to distinguish
+the durable outcome, artifact references, observed limits and cleanup. Transient
+logs can be unavailable to a fresh non-owner CLI. A progress line or an artifact
+file by itself does not establish successful completion.
+
 ## Retrieve and compare results
 
 Use the printed export commands or substitute the completed Run ID below.

@@ -17,6 +17,7 @@ from oh_goon.core.errors import (
     ReviewedRepositorySourceStale,
     RunConfigurationInvalid,
     RunControlOwnerUnavailable,
+    RunResourceScopeUnavailable,
     RuntimeSafetyBlocked,
 )
 
@@ -114,6 +115,14 @@ def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
                     or re.fullmatch(r"target\.repositories\.[0-9]{1,5}", field)
                 )
             }
+        )
+    elif isinstance(exc, RunResourceScopeUnavailable):
+        code = exc.code
+        inputs = []
+        stage = "run_resources"
+        action = (
+            "Inspect the selected Run resource caps and use a supported native user-manager "
+            "context that preserves the caller's existing resource constraints before retrying."
         )
     elif isinstance(exc, ReviewedRepositorySourceStale):
         code = exc.code

@@ -26,8 +26,9 @@ development tools and build backend; committed `uv.lock` owns native dependency
 resolution. Frozen synchronization consumes that lock without a metadata-freshness
 check or rewrite. Local development explicitly selects `dev`; package execution
 installs only the project and runtime dependencies by default. The Goon owns
-workflow input defaults and constraints; the application CLI requires explicit
-arguments.
+workflow input defaults and constraints and passes their resolved values to the
+application. The standalone CLI requires the training choices shown above;
+dataset selection and training rounds are optional there.
 
 The required integration CI check and ordinary `make release-check` run this
 project's own pytest suite through `make test-python-projects`, using its native
@@ -47,6 +48,31 @@ its measured metrics and parameters are still written. Invalid arguments are
 refused before training or output creation. Repeating the same seed reproduces
 the parameters in the same native environment; a seed change can produce
 different parameters even when accuracy is unchanged.
+
+## Exercise sustained training and progress
+
+Select the typed `training_rounds` input for a finite workload of repeated native
+fits. Its default is one fit, preserving the introductory command's output and
+artifacts. A standalone invocation can select `--training-rounds 1000` alongside
+the explicit training choices shown above.
+
+Each round creates and fits the same scikit-learn pipeline on the same seeded
+split; only the final fit is serialized. This exercises genuine numerical work
+and process supervision, not incremental learning, checkpoint recovery or a retry
+policy. Repeating identical choices reproduces the final model in the same native
+environment. Multi-round metrics additionally record `training_rounds` and
+`completed_training_rounds`.
+
+Multi-round work flushes a starting line before fitting and bounded progress lines
+after completed fits. These contain only completed/total counts, with at most 102
+lines across the supported range; they do not contain dataset rows or identifiers.
+They use the existing `OH-GOON ACTIVITY:` prefix so a waiting Oh-Goon CLI can
+display progress without reading private raw output.
+The selected Run/Step owners retain resource limits, deadlines, cancellation,
+terminal results and artifacts. Training output is progress, not completion proof.
+The final model and metrics are written only after every fit completes; an
+interruption during fitting does not publish that pair. A later output failure
+or interruption still remains a failed or cancelled Run even when files exist.
 
 ## Select a captured dataset
 

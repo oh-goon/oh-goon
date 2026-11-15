@@ -133,19 +133,48 @@ def test_empty_policy_never_resolves_or_observes_a_native_scope(
         raise AssertionError("empty policy must not acquire native state")
 
     monkeypatch.setattr(shutil, "which", unexpected)
-    with pytest.raises(FleetPlanInvalid, match="at least one"):
+    with pytest.raises(FleetPlanInvalid, match="at least one") as rejected:
         envelope.prepare_run_resource_scope("fleet-run", CicdResourcePolicy())
+    assert rejected.value.code == "FLEET_PLAN_INVALID"
+    assert rejected.value.__cause__ is None
+
+
+@pytest.mark.parametrize("run_id", ("", "x" * 161))
+def test_invalid_run_identity_remains_input_refusal_before_native_resolution(
+    monkeypatch: pytest.MonkeyPatch, run_id: str
+) -> None:
+    def unexpected(_name: str) -> None:
+        raise AssertionError("invalid identity must not resolve native state")
+
+    monkeypatch.setattr(shutil, "which", unexpected)
+    with pytest.raises(FleetPlanInvalid) as rejected:
+        envelope.prepare_run_resource_scope(run_id, CicdResourcePolicy(cpu_millis=1000))
+    assert rejected.value.code == "FLEET_PLAN_INVALID"
+    assert rejected.value.__cause__ is None
+
+
+def test_unavailable_native_tool_is_resource_refusal_without_native_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    with pytest.raises(FleetPlanInvalid) as rejected:
+        envelope.prepare_run_resource_scope("fleet-run", CicdResourcePolicy(cpu_millis=1000))
+    assert rejected.value.code == "RUN_RESOURCE_SCOPE_UNAVAILABLE"
+    assert isinstance(rejected.value.__cause__, FleetPlanInvalid)
 
 
 def test_original_guard_refusal_precedes_scope_command(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(shutil, "which", lambda _name: sys.executable)
+    failure = FleetPlanInvalid("finite private cpu.max")
 
     def refused(*_args: object, **_kwargs: object) -> tuple[str, ...]:
-        raise FleetPlanInvalid("finite private cpu.max")
+        raise failure
 
     monkeypatch.setattr(native_cgroups, "standard_resource_scope_command", refused)
-    with pytest.raises(FleetPlanInvalid, match="finite private"):
+    with pytest.raises(FleetPlanInvalid) as rejected:
         envelope.prepare_run_resource_scope("fleet-run", CicdResourcePolicy(cpu_millis=1000))
+    assert rejected.value.code == "RUN_RESOURCE_SCOPE_UNAVAILABLE"
+    assert rejected.value.__cause__ is failure
 
 
 @pytest.fixture
@@ -529,8 +558,14 @@ def test_parent_pin_retains_readonly_original_object_and_closes_deterministicall
     opened_events: list[int] = []
     native_open = os.open
 
-    def observe_open(path, flags, *args, **kwargs):
-        descriptor = native_open(path, flags, *args, **kwargs)
+    def observe_open(
+        path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        descriptor = native_open(path, flags, mode, dir_fd=dir_fd)
         if path == "cgroup.events":
             opened_events.append(descriptor)
         return descriptor

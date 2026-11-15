@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import signal
 import sys
 import tempfile
@@ -34,6 +35,8 @@ from oh_goon.core.sqlite_journal_vocabulary import SQLITE_JOURNAL_MODE_ENV
 from oh_goon.core.vocabulary import FleetRunStatus, FleetRunTerminalIntent
 from oh_goon.engine.atomic_execution_bytes import atomic_execution_bytes_supported
 from oh_goon.engine.command import CommandProcessLifecycleEvent, run_command
+from oh_goon.integrations import _fleet_plan_cgroup_resources as native_cgroups
+from oh_goon.integrations import run_resource_envelope as native_envelope
 from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.journal import Journal, RunResourceObservationContext
@@ -44,6 +47,80 @@ from tests.factories.run_resources import (
     run_resource_envelope,
     run_resource_observation,
 )
+
+
+@pytest.mark.skipif(
+    sys.platform != "linux" or not hasattr(os, "pidfd_open"),
+    reason="original Linux CLI signal owner required",
+)
+@pytest.mark.parametrize("as_json", (False, True))
+@pytest.mark.parametrize("fault_kind", ("inheritance", "native-read"))
+def test_resource_preflight_refusal_keeps_its_owner_and_private_cause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    as_json: bool,
+    fault_kind: str,
+) -> None:
+    from oh_goon.cli import main
+    from tests.factories.run_configuration import write_run_configuration
+
+    configuration = write_run_configuration(tmp_path, monkeypatch)
+    selection = configuration.read_text()
+    configuration.write_text(selection + "resources: {cpu_millis: 2000}\n")
+    snapshot = load_run_configuration(configuration)
+    resources = snapshot.selection.resources
+    assert resources is not None
+    monkeypatch.setattr(shutil, "which", lambda _name: sys.executable)
+
+    def available(_policy: object, executable: str, **_kwargs: object) -> tuple[str, ...]:
+        # A passive native-prefix control, not a launch or kernel qualification.
+        return (executable, "--user", "--scope", "--collect", "--")
+
+    monkeypatch.setattr(native_cgroups, "standard_resource_scope_command", available)
+    control = native_envelope.prepare_run_resource_scope("resource-control", resources)
+    assert control.resources == resources
+    assert ResolvedRunResourceScope.from_payload(control.to_payload()) == control
+
+    private = "PRIVATE_RESOURCE_SENTINEL /private/native/cgroup"
+    failure = (
+        FleetPlanInvalid(private + " finite pids.max")
+        if fault_kind == "inheritance"
+        else OSError(private + " native read unavailable")
+    )
+
+    def refused(*_args: object, **_kwargs: object) -> tuple[str, ...]:
+        raise failure
+
+    def no_work(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("resource preflight must precede Plan or runtime work")
+
+    monkeypatch.setattr(native_cgroups, "standard_resource_scope_command", refused)
+    monkeypatch.setattr("oh_goon.cli_configuration.prepare_configuration", no_work)
+    monkeypatch.setattr("oh_goon.application.ApplicationRuntime.build", no_work)
+    arguments = ["run", str(configuration), *(["--json"] if as_json else [])]
+    assert main(arguments) == 2
+    captured = capsys.readouterr()
+    raw = captured.out + captured.err
+    assert "PRIVATE_RESOURCE_SENTINEL" not in raw and "/private/native/cgroup" not in raw
+    if as_json:
+        report = json.loads(captured.out)
+        assert report["code"] == "RUN_RESOURCE_SCOPE_UNAVAILABLE"
+        assert report["stage"] == "run_resources"
+        assert report["inputs"] == []
+        assert report["execution"] == "not_started_by_diagnostic"
+        assert "resource" in report["safe_next_action"]
+        assert "caller" in report["safe_next_action"]
+    else:
+        assert captured.out.splitlines()[0] == (
+            "Run resources unavailable: RUN_RESOURCE_SCOPE_UNAVAILABLE"
+        )
+    with pytest.raises(FleetPlanInvalid) as rejected:
+        native_envelope.prepare_run_resource_scope("resource-control", resources)
+    assert rejected.value.code == "RUN_RESOURCE_SCOPE_UNAVAILABLE"
+    assert rejected.value.__cause__ is failure
+    assert not (tmp_path / "state.sqlite3").exists()
+    assert not configuration.with_name("goon.lock").exists()
 
 
 def _invocation(

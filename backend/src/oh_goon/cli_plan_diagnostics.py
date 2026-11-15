@@ -17,7 +17,8 @@ def print_safe_plan_diagnostic(
         )
         print(json.dumps({**report, **registration}, indent=2, ensure_ascii=False))
         return
-    print(f"Plan rejected: {report['code']}")
+    label = "Run resources unavailable" if report["stage"] == "run_resources" else "Plan rejected"
+    print(f"{label}: {report['code']}")
     if report["inputs"]:
         print(f"Inputs: {', '.join(report['inputs'])}")
     if report.get("fields"):

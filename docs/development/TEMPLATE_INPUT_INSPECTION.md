@@ -220,6 +220,10 @@ runtime, the CLI starts the same invocation in one native scope and verifies
 its actual limits. Existing private caller limits must remain enforced; a
 scope migration that would abandon one refuses before application work. Follow
 the reported prerequisite or run in an explicitly selected compatible context.
+
+An unavailable native context is reported as `RUN_RESOURCE_SCOPE_UNAVAILABLE`
+at stage `run_resources`. Inspect the selected caps and the supported user-manager
+context, preserving existing caller limits before retrying.
 There is no uncapped fallback.
 
 The budget applies to `run`, which waits for completion. Background execution,

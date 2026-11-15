@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import FleetPlanInvalid, RunResourceScopeUnavailable
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.run_resources import (
     RunResourceEnvelopeEvidence,
@@ -201,39 +201,46 @@ def prepare_run_resource_scope(
         raise FleetPlanInvalid("Whole-Run resources require an original Run identity")
     if all(value is None for value in resources.model_dump().values()):
         raise FleetPlanInvalid("Whole-Run resources require at least one selected cap")
-    selected = tuple(shutil.which(name) for name in ("systemd-run", "systemctl"))
-    if any(path is None for path in selected):
-        raise FleetPlanInvalid("Whole-Run resources require native systemd-run and systemctl")
-    systemd_run, systemctl = (str(Path(path).resolve(strict=True)) for path in selected if path)
-    run_sha, query_sha = _executable_sha256(systemd_run), _executable_sha256(systemctl)
-    environment = {name: os.environ[name] for name in sorted(_MANAGER_NAMES) if name in os.environ}
-    command = native_cgroups.standard_resource_scope_command(
-        resources, systemd_run, query_executable=systemctl, manager_environment=environment
-    )
-    unit = f"oh-goon-run-{uuid4().hex}.scope"
-    memory_policy = ("--property=OOMPolicy=kill",) if resources.memory_mib is not None else ()
-    prefix = (
-        tuple(item for item in command[:-1] if item != "--collect")
-        + memory_policy
-        + (
-            f"--unit={unit}",
-            "--expand-environment=no",
-            "--property=CollectMode=inactive",
-            "--",
+    try:
+        selected = tuple(shutil.which(name) for name in ("systemd-run", "systemctl"))
+        if any(path is None for path in selected):
+            raise FleetPlanInvalid("Whole-Run resources require native systemd-run and systemctl")
+        systemd_run, systemctl = (str(Path(path).resolve(strict=True)) for path in selected if path)
+        run_sha, query_sha = _executable_sha256(systemd_run), _executable_sha256(systemctl)
+        environment = {
+            name: os.environ[name] for name in sorted(_MANAGER_NAMES) if name in os.environ
+        }
+        command = native_cgroups.standard_resource_scope_command(
+            resources, systemd_run, query_executable=systemctl, manager_environment=environment
         )
-    )
-    scope = ResolvedRunResourceScope(
-        fleet_run_id,
-        resources,
-        unit,
-        systemd_run,
-        run_sha,
-        systemctl,
-        query_sha,
-        tuple(environment.items()),
-        prefix,
-    )
-    _require_tools_current(scope)
+        unit = f"oh-goon-run-{uuid4().hex}.scope"
+        memory_policy = ("--property=OOMPolicy=kill",) if resources.memory_mib is not None else ()
+        prefix = (
+            tuple(item for item in command[:-1] if item != "--collect")
+            + memory_policy
+            + (
+                f"--unit={unit}",
+                "--expand-environment=no",
+                "--property=CollectMode=inactive",
+                "--",
+            )
+        )
+        scope = ResolvedRunResourceScope(
+            fleet_run_id,
+            resources,
+            unit,
+            systemd_run,
+            run_sha,
+            systemctl,
+            query_sha,
+            tuple(environment.items()),
+            prefix,
+        )
+        _require_tools_current(scope)
+    except (FleetPlanInvalid, OSError) as exc:
+        raise RunResourceScopeUnavailable(
+            "Whole-Run native resource context is unavailable"
+        ) from exc
     return scope
 
 

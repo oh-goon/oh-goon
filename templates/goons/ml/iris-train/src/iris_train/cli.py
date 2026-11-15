@@ -24,24 +24,22 @@ def main() -> int:
     """Train native scikit-learn's Iris pipeline and retain its actual parameters."""
 
     parser = argparse.ArgumentParser(prog="iris-train")
-    parser.add_argument(
-        "--dataset", type=_dataset, default="builtin", metavar="{builtin,captured}"
-    )
+    parser.add_argument("--dataset", type=_dataset, default="builtin", metavar="{builtin,captured}")
     parser.add_argument("--random-seed", type=int, required=True)
     parser.add_argument("--test-size-percent", type=int, required=True)
     parser.add_argument("--minimum-accuracy-percent", type=int, required=True)
     parser.add_argument("--max-iterations", type=int, required=True)
+    parser.add_argument("--training-rounds", type=int, default=1)
     args = parser.parse_args()
     for name, lower, upper in (
         ("random_seed", 0, 2147483647),
         ("test_size_percent", 10, 40),
         ("minimum_accuracy_percent", 80, 100),
         ("max_iterations", 100, 2000),
+        ("training_rounds", 1, 10000),
     ):
         if not lower <= getattr(args, name) <= upper:
-            parser.error(
-                f"--{name.replace('_', '-')} must be between {lower} and {upper}"
-            )
+            parser.error(f"--{name.replace('_', '-')} must be between {lower} and {upper}")
     dataset_sha256 = None
     try:
         if args.dataset == "captured":
@@ -55,13 +53,29 @@ def main() -> int:
             stratify=labels,
             random_state=args.random_seed,
         )
-        scaler = StandardScaler()
-        classifier = LogisticRegression(
-            max_iter=args.max_iterations, random_state=args.random_seed
-        )
-        pipeline = make_pipeline(scaler, classifier)
-        pipeline.fit(train_data, train_labels)
-        accuracy = pipeline.score(test_data, test_labels)
+        if args.training_rounds > 1:
+            print(
+                f"OH-GOON ACTIVITY: IRIS_TRAINING_STARTED rounds={args.training_rounds}",
+                flush=True,
+            )
+        progress_interval = (args.training_rounds + 99) // 100
+        for completed_rounds in range(1, args.training_rounds + 1):
+            scaler = StandardScaler()
+            classifier = LogisticRegression(
+                max_iter=args.max_iterations, random_state=args.random_seed
+            )
+            pipeline = make_pipeline(scaler, classifier)
+            pipeline.fit(train_data, train_labels)
+            accuracy = pipeline.score(test_data, test_labels)
+            if args.training_rounds > 1 and (
+                completed_rounds == 1
+                or completed_rounds % progress_interval == 0
+                or completed_rounds == args.training_rounds
+            ):
+                print(
+                    f"OH-GOON ACTIVITY: IRIS_TRAINING_PROGRESS completed={completed_rounds} total={args.training_rounds}",
+                    flush=True,
+                )
     except DatasetError:
         parser.error(DatasetError.code)
     except (ValueError, TypeError, OverflowError):
@@ -82,6 +96,9 @@ def main() -> int:
     }
     if dataset_sha256 is not None:
         metrics["dataset_sha256"] = dataset_sha256
+    if args.training_rounds > 1:
+        metrics["training_rounds"] = args.training_rounds
+        metrics["completed_training_rounds"] = completed_rounds
     parameters = {
         "scaler_mean": scaler.mean_.tolist(),
         "scaler_scale": scaler.scale_.tolist(),
