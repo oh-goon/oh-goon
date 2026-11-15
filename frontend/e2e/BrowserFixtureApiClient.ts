@@ -17,12 +17,13 @@ import {
   LONG_STEP_NAME,
   PRIMARY_REPOSITORY,
   fixtureRepositoryInstanceId,
+  hasExactRepositoryMembership,
 } from "./fixtures/identities";
 import { scenarioDefinition, SHARED_RUN_SUBMIT_RELEASE_EVENT, waitForFixtureEvent, type BrowserFixtureScenario } from "./fixtures/scenarios";
 import { FIXTURE_FLEET_PLAN_TARGET, FIXTURE_PLAN_ID as PLAN_ID, FIXTURE_PLANS, FIXTURE_RESOLVED_PLAN, FIXTURE_SHA as SHA } from "./fixtures/plans";
 import { DEFAULT_RUN_ID, FAILED_RUN_ID, SCALE_FAILED_RUN_ID, SCALE_RUN_ID } from "./fixtures/runIds";
 import { FIXTURE_DIRECT_EXECUTION, runDetail, runState } from "./fixtures/runProjection";
-import { fixtureScheduleDefinition, fixtureScheduleStatus, requireScheduleDefinition } from "./fixtures/schedules";
+import { createdFixtureScheduleCatalog, fixtureScheduleStatus, replaceFixtureScheduleMetadata, requireScheduleDefinition, reviewedFixtureScheduleDefinition } from "./fixtures/schedules";
 import {
   scoutComparisonEnvironment,
   scoutGoonRow,
@@ -501,9 +502,9 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
     return clone(FIXTURE_PLANS.document(planKey));
   }
 
-  override async createSharedPlanFromTemplate(templateKey: string, _expectedTemplateSha256: string): Promise<WriteCommandResult<SharedPlanDocument>> {
-    const planKey = FIXTURE_PLANS.planKeyForTemplate(templateKey);
-    return this.fixtureSaved(FIXTURE_PLANS.document(planKey));
+  override async createSharedPlanFromTemplate(templateKey: string, expectedTemplateSha256: string): Promise<WriteCommandResult<SharedPlanDocument>> {
+    const document = FIXTURE_PLANS.reviewedTemplateDocument(templateKey, expectedTemplateSha256);
+    return "outcome" in document ? document : this.fixtureSaved(document);
   }
 
   /** Scripted browser presentation fixture only; real constraints belong to FleetPlanResolver. */
@@ -591,24 +592,21 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
   }
 
   override async createScheduleFromSharedPlan(scheduleId: string, request: SharedPlanScheduleCreateRequest): Promise<WriteCommandResult<ScheduleDefinition>> {
-    const planDocument = await this.sharedPlan(request.plan_key);
-    if (request.expected_plan_revision !== planDocument.sha256) {
-      throw new Error(`Shared Plan ${request.plan_key} changed after review`);
-    }
     request.repository_ids.forEach((repositoryId) => this.repositoryForScenario(repositoryId));
-    const definition = fixtureScheduleDefinition(scheduleId, request.name, request.repository_ids, request.interval_minutes, request.state, FIXTURE_PLANS.target(request.plan_key));
-    const schedules = this.schedulesState.schedules ?? [];
-    this.schedulesState = { schedules: [{ definition, latest_occurrence: null, next_run_at: "2026-08-22T16:00:00Z", missing_expected_occurrence_at: null }, ...schedules] };
+    const planDocument = await this.sharedPlan(request.plan_key);
+    const target = FIXTURE_PLANS.target(request.plan_key);
+    const catalog = this.schedulesState;
+    const definition = reviewedFixtureScheduleDefinition(scheduleId, request, planDocument, target, catalog);
+    if ("outcome" in definition) return definition;
+    this.schedulesState = createdFixtureScheduleCatalog(catalog, definition);
     return this.fixtureSaved(definition);
   }
 
   override async updateSchedule(scheduleId: string, schedule: ScheduleReplace): Promise<WriteCommandResult<ScheduleDefinition>> {
     const schedules = this.schedulesState.schedules ?? [];
     const current = requireScheduleDefinition(schedules, scheduleId);
-    if (current.generation_id !== schedule.generation_id || current.record_version !== schedule.record_version) {
-      return { outcome: "stale", diagnosticId: `fixture:schedule-authority:${scheduleId}` };
-    }
-    const definition: ScheduleDefinition = { ...current, ...schedule, schedule_id: scheduleId, updated_at: FINISHED, record_version: current.record_version + 1 };
+    const definition = replaceFixtureScheduleMetadata(current, schedule);
+    if ("outcome" in definition) return definition;
     this.schedulesState = { schedules: schedules.map((item) => item.definition.schedule_id === scheduleId ? { ...item, definition } : item) };
     return this.fixtureSaved(definition);
   }
@@ -732,7 +730,10 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
     if (this.scenarioConfig.holdSubmit === true) await waitForFixtureEvent(SHARED_RUN_SUBMIT_RELEASE_EVENT);
     if (this.scenarioConfig.submitFailureDiagnosticId !== undefined) return { outcome: "write-error", diagnosticId: this.scenarioConfig.submitFailureDiagnosticId, recovery: "refresh" };
     const targets = repositoryIds.map((id) => this.repositoryForScenario(id));
-    if (Object.keys(repositoryInstanceIds).length !== repositoryIds.length || repositoryIds.some((id) => repositoryInstanceIds[id] !== fixtureRepositoryInstanceId(id))) {
+    if (!hasExactRepositoryMembership(repositoryIds, repositoryInstanceIds)) {
+      return { outcome: "write-error", diagnosticId: "fixture:shared-plan-targets", recovery: "blocked" };
+    }
+    if (repositoryIds.some((id) => repositoryInstanceIds[id] !== fixtureRepositoryInstanceId(id))) {
       return { outcome: "stale", diagnosticId: "fixture:shared-plan-repository-instance" };
     }
     const planTarget = FIXTURE_PLANS.target(planKey);

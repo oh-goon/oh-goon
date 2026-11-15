@@ -44,6 +44,7 @@ function validateCreatedScheduleIdentity(
     sharedPlanKey: source.kind === "shared_plan" ? source.plan_key : null,
     sharedPlanRevision: source.kind === "shared_plan" ? source.sha256 : null,
     planId: result.value.target.kind === "fleet_plan" ? result.value.target.plan.plan_id : null,
+    executionDigest: result.value.target.identity.digest,
   });
   const requestAuthority = canonicalIdentity({
     repositoryIds: request.repository_ids,
@@ -54,6 +55,7 @@ function validateCreatedScheduleIdentity(
     sharedPlanKey: request.plan_key,
     sharedPlanRevision: request.expected_plan_revision,
     planId: request.expected_plan_id,
+    executionDigest: request.expected_execution_digest,
   });
   if (result.value.schedule_id === expectedScheduleId && responseAuthority === requestAuthority) return result;
   const diagnostic = appDiagnosticStore.record({

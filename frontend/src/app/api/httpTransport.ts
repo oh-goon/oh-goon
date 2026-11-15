@@ -1,5 +1,6 @@
 import { ApiError, ApiUnavailableError } from "@/domain/api/ApiError";
 import type { ReadRequestOptions } from "@/domain/api/ApiClient";
+import { API_ROOT } from "@/domain/api/operationHref";
 import {
   decodeResponse,
   operationBody,
@@ -11,7 +12,6 @@ import {
 } from "@generated/operations";
 import { decodeTransportError } from "@generated/validators";
 
-const API_ROOT = "/api";
 const REQUEST_TIMEOUT_MS = 10_000;
 const READ_RETRY_DELAYS_MS = [250, 750] as const;
 

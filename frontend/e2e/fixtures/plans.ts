@@ -1,4 +1,5 @@
 import { LONG_PLAN_NAME } from "./identities";
+import type { WriteCommandResult } from "@/domain/mutations/WriteCommandResult";
 import { DEFAULT_RUN_ID } from "./runIds";
 import type {
   FleetPlanTarget,
@@ -131,6 +132,15 @@ export class FixturePlanRegistry {
     const planKey = TEMPLATE_TO_PLAN.get(templateKey);
     if (planKey === undefined) throw new Error(`Unknown Plan template ${templateKey}`);
     return planKey;
+  }
+
+  reviewedTemplateDocument(templateKey: string, expectedTemplateSha256: string): SharedPlanDocument | Exclude<WriteCommandResult<never>, { outcome: "saved" }> {
+    const planKey = this.planKeyForTemplate(templateKey);
+    const template = this.templates().templates?.find((item) => item.template_key === templateKey);
+    if (template?.sha256 !== expectedTemplateSha256) {
+      return { outcome: "stale", diagnosticId: `fixture:plan-template:${templateKey}` };
+    }
+    return this.document(planKey);
   }
 
   require(planKey: string): FixturePlanRecord {

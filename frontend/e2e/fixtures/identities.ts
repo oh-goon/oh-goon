@@ -23,6 +23,14 @@ export function fixtureRepositoryInstanceId(repositoryId: string): string {
   return `fixture-repository-instance:${repositoryId}`;
 }
 
+export function hasExactRepositoryMembership(repositoryIds: readonly string[], instanceIds: Readonly<Record<string, string>>): boolean {
+  const ids = new Set(repositoryIds);
+  return ids.size > 0
+    && ids.size === repositoryIds.length
+    && Object.keys(instanceIds).length === ids.size
+    && repositoryIds.every((id) => Object.hasOwn(instanceIds, id));
+}
+
 export class FixtureRepositoryRegistry {
   private readonly byId: ReadonlyMap<string, RepositoryIdentity>;
   private readonly byPath: ReadonlyMap<string, RepositoryIdentity>;
