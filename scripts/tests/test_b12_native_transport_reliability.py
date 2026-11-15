@@ -237,6 +237,10 @@ def test_transport_clean_accepts_extracted_windows_sidecars_and_preserves_source
         ROOT / "scripts/source_transport_clean.sh",
         root / "scripts/source_transport_clean.sh",
     )
+    for resource in (ROOT / "backend/src/oh_goon/repository_tooling").rglob("*.sh"):
+        target = root / resource.relative_to(ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(resource, target)
     clean = subprocess.run(
         ["bash", str(root / "scripts/source_transport_clean.sh")],
         cwd=root,
@@ -278,6 +282,10 @@ def test_transport_clean_rejects_orphans_and_symlinked_owners_atomically(
         ROOT / "scripts/source_transport_clean.sh",
         root / "scripts/source_transport_clean.sh",
     )
+    for resource in (ROOT / "backend/src/oh_goon/repository_tooling").rglob("*.sh"):
+        target = root / resource.relative_to(ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(resource, target)
     denied = subprocess.run(
         ["bash", str(root / "scripts/source_transport_clean.sh")],
         cwd=root,

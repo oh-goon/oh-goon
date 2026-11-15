@@ -61,6 +61,15 @@ pre-environment repository command surface uses named project entrypoints throug
 
 ## Dependency materialization boundary
 
+Explicit source-transport repair is owned by the packaged native
+`backend/src/oh_goon/repository_tooling/source_transport_clean.sh`. The thin
+`scripts/source_transport_clean.sh` bootstrap and the Python source-layout command
+invoke that same implementation. It validates the complete candidate inventory
+before deleting known sidecars/patch transport, preserves materialized state, and
+requires a safe authored sibling for Windows metadata. Bash/GNU tools keep the
+bootstrap available before Python dependency materialization. The Python API
+consumes the native NUL-delimited removal result without another discovery walk.
+
 uv and npm are the dependency owners. Repository setup, release and container surfaces
 invoke `uv sync` and `npm ci` directly; Oh-Goon does not mirror their resolution,
 interpreter-selection, build-bootstrap, or installation semantics.

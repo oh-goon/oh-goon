@@ -65,8 +65,7 @@ def test_transport_cleanup_is_explicit_and_independent_of_build_index() -> None:
     script = (ROOT / "scripts/source_transport_clean.sh").read_text(encoding="utf-8")
     assert "set -euo pipefail" in script
     assert "SOURCE TRANSPORT CLEAN BLOCKED" in script
-    assert "-name '*:Zone.Identifier'" in script
-    assert "-name '*.patch.sha256'" in script
+    assert "exec bash " in script
 
 
 def test_backend_build_preflight_proves_editable_package_without_release_wheel() -> (

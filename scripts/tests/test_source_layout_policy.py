@@ -263,9 +263,11 @@ def test_transport_clean_removes_zone_sidecars_and_patch_transport_files(
     _minimal_source(tmp_path)
     zone = tmp_path / "templates/goons/python/quality/README.md:Zone.Identifier"
     zone.parent.mkdir(parents=True)
+    zone.with_name("README.md").write_text("authored\n", encoding="utf-8")
     zone.write_text("[ZoneTransfer]\nZoneId=3\n", encoding="utf-8")
     zone_data = tmp_path / "generated/frontend/models.ts:Zone.Identifier:$DATA"
     zone_data.parent.mkdir(parents=True)
+    zone_data.with_name("models.ts").write_text("// authored\n", encoding="utf-8")
     zone_data.write_text("[ZoneTransfer]\n", encoding="utf-8")
     patch_transport = tmp_path / "974.patch"
     patch_transport.write_text("transport-only patch\n", encoding="utf-8")
@@ -295,6 +297,7 @@ def test_source_layout_rejects_transport_artifacts_until_cleaned(
     _minimal_source(tmp_path)
     sidecar = tmp_path / "templates/goons/python/quality/README.md:Zone.Identifier"
     sidecar.parent.mkdir(parents=True)
+    sidecar.with_name("README.md").write_text("authored\n", encoding="utf-8")
     sidecar.write_text("[ZoneTransfer]\n", encoding="utf-8")
     patch_transport = tmp_path / "phase.patch"
     patch_transport.write_text("transport-only patch\n", encoding="utf-8")
@@ -450,6 +453,8 @@ def test_init_does_not_mutate_source_transport_state() -> None:
 def _write_transport_artifacts(root: Path, count: int = 3) -> tuple[Path, ...]:
     paths: list[Path] = []
     for index in range(count):
+        if index % 2 == 0:
+            (root / f"source-{index}.py").write_text("# authored\n", encoding="utf-8")
         path = (
             root / f"source-{index}.py:Zone.Identifier"
             if index % 2 == 0
@@ -523,7 +528,7 @@ def test_transport_cleanup_refusal_hides_exact_sidecar_path_until_debug(
 
     assert source_layout.main(["transport-clean"]) == 2
     normal = capsys.readouterr()
-    assert "refusing non-regular source transport cleanup target" in normal.err
+    assert "refusing unsafe source transport cleanup target" in normal.err
     assert "Zone.Identifier" not in normal.err
     assert ".patch" not in normal.err
 

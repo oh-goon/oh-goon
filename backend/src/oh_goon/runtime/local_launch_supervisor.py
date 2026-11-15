@@ -200,10 +200,33 @@ def _capture_service_output(
     stream = process.stdout
     if stream is None:
         return
-    for line in stream:
-        rendered = redact_diagnostic_text(line.rstrip())
-        if rendered:
-            log_tail.append(f"[{service.service}] {rendered}")
+    with stream:
+        for line in stream:
+            rendered = redact_diagnostic_text(line.rstrip())
+            if rendered:
+                log_tail.append(f"[{service.service}] {rendered}")
+
+
+def _stop_unregistered_service(
+    process: subprocess.Popen[str],
+    *,
+    pgid: int | None,
+    reader: threading.Thread | None,
+    failure: BaseException,
+) -> None:
+    try:
+        stop_process_group(process.pid if pgid is None else pgid, (process,))
+    except BaseException as exc:
+        failure.add_note(f"Local launch process cleanup failed: {redact_diagnostic_text(str(exc))}")
+    # A started reader owns its stream until EOF or read failure. If the reader
+    # never started, this spawn owner still owns the captured pipe.
+    if process.stdout is not None and (reader is None or reader.ident is None):
+        try:
+            process.stdout.close()
+        except OSError as exc:
+            failure.add_note(
+                f"Local launch output cleanup failed: {redact_diagnostic_text(str(exc))}"
+            )
 
 
 def _startup_log_tail(
@@ -251,26 +274,31 @@ def _spawn_registered_service(
     if service.cwd is not None:
         wrapper += ["--cwd", str(service.cwd)]
     wrapper += ["--", *service.command]
+    process: subprocess.Popen[str] | None = None
+    reader: threading.Thread | None = None
     try:
         process = subprocess.Popen(
             wrapper,
             cwd=root,
             env=child_env,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.PIPE if log_tail is not None else subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
             text=True,
             process_group=0 if pgid is None else pgid,
             pass_fds=(write_fd,),
         )
         if log_tail is not None:
-            threading.Thread(
+            reader = threading.Thread(
                 target=_capture_service_output,
                 kwargs={"process": process, "service": service, "log_tail": log_tail},
                 daemon=True,
                 name=f"oh-goon-{service.service}-startup-output",
-            ).start()
-    except BaseException:
+            )
+            reader.start()
+    except BaseException as exc:
         os.close(read_fd)
+        if process is not None:
+            _stop_unregistered_service(process, pgid=pgid, reader=reader, failure=exc)
         raise
     finally:
         os.close(write_fd)
@@ -283,10 +311,10 @@ def _spawn_registered_service(
             deadline=deadline,
             now=now,
         )
-    except BaseException:
+    except BaseException as exc:
         # The caller cannot own this process until registration succeeds, so this
         # helper must close the physical process/group on every registration failure.
-        stop_process_group(process.pid if pgid is None else pgid, (process,))
+        _stop_unregistered_service(process, pgid=pgid, reader=reader, failure=exc)
         raise
     return process
 

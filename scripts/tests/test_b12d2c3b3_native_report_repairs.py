@@ -17,6 +17,10 @@ def _root(tmp_path: Path) -> Path:
         tmp_path / "scripts/source_transport_clean.sh",
     )
     (tmp_path / "backend").mkdir()
+    for resource in (ROOT / "backend/src/oh_goon/repository_tooling").rglob("*.sh"):
+        target = tmp_path / resource.relative_to(ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(resource, target)
     (tmp_path / "backend/pyproject.toml").write_text(
         '[project]\nname="oh-goon"\n', encoding="utf-8"
     )

@@ -29,12 +29,30 @@ from oh_goon.engine.command import (
 )
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.source_snapshot import snapshot_source_directory
+from oh_goon.repository_tooling import source_layout
 from oh_goon.services.template_plan_drafts import (
     AGENT_REVIEW_EXAMPLE,
     agent_review_companion_files,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_native_wheel_selects_packaged_cleanup_resources() -> None:
+    from hatchling.builders.wheel import WheelBuilder
+
+    resources = tuple(Path(source_layout.__file__).parent.rglob("*.sh"))
+    assert resources
+    selected = {
+        Path(item.path): item
+        for item in WheelBuilder(str(ROOT / "backend")).recurse_included_files()
+    }
+    for resource in resources:
+        item = selected[resource]
+        assert (
+            item.distribution_path
+            == resource.relative_to(ROOT / "backend/src").as_posix()
+        )
 
 
 @pytest.mark.process
@@ -86,6 +104,30 @@ for entry in entries:
     wrapper = Path(sys.executable).parent / (entry.name + ('.exe' if os.name == 'nt' else ''))
     assert wrapper.is_file() and os.access(wrapper, os.X_OK), entry.name
     assert callable(entry.load()), entry.name
+if os.name == 'posix':
+    from tempfile import TemporaryDirectory
+    from oh_goon.repository_tooling.source_layout import (
+        clean_source_transport_artifacts, SourceTransportArtifactCleanupError,
+    )
+    with TemporaryDirectory(prefix='installed-cleanup-') as selected:
+        root = Path(selected)
+        (root / 'source.py').write_bytes(b'authored')
+        sidecar = root / 'source.py:Zone.Identifier'
+        sidecar.write_bytes(b'opaque metadata')
+        assert not (root / 'scripts').exists()
+        assert clean_source_transport_artifacts(root) == (Path(sidecar.name),)
+        assert not sidecar.exists() and (root / 'source.py').read_bytes() == b'authored'
+        valid = root / 'first.patch'
+        valid.write_bytes(b'transport')
+        orphan = root / 'missing.py:Zone.Identifier'
+        orphan.write_bytes(b'metadata')
+        try:
+            clean_source_transport_artifacts(root)
+        except SourceTransportArtifactCleanupError:
+            pass
+        else:
+            raise AssertionError('installed cleanup accepted orphaned metadata')
+        assert valid.exists() and orphan.exists()
 print(json.dumps(sorted(entry.name for entry in entries)))
 """,
             json.dumps(scripts),
