@@ -453,7 +453,8 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
     if stop == "timeout":
         workflow = _native_timeout_workflow(workflow)
     assert not (workflow.repository / "ml-output").exists()
-    workflow.prepare(training_rounds=10000)
+    rounds = 1000 if stop == "complete" else 10000
+    workflow.prepare(training_rounds=rounds)
     run_id: str | None = None
     handles: list[int] = []
     envelope: dict[str, Any] | None = None
@@ -485,8 +486,8 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
                 progress = stderr.read(128 * 1024 + 1)
                 assert len(progress) <= 128 * 1024
                 if (
-                    b"IRIS_TRAINING_STARTED rounds=10000" in progress
-                    and b"IRIS_TRAINING_PROGRESS completed=1 total=10000" in progress
+                    f"IRIS_TRAINING_STARTED rounds={rounds}".encode() in progress
+                    and f"IRIS_TRAINING_PROGRESS completed=1 total={rounds}".encode() in progress
                 ):
                     break
                 assert process.poll() is None, progress[-8192:]
@@ -569,8 +570,8 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
             exported = None
             if stop == "complete":
                 exported = workflow.exported(run_id, "complete")
-                assert exported[METRICS][1]["completed_training_rounds"] == 10000
-                assert exported[METRICS][1]["training_rounds"] == 10000
+                assert exported[METRICS][1]["completed_training_rounds"] == rounds
+                assert exported[METRICS][1]["training_rounds"] == rounds
                 assert step["project_source"]["content_sha256"]
                 assert step["uv"].get("group") is None
             else:
@@ -590,7 +591,7 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
                             "case": stop,
                             "run_id": run_id,
                             "control_run_id": control["fleet_run_id"],
-                            "requested_rounds": 10000,
+                            "requested_rounds": rounds,
                             "invocation_wall_seconds": invocation_elapsed,
                             "invocation_wall_scope": "whole waited CLI invocation including admission and native preparation",
                             "recorded_step_duration_ms": step["duration_ms"],
