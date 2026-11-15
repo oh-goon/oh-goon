@@ -295,10 +295,16 @@ def _checksum_path(output: Path) -> Path:
     return output.with_name(output.name + ".sha256")
 
 
-def _write_checksum(output: Path, digest: str) -> Path:
-    checksum = _checksum_path(output)
+def _require_checksum_output(checksum: Path) -> None:
     if checksum.is_symlink():
         raise ValueError("slim archive checksum output must not be a symlink")
+    if checksum.is_dir():
+        raise IsADirectoryError("slim archive checksum output must not be a directory")
+
+
+def _write_checksum(output: Path, digest: str) -> Path:
+    checksum = _checksum_path(output)
+    _require_checksum_output(checksum)
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -478,6 +484,7 @@ def package_slim(output: Path, *, root: Path | None = None) -> str:
         pass
     else:
         raise ValueError("slim archive output must be outside the source tree")
+    _require_checksum_output(_checksum_path(output))
     version_file = root / "VERSION"
     if version_file.is_symlink() or not version_file.is_file():
         raise ValueError("VERSION must be a regular non-symlink file")

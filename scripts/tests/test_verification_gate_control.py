@@ -2177,6 +2177,7 @@ def test_executable_change_cannot_claim_behavioral_na() -> None:
         "docs/development/REAL_LIFECYCLE_QA.md",
         "docs/development/REAL_LIFECYCLE_QA.yml",
         "docs/certification/answers/11-startup-certification.yml",
+        "docs/certification/answers/benchmark-integrity.yml",
     ),
 )
 def test_policy_ingresses_cannot_self_approve_as_ordinary(path: str) -> None:
@@ -2210,6 +2211,7 @@ def test_policy_ingresses_cannot_self_approve_as_ordinary(path: str) -> None:
         "docs/development/REAL_LIFECYCLE_QA.yml",
         "docs/certification/answers/01-repository-ownership.yml",
         "docs/certification/answers/11-startup-certification.yml",
+        "docs/certification/answers/benchmark-integrity.yml",
     ),
 )
 def test_governing_policy_admits_independently_bound_proof(path: str) -> None:
@@ -2222,11 +2224,16 @@ def test_governing_policy_admits_independently_bound_proof(path: str) -> None:
             if gate.is_grader_answer_section(path)
             else ()
         )
+        + (
+            ("scripts/tests/test_repository_understanding_benchmark_registry.py",)
+            if path == "docs/certification/answers/benchmark-integrity.yml"
+            else ()
+        )
     )
     obligations = ["verification-policy protection"]
     if path in REAL_LIFECYCLE_QA_PATHS:
         obligations.append("real-lifecycle QA protection")
-    if gate.is_grader_answer_section(path):
+    if gate.is_grader_answer_section(path) or path.endswith("/benchmark-integrity.yml"):
         obligations.append("grader answer-material protection")
     plan.update(
         changed_paths=[path],
@@ -2238,6 +2245,7 @@ def test_governing_policy_admits_independently_bound_proof(path: str) -> None:
     plan["evidence"]["observations"] = (
         []
         if gate.is_grader_answer_section(path)
+        or path.endswith("/benchmark-integrity.yml")
         else [{"changed_path": path, "state": "UNAVAILABLE", "nominations": []}]
     )
     native = result["outcomes"][0]
@@ -2295,7 +2303,7 @@ def test_governing_policy_admits_independently_bound_proof(path: str) -> None:
     with pytest.raises(ValueError, match="trusted-base"):
         validate(plan, result, None)
 
-    if gate.is_grader_answer_section(path):
+    if gate.is_grader_answer_section(path) or path.endswith("/benchmark-integrity.yml"):
         incomplete_result = copy.deepcopy(result)
         incomplete_result["outcomes"][0]["returncode"] = 1
         with pytest.raises(

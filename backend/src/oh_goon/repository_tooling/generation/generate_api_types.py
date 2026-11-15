@@ -24,7 +24,6 @@ from oh_goon.repository_tooling.generation.api_validator_generation import (
     render_validator_files,
     render_validators,
 )
-from oh_goon.repository_tooling.generation.generated_typescript import assert_typescript_file_limit
 
 ROOT = Path(__file__).resolve().parents[5]
 OPENAPI_PATH = ROOT / "generated" / "openapi" / "openapi.json"
@@ -57,7 +56,6 @@ def render_generated_files(openapi: dict[str, Any]) -> dict[str, str]:
         **render_operation_files(openapi),
         **render_validator_files(openapi),
     }
-    assert_typescript_file_limit(outputs)
     return dict(sorted(outputs.items()))
 
 

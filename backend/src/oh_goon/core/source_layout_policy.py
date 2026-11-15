@@ -28,8 +28,6 @@ def source_transport_artifact_issues(root: Path) -> tuple[SourceLayoutIssue, ...
             relative = PurePosixPath(*relative_dir.parts, name)
             if relative.parts and relative.parts[0] == ".git":
                 continue
-            if is_transient_source_path(relative):
-                continue
             if is_disposable_source_transport_artifact_name(name):
                 issues.append(
                     SourceLayoutIssue(
@@ -38,6 +36,8 @@ def source_transport_artifact_issues(root: Path) -> tuple[SourceLayoutIssue, ...
                         "source admission; run oh-goon-source-layout transport-clean explicitly",
                     )
                 )
+                continue
+            if is_transient_source_path(relative):
                 continue
             kept.append(name)
         dirnames[:] = kept

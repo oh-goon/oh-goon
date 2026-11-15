@@ -64,7 +64,7 @@ from oh_goon.repository_tooling.verification_gate_control import (
     get_bounded_owner_proofs,
     hashmarks_upgrade_intent,
     is_generated_contract_path,
-    is_grader_answer_section,
+    is_grader_answer_material,
     is_verification_policy_path,
     native_changed_paths,
     non_executable_documentation,
@@ -553,7 +553,7 @@ def admit_change(
     before = canonical_source_identity(root)
     executable = tuple(path for path in changed if not non_executable_documentation(root, path))
     authored = tuple(path for path in executable if not is_generated_contract_path(path))
-    grader_sections = {path for path in authored if is_grader_answer_section(path)}
+    grader_material = {path for path in authored if is_grader_answer_material(path)}
     policy_paths = tuple(path for path in authored if is_verification_policy_path(path))
     required = required_policy_tests(policy_paths)
     owner_proofs = get_bounded_owner_proofs(root, base_sha, authored, {})
@@ -577,7 +577,7 @@ def admit_change(
     assets = documentation_asset_candidates(authored)
     if assets:
         nomination_arguments["asset_paths"] = assets
-    repository_members = tuple(path for path in authored if path not in grader_sections)
+    repository_members = tuple(path for path in authored if path not in grader_material)
     evidence = (
         nominator(root, repository_members, **nomination_arguments)
         if repository_members or nomination_required
@@ -686,7 +686,7 @@ def admit_change(
             path not in removed_paths
             and path not in observed_paths
             and path not in upgrade_paths
-            and path not in grader_sections
+            and path not in grader_material
             and path not in owner_paths
         ):
             unverified.append(f"NO_PRODUCER_OBSERVATION:{path}")

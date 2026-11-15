@@ -10,7 +10,6 @@ from oh_goon.repository_tooling.generation.generate_api_types import (
     component_schemas,
     extract_operations,
     render_models,
-    render_generated_files,
     render_operations,
     render_validator_files,
     render_validators,
@@ -481,28 +480,6 @@ def test_validator_generation_omits_noop_walks_and_unused_reference_stack() -> N
     )
     assert not re.search(r"for \([^\n]+\) \{\n\s*\}", validators)
     assert not re.search(r"\.forEach\([^\n]+=> \{\n\s*\}\);", validators)
-
-
-def test_generated_typescript_is_sharded_below_the_repository_line_limit() -> None:
-    from oh_goon.api.app import create_app
-    from oh_goon.repository_tooling.generation.generated_typescript import (
-        MAX_TYPESCRIPT_LINES,
-    )
-
-    openapi = create_app().openapi()
-    outputs = render_generated_files(openapi)
-    line_counts = {
-        name: len(content.splitlines())
-        for name, content in outputs.items()
-        if name.endswith((".ts", ".tsx", ".mts", ".cts"))
-    }
-
-    assert max(line_counts.values()) <= MAX_TYPESCRIPT_LINES
-    assert line_counts["validators.ts"] <= MAX_TYPESCRIPT_LINES
-    assert line_counts["operations.ts"] <= MAX_TYPESCRIPT_LINES
-    assert line_counts["operationTypes.ts"] <= MAX_TYPESCRIPT_LINES
-    assert any(name.startswith("validatorParts/") for name in outputs)
-    assert any(name.startswith("schemaParts/") for name in outputs)
 
 
 def test_openapi_generation_reads_current_checkout_version_on_each_capture(

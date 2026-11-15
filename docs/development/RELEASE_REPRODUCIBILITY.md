@@ -25,4 +25,6 @@ Release assembly has one pre-materialization dependency-admissibility owner: `ma
 
 Release version stamping remains a deliberately narrower operation than dependency qualification. The version owner uses `uv version --frozen`; it must not run `uv lock --check`, resolve dependencies, or materialize an environment. The already-qualified `backend/uv.lock` must remain byte-identical across stamping. Lock freshness belongs to the earlier native qualification boundary, not to version mutation.
 
+A same-version retry skips native authoring only when the existing source version metadata also agrees, including npm's lock version fields and certification `source_version` fields. Drift returns to the original native uv/npm and certification stamping owners; generated OpenAPI is regenerated on both paths. The transition checks the same source-version coherence used by packaging before reporting completion and restores its captured authoring state if convergence fails. This checks release identity, without resolving dependencies or requalifying lock freshness.
+
 Frontend dependency authoring remains native npm lock authoring. There is no Oh-Goon package resolver, dependency mirror, reconstructed lock, uv-lock normalizer, retained dependency wheel authority, or hidden release source table.

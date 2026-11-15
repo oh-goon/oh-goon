@@ -316,6 +316,40 @@ def test_source_layout_rejects_transport_artifacts_until_cleaned(
     assert authored.is_file()
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "README.md:Zone.Identifier",
+        "README.md:Zone.Identifier:$DATA",
+        "phase.patch",
+        "phase.patch.sha256",
+    ],
+)
+def test_source_layout_rejects_transport_directories_before_transient_pruning(
+    tmp_path: Path, name: str
+) -> None:
+    _minimal_source(tmp_path)
+    (tmp_path / "README.md").write_text("authored\n", encoding="utf-8")
+    materialized = tmp_path / "backend/.venv" / name
+    materialized.mkdir(parents=True)
+    (materialized / "generated.txt").write_text("generated\n", encoding="utf-8")
+    assert canonical_source_layout_issues(tmp_path, check_tracked_generated=False) == ()
+
+    contamination = tmp_path / name
+    contamination.mkdir()
+    payload = contamination / "transport.txt"
+    payload.write_text("transport\n", encoding="utf-8")
+
+    assert [issue.path for issue in source_transport_artifact_issues(tmp_path)] == [
+        contamination
+    ]
+    issues = canonical_source_layout_issues(tmp_path, check_tracked_generated=False)
+    assert [issue.path for issue in issues] == [contamination]
+    assert "transport-clean explicitly" in issues[0].reason
+    assert payload.read_text(encoding="utf-8") == "transport\n"
+    assert (materialized / "generated.txt").is_file()
+
+
 def test_git_import_keeps_product_source_and_excludes_local_history(
     tmp_path: Path,
 ) -> None:

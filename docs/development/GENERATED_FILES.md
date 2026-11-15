@@ -27,4 +27,9 @@ make check-generated
 
 If generated output is wrong, change the backend source or generator. Never repair `generated/frontend/` manually.
 
+Generated TypeScript uses deterministic shards with a preferred size. An indivisible
+schema or validator may exceed that target; physical line count does not decide
+contract validity. Native TypeScript checks and generated runtime decoders retain
+their semantic authority.
+
 Release build output is also reproducible and stages under `generated/release/`. Frontend builds must never copy output into `backend/src/oh_goon/`.

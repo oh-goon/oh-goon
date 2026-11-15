@@ -168,6 +168,36 @@ def test_package_slim_refuses_disposable_source_transport_artifacts(
     assert not output.exists()
 
 
+@pytest.mark.parametrize("symlink", [False, True])
+def test_package_slim_refuses_transport_directory_without_replacing_archive(
+    tmp_path: Path, symlink: bool
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+    (root / "README.md").write_text("authored\n", encoding="utf-8")
+    output = tmp_path / "source.zip"
+    package_slim.package_slim(output, root=root)
+    original_archive = output.read_bytes()
+    checksum = output.with_name(output.name + ".sha256")
+    original_checksum = checksum.read_bytes()
+
+    contamination = root / "README.md:Zone.Identifier"
+    target = tmp_path / "transport" if symlink else contamination
+    target.mkdir()
+    payload = target / "transport.txt"
+    payload.write_text("transport\n", encoding="utf-8")
+    if symlink:
+        contamination.symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="refuses 1 source transport artifact"):
+        package_slim.package_slim(output, root=root)
+
+    assert output.read_bytes() == original_archive
+    assert checksum.read_bytes() == original_checksum
+    assert payload.read_text(encoding="utf-8") == "transport\n"
+
+
 @pytest.mark.parametrize(
     "member",
     [
@@ -739,23 +769,42 @@ def test_archive_composition_reports_exact_zip_owners(tmp_path: Path) -> None:
     assert ranked == (("backend", 30), ("docs", 10))
 
 
-def test_package_slim_rejects_symlink_checksum_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("checksum_kind", ["symlink", "directory"])
+def test_package_slim_rejects_invalid_checksum_before_replacing_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, checksum_kind: str
 ) -> None:
     root = tmp_path / "root"
     root.mkdir()
     (root / "VERSION").write_text("1.2.3\n", encoding="utf-8")
+    source = root / "README.md"
+    source.write_text("original\n", encoding="utf-8")
     monkeypatch.setattr(package_slim, "ROOT", root)
     output = tmp_path / "out.zip"
     checksum = tmp_path / "out.zip.sha256"
+    package_slim.package_slim(output)
+    previous_archive = output.read_bytes()
+    checksum.unlink()
     checksum_target = tmp_path / "checksum-target"
     checksum_target.write_text("keep\n", encoding="utf-8")
-    checksum.symlink_to(checksum_target)
+    if checksum_kind == "symlink":
+        checksum.symlink_to(checksum_target)
+    else:
+        checksum.mkdir()
+        (checksum / "keep.txt").write_text("keep directory\n", encoding="utf-8")
+    source.write_text("changed\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="checksum output must not be a symlink"):
+    error = ValueError if checksum_kind == "symlink" else IsADirectoryError
+    with pytest.raises(error, match="checksum output"):
         package_slim.package_slim(output)
 
+    assert output.read_bytes() == previous_archive
     assert checksum_target.read_text(encoding="utf-8") == "keep\n"
+    if checksum_kind == "symlink":
+        assert checksum.is_symlink()
+    else:
+        assert (checksum / "keep.txt").read_text(encoding="utf-8") == "keep directory\n"
+    assert not list(tmp_path.glob(".out.zip.*.tmp"))
+    assert not list(tmp_path.glob(".out.zip.sha256.*.tmp"))
 
 
 def test_slim_archive_excludes_repo_local_playwright_browsers(
