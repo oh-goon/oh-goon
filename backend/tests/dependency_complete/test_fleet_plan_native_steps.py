@@ -4,10 +4,10 @@ import hashlib
 import json
 import shutil
 import sys
-import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal, NoReturn, cast
 
 import httpx2
@@ -553,17 +553,25 @@ def test_local_native_project_configuration_rejects_before_producer_work(
 def test_initial_evidence_uses_private_query_file_and_spends_the_same_step_deadline(
     tmp_path: Path, model_transport: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from oh_goon.integrations import fleet_plan_native_steps as native_steps
     from oh_goon.integrations import fleet_plan_step_execution as module
 
     repository, handoff, step, runtime = _case(tmp_path)
     original_factory = native_profile_command_runner
     timeouts: list[float] = []
     query_files: list[Path] = []
+    now = 100.0
+    clock = SimpleNamespace(monotonic=lambda: now)
+    # These two owners start and spend one Step deadline. Native command clocks
+    # keep real time; producer startup speed must not decide this assertion.
+    monkeypatch.setattr(module, "time", clock)
+    monkeypatch.setattr(native_steps, "time", clock)
 
     def factory(*args: Any, **kwargs: Any) -> Any:
         bound = original_factory(*args, **kwargs)
 
         def run(*argv: str, **options: Any) -> Any:
+            nonlocal now
             assert handoff.task not in " ".join(argv)
             timeouts.append(options["timeout"])
             if "--query-file" in argv:
@@ -571,15 +579,17 @@ def test_initial_evidence_uses_private_query_file_and_spends_the_same_step_deadl
                 assert query.read_text() == handoff.task
                 assert query.stat().st_mode & 0o777 == 0o600
                 query_files.append(query)
-                time.sleep(0.25)
-            return bound(*argv, **options)
+            result = bound(*argv, **options)
+            if "--query-file" in argv:
+                now += 0.25
+            return result
 
         return run
 
     monkeypatch.setattr(module, "native_profile_command_runner", factory)
     outcome = execute_direct_step(repository, step, runtime, step_order=1)
     assert outcome.returncode == 0, outcome.stderr
-    assert len(timeouts) == 2 and timeouts[1] < timeouts[0] - 0.2
+    assert timeouts == [10.0, 9.75]
     assert query_files and all(not path.exists() for path in query_files)
 
 
