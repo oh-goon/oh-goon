@@ -419,7 +419,7 @@ def _exercise_campaign(
             else:
                 assert len(observed.artifacts) == 1 and not observed.missing_artifacts
             observations.append(observed)
-            assert not list(layout.run_workspaces.glob("oh-goon-plan-*"))
+            assert not layout.run_workspaces.exists() or not any(layout.run_workspaces.iterdir())
             assert not (repository / "model.json").exists()
             assert not (plan.parent / "goons/general/isolated-build/model.json").exists()
             censuses.append(_census(environment, phase=f"{run_id}:terminal"))

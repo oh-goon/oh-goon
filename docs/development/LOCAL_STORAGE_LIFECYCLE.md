@@ -54,6 +54,24 @@ does not release historical Run references merely to reach a disk-size target.
 If the retained class dominates, its owner needs an explicit retention decision;
 removing arbitrary reference files or native cache directories is not that decision.
 
+## Storage pressure and Run results
+
+A native command completing successfully does not prove that its declared retained
+artifacts were committed. If publication of a produced artifact declared for
+content-store retention fails, the existing Step settlement reports failure and
+the Run requires attention. A terminal Run can
+therefore be `COMPLETED` with outcome `ATTENTION_REQUIRED`; inspect its Step and
+artifact evidence rather than interpreting `COMPLETED` as success. Scratch output
+alone is not a retained reference and cannot authorize a retained-byte export.
+
+Object bytes may have committed before reference publication fails. Such an
+unreferenced object is not an accepted artifact; the content-store lifecycle owner
+retains garbage-collection authority, including its reference and live-lease checks.
+Previously committed references and immutable Run history remain protected. These
+outcomes require the Journal's own durable storage to remain writable: if terminal
+facts cannot be persisted, readback must retain its unavailable or incomplete state
+rather than infer a successful or failed Run from leftover files.
+
 ## Race safety
 
 Different storage classes require different positive proof:
