@@ -131,6 +131,7 @@ def test_enrolled_team_preserves_original_plan_source_and_repository_identity():
     plans.run.assert_called_once_with(
         REPO / "goon.yml",
         repository_ids={team.repository.repository_id},
+        expected_repository_instance_ids={team.repository.repository_id: INSTANCE},
         fleet_run_id="known",
         requested_priority=SchedulingPriority.NORMAL,
         inputs={"profile": "strict"},
