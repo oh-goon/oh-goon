@@ -330,6 +330,12 @@ class FleetPlanInvalid(InvalidRequest):
     code = "FLEET_PLAN_INVALID"
 
 
+class RunResourceScopeUnavailable(FleetPlanInvalid):
+    """A valid Run budget cannot establish its selected native resource context."""
+
+    code = "RUN_RESOURCE_SCOPE_UNAVAILABLE"
+
+
 class FleetContentReferenceUnavailable(FleetPlanInvalid):
     """The retained reference is unavailable within its selected repository scope."""
 

@@ -5,9 +5,8 @@ import os
 import sys
 
 import pytest
-from sklearn.datasets import load_iris
-
 from iris_train import cli, dataset
+from sklearn.datasets import load_iris
 
 CANARY = "PRIVATE_CAPTURED_DATASET_RECORD"
 ARGUMENTS = [
@@ -45,9 +44,11 @@ def payload():
 
 
 @pytest.mark.parametrize("at_byte_bound", (False, True))
+@pytest.mark.parametrize("training_rounds", (1, 3))
 def test_captured_resource_trains_native_model_and_records_only_dataset_identity(
-    resource, capsys, at_byte_bound
+    resource, capsys, at_byte_bound, training_rounds
 ):
+    sys.argv.extend(["--training-rounds", str(training_rounds)])
     raw = json.dumps(payload(), separators=(",", ":")).encode()
     if at_byte_bound:
         raw += b" " * (dataset.MAX_DATASET_BYTES - len(raw))
@@ -55,27 +56,22 @@ def test_captured_resource_trains_native_model_and_records_only_dataset_identity
     resource.write_bytes(raw)
     assert cli.main() == 0
     metrics = json.loads(
-        (
-            resource.parents[2] / "output/ml-output/iris-training-metrics.json"
-        ).read_text()
+        (resource.parents[2] / "output/ml-output/iris-training-metrics.json").read_text()
     )
     parameters = json.loads(
-        (
-            resource.parents[2] / "output/ml-output/iris-model-parameters.json"
-        ).read_text()
+        (resource.parents[2] / "output/ml-output/iris-model-parameters.json").read_text()
     )
     assert metrics["dataset_sha256"] == hashlib.sha256(raw).hexdigest()
     assert metrics["training_examples"] == 120 and metrics["test_examples"] == 30
     assert metrics["accuracy"] >= metrics["minimum_accuracy"] == 0.9
     assert parameters["coefficients"]
+    if training_rounds > 1:
+        assert metrics["training_rounds"] == metrics["completed_training_rounds"] == 3
+    else:
+        assert "training_rounds" not in metrics
+        assert "completed_training_rounds" not in metrics
     captured = capsys.readouterr()
-    assert (
-        CANARY
-        not in json.dumps(metrics)
-        + json.dumps(parameters)
-        + captured.out
-        + captured.err
-    )
+    assert CANARY not in json.dumps(metrics) + json.dumps(parameters) + captured.out + captured.err
 
 
 @pytest.mark.parametrize(
@@ -109,11 +105,7 @@ def test_invalid_resource_refuses_before_fitting_without_private_rows(
     elif fault == "nonfinite":
         value["data"][0][0] = math.inf
     elif fault == "duplicate":
-        raw = (
-            b'{"data":[],"data":[],"target":[],"record_ids":["'
-            + CANARY.encode()
-            + b'"]}'
-        )
+        raw = b'{"data":[],"data":[],"target":[],"record_ids":["' + CANARY.encode() + b'"]}'
     elif fault == "shape":
         value["data"][0].pop()
     elif fault == "target-count":
@@ -145,10 +137,7 @@ def test_invalid_resource_refuses_before_fitting_without_private_rows(
         cli.main()
     assert stopped.value.code == 2
     captured = capsys.readouterr()
-    assert (
-        dataset.DatasetError.code in captured.err
-        and CANARY not in captured.err + captured.out
-    )
+    assert dataset.DatasetError.code in captured.err and CANARY not in captured.err + captured.out
     assert not (resource.parents[2] / "output/ml-output").exists()
 
 
@@ -178,10 +167,7 @@ def test_unsafe_resource_is_refused_without_blocking_or_following(
         cli.main()
     assert stopped.value.code == 2
     captured = capsys.readouterr()
-    assert (
-        dataset.DatasetError.code in captured.err
-        and CANARY not in captured.out + captured.err
-    )
+    assert dataset.DatasetError.code in captured.err and CANARY not in captured.out + captured.err
     assert target.read_text() == json.dumps(payload())
     assert not (resource.parents[2] / "output/ml-output").exists()
 

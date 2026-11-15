@@ -30,9 +30,15 @@ inputs:
     max: 2000
     default: 300
     description: Maximum estimator iterations passed to the training command
+  training_rounds:
+    type: integer
+    min: 1
+    max: 10000
+    default: 1
+    description: Finite repeated native fits for workload progress and interruption
 steps:
 - run: iris-train --dataset ${{ inputs.dataset }} --random-seed ${{ inputs.random_seed }} --test-size-percent ${{ inputs.test_size_percent }} --minimum-accuracy-percent
-    ${{ inputs.minimum_accuracy_percent }} --max-iterations ${{ inputs.max_iterations }}
+    ${{ inputs.minimum_accuracy_percent }} --max-iterations ${{ inputs.max_iterations }} --training-rounds ${{ inputs.training_rounds }}
   artifacts:
   - path: ml-output/iris-training-metrics.json
     retention: content_store
