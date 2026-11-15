@@ -56,6 +56,16 @@ removing arbitrary reference files or native cache directories is not that decis
 
 ## Storage pressure and Run results
 
+Python Goon preparation runs native `uv sync` before its application command.
+If a required wheel write fails during preparation, the native nonzero exit
+remains the Step attempt's observed result and the application does not start.
+Its declared output can be reported `MISSING`; this is not an accepted retained
+artifact. The Step command still describes the authored application, while
+native process events retain the preparation process lifecycle. Frozen preparation
+records `freshness: not_checked` even on failure: disk exhaustion is not proof
+that a lock is stale. Native uv retains authority over cache behavior and any
+fallback; a full cache alone does not establish preparation failure.
+
 A native command completing successfully does not prove that its declared retained
 artifacts were committed. If publication of a produced artifact declared for
 content-store retention fails, the existing Step settlement reports failure and
