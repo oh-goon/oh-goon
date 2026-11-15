@@ -533,7 +533,7 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
             assert (
                 step["settlement"]["outcome"]
                 == {
-                    "timeout": "FAILED",
+                    "timeout": "TIMED_OUT",
                     "complete": "SUCCESS",
                     "SIGINT": "CANCELLED",
                     "SIGTERM": "CANCELLED",
@@ -542,6 +542,11 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
             assert step["attempt_count"] == (1 if stop in {"timeout", "complete"} else 0)
             if stop == "timeout":
                 assert step["exit_code"] == 124
+                assert step["settlement"]["observed_returncode"] == 124
+                assert step["settlement"]["reason"] == "DEADLINE_EXPIRED"
+                supervisor = step["attempts"][0].get("supervisor")
+                if supervisor is not None:
+                    assert supervisor["cleanup_reason"] == "none"
                 assert step["project_source"] is None
                 assert step["uv"]["project"] == "."
             status = workflow.cli("runs", "show", run_id)[0]
@@ -599,7 +604,7 @@ def test_budgeted_training_progress_precedes_signal_or_deadline_settlement(
                             "execution_lane": "repository-native UV with native timeout"
                             if stop == "timeout"
                             else "captured Python Goon package",
-                            "deadline_owner": "native timeout utility; exit124 is command failure, not backend TIMED_OUT"
+                            "deadline_owner": "native timeout utility; canonical reserved exit124 settles TIMED_OUT, not expiry of the backend3600s command timer"
                             if stop == "timeout"
                             else "normal backend command default",
                             "first_training_fit_observed_before_settlement": True,
