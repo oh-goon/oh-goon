@@ -32,7 +32,6 @@ assertions.
 
 - Use realistic long repository, Plan, Goon, Step, error and evidence text.
 - The browser fixture may make backend facts deterministic; it must not invent a second frontend execution/Plan/Schedule model.
-- Fixture writes preserve reviewed identities, exact repository membership and generation/version fences. Schedule creation preserves backend idempotency; deleting and recreating an ID creates a new generation. Keep those facts in the existing Plan, repository and Schedule fixture owners, with persistence coordinated by `BrowserFixtureApiClient`.
 - Add a browser test when the user journey crosses several components/pages or when layout/zoom/browser behavior is the risk.
 - Keep component/domain behavior in colocated Vitest tests. Do not move ordinary unit tests into `e2e/`.
 - Do not replace browser assertions with screenshots. Content visibility and axe are independent hard gates.

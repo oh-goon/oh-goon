@@ -114,6 +114,12 @@ Change backend response semantics
 ## Tests
 
 Behavior tests stay colocated with the authored source owner. Feature tests remain inside their `features/<feature>/` directory; app/domain/common-component tests remain beside those owners. `../tests/` is support-only, with shared service-free frontend test support at `../tests/support/`.
+
+Browser fixture writes preserve reviewed identities, exact repository membership
+and generation/version fences. Schedule creation preserves backend idempotency;
+deleting and recreating an ID creates a new generation. Those facts stay in the
+existing Plan, repository and Schedule fixture owners, with persistence coordinated
+by `BrowserFixtureApiClient`.
 ## Change impact
 
 Frontend changes normally stay frontend-local: run affected colocated tests and `make -C .. check`. Add only applicable boundary proof; complete frontend portfolios run daily. The following owners guide the additional proof:
