@@ -56,6 +56,15 @@ removing arbitrary reference files or native cache directories is not that decis
 
 ## Storage pressure and Run results
 
+Diagnostic JSONL is passive evidence, not Run-result authority. A failed append
+reports `DIAGNOSTIC_SINK_FAILED` and can leave a partial record after the last
+complete record. Once capacity returns, the writer separates the next event
+from an unterminated tail using the same opened append descriptor. It preserves
+the damaged bytes, including an incomplete UTF-8 sequence; it does not repair
+that record or claim the entire history is valid. Later complete events remain
+independently readable. Diagnostic loss must not turn a successful command into
+failure or a failed command into success.
+
 Python Goon preparation runs native `uv sync` before its application command.
 If a required wheel write fails during preparation, the native nonzero exit
 remains the Step attempt's observed result and the application does not start.
@@ -81,6 +90,15 @@ Previously committed references and immutable Run history remain protected. Thes
 outcomes require the Journal's own durable storage to remain writable: if terminal
 facts cannot be persisted, readback must retain its unavailable or incomplete state
 rather than infer a successful or failed Run from leftover files.
+
+SQLite decides whether a write can proceed: allocated pages or WAL capacity can
+still be reused on a filesystem with no free blocks. A real write failure can
+leave a claimed Run nonterminal even after its native command and worker exit.
+After capacity is restored, the existing scoped recovery owner requires original
+process-quiescence evidence before reconciling that Run. Missing durable results
+remain unknown, outputs are quarantined, and work is not automatically replayed.
+Prior accepted Run, Step and artifact facts remain protected; a newer Game Tape
+read can carry an advanced `journal_revision` without changing those facts.
 
 ## Race safety
 

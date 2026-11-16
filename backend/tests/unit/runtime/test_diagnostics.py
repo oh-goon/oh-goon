@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Never
+
+import pytest
 
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.runtime.diagnostics import DiagnosticRouter, JsonlDiagnosticSink
@@ -34,7 +37,7 @@ def _event(message: str = "projection failed") -> DiagnosticEvent:
     )
 
 
-def test_router_keeps_delivering_after_one_sink_fails(capsys) -> None:
+def test_router_keeps_delivering_after_one_sink_fails(capsys: pytest.CaptureFixture[str]) -> None:
     capture = _CaptureSink()
     router = DiagnosticRouter((_BrokenSink(), capture))
 
@@ -74,6 +77,36 @@ def test_jsonl_sink_rotates_without_becoming_an_execution_owner(tmp_path: Path) 
     assert path.with_name("diagnostics.jsonl.1").exists()
 
 
+@pytest.mark.parametrize("reopen", [False, True], ids=["same-sink", "reopened-sink"])
+@pytest.mark.parametrize(
+    "fragment",
+    [b'{"event_id":"unfinished-storage-write', b'{"message":"split UTF-8 \xc3'],
+    ids=["partial-json", "partial-utf8"],
+)
+def test_jsonl_sink_keeps_new_records_readable_after_a_torn_append(
+    tmp_path: Path, reopen: bool, fragment: bytes
+) -> None:
+    path = tmp_path / "diagnostics.jsonl"
+    sink = JsonlDiagnosticSink(path)
+    first = _event("complete before storage failure")
+    sink.write(first)
+    with path.open("ab") as stream:
+        stream.write(fragment)
+    prior_bytes = path.read_bytes()
+    if reopen:
+        sink = JsonlDiagnosticSink(path)
+    resumed = _event("complete after capacity returns")
+
+    sink.write(resumed)
+
+    contents = path.read_bytes()
+    assert contents.startswith(prior_bytes)
+    assert json.loads(contents.splitlines()[0])["event_id"] == first.event_id
+    assert json.loads(contents.splitlines()[-1]) == resumed.model_dump(
+        mode="json", exclude_none=True
+    )
+
+
 def test_exception_event_is_bounded_even_when_exception_stringification_is_broken() -> None:
     class BrokenStringError(RuntimeError):
         def __str__(self) -> str:
@@ -93,7 +126,9 @@ def test_exception_event_is_bounded_even_when_exception_stringification_is_broke
     assert len(event.traceback) <= 20_000
 
 
-def test_router_fallback_survives_broken_sink_exception_stringification(capsys) -> None:
+def test_router_fallback_survives_broken_sink_exception_stringification(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     class BrokenStringError(RuntimeError):
         def __str__(self) -> str:
             raise ValueError("cannot stringify")
@@ -141,11 +176,11 @@ def test_exception_event_redacts_credentials_and_local_user_paths() -> None:
 
 
 def test_frame_only_exception_diagnostic_excludes_source_locals_and_error_chain(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import linecache
 
-    def reject_source_lookup(*args, **kwargs):
+    def reject_source_lookup(*args: object, **kwargs: object) -> Never:
         raise AssertionError("frame-only diagnostics must not read source files")
 
     monkeypatch.setattr(linecache, "getline", reject_source_lookup)

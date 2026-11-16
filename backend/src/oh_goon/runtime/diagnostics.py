@@ -104,11 +104,18 @@ class JsonlDiagnosticSink:
                 self._rotate_locked()
             descriptor = os.open(
                 self._path,
-                os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_CLOEXEC", 0),
+                os.O_RDWR | os.O_CREAT | os.O_APPEND | getattr(os, "O_CLOEXEC", 0),
                 0o600,
             )
             try:
                 os.fchmod(descriptor, 0o600)
+                # A failed append can leave a partial record. Preserve those
+                # bytes while keeping the next complete event on its own line,
+                # including after a new sink opens the same file.
+                if os.lseek(descriptor, 0, os.SEEK_END):
+                    os.lseek(descriptor, -1, os.SEEK_END)
+                    if os.read(descriptor, 1) != b"\n":
+                        payload = "\n" + payload
                 with os.fdopen(descriptor, "a", encoding="utf-8", closefd=False) as handle:
                     handle.write(payload)
                     handle.flush()
