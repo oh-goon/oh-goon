@@ -145,9 +145,10 @@ def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
             "the new CLI environment before requesting a fresh Run. Inspect existing Runs first."
         )
     elif isinstance(exc, (DurableStateBusy, ExecutionBusy)):
-        code = "PLAN_RESOLUTION_REJECTED"
+        execution_busy = isinstance(exc, ExecutionBusy)
+        code = exc.code if execution_busy else "PLAN_RESOLUTION_REJECTED"
         inputs = []
-        stage = "plan_resolution"
+        stage = "execution_admission" if execution_busy else "plan_resolution"
         action = (
             "Wait for active execution to settle, or inspect retained ownership through "
             "the original matching runtime's recovery tools; then retry."

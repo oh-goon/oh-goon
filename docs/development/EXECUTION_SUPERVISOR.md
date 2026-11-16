@@ -32,8 +32,14 @@ Agent ingress requires one candidate repository and one frozen native selection;
 general target parallelism does not enable mixed-harness native overlap.
 Independent databases have separate authority domains, not a shared capacity or
 workspace lease. Choosing another store cannot prove an older writer quiescent or
-authorize concurrent mutation of its workspace. See the [native concurrency
-scope](AGENT_HARNESS_COMPATIBILITY.md#native-concurrency-boundary).
+authorize concurrent mutation of its workspace. Select one shared `OH_GOON_DB`
+for commands that mutate shared targets, or use explicitly disjoint writable
+workspaces. A busy CLI refusal retains `EXECUTION_BUSY` with diagnostic stage
+`execution_admission`; the Plan is not thereby invalid. Inspect the original Run
+through fresh read-only commands, wait for it to settle, then request a fresh
+admission. There is no automatic waiting queue or replay. The Make test CPU
+governor supplies no production-wide capacity guarantee for independent CLI
+invocations or state roots. See the [native concurrency scope](AGENT_HARNESS_COMPATIBILITY.md#native-concurrency-boundary).
 Its [scoped admission proof](AGENT_HARNESS_COMPATIBILITY.md#scoped-native-admission-qualification--2026-11-06)
 checks refusal while the original worker is alive and fresh admission after
 settlement; it does not qualify overlapping native Runs or expand capacity.
@@ -61,6 +67,12 @@ settlement while custody remains unclaimed. A process exit, lost observation
 channel or supervisor diagnostic cannot manufacture a
 terminal Run result. Native harness sessions remain below Step/Attempt and do
 not own Run admission, recovery or durable truth.
+
+If observation fails after CLI admission, the diagnostic retains the original
+state-conflict code and `run_observation` stage. Inspect that Run's handoff and
+use the matching runtime's scoped recovery after establishing original-process
+quiescence. This error is not a Plan repair request or proof that retrying is
+safe; it supplies no terminal-outcome or cleanup authority.
 
 ### Second-terminal cancellation
 

@@ -25,7 +25,7 @@ from oh_goon.cli_plan_run_readback import (
 )
 from oh_goon.cli_plan_summary import captured_workflow_summary
 from oh_goon.cli_result import CliTermination
-from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid
+from oh_goon.core.errors import FleetDomainError, FleetPlanInvalid, StateConflict
 from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import AgentRepairBudget, AgentRepairResult
 from oh_goon.core.models.caller_input_file import CallerInputFileIdentity
@@ -406,7 +406,19 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         return 143 if isinstance(interruption, CliTermination) else 130
     except (FleetDomainError, ValueError) as exc:
         diagnostic_fields: dict[str, str] = {}
-        if hasattr(args, "_run_configuration"):
+        if admitted is not None and isinstance(exc, StateConflict):
+            diagnostic_fields = {
+                "code": exc.code,
+                "stage": "run_observation",
+                "safe_next_action": (
+                    "Inspect this original Run with 'oh-goon runs handoff RUN_ID --json'. "
+                    "This error establishes neither its terminal outcome nor physical cleanup. "
+                    "Use the original matching runtime's scoped recovery after verifying "
+                    "original process quiescence; do not rerun unresolved effects."
+                ),
+            }
+            message = f"{exc.code}: {diagnostic_fields['safe_next_action']}"
+        elif hasattr(args, "_run_configuration"):
             from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
 
             diagnostic = safe_plan_diagnostic(exc)
