@@ -83,6 +83,13 @@ therefore be `COMPLETED` with outcome `ATTENTION_REQUIRED`; inspect its Step and
 artifact evidence rather than interpreting `COMPLETED` as success. Scratch output
 alone is not a retained reference and cannot authorize a retained-byte export.
 
+During an active Run, lifecycle events may already show a Step as `PASSED`
+while its repository's OperationReport is still pending. Attempt details,
+accepted settlement and artifact payloads can remain unavailable until that
+report is committed, including when a later Step keeps the repository active.
+Read `runs outputs` and the settlement together; a transient passed status does
+not authorize exporting scratch bytes or inventing a retained reference.
+
 Object bytes may have committed before reference publication fails. Such an
 unreferenced object is not an accepted artifact; the content-store lifecycle owner
 retains garbage-collection authority, including its reference and live-lease checks.
