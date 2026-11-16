@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -9,7 +10,9 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from contextlib import suppress
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from oh_goon.core import local_access_protocol
@@ -24,6 +27,11 @@ from oh_goon.repository_tooling.local_access_http import (
     new_certification_access_token,
 )
 from oh_goon.repository_tooling.release.check_release_artifact import release_artifact_issues
+from oh_goon.repository_tooling.release.cli_runtime_journey import (
+    CliRunner,
+    InstalledCliRuntimeAcceptance,
+    exercise_installed_cli_runtime,
+)
 
 ROOT = Path(__file__).resolve().parents[5]
 HOST = "127.0.0.1"
@@ -111,6 +119,7 @@ def _installed_runtime_environment(state: Path, *, access_token: str) -> dict[st
             "HOME": str(state / "home"),
             "XDG_CONFIG_HOME": str(state / "config"),
             "XDG_DATA_HOME": str(state / "data"),
+            "XDG_STATE_HOME": str(state / "state"),
             "XDG_CACHE_HOME": str(state / "cache"),
             "LOCALAPPDATA": str(state / "local-app-data"),
             "OH_GOON_DB": str(state / "oh-goon.db"),
@@ -162,17 +171,20 @@ def _accept_installed_runtime(
     acceptance_repository = repositories / "acceptance-repo"
     access_token = new_certification_access_token()
     env = _installed_runtime_environment(state, access_token=access_token)
-    provenance_issues = _verify_installed_package_origin(
-        command=command,
-        temp=temp,
-        env=env,
+    cli_temp = temp / "cli-runtime"
+    cli_temp.mkdir()
+    cli_result = _accept_installed_cli_runtime(
+        command,
+        cli_temp,
+        _installed_runtime_environment(temp / "cli-state", access_token=access_token),
         expected_version=(root / "VERSION").read_text(encoding="utf-8").strip(),
     )
-    if provenance_issues:
-        return provenance_issues
+    print("INSTALLED_CLI_RUNTIME=" + json.dumps(asdict(cli_result), sort_keys=True))
+    if cli_result.issues:
+        return cli_result.issues
     base_url = f"http://{HOST}:{port}"
     process = subprocess.Popen(
-        (str(command), "serve", "--host", HOST, "--port", str(port)),
+        (str(command), "app", "serve", "--host", HOST, "--port", str(port)),
         cwd=temp,
         env=env,
     )
@@ -208,7 +220,7 @@ def _accept_installed_runtime(
         return ("installed release did not create persistent SQLite state",)
 
     process = subprocess.Popen(
-        (str(command), "serve", "--host", HOST, "--port", str(port)),
+        (str(command), "app", "serve", "--host", HOST, "--port", str(port)),
         cwd=temp,
         env=env,
     )
@@ -248,6 +260,34 @@ def _accept_installed_runtime(
     finally:
         _stop_process(process)
     return ()
+
+
+def _accept_installed_cli_runtime(
+    command: Path,
+    temp: Path,
+    env: Mapping[str, str],
+    *,
+    expected_version: str,
+    runner: CliRunner | None = None,
+) -> InstalledCliRuntimeAcceptance:
+    """Verify one existing installation, then exercise its isolated CLI surface."""
+    temp.mkdir(parents=True, exist_ok=True)
+    provenance = _verify_installed_package_origin(
+        command=command,
+        temp=temp,
+        env=dict(env),
+        expected_version=expected_version,
+    )
+    if provenance:
+        return InstalledCliRuntimeAcceptance(issues=provenance)
+    result = exercise_installed_cli_runtime(
+        command,
+        temp,
+        env,
+        expected_version=expected_version,
+        runner=runner,
+    )
+    return replace(result, provenance_verified=True)
 
 
 def _install_locked_runtime(
@@ -331,12 +371,28 @@ def accept_release(root: Path = ROOT, *, runner: Runner = subprocess.run) -> tup
     if not wheel.is_file():
         return (f"verified release wheel is missing: {wheel.relative_to(root)}",)
 
-    with tempfile.TemporaryDirectory(prefix="oh-goon-release-accept-") as temporary:
-        temp = Path(temporary)
+    temp = Path(tempfile.mkdtemp(prefix="oh-goon-release-accept-"))
+    retained = (
+        f"Installed release acceptance state retained at {temp}. "
+        "Establish original-owner quiescence before removing this private directory."
+    )
+    try:
         venv = _install_locked_runtime(root, temp=temp, wheel=wheel, runner=runner)
         command = _venv_command(venv, "oh-goon")
-        runner((str(command), "--help"), cwd=temp, check=True, stdout=subprocess.DEVNULL)
-        return _accept_installed_runtime(root, command, temp, port=_allocate_acceptance_port())
+        issues = _accept_installed_runtime(root, command, temp, port=_allocate_acceptance_port())
+    except BaseException:
+        with suppress(OSError, ValueError):
+            print(retained, file=sys.stderr)
+        raise
+    if issues:
+        with suppress(OSError, ValueError):
+            print(retained, file=sys.stderr)
+        return issues
+    try:
+        shutil.rmtree(temp)
+    except OSError as error:
+        return (f"Installed release acceptance cleanup failed at {temp}: {error}",)
+    return ()
 
 
 def main() -> int:

@@ -81,6 +81,11 @@ The optional global `cli-install` target builds a standard wheel, which requires
 the release owner's generated UI payload. It is not required for backend
 development or the browser-first source startup path.
 
+A built release carries that UI payload; its CLI does not need Node, npm or a
+browser on the runtime PATH. Python and the native tools required by the selected
+workflow still apply. Release assembly uses frontend tools at build time, and
+installed release acceptance checks the isolated CLI before its UI/API journey.
+
 ## Source map
 
 ```text
