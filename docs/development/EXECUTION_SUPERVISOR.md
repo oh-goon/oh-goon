@@ -68,6 +68,12 @@ channel or supervisor diagnostic cannot manufacture a
 terminal Run result. Native harness sessions remain below Step/Attempt and do
 not own Run admission, recovery or durable truth.
 
+If observation fails after CLI admission, the diagnostic retains the original
+state-conflict code and `run_observation` stage. Inspect that Run's handoff and
+use the matching runtime's scoped recovery after establishing original-process
+quiescence. This error is not a Plan repair request or proof that retrying is
+safe; it supplies no terminal-outcome or cleanup authority.
+
 ### Second-terminal cancellation
 
 `oh-goon runs cancel RUN_ID` opens observation-only state and addresses the

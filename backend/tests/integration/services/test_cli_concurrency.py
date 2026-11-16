@@ -88,6 +88,10 @@ class CliConcurrencyFacts:
     scope: str
     step_statuses: tuple[str, ...] = ()
     interruption_receipt_cleanup: str | None = None
+    control_code: str | None = None
+    control_stage: str | None = None
+    recovered_failure_code: str | None = None
+    effect_quarantines: int = 0
 
 
 @dataclass
@@ -111,14 +115,20 @@ class _CliCase:
         self.runs: list[NativeRunFact] = []
         root.mkdir(parents=True, exist_ok=True)
 
-    def start(self, arguments: tuple[str, ...], environment: Mapping[str, str]) -> _Capture:
+    def start(
+        self,
+        arguments: tuple[str, ...],
+        environment: Mapping[str, str],
+        *,
+        program: Path | None = None,
+    ) -> _Capture:
         env = dict(environment)
         for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
             env.pop(name, None)
         index = len(self.captures)
         output = (self.root / f"cli-{index}.stdout").open("w+b")
         errors = (self.root / f"cli-{index}.stderr").open("w+b")
-        argv = (str(self.command), *arguments)
+        argv = (str(self.command if program is None else program), *arguments)
         try:
             process = subprocess.Popen(
                 argv,
@@ -422,6 +432,88 @@ def exercise_independent_state_cli(
         case.close()
 
 
+def exercise_worker_crash_cli(
+    command: Path,
+    root: Path,
+    environment: Mapping[str, str],
+) -> CliConcurrencyFacts:
+    """Observe original worker death; only explicit scoped recovery settles it."""
+    case = _CliCase(command, root)
+    try:
+        configuration = case.prepare("a", root / "repository", environment)
+        active = case.launch(configuration, environment)
+        original = case.held("a", environment, active)
+        original_handoff = case.cli(("runs", "handoff", original.run_id), environment)
+        signal.pidfd_send_signal(case.handles[original.worker.pid], signal.SIGKILL)
+        control = case.finish(active, expected=2)
+        assert control["code"] == "STATE_CONFLICT" and control["stage"] == "run_observation"
+        action = control["safe_next_action"]
+        assert isinstance(action, str) and action
+        from oh_goon.core.errors import FleetPlanInvalid
+        from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
+
+        # A valid admitted Run needs observation/recovery, not the generic
+        # instruction used when Plan/source selection itself was rejected.
+        assert action != safe_plan_diagnostic(FleetPlanInvalid("fixture"))["safe_next_action"]
+        before = case.cli(("runs", "show", original.run_id), environment)
+        assert before["status"] == "RUNNING"
+        recovery_script = root / "recover.py"
+        recovery_script.write_text("""import json,sys
+from oh_goon.application import ApplicationRuntime
+runtime=ApplicationRuntime.build(standard_local=True,startup_purpose='workflow')
+try:
+    run_id=sys.argv[1]
+    assert runtime.runs.get(run_id).run.status.value=='RUNNING'
+    runtime.recovery.recover_worker_exit(run_id,quiescence_timeout_seconds=5)
+    detail=runtime.runs.get(run_id)
+    assert detail.run.status.value=='FAILED'
+    print(json.dumps({'run_id':run_id,'status':detail.run.status.value,
+        'failure_code':detail.run.failure.code,'operations':len(detail.operations),
+        'quarantines':len(runtime.recovery.status().effect_quarantines)}))
+finally:
+    runtime.shutdown(wait_for_runs=True)
+""")
+        python = command.with_name("python.exe" if os.name == "nt" else "python")
+        recovered = case.finish(
+            case.start(
+                ("-I", str(recovery_script), original.run_id),
+                environment,
+                program=python,
+            )
+        )
+        assert recovered["status"] == "FAILED"
+        assert recovered["failure_code"] == "REPOSITORY_EFFECT_OUTCOME_UNKNOWN"
+        assert recovered["operations"] == 0 and recovered["quarantines"] == 1
+        database = LocalDatabase(Path(environment["OH_GOON_DB"]), read_only=True)
+        assert ExecutionCoordinator(database).active_lease() is None
+        case.retired(original)
+        after = case.cli(("runs", "show", original.run_id), environment)
+        assert after["status"] == "FAILED"
+        tape = case.cli(("runs", "tape", original.run_id), environment)
+        step = tape["repositories"][0]["steps"][0]
+        assert step["settlement"]["outcome"] != "SUCCESS"
+        final_handoff = case.cli(("runs", "handoff", original.run_id), environment)
+        assert final_handoff["source_admissions"] == original_handoff["source_admissions"]
+        assert (root / "a.effects").read_text() == "a\n"
+        return CliConcurrencyFacts(
+            "original-worker-crash",
+            (environment["OH_GOON_DB"],),
+            tuple(case.runs),
+            (after["outcome"],),
+            None,
+            False,
+            tuple(case.commands),
+            "worker exit is observation only; original installed scoped recovery preserves unknown effects/quarantine without replay",
+            (step["status"],),
+            control_code=control["code"],
+            control_stage=control["stage"],
+            recovered_failure_code=recovered["failure_code"],
+            effect_quarantines=recovered["quarantines"],
+        )
+    finally:
+        case.close()
+
+
 def _environment(root: Path) -> dict[str, str]:
     environment = dict(os.environ)
     for name in tuple(environment):
@@ -473,6 +565,22 @@ def test_independent_cli_state_cancellation_does_not_stop_other_run() -> None:
     except BaseException as error:
         error.add_note(
             f"Private concurrency fixture retained at {root}; establish owner quiescence before removal"
+        )
+        raise
+    else:
+        print("CLI_CONCURRENCY=" + json.dumps(asdict(facts), sort_keys=True))
+        shutil.rmtree(root)
+
+
+def test_original_worker_crash_keeps_original_unknown_recovery_authority() -> None:
+    root = Path(tempfile.mkdtemp(prefix="oh-goon-cli-worker-crash-"))
+    try:
+        facts = exercise_worker_crash_cli(
+            Path(sys.executable).with_name("oh-goon"), root, _environment(root / "state")
+        )
+    except BaseException as error:
+        error.add_note(
+            f"Private crash fixture retained at {root}; establish owner quiescence before removal"
         )
         raise
     else:
