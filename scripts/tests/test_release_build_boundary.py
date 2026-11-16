@@ -30,6 +30,11 @@ from oh_goon.engine.command import (
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.source_snapshot import snapshot_source_directory
 from oh_goon.repository_tooling import source_layout
+from oh_goon.repository_tooling.local_access_http import new_certification_access_token
+from oh_goon.repository_tooling.release.accept_release import (
+    _accept_installed_cli_runtime,
+    _installed_runtime_environment,
+)
 from oh_goon.services.template_plan_drafts import (
     AGENT_REVIEW_EXAMPLE,
     agent_review_companion_files,
@@ -510,6 +515,7 @@ def test_native_wheel_includes_captured_python_project_without_generated_outputs
 def test_installed_wheel_initializes_complete_agent_workflow_without_checkout_resources(
     tmp_path: Path,
 ) -> None:
+    """One dummy-UI package fixture; canonical release qualification is separate."""
     root = tmp_path / "source"
     backend = root / "backend"
     backend.mkdir(parents=True)
@@ -582,9 +588,8 @@ def test_installed_wheel_initializes_complete_agent_workflow_without_checkout_re
     database = tmp_path / "operational.sqlite"
     native_environment["OH_GOON_DB"] = str(database)
     native_environment.pop("PYTHONPATH", None)
-    shutil.rmtree(root / "templates")
-    shutil.rmtree(root / "examples")
-    shutil.rmtree(backend / "src")
+    shutil.rmtree(root)
+    assert not root.exists()
     formatter = subprocess.run(
         [
             str(environment / "bin/python"),
@@ -679,6 +684,46 @@ def test_installed_wheel_initializes_complete_agent_workflow_without_checkout_re
     assert report["proof"]["admission"] == report["proof"]["execution"] == "not-started"
     assert not database.exists()
     assert not (output / "goon.lock").exists()
+
+    cli_root = tmp_path / "installed-cli-no-node"
+    cli_root.mkdir()
+    cli_environment = _installed_runtime_environment(
+        cli_root / "state", access_token=new_certification_access_token()
+    )
+    acceptance = _accept_installed_cli_runtime(
+        environment / "bin/oh-goon",
+        cli_root,
+        cli_environment,
+        expected_version=(ROOT / "VERSION").read_text(encoding="utf-8").strip(),
+    )
+    assert acceptance.issues == ()
+    assert acceptance.provenance_verified
+    assert acceptance.state_free_actions
+    assert acceptance.run_id and acceptance.missing_uv_run_id
+    assert acceptance.run_id != acceptance.missing_uv_run_id
+    assert acceptance.fresh_readback_verified and acceptance.database_identity_preserved
+    assert acceptance.receiving_path
+    assert {"git", "uv"}.issubset(name for name, _version in acceptance.native_versions)
+    assert all(version for _name, version in acceptance.native_versions)
+    assert {"node", "npm", "npx"}.issubset(acceptance.absent_tools)
+    print(
+        "INSTALLED_PACKAGE_CLI_NO_NODE="
+        + json.dumps(
+            {
+                "scope": "dummy-UI package boundary; canonical release qualification is separate",
+                "absent_tools": acceptance.absent_tools,
+                "native_versions": dict(acceptance.native_versions),
+                "run_id": acceptance.run_id,
+                "missing_uv_run_id": acceptance.missing_uv_run_id,
+                "state_free_actions": acceptance.state_free_actions,
+                "receiving_path": acceptance.receiving_path,
+                "fresh_readback_verified": acceptance.fresh_readback_verified,
+                "database_identity_preserved": acceptance.database_identity_preserved,
+                "provenance_verified": acceptance.provenance_verified,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def test_release_staging_is_owned_by_release_script_not_make_bootstrap_target() -> None:

@@ -15,11 +15,18 @@ from oh_goon.repository_tooling.release.accept_container import (
     accept_container,
 )
 from oh_goon.repository_tooling.release.accept_release import (
+    _accept_installed_cli_runtime,
+    _accept_installed_runtime,
     _install_locked_runtime,
     _installed_runtime_environment,
     _verify_installed_package_origin,
     _wait_http,
     accept_release,
+)
+from oh_goon.repository_tooling.release.cli_runtime_journey import (
+    InstalledCliRuntimeAcceptance,
+    _bounded_command,
+    exercise_installed_cli_runtime,
 )
 from oh_goon.repository_tooling.dependency_locks import (
     ROOT as DEPENDENCY_LOCK_ROOT,
@@ -211,6 +218,157 @@ def test_real_release_acceptance_delegates_dependency_admission_to_build_release
     assert calls == [("make", "build-release")]
 
 
+@pytest.mark.parametrize(
+    "outcome",
+    (
+        "success",
+        "issues",
+        "timeout",
+        "exception",
+        "issues-broken-stderr",
+        "timeout-broken-stderr",
+    ),
+)
+def test_release_acceptance_cleans_only_after_complete_runtime_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    outcome: str,
+) -> None:
+    import sqlite3
+    import tempfile
+    from contextlib import closing
+
+    from oh_goon.repository_tooling.release import accept_release as module
+
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "VERSION").write_text("1.2.3")
+    wheel = root / "generated/release/dist/oh_goon-1.2.3-py3-none-any.whl"
+    wheel.parent.mkdir(parents=True)
+    wheel.write_bytes(b"fixture wheel")
+    original_mkdtemp = tempfile.mkdtemp
+    observed: list[Path] = []
+    database_bytes: list[bytes] = []
+    primary = outcome.removesuffix("-broken-stderr")
+    failure = (
+        subprocess.TimeoutExpired(("installed-cli",), 120)
+        if primary == "timeout"
+        else RuntimeError("original runtime failure")
+    )
+
+    def install(_root: Path, *, temp: Path, **_options: Any) -> Path:
+        observed.append(temp)
+        assert temp.stat().st_mode & 0o777 == 0o700
+        state = temp / "state"
+        state.mkdir()
+        database = state / "oh-goon.db"
+        with closing(sqlite3.connect(database)) as connection, connection:
+            connection.execute("CREATE TABLE retained_work(value TEXT)")
+            connection.execute(
+                "INSERT INTO retained_work VALUES ('original Run authority')"
+            )
+        database_bytes.append(database.read_bytes())
+        (temp / "owned-native-sentinel").write_text("may still be in use")
+        return temp / "venv"
+
+    def runtime(*_args: object, **_options: object) -> tuple[str, ...]:
+        if primary in {"timeout", "exception"}:
+            raise failure
+        return ("original runtime issue",) if primary == "issues" else ()
+
+    monkeypatch.setattr(
+        "oh_goon.repository_tooling.release.accept_release.tempfile.mkdtemp",
+        lambda **options: original_mkdtemp(dir=tmp_path, **options),
+    )
+    monkeypatch.setattr(module, "release_artifact_issues", lambda _root: ())
+    monkeypatch.setattr(module, "_install_locked_runtime", install)
+    monkeypatch.setattr(module, "_accept_installed_runtime", runtime)
+    monkeypatch.setattr(module, "_allocate_acceptance_port", lambda: 12345)
+
+    def runner(
+        argv: Sequence[str], **_options: Any
+    ) -> subprocess.CompletedProcess[object]:
+        return subprocess.CompletedProcess(argv, 0)
+
+    class BrokenStderr:
+        def write(self, _text: str) -> int:
+            if primary == "issues":
+                raise OSError("fixture stderr unavailable")
+            raise ValueError("fixture stderr closed")
+
+    with monkeypatch.context() as notice:
+        if outcome.endswith("-broken-stderr"):
+            notice.setattr(
+                "oh_goon.repository_tooling.release.accept_release.sys.stderr",
+                BrokenStderr(),
+            )
+        if primary in {"timeout", "exception"}:
+            with pytest.raises(type(failure)) as caught:
+                accept_release(root, runner=runner)
+            assert caught.value is failure
+        else:
+            issues = accept_release(root, runner=runner)
+            assert issues == (
+                ("original runtime issue",) if primary == "issues" else ()
+            )
+    temp = observed[0]
+    diagnostic = capsys.readouterr().err
+    if primary == "success":
+        assert not temp.exists() and diagnostic == ""
+    else:
+        if not outcome.endswith("-broken-stderr"):
+            assert str(temp) in diagnostic and "quiescence" in diagnostic
+        assert (temp / "owned-native-sentinel").read_text() == "may still be in use"
+        database = temp / "state/oh-goon.db"
+        assert database.read_bytes() == database_bytes[0]
+        with closing(sqlite3.connect(database)) as connection:
+            assert connection.execute("SELECT value FROM retained_work").fetchone() == (
+                "original Run authority",
+            )
+
+
+def test_release_acceptance_reports_success_cleanup_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.repository_tooling.release import accept_release as module
+
+    (tmp_path / "VERSION").write_text("1.2.3")
+    wheel = tmp_path / "generated/release/dist/oh_goon-1.2.3-py3-none-any.whl"
+    wheel.parent.mkdir(parents=True)
+    wheel.write_bytes(b"fixture wheel")
+    retained = tmp_path / "retained"
+    retained.mkdir(mode=0o700)
+    (retained / "state.db").write_bytes(b"completed original state")
+    monkeypatch.setattr(
+        "oh_goon.repository_tooling.release.accept_release.tempfile.mkdtemp",
+        lambda **kwargs: str(retained),
+    )
+    monkeypatch.setattr(module, "release_artifact_issues", lambda _root: ())
+    monkeypatch.setattr(
+        module, "_install_locked_runtime", lambda *args, **kwargs: retained / "venv"
+    )
+    monkeypatch.setattr(module, "_accept_installed_runtime", lambda *args, **kwargs: ())
+    monkeypatch.setattr(module, "_allocate_acceptance_port", lambda: 12345)
+
+    def refuse(_path: Path) -> None:
+        raise OSError("fixture cleanup is unavailable")
+
+    monkeypatch.setattr(
+        "oh_goon.repository_tooling.release.accept_release.shutil.rmtree", refuse
+    )
+    issues = accept_release(
+        tmp_path, runner=lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0)
+    )
+    assert (
+        len(issues) == 1
+        and "cleanup failed" in issues[0]
+        and str(retained) in issues[0]
+    )
+    assert (retained / "state.db").read_bytes() == b"completed original state"
+
+
 def test_container_acceptance_fails_before_docker_without_required_source_evidence(
     tmp_path: Path,
 ) -> None:
@@ -246,6 +404,7 @@ def test_installed_runtime_environment_cannot_import_or_configure_from_source(
     monkeypatch.setenv("UV_PRERELEASE", "always")
     monkeypatch.setenv("UV_EXCLUDE_NEWER", "2020-01-01")
     monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/ambient/project-env")
+    monkeypatch.setenv("XDG_STATE_HOME", "/source/private-state")
     state = tmp_path / "state"
 
     env = _installed_runtime_environment(state, access_token="acceptance-token")
@@ -262,6 +421,7 @@ def test_installed_runtime_environment_cannot_import_or_configure_from_source(
     assert env["HOME"] == str(state / "home")
     assert env["XDG_CONFIG_HOME"] == str(state / "config")
     assert env["XDG_DATA_HOME"] == str(state / "data")
+    assert env["XDG_STATE_HOME"] == str(state / "state")
     assert env["XDG_CACHE_HOME"] == str(state / "cache")
     assert env["LOCALAPPDATA"] == str(state / "local-app-data")
     assert env["OH_GOON_DB"] == str(state / "oh-goon.db")
@@ -315,14 +475,99 @@ def test_installed_release_restart_executes_again_under_new_runtime_authority() 
     )
 
 
-def test_installed_release_acceptance_uses_configurable_serve_command() -> None:
-    script = (
-        Path(__file__).resolve().parents[2]
-        / "backend/src/oh_goon/repository_tooling/release/accept_release.py"
-    ).read_text(encoding="utf-8")
-    expected = '(str(command), "serve", "--host", HOST, "--port", str(port))'
-    assert script.count(expected) == 2
-    assert '(str(command), "start", "--port"' not in script
+def test_installed_release_acceptance_uses_current_app_serve_grammar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oh_goon.cli_parser import build_parser
+    from oh_goon.repository_tooling.release import accept_release as module
+
+    (tmp_path / "VERSION").write_text("1.2.3")
+    temp = tmp_path / "accept"
+    temp.mkdir()
+    command = tmp_path / "venv/bin/oh-goon"
+    launches: list[tuple[str, ...]] = []
+
+    class Server:
+        def terminate(self) -> None:
+            pass
+
+        def wait(self, timeout: float) -> int:
+            return 0
+
+    def launch(argv: tuple[str, ...], **options: Any) -> Server:
+        selected = build_parser().parse_args(argv[1:])
+        assert selected.command == "app" and selected.app_command == "serve"
+        assert selected.host == "127.0.0.1" and selected.port == 12345
+        launches.append(argv)
+        database = Path(options["env"]["OH_GOON_DB"])
+        database.parent.mkdir(parents=True, exist_ok=True)
+        database.write_bytes(b"server-owned state")
+        return Server()
+
+    def request(method: str, url: str, **_options: object) -> object:
+        if method == "POST":
+            return {}
+        if url.endswith("/api/locations"):
+            return {"locations": [str((temp / "repositories").resolve())]}
+        if url.endswith("/api/fleet/runs/initial-run"):
+            return {"steps": ["acceptance-step"]}
+        if url.endswith("/api/league/shared-plans/acceptance-shared"):
+            return {"name": "acceptance-shared"}
+        if url.endswith("/api/fleet/runs?limit=20"):
+            return {"runs": ["initial-run", "fresh-run"]}
+        raise AssertionError(f"unexpected acceptance request: {url}")
+
+    monkeypatch.setattr(
+        module,
+        "_accept_installed_cli_runtime",
+        lambda *args, **kwargs: InstalledCliRuntimeAcceptance(),
+    )
+    monkeypatch.setattr(subprocess, "Popen", launch)
+    monkeypatch.setattr(
+        module, "_wait_http", lambda *args, **kwargs: b"<!doctype html>"
+    )
+    monkeypatch.setattr(module, "_request_json", request)
+    monkeypatch.setattr(
+        module, "exercise_product_runtime", lambda **kwargs: "initial-run"
+    )
+    monkeypatch.setattr(module, "exercise_product_api", lambda **kwargs: "fresh-run")
+    monkeypatch.setattr(module, "exercise_location_lifecycle", lambda **kwargs: None)
+    monkeypatch.setattr(module, "exercise_shared_plan", lambda *args, **kwargs: None)
+    assert module._accept_installed_runtime(tmp_path, command, temp, port=12345) == ()
+    assert len(launches) == 2
+
+
+@pytest.mark.process
+def test_installed_control_command_preserves_explicit_state_environment(
+    tmp_path: Path,
+) -> None:
+    import os
+    import sys
+
+    environment = {
+        "PATH": os.defpath,
+        "OH_GOON_DB": str(tmp_path / "selected.db"),
+        "OH_GOON_LEAGUE_FILE": str(tmp_path / "selected-league.yml"),
+    }
+    before = environment.copy()
+    fact, output, errors = _bounded_command(
+        (
+            sys.executable,
+            "-I",
+            "-c",
+            "import json,os; print(json.dumps({name:os.environ.get(name) for name in ('OH_GOON_DB','OH_GOON_LEAGUE_FILE')}))",
+        ),
+        cwd=tmp_path,
+        env=environment,
+        runner=None,
+    )
+    assert fact.exit_code == 0 and not errors
+    assert json.loads(output) == {
+        name: environment[name] for name in ("OH_GOON_DB", "OH_GOON_LEAGUE_FILE")
+    }
+    assert environment == before
+    assert not (tmp_path / "selected.db").exists()
 
 
 def test_installed_package_origin_probe_rejects_source_import(
@@ -364,6 +609,263 @@ def test_installed_package_origin_probe_rejects_version_drift(
     )
 
     assert issues and "expected '1.2.3'" in issues[0]
+
+
+def _installed_cli_protocol_fixture(
+    root: Path,
+    *,
+    mutation: str | None = None,
+) -> tuple[Path, Path, dict[str, str], Any]:
+    """Fake the CLI protocol; execute its authored stdlib workload for real.
+
+    The separate installed-wheel fixture owns actual package/import/Run proof.
+    This fixture checks that acceptance rejects changed observable responses.
+    """
+    import sys
+
+    command = root / "venv/bin/oh-goon"
+    command.parent.mkdir(parents=True)
+    command.write_text("fixture")
+    host_tools = root / "host-tools"
+    host_tools.mkdir()
+    for tool in ("uv", "git"):
+        path = host_tools / tool
+        path.write_text("fixture")
+        path.chmod(0o700)
+    if mutation == "node":
+        node = command.with_name("node")
+        node.write_text("fixture")
+        node.chmod(0o700)
+    temp = root / "journey"
+    temp.mkdir()
+    environment = _installed_runtime_environment(
+        root / "state", access_token="fixture-only"
+    )
+    environment["PATH"] = str(host_tools)
+    database = Path(environment["OH_GOON_DB"])
+    has_negative = False
+
+    def runner(
+        argv: Sequence[str], **options: Any
+    ) -> subprocess.CompletedProcess[object]:
+        nonlocal has_negative
+        args = tuple(argv)
+        if args[0] == "git":
+            (Path(args[-1]) / ".git").mkdir()
+            return subprocess.CompletedProcess(args, 0)
+        arguments = args[1:]
+        selected = options["env"]
+        exit_code = 0
+        value: object
+        if arguments == ("--help",):
+            if mutation in {"stateful-db", "stateful-league"}:
+                state_file = (
+                    database
+                    if mutation == "stateful-db"
+                    else Path(environment["OH_GOON_LEAGUE_FILE"])
+                )
+                state_file.parent.mkdir(parents=True, exist_ok=True)
+                state_file.write_bytes(b"unexpected state")
+            options["stdout"].write(b"usage: oh-goon fixture\n")
+            return subprocess.CompletedProcess(args, 0)
+        if arguments == ("--version",):
+            options["stdout"].write(b"1.2.3\n")
+            return subprocess.CompletedProcess(args, 0)
+        if arguments == ("doctor", "--json"):
+            uv_present = (temp / "native-tools/uv").exists()
+            value = {
+                "scope": "tools",
+                "status": "ready" if uv_present else "setup_required",
+                "tools": [
+                    {"name": "git", "status": "READY", "version": "git fixture"},
+                    {
+                        "name": "uv",
+                        "status": "READY" if uv_present else "MISSING",
+                        "reason_code": "NONE" if uv_present else "TOOL_MISSING",
+                        "version": "uv fixture",
+                    },
+                ],
+            }
+            exit_code = 0 if uv_present else 2
+        elif arguments == ("templates", "list", "--json"):
+            value = {
+                "schema": "oh-goon.template-catalog/v1",
+                "templates": [{"template_key": "general/example"}],
+            }
+        elif arguments[:2] == ("workflow", "inspect"):
+            value = {
+                "schema": "oh-goon.run-configuration/v2",
+                "status": "registration-unavailable",
+            }
+        elif arguments[:2] == ("workflow", "prepare"):
+            (temp / "workflow/goon.lock").write_bytes(b"original execution lock")
+            database.parent.mkdir(parents=True, exist_ok=True)
+            database.write_bytes(b"original database")
+            value = {"status": "prepared"}
+        elif arguments[:1] == ("run",):
+            missing = not (temp / "native-tools/uv").exists()
+            if missing:
+                has_negative = True
+                exit_code = 1
+                if mutation == "changed-lock":
+                    (temp / "workflow/goon.lock").write_bytes(b"changed")
+                if mutation == "reset-db":
+                    database.rename(database.with_suffix(".old"))
+                    database.write_bytes(b"replacement database")
+                else:
+                    with database.open("ab") as stream:
+                        stream.write(b"legitimate failed Run history")
+                if mutation == "missing-uv-success":
+                    exit_code = 0
+            else:
+                repo = temp / "repositories/cli-target"
+                completed = subprocess.run(
+                    [sys.executable, "-I", str(repo / "cli_acceptance_step.py")],
+                    cwd=repo,
+                    env=selected,
+                    capture_output=True,
+                    timeout=5,
+                )
+                assert completed.returncode == 0
+            value = {
+                "fleet_run_id": "missing-uv-run" if missing else "native-run",
+                "status": "COMPLETED",
+                "outcome": "ATTENTION_REQUIRED" if missing and exit_code else "SUCCESS",
+            }
+        elif arguments[:1] == ("runs",):
+            negative = arguments[2] == "missing-uv-run"
+            settlement = {
+                "outcome": "FAILED" if negative else "SUCCESS",
+                "cleanup": "VERIFIED",
+                "reason": "FAILED_TO_START" if negative else "ACCEPTED_EXIT",
+                "observed_returncode": None if negative else 0,
+            }
+            artifacts = [
+                {"path": "cli-result.json", "status": "PRESENT", "sha256": "a" * 64}
+            ]
+            if mutation == "lost-output":
+                artifacts = []
+            if arguments[1] == "show":
+                value = {"outcome": "ATTENTION_REQUIRED" if negative else "SUCCESS"}
+                if mutation == "changed-history" and has_negative and not negative:
+                    value = {"outcome": "FAILED"}
+            else:
+                value = {
+                    "repositories": [
+                        {
+                            "steps": [
+                                {
+                                    "step_id": "native",
+                                    "settlement": settlement,
+                                    "artifacts": artifacts,
+                                }
+                            ]
+                        }
+                    ]
+                }
+        else:
+            raise AssertionError(f"unexpected acceptance CLI request {arguments!r}")
+        options["stdout"].write(json.dumps(value).encode())
+        return subprocess.CompletedProcess(args, exit_code)
+
+    return command, temp, environment, runner
+
+
+@pytest.mark.process
+def test_installed_cli_journey_preserves_native_failure_and_existing_history(
+    tmp_path: Path,
+) -> None:
+    command, temp, env, runner = _installed_cli_protocol_fixture(tmp_path)
+    before = env.copy()
+    result = exercise_installed_cli_runtime(
+        command, temp, env, expected_version="1.2.3", runner=runner
+    )
+    assert result.issues == ()
+    assert (
+        result.run_id == "native-run" and result.missing_uv_run_id == "missing-uv-run"
+    )
+    assert (
+        result.state_free_actions
+        and result.fresh_readback_verified
+        and result.database_identity_preserved
+    )
+    assert {"node", "nodejs", "npm", "npx"}.issubset(result.absent_tools)
+    assert result.receiving_path
+    assert env == before
+    assert all(fact.stdout_bytes <= 2 * 1024 * 1024 for fact in result.commands)
+
+
+@pytest.mark.process
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "node",
+        "stateful-db",
+        "stateful-league",
+        "lost-output",
+        "missing-uv-success",
+        "changed-lock",
+        "reset-db",
+        "changed-history",
+    ),
+)
+def test_installed_cli_journey_rejects_observable_runtime_gaps(
+    tmp_path: Path, mutation: str
+) -> None:
+    command, temp, env, runner = _installed_cli_protocol_fixture(
+        tmp_path, mutation=mutation
+    )
+    result = exercise_installed_cli_runtime(
+        command, temp, env, expected_version="1.2.3", runner=runner
+    )
+    assert result.issues
+    assert not result.fresh_readback_verified
+
+
+def test_installed_cli_origin_refusal_precedes_journey(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "oh_goon.repository_tooling.release.accept_release._verify_installed_package_origin",
+        lambda **kwargs: ("installed package outside selected venv",),
+    )
+    result = _accept_installed_cli_runtime(
+        tmp_path / "venv/bin/oh-goon",
+        tmp_path / "journey",
+        {},
+        expected_version="1.2.3",
+    )
+    assert result.issues == ("installed package outside selected venv",)
+    assert not result.provenance_verified and result.commands == ()
+
+
+def test_full_installed_acceptance_stops_on_cli_gap_before_serving(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "VERSION").write_text("1.2.3")
+    temp = tmp_path / "accept"
+    temp.mkdir()
+    calls: list[Path] = []
+
+    def cli(
+        command: Path, *_args: object, **_kwargs: object
+    ) -> InstalledCliRuntimeAcceptance:
+        calls.append(command)
+        return InstalledCliRuntimeAcceptance(issues=("observed CLI runtime gap",))
+
+    def serve(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("CLI acceptance failed but full acceptance started the server")
+
+    monkeypatch.setattr(
+        "oh_goon.repository_tooling.release.accept_release._accept_installed_cli_runtime",
+        cli,
+    )
+    monkeypatch.setattr(subprocess, "Popen", serve)
+    command = tmp_path / "venv/bin/oh-goon"
+    assert _accept_installed_runtime(tmp_path, command, temp, port=12345) == (
+        "observed CLI runtime gap",
+    )
+    assert calls == [command]
 
 
 def test_dependency_lock_check_does_not_parse_foreign_lock_formats_when_native_tools_accept_them(

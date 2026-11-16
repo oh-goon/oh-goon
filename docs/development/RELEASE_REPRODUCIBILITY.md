@@ -21,7 +21,27 @@ The Hashmarks release wheel is intentionally declared as a standards-based PEP 5
 
 Release-wheel construction separately uses `uv build --no-sources` after the release owner has produced `generated/release/static`. This ensures an accidental future `tool.uv.sources` entry cannot become hidden build authority while preserving the stricter rule that a standard wheel cannot be built before the frontend release payload exists. The committed uv lock must use repository-approved public registries or public GitHub release artifacts; repository-local/path/vendor dependency sources are rejected by the Oh-Goon publication policy.
 
-Release assembly has one pre-materialization dependency-admissibility owner: `make release-locks-check`. It asks native uv and npm to validate their committed locks once, then the release path transports that decision into locked materialization and build. `accept-release` does not re-probe the same locks, and release-version identity checking does not independently re-run package-manager compatibility checks.
+Release assembly has one pre-materialization dependency-admissibility owner: `make release-locks-check`. It asks native uv and npm to validate their committed locks once, then the release path transports that decision into locked materialization and build. `make release-accept` does not re-probe the same locks, and release-version identity checking does not independently re-run package-manager compatibility checks.
+
+Installed release acceptance uses that canonical wheel and the existing native
+uv.lock-derived fresh installer. It verifies installed package origin, then runs
+the CLI with Node, npm and browser tools absent from its explicit runtime PATH.
+Lightweight views preserve application state; preparation and the attended Run
+use the original admission/worker/Step owners. Fresh history and a missing-uv
+failure must preserve the selected database, lock and earlier successful Run.
+Only then does the existing UI/API acceptance use `app serve` and its restart
+journey. Building the bundled UI still requires frontend tools; the CLI proof
+does not claim a frontend-free release build or replace browser/APP qualification.
+
+Acceptance removes its private installation and state only after the complete
+runtime journey succeeds. Any runtime issue or exception retains that directory
+and reports its path; establish original-owner quiescence before removing it.
+
+The ordinary installed-package regression uses the same native wheel builder
+with a synthetic UI fixture to protect package and CLI boundaries. Its result is
+distinct from qualification of a real UI-bearing wheel produced by
+`make assemble-release` after caller-owned checks. Neither path introduces
+another installer or dependency resolver.
 
 Release version stamping remains a deliberately narrower operation than dependency qualification. The version owner uses `uv version --frozen`; it must not run `uv lock --check`, resolve dependencies, or materialize an environment. The already-qualified `backend/uv.lock` must remain byte-identical across stamping. Lock freshness belongs to the earlier native qualification boundary, not to version mutation.
 
