@@ -33,11 +33,7 @@ from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import StrictFleetExecutionAdmission
 from oh_goon.core.models.run_events import (
-    DescendantsQuiescentEvent,
-    ProcessExitedEvent,
-    ProcessStartedEvent,
     ProcessStartingEvent,
-    ProcessStateUnknownEvent,
     RepositoryStartedEvent,
     StepAttemptCreatedEvent,
     StepReachedEvent,
@@ -193,21 +189,23 @@ def _runtime_progress(detail: FleetRunDetail, repository_id: str) -> GameTapeRun
     relevant = [
         event
         for event in detail.lifecycle_events
-        if getattr(event, "repository_id", None) == repository_id
-        and isinstance(
+        if isinstance(
             event,
-            (
-                StepReachedEvent,
-                StepStartedEvent,
-                StepAttemptCreatedEvent,
-                ProcessStartingEvent,
-                ProcessStartedEvent,
-                ProcessStateUnknownEvent,
-                ProcessExitedEvent,
-                DescendantsQuiescentEvent,
-                TerminationRequestedEvent,
-            ),
+            (StepReachedEvent, StepStartedEvent, StepAttemptCreatedEvent, ProcessStartingEvent),
         )
+        and event.repository_id == repository_id
+        and event.event_type
+        in {
+            FleetRunEventType.STEP_REACHED,
+            FleetRunEventType.STEP_STARTED,
+            FleetRunEventType.STEP_ATTEMPT_CREATED,
+            FleetRunEventType.PROCESS_STARTING,
+            FleetRunEventType.PROCESS_STARTED,
+            FleetRunEventType.PROCESS_STATE_UNKNOWN,
+            FleetRunEventType.PROCESS_EXITED,
+            FleetRunEventType.DESCENDANTS_QUIESCENT,
+            FleetRunEventType.TERMINATION_REQUESTED,
+        }
     ]
     if not relevant:
         return None
@@ -215,17 +213,17 @@ def _runtime_progress(detail: FleetRunDetail, repository_id: str) -> GameTapeRun
     process_state: Literal[
         "NOT_STARTED", "STARTING", "RUNNING", "UNKNOWN", "EXITED", "QUIESCENT"
     ] = "NOT_STARTED"
-    if isinstance(latest, ProcessStartingEvent):
-        process_state = "STARTING"
-    if isinstance(latest, ProcessStartedEvent):
-        process_state = "RUNNING"
-    if isinstance(latest, ProcessStateUnknownEvent):
-        process_state = "UNKNOWN"
-    if isinstance(latest, ProcessExitedEvent):
-        process_state = "EXITED"
-    if isinstance(latest, DescendantsQuiescentEvent):
-        process_state = "QUIESCENT"
-    # TerminationRequestedEvent is also ProcessStartedEvent; retain RUNNING until an exit/quiescence fact exists.
+    match latest.event_type:
+        case FleetRunEventType.PROCESS_STARTING:
+            process_state = "STARTING"
+        case FleetRunEventType.PROCESS_STARTED | FleetRunEventType.TERMINATION_REQUESTED:
+            process_state = "RUNNING"
+        case FleetRunEventType.PROCESS_STATE_UNKNOWN:
+            process_state = "UNKNOWN"
+        case FleetRunEventType.PROCESS_EXITED:
+            process_state = "EXITED"
+        case FleetRunEventType.DESCENDANTS_QUIESCENT:
+            process_state = "QUIESCENT"
     return GameTapeRuntimeProgress(
         journal_sequence=latest.sequence,
         observed_at=latest.generated_at,

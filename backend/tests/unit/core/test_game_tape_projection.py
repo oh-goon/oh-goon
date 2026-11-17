@@ -1334,3 +1334,123 @@ def test_attempt_comparison_preserves_isolation_boundary_changes(change: str) ->
     first = _failed_attempt().model_copy(update={"standard_isolation": isolation})
     second = first.model_copy(update={"attempt": 2, "standard_isolation": changed})
     assert compare_adjacent_attempts((first, second))[0].isolation_changed is True
+
+
+@pytest.mark.parametrize("disposition", ["finalized", "abandoned", "quarantined"])
+def test_game_tape_output_disposition_preserves_validated_physical_progress(
+    tmp_path: Path, disposition: str
+) -> None:
+    from oh_goon.core.models.run_events import (
+        OutputAbandonedEvent,
+        OutputFinalizedEvent,
+        OutputQuarantinedEvent,
+        ProcessExitedEvent,
+        ProcessStartingEvent,
+    )
+    from oh_goon.core.run_projection import project_fleet_run_detail
+
+    detail = _settled_step_detail(
+        tmp_path,
+        PlanStepSettlementEvidence(
+            outcome="FAILED",
+            cleanup="VERIFIED",
+            reason="FAILED_EXIT",
+            observed_returncode=7,
+        ),
+    )
+    run = detail.run
+    repository_id = run.targets[0].repository_id
+    operation_id = repository_attempt_operation_id(run.fleet_run_id, repository_id)
+    at = run.accepted_at
+    events = list(
+        CanonicalFleetJournalBuilder(detail)
+        .run_started(at)
+        .repository_started(
+            repository_id,
+            operation_id,
+            at,
+        )
+        .build()
+    )
+    common: dict[str, Any] = dict(
+        fleet_run_id=run.fleet_run_id,
+        repository_id=repository_id,
+        operation_id=operation_id,
+        physical_execution_id="physical-output-owner",
+        generated_at=at,
+    )
+    born = {**common, "pid": 4321, "process_identity": "original-process"}
+    events.append(
+        ProcessStartingEvent(
+            event_type=FleetRunEventType.PROCESS_STARTING, sequence=len(events) + 1, **common
+        )
+    )
+    events.append(
+        ProcessStartedEvent(
+            event_type=FleetRunEventType.PROCESS_STARTED, sequence=len(events) + 1, **born
+        )
+    )
+    output: OutputFinalizedEvent | OutputAbandonedEvent | OutputQuarantinedEvent
+    if disposition == "quarantined":
+        events.append(
+            ProcessStateUnknownEvent(
+                event_type=FleetRunEventType.PROCESS_STATE_UNKNOWN,
+                sequence=len(events) + 1,
+                reason="lost observation",
+                **born,
+            )
+        )
+        output = OutputQuarantinedEvent(
+            event_type=FleetRunEventType.OUTPUT_QUARANTINED,
+            sequence=len(events) + 1,
+            reason="unknown process state",
+            **common,
+        )
+        expected_state = "UNKNOWN"
+    else:
+        events.append(
+            ProcessExitedEvent(
+                event_type=FleetRunEventType.PROCESS_EXITED,
+                sequence=len(events) + 1,
+                returncode=0,
+                **born,
+            )
+        )
+        events.append(
+            DescendantsQuiescentEvent(
+                event_type=FleetRunEventType.DESCENDANTS_QUIESCENT, sequence=len(events) + 1, **born
+            )
+        )
+        output = (
+            OutputFinalizedEvent(
+                event_type=FleetRunEventType.OUTPUT_FINALIZED,
+                sequence=len(events) + 1,
+                output_count=1,
+                **common,
+            )
+            if disposition == "finalized"
+            else OutputAbandonedEvent(
+                event_type=FleetRunEventType.OUTPUT_ABANDONED,
+                sequence=len(events) + 1,
+                reason="cancelled",
+                **common,
+            )
+        )
+        expected_state = "QUIESCENT"
+    before = project_fleet_run_detail(
+        events, lambda _: pytest.fail("No operation committed")
+    ).game_tape
+    after = project_fleet_run_detail(
+        [*events, output], lambda _: pytest.fail("No operation committed")
+    ).game_tape
+    progress = before.repositories[0].runtime_progress
+    refined = after.repositories[0].runtime_progress
+    assert progress is not None and progress.process_state == expected_state
+    assert refined is not None and refined.process_state == expected_state
+    assert refined.pid == progress.pid == 4321
+    assert (
+        refined.physical_execution_id
+        == progress.physical_execution_id
+        == common["physical_execution_id"]
+    )
+    assert any(event.event_type.value == output.event_type.value for event in after.play_by_play)

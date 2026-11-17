@@ -306,6 +306,10 @@ isolation evidence remains distinct from an observed boundary.
 
 ### Play-by-Play
 
+Runtime process progress consumes the physical lifecycle's wire event types.
+Output finalization, abandonment and quarantine remain in the chronology but do
+not advance or rewind the recorded physical process state or PID.
+
 Play-by-Play renders the canonical execution-ledger projection in chronological order. It uses the same repository/step execution identities as every other Game Tape view, so selecting a step event opens the same inspector/evidence context. The event source is shown explicitly (`run_lifecycle`, `admitted_plan`, `operation_report`, or `step_execution`) so developers can see which durable owner supports the statement. Play-by-Play does not reconstruct a DAG or manufacture events from log text.
 
 ## Logs and durable evidence
