@@ -1211,3 +1211,126 @@ def test_verified_success_keeps_failure_guidance_absent(tmp_path: Path) -> None:
     )
     assert detail.outcome is FleetRunOutcome.SUCCESS
     assert detail.game_tape.why_not is None
+
+
+def _resource_isolation(resources: PlanResourceEvidence) -> PlanStandardIsolationEvidence:
+    return PlanStandardIsolationEvidence(
+        backend=PlanIsolationBackendEvidence(
+            backend_id="bubblewrap",
+            configuration_id="same-boundary",
+            kernel_boundary="shared_host_kernel",
+            remote_execution=False,
+            experimental=False,
+        ),
+        workspace_read_only=True,
+        broker_socket_mounted=False,
+        resources=resources,
+        resource_owner="systemd_user_scope",
+    )
+
+
+@pytest.mark.parametrize(
+    ("resource_changes", "context_changed"),
+    [
+        (
+            {"cpu_usage_usec": 1, "memory_peak_bytes": 1024, "pids_peak": 1, "oom_kill_count": 0},
+            False,
+        ),
+        ({"cpu_millis": 2000}, True),
+        ({"memory_bytes": 128 * 1024 * 1024}, True),
+        ({"max_processes": 32}, True),
+    ],
+)
+def test_retry_and_run_comparison_use_resource_policy_not_usage(
+    tmp_path: Path, resource_changes: dict[str, int], context_changed: bool
+) -> None:
+    from oh_goon.core.game_tape_attempt_comparison import compare_adjacent_attempts
+    from oh_goon.core.game_tape_retry_context import summarize_retry_context
+
+    resources = PlanResourceEvidence(
+        cpu_millis=1000, memory_bytes=64 * 1024 * 1024, max_processes=16
+    )
+    refined = resources.model_copy(update=resource_changes)
+    first = _failed_attempt().model_copy(
+        update={
+            "standard_isolation": _resource_isolation(resources),
+            "resources": resources,
+            "retry": ScheduledPlanRetryDecisionEvidence(
+                exit_code=1,
+                policy_reason="declared transient",
+                delay_seconds=0,
+                next_attempt=2,
+            ),
+        }
+    )
+    second = first.model_copy(
+        update={
+            "attempt": 2,
+            "standard_isolation": _resource_isolation(refined),
+            "resources": refined,
+            "retry": None,
+        }
+    )
+    transitions = compare_adjacent_attempts((first, second))
+    assert transitions[0].isolation_changed is context_changed
+    assert transitions[0].resource_policy_changed is context_changed
+    assert summarize_retry_context(2, transitions).physical_context_changed is context_changed
+
+    tape = _settled_step_detail(
+        tmp_path,
+        PlanStepSettlementEvidence(
+            outcome="FAILED",
+            cleanup="VERIFIED",
+            reason="FAILED_EXIT",
+            observed_returncode=7,
+        ),
+    ).game_tape
+    repository = tape.repositories[0]
+    step = repository.steps[0]
+    base = tape.model_copy(
+        update={
+            "repositories": (
+                repository.model_copy(
+                    update={
+                        "steps": (step.model_copy(update={"attempts": (first,)}),),
+                    }
+                ),
+            )
+        }
+    )
+    compared = tape.model_copy(
+        update={
+            "repositories": (
+                repository.model_copy(
+                    update={
+                        "steps": (step.model_copy(update={"attempts": (second,)}),),
+                    }
+                ),
+            )
+        }
+    )
+    diff = compare_game_tapes(base, compared).repositories[0].steps[0]
+    assert diff.isolation_changed is context_changed
+    assert diff.resource_policy_changed is context_changed
+
+
+@pytest.mark.parametrize("change", ["missing", "backend", "permission"])
+def test_attempt_comparison_preserves_isolation_boundary_changes(change: str) -> None:
+    from oh_goon.core.game_tape_attempt_comparison import compare_adjacent_attempts
+
+    isolation = _resource_isolation(PlanResourceEvidence(cpu_millis=1000))
+    if change == "missing":
+        changed = None
+    elif change == "backend":
+        changed = isolation.model_copy(
+            update={
+                "backend": isolation.backend.model_copy(
+                    update={"configuration_id": "other-boundary"}
+                ),
+            }
+        )
+    else:
+        changed = isolation.model_copy(update={"workspace_read_only": False})
+    first = _failed_attempt().model_copy(update={"standard_isolation": isolation})
+    second = first.model_copy(update={"attempt": 2, "standard_isolation": changed})
+    assert compare_adjacent_attempts((first, second))[0].isolation_changed is True

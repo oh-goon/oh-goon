@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from oh_goon.core.fleet_plan_evidence_identity import standard_isolation_context
 from oh_goon.core.models.fleet_plan_evidence import PlanStepAttemptEvidence
 from oh_goon.core.models.game_tape import GameTapeAttemptTransition
 
@@ -36,7 +37,10 @@ def _transition(
         ),
         tool_changed=_tool_identity(previous) != _tool_identity(current),
         egress_changed=previous.egress.policy_id != current.egress.policy_id,
-        isolation_changed=previous.standard_isolation != current.standard_isolation,
+        isolation_changed=(
+            standard_isolation_context(previous.standard_isolation)
+            != standard_isolation_context(current.standard_isolation)
+        ),
         resource_policy_changed=_resource_policy(previous) != _resource_policy(current),
         cache_input_changed=previous.cache_input != current.cache_input,
         stdout_changed=previous.stdout_evidence.sha256 != current.stdout_evidence.sha256,

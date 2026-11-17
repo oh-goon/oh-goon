@@ -299,6 +299,11 @@ The same owner projects a selected-context window. Starting at the inspected run
 
 Duration, return code, stdout hash and stderr hash are deliberately excluded from the physical-context classification. They describe what happened during an attempt, not the identity/policy of the context in which it ran. The Attempts view renders the backend-owned summary and still shows those outcome differences separately.
 
+Retry and Run comparisons use the same recorded isolation boundary and resource
+policy. Optional CPU usage, memory/PID peaks and OOM measurements remain visible
+evidence; adding or changing them does not change the isolation context. Missing
+isolation evidence remains distinct from an observed boundary.
+
 ### Play-by-Play
 
 Play-by-Play renders the canonical execution-ledger projection in chronological order. It uses the same repository/step execution identities as every other Game Tape view, so selecting a step event opens the same inspector/evidence context. The event source is shown explicitly (`run_lifecycle`, `admitted_plan`, `operation_report`, or `step_execution`) so developers can see which durable owner supports the statement. Play-by-Play does not reconstruct a DAG or manufacture events from log text.

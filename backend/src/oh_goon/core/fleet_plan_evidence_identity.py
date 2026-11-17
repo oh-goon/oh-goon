@@ -7,6 +7,7 @@ if TYPE_CHECKING:
         PlanEgressEvidence,
         PlanExecutionInputEvidence,
         PlanResourceEvidence,
+        PlanStandardIsolationEvidence,
         RequirementsRepositoryAdmissionEvidence,
     )
 
@@ -72,3 +73,14 @@ def resource_policy_payload(evidence: PlanResourceEvidence) -> dict[str, object]
         "memory_bytes": evidence.memory_bytes,
         "max_processes": evidence.max_processes,
     }
+
+
+def standard_isolation_context(
+    evidence: PlanStandardIsolationEvidence | None,
+) -> dict[str, object] | None:
+    """Compare the recorded boundary and resource policy, excluding usage observations."""
+    if evidence is None:
+        return None
+    payload = evidence.model_dump(mode="json", exclude={"resources"}, exclude_computed_fields=True)
+    payload["resources"] = evidence.resources.policy_id if evidence.resources is not None else None
+    return payload
