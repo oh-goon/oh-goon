@@ -139,7 +139,7 @@ def resolve_compiled_steps(
         resolved=resolved,
         step_sources=step_sources,
         imports=resolved_imports,
-        allow_multiple_published_workspaces=plan_path.name == "plan.yml",
+        allow_multiple_published_workspaces=compiled.authoring_kind == "plan",
     )
 
 
