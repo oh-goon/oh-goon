@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
+
 from oh_goon.core.execution_ledger import _step_terminal_message
 from oh_goon.core.game_tape_step_projection import project_steps
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep
-from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution, PlanOutputEvidence
+from oh_goon.core.models.fleet_plan_evidence import (
+    FailedPlanStepExecution,
+    PlanOutputEvidence,
+    PlanStepSettlementEvidence,
+)
 from oh_goon.core.models.fleet_plan_step_primitives import (
     PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
 )
@@ -39,6 +45,9 @@ def test_game_tape_preserves_missing_executable_fact() -> None:
         returncode=PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
         stdout_evidence=_output(""),
         stderr_evidence=_output(f"Executable not found: {executable}\n"),
+        settlement=PlanStepSettlementEvidence(
+            outcome="FAILED", cleanup="VERIFIED", reason="FAILED_TO_START"
+        ),
         duration_ms=0,
         repository_state_before="before",
         repository_state_after="before",
@@ -83,6 +92,9 @@ def test_game_tape_preserves_not_runnable_executable_fact() -> None:
         returncode=PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
         stdout_evidence=_output(""),
         stderr_evidence=_output(f"Executable is not runnable: {executable}\n"),
+        settlement=PlanStepSettlementEvidence(
+            outcome="FAILED", cleanup="VERIFIED", reason="FAILED_TO_START"
+        ),
         duration_ms=0,
         repository_state_before="before",
         repository_state_after="before",
@@ -104,4 +116,35 @@ def test_game_tape_preserves_not_runnable_executable_fact() -> None:
     assert (
         _step_terminal_message(GameTapeStatus.FAILED, execution)
         == "Step executable could not be run."
+    )
+
+
+@pytest.mark.parametrize("returncode", [124, 126, 127])
+def test_missing_settlement_does_not_invent_timeout_or_launch_cause(returncode: int) -> None:
+    planned = ResolvedCommandStep(step_id="legacy", argv=("native-tool",))
+    execution = FailedPlanStepExecution(
+        step_id="legacy",
+        kind="command",
+        returncode=returncode,
+        stdout_evidence=_output(""),
+        stderr_evidence=_output(""),
+        repository_state_before="same",
+        repository_state_after="same",
+    )
+    projected = project_steps(
+        "run",
+        "repo",
+        (planned,),
+        (execution,),
+        step_sources={},
+        source_label="fixture",
+        terminal=True,
+        operation_reason_code=None,
+    )[0]
+    assert projected.settlement.reason == "MISSING_SETTLEMENT"
+    assert projected.reason is None
+    assert projected.exit_code == returncode
+    assert (
+        _step_terminal_message(GameTapeStatus.FAILED, execution)
+        == f"Step failed with exit code {returncode}."
     )

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
+
+import pytest
 
 from oh_goon.core.vocabulary import FleetRunEventType, GameTapeEventType
 from tests.factories.local_lifecycle_execution import prepare_local_lifecycle_execution
@@ -161,3 +164,30 @@ steps:
         assert live_tape.repositories[0].steps[0].status.value == "RUNNING"
         assert not future.done()
         future.result(timeout=5)
+
+
+@pytest.mark.parametrize("exit_code", [126, 127])
+def test_native_failed_exit_keeps_settled_cause_in_game_tape(
+    tmp_path: Path, exit_code: int
+) -> None:
+    execution = prepare_local_lifecycle_execution(
+        tmp_path,
+        plan_text="steps:\n- id: observed\n  run: './lifecycle-step.py'\n",
+        script_body=f"print('process-body-executed', end=''); raise SystemExit({exit_code})",
+        fleet_run_id=f"native-failed-exit-{exit_code}",
+    )
+    execution.execute()
+    reconstructed = execution.reconstructed_detail()
+    tape = reconstructed.game_tape
+    step = tape.repositories[0].steps[0]
+    assert step.exit_code == exit_code
+    assert step.settlement.reason == "FAILED_EXIT"
+    assert step.settlement.observed_returncode == exit_code
+    assert step.settlement.cleanup == "VERIFIED"
+    assert step.stdout_evidence is not None
+    assert step.stdout_evidence.sha256 == hashlib.sha256(b"process-body-executed").hexdigest()
+    assert step.reason is None
+    terminal = next(
+        event for event in tape.play_by_play if event.event_type is GameTapeEventType.STEP_FAILED
+    )
+    assert terminal.returncode == exit_code

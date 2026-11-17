@@ -24,7 +24,6 @@ from oh_goon.core.models.fleet_plan_evidence import (
 from oh_goon.core.models.fleet_plan_step_primitives import (
     PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
     PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
-    PLAN_TIMEOUT_RETURN_CODE,
     PathExistsCondition,
     PathMissingCondition,
     StepStatusCondition,
@@ -206,6 +205,13 @@ def _failure_reason(
     teardown = execution.teardown if execution is not None else None
     if isinstance(teardown, FailedPlanStepTeardownEvidence):
         return f"Step teardown failed: {teardown.reason_code}."
+    if execution is None:
+        return None
+    if execution.settlement.reason == "DEADLINE_EXPIRED":
+        # The acceptor owns the deadline result; its effective budget is not retained here.
+        return "Step timed out."
+    if execution.settlement.reason != "FAILED_TO_START":
+        return None
     if returncode in {
         PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
         PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
@@ -222,12 +228,7 @@ def _failure_reason(
         if returncode == PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE:
             return f"Executable is not runnable: {executable}."
         return f"Executable not found: {executable}."
-    if returncode != PLAN_TIMEOUT_RETURN_CODE:
-        return None
-    # The authored timeout is not the effective budget: execution can apply a
-    # shorter Run/repair deadline, and elapsed time can include process cleanup.
-    # No effective budget is retained in this execution evidence.
-    return "Step timed out."
+    return "Step executable could not be started."
 
 
 def _failure_fingerprint(

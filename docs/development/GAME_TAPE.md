@@ -222,6 +222,12 @@ Run-level Search filters the backend Game Tape projection in memory. It covers s
 
 ### Failure fingerprint and evidence navigation
 
+Timeout and executable-launch explanations consume the original Step settlement.
+A native failed exit of 126 or 127 remains a failed exit; those numbers refine
+the wording only after the owner has established `FAILED_TO_START`. Missing
+settlement does not establish a timeout or launch failure. Teardown failure
+remains an independent failure obligation.
+
 A failed step exposes its canonical exit code and operation reason code plus a preferred durable stdout/stderr evidence anchor: stream, SHA-256, line count, and byte count. When canonical physical-attempt evidence exists, that anchor comes from the actual final attempt and records the attempt number. One deterministic `game-tape-failure-*` signature identifies the exact exit/reason/stream/hash fact set; it is an evidence identity, not an inferred root-cause classification. The shared inspector can navigate directly to the selected step in Logs/evidence. This is a navigation/debugging fingerprint, not a replacement for raw logs. Because historical raw bytes and source-line extraction are not durable facts, Game Tape explicitly says they are unavailable instead of fabricating a first-failure line.
 
 ### Physical attempts and reproduction facts
