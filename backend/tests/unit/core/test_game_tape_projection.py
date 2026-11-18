@@ -1211,3 +1211,246 @@ def test_verified_success_keeps_failure_guidance_absent(tmp_path: Path) -> None:
     )
     assert detail.outcome is FleetRunOutcome.SUCCESS
     assert detail.game_tape.why_not is None
+
+
+def _resource_isolation(resources: PlanResourceEvidence) -> PlanStandardIsolationEvidence:
+    return PlanStandardIsolationEvidence(
+        backend=PlanIsolationBackendEvidence(
+            backend_id="bubblewrap",
+            configuration_id="same-boundary",
+            kernel_boundary="shared_host_kernel",
+            remote_execution=False,
+            experimental=False,
+        ),
+        workspace_read_only=True,
+        broker_socket_mounted=False,
+        resources=resources,
+        resource_owner="systemd_user_scope",
+    )
+
+
+@pytest.mark.parametrize(
+    ("resource_changes", "context_changed"),
+    [
+        (
+            {"cpu_usage_usec": 1, "memory_peak_bytes": 1024, "pids_peak": 1, "oom_kill_count": 0},
+            False,
+        ),
+        ({"cpu_millis": 2000}, True),
+        ({"memory_bytes": 128 * 1024 * 1024}, True),
+        ({"max_processes": 32}, True),
+    ],
+)
+def test_retry_and_run_comparison_use_resource_policy_not_usage(
+    tmp_path: Path, resource_changes: dict[str, int], context_changed: bool
+) -> None:
+    from oh_goon.core.game_tape_attempt_comparison import compare_adjacent_attempts
+    from oh_goon.core.game_tape_retry_context import summarize_retry_context
+
+    resources = PlanResourceEvidence(
+        cpu_millis=1000, memory_bytes=64 * 1024 * 1024, max_processes=16
+    )
+    refined = resources.model_copy(update=resource_changes)
+    first = _failed_attempt().model_copy(
+        update={
+            "standard_isolation": _resource_isolation(resources),
+            "resources": resources,
+            "retry": ScheduledPlanRetryDecisionEvidence(
+                exit_code=1,
+                policy_reason="declared transient",
+                delay_seconds=0,
+                next_attempt=2,
+            ),
+        }
+    )
+    second = first.model_copy(
+        update={
+            "attempt": 2,
+            "standard_isolation": _resource_isolation(refined),
+            "resources": refined,
+            "retry": None,
+        }
+    )
+    transitions = compare_adjacent_attempts((first, second))
+    assert transitions[0].isolation_changed is context_changed
+    assert transitions[0].resource_policy_changed is context_changed
+    assert summarize_retry_context(2, transitions).physical_context_changed is context_changed
+
+    tape = _settled_step_detail(
+        tmp_path,
+        PlanStepSettlementEvidence(
+            outcome="FAILED",
+            cleanup="VERIFIED",
+            reason="FAILED_EXIT",
+            observed_returncode=7,
+        ),
+    ).game_tape
+    repository = tape.repositories[0]
+    step = repository.steps[0]
+    base = tape.model_copy(
+        update={
+            "repositories": (
+                repository.model_copy(
+                    update={
+                        "steps": (step.model_copy(update={"attempts": (first,)}),),
+                    }
+                ),
+            )
+        }
+    )
+    compared = tape.model_copy(
+        update={
+            "repositories": (
+                repository.model_copy(
+                    update={
+                        "steps": (step.model_copy(update={"attempts": (second,)}),),
+                    }
+                ),
+            )
+        }
+    )
+    diff = compare_game_tapes(base, compared).repositories[0].steps[0]
+    assert diff.isolation_changed is context_changed
+    assert diff.resource_policy_changed is context_changed
+
+
+@pytest.mark.parametrize("change", ["missing", "backend", "permission"])
+def test_attempt_comparison_preserves_isolation_boundary_changes(change: str) -> None:
+    from oh_goon.core.game_tape_attempt_comparison import compare_adjacent_attempts
+
+    isolation = _resource_isolation(PlanResourceEvidence(cpu_millis=1000))
+    if change == "missing":
+        changed = None
+    elif change == "backend":
+        changed = isolation.model_copy(
+            update={
+                "backend": isolation.backend.model_copy(
+                    update={"configuration_id": "other-boundary"}
+                ),
+            }
+        )
+    else:
+        changed = isolation.model_copy(update={"workspace_read_only": False})
+    first = _failed_attempt().model_copy(update={"standard_isolation": isolation})
+    second = first.model_copy(update={"attempt": 2, "standard_isolation": changed})
+    assert compare_adjacent_attempts((first, second))[0].isolation_changed is True
+
+
+@pytest.mark.parametrize("disposition", ["finalized", "abandoned", "quarantined"])
+def test_game_tape_output_disposition_preserves_validated_physical_progress(
+    tmp_path: Path, disposition: str
+) -> None:
+    from oh_goon.core.models.run_events import (
+        OutputAbandonedEvent,
+        OutputFinalizedEvent,
+        OutputQuarantinedEvent,
+        ProcessExitedEvent,
+        ProcessStartingEvent,
+    )
+    from oh_goon.core.run_projection import project_fleet_run_detail
+
+    detail = _settled_step_detail(
+        tmp_path,
+        PlanStepSettlementEvidence(
+            outcome="FAILED",
+            cleanup="VERIFIED",
+            reason="FAILED_EXIT",
+            observed_returncode=7,
+        ),
+    )
+    run = detail.run
+    repository_id = run.targets[0].repository_id
+    operation_id = repository_attempt_operation_id(run.fleet_run_id, repository_id)
+    at = run.accepted_at
+    events = list(
+        CanonicalFleetJournalBuilder(detail)
+        .run_started(at)
+        .repository_started(
+            repository_id,
+            operation_id,
+            at,
+        )
+        .build()
+    )
+    common: dict[str, Any] = dict(
+        fleet_run_id=run.fleet_run_id,
+        repository_id=repository_id,
+        operation_id=operation_id,
+        physical_execution_id="physical-output-owner",
+        generated_at=at,
+    )
+    born = {**common, "pid": 4321, "process_identity": "original-process"}
+    events.append(
+        ProcessStartingEvent(
+            event_type=FleetRunEventType.PROCESS_STARTING, sequence=len(events) + 1, **common
+        )
+    )
+    events.append(
+        ProcessStartedEvent(
+            event_type=FleetRunEventType.PROCESS_STARTED, sequence=len(events) + 1, **born
+        )
+    )
+    output: OutputFinalizedEvent | OutputAbandonedEvent | OutputQuarantinedEvent
+    if disposition == "quarantined":
+        events.append(
+            ProcessStateUnknownEvent(
+                event_type=FleetRunEventType.PROCESS_STATE_UNKNOWN,
+                sequence=len(events) + 1,
+                reason="lost observation",
+                **born,
+            )
+        )
+        output = OutputQuarantinedEvent(
+            event_type=FleetRunEventType.OUTPUT_QUARANTINED,
+            sequence=len(events) + 1,
+            reason="unknown process state",
+            **common,
+        )
+        expected_state = "UNKNOWN"
+    else:
+        events.append(
+            ProcessExitedEvent(
+                event_type=FleetRunEventType.PROCESS_EXITED,
+                sequence=len(events) + 1,
+                returncode=0,
+                **born,
+            )
+        )
+        events.append(
+            DescendantsQuiescentEvent(
+                event_type=FleetRunEventType.DESCENDANTS_QUIESCENT, sequence=len(events) + 1, **born
+            )
+        )
+        output = (
+            OutputFinalizedEvent(
+                event_type=FleetRunEventType.OUTPUT_FINALIZED,
+                sequence=len(events) + 1,
+                output_count=1,
+                **common,
+            )
+            if disposition == "finalized"
+            else OutputAbandonedEvent(
+                event_type=FleetRunEventType.OUTPUT_ABANDONED,
+                sequence=len(events) + 1,
+                reason="cancelled",
+                **common,
+            )
+        )
+        expected_state = "QUIESCENT"
+    before = project_fleet_run_detail(
+        events, lambda _: pytest.fail("No operation committed")
+    ).game_tape
+    after = project_fleet_run_detail(
+        [*events, output], lambda _: pytest.fail("No operation committed")
+    ).game_tape
+    progress = before.repositories[0].runtime_progress
+    refined = after.repositories[0].runtime_progress
+    assert progress is not None and progress.process_state == expected_state
+    assert refined is not None and refined.process_state == expected_state
+    assert refined.pid == progress.pid == 4321
+    assert (
+        refined.physical_execution_id
+        == progress.physical_execution_id
+        == common["physical_execution_id"]
+    )
+    assert any(event.event_type.value == output.event_type.value for event in after.play_by_play)

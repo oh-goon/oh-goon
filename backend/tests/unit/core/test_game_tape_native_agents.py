@@ -23,7 +23,11 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedCommandStep,
     ResolvedFleetPlan,
 )
-from oh_goon.core.models.fleet_plan_evidence import FailedPlanStepExecution, PlanOutputEvidence
+from oh_goon.core.models.fleet_plan_evidence import (
+    FailedPlanStepExecution,
+    PlanOutputEvidence,
+    PlanStepSettlementEvidence,
+)
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
 from oh_goon.core.models.game_tape import GameTapeStepExecution
 from oh_goon.core.vocabulary import GameTapeStatus
@@ -238,6 +242,9 @@ def test_native_executable_failure_reason_uses_retained_invocation(
             kind="agent",
             argv=argv,
             returncode=returncode,
+            settlement=PlanStepSettlementEvidence(
+                outcome="FAILED", cleanup="VERIFIED", reason="FAILED_TO_START"
+            ),
             stdout_evidence=output,
             stderr_evidence=output,
             repository_state_before="before",

@@ -14,7 +14,6 @@ from oh_goon.core.models.fleet_plan_evidence import (
 from oh_goon.core.models.fleet_plan_step_primitives import (
     PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE,
     PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE,
-    PLAN_TIMEOUT_RETURN_CODE,
 )
 from oh_goon.core.models.game_tape import GameTapeEvent
 from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
@@ -365,12 +364,14 @@ def _step_terminal_message(status: GameTapeStatus, execution: PlanStepExecution)
             f"Non-terminal Step status reached terminal ledger projection: {status.value}"
         )
     returncode = getattr(execution, "returncode", 1)
-    if returncode == PLAN_TIMEOUT_RETURN_CODE:
+    if execution.settlement.reason == "DEADLINE_EXPIRED":
         return "Step timed out."
-    if returncode == PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE:
-        return "Step executable could not be run."
-    if returncode == PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE:
-        return "Step executable was not found."
+    if execution.settlement.reason == "FAILED_TO_START":
+        if returncode == PLAN_EXECUTABLE_NOT_RUNNABLE_RETURN_CODE:
+            return "Step executable could not be run."
+        if returncode == PLAN_EXECUTABLE_NOT_FOUND_RETURN_CODE:
+            return "Step executable was not found."
+        return "Step executable could not be started."
     return f"Step failed with exit code {returncode}."
 
 

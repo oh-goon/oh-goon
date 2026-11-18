@@ -222,6 +222,12 @@ Run-level Search filters the backend Game Tape projection in memory. It covers s
 
 ### Failure fingerprint and evidence navigation
 
+Timeout and executable-launch explanations consume the original Step settlement.
+A native failed exit of 126 or 127 remains a failed exit; those numbers refine
+the wording only after the owner has established `FAILED_TO_START`. Missing
+settlement does not establish a timeout or launch failure. Teardown failure
+remains an independent failure obligation.
+
 A failed step exposes its canonical exit code and operation reason code plus a preferred durable stdout/stderr evidence anchor: stream, SHA-256, line count, and byte count. When canonical physical-attempt evidence exists, that anchor comes from the actual final attempt and records the attempt number. One deterministic `game-tape-failure-*` signature identifies the exact exit/reason/stream/hash fact set; it is an evidence identity, not an inferred root-cause classification. The shared inspector can navigate directly to the selected step in Logs/evidence. This is a navigation/debugging fingerprint, not a replacement for raw logs. Because historical raw bytes and source-line extraction are not durable facts, Game Tape explicitly says they are unavailable instead of fabricating a first-failure line.
 
 ### Physical attempts and reproduction facts
@@ -299,7 +305,16 @@ The same owner projects a selected-context window. Starting at the inspected run
 
 Duration, return code, stdout hash and stderr hash are deliberately excluded from the physical-context classification. They describe what happened during an attempt, not the identity/policy of the context in which it ran. The Attempts view renders the backend-owned summary and still shows those outcome differences separately.
 
+Retry and Run comparisons use the same recorded isolation boundary and resource
+policy. Optional CPU usage, memory/PID peaks and OOM measurements remain visible
+evidence; adding or changing them does not change the isolation context. Missing
+isolation evidence remains distinct from an observed boundary.
+
 ### Play-by-Play
+
+Runtime process progress consumes the physical lifecycle's wire event types.
+Output finalization, abandonment and quarantine remain in the chronology but do
+not advance or rewind the recorded physical process state or PID.
 
 Play-by-Play renders the canonical execution-ledger projection in chronological order. It uses the same repository/step execution identities as every other Game Tape view, so selecting a step event opens the same inspector/evidence context. The event source is shown explicitly (`run_lifecycle`, `admitted_plan`, `operation_report`, or `step_execution`) so developers can see which durable owner supports the statement. Play-by-Play does not reconstruct a DAG or manufacture events from log text.
 

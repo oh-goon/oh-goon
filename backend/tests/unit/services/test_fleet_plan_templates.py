@@ -388,3 +388,59 @@ def test_shipped_plan_template_descriptions_are_plain_text_for_browser_ui() -> N
     description = PLANS.catalog().templates[0].description
     assert not description.startswith("**")
     assert not description.endswith("**")
+
+
+@pytest.mark.parametrize("filename", ["plan.yml", "checks.yml"])
+def test_named_file_plans_preserve_multiple_goon_workspace_publishers(
+    tmp_path: Path, filename: str
+) -> None:
+    for name in ("a", "b"):
+        package = tmp_path / "catalog/general" / name
+        package.mkdir(parents=True)
+        (package / "README.md").write_text(f"# general/{name}\n")
+        (package / "goon.yml").write_text(
+            "steps:\n- id: publish\n  run: 'true'\n  workspace: {from: repository, publish: true}\n"
+        )
+    path = tmp_path / filename
+    path.write_text(
+        "goons:\n- import: general/a\n  from: catalog\n  as: first\n"
+        "- import: general/b\n  from: catalog\n  as: second\n"
+    )
+    resolver = FleetPlanResolver()
+    graph = resolver.analyze_source(path)
+    assert graph.root.compiled.authoring_kind == "plan"
+    resolved = resolver.resolve_source_graph(graph)
+    assert [(s.step_id, s.workspace.publish) for s in resolved.steps] == [
+        ("first.publish", True),
+        ("second.publish", True),
+    ]
+    assert [item.import_id for item in resolved.imports] == ["first", "second"]
+
+
+@pytest.mark.parametrize("composition", [False, True])
+def test_goons_still_reject_multiple_workspace_publishers(
+    tmp_path: Path, composition: bool
+) -> None:
+    if composition:
+        for name in ("a", "b"):
+            package = tmp_path / "catalog/general" / name
+            package.mkdir(parents=True)
+            (package / "README.md").write_text(f"# general/{name}\n")
+            (package / "goon.yml").write_text(
+                "steps:\n- run: 'true'\n  workspace: {from: repository, publish: true}\n"
+            )
+        text = (
+            "goons:\n- import: general/a\n  from: catalog\n- import: general/b\n  from: catalog\n"
+        )
+    else:
+        text = (
+            "steps:\n- id: first\n  run: 'true'\n  workspace: {from: repository, publish: true}\n"
+            "- id: second\n  run: 'true'\n  workspace: {from: repository, publish: true}\n"
+        )
+    path = tmp_path / "goon.yml"
+    path.write_text(text)
+    resolver = FleetPlanResolver()
+    graph = resolver.analyze_source(path)
+    assert graph.root.compiled.authoring_kind == "goon"
+    with pytest.raises(FleetPlanInvalid, match="One Goon may publish at most one workspace"):
+        resolver.resolve_source_graph(graph)
