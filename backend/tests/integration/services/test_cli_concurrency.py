@@ -218,9 +218,16 @@ class _CliCase:
     def launch(self, configuration: Path, env: Mapping[str, str]) -> _Capture:
         return self.start(("run", str(configuration), "--no-input", "--yes", "--json"), env)
 
-    def held(self, label: str, env: Mapping[str, str], capture: _Capture) -> NativeRunFact:
+    def held(
+        self,
+        label: str,
+        env: Mapping[str, str],
+        capture: _Capture,
+        *,
+        readiness_timeout: float = 35,
+    ) -> NativeRunFact:
         marker = self.root / f"{label}.ready"
-        deadline = monotonic() + 35
+        deadline = monotonic() + readiness_timeout
         while not marker.exists():
             assert capture.process.poll() is None, "control CLI exited before native readiness"
             assert monotonic() < deadline, "native concurrency readiness unavailable"

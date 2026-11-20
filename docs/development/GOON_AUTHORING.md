@@ -93,6 +93,9 @@ commit in the existing execution lock. `workflow prepare run.yml --refresh appli
 explicitly refreshes application pins; `--refresh goons` and `--refresh skills`
 retain their separate scopes. Selections sharing an origin/ref must agree on one
 commit; a partial refresh cannot silently advance another source kind.
+Refreshing an application pin changes future admissions. An already admitted
+Run keeps its captured source and original Git commit even while its workflow
+is prepared again; later Runs capture the refreshed selection independently.
 
 Local captured bytes and exact Git provenance travel through the existing
 resolved Command Step, retained project delivery and admission. App code runs
