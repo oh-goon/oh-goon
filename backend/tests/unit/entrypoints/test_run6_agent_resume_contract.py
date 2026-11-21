@@ -25,7 +25,7 @@ class _Facts:
     def __init__(self, data: dict[str, Any]) -> None:
         self.data = data
 
-    def model_dump(self, *, mode: str) -> dict[str, Any]:
+    def model_dump(self, *, mode: str, by_alias: bool = False) -> dict[str, Any]:
         assert mode == "json"
         return self.data
 
@@ -107,6 +107,14 @@ class _CanonicalRuns:
         self.calls: list[tuple[object, ...]] = []
         self.reject = False
         self.tape = _Tape(run_id, stage=stage)
+        self.feedback = _Facts(
+            {
+                "schema": "oh-goon.run-feedback/v1",
+                "fleet_run_id": run_id,
+                "authority": "observation_only",
+                "context_authority": "untrusted_data_no_effect_or_recovery_permission",
+            }
+        )
 
     def get(self, run_id: str) -> SimpleNamespace:
         self.calls.append(("get", run_id))
@@ -128,6 +136,7 @@ class _CanonicalRuns:
             repository_admissions=(),
             journal_revision=100,
             campaign_journal=None,
+            feedback=self.feedback,
         )
 
     def events(self, run_id: str, after: int = 0, *, limit: int | None = None) -> SimpleNamespace:
@@ -247,6 +256,7 @@ def test_full_agent_run_id_resume_and_existing_evidence_views(
     assert handoff["fleet_run_id"] == run_id
     assert handoff["status"] == "FAILED"
     assert handoff["outcome"] == "FAILED"
+    assert handoff["feedback"] == runs.feedback.model_dump(mode="json", by_alias=True)
     assert handoff["issue_focus"] == [x.model_dump(mode="json") for x in runs.tape.issue_focus]
     assert handoff["why_not"] == runs.tape.why_not.model_dump(mode="json")
     views = handoff["readback"]
