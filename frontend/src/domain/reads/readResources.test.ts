@@ -27,6 +27,8 @@ describe("read resource invalidation", () => {
       "history-list",
       "history-detail",
       "agent-campaign",
+      "agent-continuation",
+      "agent-continuation-outcome",
       "game-tape-diff",
       "game-tape-performance",
       "game-tape-artifacts",
