@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import AwareDatetime, Field
 
+from oh_goon.core.models.agent_continuation_receipt import AgentContinuationState
 from oh_goon.core.models.agent_controls import AgentRunControls
 from oh_goon.core.models.agent_repair import AgentRepairBudget
 from oh_goon.core.models.base import ImmutableModel
@@ -191,6 +192,9 @@ class RunFeedback(ImmutableModel):
     status: str
     outcome: str
     terminal: bool
+    continuation_state: AgentContinuationState | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     diagnostic: RunFeedbackDiagnostic
     recovery_action: RunFeedbackRecoveryAction
     goals: tuple[RunFeedbackGoal, ...] = Field(default=(), max_length=MAX_RUN_FEEDBACK_GOALS)

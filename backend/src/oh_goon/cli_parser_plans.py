@@ -186,6 +186,24 @@ def _add_run_readback_commands[_Parser: argparse.ArgumentParser](
     history.add_argument("--before-revision", type=_admission_revision)
     history.add_argument("--limit", type=_event_page_limit, default=20)
     history.add_argument("--json", action="store_true", dest="as_json")
+    investigate = plan_subparsers.add_parser(
+        "investigate", help="Inspect a stopped campaign and its current candidate for a fresh Run"
+    )
+    investigate.add_argument("fleet_run_id", help="Exact campaign or member Run identity")
+    investigate.add_argument("--agent", choices=("codex", "opencode", "pi"))
+    investigate.add_argument("--profile")
+    investigate.add_argument("--config", type=Path)
+    investigate.add_argument("--json", action="store_true", dest="as_json")
+    continuation = plan_subparsers.add_parser(
+        "continue",
+        help="Authorize a fresh native Run from an inspected stopped campaign; wait for completion",
+    )
+    continuation.add_argument("fleet_run_id", help="Exact inspected campaign identity")
+    continuation.add_argument("--inspection", type=Path, required=True)
+    continuation.add_argument("--feedback-file", type=Path, required=True)
+    continuation.add_argument("--new-run-id", required=True)
+    continuation.add_argument("--authorize", action="store_true", required=True)
+    continuation.add_argument("--json", action="store_true", dest="as_json")
     cancel = plan_subparsers.add_parser(
         "cancel",
         help="Request cancellation of one exact Run from its proven original live owner",

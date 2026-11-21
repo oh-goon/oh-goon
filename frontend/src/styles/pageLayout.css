@@ -74,6 +74,10 @@
 /* Cross-app long-content contract: prose wraps; bounded code blocks keep their own scrolling semantics. */
 .page :is(dd,li,small){overflow-wrap:anywhere;}
 .page code:not(pre code){overflow-wrap:anywhere;word-break:break-word;}
+.campaign-continuation{min-width:0;}
+.campaign-continuation pre{max-width:100%;max-height:24rem;overflow:auto;white-space:pre;}
+.campaign-continuation form>label:not(.checkbox-row){display:grid;gap:var(--space-small);}
+.campaign-continuation textarea{width:100%;min-height:8rem;}
 .table-shell td{overflow-wrap:anywhere;}
 .page-heading__action{max-width:100%;}
 @media(max-width:680px){.page-heading__action{align-items:stretch;flex-direction:column}.page-heading__action>*{max-width:100%}}

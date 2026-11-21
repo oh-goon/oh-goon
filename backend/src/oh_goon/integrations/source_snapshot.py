@@ -12,6 +12,7 @@ from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 
 Cancel = Callable[[], bool] | None
+SourcePathValidator = Callable[[Path, Path, bool], None]
 _COPY_CHUNK_BYTES = 1024 * 1024
 
 
@@ -29,10 +30,15 @@ def source_snapshot_identity(
     cancel_requested: Cancel = None,
     exclude_paths: tuple[str, ...] = (),
     reject_dotenv_state: bool = False,
+    source_path_validator: SourcePathValidator | None = None,
 ) -> SnapshotIdentity:
     """Identify certifiable source with Hashmarks after Oh-Goon policy exclusions."""
 
+    if source_path_validator is not None:
+        source_path_validator(source, Path("."), True)
     root = source.resolve()
+    if source_path_validator is not None and root != source:
+        source_path_validator(root, Path("."), True)
     if not root.is_dir():
         raise FleetPlanInvalid(f"Repository source snapshot is not a directory: {root}")
     exclusions = _transient_source_exclusions(
@@ -40,6 +46,7 @@ def source_snapshot_identity(
         cancel_requested=cancel_requested,
         exclude_paths=exclude_paths,
         reject_dotenv_state=reject_dotenv_state,
+        source_path_validator=source_path_validator,
     )
     return _identify_source(root, exclusions, cancel_requested)
 
@@ -63,6 +70,7 @@ def _transient_source_exclusions(
     cancel_requested: Cancel,
     exclude_paths: tuple[str, ...] = (),
     reject_dotenv_state: bool = False,
+    source_path_validator: SourcePathValidator | None = None,
 ) -> tuple[str, ...]:
     excluded: list[str] = list(exclude_paths)
     # Output files do not make their newly-created parent directories authored.
@@ -85,14 +93,24 @@ def _transient_source_exclusions(
         kept: list[str] = []
         for name in sorted(directories):
             relative = relative_current / name
-            _require_source_input(relative, reject_dotenv_state)
             entry = current_path / name
+            _require_source_input(
+                relative,
+                reject_dotenv_state,
+                source_path_validator,
+                root,
+                source_path_validator is not None and not entry.is_symlink(),
+            )
             if is_transient_source_path(relative, exclude_paths=exclude_paths):
                 excluded.append(relative.as_posix())
             else:
                 if entry.is_symlink():
                     raw, target = _validated_symlink_target(
-                        root, entry, relative, reject_dotenv_state=reject_dotenv_state
+                        root,
+                        entry,
+                        relative,
+                        reject_dotenv_state=reject_dotenv_state,
+                        source_path_validator=source_path_validator,
                     )
                     symlinks.append((relative, raw, target))
                     retain_ancestors(relative)
@@ -104,13 +122,17 @@ def _transient_source_exclusions(
         directories[:] = kept
         for name in sorted(files):
             relative = relative_current / name
-            _require_source_input(relative, reject_dotenv_state)
+            _require_source_input(relative, reject_dotenv_state, source_path_validator, root, False)
             entry = current_path / name
             if is_transient_source_path(relative, exclude_paths=exclude_paths):
                 excluded.append(relative.as_posix())
             elif entry.is_symlink():
                 raw, target = _validated_symlink_target(
-                    root, entry, relative, reject_dotenv_state=reject_dotenv_state
+                    root,
+                    entry,
+                    relative,
+                    reject_dotenv_state=reject_dotenv_state,
+                    source_path_validator=source_path_validator,
                 )
                 symlinks.append((relative, raw, target))
                 retain_ancestors(relative)
@@ -165,10 +187,15 @@ def snapshot_source_directory(
     max_bytes: int | None = None,
     max_entries: int | None = None,
     reject_dotenv_state: bool = False,
+    source_path_validator: SourcePathValidator | None = None,
 ) -> SnapshotIdentity:
-    """Freeze source-only repository bytes and prove the filtered source stayed stable."""
+    """Freeze source-only bytes and prove source stability under optional path admission."""
 
+    if source_path_validator is not None:
+        source_path_validator(source, Path("."), True)
     root = source.resolve()
+    if source_path_validator is not None and root != source:
+        source_path_validator(root, Path("."), True)
     if not root.is_dir():
         raise FleetPlanInvalid(f"{label} is not a directory: {root}")
     for _attempt in range(3):
@@ -178,6 +205,7 @@ def snapshot_source_directory(
             cancel_requested=cancel_requested,
             exclude_paths=exclude_paths,
             reject_dotenv_state=reject_dotenv_state,
+            source_path_validator=source_path_validator,
         )
         before = _identify_source(root, exclusions, cancel_requested)
         if (max_bytes is not None and before.byte_count > max_bytes) or (
@@ -195,17 +223,20 @@ def snapshot_source_directory(
                 label,
                 exclusions,
                 reject_dotenv_state=reject_dotenv_state,
+                source_path_validator=source_path_validator,
             )
             after = source_snapshot_identity(
                 root,
                 cancel_requested=cancel_requested,
                 exclude_paths=exclude_paths,
                 reject_dotenv_state=reject_dotenv_state,
+                source_path_validator=source_path_validator,
             )
             copied = source_snapshot_identity(
                 destination,
                 cancel_requested=cancel_requested,
                 reject_dotenv_state=reject_dotenv_state,
+                source_path_validator=source_path_validator,
             )
         except BaseException:
             _remove(destination)
@@ -225,6 +256,7 @@ def _copy_source_tree(
     exclude_paths: tuple[str, ...] = (),
     *,
     reject_dotenv_state: bool = False,
+    source_path_validator: SourcePathValidator | None = None,
 ) -> None:
     _check_cancel(cancel_requested, root)
     destination.mkdir()
@@ -232,7 +264,13 @@ def _copy_source_tree(
     relative_current = source.relative_to(root)
     for entry in sorted(source.iterdir(), key=lambda item: item.name):
         relative = relative_current / entry.name
-        _require_source_input(relative, reject_dotenv_state)
+        _require_source_input(
+            relative,
+            reject_dotenv_state,
+            source_path_validator,
+            root,
+            source_path_validator is not None and entry.is_dir() and not entry.is_symlink(),
+        )
         if is_transient_source_path(relative, exclude_paths=exclude_paths):
             continue
         target = destination / entry.name
@@ -243,6 +281,7 @@ def _copy_source_tree(
                 relative,
                 exclude_paths=exclude_paths,
                 reject_dotenv_state=reject_dotenv_state,
+                source_path_validator=source_path_validator,
             )
             target.symlink_to(symlink_target)
         elif entry.is_dir():
@@ -254,6 +293,7 @@ def _copy_source_tree(
                 label,
                 exclude_paths,
                 reject_dotenv_state=reject_dotenv_state,
+                source_path_validator=source_path_validator,
             )
         elif entry.is_file():
             _copy_file(entry, target, cancel_requested, label)
@@ -268,6 +308,7 @@ def _validated_symlink_target(
     *,
     exclude_paths: tuple[str, ...] = (),
     reject_dotenv_state: bool = False,
+    source_path_validator: SourcePathValidator | None = None,
 ) -> tuple[str, Path]:
     raw = os.readlink(entry)
     target = Path(raw)
@@ -280,7 +321,13 @@ def _validated_symlink_target(
         raise FleetPlanInvalid(
             f"Repository source contains escaping symlink: {relative} -> {raw}"
         ) from exc
-    _require_source_input(target_relative, reject_dotenv_state)
+    _require_source_input(
+        target_relative,
+        reject_dotenv_state,
+        source_path_validator,
+        root,
+        source_path_validator is not None and resolved.is_dir(),
+    )
     if is_transient_source_path(target_relative, exclude_paths=exclude_paths):
         raise FleetPlanInvalid(
             f"Repository source symlink targets generated/operational state: {relative} -> {raw}"
@@ -288,7 +335,15 @@ def _validated_symlink_target(
     return raw, target_relative
 
 
-def _require_source_input(relative: Path, reject_dotenv_state: bool) -> None:
+def _require_source_input(
+    relative: Path,
+    reject_dotenv_state: bool,
+    source_path_validator: SourcePathValidator | None,
+    root: Path,
+    directory: bool,
+) -> None:
+    if source_path_validator is not None:
+        source_path_validator(root, relative, directory)
     if reject_dotenv_state and is_live_dotenv_state(relative):
         raise FleetPlanInvalid(
             "Independent application source contains live dotenv state; "

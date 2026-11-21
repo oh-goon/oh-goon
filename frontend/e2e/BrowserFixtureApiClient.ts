@@ -7,6 +7,7 @@ import { CatalogFixtureApi, CATALOG_FIXTURE_PLAN_ID, catalogFixtureRunDetail } f
 import { fixtureLockDriftDiagnostic } from "./fixtures/diagnostics";
 import { defaultFailureGroup, requireFailureGroup, scaleFailureGroups, scaleFailureRunId } from "./fixtures/failures";
 import { fixtureArtifactReadback, fixtureCampaignReadback, fixtureCampaignResultForId, fixtureFailureHistory, fixtureLiveOutput, fixtureRunDiff } from "./fixtures/gameTape";
+import { AgentContinuationFixtureApi, CONTINUATION_CAMPAIGN_ID, fixtureStoppedCampaign } from "./fixtures/agentContinuation";
 import { fixtureObservationWindows } from "./fixtures/executionTimeline";
 import {
   FIXTURE_REPOSITORIES,
@@ -50,10 +51,7 @@ import type {
   FleetFailureInventory,
   FleetFailureRepositoryItem,
   FleetFailureRepositoryPage,
-  FleetRunEventBatch,
-  FleetRunHistoryPage,
-  FleetRunState,
-  FleetPlanTarget,
+  FleetRunEventBatch, FleetRunHistoryPage, FleetRunState, FleetPlanTarget,
   DependencyAdvisoryOverview,
   DependencyCoverageRepositoryPage,
   DependencyFleetCoverageOverview,
@@ -127,6 +125,7 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
   private readonly runs = new FixtureRunRegistry();
   private readonly dependencySelections = new Map<string, DependencyTargetMaterialization>();
   private readonly catalogFixture: CatalogFixtureApi;
+  private readonly continuationFixture = new AgentContinuationFixtureApi({ runs: this.runs, saved: (value) => this.fixtureSaved(value) });
   private readonly scenario: BrowserFixtureScenario;
   private readonly scenarioConfig: ReturnType<typeof scenarioDefinition>;
 
@@ -678,7 +677,10 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
     return { journal_revision: this.scenario === "scale" ? 5001 : 203, next_before_revision: null, items };
   }
 
-  override async agentCampaign(campaignId: string) { return fixtureCampaignResultForId(campaignId); }
+  override async agentCampaign(campaignId: string) { return campaignId === CONTINUATION_CAMPAIGN_ID ? fixtureStoppedCampaign() : fixtureCampaignResultForId(campaignId); }
+
+  override inspectAgentContinuation(campaignId: string, implementation?: Parameters<ApiClient["inspectAgentContinuation"]>[1], profile?: string | null) { return this.continuationFixture.inspect(campaignId, implementation, profile); }
+  override continueAgentCampaign(campaignId: string, request: Parameters<ApiClient["continueAgentCampaign"]>[1]) { return this.continuationFixture.start(campaignId, request); }
 
   override async fleetRunDetail(runId: string, _options?: ReadRequestOptions, observeArtifacts = false): Promise<FleetRunDetail> {
     const run = this.projectRunState(runId);

@@ -17,6 +17,7 @@ export function GameTapeRunFeedback({ feedback, runId, campaignId, journalRevisi
   return <section className="game-tape-section game-tape-run-feedback" aria-label={t("gameTape.feedback.title")}>
     <h3>{t("gameTape.feedback.title")}</h3>
     <p>{t("gameTape.feedback.authority")}</p>
+    {feedback.continuation_state ? <p role="status">{t(`campaignContinuation.states.${feedback.continuation_state}`)}</p> : null}
     <strong>{feedback.diagnostic.classification}</strong>
     <p>{feedback.diagnostic.reason}</p>
     <dl className="game-tape-receipt">

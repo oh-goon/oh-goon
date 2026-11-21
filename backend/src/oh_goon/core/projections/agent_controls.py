@@ -20,7 +20,7 @@ from oh_goon.core.models.run_admission import StrictFleetExecutionAdmission
 from oh_goon.core.models.target import FleetPlanTarget
 
 
-def _mode(selected: ResolvedNativeAgent) -> NativeAgentControlMode:
+def native_agent_control_mode(selected: ResolvedNativeAgent) -> NativeAgentControlMode:
     if selected.profile.codex_service is not None:
         return "codex_service"
     if selected.profile.codex_login is not None:
@@ -59,7 +59,7 @@ def _selections(detail: FleetRunDetail) -> tuple[tuple[AgentControlSelection, ..
             AgentControlSelection(
                 step_id=step.step_id,
                 agent=selected.agent,
-                mode=_mode(selected),
+                mode=native_agent_control_mode(selected),
                 implementation_identity=f"{selected.agent}:sha256:{selected.executable_sha256}",
                 executable_sha256=selected.executable_sha256,
                 profile=selected.profile_name,

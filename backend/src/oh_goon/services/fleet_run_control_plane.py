@@ -1086,6 +1086,22 @@ class FleetRunControlPlane:
             campaign=campaign,
         )
 
+    def agent_campaign_evidence(
+        self, campaign_or_run_id: str
+    ) -> tuple[AgentCampaignReadback, tuple[FleetRunDetail, ...]]:
+        """Read exact campaign membership and child evidence from one verified cut."""
+        view = self._journal.read_view()
+        campaign = view.campaign(campaign_or_run_id)
+        if campaign.intent is None:
+            selected = view.required_run_detail(campaign_or_run_id)
+            target = selected.run.target
+            if not isinstance(target, FleetPlanTarget) or target.agent_repair is None:
+                raise FleetPlanInvalid("Selected Run is not part of a repair campaign")
+            campaign = view.campaign(target.agent_repair.repair_id)
+        return campaign, tuple(
+            view.required_run_detail(phase.fleet_run_id) for phase in campaign.phases
+        )
+
     def history(
         self,
         *,

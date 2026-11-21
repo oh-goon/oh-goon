@@ -94,6 +94,15 @@ export function createApiClient(mutations: MutationController): ApiClient {
       { path: { campaign_id: campaignId } },
       options,
     ),
+    inspectAgentContinuation: (campaignId, implementation, profile, options) => readOperation(
+      op.inspect_agent_continuation.operationId,
+      { path: { campaign_id: campaignId }, query: { ...(implementation ? { implementation } : {}), ...(profile ? { profile } : {}) } },
+      options,
+    ),
+    continueAgentCampaign: (campaignId, request) => write(
+      "fleet-run", op.continue_agent_campaign.operationId,
+      { path: { campaign_id: campaignId }, body: request },
+    ),
     compareFleetRuns: (runId, baselineRunId, options) => readOperation(
       op.compare_fleet_runs.operationId,
       { path: { fleet_run_id: runId, baseline_run_id: baselineRunId } },

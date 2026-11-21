@@ -19,6 +19,7 @@ type ScoutFindingCategory = NonNullable<NonNullable<OperationCall<typeof op.scou
 type ScoutDetailSection = NonNullable<NonNullable<OperationCall<typeof op.scout_plan.operationId>["query"]>["section"]>;
 type ScheduleOccurrenceStatus = NonNullable<NonNullable<OperationCall<typeof op.schedule_occurrence_repositories.operationId>["query"]>["status"]>;
 type DependencyCoveragePopulation = NonNullable<OperationCall<typeof op.dependency_coverage_repositories.operationId>["query"]>["coverage"];
+type AgentContinuationQuery = NonNullable<OperationCall<typeof op.inspect_agent_continuation.operationId>["query"]>;
 
 export type SharedPlanInputs = NonNullable<OperationBody<typeof op.preview_shared_plan.operationId>["inputs"]>;
 export type DependencyEcosystem = NonNullable<DependencyTargetFilter["ecosystem"]>;
@@ -63,6 +64,8 @@ export interface ApiClient {
   fleetRunHistory(beforeRevision?: number, limit?: number, outcome?: FleetRunHistoryOutcome, status?: FleetRunHistoryStatus, source?: FleetRunHistorySource, repositoryId?: string, fromAt?: string, toAt?: string, planQuery?: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.fleet_run_history.operationId>;
   fleetRunDetail(runId: string, options?: ReadRequestOptions, observeArtifacts?: boolean): ReadOperationResult<typeof op.get_fleet_run.operationId>;
   agentCampaign(campaignId: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.get_agent_campaign.operationId>;
+  inspectAgentContinuation(campaignId: string, implementation?: AgentContinuationQuery["implementation"], profile?: AgentContinuationQuery["profile"], options?: ReadRequestOptions): ReadOperationResult<typeof op.inspect_agent_continuation.operationId>;
+  continueAgentCampaign(campaignId: string, request: OperationBody<typeof op.continue_agent_campaign.operationId>): WriteOperationResult<typeof op.continue_agent_campaign.operationId>;
   compareFleetRuns(runId: string, baselineRunId: string, options?: ReadRequestOptions): ReadOperationResult<typeof op.compare_fleet_runs.operationId>;
   gameTapePerformance(runId: string, sampleLimit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.game_tape_performance.operationId>;
   gameTapeFailureHistory(runId: string, repositoryId: string, stepId: string, sampleLimit?: number, options?: ReadRequestOptions): ReadOperationResult<typeof op.game_tape_failure_history.operationId>;

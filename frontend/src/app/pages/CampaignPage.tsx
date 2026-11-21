@@ -6,6 +6,7 @@ import { appLocationHash, queryParamsFromHash, writeAppLocation } from "@/app/na
 import { useReadResource } from "@/app/reads/useReadResource";
 import { ErrorBanner } from "@/components/common/ErrorBanner";
 import { PageHeading } from "@/components/common/PageHeading";
+import { CampaignContinuationPanel } from "@/app/pages/CampaignContinuationPanel";
 import { GameTapeCampaignJournal, GameTapeRunFeedback } from "@/features/game-tape/GameTapeFeature";
 import type { AgentCampaignResult } from "@generated/models";
 
@@ -49,5 +50,6 @@ export function CampaignPage() {
       {result.runs.length ? <ul>{result.runs.map((run, index) => typeof run.fleet_run_id === "string" ? <li key={`${index}:${run.fleet_run_id}`}><a href={appLocationHash("runs", { run: run.fleet_run_id })}>{run.fleet_run_id}</a></li> : null)}</ul> : <p>{t("gameTape.campaign.noRuns")}</p>}
       <details className="advanced-disclosure"><summary>{t("gameTape.campaign.structuredResult")}</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>
     </section> : null}
+    {result ? <CampaignContinuationPanel campaignId={result.campaign_id} /> : null}
   </main>;
 }

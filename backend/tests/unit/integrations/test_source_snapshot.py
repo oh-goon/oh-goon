@@ -260,6 +260,7 @@ def test_application_snapshot_refuses_dotenv_races_and_discards_partial_copy(
         exclude_paths: tuple[str, ...] = (),
         *,
         reject_dotenv_state: bool = False,
+        source_path_validator: source_snapshot.SourcePathValidator | None = None,
     ) -> None:
         if current == root and injection == "before_copy":
             private.write_text("PRIVATE_RACE_TEST_VALUE=must-not-be-read\n")
@@ -271,6 +272,7 @@ def test_application_snapshot_refuses_dotenv_races_and_discards_partial_copy(
             label,
             exclude_paths,
             reject_dotenv_state=reject_dotenv_state,
+            source_path_validator=source_path_validator,
         )
         if current == root and injection != "before_copy":
             private.write_text("PRIVATE_RACE_TEST_VALUE=must-not-be-read\n")

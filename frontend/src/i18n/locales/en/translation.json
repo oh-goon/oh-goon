@@ -3056,5 +3056,52 @@
     "lifecycleLimits": "Lifecycle observation limits",
     "unresolvedRelationships": "Unresolved relationship observations",
     "externalRelationships": "External or unindexed relationship observations"
+  },
+  "campaignContinuation": {
+    "title": "Investigate and continue with a fresh Run",
+    "explanation": "Inspect the current registered repository and the original attempt, then provide new feedback or clarification. Continuation admits a separate Run with fresh configuration and a new native session. Original results remain recorded.",
+    "observer": "Leaving this page stops your observation only. Work continues; cancel an active Run through its existing Run controls.",
+    "implementation": "Fresh native Agent implementation",
+    "recordedSelection": "Use the recorded implementation",
+    "profile": "Current native Agent profile",
+    "selectionHelp": "Leave a selection blank to resolve its recorded choice against current configuration. Check the resolved profile and implementation identity before authorizing.",
+    "check": "Check current candidate",
+    "checking": "Checking current candidate…",
+    "inspection": "Current continuation inspection",
+    "inspectionFailed": "The current candidate could not be inspected. No continuation was authorized.",
+    "repository": "Registered repository",
+    "originalRun": "Original Run",
+    "recordedCandidate": "Last captured candidate identity",
+    "currentCandidate": "Current source snapshot SHA-256",
+    "currentSubject": "Current repository instance",
+    "currentSelection": "Resolved current native selection",
+    "diff": "Current candidate diff",
+    "diffBaseline": "Native Git comparison: the last captured candidate against the current repository. This bounded observation grants no execution or verification authority.",
+    "diffTruncated": "This diff is truncated. Omitted changes are not shown.",
+    "noDiff": "Native Git reported no differences.",
+    "diffUnavailable": "Native Git diff unavailable.",
+    "feedback": "New feedback or clarification",
+    "feedbackLimit": "{{count}} / 8192 UTF-8 bytes",
+    "authorize": "Authorize fresh workspace writes for this exact inspected candidate, native selection and feedback",
+    "submit": "Start fresh continuation Run",
+    "submission": "Fresh continuation request",
+    "openRun": "Open continuation Run",
+    "checkOutcome": "Check this Run outcome",
+    "outcomeUnavailable": "This Run outcome is unavailable. The original request may still be pending; inspect this same Run ID again before starting another invocation.",
+    "checks": "Recorded verification commands",
+    "states": {
+      "awaiting_input": "Awaiting input",
+      "stopped": "Stopped",
+      "needs_review": "Needs review",
+      "native_finished": "Native Agent finished; verification is separate",
+      "verified_success": "Verified success"
+    },
+    "submissionStates": {
+      "idle": "No request submitted.",
+      "pending": "Submitting this new Run identity…",
+      "admitted": "This fresh Run was admitted. Inspect its Game Tape for execution and verification results.",
+      "unknown": "Acknowledgement is unavailable. Read this same Run ID to reconcile the original request; this page will not resubmit it."
+    },
+    "diffBytes": "Native diff bytes: {{total}}; omitted bytes: {{omitted}}."
   }
 }

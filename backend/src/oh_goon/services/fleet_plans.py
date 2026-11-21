@@ -48,6 +48,7 @@ from oh_goon.core.models.caller_input_file import (
 from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.execution_lock_models import ExecutionLock, LockedExternalArtifact
 from oh_goon.core.models.fleet_plan import (
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
     MAX_AGENT_TASK_CHARS,
     AgentPlanStep,
     ManagedExtension,
@@ -154,8 +155,15 @@ def _native_prior_context(value: str | None) -> str | None:
 
 
 if TYPE_CHECKING:
+    from oh_goon.core.models.agent_continuation import (
+        AgentContinuationInspection,
+        AgentContinuationReceipt,
+        AgentContinuationRequest,
+        AgentContinuationResult,
+    )
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
     from oh_goon.integrations.fleet_content_store import FleetContentStore
+    from oh_goon.services.repositories import RepositoryService
 
 
 class FleetPlanService:
@@ -174,6 +182,7 @@ class FleetPlanService:
         terminal: CommandTerminal | None = None,
         standard_process_isolation: ProcessIsolationBackend | None = None,
         git_service: GitService | None = None,
+        repositories: RepositoryService | None = None,
     ) -> None:
         self._resolver = resolver
         self._runs = runs
@@ -185,6 +194,32 @@ class FleetPlanService:
         self._terminal = terminal
         self._standard_process_isolation = standard_process_isolation
         self._git_service = git_service
+        self._repositories = repositories
+
+    def inspect_agent_continuation(
+        self,
+        campaign_or_run_id: str,
+        *,
+        implementation: str | None = None,
+        profile: str | None = None,
+        config_file: str | None = None,
+    ) -> AgentContinuationInspection:
+        from oh_goon.services.fleet_plan_continuation import inspect_agent_continuation
+
+        return inspect_agent_continuation(
+            self,
+            campaign_or_run_id,
+            implementation=implementation,
+            profile=profile,
+            config_file=config_file,
+        )
+
+    def continue_agent_campaign(
+        self, campaign_or_run_id: str, request: AgentContinuationRequest
+    ) -> AgentContinuationResult:
+        from oh_goon.services.fleet_plan_continuation import continue_agent_campaign
+
+        return continue_agent_campaign(self, campaign_or_run_id, request)
 
     def require_cli_plan_preparation(self, fleet_run_id: str | None) -> None:
         """CLI ingress preflight without manufacturing a Plan or execution authority."""
@@ -198,9 +233,13 @@ class FleetPlanService:
         skill: Path | None,
         task: str,
         verification: tuple[tuple[str, ...], ...] = (),
+        verification_timeouts: tuple[float | None, ...] = (),
         role: str = "report",
         fleet_run_id: str | None = None,
         prior_context: str | None = None,
+        reviewed_repository_source: RepositorySourceAuthority | None = None,
+        expected_repository_instance_ids: dict[str, str] | None = None,
+        continuation_receipt: AgentContinuationReceipt | None = None,
     ) -> FleetRunState:
         """Author one ordinary native-workload Plan and admit it through Fleet.
 
@@ -224,6 +263,10 @@ class FleetPlanService:
         except UnicodeError:
             raise FleetPlanInvalid("Native task must be valid UTF-8") from None
         context = _native_prior_context(prior_context)
+        if verification_timeouts and len(verification_timeouts) != len(verification):
+            raise FleetPlanInvalid("Native verification timeouts must match selected commands")
+        if any(timeout != DEFAULT_COMMAND_TIMEOUT_SECONDS for timeout in verification_timeouts):
+            raise FleetPlanInvalid("Native verification requires the backend default command timeout")
         self.require_plan_ingress_preparation(fleet_run_id)
         workspace = workspace.resolve(strict=True)
         if role not in {"report", "review"}:
@@ -325,7 +368,14 @@ class FleetPlanService:
                     native_agent=plan.native_agent,
                 )
             write_execution_lock(root / LOCK_FILE_NAME, build_execution_lock(plan))
-            target = self._agent_target(plan, deliveries, source_sha, repository_id(workspace))
+            target = self._agent_target(
+                plan,
+                deliveries,
+                source_sha,
+                repository_id(workspace),
+                reviewed_repository_source=reviewed_repository_source,
+                continuation_receipt=continuation_receipt,
+            )
             return self._runs.start_prepared_plan(
                 target,
                 repository_ids={repository_id(workspace)},
@@ -333,6 +383,7 @@ class FleetPlanService:
                 fleet_run_id=fleet_run_id,
                 source=FleetRunSource.MANUAL,
                 created_agent_deliveries=target.agent_deliveries,
+                expected_repository_instance_ids=expected_repository_instance_ids,
             )
 
     def _prepare_native_agent(
@@ -1161,6 +1212,8 @@ class FleetPlanService:
         repository_goon: bool = False,
         lock_artifacts: tuple[LockedExternalArtifact, ...] = (),
         source: SharedPlanSource | None = None,
+        reviewed_repository_source: RepositorySourceAuthority | None = None,
+        continuation_receipt: AgentContinuationReceipt | None = None,
     ) -> FleetPlanTarget:
         if self._content_store is None:
             raise FleetPlanInvalid("frozen Agent delivery requires an available content store")
@@ -1201,6 +1254,8 @@ class FleetPlanService:
                 agent_deliveries=tuple(references),
                 agent_repair=repair,
                 caller_input_file=caller_input_file,
+                reviewed_repository_source=reviewed_repository_source,
+                agent_continuation=continuation_receipt,
             )
         except Exception as error:
             for reference in references:

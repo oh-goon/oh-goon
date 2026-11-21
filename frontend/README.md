@@ -79,6 +79,14 @@ Game Tape opens on the read-only **Steps** review tab, which contains the **CI/C
 
 Raw stdout/stderr rendering is separately bounded to at most 120 matching chunks at once even when the backend retains more. Search and stdout/stderr filtering still apply to the full loaded Step output; Earlier/Newer controls and canonical failure navigation keep every loaded matching chunk reachable without an unbounded DOM.
 Durable Runs/Game Tape URL state is owned by `app/pages/runReviewState.ts` and is normalized only after the requested canonical Run is loaded. Stale Step/baseline/lane/source identities are removed with replace-style history; browser review preferences do not become execution authority.
+
+Campaign readback offers an explicit current-candidate inspection before a fresh
+continuation. The backend supplies source identity, bounded native Git diff,
+current native selection and verification facts. New feedback and authorization
+apply to that exact inspection. The browser retains only a proposed Run ID in
+the campaign URL so an unavailable acknowledgement can be reconciled through
+ordinary Run readback without resubmitting. Original campaign and Run history
+remain available; leaving the page does not cancel work.
 ## Visual system
 
 `src/app/theme/themeTokens.ts` is the one tuning surface for the snow/ice/hockey palette and shared visual primitives.

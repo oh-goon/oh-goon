@@ -8,6 +8,7 @@ from oh_goon.services.command_center import CommandCenterService
 from oh_goon.services.dependencies import DependencyFleetService
 from oh_goon.services.filesystem import FilesystemService
 from oh_goon.services.fleet import FleetService
+from oh_goon.services.fleet_plans import FleetPlanService
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.goon import GoonService
 from oh_goon.services.league import LeagueService
@@ -82,6 +83,10 @@ def fleet_service() -> FleetService:
 
 def fleet_run_control_plane() -> FleetRunControlPlane:
     return application().runs
+
+
+def fleet_plan_service() -> FleetPlanService:
+    return application().plans
 
 
 def executor_pool() -> FleetExecutorPool:

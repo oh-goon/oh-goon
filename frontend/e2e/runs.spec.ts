@@ -5,6 +5,43 @@ import { DEFAULT_RUN_ID, FAILED_RUN_ID } from "./fixtures/runIds";
 import { ARTIFACT_OBSERVATION_RELEASE_EVENT, ARTIFACT_OBSERVATION_REQUEST_EVENT, ARTIFACT_OBSERVATION_RESPONSE_EVENT } from "./fixtures/scenarios";
 import { openFixture, openRunFixture } from "./helpers/navigation";
 import { gameTapeFlow, gameTapeFlowSearch, gameTapeInspector, gameTapeRegion, runHistoryRegion } from "./helpers/locators";
+import { CONTINUATION_CAMPAIGN_ID } from "./fixtures/agentContinuation";
+
+test("Stopped campaign inspection creates a fresh Run and retains the original attempt", async ({ page }, testInfo) => {
+  await openFixture(page, `runs?campaign=${CONTINUATION_CAMPAIGN_ID}`);
+  const continuation = page.getByRole("region", { name: "Investigate and continue with a fresh Run", exact: true });
+  await expect(continuation.getByText(/Leaving this page stops your observation only/)).toBeVisible();
+  await continuation.getByRole("button", { name: "Check current candidate", exact: true }).click();
+  const inspection = continuation.getByRole("region", { name: "Current continuation inspection", exact: true });
+  await expect(inspection.getByRole("heading", { name: "Current continuation inspection", exact: true })).toBeFocused();
+  await expect(inspection.getByText("Needs review", { exact: true })).toBeVisible();
+  await expect(inspection.getByText("c".repeat(64), { exact: true })).toBeVisible();
+  await expect(inspection.getByRole("link", { name: FAILED_RUN_ID, exact: true })).toHaveAttribute("href", `#runs?run=${FAILED_RUN_ID}`);
+  await inspection.getByText("Current candidate diff", { exact: true }).click();
+  await expect(inspection.getByText("This diff is truncated. Omitted changes are not shown.", { exact: true })).toBeVisible();
+  await continuation.getByLabel("New feedback or clarification", { exact: true }).fill("Clarify the original regression and preserve its verification command.");
+  await continuation.getByRole("checkbox").focus();
+  await page.keyboard.press("Space");
+  await continuation.getByRole("button", { name: "Start fresh continuation Run", exact: true }).click();
+  const submission = continuation.getByRole("region", { name: "Fresh continuation request", exact: true });
+  await expect(submission.getByText(/This fresh Run was admitted/)).toBeVisible();
+  const proposed = new URLSearchParams(new URL(page.url()).hash.split("?", 2)[1]).get("continuation_run");
+  expect(proposed).toBeTruthy();
+  await expect(submission.getByRole("link", { name: "Open continuation Run", exact: true })).toHaveAttribute("href", `#runs?run=${proposed}`);
+  await page.setViewportSize({ width: 375, height: 800 });
+  expect(await continuation.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await continuation.screenshot({ path: testInfo.outputPath("fresh-continuation-mobile.png") });
+  await submission.getByRole("link", { name: "Open continuation Run", exact: true }).click();
+  await expect(gameTapeRegion(page)).toBeVisible();
+  await page.goBack();
+  await page.reload();
+  await expect(continuation.getByRole("region", { name: "Fresh continuation request", exact: true }).getByText(proposed!, { exact: true })).toBeVisible();
+  await expect(continuation.getByRole("button", { name: "Start fresh continuation Run", exact: true })).toBeDisabled();
+  const original = page.getByRole("link", { name: FAILED_RUN_ID, exact: true });
+  await expect(original).toBeVisible();
+  await original.click();
+  await expect(gameTapeRegion(page).getByRole("region", { name: "Recorded attempt feedback", exact: true }).getByText("FAILED · FAILED", { exact: true })).toBeVisible();
+});
 
 test("Bounded Run feedback remains readable and exposes passive continuation support", async ({ page }, testInfo) => {
   await openRunFixture(page);

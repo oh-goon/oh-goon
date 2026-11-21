@@ -250,6 +250,52 @@ The complete context must fit the existing 65,536-byte phase context bound;
 oversize context rejects before new admission instead of silently clipping.
 No prior Run or ambient conversation is selected automatically.
 
+### Investigate and continue stopped campaigns
+
+The campaign page can inspect the currently registered repository and a bounded
+native Git diff against the last retained captured candidate. The capture stores
+bytes, not historical executable modes; mode lines from its materialization do
+not establish past permission changes. Missing Git or an inaccessible retained
+capture is reported explicitly. Recorded candidate identity and current source
+identity remain separate. Grader-only and native configuration material cannot
+enter this inspection.
+
+The same operation is available to CLI callers:
+
+```sh
+oh-goon runs investigate CAMPAIGN_ID --agent codex --profile SERVICE_PROFILE --json > /private/inspection.json
+oh-goon runs continue CAMPAIGN_ID --inspection /private/inspection.json \
+  --feedback-file /private/feedback.txt --new-run-id NEW_RUN_ID --authorize
+```
+
+Review the inspection and supply new feedback before authorizing workspace writes
+and the displayed independent checks. A fresh Run uses current source, provider
+configuration and admission; previous review scope, permissions and native
+sessions grant no authority. The inspection fences campaign, repository subject,
+source and native selection. Changed fences refuse submission. Only direct
+verification commands whose semantics can be preserved are offered, using the
+ordinary backend command timeout. Custom timeout, environment or project
+semantics are unavailable through this operation. Previous campaign time budgets
+grant no fresh execution authority. Without independent verification, native success is
+`native_finished`, never `verified_success`.
+
+The API uses `GET /api/fleet/runs/campaigns/{id}/continuation` and
+`POST /api/fleet/runs/campaigns/{id}/continuations` through that same service.
+The immutable child receipt records parent and exact request identity in the
+existing Run journal. Exact duplicate requests return that child; changed intent
+under the same proposed ID conflicts. If an acknowledgement is lost, inspect the
+proposed Run ID. The browser retains only that lookup ID in its URL and does not
+automatically resend. CLI execution waits; Ctrl-C requests cancellation from its
+original owner. Closing a browser observation does not cancel the Run.
+
+Cancelled campaigns and unknown process/resource cleanup cannot authorize this
+operation. Unsupported native profiles report their missing execution boundary;
+the operation does not configure an isolation provider. Current supported
+execution still requires the selected mode's ordinary compatibility checks.
+Exact native resume, steering, clearing pending work and native detach remain
+unsupported. A fresh continuation does not establish installed harness or
+environment qualification, or HUG-81's held-out usability evidence.
+
 ### Ephemeral Pi RPC
 
 A Pi-only managed profile may explicitly select `pi_rpc: true`:

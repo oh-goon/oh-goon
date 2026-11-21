@@ -73,6 +73,10 @@ class _PlanSourceIdentity(TypedDict, total=False):
 
 def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> int | None:
     if args.command == "runs":
+        if args.runs_command in {"investigate", "continue"}:
+            from oh_goon.cli_agent_continuation import run_agent_continuation_command
+
+            return run_agent_continuation_command(runtime, args)
         if args.runs_command == "cancel":
             from oh_goon.cli_run_cancel import run_cancel_command
 

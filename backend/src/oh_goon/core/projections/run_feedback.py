@@ -8,8 +8,9 @@ import json
 from pydantic import BaseModel
 
 from oh_goon.core.agent_campaign_settlement import declared_regression_feedback
+from oh_goon.core.models.agent_continuation_receipt import AgentContinuationState
 from oh_goon.core.models.agent_controls import MAX_AGENT_CONTROL_ID_CHARS
-from oh_goon.core.models.fleet_plan import ResolvedAgentStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedCommandStep
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepTeardownEvidence,
     PlanStepExecution,
@@ -284,6 +285,62 @@ def _accepted_steps(
         for step in evidence.plan.steps:
             accepted[(repository_id, step.step_id)] = step
     return accepted
+
+
+def _continuation_state(
+    detail: FleetRunDetail,
+    reports: dict[str, OperationReport],
+    steps: dict[tuple[str, str], PlanStepExecution],
+) -> AgentContinuationState | None:
+    """Describe original continuation results without promoting native claims."""
+    target = detail.run.target
+    if not isinstance(target, FleetPlanTarget) or target.agent_continuation is None:
+        return None
+    if detail.outcome.value == "CANCELLED":
+        return "stopped"
+    if not detail.run.status.terminal:
+        return "awaiting_input"
+    review = target.agent_continuation.review
+    if (
+        len(detail.run.targets) != 1
+        or len(reports) != 1
+        or len(steps) != len(target.plan.steps)
+        or any(report.resource_settlement != "SETTLED" for report in reports.values())
+        or not target.plan.steps
+        or not isinstance(target.plan.steps[0], ResolvedAgentStep)
+        or target.plan.steps[0].workload.harness != "native"
+        or len(target.plan.steps) != len(review.verification) + 1
+    ):
+        return "stopped"
+    for selected, argv, timeout in zip(
+        target.plan.steps[1:], review.verification, review.verification_timeouts, strict=True
+    ):
+        if not isinstance(selected, ResolvedCommandStep) or selected != ResolvedCommandStep(
+            step_id=selected.step_id, argv=argv, timeout_seconds=timeout
+        ):
+            return "stopped"
+    for step in steps.values():
+        if (
+            step.settlement.cleanup != "VERIFIED"
+            or isinstance(step.teardown, FailedPlanStepTeardownEvidence)
+            or not step.attempts
+            or step.settlement.outcome in {"INCOMPLETE", "AUTHORITY_LOST", "CANCELLED"}
+            or any(
+                attempt.supervisor is None
+                or attempt.supervisor.final_process_group_quiescent is not True
+                or (
+                    attempt.standard_isolation is not None
+                    and attempt.standard_isolation.filesystem_cleanup != "verified"
+                )
+                for attempt in step.attempts
+            )
+        ):
+            return "stopped"
+    if detail.outcome.value != "SUCCESS" or any(
+        step.settlement.outcome != "SUCCESS" for step in steps.values()
+    ):
+        return "needs_review"
+    return "verified_success" if review.verification else "native_finished"
 
 
 def _run_diagnostic(
@@ -580,6 +637,7 @@ def project_run_feedback(detail: FleetRunDetail) -> RunFeedback:
         status=detail.run.status.value,
         outcome=detail.outcome.value,
         terminal=detail.run.status.terminal,
+        continuation_state=_continuation_state(detail, accepted_reports, original_steps),
         diagnostic=diagnostic,
         recovery_action=_recovery_action(detail, steps, diagnostic),
         goals=tuple(goals[:MAX_RUN_FEEDBACK_GOALS]),
