@@ -4,8 +4,8 @@ AGENT_HARNESS_COMPATIBILITY disposition: retain the current protected stdin,
 typed JSONL, scoped apply, isolation and settlement adaptations unchanged. The
 public executable is synthetic; this proves native transport and physical
 phase custody, not an installed Codex version, model quality or live account.
-The ordinary provider counterpart owns the same bounded recovery graph; this
-additional daily case explicitly exercises its native Bubblewrap boundary.
+This bounded case protects the original native Bubblewrap recovery boundary;
+the provider counterpart separately protects HTTP reasoning delivery.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProce
 from tests.integration.services.test_agent_regression_recovery import exercise_regression_recovery
 
 pytestmark = [
-    pytest.mark.daily,
     pytest.mark.process,
     pytest.mark.no_resume,
     pytest.mark.skipif(
