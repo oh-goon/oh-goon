@@ -853,7 +853,9 @@ max_output_tokens = 8192
                         repository_id=repository_id(repo),
                         budget=AgentRepairBudget(
                             max_attempts=passes,
-                            timeout_seconds=45,
+                            # This positive vector includes six claimed workers
+                            # and cold producer preparation, not a latency bound.
+                            timeout_seconds=120 if scenario == "accepted_nonzero" else 45,
                             # Exercise a stalled model request after cold producer
                             # startup, rather than racing that startup on busy hosts.
                             step_timeout_seconds=5 if scenario == "timeout" else 10,

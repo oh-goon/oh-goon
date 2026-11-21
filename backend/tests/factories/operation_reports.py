@@ -48,7 +48,7 @@ from oh_goon.core.vocabulary import (
 from tests.factories.capabilities import capability_snapshot
 
 
-def _evidence(action: OperationAction, target: OperationTarget | None) -> OperationEvidence:
+def _evidence(action: OperationAction, target: OperationTarget | None):
     if action in {OperationAction.STATUS, OperationAction.INIT}:
         return ReadinessOperationEvidence(
             kind="READINESS",
@@ -95,7 +95,7 @@ def _evidence(action: OperationAction, target: OperationTarget | None) -> Operat
             recipe=UvRecipeResult(
                 recipe=recipe,
                 safety=CommandSafety.READ_ONLY,
-                argv=("uv", recipe.value.lower()),
+                argv=["uv", recipe.value.lower()],
                 exit_code=0,
             ),
         )
@@ -127,7 +127,7 @@ def make_operation_report(
     identity = (
         repository
         if isinstance(repository, RepositoryIdentity)
-        else RepositoryIdentity.model_validate({"name": repository.name, "path": repository})
+        else RepositoryIdentity(name=repository.name, path=repository)
     )
     return OperationReport(
         target=target,
@@ -138,9 +138,7 @@ def make_operation_report(
         ),
         repository=identity,
         outcome=(
-            SuccessfulOperationOutcome.model_validate(
-                {"state": "successful", "verdict": verdict, "reason_code": reason_code}
-            )
+            SuccessfulOperationOutcome(state="successful", verdict=verdict, reason_code=reason_code)
             if verdict.successful
             else FailedOperationOutcome(
                 state="failed", returncode=returncode or 1, reason_code=reason_code
