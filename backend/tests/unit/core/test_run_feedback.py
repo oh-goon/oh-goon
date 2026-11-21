@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from oh_goon.core.agent_campaign_settlement import regression_recovery
 from oh_goon.core.models.agent_repair import (
     AgentCampaignDecision,
     AgentCampaignIntent,
@@ -680,3 +681,74 @@ def test_missing_or_unaccepted_non_plan_result_never_claims_success_or_a_fresh_r
     ).feedback
     assert feedback.diagnostic.classification == "unknown_execution"
     assert feedback.recovery_action == "open-recovery"
+
+
+def _without_campaign(detail: FleetRunDetail) -> FleetRunDetail:
+    target = detail.run.target
+    assert isinstance(target, FleetPlanTarget)
+    target = target.model_copy(update={"agent_repair": None})
+    return detail.model_copy(
+        update={
+            "run": detail.run.model_copy(update={"target": target}),
+            "operations": (detail.operations[0].model_copy(update={"target": target}),),
+        }
+    )
+
+
+def test_standalone_declared_code_failure_retains_diagnostic_without_campaign_authority():
+    detail = _without_campaign(_detail(recoverable=True))
+    assert regression_recovery(detail) is None
+    feedback = detail.feedback
+    assert feedback.diagnostic.classification == "known_code_failure"
+    assert feedback.steps[0].retained_diagnostics[0].text == "native failure"
+    assert feedback.steps[0].retained_diagnostics[0].authority == "untrusted_recorded_data"
+    assert feedback.campaign is None and feedback.budgets is None
+    assert feedback.context_authority == "untrusted_data_no_effect_or_recovery_permission"
+    assert detail.outcome.value == "ATTENTION_REQUIRED"
+
+
+@pytest.mark.parametrize("missing", ["physical", "supervisor", "feedback", "declaration"])
+def test_standalone_failure_requires_the_same_original_native_proof(missing):
+    detail = _without_campaign(_detail(recoverable=True))
+    assert detail.feedback.diagnostic.classification == "known_code_failure"
+    operation = detail.operations[0]
+    evidence = operation.evidence
+    assert isinstance(evidence, FleetPlanOperationEvidence) and evidence.plan is not None
+    step = evidence.plan.steps[0]
+    if missing in {"physical", "supervisor"}:
+        attempt = step.attempts[0].model_copy(
+            update={
+                "physical_execution_id" if missing == "physical" else "supervisor": None,
+            }
+        )
+        step = step.model_copy(update={"attempts": (attempt,)})
+    elif missing == "feedback":
+        step = step.model_copy(update={"outputs": ()})
+    else:
+        target = detail.run.target
+        assert isinstance(target, FleetPlanTarget)
+        selected = target.plan.steps[0]
+        assert isinstance(selected, ResolvedCommandStep)
+        target = target.model_copy(
+            update={
+                "plan": target.plan.model_copy(
+                    update={
+                        "steps": (selected.model_copy(update={"regression_failure": None}),),
+                    }
+                )
+            }
+        )
+        detail = detail.model_copy(update={"run": detail.run.model_copy(update={"target": target})})
+        operation = operation.model_copy(update={"target": target})
+    operation = operation.model_copy(
+        update={
+            "evidence": evidence.model_copy(
+                update={
+                    "plan": evidence.plan.model_copy(update={"steps": (step,)}),
+                }
+            )
+        }
+    )
+    feedback = detail.model_copy(update={"operations": (operation,)}).feedback
+    assert feedback.diagnostic.classification == "unknown_execution"
+    assert feedback.steps[0].retained_diagnostics == ()

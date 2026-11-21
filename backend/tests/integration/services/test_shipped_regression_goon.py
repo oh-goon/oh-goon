@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from oh_goon.application import ApplicationRuntime
+from oh_goon.core.agent_campaign_settlement import regression_recovery
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run import FleetRunDetail
@@ -106,6 +107,18 @@ def test_shipped_regression_goon_retains_failure_and_preserves_ordinary_stop(
         assert retained.physical_execution_id == attempt.physical_execution_id
         assert retained.physical_execution_id
         assert blocked.status == "SKIPPED" and not effect.exists()
+        feedback = failed.feedback
+        assert feedback.diagnostic.classification == "known_code_failure"
+        recorded = next(step for step in feedback.steps if step.step_id == regression.step_id)
+        assert recorded.diagnostic.classification == "known_code_failure"
+        assert recorded.retained_diagnostics[0].text == retained.text
+        assert (
+            recorded.retained_diagnostics[0].physical_execution_id == attempt.physical_execution_id
+        )
+        assert recorded.retained_diagnostics[0].authority == "untrusted_recorded_data"
+        assert feedback.context_authority == "untrusted_data_no_effect_or_recovery_permission"
+        assert feedback.campaign is None and regression_recovery(failed) is None
+        assert failed.outcome.value == "ATTENTION_REQUIRED" and not effect.exists()
         assert (package / "goon.yml").read_bytes() == authored
         assert runtime.runs.get(control.run.fleet_run_id).outcome.value == "SUCCESS"
     finally:

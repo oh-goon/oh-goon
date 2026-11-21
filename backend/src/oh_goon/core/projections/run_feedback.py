@@ -7,10 +7,7 @@ import json
 
 from pydantic import BaseModel
 
-from oh_goon.core.agent_campaign_settlement import (
-    regression_feedback_context,
-    regression_recovery,
-)
+from oh_goon.core.agent_campaign_settlement import declared_regression_feedback
 from oh_goon.core.models.agent_controls import MAX_AGENT_CONTROL_ID_CHARS
 from oh_goon.core.models.fleet_plan import ResolvedAgentStep
 from oh_goon.core.models.fleet_plan_evidence import (
@@ -502,22 +499,30 @@ def project_run_feedback(detail: FleetRunDetail) -> RunFeedback:
                 else 0,
             )
         )
-    recovery = regression_recovery(detail)
-    retained_by_step: dict[str, list[RunFeedbackRetainedDiagnostic]] = {}
-    if recovery is not None:
-        for entry in regression_feedback_context(detail, recovery)["feedback"]:
-            retained_by_step.setdefault(entry["step_id"], []).append(
-                RunFeedbackRetainedDiagnostic(
-                    output_name=entry["output_name"],
-                    physical_execution_id=entry["physical_execution_id"],
-                    sha256=entry["sha256"],
-                    byte_count=entry["byte_count"],
-                    text=entry["text"],
-                    redacted=entry["redacted"],
-                )
-            )
     accepted_reports = _accepted_reports(detail)
     original_steps = _accepted_steps(detail, accepted_reports)
+    retained_by_step: dict[tuple[str, str], tuple[RunFeedbackRetainedDiagnostic, ...]] = {}
+    if plan_target is not None and detail.run.status is FleetRunStatus.COMPLETED:
+        selected_steps = {selected.step_id: selected for selected in plan_target.plan.steps}
+        for identity, recorded_step in original_steps.items():
+            reference = declared_regression_feedback(selected_steps[identity[1]], recorded_step)
+            if reference is None:
+                continue
+            output = next(
+                output for output in recorded_step.outputs if output.name == reference.output_name
+            )
+            retained = output.retained_stream
+            assert retained is not None
+            retained_by_step[identity] = (
+                RunFeedbackRetainedDiagnostic(
+                    output_name=reference.output_name,
+                    physical_execution_id=reference.physical_execution_id,
+                    sha256=reference.sha256,
+                    byte_count=reference.byte_count,
+                    text=retained.text,
+                    redacted=retained.redacted,
+                ),
+            )
     verification = tuple(
         _verification(
             repository,
@@ -534,7 +539,7 @@ def project_run_feedback(detail: FleetRunDetail) -> RunFeedback:
                     detail,
                     repository,
                     step,
-                    tuple(retained_by_step.get(step.step_id, ())),
+                    retained_by_step.get((repository.repository.repository_id, step.step_id), ()),
                     failure_kind=getattr(original, "failure_kind", None),
                     teardown_failed=original is not None
                     and isinstance(original.teardown, FailedPlanStepTeardownEvidence),

@@ -219,8 +219,12 @@ def test_provider_truncation_preserves_feedback_across_api_campaign_and_fresh_cl
             assert len(observed) == 1 and refused_requests == []
             assert (repository / "code.txt").read_text() == "broken\n"
         finally:
-            if runtime is not None:
-                runtime.shutdown(wait_for_runs=True)
-            server.shutdown()
-            worker.join(timeout=5)
-            assert not worker.is_alive()
+            try:
+                if runtime is not None:
+                    runtime.shutdown(wait_for_runs=True)
+            finally:
+                try:
+                    server.shutdown()
+                finally:
+                    worker.join(timeout=5)
+                    assert not worker.is_alive()
