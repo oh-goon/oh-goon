@@ -9,12 +9,14 @@ import { GameTapeStepArtifacts } from "@/features/game-tape/components/GameTapeS
 import { OperationAction } from "@generated/enums";
 import type { FleetRunDetail, GameTape } from "@generated/models";
 import { InMemoryApiClient } from "@test/InMemoryApiClient";
+import { fixtureRunFeedback } from "../../../../e2e/fixtures/runFeedback";
 
 const time = "2026-10-28T12:00:00Z";
 
 function recordedDetail(runId: string, digest = "a".repeat(64)): FleetRunDetail {
   const repository = { repository_id: "repo-a", name: "subject", path: "/subject" };
   return {
+    feedback: fixtureRunFeedback(runId, { status: "COMPLETED", outcome: "SUCCESS", recovery_action: "none", diagnostic: { classification: "success", owner: "fleet_run", reason: "Recorded artifact test Run." }, goals: [], campaign: null, budgets: null, sources: [], steps: [], verification: [] }),
     run: {
       fleet_run_id: runId, status: "COMPLETED", accepted_at: time, started_at: time, finished_at: time,
       capability: { capability_id: "fleet-plan-execute", policy_fingerprint: "recorded-policy", action: OperationAction.EXECUTE_PLAN, target_kind: "FLEET_PLAN", safety: "OPAQUE_MUTATION" },

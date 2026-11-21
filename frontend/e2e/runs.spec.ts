@@ -6,6 +6,25 @@ import { ARTIFACT_OBSERVATION_RELEASE_EVENT, ARTIFACT_OBSERVATION_REQUEST_EVENT,
 import { openFixture, openRunFixture } from "./helpers/navigation";
 import { gameTapeFlow, gameTapeFlowSearch, gameTapeInspector, gameTapeRegion, runHistoryRegion } from "./helpers/locators";
 
+test("Bounded Run feedback remains readable and exposes passive continuation support", async ({ page }, testInfo) => {
+  await openRunFixture(page);
+  const feedback = gameTapeRegion(page).getByRole("region", { name: "Recorded attempt feedback", exact: true });
+  await expect(feedback.getByText(DEFAULT_RUN_ID, { exact: true })).toBeVisible();
+  await expect(feedback.getByText("success", { exact: true })).toBeVisible();
+  await feedback.getByText("Goals, source evidence, budgets and continuation support", { exact: true }).click();
+  await expect(feedback.getByText("Resume the exact native session · Qualification unavailable", { exact: true })).toBeVisible();
+  await expect(feedback.getByText("Detach from active work · Unsupported", { exact: true })).toBeVisible();
+  await expect(feedback.getByRole("button")).toHaveCount(0);
+  await feedback.getByText("Exact bounded feedback, references and omissions", { exact: true }).click();
+  await expect(feedback.locator("pre")).toContainText('"steps": 8');
+  await page.setViewportSize({ width: 375, height: 800 });
+  expect(await feedback.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await feedback.screenshot({ path: testInfo.outputPath("feedback-mobile.png") });
+  await page.reload();
+  await expect(feedback.getByText(DEFAULT_RUN_ID, { exact: true })).toBeVisible();
+  await expect(feedback.getByText("success", { exact: true })).toBeVisible();
+});
+
 test("Artifact availability is checked explicitly and remains separate from recorded evidence", async ({ page }) => {
   await page.addInitScript((eventName) => {
     window.addEventListener(eventName, () => {

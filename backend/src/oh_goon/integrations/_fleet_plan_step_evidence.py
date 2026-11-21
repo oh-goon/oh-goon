@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import replace
 from datetime import datetime
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
@@ -77,6 +77,7 @@ class _StepEvidenceFields(TypedDict):
     outputs: tuple[PublishedPlanOutputEvidence, ...]
     observations: tuple[FleetObservationEvidence, ...]
     settlement: PlanStepSettlementEvidence
+    failure_kind: Literal["model_output_truncated"] | None
 
 
 def step_evidence(
@@ -110,6 +111,7 @@ def step_evidence(
         "outputs": outputs,
         "observations": outcome.observations,
         "settlement": settlement,
+        "failure_kind": outcome.failure_kind,
     }
     if settlement.outcome == "SKIPPED":
         reason = outcome.stdout or outcome.stderr or "Step skipped"

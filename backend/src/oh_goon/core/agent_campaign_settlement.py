@@ -16,7 +16,7 @@ from oh_goon.core.models.agent_repair import (
 )
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord, AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
-from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedCommandStep
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedCommandStep, ResolvedPlanStep
 from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepTeardownEvidence,
     PlanStepExecution,
@@ -77,6 +77,74 @@ def _settled_attempt(step: PlanStepExecution) -> bool:
     )
 
 
+def declared_regression_feedback(
+    selected: ResolvedPlanStep, step: PlanStepExecution
+) -> AgentRegressionFeedbackReference | None:
+    """Recognize one declared, settled code failure without granting recovery.
+
+    The caller must bind this selected Step and result to the original Run.
+    Campaign continuation retains its separate whole-Run and phase authority.
+    """
+    if (
+        not isinstance(selected, ResolvedCommandStep)
+        or selected.step_id != step.step_id
+        or selected.kind != step.kind
+        or selected.uv is not None
+        or selected.project_source is not None
+        or not _settled_attempt(step)
+    ):
+        return None
+    policy = selected.regression_failure
+    returncode = step.settlement.observed_returncode
+    if (
+        step.status != "FAILED"
+        or step.settlement.outcome != "FAILED"
+        or step.settlement.reason != "FAILED_EXIT"
+        or policy is None
+        or returncode is None
+        or returncode <= 0
+        or 124 <= returncode <= 127
+        or returncode not in policy.exit_codes
+    ):
+        return None
+    declarations = [
+        output
+        for output in selected.outputs
+        if isinstance(output, PlanStreamOutput) and output.name == policy.feedback
+    ]
+    outputs = [output for output in step.outputs if output.name == policy.feedback]
+    if (
+        len(declarations) != 1
+        or declarations[0].stream != "stdout"
+        or not declarations[0].retain
+        or declarations[0].max_bytes > 2048
+        or len(outputs) != 1
+        or outputs[0].retained_stream is None
+    ):
+        return None
+    retained = outputs[0].retained_stream
+    encoded = retained.text.encode("utf-8")
+    if (
+        not retained.text.strip()
+        or not 0 < len(encoded) <= 2048
+        or len(encoded) != retained.byte_count
+        or hashlib.sha256(encoded).hexdigest() != retained.sha256
+        or retained.source != step.stdout_evidence
+        or retained.source != step.attempts[0].stdout_evidence
+        or step.attempts[0].physical_execution_id is None
+        or retained.physical_execution_id != step.attempts[0].physical_execution_id
+        or not 0 < retained.source.byte_count <= declarations[0].max_bytes
+    ):
+        return None
+    return AgentRegressionFeedbackReference(
+        step_id=step.step_id,
+        output_name=policy.feedback,
+        physical_execution_id=retained.physical_execution_id,
+        sha256=retained.sha256,
+        byte_count=retained.byte_count,
+    )
+
+
 def regression_recovery(detail: FleetRunDetail) -> AgentRegressionRecovery | None:
     """Classify only explicitly declared, completely settled native code failures.
 
@@ -105,68 +173,20 @@ def regression_recovery(detail: FleetRunDetail) -> AgentRegressionRecovery | Non
         return None
     feedback = []
     for selected, step in zip(target.plan.steps, steps, strict=True):
-        if (
-            not isinstance(selected, ResolvedCommandStep)
-            or selected.uv is not None
-            or selected.project_source is not None
-            or not _settled_attempt(step)
-        ):
-            return None
         if step.settlement.outcome == "SUCCESS":
-            if step.status != "COMPLETED":
+            if (
+                not isinstance(selected, ResolvedCommandStep)
+                or selected.uv is not None
+                or selected.project_source is not None
+                or not _settled_attempt(step)
+                or step.status != "COMPLETED"
+            ):
                 return None
             continue
-        policy = selected.regression_failure
-        returncode = step.settlement.observed_returncode
-        if (
-            step.status != "FAILED"
-            or step.settlement.outcome != "FAILED"
-            or step.settlement.reason != "FAILED_EXIT"
-            or policy is None
-            or returncode is None
-            or returncode <= 0
-            or 124 <= returncode <= 127
-            or returncode not in policy.exit_codes
-        ):
+        reference = declared_regression_feedback(selected, step)
+        if reference is None:
             return None
-        declarations = [
-            output
-            for output in selected.outputs
-            if isinstance(output, PlanStreamOutput) and output.name == policy.feedback
-        ]
-        outputs = [output for output in step.outputs if output.name == policy.feedback]
-        if (
-            len(declarations) != 1
-            or declarations[0].stream != "stdout"
-            or not declarations[0].retain
-            or declarations[0].max_bytes > 2048
-            or len(outputs) != 1
-            or outputs[0].retained_stream is None
-        ):
-            return None
-        retained = outputs[0].retained_stream
-        encoded = retained.text.encode("utf-8")
-        if (
-            not retained.text.strip()
-            or not 0 < len(encoded) <= 2048
-            or len(encoded) != retained.byte_count
-            or hashlib.sha256(encoded).hexdigest() != retained.sha256
-            or retained.source != step.stdout_evidence
-            or retained.source != step.attempts[0].stdout_evidence
-            or step.attempts[0].physical_execution_id is None
-            or retained.physical_execution_id != step.attempts[0].physical_execution_id
-            or not 0 < retained.source.byte_count <= declarations[0].max_bytes
-        ):
-            return None
-        feedback.append(
-            AgentRegressionFeedbackReference(
-                step_id=step.step_id,
-                output_name=policy.feedback,
-                physical_execution_id=retained.physical_execution_id,
-                sha256=retained.sha256,
-                byte_count=retained.byte_count,
-            )
-        )
+        feedback.append(reference)
     if not feedback:
         return None
     return AgentRegressionRecovery(

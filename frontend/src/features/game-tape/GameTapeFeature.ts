@@ -13,3 +13,4 @@ export { gameTapeFlowGroups } from "@/features/game-tape/gameTapeFlowModel";
 
 export { statusSymbol } from "@/features/game-tape/gameTapeFormat";
 export { GameTapeCampaignJournal } from "@/features/game-tape/components/GameTapeCampaignJournal";
+export { GameTapeRunFeedback } from "@/features/game-tape/components/GameTapeRunFeedback";

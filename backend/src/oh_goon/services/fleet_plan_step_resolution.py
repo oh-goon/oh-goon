@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
+from oh_goon.core.agent_harness_contract import captured_task_readback
 from oh_goon.core.errors import FleetExtensionInvalid, FleetPlanInvalid
 from oh_goon.core.fleet_plan_git import resolve_git_step
 from oh_goon.core.fleet_plan_values import PipelineValueCompiler
@@ -364,6 +365,7 @@ def resolve_delivered_agent_step(
             delivery_sha256=hashlib.sha256(handoff.encode_prework_delivery()).hexdigest(),
             handoff_identity=handoff.handoff_identity,
             source_step_id=handoff.step_id,
+            **captured_task_readback(handoff.task),
             workload=ResolvedNativeAgentWorkload(role=role, native_agent=native_agent),
         )
     if (
@@ -425,6 +427,7 @@ def resolve_delivered_agent_step(
             "delivery_sha256": hashlib.sha256(handoff.encode_prework_delivery()).hexdigest(),
             "handoff_identity": handoff.handoff_identity,
             "source_step_id": handoff.step_id,
+            **captured_task_readback(handoff.task),
             "workload": workload,
         }
     )

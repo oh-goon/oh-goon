@@ -49,6 +49,12 @@ class AgentProviderError(InvalidRequest):
     code = "AGENT_PROVIDER_ERROR"
 
 
+class AgentResponseTruncated(AgentProviderError):
+    """The selected provider explicitly reported its output-token limit."""
+
+    code = "AGENT_RESPONSE_TRUNCATED"
+
+
 PROVIDER_HISTORY_AUTHORIZATION_MESSAGE = (
     "Provider-held history requires explicit selected-model allow_provider_history=true. "
     "Request data cannot change this policy; authorization includes the selected provider scope."

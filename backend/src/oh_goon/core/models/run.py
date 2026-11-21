@@ -26,6 +26,7 @@ from oh_goon.core.models.run_admission import (
     _validate_trusted_local_admission,
     validate_fleet_repository_capture,
 )
+from oh_goon.core.models.run_feedback import RunFeedback
 from oh_goon.core.models.run_launch import (
     ApplicationLaunchReceipt,
     UnmanagedApplicationLaunchReceipt,
@@ -294,6 +295,13 @@ class FleetRunDetail(ImmutableModel):
         from oh_goon.core.game_tape_projection import project_game_tape
 
         return project_game_tape(self)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def feedback(self) -> RunFeedback:
+        from oh_goon.core.projections.run_feedback import project_run_feedback
+
+        return project_run_feedback(self)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

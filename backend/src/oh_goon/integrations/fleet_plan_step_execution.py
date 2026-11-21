@@ -525,6 +525,12 @@ def _execute_typed_step(
                 )
             if handoff.step_id != step.source_step_id or handoff.harness != step.workload.harness:
                 raise FleetPlanInvalid("Agent Step meaning differs from admitted frozen delivery")
+            if step.task_sha256 is not None:
+                from oh_goon.core.agent_harness_contract import captured_task_readback
+
+                expected_task = captured_task_readback(handoff.task)
+                if any(getattr(step, key) != value for key, value in expected_task.items()):
+                    raise FleetPlanInvalid("Agent task readback differs from its frozen delivery")
             selected_model = (
                 step.workload.model
                 if isinstance(

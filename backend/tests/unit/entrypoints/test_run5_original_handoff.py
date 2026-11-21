@@ -13,6 +13,7 @@ from oh_goon.cli_runtime_plans import run_plan_command
 from oh_goon.core.errors import InvalidRequest
 from oh_goon.core.models.fleet_plan_evidence import PlanStepSettlementEvidence
 from oh_goon.core.models.game_tape import GameTapeIssueFocus, GameTapeWhyNotDiagnostic
+from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
 
 
@@ -20,7 +21,7 @@ class _Model:
     def __init__(self, value):
         self.value = value
 
-    def model_dump(self, *, mode):
+    def model_dump(self, *, mode, by_alias=False):
         assert mode == "json"
         return self.value
 
@@ -71,6 +72,8 @@ class _RunOwner:
             repository_admissions=(),
             journal_revision=42,
             campaign_journal=None,
+            execution=DirectFleetExecutionAdmission(),
+            feedback=_Model({"fleet_run_id": run_id, "authority": "observation_only"}),
         )
 
     def __getattr__(self, name):
@@ -111,6 +114,7 @@ def test_handoff_preserves_exact_original_failure_guidance_and_focus(capsys):
     assert _invoke(owner, "--json") == 0
     result = json.loads(capsys.readouterr().out)
     assert result["schema"] == "oh-goon.plan-run-handoff/v1"
+    assert result["feedback"] == {"fleet_run_id": "run-5", "authority": "observation_only"}
     assert result["journal_revision"] == 42
     assert result["status"] == "FAILED" and result["outcome"] == "FAILED"
     assert result["game_tape_status"] == "FAILED"

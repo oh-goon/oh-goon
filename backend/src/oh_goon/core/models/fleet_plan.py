@@ -697,6 +697,15 @@ class ResolvedAgentStep(ImmutableModel):
     delivery_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     handoff_identity: str = Field(min_length=1, max_length=160)
     source_step_id: str = Field(min_length=1, max_length=80)
+    # Retained from the original handoff; readback context grants no effects.
+    task_summary: str | None = Field(
+        default=None, max_length=2048, exclude_if=lambda value: value is None
+    )
+    task_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$", exclude_if=lambda value: value is None
+    )
+    task_omitted_characters: int = Field(default=0, ge=0, exclude_if=lambda value: value == 0)
+    task_redacted: bool = Field(default=False, exclude_if=lambda value: not value)
     feedback_reference: str | None = Field(default=None, max_length=240)
     # Original sequencer alone binds this from a published prior Step, never the model.
     feedback_value: str | None = Field(default=None, max_length=2048)
@@ -706,6 +715,10 @@ class ResolvedAgentStep(ImmutableModel):
 
     @model_validator(mode="after")
     def validate_execution_envelope(self) -> "ResolvedAgentStep":
+        if (self.task_summary is None) != (self.task_sha256 is None) or (
+            self.task_summary is None and (self.task_omitted_characters or self.task_redacted)
+        ):
+            raise ValueError("Agent task readback requires its captured summary and identity")
         if (
             self.success_codes != (0,)
             or self.capabilities.egress.mode != "none"

@@ -748,6 +748,15 @@ Run are separate capabilities. A prior-Run handoff transports explicit untrusted
 task context; it grants no permission and carries no native transcript. Native
 session migration across harnesses is unsupported. An admitted Step cannot change
 harness when one fails; another selection requires fresh resolution/admission.
+The canonical Run control projection reports the frozen harness, mode and backend
+alongside separate fresh handoff, exact resume, cross-harness fresh handoff,
+steering, user follow-up, abort and detach availability. Fresh handoff routes still
+require fresh resolution/admission; abort refers only to the original Run's
+cancellation owner. Native RPC presence and historical installed observations do
+not qualify a product continuation route or another environment. Missing complete
+environment qualification remains explicit. Disposition: **retain** the native
+protocol, settlement and protected-store adaptations; this read-only projection
+does not satisfy their removal gates or enable another native control.
 The protocol-fixture cases in the [CLI lifecycle tests][cli-lifecycle-tests]
 exercise current typed review acceptance through real supervised children and
 Journal reopen. They reject stale terminal claims, later payloads without fresh

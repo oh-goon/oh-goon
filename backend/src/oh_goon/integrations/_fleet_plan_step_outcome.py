@@ -67,6 +67,7 @@ class StepOutcome:
     )
     observed_returncode: int | None = None
     resource_cleanup: Literal["verified", "unverified"] = "verified"
+    failure_kind: Literal["model_output_truncated"] | None = None
 
     def __post_init__(self) -> None:
         if self.supervisor is not None and (

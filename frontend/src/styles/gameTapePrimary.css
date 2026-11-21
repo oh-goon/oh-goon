@@ -68,6 +68,9 @@ button.game-tape-issue-overview__item:hover{border-color:var(--border-subtle);ba
 .game-tape-summary__failure-answer{border:0!important;border-right:0!important;background:linear-gradient(90deg,var(--status-danger-surface),transparent)!important}
 .game-tape-summary__outcome[data-status]{box-shadow:inset 3px 0 0 var(--gt-status)}
 .game-tape-section{min-width:0;max-width:100%;padding-top:14px}
+.game-tape-run-feedback{overflow-wrap:anywhere}
+.game-tape-run-feedback details{min-width:0;max-width:100%}
+.game-tape-run-feedback pre{max-width:100%;overflow:auto}
 .game-tape-timeline{gap:18px}
 .game-tape-timeline>section{gap:4px}
 .game-tape-timeline__lane-heading{padding:7px 2px 8px;border:0;border-bottom:1px solid var(--gt-status-border);border-radius:0;background:transparent;box-shadow:none}

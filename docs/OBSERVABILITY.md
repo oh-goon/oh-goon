@@ -30,6 +30,24 @@ Observability does not create a second Run route.
 
 An empty time-grid cell means there is no execution observation for that repository and bucket. It is absence of evidence, not a `NO_EXECUTION` status.
 
+### Bounded agent feedback
+
+`FleetRunDetail.feedback`, `runs feedback RUN_ID --json`, and the Run feedback
+API project the same immutable read cut. The feedback body is bounded to 64 KiB,
+including escaped text, with explicit whole-field and membership omissions and
+references back to the original Run. It introduces no state store or execution
+route. Game Tape and campaign presentation consume its typed diagnostic,
+settlement, recorded budgets and separate native control/qualification facts.
+Current candidate identity means the latest recorded campaign fact at that cut;
+the selected historical Run retains its own candidate and source identities.
+
+Only accepted native/Step evidence supplies diagnostic classifications. Declared
+code failures reuse the original regression acceptor, and provider output-token
+limits use the adapter's typed completion protocol. Passive log text cannot
+select a classification, retry, permission or successful result. Missing evidence
+and unavailable qualification remain explicit. Model usage is unavailable unless
+its own observation owner recorded it; a request token limit is not usage.
+
 ### Domain observations
 
 A typed evidence domain may maintain a rebuildable index when querying raw Run

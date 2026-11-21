@@ -546,9 +546,16 @@ class _PlanStepExecutionBase(ImmutableModel):
     teardown: PlanStepTeardownEvidence | None = None
     observations: tuple[FleetObservationEvidence, ...] = Field(default_factory=tuple, max_length=8)
     settlement: PlanStepSettlementEvidence = Field(default_factory=PlanStepSettlementEvidence)
+    failure_kind: Literal["model_output_truncated"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_timing(self) -> _PlanStepExecutionBase:
+        if self.failure_kind is not None and (
+            self.kind != "agent" or getattr(self, "status", None) != "FAILED"
+        ):
+            raise ValueError("Provider failure metadata requires a failed Agent Step")
         if (self.started_at is None) != (self.finished_at is None):
             raise ValueError("Fleet plan step timing requires both start and finish")
         if (

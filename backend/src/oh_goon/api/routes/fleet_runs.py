@@ -35,6 +35,7 @@ from oh_goon.core.models.run import (
     FleetRunState,
 )
 from oh_goon.core.models.run_events import FleetRunEventBatch
+from oh_goon.core.models.run_feedback import RunFeedback
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunSource, FleetRunStatus
 from oh_goon.integrations.exact_file_write import ExactPublicationDurabilityError
 from oh_goon.services.enforcer_run_receipt import enforcer_run_receipt, render_enforcer_yaml
@@ -337,6 +338,17 @@ def game_tape_failure_history(
         step_id=step_id,
         sample_limit=sample_limit,
     )
+
+
+@router.get(
+    "/{fleet_run_id}/feedback", response_model=RunFeedback, operation_id="get_fleet_run_feedback"
+)
+def get_fleet_run_feedback(
+    fleet_run_id: str,
+    control_plane: FleetRunControlPlane = Depends(fleet_run_control_plane),
+) -> RunFeedback:
+    """One bounded original-read-cut observation; this endpoint grants no effects."""
+    return control_plane.get(fleet_run_id).feedback
 
 
 @router.get("/{fleet_run_id}", response_model=FleetRunDetail, operation_id="get_fleet_run")

@@ -6,7 +6,7 @@ import { appLocationHash, queryParamsFromHash, writeAppLocation } from "@/app/na
 import { useReadResource } from "@/app/reads/useReadResource";
 import { ErrorBanner } from "@/components/common/ErrorBanner";
 import { PageHeading } from "@/components/common/PageHeading";
-import { GameTapeCampaignJournal } from "@/features/game-tape/GameTapeFeature";
+import { GameTapeCampaignJournal, GameTapeRunFeedback } from "@/features/game-tape/GameTapeFeature";
 import type { AgentCampaignResult } from "@generated/models";
 
 export function CampaignPage() {
@@ -40,6 +40,7 @@ export function CampaignPage() {
     {read.resource.failure ? <ErrorBanner message={read.resource.failure.message} /> : null}
     {result ? <section className="panel">
       <h2>{t("gameTape.campaign.result")}: {result.result}</h2>
+      <GameTapeRunFeedback feedback={result.feedback} campaignId={result.campaign_id} journalRevision={result.journal_revision} />
       {result.incomplete_reasons.length ? <ul>{result.incomplete_reasons.map((reason, index) => <li key={`${index}:${reason}`}>{reason}</li>)}</ul> : null}
       {result.journal_revision !== null ? <GameTapeCampaignJournal key={result.campaign_id} campaign={{
         campaign_id: result.campaign_id, journal_revision: result.journal_revision,

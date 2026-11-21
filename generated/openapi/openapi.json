@@ -541,6 +541,16 @@
             "title": "Decision History",
             "type": "array"
           },
+          "feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunFeedback"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "final_candidate": {
             "anyOf": [
               {
@@ -828,6 +838,135 @@
           "selection"
         ],
         "title": "AgentConnection",
+        "type": "object"
+      },
+      "AgentControlSelection": {
+        "additionalProperties": false,
+        "description": "Exact frozen selection; neither inventory nor installed capability proof.",
+        "properties": {
+          "agent": {
+            "enum": [
+              "codex",
+              "opencode",
+              "pi"
+            ],
+            "title": "Agent",
+            "type": "string"
+          },
+          "environment_qualification": {
+            "const": "unqualified",
+            "default": "unqualified",
+            "title": "Environment Qualification",
+            "type": "string"
+          },
+          "executable_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Executable Sha256",
+            "type": "string"
+          },
+          "harness": {
+            "const": "native",
+            "default": "native",
+            "title": "Harness",
+            "type": "string"
+          },
+          "implementation_identity": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Implementation Identity",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "headless_cli",
+              "interactive_cli",
+              "codex_login_cli",
+              "codex_service",
+              "pi_rpc"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "placement_availability": {
+            "enum": [
+              "recorded",
+              "unavailable",
+              "omitted_over_limit"
+            ],
+            "title": "Placement Availability",
+            "type": "string"
+          },
+          "placement_backend_id": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement Backend Id"
+          },
+          "placement_configuration_id": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement Configuration Id"
+          },
+          "profile": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Profile",
+            "type": "string"
+          },
+          "sandbox_owner": {
+            "enum": [
+              "harness",
+              "execution_backend"
+            ],
+            "title": "Sandbox Owner",
+            "type": "string"
+          },
+          "selected_backend": {
+            "enum": [
+              "local",
+              "bubblewrap"
+            ],
+            "title": "Selected Backend",
+            "type": "string"
+          },
+          "selection_availability": {
+            "const": "frozen_intent",
+            "default": "frozen_intent",
+            "title": "Selection Availability",
+            "type": "string"
+          },
+          "step_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "agent",
+          "mode",
+          "implementation_identity",
+          "executable_sha256",
+          "profile",
+          "selected_backend",
+          "sandbox_owner",
+          "placement_availability"
+        ],
+        "title": "AgentControlSelection",
         "type": "object"
       },
       "AgentHarnessObservation": {
@@ -1390,6 +1529,170 @@
           "reviewed_paths"
         ],
         "title": "AgentReviewRecord",
+        "type": "object"
+      },
+      "AgentRunControl": {
+        "additionalProperties": false,
+        "description": "Product route availability, never permission to invoke that route.",
+        "properties": {
+          "action": {
+            "enum": [
+              "fresh_handoff",
+              "exact_native_resume",
+              "cross_harness_fresh_handoff",
+              "steer",
+              "follow_up",
+              "abort",
+              "detach"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "requirements": {
+            "default": [],
+            "items": {
+              "enum": [
+                "fresh_resolution",
+                "fresh_admission",
+                "original_run_owner"
+              ],
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Requirements",
+            "type": "array"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "enum": [
+                  "fresh_run_with_handoff",
+                  "cancel_run"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route"
+          },
+          "state": {
+            "enum": [
+              "available",
+              "unsupported",
+              "unqualified"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "state",
+          "reason"
+        ],
+        "title": "AgentRunControl",
+        "type": "object"
+      },
+      "AgentRunControls": {
+        "additionalProperties": false,
+        "description": "Bounded control projection from one immutable canonical Run read cut.",
+        "properties": {
+          "controls": {
+            "items": {
+              "$ref": "#/components/schemas/AgentRunControl"
+            },
+            "maxItems": 7,
+            "minItems": 7,
+            "title": "Controls",
+            "type": "array"
+          },
+          "environment_qualification": {
+            "const": "unqualified",
+            "default": "unqualified",
+            "title": "Environment Qualification",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fleet Run Id"
+          },
+          "fleet_run_id_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fleet Run Id Sha256"
+          },
+          "journal_revision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Journal Revision"
+          },
+          "omitted_selections": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Selections",
+            "type": "integer"
+          },
+          "qualification_reason": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Qualification Reason",
+            "type": "string"
+          },
+          "run_id_availability": {
+            "default": "recorded",
+            "enum": [
+              "recorded",
+              "omitted_over_limit"
+            ],
+            "title": "Run Id Availability",
+            "type": "string"
+          },
+          "selections": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AgentControlSelection"
+            },
+            "maxItems": 8,
+            "title": "Selections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "controls",
+          "qualification_reason"
+        ],
+        "title": "AgentRunControls",
         "type": "object"
       },
       "AgentStepDeliveryReference": {
@@ -4129,6 +4432,18 @@
             "title": "Duration Ms",
             "type": "integer"
           },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "const": "model_output_truncated",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -6583,6 +6898,18 @@
             "title": "Duration Ms",
             "type": "integer"
           },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "const": "model_output_truncated",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -9006,6 +9333,10 @@
             ],
             "title": "Execution"
           },
+          "feedback": {
+            "$ref": "#/components/schemas/RunFeedback",
+            "readOnly": true
+          },
           "game_tape": {
             "$ref": "#/components/schemas/GameTape",
             "readOnly": true
@@ -9092,6 +9423,7 @@
           "outcome",
           "rerun_supported",
           "game_tape",
+          "feedback",
           "plan_trust_receipts"
         ],
         "title": "FleetRunDetail",
@@ -25001,6 +25333,41 @@
             "title": "Success Codes",
             "type": "array"
           },
+          "task_omitted_characters": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Task Omitted Characters",
+            "type": "integer"
+          },
+          "task_redacted": {
+            "default": false,
+            "title": "Task Redacted",
+            "type": "boolean"
+          },
+          "task_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Sha256"
+          },
+          "task_summary": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Summary"
+          },
           "timeout_seconds": {
             "exclusiveMinimum": 0.0,
             "maximum": 21600.0,
@@ -27972,6 +28339,1088 @@
           "failure"
         ],
         "title": "RunFailedEvent",
+        "type": "object"
+      },
+      "RunFeedback": {
+        "additionalProperties": false,
+        "properties": {
+          "authority": {
+            "const": "observation_only",
+            "default": "observation_only",
+            "title": "Authority",
+            "type": "string"
+          },
+          "budgets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunFeedbackBudgets"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "campaign": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunFeedbackCampaign"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "constraints": {
+            "$ref": "#/components/schemas/RunFeedbackConstraints"
+          },
+          "context_authority": {
+            "const": "untrusted_data_no_effect_or_recovery_permission",
+            "default": "untrusted_data_no_effect_or_recovery_permission",
+            "title": "Context Authority",
+            "type": "string"
+          },
+          "controls": {
+            "$ref": "#/components/schemas/AgentRunControls"
+          },
+          "diagnostic": {
+            "$ref": "#/components/schemas/RunFeedbackDiagnostic"
+          },
+          "fleet_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fleet Run Id"
+          },
+          "fleet_run_id_sha256": {
+            "title": "Fleet Run Id Sha256",
+            "type": "string"
+          },
+          "goals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunFeedbackGoal"
+            },
+            "maxItems": 8,
+            "title": "Goals",
+            "type": "array"
+          },
+          "journal_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Journal Revision"
+          },
+          "native_claims": {
+            "const": "not_projected",
+            "default": "not_projected",
+            "title": "Native Claims",
+            "type": "string"
+          },
+          "omissions": {
+            "$ref": "#/components/schemas/RunFeedbackOmissions"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "readback": {
+            "items": {
+              "$ref": "#/components/schemas/RunFeedbackReadbackReference"
+            },
+            "maxItems": 3,
+            "title": "Readback",
+            "type": "array"
+          },
+          "recovery_action": {
+            "enum": [
+              "readmit-placement",
+              "run-same-target",
+              "open-recovery",
+              "none"
+            ],
+            "title": "Recovery Action",
+            "type": "string"
+          },
+          "schema": {
+            "const": "oh-goon.run-feedback/v1",
+            "default": "oh-goon.run-feedback/v1",
+            "title": "Schema",
+            "type": "string"
+          },
+          "sources": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunFeedbackSource"
+            },
+            "maxItems": 8,
+            "title": "Sources",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "steps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunFeedbackStep"
+            },
+            "maxItems": 16,
+            "title": "Steps",
+            "type": "array"
+          },
+          "terminal": {
+            "title": "Terminal",
+            "type": "boolean"
+          },
+          "verification": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunFeedbackVerification"
+            },
+            "maxItems": 8,
+            "title": "Verification",
+            "type": "array"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "fleet_run_id_sha256",
+          "journal_revision",
+          "status",
+          "outcome",
+          "terminal",
+          "diagnostic",
+          "recovery_action",
+          "constraints",
+          "controls",
+          "omissions",
+          "readback"
+        ],
+        "title": "RunFeedback",
+        "type": "object"
+      },
+      "RunFeedbackAttempt": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt"
+          },
+          "cleanup_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Reason"
+          },
+          "final_process_group_quiescent": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Process Group Quiescent"
+          },
+          "forced_termination": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forced Termination"
+          },
+          "observed_returncode": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Returncode"
+          },
+          "physical_execution_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Physical Execution Id"
+          }
+        },
+        "title": "RunFeedbackAttempt",
+        "type": "object"
+      },
+      "RunFeedbackBudgets": {
+        "additionalProperties": false,
+        "properties": {
+          "deadline_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
+          "decision_phase_ordinal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Phase Ordinal"
+          },
+          "elapsed_budget": {
+            "const": "not_recomputed",
+            "default": "not_recomputed",
+            "title": "Elapsed Budget",
+            "type": "string"
+          },
+          "maximum_runs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Runs"
+          },
+          "model_usage": {
+            "const": "unavailable",
+            "default": "unavailable",
+            "title": "Model Usage",
+            "type": "string"
+          },
+          "original": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRepairBudget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "remaining_runs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Runs"
+          },
+          "remaining_runs_authority": {
+            "default": "unavailable",
+            "enum": [
+              "committed_decision",
+              "unavailable"
+            ],
+            "title": "Remaining Runs Authority",
+            "type": "string"
+          }
+        },
+        "title": "RunFeedbackBudgets",
+        "type": "object"
+      },
+      "RunFeedbackCampaign": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
+          },
+          "candidate_freshness": {
+            "const": "recorded_not_live",
+            "default": "recorded_not_live",
+            "title": "Candidate Freshness",
+            "type": "string"
+          },
+          "current_candidate_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Candidate Identity"
+          },
+          "original_execution_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Execution Digest"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "run_candidate_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Candidate Identity"
+          },
+          "run_scope_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Scope Identity"
+          },
+          "scope_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Identity"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "current_candidate_identity",
+          "scope_identity",
+          "original_execution_digest",
+          "phase",
+          "attempt"
+        ],
+        "title": "RunFeedbackCampaign",
+        "type": "object"
+      },
+      "RunFeedbackConstraints": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_policy": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "cicd": "#/components/schemas/CicdExecutionPolicy",
+                    "inspection": "#/components/schemas/InspectionExecutionPolicy",
+                    "maintenance": "#/components/schemas/MaintenanceExecutionPolicy",
+                    "migration": "#/components/schemas/MigrationExecutionPolicy",
+                    "verification": "#/components/schemas/VerificationExecutionPolicy"
+                  },
+                  "propertyName": "purpose"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CicdExecutionPolicy"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MaintenanceExecutionPolicy"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MigrationExecutionPolicy"
+                  },
+                  {
+                    "$ref": "#/components/schemas/VerificationExecutionPolicy"
+                  },
+                  {
+                    "$ref": "#/components/schemas/InspectionExecutionPolicy"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Policy"
+          },
+          "limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetPlanRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "omitted_write_roots": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Write Roots",
+            "type": "integer"
+          },
+          "write_roots": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Write Roots",
+            "type": "array"
+          }
+        },
+        "title": "RunFeedbackConstraints",
+        "type": "object"
+      },
+      "RunFeedbackDiagnostic": {
+        "additionalProperties": false,
+        "properties": {
+          "classification": {
+            "enum": [
+              "known_code_failure",
+              "environment_or_launch_failure",
+              "verification_unavailable",
+              "model_output_truncated",
+              "cancelled",
+              "timed_out",
+              "unknown_execution",
+              "active",
+              "success",
+              "skipped"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
+          "omitted_reason_characters": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Reason Characters",
+            "type": "integer"
+          },
+          "owner": {
+            "enum": [
+              "fleet_step_settlement",
+              "agent_campaign_settlement",
+              "fleet_shard_execution",
+              "fleet_run"
+            ],
+            "title": "Owner",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 160,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "classification",
+          "owner",
+          "reason"
+        ],
+        "title": "RunFeedbackDiagnostic",
+        "type": "object"
+      },
+      "RunFeedbackGoal": {
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "enum": [
+              "recorded",
+              "unavailable"
+            ],
+            "title": "Availability",
+            "type": "string"
+          },
+          "delivery_sha256": {
+            "title": "Delivery Sha256",
+            "type": "string"
+          },
+          "handoff_identity": {
+            "title": "Handoff Identity",
+            "type": "string"
+          },
+          "omitted_characters": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Characters",
+            "type": "integer"
+          },
+          "redacted": {
+            "default": false,
+            "title": "Redacted",
+            "type": "boolean"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "step_id",
+          "availability",
+          "handoff_identity",
+          "delivery_sha256"
+        ],
+        "title": "RunFeedbackGoal",
+        "type": "object"
+      },
+      "RunFeedbackOmissions": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "goals": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Goals",
+            "type": "integer"
+          },
+          "response_limit_applied": {
+            "default": false,
+            "title": "Response Limit Applied",
+            "type": "boolean"
+          },
+          "sources": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Sources",
+            "type": "integer"
+          },
+          "steps": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Steps",
+            "type": "integer"
+          },
+          "verifications": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Verifications",
+            "type": "integer"
+          }
+        },
+        "title": "RunFeedbackOmissions",
+        "type": "object"
+      },
+      "RunFeedbackOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "byte_count": {
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "physical_execution_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Physical Execution Id"
+          },
+          "producer_execution_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer Execution Identity"
+          },
+          "retained_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retained Sha256"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "sha256",
+          "byte_count"
+        ],
+        "title": "RunFeedbackOutput",
+        "type": "object"
+      },
+      "RunFeedbackReadbackReference": {
+        "additionalProperties": false,
+        "description": "Identifiers for existing read owners, never an executable recovery command.",
+        "properties": {
+          "evidence": {
+            "enum": [
+              "original_run",
+              "complete_verification_membership",
+              "retained_output_references"
+            ],
+            "title": "Evidence",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fleet Run Id"
+          },
+          "fleet_run_id_sha256": {
+            "title": "Fleet Run Id Sha256",
+            "type": "string"
+          },
+          "projection": {
+            "enum": [
+              "detail",
+              "game_tape",
+              "outputs"
+            ],
+            "title": "Projection",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projection",
+          "fleet_run_id",
+          "fleet_run_id_sha256",
+          "evidence"
+        ],
+        "title": "RunFeedbackReadbackReference",
+        "type": "object"
+      },
+      "RunFeedbackRetainedDiagnostic": {
+        "additionalProperties": false,
+        "description": "Only original, completely validated regression feedback may carry text.",
+        "properties": {
+          "authority": {
+            "const": "untrusted_recorded_data",
+            "default": "untrusted_recorded_data",
+            "title": "Authority",
+            "type": "string"
+          },
+          "byte_count": {
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "output_name": {
+            "title": "Output Name",
+            "type": "string"
+          },
+          "physical_execution_id": {
+            "title": "Physical Execution Id",
+            "type": "string"
+          },
+          "redacted": {
+            "title": "Redacted",
+            "type": "boolean"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 2048,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_name",
+          "physical_execution_id",
+          "sha256",
+          "byte_count",
+          "text",
+          "redacted"
+        ],
+        "title": "RunFeedbackRetainedDiagnostic",
+        "type": "object"
+      },
+      "RunFeedbackSource": {
+        "additionalProperties": false,
+        "properties": {
+          "admission_id": {
+            "title": "Admission Id",
+            "type": "string"
+          },
+          "repository_id": {
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "source_authority_id": {
+            "title": "Source Authority Id",
+            "type": "string"
+          },
+          "source_content_sha256": {
+            "title": "Source Content Sha256",
+            "type": "string"
+          },
+          "source_subject_instance_id": {
+            "title": "Source Subject Instance Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_id",
+          "admission_id",
+          "source_authority_id",
+          "source_subject_instance_id",
+          "source_content_sha256"
+        ],
+        "title": "RunFeedbackSource",
+        "type": "object"
+      },
+      "RunFeedbackStep": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunFeedbackAttempt"
+            },
+            "maxItems": 5,
+            "title": "Attempts",
+            "type": "array"
+          },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunFeedbackAttempt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "diagnostic": {
+            "$ref": "#/components/schemas/RunFeedbackDiagnostic"
+          },
+          "omitted_outputs": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Outputs",
+            "type": "integer"
+          },
+          "omitted_retained_diagnostics": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Retained Diagnostics",
+            "type": "integer"
+          },
+          "outputs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunFeedbackOutput"
+            },
+            "maxItems": 4,
+            "title": "Outputs",
+            "type": "array"
+          },
+          "repository_execution_id": {
+            "title": "Repository Execution Id",
+            "type": "string"
+          },
+          "repository_id": {
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "retained_diagnostics": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunFeedbackRetainedDiagnostic"
+            },
+            "maxItems": 4,
+            "title": "Retained Diagnostics",
+            "type": "array"
+          },
+          "settlement": {
+            "$ref": "#/components/schemas/PlanStepSettlementEvidence"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "stderr_evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanOutputEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stdout_evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanOutputEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "step_execution_id": {
+            "title": "Step Execution Id",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_id",
+          "repository_execution_id",
+          "step_id",
+          "step_execution_id",
+          "status",
+          "diagnostic",
+          "settlement"
+        ],
+        "title": "RunFeedbackStep",
+        "type": "object"
+      },
+      "RunFeedbackVerification": {
+        "additionalProperties": false,
+        "properties": {
+          "actual_count": {
+            "minimum": 0.0,
+            "title": "Actual Count",
+            "type": "integer"
+          },
+          "actual_membership_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Membership Identity"
+          },
+          "availability": {
+            "enum": [
+              "recorded",
+              "unavailable",
+              "omitted"
+            ],
+            "title": "Availability",
+            "type": "string"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GameTapeVerificationExecutionBoundary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "omitted_actual_members": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Actual Members",
+            "type": "integer"
+          },
+          "omitted_results": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Results",
+            "type": "integer"
+          },
+          "omitted_selected_members": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Selected Members",
+            "type": "integer"
+          },
+          "qualification": {
+            "enum": [
+              "original_producer_qualifications",
+              "unavailable",
+              "omitted_not_qualified"
+            ],
+            "title": "Qualification",
+            "type": "string"
+          },
+          "repository_id": {
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "result_count": {
+            "minimum": 0.0,
+            "title": "Result Count",
+            "type": "integer"
+          },
+          "results": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/GameTapeShardLineage"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "selected_count": {
+            "minimum": 0.0,
+            "title": "Selected Count",
+            "type": "integer"
+          },
+          "selected_membership_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Membership Identity"
+          },
+          "selection_evidence_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection Evidence Identity"
+          }
+        },
+        "required": [
+          "repository_id",
+          "availability",
+          "selected_count",
+          "actual_count",
+          "result_count",
+          "qualification"
+        ],
+        "title": "RunFeedbackVerification",
         "type": "object"
       },
       "RunRepairSelection": {
@@ -32713,6 +34162,18 @@
             "minimum": 0.0,
             "title": "Duration Ms",
             "type": "integer"
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "const": "model_output_truncated",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
           },
           "finished_at": {
             "anyOf": [
@@ -38597,6 +40058,89 @@
           }
         },
         "summary": "Game Tape Failure History",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/runs/{fleet_run_id}/feedback": {
+      "get": {
+        "description": "One bounded original-read-cut observation; this endpoint grants no effects.",
+        "operationId": "get_fleet_run_feedback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fleet_run_id",
+            "required": true,
+            "schema": {
+              "title": "Fleet Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunFeedback"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Get Fleet Run Feedback",
         "tags": [
           "fleet"
         ]

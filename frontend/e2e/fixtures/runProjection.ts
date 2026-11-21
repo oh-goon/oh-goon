@@ -14,6 +14,7 @@ import type {
 import { LONG_GOON_NAME, LONG_NATIVE_INPUT_IDENTITY, LONG_STEP_NAME } from "./identities";
 import { FIXTURE_FLEET_PLAN_TARGET, FIXTURE_SHA } from "./plans";
 import { FIXTURE_FINISHED, FIXTURE_NOW } from "./time";
+import { fixtureRunFeedback } from "./runFeedback";
 
 function executionReferenceForTarget(target: FleetPlanTarget): ResolvedExecutionReference {
   return {
@@ -166,6 +167,15 @@ export function runDetail(run: FleetRunState, tapeStatus: FleetRunDetail["game_t
   }));
   return {
     run,
+    feedback: fixtureRunFeedback(run.fleet_run_id, {
+      status: run.status,
+      outcome: failed ? FleetRunOutcome.FAILED : running ? FleetRunOutcome.IN_PROGRESS : FleetRunOutcome.SUCCESS,
+      terminal: "finished_at" in run,
+      diagnostic: { classification: running ? "active" : failed ? "unknown_execution" : "success", owner: "fleet_run", reason: "Recorded browser fixture Run outcome; detailed Step feedback is omitted." },
+      recovery_action: running || failed ? "none" : "run-same-target",
+      goals: [], campaign: null, budgets: null, sources: [], steps: [], verification: [],
+      omissions: { steps: allSteps.length, goals: 0, sources: targets.length, verifications: 0, fields: [], response_limit_applied: false },
+    }),
     execution: FIXTURE_DIRECT_EXECUTION,
     outcome: failed ? FleetRunOutcome.FAILED : running ? FleetRunOutcome.IN_PROGRESS : FleetRunOutcome.SUCCESS,
     game_tape: tape,

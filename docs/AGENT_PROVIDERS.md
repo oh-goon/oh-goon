@@ -192,12 +192,13 @@ After a session ends, use the same Oh-Goon state root and exact Run ID:
 
 ```sh
 oh-goon runs handoff FLEET_RUN_ID --json
+oh-goon runs feedback FLEET_RUN_ID --json
 oh-goon runs outputs FLEET_RUN_ID --json
 oh-goon runs events FLEET_RUN_ID --after 0 --json
 oh-goon local-state diagnostics-path
 ```
 
-The first three commands read original durable Run/Game Tape facts, including
+The Run read commands read original durable Run/Game Tape facts, including
 recorded source/Step identities, verification outcomes and incomplete cleanup.
 The last prints the existing diagnostics path; read its bounded JSONL records
 for matching Run/repository/Step IDs. `runs logs` remains transient and may be
@@ -219,6 +220,21 @@ canonical cancellation receipt. Duration is unavailable when no process launched
 The reusable handoff view bounds source admissions, Steps and claim excerpts and
 reports every projection omission. Full recorded facts remain in the original
 Run events and Game Tape; transient raw output may be unavailable.
+
+`runs feedback` returns the canonical bounded feedback also exposed by the Run
+API and existing Game Tape/campaign views. It binds the original Run, accepted
+Step/Attempt/physical identities, source admissions, redacted captured task,
+typed failure, cleanup, recorded campaign budgets and retained-output references.
+It distinguishes the selected Run's candidate from the campaign's last recorded
+candidate; neither claims live workspace freshness. Flat verification membership
+retains producer qualifications or is omitted as a whole with exact counts and
+readback references. Native summaries and diagnostic text remain untrusted data.
+
+The selected provider's explicit output-token-limit completion is retained as
+`model_output_truncated`; ordinary nonzero exits do not establish that category
+or a code defect. A missing result, uncertain cleanup, unsupported classification
+or lost acknowledgement stays unknown. Control availability describes existing
+product routes and required fresh admission; it never grants recovery permission.
 
 To seed a fresh session explicitly from one Run:
 
@@ -757,6 +773,11 @@ frozen developer instructions; omitting them lost context after native compactio
 The Run profile itself owns one ephemeral task turn and does not expose cross-Run
 session adoption or user follow-up. New permission phases require distinct
 admission and owned process closure; a live resume cannot downgrade repair rights.
+Run feedback reports these controls separately from fresh handoff and Run
+cancellation, using the frozen selected harness, transport mode and recorded
+backend identity. Product route availability does not establish installed
+harness/mode/environment qualification. Unrecorded qualification stays explicit;
+inventory, native resume RPCs and the current reader's host cannot supply it.
 
 OpenCode still exposes readiness and an explicit protected-execution refusal,
 with no submission or continuation methods. Owned Codex cancellation targets its

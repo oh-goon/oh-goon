@@ -95,6 +95,7 @@ def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> i
         "steps": run_plan_readback,
         "outputs": run_plan_readback,
         "handoff": run_plan_readback,
+        "feedback": run_plan_readback,
         "campaign": run_plan_readback,
         "export-artifact": _export_artifact,
         "schedule": _schedule,

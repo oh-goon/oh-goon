@@ -657,6 +657,7 @@ def run_handoff_projection(detail: FleetRunDetail) -> dict[str, Any]:
     tape = detail.game_tape
     return {
         "schema": "oh-goon.plan-run-handoff/v1",
+        "feedback": detail.feedback.model_dump(mode="json", by_alias=True),
         "fleet_run_id": detail.run.fleet_run_id,
         **_recorded_run_lineage(detail.execution),
         "journal_revision": detail.journal_revision,
@@ -762,6 +763,21 @@ def _campaign(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     return 0
 
 
+def _feedback(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
+    """Render the same bounded observation returned by the original Run API."""
+    feedback = runtime.runs.get(args.fleet_run_id).feedback
+    if args.as_json:
+        _print_json(feedback.model_dump(mode="json", by_alias=True))
+    else:
+        print(f"Fleet Run ID: {feedback.fleet_run_id or '[omitted; inspect recorded identity]'}")
+        print(f"Status: {feedback.status} | Outcome: {feedback.outcome}")
+        print(f"Diagnostic: {feedback.diagnostic.classification} ({feedback.diagnostic.reason})")
+        for control in feedback.controls.controls:
+            print(f"  {control.action}: {control.state} | {control.reason}")
+        print("Read-only context; fresh resolution and admission remain required.")
+    return 0
+
+
 _READ_COMMANDS = {
     "list": _history,
     "show": _status,
@@ -773,6 +789,7 @@ _READ_COMMANDS = {
     "steps": _steps,
     "outputs": _outputs,
     "handoff": _handoff,
+    "feedback": _feedback,
     "campaign": _campaign,
 }
 

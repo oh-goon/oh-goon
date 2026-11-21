@@ -363,6 +363,20 @@ def project_agent_campaign(
             reasons.append(
                 f"Controller stopped with {decision.stop_reason.value if decision.stop_reason else 'unavailable'}"
             )
+    feedback = None
+    if campaign is not None and campaign.phases:
+        phase = campaign.phases[-1]
+        for context, detail, target in members:
+            if (
+                detail.run.fleet_run_id == phase.fleet_run_id
+                and context == phase.context
+                and target.execution_digest == phase.execution_digest
+                and tuple(step.step_id for step in target.plan.steps) == phase.selected_step_ids
+            ):
+                feedback = detail.model_copy(
+                    update={"campaign_journal": campaign, "journal_revision": journal_revision}
+                ).feedback.model_dump(mode="json", by_alias=True)
+                break
     return {
         "schema": "oh-goon.agent-campaign-result/v2",
         "campaign_id": campaign_id,
@@ -398,6 +412,7 @@ def project_agent_campaign(
         if decision is not None and result == "converged"
         else None,
         "runs": runs,
+        "feedback": feedback,
         "reviews": reviews,
         "findings": findings,
         "adjudications": adjudications,

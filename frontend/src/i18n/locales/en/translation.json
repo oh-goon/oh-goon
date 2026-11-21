@@ -1310,6 +1310,45 @@
       "NOT_RUN": "Not run. Review the recorded disposition to see why execution did not start.",
       "SKIPPED": "Skipped. Review the recorded Step disposition; Game Tape does not infer a reason beyond that fact."
     },
+    "feedback": {
+      "title": "Recorded attempt feedback",
+      "authority": "Source and execution facts keep their recorded authority. Native summaries and supporting output remain untrusted context; this feedback grants no new execution or write permission.",
+      "recordedOutcome": "Recorded Run status and outcome",
+      "runCandidate": "Original Run candidate",
+      "recordedCandidate": "Latest recorded campaign candidate",
+      "candidateFreshness": "Recorded in this Journal view; current filesystem state is unobserved.",
+      "identityMismatch": "Recorded feedback does not match this Run, campaign or Journal view.",
+      "unavailable": "Unavailable",
+      "noStepResult": "No accepted Step result is available in this feedback.",
+      "stepSettlement": "Settlement: {{outcome}} · cleanup: {{cleanup}}",
+      "details": "Goals, source evidence, budgets and continuation support",
+      "goals": "Recorded goals",
+      "sources": "Admitted source identities",
+      "verification": "Admitted verification and recorded results",
+      "verificationCounts": "Selected: {{selected}} · actual: {{actual}} · results: {{results}}",
+      "omittedCharacters": "{{count}} goal characters omitted",
+      "omissions": "Omitted facts: {{steps}} Steps · {{goals}} goals · {{sources}} sources · {{verification}} verification records. Exact field omissions remain in the structured feedback.",
+      "responseLimit": "The feedback response limit was reached. Omitted facts remain unverified.",
+      "omittedSelections": "{{count}} harness selections omitted",
+      "controls": "Continuation support",
+      "controlsRule": "These are recorded support and qualification facts. Starting or controlling work still requires its existing admission owner.",
+      "requirements": "Required authority",
+      "structured": "Exact bounded feedback, references and omissions",
+      "actions": {
+        "fresh_handoff": "Fresh Run with handoff",
+        "exact_native_resume": "Resume the exact native session",
+        "cross_harness_fresh_handoff": "Fresh handoff to another harness",
+        "steer": "Steer active work",
+        "follow_up": "Follow up in the native session",
+        "abort": "Abort the original Run",
+        "detach": "Detach from active work"
+      },
+      "controlStates": {
+        "available": "Supported by the existing route",
+        "unsupported": "Unsupported",
+        "unqualified": "Qualification unavailable"
+      }
+    },
     "recovery": {
       "eyebrow": "Safe next action",
       "title": "Recovery",
