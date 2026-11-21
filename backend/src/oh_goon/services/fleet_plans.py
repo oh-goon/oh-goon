@@ -266,7 +266,9 @@ class FleetPlanService:
         if verification_timeouts and len(verification_timeouts) != len(verification):
             raise FleetPlanInvalid("Native verification timeouts must match selected commands")
         if any(timeout != DEFAULT_COMMAND_TIMEOUT_SECONDS for timeout in verification_timeouts):
-            raise FleetPlanInvalid("Native verification requires the backend default command timeout")
+            raise FleetPlanInvalid(
+                "Native verification requires the backend default command timeout"
+            )
         self.require_plan_ingress_preparation(fleet_run_id)
         workspace = workspace.resolve(strict=True)
         if role not in {"report", "review"}:
