@@ -4,6 +4,15 @@ import { GameTapeRunFeedback } from "@/features/game-tape/components/GameTapeRun
 import { fixtureRunFeedback } from "../../../../e2e/fixtures/runFeedback";
 
 describe("GameTapeRunFeedback", () => {
+  it.each([
+    ["native_finished", "Native Agent finished; verification is separate"],
+    ["verified_success", "Verified success"],
+  ] as const)("renders backend continuation authority %s independently of successful native exit", (continuation_state, label) => {
+    const feedback = fixtureRunFeedback(undefined, { continuation_state, status: "COMPLETED", outcome: "SUCCESS", diagnostic: { classification: "success", owner: "fleet_run", reason: "Native execution completed." } });
+    render(<GameTapeRunFeedback feedback={feedback} runId="run-original" />);
+    expect(screen.getByRole("status")).toHaveTextContent(label);
+    expect(screen.getByText("success")).toBeVisible();
+  });
   it("shows the canonical diagnostic, identities, settlement, membership and qualified support without controls that execute work", () => {
     const recorded = fixtureRunFeedback();
     recorded.controls.selections = [{ step_id: "regression", harness: "native", agent: "codex", mode: "codex_service", implementation_identity: "codex:sha256:" + "a".repeat(64), executable_sha256: "a".repeat(64), profile: "service", selected_backend: "bubblewrap", sandbox_owner: "execution_backend", placement_backend_id: "local-original", placement_configuration_id: "configuration-original", placement_availability: "recorded", environment_qualification: "unqualified", selection_availability: "frozen_intent" }];

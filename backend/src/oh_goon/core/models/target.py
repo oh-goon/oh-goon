@@ -9,6 +9,7 @@ from oh_goon.core.execution_lock_identity import (
     build_execution_lock,
     canonical_external_identities,
 )
+from oh_goon.core.models.agent_continuation_receipt import AgentContinuationReceipt
 from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.caller_input_file import (
@@ -95,6 +96,9 @@ class FleetPlanTarget(ImmutableModel):
         default=None, exclude_if=lambda value: value is None
     )
     reviewed_repository_source: RepositorySourceAuthority | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    agent_continuation: AgentContinuationReceipt | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
@@ -189,6 +193,35 @@ class FleetPlanTarget(ImmutableModel):
             raise ValueError(
                 "scheduled caller source is not bound to this resolved execution target"
             )
+        continuation = self.agent_continuation
+        if continuation is not None:
+            review = continuation.review
+            native = self.plan.native_agent
+            agents = [step for step in self.plan.steps if isinstance(step, ResolvedAgentStep)]
+            if (
+                self.agent_repair is not None
+                or self.reviewed_repository_source != review.source_authority
+                or native is None
+                or native.agent != review.implementation
+                or native.profile_name != review.profile
+                or native.interactive
+                or native.profile.sandbox_owner != "harness"
+                or len(agents) != 1
+                or not self.plan.steps
+                or self.plan.steps[0] != agents[0]
+                or agents[0].workload.harness != "native"
+                or agents[0].workload.role != "report"
+                or agents[0].task_sha256 != continuation.feedback_sha256
+                or len(self.plan.steps) != len(review.verification) + 1
+            ):
+                raise ValueError("Continuation receipt differs from fresh native Run authority")
+            for selected, argv, timeout in zip(
+                self.plan.steps[1:], review.verification, review.verification_timeouts, strict=True
+            ):
+                if not isinstance(selected, ResolvedCommandStep) or selected != ResolvedCommandStep(
+                    step_id=selected.step_id, argv=argv, timeout_seconds=timeout
+                ):
+                    raise ValueError("Continuation verification differs from its reviewed commands")
         return self
 
     @property

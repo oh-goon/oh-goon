@@ -840,6 +840,463 @@
         "title": "AgentConnection",
         "type": "object"
       },
+      "AgentContinuationDiff": {
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "title": "Availability",
+            "type": "string"
+          },
+          "baseline": {
+            "const": "last_captured_candidate",
+            "default": "last_captured_candidate",
+            "title": "Baseline",
+            "type": "string"
+          },
+          "byte_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Count"
+          },
+          "omitted_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Omitted Bytes"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "text": {
+            "default": "",
+            "maxLength": 65536,
+            "title": "Text",
+            "type": "string"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "availability"
+        ],
+        "title": "AgentContinuationDiff",
+        "type": "object"
+      },
+      "AgentContinuationInspection": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "can_continue": {
+            "title": "Can Continue",
+            "type": "boolean"
+          },
+          "feedback": {
+            "$ref": "#/components/schemas/RunFeedback"
+          },
+          "previous_run_id": {
+            "title": "Previous Run Id",
+            "type": "string"
+          },
+          "refusal_reasons": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Refusal Reasons",
+            "type": "array"
+          },
+          "repository": {
+            "$ref": "#/components/schemas/RepositoryIdentity"
+          },
+          "review": {
+            "$ref": "#/components/schemas/AgentContinuationReview"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/AgentContinuationSelection"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AgentContinuationSourceInspection"
+          },
+          "state": {
+            "enum": [
+              "awaiting_input",
+              "stopped",
+              "needs_review",
+              "native_finished",
+              "verified_success"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "verification_reason": {
+            "title": "Verification Reason",
+            "type": "string"
+          },
+          "verification_status": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "title": "Verification Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "campaign_id",
+          "previous_run_id",
+          "repository",
+          "selection",
+          "feedback",
+          "source",
+          "review",
+          "verification_status",
+          "verification_reason",
+          "can_continue"
+        ],
+        "title": "AgentContinuationInspection",
+        "type": "object"
+      },
+      "AgentContinuationReceipt": {
+        "additionalProperties": false,
+        "description": "Immutable lineage and exact-request identity retained on the admitted target.",
+        "properties": {
+          "feedback_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Feedback Sha256",
+            "type": "string"
+          },
+          "request_identity": {
+            "pattern": "^agent-continuation-request-[0-9a-f]{64}$",
+            "title": "Request Identity",
+            "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/AgentContinuationReview"
+          }
+        },
+        "required": [
+          "request_identity",
+          "review",
+          "feedback_sha256"
+        ],
+        "title": "AgentContinuationReceipt",
+        "type": "object"
+      },
+      "AgentContinuationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "authorize": {
+            "title": "Authorize",
+            "type": "boolean"
+          },
+          "feedback": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Feedback",
+            "type": "string"
+          },
+          "new_fleet_run_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "New Fleet Run Id",
+            "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/AgentContinuationReview"
+          }
+        },
+        "required": [
+          "new_fleet_run_id",
+          "review",
+          "feedback",
+          "authorize"
+        ],
+        "title": "AgentContinuationRequest",
+        "type": "object"
+      },
+      "AgentContinuationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledgment": {
+            "enum": [
+              "admitted",
+              "existing"
+            ],
+            "title": "Acknowledgment",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/AgentContinuationReceipt"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "receipt",
+          "acknowledgment"
+        ],
+        "title": "AgentContinuationResult",
+        "type": "object"
+      },
+      "AgentContinuationReview": {
+        "additionalProperties": false,
+        "description": "Small observation fences; none grants native effects or reuses a session.",
+        "properties": {
+          "campaign_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          },
+          "campaign_revision": {
+            "minimum": 1.0,
+            "title": "Campaign Revision",
+            "type": "integer"
+          },
+          "config_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config File"
+          },
+          "decision_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "implementation": {
+            "enum": [
+              "codex",
+              "opencode",
+              "pi"
+            ],
+            "title": "Implementation",
+            "type": "string"
+          },
+          "previous_execution_digest": {
+            "minLength": 1,
+            "title": "Previous Execution Digest",
+            "type": "string"
+          },
+          "previous_run_id": {
+            "minLength": 1,
+            "title": "Previous Run Id",
+            "type": "string"
+          },
+          "profile": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Profile",
+            "type": "string"
+          },
+          "repository_id": {
+            "minLength": 1,
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "repository_instance_id": {
+            "minLength": 1,
+            "title": "Repository Instance Id",
+            "type": "string"
+          },
+          "selection_identity": {
+            "pattern": "^agent-continuation-selection-[0-9a-f]{64}$",
+            "title": "Selection Identity",
+            "type": "string"
+          },
+          "source_authority": {
+            "$ref": "#/components/schemas/RepositorySourceAuthority"
+          },
+          "verification": {
+            "default": [],
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "maxItems": 16,
+            "title": "Verification",
+            "type": "array"
+          },
+          "verification_timeouts": {
+            "default": [],
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 16,
+            "title": "Verification Timeouts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "campaign_revision",
+          "decision_id",
+          "previous_run_id",
+          "previous_execution_digest",
+          "repository_id",
+          "repository_instance_id",
+          "source_authority",
+          "implementation",
+          "profile",
+          "selection_identity"
+        ],
+        "title": "AgentContinuationReview",
+        "type": "object"
+      },
+      "AgentContinuationSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "environment_qualification": {
+            "const": "unqualified",
+            "default": "unqualified",
+            "title": "Environment Qualification",
+            "type": "string"
+          },
+          "executable_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Executable Sha256",
+            "type": "string"
+          },
+          "implementation": {
+            "enum": [
+              "codex",
+              "opencode",
+              "pi"
+            ],
+            "title": "Implementation",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "headless_cli",
+              "interactive_cli",
+              "codex_login_cli",
+              "codex_service",
+              "pi_rpc"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "sandbox_owner": {
+            "enum": [
+              "harness",
+              "execution_backend"
+            ],
+            "title": "Sandbox Owner",
+            "type": "string"
+          },
+          "selected_backend": {
+            "enum": [
+              "local",
+              "bubblewrap"
+            ],
+            "title": "Selected Backend",
+            "type": "string"
+          },
+          "selection_identity": {
+            "title": "Selection Identity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "implementation",
+          "profile",
+          "mode",
+          "selected_backend",
+          "sandbox_owner",
+          "executable_sha256",
+          "selection_identity"
+        ],
+        "title": "AgentContinuationSelection",
+        "type": "object"
+      },
+      "AgentContinuationSourceInspection": {
+        "additionalProperties": false,
+        "properties": {
+          "diff": {
+            "$ref": "#/components/schemas/AgentContinuationDiff"
+          },
+          "original_delivery_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Original Delivery Sha256",
+            "type": "string"
+          },
+          "recorded_candidate_identity": {
+            "title": "Recorded Candidate Identity",
+            "type": "string"
+          },
+          "repository_instance_id": {
+            "title": "Repository Instance Id",
+            "type": "string"
+          },
+          "source_authority": {
+            "$ref": "#/components/schemas/RepositorySourceAuthority"
+          }
+        },
+        "required": [
+          "source_authority",
+          "repository_instance_id",
+          "diff",
+          "recorded_candidate_identity",
+          "original_delivery_sha256"
+        ],
+        "title": "AgentContinuationSourceInspection",
+        "type": "object"
+      },
       "AgentControlSelection": {
         "additionalProperties": false,
         "description": "Exact frozen selection; neither inventory nor installed capability proof.",
@@ -8914,6 +9371,16 @@
         "additionalProperties": false,
         "description": "Verified immutable execution target; constructed once before admission and transported unchanged.",
         "properties": {
+          "agent_continuation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentContinuationReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "agent_deliveries": {
             "default": [],
             "items": {
@@ -28379,6 +28846,24 @@
             "title": "Context Authority",
             "type": "string"
           },
+          "continuation_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "awaiting_input",
+                  "stopped",
+                  "needs_review",
+                  "native_finished",
+                  "verified_success"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continuation State"
+          },
           "controls": {
             "$ref": "#/components/schemas/AgentRunControls"
           },
@@ -38769,6 +39254,212 @@
           }
         },
         "summary": "Get Agent Campaign",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/runs/campaigns/{campaign_id}/continuation": {
+      "get": {
+        "operationId": "inspect_agent_continuation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "implementation",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Implementation"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentContinuationInspection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Inspect Agent Continuation",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/fleet/runs/campaigns/{campaign_id}/continuations": {
+      "post": {
+        "operationId": "continue_agent_campaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentContinuationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentContinuationResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Current state conflicts with the request"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal domain failure"
+          }
+        },
+        "summary": "Continue Agent Campaign",
         "tags": [
           "fleet"
         ]

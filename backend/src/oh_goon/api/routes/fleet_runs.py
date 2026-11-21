@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from oh_goon.api.dependencies import fleet_run_control_plane
+from oh_goon.api.dependencies import fleet_plan_service, fleet_run_control_plane
 from oh_goon.api.schemas.catalog_showcase import RunArtifactExportRequest
 from oh_goon.api.schemas.fleet import (
     AgentCampaignResult,
@@ -12,6 +12,11 @@ from oh_goon.api.schemas.fleet import (
     FleetRunRequest,
 )
 from oh_goon.core.errors import FleetDomainError
+from oh_goon.core.models.agent_continuation import (
+    AgentContinuationInspection,
+    AgentContinuationRequest,
+    AgentContinuationResult,
+)
 from oh_goon.core.models.catalog_showcase import RunArtifactExport
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
 from oh_goon.core.models.fleet_failures import (
@@ -39,6 +44,7 @@ from oh_goon.core.models.run_feedback import RunFeedback
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunSource, FleetRunStatus
 from oh_goon.integrations.exact_file_write import ExactPublicationDurabilityError
 from oh_goon.services.enforcer_run_receipt import enforcer_run_receipt, render_enforcer_yaml
+from oh_goon.services.fleet_plans import FleetPlanService
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 
 router = APIRouter(prefix="/fleet/runs", tags=["fleet"])
@@ -135,6 +141,35 @@ def get_agent_campaign(
     control_plane: FleetRunControlPlane = Depends(fleet_run_control_plane),
 ) -> AgentCampaignResult:
     return AgentCampaignResult.model_validate(control_plane.agent_campaign(campaign_id))
+
+
+@router.get(
+    "/campaigns/{campaign_id}/continuation",
+    response_model=AgentContinuationInspection,
+    operation_id="inspect_agent_continuation",
+)
+def inspect_agent_continuation(
+    campaign_id: str,
+    implementation: str | None = Query(default=None),
+    profile: str | None = Query(default=None),
+    plans: FleetPlanService = Depends(fleet_plan_service),
+) -> AgentContinuationInspection:
+    return plans.inspect_agent_continuation(
+        campaign_id, implementation=implementation, profile=profile
+    )
+
+
+@router.post(
+    "/campaigns/{campaign_id}/continuations",
+    response_model=AgentContinuationResult,
+    operation_id="continue_agent_campaign",
+)
+def continue_agent_campaign(
+    campaign_id: str,
+    request: AgentContinuationRequest,
+    plans: FleetPlanService = Depends(fleet_plan_service),
+) -> AgentContinuationResult:
+    return plans.continue_agent_campaign(campaign_id, request)
 
 
 @router.get(

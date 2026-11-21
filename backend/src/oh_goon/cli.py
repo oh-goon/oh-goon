@@ -653,7 +653,9 @@ def _main(
         )
     elif args.command == "runs":
         runtime = _build_application_runtime(
-            startup_purpose="observation", as_json=args.as_json, readback_id=args.fleet_run_id
+            startup_purpose="application" if args.runs_command == "continue" else "observation",
+            as_json=args.as_json,
+            readback_id=args.fleet_run_id,
         )
     else:
         if resource_handoff is not None:

@@ -207,6 +207,8 @@ export class InMemoryApiClient implements ApiClient {
   fleetRunHistory(..._args: Parameters<ApiClient["fleetRunHistory"]>): ReturnType<ApiClient["fleetRunHistory"]> { return unsupported("fleetRunHistory"); }
   fleetRunDetail(..._args: Parameters<ApiClient["fleetRunDetail"]>): ReturnType<ApiClient["fleetRunDetail"]> { return unsupported("fleetRunDetail"); }
   agentCampaign(..._args: Parameters<ApiClient["agentCampaign"]>): ReturnType<ApiClient["agentCampaign"]> { return unsupported("agentCampaign"); }
+  inspectAgentContinuation(..._args: Parameters<ApiClient["inspectAgentContinuation"]>): ReturnType<ApiClient["inspectAgentContinuation"]> { return unsupported("inspectAgentContinuation"); }
+  continueAgentCampaign(..._args: Parameters<ApiClient["continueAgentCampaign"]>): ReturnType<ApiClient["continueAgentCampaign"]> { return unsupported("continueAgentCampaign"); }
   repairSharedPlan(..._args: Parameters<ApiClient["repairSharedPlan"]>): ReturnType<ApiClient["repairSharedPlan"]> { return unsupported("repairSharedPlan"); }
   compareFleetRuns(..._args: Parameters<ApiClient["compareFleetRuns"]>): ReturnType<ApiClient["compareFleetRuns"]> { return unsupported("compareFleetRuns"); }
   gameTapePerformance(..._args: Parameters<ApiClient["gameTapePerformance"]>): ReturnType<ApiClient["gameTapePerformance"]> { return unsupported("gameTapePerformance"); }

@@ -3056,5 +3056,52 @@
     "lifecycleLimits": "Gränser för livscykelobservationer",
     "unresolvedRelationships": "Olösta relationsobservationer",
     "externalRelationships": "Externa eller oindexerade relationsobservationer"
+  },
+  "campaignContinuation": {
+    "title": "Undersök och fortsätt med en ny Run",
+    "explanation": "Granska det aktuella registrerade repositoriet och det ursprungliga försöket och lämna sedan ny återkoppling eller ett förtydligande. Fortsättningen startar en separat Run med aktuell konfiguration och en ny inbyggd session. Ursprungliga resultat finns kvar.",
+    "observer": "När du lämnar sidan avslutas endast din observation. Arbetet fortsätter; avbryt en aktiv Run via dess befintliga Run-kontroller.",
+    "implementation": "Ny inbyggd Agent-implementation",
+    "recordedSelection": "Använd den registrerade implementationen",
+    "profile": "Aktuell inbyggd Agent-profil",
+    "selectionHelp": "Lämna ett val tomt för att kontrollera det registrerade valet mot aktuell konfiguration. Granska den upplösta profilen och implementationsidentiteten innan du godkänner.",
+    "check": "Kontrollera aktuell kandidat",
+    "checking": "Kontrollerar aktuell kandidat…",
+    "inspection": "Aktuell fortsättningsgranskning",
+    "inspectionFailed": "Den aktuella kandidaten kunde inte granskas. Ingen fortsättning har godkänts.",
+    "repository": "Registrerat repository",
+    "originalRun": "Ursprunglig Run",
+    "recordedCandidate": "Senast fångade kandidatidentitet",
+    "currentCandidate": "SHA-256 för aktuell källögonblicksbild",
+    "currentSubject": "Aktuell repository-instans",
+    "currentSelection": "Upplöst aktuellt inbyggt val",
+    "diff": "Skillnader för aktuell kandidat",
+    "diffBaseline": "Inbyggd Git-jämförelse: den senast fångade kandidaten mot aktuellt repository. Denna begränsade observation ger ingen körnings- eller verifieringsbehörighet.",
+    "diffTruncated": "Skillnaderna är avkortade. Utelämnade ändringar visas inte.",
+    "noDiff": "Inbyggd Git rapporterade inga skillnader.",
+    "diffUnavailable": "Inbyggda Git-skillnader är inte tillgängliga.",
+    "feedback": "Ny återkoppling eller nytt förtydligande",
+    "feedbackLimit": "{{count}} / 8192 UTF-8-byte",
+    "authorize": "Godkänn nya arbetsyteskrivningar för exakt denna granskade kandidat, detta inbyggda val och denna återkoppling",
+    "submit": "Starta en ny fortsättnings-Run",
+    "submission": "Ny fortsättningsbegäran",
+    "openRun": "Öppna fortsättnings-Run",
+    "checkOutcome": "Kontrollera resultat för denna Run",
+    "outcomeUnavailable": "Resultatet för denna Run är inte tillgängligt. Den ursprungliga begäran kan fortfarande vänta; kontrollera samma Run-ID igen innan du startar ett nytt anrop.",
+    "checks": "Registrerade verifieringskommandon",
+    "states": {
+      "awaiting_input": "Väntar på indata",
+      "stopped": "Stoppad",
+      "needs_review": "Behöver granskas",
+      "native_finished": "Inbyggd Agent klar; verifieringen är separat",
+      "verified_success": "Verifierad framgång"
+    },
+    "submissionStates": {
+      "idle": "Ingen begäran har skickats.",
+      "pending": "Skickar denna nya Run-identitet…",
+      "admitted": "Denna nya Run har antagits. Granska dess Game Tape för körnings- och verifieringsresultat.",
+      "unknown": "Bekräftelsen är inte tillgänglig. Läs samma Run-ID för att kontrollera den ursprungliga begäran; sidan skickar den inte igen."
+    },
+    "diffBytes": "Byte i inbyggda Git-skillnader: {{total}}; utelämnade byte: {{omitted}}."
   }
 }

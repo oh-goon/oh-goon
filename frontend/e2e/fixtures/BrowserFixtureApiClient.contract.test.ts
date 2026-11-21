@@ -7,6 +7,7 @@ import { FIXTURE_REPOSITORIES, FIXTURE_REPOSITORY_LIST, fixtureRepositoryInstanc
 import { FIXTURE_PLANS, FIXTURE_SHA } from "./plans";
 import { DEFAULT_RUN_ID } from "./runIds";
 import { CATALOG_FIXTURE_CANDIDATE, CATALOG_FIXTURE_STEP_ID } from "./catalog";
+import { CONTINUATION_CAMPAIGN_ID } from "./agentContinuation";
 
 function reviewedScheduleRequest(): SharedPlanScheduleCreateRequest {
   const repositoryId = FIXTURE_REPOSITORIES.payments.repository_id;
@@ -24,6 +25,18 @@ function reviewedScheduleRequest(): SharedPlanScheduleCreateRequest {
 }
 
 describe("BrowserFixtureApiClient canonical fixture contracts", () => {
+  it("serves typed current continuation evidence and records its receipt on a separate Run", async () => {
+    const client = new BrowserFixtureApiClient();
+    const inspection = decodeResponse(operations.inspect_agent_continuation.operationId, await client.inspectAgentContinuation(CONTINUATION_CAMPAIGN_ID));
+    const saved = await client.continueAgentCampaign(CONTINUATION_CAMPAIGN_ID, { new_fleet_run_id: "fresh-contract-run", review: inspection.review, feedback: "Clarify the original regression.", authorize: true });
+    expect(saved.outcome).toBe("saved");
+    if (saved.outcome !== "saved") return;
+    const result = decodeResponse(operations.continue_agent_campaign.operationId, saved.value);
+    const detail = decodeResponse(operations.get_fleet_run.operationId, await client.fleetRunDetail(result.fleet_run_id));
+    expect(detail.run.fleet_run_id).not.toBe(inspection.previous_run_id);
+    expect(detail.run.target?.kind === "fleet_plan" && detail.run.target.agent_continuation).toEqual(result.receipt);
+    expect((await client.fleetRunDetail(inspection.previous_run_id)).run.status).toBe("FAILED");
+  });
   it("refuses a stale template digest before reporting a saved Plan", async () => {
     const client = new BrowserFixtureApiClient();
     const template = (await client.planTemplates()).templates?.[0];

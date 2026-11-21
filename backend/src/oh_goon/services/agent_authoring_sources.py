@@ -35,6 +35,8 @@ if TYPE_CHECKING:
     from oh_goon.runtime.enforcer_lace_journal import CausalRunJournal
     from oh_goon.runtime.enforcer_lace_signer_trust_epoch import SignerTrustGrant
 
+_NATIVE_PROJECT_DIRECTORY_NAMES = frozenset({".codex", ".opencode"})
+
 
 def capture_agent_sources(
     definitions: tuple[PlanInputDefinition, ...],
@@ -274,10 +276,28 @@ def _require_private_native_source_separation(
 
 
 def _require_native_project_source_privacy(relative: PurePosixPath) -> None:
-    if any(part.casefold() in {".codex", ".opencode"} for part in relative.parts) or (
+    if any(part.casefold() in _NATIVE_PROJECT_DIRECTORY_NAMES for part in relative.parts) or (
         relative.name.casefold() in {"opencode.json", "opencode.jsonc"}
     ):
         raise FleetPlanInvalid("Agent source includes native authentication/configuration state")
+
+
+def require_native_agent_source_path_privacy(root: Path, relative: Path, directory: bool) -> None:
+    """Apply existing Agent privacy before an inspection snapshot opens member bytes.
+
+    Empty reserved native directories remain permitted. A descendant entry is
+    rejected before copying. Native names are scoped to the selected tree, so
+    an unrelated host ancestor such as Codex's worktree storage is not source.
+    """
+    if is_grader_private_source_path(root / relative):
+        raise FleetPlanInvalid("Native Agent workspace contains grader-only material")
+    selected = PurePosixPath(relative.as_posix())
+    if root.name.casefold() in _NATIVE_PROJECT_DIRECTORY_NAMES:
+        selected = PurePosixPath(root.name) / selected
+    if directory and selected.name.casefold() in _NATIVE_PROJECT_DIRECTORY_NAMES:
+        _require_native_project_source_privacy(selected.parent)
+    else:
+        _require_native_project_source_privacy(selected)
 
 
 def _require_public_agent_source_selection(root: Path, reference: str) -> None:
@@ -385,7 +405,7 @@ def _snapshot_authorized_tree(
             raise FleetPlanInvalid(f"AG-01 {label} crosses a foreign filesystem")
         with os.scandir(dir_fd) as iterator:
             if private_native_roots and any(
-                part.casefold() in {".codex", ".opencode"} for part in subpath.parts
+                part.casefold() in _NATIVE_PROJECT_DIRECTORY_NAMES for part in subpath.parts
             ):
                 # Native sandbox setup may retain an empty reserved directory.
                 # Empty directories have no source members. Any entry is private
@@ -412,7 +432,8 @@ def _snapshot_authorized_tree(
                 continue
             before = os.stat(entry.name, dir_fd=dir_fd, follow_symlinks=False)
             if private_native_roots and not (
-                entry.name.casefold() in {".codex", ".opencode"} and stat.S_ISDIR(before.st_mode)
+                entry.name.casefold() in _NATIVE_PROJECT_DIRECTORY_NAMES
+                and stat.S_ISDIR(before.st_mode)
             ):
                 _require_native_project_source_privacy(PurePosixPath(rel))
             if stat.S_ISDIR(before.st_mode):

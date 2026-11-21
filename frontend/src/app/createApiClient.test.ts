@@ -7,6 +7,7 @@ import { MutationController } from "@/domain/concurrency/MutationController";
 import { operations as op } from "@generated/operations";
 import { catalogFixturePreview } from "../../e2e/fixtures/catalog";
 import { FIXTURE_REPOSITORIES, fixtureRepositoryInstanceId } from "../../e2e/fixtures/identities";
+import { CONTINUATION_CAMPAIGN_ID, fixtureAgentContinuation } from "../../e2e/fixtures/agentContinuation";
 
 vi.mock("@/app/api/mutationTransport", () => ({ writeOperation: vi.fn() }));
 vi.mock("@/app/api/httpTransport", () => ({ readOperation: vi.fn() }));
@@ -39,6 +40,17 @@ describe("createApiClient write fence transport", () => {
     expect(read).toHaveBeenNthCalledWith(2, op.catalog_preview.operationId, { path: { repository_id: repositoryId }, body: candidate }, options);
     expect(write).toHaveBeenNthCalledWith(1, mutations, "fleet-run", op.catalog_run.operationId, { path: { repository_id: repositoryId }, body: submission });
     expect(write).toHaveBeenNthCalledWith(2, mutations, "fleet-run", op.export_run_artifact.operationId, { path: { fleet_run_id: "original-catalog-run" }, body: artifact });
+  });
+
+  it("uses generated continuation operations for exact current inspection and a separate fresh Run request", () => {
+    const mutations = new MutationController();
+    const client = createApiClient(mutations);
+    const options = { signal: new AbortController().signal };
+    const request = { new_fleet_run_id: "fresh-continuation", review: fixtureAgentContinuation().review, feedback: "Clarify the regression.", authorize: true };
+    void client.inspectAgentContinuation(CONTINUATION_CAMPAIGN_ID, "codex", "current-native", options);
+    void client.continueAgentCampaign(CONTINUATION_CAMPAIGN_ID, request);
+    expect(read).toHaveBeenCalledWith(op.inspect_agent_continuation.operationId, { path: { campaign_id: CONTINUATION_CAMPAIGN_ID }, query: { implementation: "codex", profile: "current-native" } }, options);
+    expect(write).toHaveBeenCalledWith(mutations, "fleet-run", op.continue_agent_campaign.operationId, { path: { campaign_id: CONTINUATION_CAMPAIGN_ID }, body: request });
   });
 
   it("keeps ecosystem and scoped package spelling in dependency reads", () => {
