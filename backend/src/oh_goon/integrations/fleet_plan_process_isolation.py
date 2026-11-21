@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Mapping, Protocol
 from oh_goon.core.errors import ExecutorPlacementLost, FleetPlanInvalid
 from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import AgentRepairContext
+from oh_goon.core.models.execution_materialization import ExecutionMaterialization
 from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
@@ -96,8 +97,16 @@ class StandardIsolatedProcessRequest:
     termination_requested: Callable[[], TerminationSignal | None] | None = field(
         default=None, repr=False
     )
+    workspace_materialization: ExecutionMaterialization | None = None
+    workspace_directory_fd: int | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        if (self.workspace_materialization is None) != (self.workspace_directory_fd is None):
+            raise FleetPlanInvalid("Candidate workspace requires its original directory handle")
+        if self.workspace_directory_fd is not None and (
+            type(self.workspace_directory_fd) is not int or self.workspace_directory_fd < 0
+        ):
+            raise FleetPlanInvalid("Candidate workspace directory handle is invalid")
         if (
             not self.workspace.is_absolute()
             or not self.cwd.is_absolute()
@@ -206,6 +215,9 @@ class NativeProfileCommandRunner:
     _common_mounts: tuple[StandardReadOnlyMount, ...] = field(repr=False)
     _protected: bool = field(repr=False)
     _admitted_roots: tuple[Path, ...] = field(repr=False)
+    workspace_materialization: ExecutionMaterialization | None = field(repr=False)
+    workspace_directory_fd: int | None = field(repr=False)
+    require_candidate_current: Callable[[], None] | None = field(repr=False)
 
     def __init__(
         self,
@@ -216,19 +228,20 @@ class NativeProfileCommandRunner:
         *,
         termination_requested: Callable[[], TerminationSignal | None] | None = None,
         repair_context: AgentRepairContext | None = None,
+        workspace_materialization: ExecutionMaterialization | None = None,
+        workspace_directory_fd: int | None = None,
+        require_candidate_current: Callable[[], None] | None = None,
     ) -> None:
         from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 
         workspace = repository.resolve(strict=True)
-        roots = tuple(Path(root) for root in native_agent.profile.workspace_roots)
-        if (
-            native_agent.agent not in native_agent.profile.allowed_agents
-            or any(not root.is_absolute() or ".." in root.parts for root in roots)
-            or (roots and not any(workspace.is_relative_to(root) for root in roots))
-        ):
-            raise FleetPlanInvalid(
-                "Native workload differs from its resolved agent/workspace policy"
-            )
+        require_native_workspace_scope(workspace, native_agent)
+        if (workspace_materialization is None) != (require_candidate_current is None):
+            raise FleetPlanInvalid("Native candidate requires its complete current authority")
+        if (workspace_materialization is None) != (workspace_directory_fd is None):
+            raise FleetPlanInvalid("Native candidate requires its original directory custody")
+        if require_candidate_current is not None:
+            require_candidate_current()
         sandboxed = native_agent.profile.backend == "bubblewrap"
         standard_backend = backend if isinstance(backend, BubblewrapProcessIsolation) else None
         if sandboxed:
@@ -240,8 +253,18 @@ class NativeProfileCommandRunner:
                 raise FleetPlanInvalid(
                     "Native sandbox backend configuration changed after resolution"
                 )
-            _require_standard_git_layout(workspace)
-        elif any(
+            _require_standard_git_layout(workspace, workspace_materialization)
+        if workspace_materialization is not None and (
+            not sandboxed
+            or native_agent.agent != "pi"
+            or native_agent.interactive
+            or native_agent.profile.sandbox_owner != "harness"
+            or workspace_materialization.writer_scope_kind != "native_namespace_scope"
+        ):
+            raise FleetPlanInvalid(
+                "Candidate execution requires its selected native namespace mode"
+            )
+        if not sandboxed and any(
             value is not None for value in native_agent.profile.resources.model_dump().values()
         ):
             raise FleetPlanInvalid(
@@ -267,6 +290,9 @@ class NativeProfileCommandRunner:
         object.__setattr__(self, "_common_mounts", common_mounts)
         object.__setattr__(self, "_protected", protected)
         object.__setattr__(self, "_admitted_roots", admitted_roots)
+        object.__setattr__(self, "workspace_materialization", workspace_materialization)
+        object.__setattr__(self, "workspace_directory_fd", workspace_directory_fd)
+        object.__setattr__(self, "require_candidate_current", require_candidate_current)
 
     def __call__(
         self,
@@ -300,6 +326,8 @@ class NativeProfileCommandRunner:
         protected = self._protected
         admitted_roots = self._admitted_roots
         sandboxed = native_agent.profile.backend == "bubblewrap"
+        if self.require_candidate_current is not None:
+            self.require_candidate_current()
         if type(retain_output_tail) is not bool:
             raise FleetPlanInvalid("Native output tail selection must be a boolean")
         if type(preserve_stdout_whitespace) is not bool:
@@ -348,8 +376,14 @@ class NativeProfileCommandRunner:
             )
         assert standard_backend is not None and workspace_pin is not None
         with workspace_pin(workspace) as require_current:
-            require_current()
-            _require_standard_git_layout(workspace)
+
+            def require_bound_current() -> None:
+                require_current()
+                if self.require_candidate_current is not None:
+                    self.require_candidate_current()
+
+            require_bound_current()
+            _require_standard_git_layout(workspace, self.workspace_materialization)
             request = StandardIsolatedProcessRequest(
                 workspace=workspace,
                 argv=tuple(argv),
@@ -358,7 +392,7 @@ class NativeProfileCommandRunner:
                 if env is not None
                 else direct_plan_environment((), host_environment=os.environ),
                 backend_configuration_id=native_agent.backend_configuration_id or "",
-                require_workspace_current=require_current,
+                require_workspace_current=require_bound_current,
                 read_only_mounts=_combine_native_mounts(common_mounts, read_only_mounts),
                 broker_directory=broker_directory,
                 private_configuration_directory=private_configuration_directory,
@@ -373,6 +407,8 @@ class NativeProfileCommandRunner:
                 retain_output_tail=retain_output_tail,
                 preserve_stdout_whitespace=preserve_stdout_whitespace,
                 termination_requested=termination_requested,
+                workspace_materialization=self.workspace_materialization,
+                workspace_directory_fd=self.workspace_directory_fd,
             )
             return standard_backend.execute(
                 request,
@@ -392,6 +428,9 @@ def native_profile_command_runner(
     *,
     termination_requested: Callable[[], TerminationSignal | None] | None = None,
     repair_context: AgentRepairContext | None = None,
+    workspace_materialization: ExecutionMaterialization | None = None,
+    workspace_directory_fd: int | None = None,
+    require_candidate_current: Callable[[], None] | None = None,
 ) -> NativeProfileCommandRunner:
     """Use the original command algorithm with one explicit native selection."""
     return NativeProfileCommandRunner(
@@ -401,12 +440,39 @@ def native_profile_command_runner(
         workspace_pin,
         termination_requested=termination_requested,
         repair_context=repair_context,
+        workspace_materialization=workspace_materialization,
+        workspace_directory_fd=workspace_directory_fd,
+        require_candidate_current=require_candidate_current,
     )
 
 
-def _require_standard_git_layout(workspace: Path) -> None:
+def require_native_workspace_scope(workspace: Path, native_agent: ResolvedNativeAgent) -> None:
+    """Validate the selected physical root, including a proposed owned path before allocation."""
+    roots = tuple(Path(root) for root in native_agent.profile.workspace_roots)
+    selected = workspace.resolve(strict=False)
+    if (
+        not workspace.is_absolute()
+        or native_agent.agent not in native_agent.profile.allowed_agents
+        or any(not root.is_absolute() or ".." in root.parts for root in roots)
+        or (roots and not any(selected.is_relative_to(root) for root in roots))
+    ):
+        raise FleetPlanInvalid("Native workload differs from its resolved agent/workspace policy")
+
+
+def _require_standard_git_layout(
+    workspace: Path, materialization: ExecutionMaterialization | None = None
+) -> None:
     git = workspace / ".git"
     if git.is_symlink() or (git.exists() and not git.is_dir()) or (git / "commondir").exists():
+        if (
+            materialization is not None
+            and materialization.writer_scope_kind == "native_namespace_scope"
+            and git.is_file()
+            and not git.is_symlink()
+        ):
+            # The original candidate owner re-proves its exact Git marker.
+            # The selected backend masks it; shared metadata is never mounted.
+            return
         raise FleetPlanInvalid(
             "Native sandbox requires repository-local Git metadata; external linked-worktree "
             "metadata has no scoped workspace-authority mount"

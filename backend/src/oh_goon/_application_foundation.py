@@ -13,10 +13,12 @@ if TYPE_CHECKING:
 
 from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.capability_registry import capability_definitions
+from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.core.ports.capability_runner import CapabilityRunner
+from oh_goon.core.ports.candidate_execution import CandidateExecutionContext
+from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest, CapabilityRunner
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
@@ -126,6 +128,23 @@ def _build_capability_runtime(
     standard_process_isolation: ProcessIsolationBackend | None = None,
     startup_purpose: RuntimeStartupPurpose = "application",
 ) -> tuple[FleetExecutorPool, CapabilityExecutor, FleetContentStore]:
+    def prepare_candidate(
+        admission: CandidateWorkspaceAdmission, request: CapabilityExecutionRequest
+    ) -> CandidateExecutionContext:
+        from oh_goon.core.errors import FleetPlanInvalid
+        from oh_goon.services.fleet_plan_candidate import prepare_candidate_execution
+
+        if request.require_execution_current is None or request.require_settlement_current is None:
+            raise FleetPlanInvalid("Candidate execution requires the original claimed worker")
+        return prepare_candidate_execution(
+            admission,
+            database=database,
+            effect=request.attempt,
+            require_execution_current=request.require_execution_current,
+            require_settlement_current=request.require_settlement_current,
+            git=git,
+        )
+
     executor_pool = FleetExecutorPool(database, configuration)
     process_isolation_backends = (
         tuple(item.backend for item in configuration.executors) if configuration is not None else ()
@@ -154,6 +173,7 @@ def _build_capability_runtime(
             terminal=terminal,
             standard_process_isolation=standard_process_isolation,
             workspace_pin=RepositoryWorkspaceAuthority.pin_repository_subject,
+            candidate_execution_factory=prepare_candidate,
         ),
     }
     _require_complete_runner_wiring(runners)

@@ -164,6 +164,62 @@ checkpoints, assignments, leases, or physical bindings can be rejected without r
 ### FleetRun lifecycle state is structural
 FleetRun state is represented with explicit structural states rather than loosely related booleans or implicit event-position assumptions.
 
+### Candidate execution retains the registered subject and original Run
+
+An explicitly selected native candidate Run keeps the registered repository as
+its catalog, admission, Journal and retained-content owner. A real
+`READ_SNAPSHOT` allocation captures that source; a distinct `WORKTREE` allocation
+owns the mutable candidate. Its `WorkspaceRef`, initial checkpoint, state version
+and captured source authority cross the existing Fleet target boundary. A path
+or a second repository registration cannot substitute for those identities.
+The first candidate must match the admitted registered source. Reusing a changed
+candidate requires separately admitted source authority; the initial route does
+not infer it from the developer checkout.
+
+The original claimed worker and repository-effect attempt acquire the existing
+assignment, exclusive workspace lease and execution materialization. The prepared
+effect binds that actual materialization before `EFFECT_STARTED`; the same
+original Step and process owners execute and verify inside the resolved candidate.
+They recheck the current workspace/assignment/lease and worker claim before
+effects. Checkpointing, execution-evidence acceptance and lease settlement remain
+with their existing owners. A partial finalization preserves the candidate and
+reports incomplete settlement rather than inventing success or replaying work.
+
+The initial native route selects headless, harness-owned Pi with Bubblewrap.
+Configured physical workspace roots remain binding. Linked Git metadata is
+hidden from native tools; trusted workspace lifecycle operations use native Git
+with repository hooks and fsmonitor disabled. Configured external clean/process
+filters are refused before lifecycle metadata commands; those commands do not
+grant repository-configured programs execution outside the native sandbox.
+The agent receives no shared Git
+administration mount, developer-checkout write grant or promotion authority.
+Other native modes retain their existing compatibility and refusal behavior.
+
+Post-writer retirement requires the original backend's workspace/materialization
+bound physical lifetime evidence in canonical accepted execution records. A
+generic process-group acknowledgement, released lease, parent exit or caller
+boolean cannot establish writer absence. The selected Linux Bubblewrap boundary
+holds payload execution until its private PID namespace is observed, and binds
+its terminal kernel observation to the original physical execution. Missing or
+ambiguous closure remains recoverable. This selected capability does not qualify
+strict custody, another namespace/backend/environment or native session adoption.
+The native scope is an explicit requirement of the existing immutable execution
+materialization, recorded before effects. It does not require a SQLite format
+change or reinterpret a legacy NULL writer kind as proof of no writer. Cancellation
+blocks new launches while original-owner settlement can retain physical closure
+facts. Explicit cleanup reconciliation does not create a successful code result
+or rewrite the cancelled Run.
+
+Checkpoints retain content identity and provenance, not an extra copy of dirty
+output. Dirty or changed-HEAD candidates therefore remain retained; native Git
+retirement still requires clean, checkpoint-identical bytes at the original base.
+Git-ignored output cannot be discarded merely because native status is clean;
+source changes must also match the original admitted checkpoint, and ignored
+unpromoted artifacts remain retained through the native metadata owner.
+A clean result can be explicitly finalized and retired through the same durable
+Git receipt/reconciliation owner. No automatic reset, forced removal, promotion
+framework or second cleanup registry is introduced.
+
 ### Tagged-union discriminators are required end to end
 Where execution modes have distinct semantics, their discriminators remain explicit through model, persistence, API and frontend boundaries.
 

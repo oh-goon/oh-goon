@@ -16,7 +16,7 @@ from functools import partial
 from pathlib import Path
 from queue import Empty, Full, Queue
 from threading import Event, Thread
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_result import CliTermination, record_cli_cleanup_failure
@@ -55,6 +55,12 @@ _NATIVE_SETUP_REQUIREMENTS = {
         "posix_terminal",
         "Interactive mode requires a POSIX terminal; select --headless for non-terminal execution.",
     ),
+    "CANDIDATE_PROFILE_UNAVAILABLE": (
+        "owned_candidate_namespace",
+        "Candidate execution requires headless Pi with a supported harness-owned Bubblewrap "
+        "managed-inference profile. Its workspace roots must permit the owned candidate. "
+        "Review the selected profile; existing direct execution remains separately selected.",
+    ),
     "RESOURCE_ISOLATION_REQUIRED": (
         "isolated_resource_limits",
         "Resource caps require a native isolated execution profile; select a supported isolated profile.",
@@ -82,6 +88,11 @@ class _NativeCliRequirementError(AgentProviderError):
         super().__init__(_NATIVE_SETUP_REQUIREMENTS[reason][1])
 
 
+class _CandidateRunOptions(TypedDict, total=False):
+    candidate: bool
+    fleet_run_id: str
+
+
 def add_ai_command[_Parser: argparse.ArgumentParser](
     subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
@@ -97,6 +108,11 @@ def add_ai_command[_Parser: argparse.ArgumentParser](
     )
     parser.add_argument("--workspace", type=Path, default=Path(), help="Git repository root")
     parser.add_argument("--skill", type=Path, help="Caller-selected Skill source")
+    parser.add_argument(
+        "--candidate",
+        action="store_true",
+        help="Edit an owned candidate through headless Pi/Bubblewrap; retain the developer checkout",
+    )
     parser.add_argument(
         "--handoff-from",
         metavar="RUN_ID",
@@ -147,6 +163,10 @@ def _task(args: argparse.Namespace) -> str:
 
 
 def _interactive(args: argparse.Namespace) -> bool | None:
+    if getattr(args, "candidate", False):
+        if args.interactive:
+            raise _NativeCliRequirementError("CANDIDATE_PROFILE_UNAVAILABLE")
+        return False
     terminal = sys.stdin.isatty() and sys.stdout.isatty()
     if args.interactive and args.as_json:
         raise _NativeCliRequirementError("INTERACTIVE_JSON_UNSUPPORTED")
@@ -269,6 +289,14 @@ def run_ai_command(args: argparse.Namespace) -> int:
             config_file=args.config,
             interactive=interactive,
         )
+        if getattr(args, "candidate", False):
+            from oh_goon.core.errors import FleetPlanInvalid
+            from oh_goon.services.fleet_plan_candidate import require_native_candidate_selection
+
+            try:
+                require_native_candidate_selection(selected)
+            except FleetPlanInvalid:
+                raise _NativeCliRequirementError("CANDIDATE_PROFILE_UNAVAILABLE") from None
         interactive = selected.interactive
         with _host_terminal() if interactive else nullcontext(None) as terminal:
             runtime = ApplicationRuntime.build(
@@ -285,12 +313,15 @@ def run_ai_command(args: argparse.Namespace) -> int:
                 task,
                 verification,
                 handoff_from=args.handoff_from,
+                candidate=getattr(args, "candidate", False),
             )
         if args.as_json:
             print(detail.model_dump_json(indent=2))
         else:
             print(f"Status: {detail.run.status.value}")
             print(f"Outcome: {detail.outcome.value}")
+            if getattr(args, "candidate", False):
+                _print_candidate_result(detail)
         return result
     except KeyboardInterrupt as interruption:
         if args.as_json:
@@ -358,6 +389,26 @@ def run_ai_command(args: argparse.Namespace) -> int:
         return 2
 
 
+def _print_candidate_result(detail: FleetRunDetail) -> None:
+    from oh_goon.core.models.operation import FleetPlanOperationEvidence
+    from oh_goon.core.models.target import FleetPlanTarget
+
+    target = detail.run.target
+    if isinstance(target, FleetPlanTarget) and target.candidate_workspace is not None:
+        print(f"Candidate workspace: {target.candidate_workspace.workspace.workspace_id}")
+    for operation in detail.operations:
+        if isinstance(operation.evidence, FleetPlanOperationEvidence):
+            receipt = operation.evidence.candidate_receipt
+            if receipt is not None:
+                print(f"Candidate settlement: {receipt.settlement}")
+                if receipt.checkpoint is not None:
+                    print(f"Recorded candidate checkpoint: {receipt.checkpoint.checkpoint_id}")
+    print(
+        "Inspect the owned candidate: "
+        + shlex.join(("oh-goon", "runs", "candidate", detail.run.fleet_run_id, "--json"))
+    )
+
+
 def _run_and_close(
     runtime: ApplicationRuntime,
     selected: ResolvedNativeAgent,
@@ -367,6 +418,7 @@ def _run_and_close(
     verification: tuple[tuple[str, ...], ...],
     *,
     handoff_from: str | None = None,
+    candidate: bool = False,
 ) -> tuple[int, FleetRunDetail]:
     from oh_goon.cli import _shutdown_after_completed_command, _shutdown_after_primary_failure
 
@@ -379,6 +431,7 @@ def _run_and_close(
             task,
             verification,
             handoff_from=handoff_from,
+            candidate=candidate,
         )
         if result not in (0, 130, 143):
             _print_failure_stderr(runtime, detail)
@@ -468,11 +521,20 @@ def _run_selected(
     verification: tuple[tuple[str, ...], ...],
     *,
     handoff_from: str | None = None,
+    candidate: bool = False,
 ) -> tuple[int, FleetRunDetail]:
     from oh_goon.cli_plan_run_readback import run_handoff_projection
     from oh_goon.services.fleet_plans import _native_prior_context
 
     admitted = None
+    candidate_options: _CandidateRunOptions = {}
+    if candidate:
+        from oh_goon.core.product_identity import new_fleet_run_id
+
+        proposed_id = new_fleet_run_id()
+        candidate_options = {"candidate": True, "fleet_run_id": proposed_id}
+        print(f"Proposed Fleet Run ID: {proposed_id}", file=sys.stderr)
+        _print_handoff_reference(proposed_id)
     try:
         prior_context = None
         if handoff_from is not None:
@@ -498,6 +560,7 @@ def _run_selected(
             task=task,
             verification=verification,
             prior_context=prior_context,
+            **candidate_options,
         )
         print(f"Fleet Run ID: {admitted.fleet_run_id}", file=sys.stderr)
         _print_handoff_reference(admitted.fleet_run_id)

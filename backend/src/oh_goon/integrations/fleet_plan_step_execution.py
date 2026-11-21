@@ -35,6 +35,7 @@ from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.models.execution_identity import ExecutionIdentity
+from oh_goon.core.models.execution_materialization import ExecutionMaterialization
 from oh_goon.core.models.fleet_observation import AgentHarnessObservation
 from oh_goon.core.models.fleet_plan import (
     PLAN_CONTRACT_RETURN_CODE,
@@ -220,6 +221,7 @@ class StepLifecycleObserver(Protocol):
         *,
         attempt_number: int | None = None,
         physical_execution_id: str | None = None,
+        workspace_materialization_id: str | None = None,
         pid: int | None = None,
         process_identity: str | None = None,
         returncode: int | None = None,
@@ -258,6 +260,9 @@ class StepRuntime:
     execution_identity: ExecutionIdentity | None = None
     workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None = None
     native_profile: ResolvedNativeAgent | None = None
+    workspace_materialization: ExecutionMaterialization | None = None
+    workspace_directory_fd: int | None = None
+    require_candidate_current: Callable[[], None] | None = None
     project_sources: Mapping[str, Path] = field(default_factory=dict)
     project_workspaces: Mapping[str, Path] = field(default_factory=dict)
     on_unsettled_run_process: Callable[[], None] | None = None
@@ -298,6 +303,9 @@ def execute_direct_step(
             runtime.workspace_pin,
             termination_requested=runtime.termination_requested,
             repair_context=runtime.repair_context,
+            workspace_materialization=runtime.workspace_materialization,
+            workspace_directory_fd=runtime.workspace_directory_fd,
+            require_candidate_current=runtime.require_candidate_current,
         )
         if runtime.native_profile is not None
         else _direct_step_command_runner

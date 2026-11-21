@@ -180,6 +180,7 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
         standard_process_isolation=foundation.standard_process_isolation,
         git_service=foundation.git_service,
         repositories=repositories,
+        workspace_database=foundation.database,
     )
     shared_plan_store = (
         SharedPlanFileStore(initialize=False)

@@ -162,7 +162,10 @@ if TYPE_CHECKING:
         AgentContinuationResult,
     )
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+    from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
+    from oh_goon.core.models.candidate_workspace import CandidateRunInspection
     from oh_goon.integrations.fleet_content_store import FleetContentStore
+    from oh_goon.runtime.database import LocalDatabase
     from oh_goon.services.repositories import RepositoryService
 
 
@@ -183,6 +186,7 @@ class FleetPlanService:
         standard_process_isolation: ProcessIsolationBackend | None = None,
         git_service: GitService | None = None,
         repositories: RepositoryService | None = None,
+        workspace_database: LocalDatabase | None = None,
     ) -> None:
         self._resolver = resolver
         self._runs = runs
@@ -195,6 +199,7 @@ class FleetPlanService:
         self._standard_process_isolation = standard_process_isolation
         self._git_service = git_service
         self._repositories = repositories
+        self._workspace_database = workspace_database
 
     def inspect_agent_continuation(
         self,
@@ -225,6 +230,44 @@ class FleetPlanService:
         """CLI ingress preflight without manufacturing a Plan or execution authority."""
         self.require_plan_ingress_preparation(fleet_run_id)
 
+    def inspect_candidate_run(self, fleet_run_id: str) -> CandidateRunInspection:
+        from oh_goon.services.fleet_plan_candidate import inspect_candidate_run
+
+        if self._workspace_database is None:
+            raise FleetPlanInvalid("Candidate inspection requires its original workspace owner")
+        return inspect_candidate_run(
+            fleet_run_id, database=self._workspace_database, detail=self._runs.get(fleet_run_id)
+        )
+
+    def retire_candidate_run(
+        self,
+        fleet_run_id: str,
+        *,
+        expected_state_version: int,
+        authorize: bool,
+        reconcile: bool = False,
+    ) -> CandidateRunInspection:
+        from oh_goon.services.fleet_plan_candidate import retire_candidate_run
+
+        if (
+            self._workspace_database is None
+            or authorize is not True
+            or type(expected_state_version) is not int
+            or expected_state_version < 1
+            or type(reconcile) is not bool
+        ):
+            raise FleetPlanInvalid(
+                "Candidate retirement requires explicit authorization and the observed version"
+            )
+        return retire_candidate_run(
+            fleet_run_id,
+            database=self._workspace_database,
+            detail=self._runs.get(fleet_run_id),
+            expected_state_version=expected_state_version,
+            reconcile=reconcile,
+            git=self._git_service,
+        )
+
     def run_native_agent(
         self,
         *,
@@ -240,6 +283,7 @@ class FleetPlanService:
         reviewed_repository_source: RepositorySourceAuthority | None = None,
         expected_repository_instance_ids: dict[str, str] | None = None,
         continuation_receipt: AgentContinuationReceipt | None = None,
+        candidate: bool = False,
     ) -> FleetRunState:
         """Author one ordinary native-workload Plan and admit it through Fleet.
 
@@ -247,6 +291,8 @@ class FleetPlanService:
         Its resolved target and exact frozen source remain with the existing
         content/Run owners; this convenience owns no process or workflow loop.
         """
+        if type(candidate) is not bool:
+            raise FleetPlanInvalid("Candidate selection requires an explicit boolean")
         if not self._standard_local_fleet or self._content_store is None:
             raise FleetPlanInvalid("Native Agent hosting requires ordinary Fleet execution")
         if (
@@ -279,114 +325,189 @@ class FleetPlanService:
             raise FleetPlanInvalid(
                 "Protected native coding requires the read-only proposal and separately admitted scoped apply workflow"
             )
-        selected = self._prepare_native_agent(
-            selected, workspace, read_only_workspace=role != "report" and not verification
-        )
         from oh_goon.core.product_identity import repository_id
 
-        with TemporaryDirectory(prefix="oh-goon-native-plan-") as temporary:
-            root = Path(temporary)
-            package = root / "catalog/agents/session"
-            package.mkdir(parents=True)
-            if skill is None:
-                selected_skill = root / "skills/oh-goon/native"
-                selected_skill.mkdir(parents=True)
-                (selected_skill / "SKILL.md").write_text(
-                    "# Native coding workload\n\nFollow the supplied task within the approved "
-                    "workspace. Report incomplete work and failures accurately. Native verification "
-                    "results remain separate from agent claims.\n",
+        logical_repository_id = repository_id(workspace)
+        candidate_admission: CandidateWorkspaceAdmission | None = None
+        capture_git = self._git_service
+        try:
+            if candidate:
+                from oh_goon.integrations.fleet_plan_process_isolation import (
+                    require_native_workspace_scope,
+                )
+                from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
+                from oh_goon.services.fleet_plan_candidate import (
+                    prepare_candidate_workspace,
+                    require_native_candidate_selection,
+                    workspace_control_git,
+                )
+
+                if (
+                    self._workspace_database is None
+                    or self._repositories is None
+                    or role != "report"
+                ):
+                    raise FleetPlanInvalid(
+                        "Candidate execution requires its registered workspace owner"
+                    )
+                require_native_candidate_selection(selected)
+                if expected_repository_instance_ids is not None and set(
+                    expected_repository_instance_ids
+                ) != {logical_repository_id}:
+                    raise FleetPlanInvalid(
+                        "Candidate execution requires one exact registered subject"
+                    )
+                selected = self._prepare_native_agent(selected, workspace, read_only_workspace=True)
+                fleet_run_id = fleet_run_id or new_fleet_run_id()
+                candidate_admission = prepare_candidate_workspace(
+                    database=self._workspace_database,
+                    repositories=self._repositories,
+                    fleet_run_id=fleet_run_id,
+                    repository_id=logical_repository_id,
+                    git=self._git_service,
+                    expected_source=reviewed_repository_source,
+                    expected_subject=(expected_repository_instance_ids or {}).get(
+                        logical_repository_id
+                    ),
+                    validate_candidate_path=lambda path: require_native_workspace_scope(
+                        path, selected
+                    ),
+                )
+                workspace = RepositoryWorkspaceAuthority(self._workspace_database).physical_path(
+                    candidate_admission.workspace
+                )
+                reviewed_repository_source = candidate_admission.source
+                expected_repository_instance_ids = {
+                    logical_repository_id: candidate_admission.source.subject_instance_id
+                }
+                capture_git = workspace_control_git(self._git_service)
+            else:
+                selected = self._prepare_native_agent(
+                    selected, workspace, read_only_workspace=role != "report" and not verification
+                )
+
+            with TemporaryDirectory(prefix="oh-goon-native-plan-") as temporary:
+                root = Path(temporary)
+                package = root / "catalog/agents/session"
+                package.mkdir(parents=True)
+                if skill is None:
+                    selected_skill = root / "skills/oh-goon/native"
+                    selected_skill.mkdir(parents=True)
+                    (selected_skill / "SKILL.md").write_text(
+                        "# Native coding workload\n\nFollow the supplied task within the approved "
+                        "workspace. Report incomplete work and failures accurately. Native verification "
+                        "results remain separate from agent claims.\n",
+                        encoding="utf-8",
+                    )
+                else:
+                    selected_skill = skill.resolve(strict=True)
+                    if selected_skill.is_file():
+                        if selected_skill.name != "SKILL.md":
+                            raise FleetPlanInvalid("Select the canonical SKILL.md or its directory")
+                        selected_skill = selected_skill.parent
+                recipients = list(selected.disclosure_recipients)
+                steps = [
+                    {
+                        "id": "native-agent",
+                        "uses": "agent",
+                        "harness": "native",
+                        "role": role,
+                        "task": task,
+                        "timeout_seconds": selected.profile.timeout_seconds,
+                        "requested_effects": {
+                            "repository_access": "write" if role == "report" else "read_only",
+                            "recipients": recipients,
+                        },
+                    },
+                    *(
+                        {"id": f"verify-{index}", "run": shlex.join(argv)}
+                        for index, argv in enumerate(verification, 1)
+                    ),
+                ]
+                payload = {
+                    "inputs": {
+                        "repo": {"type": "repository_reference"},
+                        "skill": {"type": "skill_reference"},
+                        "acceptance": {"type": "acceptance_profile"},
+                    },
+                    "steps": steps,
+                }
+                (package / "goon.yml").write_text(yaml.safe_dump(payload), encoding="utf-8")
+                (package / "README.md").write_text("# agents/session\n", encoding="utf-8")
+                plan_path = root / "plan.yml"
+                plan_path.write_text(
+                    yaml.safe_dump({"goons": [{"import": "agents/session", "from": "catalog"}]}),
                     encoding="utf-8",
                 )
-            else:
-                selected_skill = skill.resolve(strict=True)
-                if selected_skill.is_file():
-                    if selected_skill.name != "SKILL.md":
-                        raise FleetPlanInvalid("Select the canonical SKILL.md or its directory")
-                    selected_skill = selected_skill.parent
-            recipients = list(selected.disclosure_recipients)
-            steps = [
-                {
-                    "id": "native-agent",
-                    "uses": "agent",
-                    "harness": "native",
-                    "role": role,
-                    "task": task,
-                    "timeout_seconds": selected.profile.timeout_seconds,
-                    "requested_effects": {
-                        "repository_access": "write" if role == "report" else "read_only",
-                        "recipients": recipients,
+                plan, deliveries, source_sha = self._resolver.resolve_frozen_agents(
+                    plan_path,
+                    inputs={
+                        "repo": f"local:{workspace.parent.name}/{workspace.name}",
+                        "skill": f"local:{selected_skill.parent.name}/{selected_skill.name}",
+                        "acceptance": "native-coding",
                     },
-                },
-                *(
-                    {"id": f"verify-{index}", "run": shlex.join(argv)}
-                    for index, argv in enumerate(verification, 1)
-                ),
-            ]
-            payload = {
-                "inputs": {
-                    "repo": {"type": "repository_reference"},
-                    "skill": {"type": "skill_reference"},
-                    "acceptance": {"type": "acceptance_profile"},
-                },
-                "steps": steps,
-            }
-            (package / "goon.yml").write_text(yaml.safe_dump(payload), encoding="utf-8")
-            (package / "README.md").write_text("# agents/session\n", encoding="utf-8")
-            plan_path = root / "plan.yml"
-            plan_path.write_text(
-                yaml.safe_dump({"goons": [{"import": "agents/session", "from": "catalog"}]}),
-                encoding="utf-8",
-            )
-            plan, deliveries, source_sha = self._resolver.resolve_frozen_agents(
-                plan_path,
-                inputs={
-                    "repo": f"local:{workspace.parent.name}/{workspace.name}",
-                    "skill": f"local:{selected_skill.parent.name}/{selected_skill.name}",
-                    "acceptance": "native-coding",
-                },
-                repository_root=workspace.parent.parent,
-                skill_root=selected_skill.parent.parent,
-                allowed_acceptance=("native-coding",),
-                native_agent=selected,
-                repository=workspace,
-                git_service=self._git_service,
-            )
-            if context is not None:
-                plan = ResolvedFleetPlan.create(
-                    name=plan.name,
-                    description=plan.description,
-                    execution=plan.execution,
-                    steps=tuple(
-                        step.model_copy(update={"review_context": context})
-                        if isinstance(step, ResolvedAgentStep)
-                        else step
-                        for step in plan.steps
-                    ),
-                    requirements=plan.requirements,
-                    imports=plan.imports,
-                    step_sources=plan.step_sources,
-                    skill_sources=plan.skill_sources,
-                    configuration=plan.configuration,
-                    native_agent=plan.native_agent,
+                    repository_root=workspace.parent.parent,
+                    skill_root=selected_skill.parent.parent,
+                    allowed_acceptance=("native-coding",),
+                    native_agent=selected,
+                    repository=workspace,
+                    git_service=capture_git,
                 )
-            write_execution_lock(root / LOCK_FILE_NAME, build_execution_lock(plan))
-            target = self._agent_target(
-                plan,
-                deliveries,
-                source_sha,
-                repository_id(workspace),
-                reviewed_repository_source=reviewed_repository_source,
-                continuation_receipt=continuation_receipt,
-            )
-            return self._runs.start_prepared_plan(
-                target,
-                repository_ids={repository_id(workspace)},
-                all_repositories=False,
-                fleet_run_id=fleet_run_id,
-                source=FleetRunSource.MANUAL,
-                created_agent_deliveries=target.agent_deliveries,
-                expected_repository_instance_ids=expected_repository_instance_ids,
-            )
+                if context is not None:
+                    plan = ResolvedFleetPlan.create(
+                        name=plan.name,
+                        description=plan.description,
+                        execution=plan.execution,
+                        steps=tuple(
+                            step.model_copy(update={"review_context": context})
+                            if isinstance(step, ResolvedAgentStep)
+                            else step
+                            for step in plan.steps
+                        ),
+                        requirements=plan.requirements,
+                        imports=plan.imports,
+                        step_sources=plan.step_sources,
+                        skill_sources=plan.skill_sources,
+                        configuration=plan.configuration,
+                        native_agent=plan.native_agent,
+                    )
+                write_execution_lock(root / LOCK_FILE_NAME, build_execution_lock(plan))
+                target = self._agent_target(
+                    plan,
+                    deliveries,
+                    source_sha,
+                    logical_repository_id,
+                    reviewed_repository_source=reviewed_repository_source,
+                    continuation_receipt=continuation_receipt,
+                    candidate_workspace=candidate_admission,
+                )
+                return self._runs.start_prepared_plan(
+                    target,
+                    repository_ids={logical_repository_id},
+                    all_repositories=False,
+                    fleet_run_id=fleet_run_id,
+                    source=FleetRunSource.MANUAL,
+                    created_agent_deliveries=target.agent_deliveries,
+                    expected_repository_instance_ids=expected_repository_instance_ids,
+                )
+
+        except BaseException as error:
+            if candidate_admission is not None:
+                from oh_goon.services.fleet_plan_candidate import release_unadmitted_candidate
+
+                assert self._workspace_database is not None and fleet_run_id is not None
+                try:
+                    release_unadmitted_candidate(
+                        candidate_admission,
+                        database=self._workspace_database,
+                        fleet_run_id=fleet_run_id,
+                    )
+                except Exception as cleanup_error:
+                    error.add_note(
+                        f"Unadmitted candidate cleanup is unverified; preserve workspace "
+                        f"{candidate_admission.workspace.workspace_id}: {cleanup_error}"
+                    )
+            raise
 
     def _prepare_native_agent(
         self,
@@ -1216,6 +1337,7 @@ class FleetPlanService:
         source: SharedPlanSource | None = None,
         reviewed_repository_source: RepositorySourceAuthority | None = None,
         continuation_receipt: AgentContinuationReceipt | None = None,
+        candidate_workspace: CandidateWorkspaceAdmission | None = None,
     ) -> FleetPlanTarget:
         if self._content_store is None:
             raise FleetPlanInvalid("frozen Agent delivery requires an available content store")
@@ -1258,6 +1380,7 @@ class FleetPlanService:
                 caller_input_file=caller_input_file,
                 reviewed_repository_source=reviewed_repository_source,
                 agent_continuation=continuation_receipt,
+                candidate_workspace=candidate_workspace,
             )
         except Exception as error:
             for reference in references:

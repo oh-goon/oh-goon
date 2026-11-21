@@ -13,7 +13,7 @@ import pytest
 
 from oh_goon import _application_worker_runtime as worker
 from oh_goon._application_foundation import RuntimeFoundation, build_runtime_foundation
-from oh_goon.core.errors import FleetPlanInvalid, OwnershipLost
+from oh_goon.core.errors import FleetPlanInvalid, OwnershipLost, StateConflict
 from oh_goon.core.models.agent_providers import (
     NativeAgentDefinition,
     NativeAgentProfile,
@@ -135,6 +135,58 @@ def _native_git(
             observation_runner=partial(runner, read_only_workspace=True) if sandboxed else None,
         ),
     )
+
+
+@pytest.mark.parametrize("native", (False, True))
+def test_worker_git_preserves_metadata_filter_guard_after_real_roundtrip(
+    tmp_path: Path, native: bool
+) -> None:
+    repository, _selected, isolation, configured = _native_git(tmp_path, sandboxed=False)
+    plain = GitService()
+    (repository / "data.txt").write_text("initial\n")
+    (repository / ".gitattributes").write_text("*.txt filter=host-code\n")
+    assert plain.run("add", "data.txt", ".gitattributes", cwd=repository).returncode == 0
+    effect = tmp_path / "filter-started"
+    program = tmp_path / "clean-filter"
+    program.write_text(f"#!/bin/sh\nprintf started > '{effect}'\ncat\n")
+    program.chmod(0o700)
+    assert (
+        plain.run("config", "filter.host-code.clean", str(program), cwd=repository).returncode == 0
+    )
+    (repository / "data.txt").write_text("changed\n")
+    git = replace(configured if native else plain, metadata_only=True)
+    captured = worker.WorkerGitConfiguration.capture(git, isolation=isolation)
+    restored = worker.WorkerGitConfiguration.model_validate_json(
+        captured.model_dump_json()
+    ).restore(isolation=isolation)
+    assert restored.metadata_only is True
+    with pytest.raises(StateConflict, match="clean/process filters"):
+        restored.observe(repository)
+    assert not effect.exists()
+    # Establish that the same native repository would execute the helper if
+    # transport silently lost the caller's metadata-only restriction.
+    assert plain.run("status", "--porcelain", cwd=repository).returncode == 0
+    assert effect.read_text() == "started"
+
+
+@pytest.mark.parametrize("sandboxed", (False, True))
+def test_worker_git_roundtrip_preserves_metadata_flag_on_scoped_profiles(tmp_path, sandboxed):
+    _repository, _selected, isolation, git = _native_git(tmp_path, sandboxed=sandboxed)
+    git = replace(git, metadata_only=True)
+    captured = worker.WorkerGitConfiguration.capture(git, isolation=isolation)
+    restored = worker.WorkerGitConfiguration.model_validate_json(
+        captured.model_dump_json()
+    ).restore(isolation=isolation)
+    assert restored.metadata_only is True
+    assert restored.executable == git.executable
+    assert restored.default_timeout_seconds == git.default_timeout_seconds
+
+
+def test_worker_git_metadata_flag_rejects_coerced_payload():
+    with pytest.raises(ValueError):
+        worker.WorkerGitConfiguration.model_validate(
+            {"executable": "git", "default_timeout_seconds": 13, "metadata_only": "true"}
+        )
 
 
 @pytest.mark.parametrize("sandboxed", (False, True))

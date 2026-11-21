@@ -156,7 +156,9 @@ def test_read_snapshot_postcommit_verification_failure_preserves_ready_bytes(
     source = tmp_path / "source"
     source.mkdir()
 
-    def snapshot(_source, destination, *, label):
+    def snapshot(
+        _source, destination, *, label, source_path_validator=None, max_bytes=None, max_entries=None
+    ):
         destination.mkdir()
         (destination / "file.txt").write_text("committed data", encoding="utf-8")
         return SnapshotIdentity(sha256="a" * 64, byte_count=14, entry_count=1)
@@ -277,7 +279,9 @@ def test_precommit_published_snapshot_reconciles_using_original_owner(
     source = tmp_path / "source"
     source.mkdir()
 
-    def snapshot(_source, destination, *, label):
+    def snapshot(
+        _source, destination, *, label, source_path_validator=None, max_bytes=None, max_entries=None
+    ):
         destination.mkdir()
         (destination / "file.txt").write_text("exact", encoding="utf-8")
         return SnapshotIdentity(sha256="b" * 64, byte_count=5, entry_count=1)
@@ -322,7 +326,9 @@ def test_reconcile_read_publication_tamper_is_fail_closed(
     source = tmp_path / "source"
     source.mkdir()
 
-    def snapshot(_source, destination, *, label):
+    def snapshot(
+        _source, destination, *, label, source_path_validator=None, max_bytes=None, max_entries=None
+    ):
         destination.mkdir()
         (destination / "file.txt").write_text("actual")
         return SnapshotIdentity(sha256="c" * 64, byte_count=6, entry_count=1)

@@ -84,6 +84,12 @@ def observe_command_processes(observer: CommandProcessObserver) -> Generator[Non
         _command_process_observer.reset(token)
 
 
+def current_command_process_observer() -> CommandProcessObserver | None:
+    """Expose the original observer for a backend's effect-specific composition."""
+
+    return _command_process_observer.get()
+
+
 def native_child_custody_supported() -> bool:
     """Probe the unprivileged native handles required by this command owner."""
     if (
@@ -201,6 +207,7 @@ class CommandProcessLifecycleEvent:
     process_identity: str | None = None
     returncode: int | None = None
     termination_reason: str | None = None
+    workspace_materialization_id: str | None = None
 
 
 class CommandTimeoutExpired(subprocess.TimeoutExpired):

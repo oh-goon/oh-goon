@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
+from contextlib import ExitStack
 from dataclasses import replace
 from itertools import islice
 from pathlib import Path, PurePosixPath
@@ -23,6 +24,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanIsolationBackendEvidence,
     PlanResourceEvidence,
     PlanStandardIsolationEvidence,
+    PlanWorkspaceWriterScopeEvidence,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_isolation import (
@@ -39,9 +41,11 @@ from oh_goon.engine.command import (
     CommandCancelledError,
     CommandOutputLimitExceeded,
     CommandOutputObserver,
+    CommandProcessLifecycleEvent,
     CommandProcessObserver,
     CommandResult,
     CommandTimeoutExpired,
+    current_command_process_observer,
     run_command,
 )
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
@@ -73,6 +77,7 @@ from oh_goon.integrations.fleet_plan_bind_source_custody import (
     OriginalBindSourceLease,
     require_bubblewrap_fd_binding,
 )
+from oh_goon.integrations.fleet_plan_bubblewrap_lifetime import BubblewrapWriterNamespace
 from oh_goon.integrations.fleet_plan_local_lace_allocation import observe_local_allocation
 from oh_goon.integrations.fleet_plan_local_lace_intent import (
     local_resource_identities,
@@ -303,15 +308,7 @@ class BubblewrapProcessIsolation:
     def require_standard_available(self, request: StandardIsolatedProcessRequest) -> None:
         """Prove the requested ordinary namespace capability before workload effects."""
         private_file_identities, _resource_scope = self._validate_standard_request(request)
-        if not self._standard_system_checked:
-            system_runtime_roots = _standard_system_roots()
-            for path in system_runtime_roots:
-                _require_standard_bind_structure(
-                    path,
-                    system_runtime_roots=system_runtime_roots,
-                    private_file_identities=private_file_identities,
-                )
-            self._standard_system_checked = True
+        self._require_standard_system_bindings(private_file_identities)
         configuration = stable_id(
             "standard-bubblewrap-capability",
             {
@@ -379,6 +376,19 @@ class BubblewrapProcessIsolation:
             self._standard_available_configurations.move_to_end(configuration)
             if len(self._standard_available_configurations) > _STANDARD_CAPABILITY_CACHE_LIMIT:
                 self._standard_available_configurations.popitem(last=False)
+
+    def _require_standard_system_bindings(
+        self, private_file_identities: frozenset[tuple[int, int]]
+    ) -> None:
+        if not self._standard_system_checked:
+            system_runtime_roots = _standard_system_roots()
+            for path in system_runtime_roots:
+                _require_standard_bind_structure(
+                    path,
+                    system_runtime_roots=system_runtime_roots,
+                    private_file_identities=private_file_identities,
+                )
+            self._standard_system_checked = True
 
     def _validate_standard_request(
         self, request: StandardIsolatedProcessRequest
@@ -570,8 +580,13 @@ class BubblewrapProcessIsolation:
             from oh_goon.engine.errors import OperationCancelledError
 
             raise OperationCancelledError("Standard sandbox cancelled before preparation")
-        if not _preflight:
+        if not _preflight and request.workspace_materialization is None:
             self.require_standard_available(request)
+        elif not _preflight:
+            # The actual gated namespace proves setup before workload release.
+            # A second writable /bin/true launch would carry unaccounted authority.
+            private_file_identities, _resource_scope = self._validate_standard_request(request)
+            self._require_standard_system_bindings(private_file_identities)
         # The private preflight caller has already validated the same request.
         # Both probe and workload still revalidate immediately before native launch.
         from oh_goon.integrations.fleet_plan_run import _write_minimal_etc
@@ -589,12 +604,14 @@ class BubblewrapProcessIsolation:
         result: CommandResult | None = None
         directory: str | None = None
         cleanup_error: OSError | None = None
+        writer_scope: PlanWorkspaceWriterScopeEvidence | None = None
         try:
             with (
                 tempfile.TemporaryDirectory(
                     prefix="oh-goon-isolated-", dir=temporary_base
                 ) as directory,
                 tempfile.TemporaryFile() as status,
+                ExitStack() as namespace_owner,
             ):
                 paths = AttemptPathLayout.from_root(Path(directory))
                 if request.protected_execution:
@@ -619,6 +636,20 @@ class BubblewrapProcessIsolation:
                     egress_mode="host_unrestricted" if request.host_network else "none",
                 )
                 args.insert(1, "--unshare-user")
+                writer_namespace = None
+                if request.workspace_materialization is not None and not _preflight:
+                    if request.workspace_directory_fd is None:
+                        raise FleetPlanInvalid("Candidate workspace directory handle is missing")
+                    writer_namespace = namespace_owner.enter_context(
+                        BubblewrapWriterNamespace(
+                            materialization=request.workspace_materialization,
+                            backend_configuration_id=request.backend_configuration_id,
+                            require_workspace_current=request.require_workspace_current,
+                            workspace_directory_fd=request.workspace_directory_fd,
+                            startup_timeout=min(5.0, timeout) if timeout is not None else 5.0,
+                        )
+                    )
+                    args.extend(writer_namespace.arguments)
                 if not _preflight:
                     args.extend(("--json-status-fd", str(status.fileno())))
                 if request.terminal is not None:
@@ -630,7 +661,17 @@ class BubblewrapProcessIsolation:
                 for name in ("passwd", "group", "nsswitch.conf", "hosts"):
                     args.extend(("--ro-bind", str(paths.etc / name), "/etc/" + name))
                 workspace_mode = "--ro-bind" if request.read_only_workspace else "--bind"
-                args.extend((workspace_mode, str(request.workspace), "/workspace"))
+                if writer_namespace is not None:
+                    workspace_mode += "-fd"
+                args.extend(
+                    (
+                        workspace_mode,
+                        str(writer_namespace.workspace_fd)
+                        if writer_namespace is not None
+                        else str(request.workspace),
+                        "/workspace",
+                    )
+                )
                 for source, target in (
                     (paths.home, "/home/fleet"),
                     (paths.tmp, "/tmp"),
@@ -639,7 +680,15 @@ class BubblewrapProcessIsolation:
                 ):
                     args.extend(("--bind", str(source), target))
                 if str(request.workspace) != "/workspace":
-                    args.extend((workspace_mode, str(request.workspace), str(request.workspace)))
+                    args.extend(
+                        (
+                            workspace_mode,
+                            str(writer_namespace.workspace_alias_fd)
+                            if writer_namespace is not None
+                            else str(request.workspace),
+                            str(request.workspace),
+                        )
+                    )
                 for root in request.allowed_write_roots:
                     relative = root.relative_to(request.workspace)
                     for island_target in dict.fromkeys(
@@ -672,6 +721,21 @@ class BubblewrapProcessIsolation:
                     )
                 if request.broker_directory is not None:
                     args.extend(("--ro-bind", str(request.broker_directory), "/run/oh-goon-broker"))
+                if writer_namespace is not None and (request.workspace / ".git").exists():
+                    # Linked worktree administration remains exclusively with
+                    # the trusted lifecycle Git owner. Keep this mask outside
+                    # every writable scratch alias and apply it after all other
+                    # mounts, including runtime ancestors of the physical alias.
+                    hidden_git = Path(directory) / "hidden-git-metadata"
+                    hidden_git.write_bytes(b"")
+                    hidden_git.chmod(0o400)
+                    for metadata_target in dict.fromkeys(
+                        (
+                            PurePosixPath("/workspace/.git"),
+                            PurePosixPath(request.workspace / ".git"),
+                        )
+                    ):
+                        args.extend(("--ro-bind", str(hidden_git), str(metadata_target)))
                 canonical_sources = (
                     *_standard_system_roots(),
                     *(
@@ -744,6 +808,27 @@ class BubblewrapProcessIsolation:
                     )
                 )
                 _private_file_identities, resource_scope = self._validate_standard_request(request)
+                native_observer = process_observer
+                if writer_namespace is not None:
+                    original_observer = process_observer or current_command_process_observer()
+
+                    def observe_candidate_process(event: CommandProcessLifecycleEvent) -> None:
+                        if event.kind == "PROCESS_STARTING" and (
+                            not request.read_only_workspace or request.allowed_write_roots
+                        ):
+                            assert request.workspace_materialization is not None
+                            event = replace(
+                                event,
+                                workspace_materialization_id=(
+                                    request.workspace_materialization.materialization_id
+                                ),
+                            )
+                        if original_observer is not None:
+                            original_observer(event)
+                        assert writer_namespace is not None
+                        writer_namespace.observe(event)
+
+                    native_observer = observe_candidate_process
                 try:
                     result = run_command(
                         *resource_scope,
@@ -754,12 +839,15 @@ class BubblewrapProcessIsolation:
                         cancel_requested=cancel_requested,
                         termination_requested=request.termination_requested,
                         stream_output=stream_output,
-                        process_observer=process_observer,
+                        process_observer=native_observer,
                         runtime_supervision=runtime_supervision,
                         terminal=request.terminal,
                         input_data=request.input_data,
                         input_source=request.input_source,
-                        pass_fds=(status.fileno(),),
+                        pass_fds=(
+                            status.fileno(),
+                            *(writer_namespace.pass_fds if writer_namespace is not None else ()),
+                        ),
                         max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
                         retain_output_tail=request.retain_output_tail,
                         preserve_stdout_whitespace=request.preserve_stdout_whitespace,
@@ -775,13 +863,29 @@ class BubblewrapProcessIsolation:
                     acknowledged = _standard_workload_exec_completed(
                         status.read(4097), result.returncode if result is not None else None
                     )
+                if writer_namespace is not None:
+                    writer_scope = writer_namespace.evidence(
+                        result.physical_execution_id
+                        if result is not None
+                        else getattr(pending_error, "physical_execution_id", None)
+                        or writer_namespace.physical_execution_id
+                        if pending_error is not None
+                        else None
+                    )
         except OSError as exc:
             if pending_error is None:
-                if result is not None and acknowledged and not _preflight:
+                if (
+                    result is not None
+                    and not _preflight
+                    and (acknowledged or writer_scope is not None and result.returncode != 0)
+                ):
                     return replace(
                         result,
                         standard_isolation=_standard_isolation_evidence(
-                            request, filesystem_cleanup="unverified"
+                            request,
+                            filesystem_cleanup="unverified",
+                            writer_scope=writer_scope,
+                            preflight="verified" if acknowledged else "not_recorded",
                         ),
                         stderr=(
                             result.stderr + "\nStandard sandbox filesystem cleanup is unverified"
@@ -800,20 +904,30 @@ class BubblewrapProcessIsolation:
             cleanup_error is None and directory is not None and not Path(directory).exists()
         )
         if pending_error is not None:
-            if acknowledged:
+            if acknowledged or writer_scope is not None:
                 pending_error.__dict__["standard_isolation"] = _standard_isolation_evidence(
-                    request, filesystem_cleanup="verified" if cleanup_verified else "unverified"
+                    request,
+                    filesystem_cleanup="verified" if cleanup_verified else "unverified",
+                    writer_scope=writer_scope,
+                    preflight="verified" if acknowledged else "not_recorded",
                 )
             if cleanup_error is not None:
                 pending_error.add_note("Standard sandbox filesystem cleanup is unverified")
                 raise pending_error from cleanup_error
             raise pending_error
         if not cleanup_verified:
-            if result is not None and acknowledged and not _preflight:
+            if (
+                result is not None
+                and not _preflight
+                and (acknowledged or writer_scope is not None and result.returncode != 0)
+            ):
                 return replace(
                     result,
                     standard_isolation=_standard_isolation_evidence(
-                        request, filesystem_cleanup="unverified"
+                        request,
+                        filesystem_cleanup="unverified",
+                        writer_scope=writer_scope,
+                        preflight="verified" if acknowledged else "not_recorded",
                     ),
                     stderr=(
                         result.stderr + "\nStandard sandbox filesystem cleanup is unverified"
@@ -833,8 +947,18 @@ class BubblewrapProcessIsolation:
                 raise FleetPlanInvalid(
                     "Standard sandbox completed without native workload-exec evidence"
                 )
+            if writer_scope is not None:
+                return replace(
+                    result,
+                    standard_isolation=_standard_isolation_evidence(
+                        request, writer_scope=writer_scope, preflight="not_recorded"
+                    ),
+                )
             return result
-        return replace(result, standard_isolation=_standard_isolation_evidence(request))
+        return replace(
+            result,
+            standard_isolation=_standard_isolation_evidence(request, writer_scope=writer_scope),
+        )
 
     def configuration_identity(self) -> str:
         return stable_id(
@@ -1426,6 +1550,8 @@ def _standard_isolation_evidence(
     request: StandardIsolatedProcessRequest,
     *,
     filesystem_cleanup: Literal["verified", "unverified"] = "verified",
+    writer_scope: PlanWorkspaceWriterScopeEvidence | None = None,
+    preflight: Literal["verified", "not_recorded"] = "verified",
 ) -> PlanStandardIsolationEvidence:
     policy = request.resources
     limited = any(value is not None for value in policy.model_dump().values())
@@ -1445,7 +1571,7 @@ def _standard_isolation_evidence(
         protected_paths=tuple(path.as_posix() for path in sorted(LIVE_CHECKOUT_PROTECTED_PATHS))
         if request.read_only_workspace
         else (),
-        preflight="verified",
+        preflight=preflight,
         filesystem_cleanup=filesystem_cleanup,
         broker_socket_mounted=request.broker_directory is not None,
         private_configuration_overlay=request.private_configuration_directory is not None,
@@ -1457,6 +1583,7 @@ def _standard_isolation_evidence(
         if limited
         else None,
         resource_owner="systemd_user_scope" if limited else "none",
+        workspace_writer_scope=writer_scope,
     )
 
 

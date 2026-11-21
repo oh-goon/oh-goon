@@ -28,6 +28,8 @@ class CapabilityExecutionRequest:
     repository_admission: PlanRepositoryAdmissionEvidence | None = None
     local_lace_intent_for: Callable[..., LocalLaceIntentReservation] | None = None
     admitted_run: FleetRunDetail | None = None
+    require_execution_current: Callable[[], None] | None = None
+    require_settlement_current: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         if self.attempt.capability != self.definition.durable_snapshot():

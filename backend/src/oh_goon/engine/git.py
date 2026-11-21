@@ -13,7 +13,12 @@ from oh_goon.core.errors import StateConflict
 from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import GitBranchState, WorktreeState
-from oh_goon.engine.command import CommandCancelledError, CommandResult, run_command
+from oh_goon.engine.command import (
+    CommandCancelledError,
+    CommandOutputLimitExceeded,
+    CommandResult,
+    run_command,
+)
 from oh_goon.engine.errors import OperationCancelledError
 
 Cancel = Callable[[], bool] | None
@@ -64,6 +69,7 @@ class GitService:
     default_timeout_seconds: float = 30.0
     command_runner: Callable[..., CommandResult] | None = None
     observation_runner: Callable[..., CommandResult] | None = None
+    metadata_only: bool = False
 
     def run(
         self,
@@ -73,9 +79,20 @@ class GitService:
         cancel_requested: Cancel = None,
         env: Mapping[str, str] | None = None,
         command_runner: Callable[..., CommandResult] | None = None,
+        max_capture_bytes_per_stream: int | None = None,
     ) -> CommandResult:
+        if self.metadata_only and args and args[0] != "config":
+            self.require_metadata_safety(cwd, env=env)
         try:
-            return (command_runner or self.command_runner or run_command)(
+            runner: Callable[..., CommandResult] = (
+                command_runner or self.command_runner or run_command
+            )
+            capture_options = (
+                {"max_capture_bytes_per_stream": max_capture_bytes_per_stream}
+                if max_capture_bytes_per_stream is not None
+                else {}
+            )
+            return runner(
                 self.executable,
                 *args,
                 cwd=cwd,
@@ -86,9 +103,36 @@ class GitService:
                 ),
                 cancel_requested=cancel_requested,
                 env=env,
+                **capture_options,
             )
         except CommandCancelledError as exc:
             raise OperationCancelledError(str(exc)) from exc
+
+    def require_metadata_safety(
+        self, repository: Path | None, *, env: Mapping[str, str] | None = None
+    ) -> None:
+        """Refuse source-code filters before a trusted lifecycle metadata command.
+
+        Git itself resolves configuration and reports only matching key names.
+        Disabling filters would change native cleanliness semantics, so these
+        repositories remain unsupported by the metadata-only lifecycle.
+        """
+        result = self.run(
+            "config",
+            "--null",
+            "--name-only",
+            "--get-regexp",
+            r"^filter\..*\.(clean|process)$",
+            ".",
+            cwd=repository,
+            env=env,
+        )
+        if result.returncode == 1 and not result.stdout and not result.stdout_truncated:
+            return
+        raise StateConflict(
+            "Workspace metadata cannot execute repository clean/process filters; "
+            "native clean-source evidence is unavailable"
+        )
 
     def observe(
         self,
@@ -99,6 +143,33 @@ class GitService:
     ) -> GitObservation:
         return _observe(self, repository, cancel_requested, env=env)
 
+    def require_no_ignored_files(
+        self, repository: Path, *, env: Mapping[str, str] | None = None
+    ) -> None:
+        """Let native Git prove that removal would discard no ignored files.
+
+        Source identity deliberately excludes some runtime output. Neither a
+        clean status nor a source checkpoint makes those bytes disposable.
+        """
+        try:
+            result = self.run(
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "-z",
+                cwd=repository,
+                env=env,
+                command_runner=self.observation_runner,
+                max_capture_bytes_per_stream=8192,
+            )
+        except CommandOutputLimitExceeded as error:
+            raise StateConflict("Native Git ignored-output inventory is incomplete") from error
+        if result.returncode != 0 or result.stdout_truncated or result.stderr:
+            raise StateConflict("Native Git ignored-output inventory is incomplete")
+        if result.stdout:
+            raise StateConflict("Candidate contains ignored output; preserve it for review")
+
     def fingerprint(
         self,
         repository: Path,
@@ -106,12 +177,19 @@ class GitService:
     ) -> RepositoryStateFingerprint:
         return self.observe(repository, cancel_requested).fingerprint
 
-    def root(self, repository: Path, cancel_requested: Cancel = None) -> Path | None:
+    def root(
+        self,
+        repository: Path,
+        cancel_requested: Cancel = None,
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> Path | None:
         result = self.run(
             "rev-parse",
             "--show-toplevel",
             cwd=repository,
             cancel_requested=cancel_requested,
+            env=env,
             command_runner=self.observation_runner,
         )
         return Path(result.stdout).resolve() if result.returncode == 0 and result.stdout else None

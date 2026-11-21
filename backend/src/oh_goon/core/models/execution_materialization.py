@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import AwareDatetime, Field, model_validator
 
 from oh_goon.core.models.base import ImmutableModel
@@ -26,11 +28,22 @@ class ExecutionMaterialization(ImmutableModel):
     producer_contract_version: str | None = Field(default=None, min_length=1)
     producer_contract_identity: str | None = Field(default=None, min_length=1)
     producer_work_identity: str | None = Field(default=None, min_length=1)
+    writer_scope_kind: Literal["native_namespace_scope"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    workspace_device: int | None = Field(default=None, ge=0, exclude_if=lambda value: value is None)
+    workspace_inode: int | None = Field(default=None, ge=1, exclude_if=lambda value: value is None)
+    workspace_mode: int | None = Field(default=None, ge=1, exclude_if=lambda value: value is None)
     resolved_fingerprint: str = Field(min_length=1)
     created_at: AwareDatetime
 
     @model_validator(mode="after")
     def _producer_and_fingerprint(self) -> "ExecutionMaterialization":
+        physical = (self.workspace_device, self.workspace_inode, self.workspace_mode)
+        if (self.writer_scope_kind is None and any(value is not None for value in physical)) or (
+            self.writer_scope_kind is not None and any(value is None for value in physical)
+        ):
+            raise ValueError("Native writer scope requires its exact physical workspace binding")
         producer_fields = (
             self.producer_artifact_identity,
             self.producer_contract_version,
@@ -64,5 +77,15 @@ def execution_materialization_fingerprint(value: ExecutionMaterialization) -> st
             "producer_contract_version": value.producer_contract_version,
             "producer_contract_identity": value.producer_contract_identity,
             "producer_work_identity": value.producer_work_identity,
+            **(
+                {
+                    "writer_scope_kind": value.writer_scope_kind,
+                    "workspace_device": value.workspace_device,
+                    "workspace_inode": value.workspace_inode,
+                    "workspace_mode": value.workspace_mode,
+                }
+                if value.writer_scope_kind is not None
+                else {}
+            ),
         },
     )

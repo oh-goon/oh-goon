@@ -18,7 +18,7 @@ from oh_goon.core.time import utc_now
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution_assignments import ExecutionAssignmentAuthority
 from oh_goon.runtime.execution_materializations import ExecutionMaterializationAuthority
-from oh_goon.runtime.workspace_leases import WorkspaceLeaseStore
+from oh_goon.runtime.workspace_leases import NativeWorkspaceQuiescence, WorkspaceLeaseStore
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
 
@@ -59,6 +59,7 @@ class ExecutionEvidenceAcceptanceAuthority:
         evidence_artifact_ids: tuple[str, ...] = (),
         producer_work_identity: str | None = None,
         quiescence: WriterQuiescenceEvidence | None = None,
+        native_quiescence: NativeWorkspaceQuiescence | None = None,
     ) -> AcceptedExecutionEvidence:
         self._validate_request(output_checkpoint_id, result_identity, evidence_artifact_ids)
         self._validate_live_authority(
@@ -69,6 +70,7 @@ class ExecutionEvidenceAcceptanceAuthority:
             output_checkpoint_id=output_checkpoint_id,
             producer_work_identity=producer_work_identity,
             quiescence=quiescence,
+            native_quiescence=native_quiescence,
         )
         with self._database.transaction(write=True) as connection:
             rows = self._load_durable_rows(
@@ -85,6 +87,7 @@ class ExecutionEvidenceAcceptanceAuthority:
                 materialization,
                 output_checkpoint_id=output_checkpoint_id,
                 producer_work_identity=producer_work_identity,
+                native_quiescence=native_quiescence,
             )
             value = self._new_acceptance(
                 workspace,
@@ -121,6 +124,7 @@ class ExecutionEvidenceAcceptanceAuthority:
         output_checkpoint_id: str,
         producer_work_identity: str | None,
         quiescence: WriterQuiescenceEvidence | None,
+        native_quiescence: NativeWorkspaceQuiescence | None,
     ) -> None:
         if self._assignments.assignment(assignment.assignment_id) != assignment:
             raise ExecutionEvidenceRejected("Assignment differs from durable authority")
@@ -129,7 +133,9 @@ class ExecutionEvidenceAcceptanceAuthority:
             != materialization
         ):
             raise ExecutionEvidenceRejected("Materialization differs from durable authority")
-        self._leases.require_writer_quiescence(lease, quiescence)
+        self._leases.require_writer_quiescence(
+            lease, quiescence, native_quiescence=native_quiescence
+        )
         current_output = self._workspaces.current_candidate_checkpoint(workspace, reprove=True)
         if current_output.checkpoint_id != output_checkpoint_id:
             raise ExecutionEvidenceRejected("Output checkpoint is no longer the current candidate")
@@ -274,6 +280,7 @@ class ExecutionEvidenceAcceptanceAuthority:
         *,
         output_checkpoint_id: str,
         producer_work_identity: str | None,
+        native_quiescence: NativeWorkspaceQuiescence | None,
     ) -> datetime:
         state, lease_row, assignment_row, materialization_row, output_row = rows
         self._validate_durable_workspace_and_lease(
@@ -297,6 +304,7 @@ class ExecutionEvidenceAcceptanceAuthority:
         self._validate_durable_producer(
             materialization_row, materialization, producer_work_identity
         )
+        self._leases.require_native_writer_quiescence_in(connection, lease, native_quiescence)
         # Sample only after all durable authority reads/lineage checks, immediately
         # before original-owner acceptance INSERT. This is the single write-cut
         # clock for both rejection and the eventual receipt.

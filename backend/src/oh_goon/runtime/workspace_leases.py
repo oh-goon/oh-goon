@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Literal
 
@@ -17,6 +18,8 @@ from oh_goon.core.errors import (
     WorkspaceTransitionInvalid,
 )
 from oh_goon.core.models.execution_assignment import ExecutionAssignment
+from oh_goon.core.models.execution_materialization import ExecutionMaterialization
+from oh_goon.core.models.fleet_plan_evidence import PlanWorkspaceWriterScopeEvidence
 from oh_goon.core.models.workspace import WorkspaceRef, WorkspaceState
 from oh_goon.core.models.workspace_lease import WorkspaceLease, WriterQuiescenceEvidence
 from oh_goon.core.product_identity import new_workspace_lease_id
@@ -27,6 +30,59 @@ from oh_goon.runtime.execution_assignments import ExecutionAssignmentAuthority
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
 QuiescenceProver = Callable[[WorkspaceLease], WriterQuiescenceEvidence]
+
+
+@dataclass(frozen=True, slots=True)
+class NativeWorkspaceQuiescence:
+    """Complete actual namespace observations from the original execution owner."""
+
+    scopes: tuple[PlanWorkspaceWriterScopeEvidence, ...]
+    physical_execution_ids: tuple[str, ...]
+    backend_configuration_id: str
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "kind": "native_namespace_scope",
+            "physical_execution_ids": list(self.physical_execution_ids),
+            "backend_configuration_id": self.backend_configuration_id,
+            "scopes": [scope.model_dump(mode="json") for scope in self.scopes],
+        }
+
+
+def require_native_workspace_quiescence(
+    materialization: ExecutionMaterialization,
+    *,
+    scopes: tuple[PlanWorkspaceWriterScopeEvidence, ...],
+    physical_execution_ids: tuple[str, ...],
+    backend_configuration_id: str,
+) -> None:
+    """Require an exact original-launch partition and actual closed PID namespaces."""
+    observed = tuple(scope.physical_execution_id for scope in scopes)
+    if (
+        materialization.writer_scope_kind != "native_namespace_scope"
+        or not backend_configuration_id
+        or not physical_execution_ids
+        or len(set(physical_execution_ids)) != len(physical_execution_ids)
+        or len(set(observed)) != len(observed)
+        or set(observed) != set(physical_execution_ids)
+        or any(
+            scope.materialization != materialization
+            or scope.workspace_device != materialization.workspace_device
+            or scope.workspace_inode != materialization.workspace_inode
+            or scope.workspace_mode != materialization.workspace_mode
+            or scope.backend_configuration_id != backend_configuration_id
+            or not scope.namespace_distinct
+            or not scope.init_death_observed
+            or scope.observed_at < materialization.created_at
+            for scope in scopes
+        )
+    ):
+        raise WorkspaceFenceUnproven(
+            "Native candidate requires complete original namespace-writer closure"
+        )
+
+
+NativeQuiescenceProver = Callable[[WorkspaceLease], NativeWorkspaceQuiescence]
 
 
 class WorkspaceLeaseStore:
@@ -196,6 +252,10 @@ class WorkspaceLeaseStore:
                 raise WorkspaceLeaseExpired(
                     f"Workspace lease expired before writer authority could be bound: {lease.lease_id}"
                 )
+            if self._native_materialization_in(connection, observed) is not None:
+                raise WorkspaceLeaseLost(
+                    "Native namespace materialization already owns the writer scope"
+                )
             result = connection.execute(
                 """
                 UPDATE workspace_leases
@@ -216,6 +276,7 @@ class WorkspaceLeaseStore:
         *,
         expected_state_version: int,
         quiescence: WriterQuiescenceEvidence | None = None,
+        native_quiescence: NativeWorkspaceQuiescence | None = None,
     ) -> WorkspaceState:
         # Release is one durable authority cut.  Do not validate the lease in one
         # transaction and finish it in another: writer authority could otherwise be
@@ -226,8 +287,28 @@ class WorkspaceLeaseStore:
             expected_state_version=expected_state_version,
             status="RELEASED",
             quiescence=quiescence,
+            native_quiescence=native_quiescence,
             next_lifecycle=WorkspaceLifecycleState.READY,
             expiry_requirement="unexpired",
+        )
+
+    def release_unmaterialized(
+        self, lease: WorkspaceLease, *, expected_state_version: int
+    ) -> WorkspaceState:
+        """Release failed preparation only if no execution materialization was issued.
+
+        The no-materialization and no-writer facts are read in the same original
+        write cut as lease release. A commit-unknown materialization remains a
+        potential writer and cannot use this preparation-only route.
+        """
+        return self._finish(
+            lease,
+            expected_state_version=expected_state_version,
+            status="RELEASED",
+            quiescence=None,
+            next_lifecycle=WorkspaceLifecycleState.READY,
+            expiry_requirement="unexpired",
+            require_unmaterialized=True,
         )
 
     def reconcile_expired(
@@ -236,10 +317,52 @@ class WorkspaceLeaseStore:
         *,
         expected_state_version: int,
         prove_quiescence: QuiescenceProver | None = None,
+        prove_native_quiescence: NativeQuiescenceProver | None = None,
     ) -> WorkspaceState:
         lease = self.lease(lease_id)
         if utc_now() < lease.expires_at:
             raise WorkspaceTransitionInvalid("Workspace lease is not expired")
+        with self._database.transaction() as connection:
+            native = self._native_materialization_in(connection, lease)
+        if native is not None:
+            native_evidence = (
+                prove_native_quiescence(lease) if prove_native_quiescence is not None else None
+            )
+            if native_evidence is not None:
+                try:
+                    require_native_workspace_quiescence(
+                        native,
+                        scopes=native_evidence.scopes,
+                        physical_execution_ids=native_evidence.physical_execution_ids,
+                        backend_configuration_id=native_evidence.backend_configuration_id,
+                    )
+                except WorkspaceFenceUnproven:
+                    self._finish(
+                        lease,
+                        expected_state_version=expected_state_version,
+                        status="QUARANTINED",
+                        quiescence=None,
+                        native_quiescence=native_evidence,
+                        next_lifecycle=WorkspaceLifecycleState.FAILED,
+                        expiry_requirement="expired",
+                    )
+                    raise
+            state = self._finish(
+                lease,
+                expected_state_version=expected_state_version,
+                status="EXPIRED" if native_evidence is not None else "QUARANTINED",
+                quiescence=None,
+                native_quiescence=native_evidence,
+                next_lifecycle=WorkspaceLifecycleState.READY
+                if native_evidence is not None
+                else WorkspaceLifecycleState.FAILED,
+                expiry_requirement="expired",
+            )
+            if native_evidence is None:
+                raise WorkspaceFenceUnproven(
+                    "Expired native workspace writer is unproven; workspace quarantined"
+                )
+            return state
         if lease.writer_authority_kind is None:
             return self._finish(
                 lease,
@@ -287,10 +410,14 @@ class WorkspaceLeaseStore:
         self,
         lease: WorkspaceLease,
         evidence: WriterQuiescenceEvidence | None,
+        *,
+        native_quiescence: NativeWorkspaceQuiescence | None = None,
     ) -> None:
         """Verify exact physical-writer quiescence without changing lease state."""
 
         current = self.assert_current(lease)
+        with self._database.transaction() as connection:
+            self.require_native_writer_quiescence_in(connection, current, native_quiescence)
         if current.writer_authority_kind is not None:
             self._require_quiescence(current, evidence)
 
@@ -321,6 +448,8 @@ class WorkspaceLeaseStore:
         quiescence: WriterQuiescenceEvidence | None,
         next_lifecycle: WorkspaceLifecycleState,
         expiry_requirement: Literal["unexpired", "expired"],
+        native_quiescence: NativeWorkspaceQuiescence | None = None,
+        require_unmaterialized: bool = False,
     ) -> WorkspaceState:
         with self._database.transaction(write=True) as connection:
             state = self._state_for_update(connection, lease.workspace_id)
@@ -347,11 +476,29 @@ class WorkspaceLeaseStore:
                 )
             if expiry_requirement == "expired" and finished_at < observed.expires_at:
                 raise WorkspaceTransitionInvalid("Workspace lease is not expired")
+            if require_unmaterialized and (
+                observed.writer_authority_kind is not None
+                or connection.execute(
+                    "SELECT 1 FROM execution_materializations WHERE lease_id=? LIMIT 1",
+                    (lease.lease_id,),
+                ).fetchone()
+                is not None
+            ):
+                raise WorkspaceFenceUnproven(
+                    "Candidate preparation has durable writer or materialization authority"
+                )
             if (
                 next_lifecycle is WorkspaceLifecycleState.READY
                 and observed.writer_authority_kind is not None
             ):
                 self._require_quiescence(observed, quiescence)
+            if next_lifecycle is WorkspaceLifecycleState.READY:
+                self.require_native_writer_quiescence_in(connection, observed, native_quiescence)
+            fence = None
+            if native_quiescence is not None:
+                fence = native_quiescence.payload()
+            elif quiescence is not None:
+                fence = quiescence.model_dump(mode="json", exclude_computed_fields=True)
             connection.execute(
                 """
                 UPDATE workspace_leases
@@ -362,11 +509,11 @@ class WorkspaceLeaseStore:
                     status,
                     (
                         json.dumps(
-                            quiescence.model_dump(mode="json", exclude_computed_fields=True),
+                            fence,
                             sort_keys=True,
                             separators=(",", ":"),
                         )
-                        if quiescence is not None
+                        if fence is not None
                         else None
                     ),
                     finished_at.isoformat(),
@@ -379,6 +526,58 @@ class WorkspaceLeaseStore:
                 lifecycle_state=next_lifecycle,
                 current_lease_id=None,
             )
+
+    @staticmethod
+    def _native_materialization_in(
+        connection: sqlite3.Connection, lease: WorkspaceLease
+    ) -> ExecutionMaterialization | None:
+        rows = connection.execute(
+            "SELECT payload_json, resolved_fingerprint FROM execution_materializations "
+            "WHERE lease_id=?",
+            (lease.lease_id,),
+        ).fetchall()
+        found = None
+        for row in rows:
+            value = ExecutionMaterialization.model_validate(json.loads(row["payload_json"]))
+            if value.writer_scope_kind is None:
+                continue
+            if (
+                found is not None
+                or value.resolved_fingerprint != row["resolved_fingerprint"]
+                or value.workspace_id != lease.workspace_id
+                or value.lease_id != lease.lease_id
+                or value.attempt_id != lease.attempt_id
+                or value.assignment_id != lease.assignment_id
+                or value.assignment_fingerprint != lease.assignment_fingerprint
+                or value.lease_generation != lease.lease_generation
+                or value.executor_id != lease.executor_id
+                or value.executor_generation != lease.executor_generation
+                or value.input_checkpoint_id != lease.input_checkpoint_id
+            ):
+                raise WorkspaceFenceUnproven("Native workspace materialization authority differs")
+            found = value
+        return found
+
+    @classmethod
+    def require_native_writer_quiescence_in(
+        cls,
+        connection: sqlite3.Connection,
+        lease: WorkspaceLease,
+        evidence: NativeWorkspaceQuiescence | None,
+    ) -> None:
+        materialization = cls._native_materialization_in(connection, lease)
+        if materialization is None:
+            if evidence is not None:
+                raise WorkspaceFenceUnproven("Native closure has no native writer materialization")
+            return
+        if evidence is None:
+            raise WorkspaceFenceUnproven("Native workspace writer absence is unproven")
+        require_native_workspace_quiescence(
+            materialization,
+            scopes=evidence.scopes,
+            physical_execution_ids=evidence.physical_execution_ids,
+            backend_configuration_id=evidence.backend_configuration_id,
+        )
 
     @staticmethod
     def _state_for_update(connection: sqlite3.Connection, workspace_id: str) -> WorkspaceState:
