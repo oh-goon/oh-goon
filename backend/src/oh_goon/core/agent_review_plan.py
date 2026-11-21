@@ -9,6 +9,7 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan import (
     AgentPlanStep,
     AgentResultRole,
+    CommandPlanStep,
     CompiledGoonImportStep,
     DependencyInventoryPlanStep,
     PlanStep,
@@ -105,7 +106,14 @@ def validate_agent_phase_steps(
                 step.when is not None
                 or step.retry.max_attempts != 1
                 or step.lifecycle.value != "normal"
-                or step.on_failure.value != "stop"
+                or (
+                    step.on_failure.value != "stop"
+                    and not (
+                        owners[step.step_id] == "regression"
+                        and isinstance(step, CommandPlanStep)
+                        and step.regression_failure is not None
+                    )
+                )
                 or step.workspace.publish
                 or step.cache.publish
             )

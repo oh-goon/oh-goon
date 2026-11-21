@@ -241,6 +241,7 @@ def attempt_evidence(
     )
     return PlanStepAttemptEvidence(
         attempt=attempt,
+        physical_execution_id=outcome.physical_execution_id,
         argv=canonical_argv(step, outcome),
         returncode=outcome.returncode,
         observed_returncode=outcome.observed_returncode,

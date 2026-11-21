@@ -591,6 +591,7 @@ def _start_supervised_command(
     pipe_input: bool,
     preserve_native_executable_path: bool,
     retain_output_tail: bool,
+    preserve_stdout_whitespace: bool,
 ) -> _StartedCommand:
     child_env = sanitized_child_environment(argv, env)
     physical_execution_id = new_physical_execution_id()
@@ -654,6 +655,7 @@ def _start_supervised_command(
         max_capture_bytes_per_stream,
         terminal=terminal is not None,
         retain_output_tail=retain_output_tail,
+        preserve_stdout_whitespace=preserve_stdout_whitespace,
     )
     output_errors: list[BaseException] = []
     stdout_reader = (
@@ -671,6 +673,7 @@ def _start_supervised_command(
             capture.stdout,
             stream_output,
             output_errors,
+            translate_newlines=not preserve_stdout_whitespace,
         )
     )
     stderr_reader = (
@@ -721,6 +724,7 @@ def run_command(
     input_source: CommandInputSource | None = None,
     preserve_native_executable_path: bool = True,
     retain_output_tail: bool = False,
+    preserve_stdout_whitespace: bool = False,
 ) -> CommandResult:
     """Run one owned command with optional live output and input transport.
 
@@ -730,6 +734,8 @@ def run_command(
     preserve_native_executable_path=False and retains the sealed launch owner.
     Terminal output and explicit tail capture retain a bounded diagnostic tail;
     stdout_evidence hashes and counts the original complete raw stream.
+    Explicit stdout whitespace preservation retains the captured text unchanged
+    without selecting tail capture or changing its byte limit.
     Immutable input_data and a nonblocking input_source use the same supervised
     stdin pipe; either is exclusive with caller-owned terminal transport.
     """
@@ -745,6 +751,8 @@ def run_command(
         raise ValueError("native executable path preservation must be a boolean")
     if type(retain_output_tail) is not bool:
         raise ValueError("command output tail retention must be a boolean")
+    if type(preserve_stdout_whitespace) is not bool:
+        raise ValueError("command stdout whitespace preservation must be a boolean")
     if terminal is not None and (type(terminal) is not CommandTerminal or os.name == "nt"):
         raise ValueError("command PTY transport requires POSIX and CommandTerminal")
     if input_data is not None and (
@@ -776,6 +784,7 @@ def run_command(
         pipe_input=input_data is not None or input_source is not None,
         preserve_native_executable_path=preserve_native_executable_path,
         retain_output_tail=retain_output_tail,
+        preserve_stdout_whitespace=preserve_stdout_whitespace,
     )
     process = started_command.process
     parent_guard = started_command.parent_guard
@@ -1039,7 +1048,7 @@ def run_command(
             runtime_authority=authority_receipt,
             physical_execution_id=physical_execution_id,
             stdout=stdout_capture.text
-            if terminal is not None or retain_output_tail
+            if terminal is not None or retain_output_tail or preserve_stdout_whitespace
             else stdout_capture.text.rstrip(),
             stderr=stderr_capture.text.rstrip(),
             stdout_evidence=stdout_capture.evidence,
@@ -1114,9 +1123,9 @@ def run_command(
         finally:
             if parent_guard is not None:
                 parent_guard.close()
-        if (terminal is not None or retain_output_tail) and isinstance(
-            failure, (CommandTimeoutExpired, CommandCancelledError)
-        ):
+        if (
+            terminal is not None or retain_output_tail or preserve_stdout_whitespace
+        ) and isinstance(failure, (CommandTimeoutExpired, CommandCancelledError)):
             failure.stdout_evidence = stdout_capture.evidence
             failure.stdout_truncated = stdout_capture.truncated
             if isinstance(failure, CommandTimeoutExpired):
@@ -1480,6 +1489,8 @@ def _reader(
     capture: TextCapture,
     observer: CommandOutputObserver | None,
     errors: list[BaseException],
+    *,
+    translate_newlines: bool = True,
 ) -> Thread:
     def read() -> None:
         if pipe is None:
@@ -1489,12 +1500,13 @@ def _reader(
             # live child emitting READY then sleeping can never be cancelled
             # from its output. read1() returns available bytes without waiting
             # for a 64-KiB fill; incremental decoding preserves split UTF-8 and
-            # universal-newline semantics across arbitrary kernel chunks.
+            # default universal-newline semantics across arbitrary kernel chunks.
+            # Explicit complete stdout retains its original newline characters.
             decoder = io.IncrementalNewlineDecoder(
                 codecs.getincrementaldecoder(pipe.encoding or "utf-8")(
                     errors=pipe.errors or "strict"
                 ),
-                translate=True,
+                translate=translate_newlines,
             )
             while True:
                 try:

@@ -152,6 +152,7 @@ def test_profile_runner_transports_pinned_subject_resources_and_native_inputs(
         input_data=None if streaming_input else b"input",
         input_source=source,
         retain_output_tail=True,
+        preserve_stdout_whitespace=True,
         read_only_mounts=(mount,),
         read_only_workspace=True,
     )
@@ -165,6 +166,7 @@ def test_profile_runner_transports_pinned_subject_resources_and_native_inputs(
     assert request.input_data == (None if streaming_input else b"input")
     assert request.input_source is source and request.read_only_workspace
     assert request.retain_output_tail
+    assert request.preserve_stdout_whitespace
     assert mount in request.read_only_mounts
     assert options["timeout"] == 7 and options["cancel_requested"] is cancel
     assert events == ["pin", "verify", "verify", "release"]

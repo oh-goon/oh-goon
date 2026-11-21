@@ -171,6 +171,9 @@ from oh_goon.core.models.fleet_plan_step_primitives import (
     PlanPublishedOutput as PlanPublishedOutput,
 )
 from oh_goon.core.models.fleet_plan_step_primitives import (
+    PlanRegressionFailure as PlanRegressionFailure,
+)
+from oh_goon.core.models.fleet_plan_step_primitives import (
     PlanStreamOutput as PlanStreamOutput,
 )
 from oh_goon.core.models.fleet_plan_step_primitives import (
@@ -264,10 +267,36 @@ class CommandPlanStep(ImmutableModel):
     outputs: tuple[PlanPublishedOutput | PlanStreamOutput, ...] = Field(
         default_factory=tuple, max_length=16
     )
+    regression_failure: PlanRegressionFailure | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     _success_codes = field_validator("success_codes")(_validate_success_codes)
 
     _outputs = field_validator("outputs")(_validate_published_outputs)
+
+    @model_validator(mode="after")
+    def validate_regression_failure(self) -> CommandPlanStep:
+        policy = self.regression_failure
+        if policy is None:
+            return self
+        feedback = next((value for value in self.outputs if value.name == policy.feedback), None)
+        if (
+            self.uv is not None
+            or getattr(self, "project_source", None) is not None
+            or self.lifecycle is not StepLifecycle.NORMAL
+            or self.when is not None
+            or self.retry.max_attempts != 1
+            or set(policy.exit_codes).intersection(self.success_codes)
+            or not isinstance(feedback, PlanStreamOutput)
+            or not feedback.retain
+            or any(not isinstance(value, PlanStreamOutput) for value in self.outputs)
+        ):
+            raise ValueError(
+                "Regression failure recovery requires an unconditional single native command, "
+                "distinct failure codes and retained stdout feedback"
+            )
+        return self
 
 
 class AgentStepRequestedEffects(ImmutableModel):

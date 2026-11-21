@@ -1390,6 +1390,9 @@ class FleetPlanService:
                 else (),
                 unstarted_selection=current_selection if reason is not None else None,
                 stop_reason=reason,
+                regression_recovery=campaign.regression_recovery
+                if reason is None and campaign is not None
+                else None,
                 passed_test_step_id=passed_test_step_id
                 if reason is RepairStop.TEST_PASSED
                 else None,

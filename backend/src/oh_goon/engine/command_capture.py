@@ -12,7 +12,7 @@ _LINE_BREAKS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
 
 
 class TextCapture:
-    """Bound retained text while draining; terminal evidence hashes the whole raw stream.
+    """Bound retained text while draining; selected evidence hashes the whole raw stream.
 
     Ordinary output fails at its byte ceiling. Explicit tail mode keeps a bounded
     UTF-8 tail with an omission marker, without treating session volume as failure.
@@ -20,7 +20,12 @@ class TextCapture:
     """
 
     def __init__(
-        self, limit_bytes: int | None, overflow: Event, *, retain_tail: bool = False
+        self,
+        limit_bytes: int | None,
+        overflow: Event,
+        *,
+        retain_tail: bool = False,
+        record_raw_evidence: bool = False,
     ) -> None:
         self._limit_bytes = (
             _DEFAULT_TAIL_BYTES if retain_tail and limit_bytes is None else limit_bytes
@@ -30,6 +35,7 @@ class TextCapture:
         self._captured_bytes = 0
         self.overflow_stream: Literal["stdout", "stderr"] | None = None
         self._retain_tail = retain_tail
+        self._record_raw_evidence = retain_tail or record_raw_evidence
         self._tail = bytearray()
         self._omitted = False
         self._digest = hashlib.sha256()
@@ -59,7 +65,7 @@ class TextCapture:
 
     @property
     def evidence(self) -> PlanOutputEvidence | None:
-        if not self._retain_tail:
+        if not self._record_raw_evidence:
             return None
         return PlanOutputEvidence(
             sha256=self._digest.hexdigest(),
@@ -74,9 +80,8 @@ class TextCapture:
         stream: Literal["stdout", "stderr"],
         raw: bytes | None = None,
     ) -> None:
-        if self._retain_tail:
-            encoded = chunk.encode("utf-8")
-            observed = encoded if raw is None else raw
+        if self._record_raw_evidence:
+            observed = chunk.encode("utf-8") if raw is None else raw
             self._digest.update(observed)
             self._observed_bytes += len(observed)
             if chunk:
@@ -88,6 +93,8 @@ class TextCapture:
                 self._last_cr = chunk.endswith("\r")
                 self._last_break = chunk[-1] in _LINE_BREAKS
                 self._has_text = True
+        if self._retain_tail:
+            encoded = chunk.encode("utf-8")
             self._tail.extend(encoded)
             assert self._limit_bytes is not None
             if len(self._tail) > self._limit_bytes:
@@ -116,10 +123,18 @@ class TextCapture:
 
 class CommandCapture:
     def __init__(
-        self, limit_bytes: int | None, *, terminal: bool = False, retain_output_tail: bool = False
+        self,
+        limit_bytes: int | None,
+        *,
+        terminal: bool = False,
+        retain_output_tail: bool = False,
+        preserve_stdout_whitespace: bool = False,
     ) -> None:
         self.overflow = Event()
         self.stdout = TextCapture(
-            limit_bytes, self.overflow, retain_tail=terminal or retain_output_tail
+            limit_bytes,
+            self.overflow,
+            retain_tail=terminal or retain_output_tail,
+            record_raw_evidence=preserve_stdout_whitespace,
         )
         self.stderr = TextCapture(limit_bytes, self.overflow, retain_tail=retain_output_tail)

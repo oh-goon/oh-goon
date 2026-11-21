@@ -14,7 +14,7 @@ from oh_goon.core.models.fleet_plan_retry import (
     PlanRetryDecisionEvidence,
     ScheduledPlanRetryDecisionEvidence,
 )
-from oh_goon.core.models.fleet_plan_step_primitives import StepFailurePolicy
+from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput, StepFailurePolicy
 from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.engine.git import GitObservation
 from oh_goon.integrations._fleet_plan_step_outcome import (
@@ -251,15 +251,26 @@ def _successful_direct_publication(
     if outcome.skipped or process_boundary_settled(outcome) is not True:
         return AttemptPublication({}, (), outcome, None, None)
     if not step_succeeded(step, outcome):
-        # Explicitly continued, single-attempt direct command Steps may transport
-        # a bounded diagnostic file to subsequent authored Steps.  Its nonzero
-        # physical result remains FAILED in Game Tape.  Agent proposals, strict
-        # workspaces, and retryable attempts never use this diagnostic path.
+        # Retaining a bounded native diagnostic does not grant continuation.
+        # Existing explicitly continued commands may also publish their files.
+        # Agent proposals, strict workspaces, and retryable attempts never use
+        # this failed-command publication path.
         if not (
             type(step) is ResolvedCommandStep
-            and step.on_failure is StepFailurePolicy.CONTINUE
             and step.retry.max_attempts == 1
             and step.outputs
+            and (
+                step.on_failure is StepFailurePolicy.CONTINUE
+                or (
+                    all(isinstance(output, PlanStreamOutput) for output in step.outputs)
+                    and any(
+                        isinstance(output, PlanStreamOutput)
+                        and output.stream == "stdout"
+                        and output.retain
+                        for output in step.outputs
+                    )
+                )
+            )
         ):
             return AttemptPublication({}, (), outcome, None, None)
     publication = publish_direct_attempt_outputs(step, outcome, repository)

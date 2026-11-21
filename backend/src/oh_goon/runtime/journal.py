@@ -6,6 +6,11 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import Field
 
+from oh_goon.core.agent_campaign_settlement import (
+    campaign_convergence_error,
+    regression_phase_context_error,
+    regression_recovery,
+)
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.effect_attempts import LIVE_OWNED_EFFECT_STATUSES
 from oh_goon.core.errors import InvalidRunTransition, JournalConflict
@@ -63,7 +68,6 @@ from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
-    FleetRunOutcome,
     FleetRunSource,
     FleetRunStatus,
     FleetRunTerminalIntent,
@@ -413,37 +417,29 @@ class Journal:
                 raise JournalConflict(
                     "Campaign cannot publish a second successor or exceed its budget"
                 )
-        if decision.stop_reason is AgentRepairStopReason.CONVERGED and any(
-            view.required_run_detail(phase.fleet_run_id).outcome is not FleetRunOutcome.SUCCESS
-            for phase in phases
-        ):
-            raise JournalConflict("Campaign convergence conflicts with unsuccessful child results")
-        if decision.stop_reason is AgentRepairStopReason.CONVERGED:
-            for phase in phases:
-                detail = view.required_run_detail(phase.fleet_run_id)
-                target = detail.run.target
-                evidence = detail.operations[0].evidence if len(detail.operations) == 1 else None
-                result = evidence.plan if isinstance(evidence, FleetPlanOperationEvidence) else None
+            latest_detail = view.required_run_detail(phases[-1].fleet_run_id)
+            marker = decision.regression_recovery
+            if phases[-1].context.phase is not None and latest_detail.outcome.value != "SUCCESS":
+                eligible = regression_recovery(latest_detail)
                 if (
-                    not isinstance(target, FleetPlanTarget)
-                    or result is None
-                    or result.plan_id != target.plan.plan_id
-                    or tuple((step.step_id, step.kind) for step in result.steps)
-                    != tuple((step.step_id, step.kind) for step in target.plan.steps)
-                    or any(
-                        step.status != "COMPLETED"
-                        or step.settlement.outcome != "SUCCESS"
-                        or step.settlement.cleanup != "VERIFIED"
-                        for step in result.steps
-                    )
-                    or any(
-                        operation.resource_settlement == "UNRESOLVED"
-                        for operation in detail.operations
-                    )
+                    eligible is None
+                    or marker != eligible
+                    or decision.candidate_identity != eligible.candidate_identity
+                    or decision.scope_identity != eligible.scope_identity
                 ):
                     raise JournalConflict(
-                        "Campaign convergence lacks exact accepted settled Step evidence"
+                        "Campaign advancement lacks exact safely settled regression recovery"
                     )
+            elif marker is not None:
+                raise JournalConflict("Campaign advancement contains spurious regression recovery")
+        if decision.stop_reason is AgentRepairStopReason.CONVERGED:
+            error = campaign_convergence_error(
+                current,
+                tuple(view.required_run_detail(phase.fleet_run_id) for phase in phases),
+                decision,
+            )
+            if error is not None:
+                raise JournalConflict(error)
         self._facts.append_campaign(connection, decision)
         return self._facts.read_view(connection).campaign(decision.campaign_id)
 
@@ -470,7 +466,8 @@ class Journal:
             raise JournalConflict(
                 "Campaign phase admission requires its committed predecessor revision"
             )
-        current = self._facts.read_view(connection).campaign(context.repair_id)
+        view = self._facts.read_view(connection)
+        current = view.campaign(context.repair_id)
         self._require_campaign_writer(current, context.campaign_revision)
         intent = current.intent
         assert intent is not None
@@ -515,6 +512,13 @@ class Journal:
             raise JournalConflict(
                 "Initial campaign admission differs from original selected candidate/scope"
             )
+        error = regression_phase_context_error(
+            current,
+            tuple(view.required_run_detail(phase.fleet_run_id) for phase in phases),
+            target,
+        )
+        if error is not None:
+            raise JournalConflict(error)
         self._facts.append_campaign(
             connection,
             AgentCampaignPhase(

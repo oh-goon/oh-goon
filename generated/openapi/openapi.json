@@ -173,6 +173,16 @@
             "title": "Phase Ordinal",
             "type": "integer"
           },
+          "regression_recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRegressionRecovery"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "remaining_runs": {
             "maximum": 160.0,
             "minimum": 0.0,
@@ -1008,6 +1018,96 @@
           "base_url"
         ],
         "title": "AgentProvider",
+        "type": "object"
+      },
+      "AgentRegressionFeedbackReference": {
+        "additionalProperties": false,
+        "description": "Exact retained native diagnostic consumed by a recovery decision.",
+        "properties": {
+          "attempt": {
+            "const": 1,
+            "default": 1,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "byte_count": {
+            "maximum": 2048.0,
+            "minimum": 1.0,
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "output_name": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$",
+            "title": "Output Name",
+            "type": "string"
+          },
+          "physical_execution_id": {
+            "minLength": 1,
+            "title": "Physical Execution Id",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "step_id": {
+            "minLength": 1,
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id",
+          "output_name",
+          "physical_execution_id",
+          "sha256",
+          "byte_count"
+        ],
+        "title": "AgentRegressionFeedbackReference",
+        "type": "object"
+      },
+      "AgentRegressionRecovery": {
+        "additionalProperties": false,
+        "description": "A settled failed regression remains immutable while a fresh cycle repairs it.",
+        "properties": {
+          "candidate_identity": {
+            "minLength": 1,
+            "title": "Candidate Identity",
+            "type": "string"
+          },
+          "feedback": {
+            "items": {
+              "$ref": "#/components/schemas/AgentRegressionFeedbackReference"
+            },
+            "minItems": 1,
+            "title": "Feedback",
+            "type": "array"
+          },
+          "fleet_run_id": {
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "scope_identity": {
+            "minLength": 1,
+            "title": "Scope Identity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "operation_id",
+          "candidate_identity",
+          "scope_identity",
+          "feedback"
+        ],
+        "title": "AgentRegressionRecovery",
         "type": "object"
       },
       "AgentRepairBudget": {
@@ -20857,6 +20957,39 @@
         "title": "PlanPublishedOutput",
         "type": "object"
       },
+      "PlanRegressionFailure": {
+        "additionalProperties": false,
+        "description": "Author-declared ordinary verifier failures, never native attempt replay.",
+        "properties": {
+          "exit_codes": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Exit Codes",
+            "type": "array"
+          },
+          "feedback": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$",
+            "title": "Feedback",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "exit_codes",
+          "feedback",
+          "reason"
+        ],
+        "title": "PlanRegressionFailure",
+        "type": "object"
+      },
       "PlanRepositoryAdmissionEvidence": {
         "additionalProperties": false,
         "description": "Durable repository, Plan semantics, and source authority admitted before effects.",
@@ -21066,6 +21199,50 @@
         "title": "PlanRetainedContentEvidence",
         "type": "object"
       },
+      "PlanRetainedStreamOutputEvidence": {
+        "additionalProperties": false,
+        "description": "Bounded retained text, separate from its original native stdout identity.",
+        "properties": {
+          "byte_count": {
+            "maximum": 2048.0,
+            "minimum": 0.0,
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "physical_execution_id": {
+            "minLength": 1,
+            "title": "Physical Execution Id",
+            "type": "string"
+          },
+          "redacted": {
+            "default": false,
+            "title": "Redacted",
+            "type": "boolean"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PlanOutputEvidence"
+          },
+          "text": {
+            "maxLength": 2048,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "sha256",
+          "byte_count",
+          "source",
+          "physical_execution_id"
+        ],
+        "title": "PlanRetainedStreamOutputEvidence",
+        "type": "object"
+      },
       "PlanSnapshotEvidence": {
         "additionalProperties": false,
         "description": "Content identity for one execution input snapshot; no local path is persisted.",
@@ -21269,6 +21446,18 @@
               }
             ],
             "title": "Observed Returncode"
+          },
+          "physical_execution_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Physical Execution Id"
           },
           "release_effect": {
             "anyOf": [
@@ -21826,6 +22015,11 @@
             "pattern": "^[A-Za-z_][A-Za-z0-9_-]{0,63}$",
             "title": "Name",
             "type": "string"
+          },
+          "retain": {
+            "default": false,
+            "title": "Retain",
+            "type": "boolean"
           },
           "stream": {
             "enum": [
@@ -22908,6 +23102,16 @@
               }
             ],
             "title": "Producer Execution Identity"
+          },
+          "retained_stream": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanRetainedStreamOutputEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "sha256": {
             "pattern": "^[0-9a-f]{64}$",
@@ -24985,6 +25189,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/CapturedProjectSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "regression_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanRegressionFailure"
               },
               {
                 "type": "null"

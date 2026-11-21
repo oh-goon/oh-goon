@@ -67,6 +67,13 @@ class PlanStreamOutput(ImmutableModel):
     name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
     stream: Literal["stdout", "stderr"]
     max_bytes: int = Field(default=4096, ge=1, le=65536)
+    retain: bool = Field(default=False, exclude_if=lambda value: not value)
+
+    @model_validator(mode="after")
+    def validate_retained_stream(self) -> PlanStreamOutput:
+        if self.retain and (self.stream != "stdout" or self.max_bytes > 2048):
+            raise ValueError("Retained stream outputs require stdout bounded to 2048 bytes")
+        return self
 
 
 class PlanArtifactDeclaration(ImmutableModel):
@@ -181,3 +188,22 @@ def _validate_published_outputs(
     if len(names) != len(set(names)):
         raise ValueError("Fleet plan published output names must be unique per step")
     return value
+
+
+class PlanRegressionFailure(ImmutableModel):
+    """Author-declared ordinary verifier failures, never native attempt replay."""
+
+    exit_codes: tuple[int, ...] = Field(min_length=1, max_length=16)
+    feedback: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
+    reason: str = Field(min_length=1, max_length=240)
+
+    @field_validator("exit_codes", mode="before")
+    @classmethod
+    def validate_codes(cls, value: object) -> object:
+        if not isinstance(value, (list, tuple)) or any(
+            type(code) is not int or not 1 <= code <= 255 or 124 <= code <= 127 for code in value
+        ):
+            raise ValueError("Regression failure codes require ordinary nonreserved native exits")
+        if len(value) != len(set(value)):
+            raise ValueError("Regression failure codes must be unique")
+        return value

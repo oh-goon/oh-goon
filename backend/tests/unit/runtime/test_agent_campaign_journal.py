@@ -1,11 +1,15 @@
 """Campaign decisions share the real Journal transaction and verified read cut."""
 
+import hashlib
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
+from oh_goon.core.agent_campaign_settlement import regression_feedback_context, regression_recovery
 from oh_goon.core.errors import JournalConflict
 from oh_goon.core.models.agent_repair import (
     MAX_AGENT_CAMPAIGN_MESSAGE_CHARS,
@@ -14,10 +18,13 @@ from oh_goon.core.models.agent_repair import (
     AgentCampaignIntent,
     AgentCampaignRunEvidence,
     AgentCampaignUnstartedSelection,
+    AgentRegressionRecovery,
     AgentRepairBudget,
     AgentRepairContext,
     AgentRepairStopReason,
 )
+from oh_goon.core.models.agent_review import AgentAdjudicationRecord, AgentReviewRecord
+from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedCommandStep, ResolvedFleetPlan
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
@@ -26,8 +33,10 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanEgressEvidence,
     PlanExecutionSupervisorEvidence,
     PlanOutputEvidence,
+    PlanRetainedStreamOutputEvidence,
     PlanStepAttemptEvidence,
     PlanStepSettlementEvidence,
+    PublishedPlanOutputEvidence,
     SkippedPlanStepExecution,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import (
@@ -69,30 +78,51 @@ from tests.factories.operation_reports import make_operation_report
 from tests.factories.run_admission import repository_admissions_for
 
 
-def campaign(tmp_path: Path, *, initial_phase="review", failure_driven=False):
+def campaign(
+    tmp_path: Path,
+    *,
+    initial_phase: str = "review",
+    failure_driven: bool = False,
+    maximum_runs: int = 2,
+    write_roots: tuple[str, ...] = ("code.py",),
+) -> tuple[Journal, RepositoryIdentity, AgentCampaignIntent]:
     journal = Journal(LocalDatabase(tmp_path / "state.db"))
     repository = RepositoryIdentity(
         repository_id=repository_id(tmp_path / "repo"), name="repo", path=tmp_path / "repo"
     )
-    budget = AgentRepairBudget(max_attempts=2, timeout_seconds=60, step_timeout_seconds=10)
+    budget = AgentRepairBudget(
+        max_attempts=3 if maximum_runs > 6 else 2, timeout_seconds=60, step_timeout_seconds=10
+    )
     intent = AgentCampaignIntent(
         campaign_id="campaign",
         repository_id=repository.repository_id,
         original_execution_digest="original",
         budget=budget,
-        maximum_runs=2,
+        maximum_runs=maximum_runs,
         initial_phase="repair" if failure_driven else initial_phase,
         initial_step_ids=(initial_phase, "agent") if failure_driven else (initial_phase,),
         deadline_at=utc_now() + timedelta(seconds=60),
         candidate_identity=None if failure_driven else "candidate",
         scope_identity=None if failure_driven else "scope",
-        write_roots=() if failure_driven else ("code.py",),
+        write_roots=() if failure_driven else write_roots,
     )
     journal.begin_agent_campaign(intent)
     return journal, repository, intent
 
 
-def phase_target(journal: Journal, *, ordinal=1, phase="review", failure_driven=False):
+def phase_target(
+    journal: Journal,
+    *,
+    ordinal: int = 1,
+    phase: str = "review",
+    failure_driven: bool = False,
+    candidate: str = "candidate",
+    review_pass: int = 1,
+    recoverable: bool = False,
+    with_agent: bool = False,
+    agent_context: str | None = None,
+    scope: str = "scope",
+) -> FleetPlanTarget:
     current = journal.agent_campaign("campaign")
     intent = current.intent
     assert intent is not None
@@ -100,37 +130,70 @@ def phase_target(journal: Journal, *, ordinal=1, phase="review", failure_driven=
         name="phase",
         description="Journal boundary fixture",
         execution=MaintenanceExecutionPolicy(),
-        steps=(ResolvedCommandStep(step_id=phase, argv=("check",), timeout_seconds=10),)
+        steps=(
+            ResolvedCommandStep.model_validate(
+                {
+                    "step_id": phase,
+                    "argv": ("check",),
+                    "timeout_seconds": 10,
+                    **(
+                        {
+                            "on_failure": "continue",
+                            "regression_failure": {
+                                "exit_codes": (1,),
+                                "feedback": "diagnostic",
+                                "reason": "Verifier exit 1 is ordinary code failure",
+                            },
+                            "outputs": (
+                                {
+                                    "name": "diagnostic",
+                                    "stream": "stdout",
+                                    "max_bytes": 2048,
+                                    "retain": True,
+                                },
+                            ),
+                        }
+                        if recoverable
+                        else {}
+                    ),
+                },
+            ),
+        )
         + (
             (
-                ResolvedAgentStep(
-                    step_id="agent",
-                    timeout_seconds=10,
-                    workload={"harness": "local-model-proposal", "model": "fixture"},
-                    delivery_sha256="a" * 64,
-                    handoff_identity="frozen",
-                    source_step_id="agent",
+                ResolvedAgentStep.model_validate(
+                    {
+                        "step_id": "agent",
+                        "timeout_seconds": 10,
+                        "workload": {"harness": "local-model-proposal", "model": "fixture"},
+                        "delivery_sha256": "a" * 64,
+                        "handoff_identity": "frozen",
+                        "source_step_id": "agent",
+                        "review_context": agent_context,
+                    }
                 ),
             )
-            if failure_driven
+            if failure_driven or with_agent
             else ()
         ),
     )
-    context = AgentRepairContext(
-        repair_id="campaign",
-        campaign_revision=current.latest_revision,
-        attempt=ordinal,
-        max_attempts=2,
-        previous_run_id="campaign" if ordinal == 2 else None,
-        phase=None if failure_driven else phase,
-        review_pass=None if failure_driven else 1,
-        original_execution_digest=None if failure_driven else "original",
-        candidate_identity=None if failure_driven else "candidate",
-        scope_identity=None if failure_driven else "scope",
-        write_roots=() if failure_driven else ("code.py",),
-        limits=FleetPlanRunLimits(deadline_at=intent.deadline_at, step_timeout_seconds=10),
+    context = AgentRepairContext.model_validate(
+        {
+            "repair_id": "campaign",
+            "campaign_revision": current.latest_revision,
+            "attempt": ordinal,
+            "max_attempts": intent.maximum_runs,
+            "previous_run_id": current.phases[-1].fleet_run_id if current.phases else None,
+            "phase": None if failure_driven else phase,
+            "review_pass": None if failure_driven else review_pass,
+            "original_execution_digest": None if failure_driven else "original",
+            "candidate_identity": None if failure_driven else candidate,
+            "scope_identity": None if failure_driven else scope,
+            "write_roots": () if failure_driven else intent.write_roots,
+            "limits": FleetPlanRunLimits(deadline_at=intent.deadline_at, step_timeout_seconds=10),
+        }
     )
-    if failure_driven:
+    if failure_driven or with_agent:
         return FleetPlanTarget(
             kind="fleet_plan",
             plan=plan,
@@ -150,9 +213,33 @@ def phase_target(journal: Journal, *, ordinal=1, phase="review", failure_driven=
     return FleetPlanTarget(**{**base.model_dump(), "agent_repair": context})
 
 
-def admit_phase(journal, repository, *, ordinal=1, phase="review", failure_driven=False):
-    run_id = "campaign" if ordinal == 1 else "second"
-    target = phase_target(journal, ordinal=ordinal, phase=phase, failure_driven=failure_driven)
+def admit_phase(
+    journal: Journal,
+    repository: RepositoryIdentity,
+    *,
+    ordinal: int = 1,
+    phase: str = "review",
+    failure_driven: bool = False,
+    candidate: str = "candidate",
+    review_pass: int = 1,
+    recoverable: bool = False,
+    with_agent: bool = False,
+    agent_context: str | None = None,
+    scope: str = "scope",
+) -> tuple[str, FleetPlanTarget]:
+    run_id = "campaign" if ordinal == 1 else "second" if ordinal == 2 else f"phase-{ordinal}"
+    target = phase_target(
+        journal,
+        ordinal=ordinal,
+        phase=phase,
+        failure_driven=failure_driven,
+        candidate=candidate,
+        review_pass=review_pass,
+        recoverable=recoverable,
+        with_agent=with_agent,
+        agent_context=agent_context,
+        scope=scope,
+    )
     intent = FleetRunAdmissionIntent(
         target=target,
         capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
@@ -165,7 +252,21 @@ def admit_phase(journal, repository, *, ordinal=1, phase="review", failure_drive
     return run_id, target
 
 
-def settle(journal, repository, run_id, target, *, exit_code=0, settlement=None, attempts=True):
+def settle(
+    journal: Journal,
+    repository: RepositoryIdentity,
+    run_id: str,
+    target: FleetPlanTarget,
+    *,
+    exit_code: int = 0,
+    settlement: PlanStepSettlementEvidence | None = None,
+    attempts: bool = True,
+    record: AgentReviewRecord | AgentAdjudicationRecord | None = None,
+    worktree_files_after: tuple[str, ...] = (),
+) -> None:
+    assert target.agent_repair is not None
+    selected = target.plan.steps[0]
+    assert isinstance(selected, ResolvedCommandStep)
     start_run(journal, run_id)
     operation_id = start_repository(journal, run_id, repository)
     for event_type in (
@@ -194,7 +295,15 @@ def settle(journal, repository, run_id, target, *, exit_code=0, settlement=None,
                 step_id="agent",
                 step_order=2,
             )
-    output = PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
+    retained = selected.regression_failure is not None
+    diagnostic = b"regression failed\n"
+    output = (
+        PlanOutputEvidence(
+            sha256=hashlib.sha256(diagnostic).hexdigest(), byte_count=len(diagnostic), line_count=1
+        )
+        if retained
+        else PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
+    )
     step_type = CompletedPlanStepExecution if exit_code == 0 else FailedPlanStepExecution
     report = make_operation_report(
         repository,
@@ -216,6 +325,26 @@ def settle(journal, repository, run_id, target, *, exit_code=0, settlement=None,
                         stdout_evidence=output,
                         stderr_evidence=output,
                         returncode=exit_code,
+                        worktree_files_after=worktree_files_after,
+                        observations=(AgentReviewObservation(record=record),)
+                        if record is not None
+                        else (),
+                        outputs=(
+                            PublishedPlanOutputEvidence(
+                                name="diagnostic",
+                                sha256=output.sha256,
+                                byte_count=output.byte_count,
+                                retained_stream=PlanRetainedStreamOutputEvidence(
+                                    text=diagnostic.decode().strip(),
+                                    sha256=hashlib.sha256(diagnostic.strip()).hexdigest(),
+                                    byte_count=len(diagnostic.strip()),
+                                    source=output,
+                                    physical_execution_id="physical-regression",
+                                ),
+                            ),
+                        )
+                        if retained
+                        else (),
                         repository_state_before="before",
                         repository_state_after="after",
                         settlement=settlement
@@ -230,13 +359,16 @@ def settle(journal, repository, run_id, target, *, exit_code=0, settlement=None,
                             PlanStepAttemptEvidence(
                                 attempt=1,
                                 returncode=exit_code,
+                                observed_returncode=exit_code,
+                                physical_execution_id="physical-regression" if retained else None,
                                 stdout_evidence=output,
                                 stderr_evidence=output,
                                 repository_state_before="before",
                                 repository_state_after="after",
+                                worktree_files_after=worktree_files_after,
                                 egress=PlanEgressEvidence(mode="none"),
                                 supervisor=PlanExecutionSupervisorEvidence(
-                                    final_process_group_quiescent=True
+                                    final_process_group_quiescent=True, forced_termination=False
                                 ),
                             ),
                         )
@@ -270,15 +402,19 @@ def settle(journal, repository, run_id, target, *, exit_code=0, settlement=None,
 
 
 def decision(
-    journal,
+    journal: Journal,
     *,
-    stop=None,
-    decision_id="advance",
-    next_phase="verification",
-    passed_test_step_id=None,
-    next_step_ids=None,
-):
+    stop: AgentRepairStopReason | None = None,
+    decision_id: str = "advance",
+    next_phase: str = "verification",
+    passed_test_step_id: str | None = None,
+    next_step_ids: tuple[str, ...] | None = None,
+    candidate: str = "candidate",
+    recovery: AgentRegressionRecovery | None = None,
+    scope: str = "scope",
+) -> AgentCampaignDecision:
     current = journal.agent_campaign("campaign")
+    assert current.intent is not None
     view = journal.read_view()
     evidence = []
     unresolved = []
@@ -299,7 +435,7 @@ def decision(
         expected_revision=current.latest_revision,
         decision_id=decision_id,
         phase_ordinal=len(current.phases),
-        remaining_runs=2 - len(current.phases),
+        remaining_runs=current.intent.maximum_runs - len(current.phases),
         consumed_runs=tuple(evidence),
         unresolved_run_ids=tuple(unresolved),
         stop_reason=stop,
@@ -316,17 +452,20 @@ def decision(
         )
         if stop is None
         else (),
-        candidate_identity="candidate",
-        scope_identity="scope",
+        candidate_identity=candidate,
+        scope_identity=scope,
+        regression_recovery=recovery,
     )
 
 
-def test_admission_and_exact_phase_linkage_rollback_together(tmp_path, monkeypatch):
+def test_admission_and_exact_phase_linkage_rollback_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     journal, repository, _ = campaign(tmp_path)
     initial = journal.read_view().revision
     append = journal._facts.append_run_event
 
-    def fail_after_phase(*_):
+    def fail_after_phase(*_: object) -> None:
         raise OSError("disk full during Run admission")
 
     monkeypatch.setattr(journal._facts, "append_run_event", fail_after_phase)
@@ -345,7 +484,7 @@ def test_admission_and_exact_phase_linkage_rollback_together(tmp_path, monkeypat
     )
 
 
-def test_committed_terminal_receipt_survives_restart_and_exact_retry(tmp_path):
+def test_committed_terminal_receipt_survives_restart_and_exact_retry(tmp_path: Path) -> None:
     journal, repository, intent = campaign(tmp_path)
     run_id, target = admit_phase(journal, repository)
     settle(journal, repository, run_id, target)
@@ -356,6 +495,7 @@ def test_committed_terminal_receipt_survives_restart_and_exact_retry(tmp_path):
     terminal = decision(journal, stop=AgentRepairStopReason.CONVERGED, decision_id="terminal")
     journal.commit_agent_campaign_decision(terminal)
     receipt = journal.agent_campaign_result("campaign")
+    assert receipt.campaign_journal is not None
     assert receipt.converged and receipt.committed_decision_id == "terminal"
     assert receipt.admitted_run_ids == ("campaign", "second")
     reopened = Journal(LocalDatabase(tmp_path / "state.db"))
@@ -369,7 +509,9 @@ def test_committed_terminal_receipt_survives_restart_and_exact_retry(tmp_path):
     assert reopened.read_view().revision == before
 
 
-def test_successful_child_without_controller_commit_remains_incomplete_and_cannot_resume(tmp_path):
+def test_successful_child_without_controller_commit_remains_incomplete_and_cannot_resume(
+    tmp_path: Path,
+) -> None:
     journal, repository, _ = campaign(tmp_path)
     run_id, target = admit_phase(journal, repository)
     settle(journal, repository, run_id, target)
@@ -383,14 +525,14 @@ def test_successful_child_without_controller_commit_remains_incomplete_and_canno
         reopened.commit_agent_campaign_decision(pending)
 
 
-def test_competing_advancements_commit_only_one_successor(tmp_path):
+def test_competing_advancements_commit_only_one_successor(tmp_path: Path) -> None:
     journal, repository, _ = campaign(tmp_path)
     run_id, target = admit_phase(journal, repository)
     settle(journal, repository, run_id, target)
     first = decision(journal, decision_id="first")
     second = decision(journal, decision_id="second", next_phase="repair")
 
-    def publish(value):
+    def publish(value: AgentCampaignDecision) -> str:
         try:
             journal.commit_agent_campaign_decision(value)
         except JournalConflict:
@@ -403,7 +545,7 @@ def test_competing_advancements_commit_only_one_successor(tmp_path):
     assert sum(isinstance(record.fact, AgentCampaignDecision) for record in records) == 1
 
 
-def test_convergence_refuses_unresolved_work_and_accepted_cancel(tmp_path):
+def test_convergence_refuses_unresolved_work_and_accepted_cancel(tmp_path: Path) -> None:
     journal, repository, _ = campaign(tmp_path)
     run_id, _ = admit_phase(journal, repository)
     with pytest.raises(JournalConflict, match="unresolved work"):
@@ -420,7 +562,9 @@ def test_convergence_refuses_unresolved_work_and_accepted_cancel(tmp_path):
     assert journal.agent_campaign_result("campaign").stop_reason is AgentRepairStopReason.CANCELLED
 
 
-def test_changed_settled_evidence_and_unselected_phase_rejected_before_publication(tmp_path):
+def test_changed_settled_evidence_and_unselected_phase_rejected_before_publication(
+    tmp_path: Path,
+) -> None:
     journal, repository, _ = campaign(tmp_path)
     run_id, target = admit_phase(journal, repository)
     settle(journal, repository, run_id, target)
@@ -436,7 +580,7 @@ def test_changed_settled_evidence_and_unselected_phase_rejected_before_publicati
     assert journal.read_view().run_detail("second") is None
 
 
-def test_controller_diagnostics_are_redacted_before_canonical_persistence(tmp_path):
+def test_controller_diagnostics_are_redacted_before_canonical_persistence(tmp_path: Path) -> None:
     journal, _, _ = campaign(tmp_path)
     canary = "campaign-secret-canary-0f9b"
     terminal = decision(journal, stop=AgentRepairStopReason.EXECUTION_UNRESOLVED)
@@ -455,19 +599,22 @@ def test_controller_diagnostics_are_redacted_before_canonical_persistence(tmp_pa
     assert canary not in payload
 
 
-def test_receipt_declares_full_verified_cut_after_unrelated_later_fact(tmp_path):
+def test_receipt_declares_full_verified_cut_after_unrelated_later_fact(tmp_path: Path) -> None:
     journal, _, intent = campaign(tmp_path)
     terminal = decision(journal, stop=AgentRepairStopReason.CANCELLED)
     committed = journal.commit_agent_campaign_decision(terminal)
     journal.begin_agent_campaign(intent.model_copy(update={"campaign_id": "unrelated"}))
     receipt = journal.agent_campaign_result("campaign")
+    assert receipt.campaign_journal is not None
     assert receipt.journal_revision == journal.read_view().revision
     assert receipt.campaign_journal.journal_revision == receipt.journal_revision
     assert receipt.campaign_journal.latest_revision == committed.latest_revision
     assert receipt.campaign_journal.latest_revision < receipt.journal_revision
 
 
-def test_convergence_requires_final_verification_and_its_exact_candidate_scope(tmp_path):
+def test_convergence_requires_final_verification_and_its_exact_candidate_scope(
+    tmp_path: Path,
+) -> None:
     journal, repository, _ = campaign(tmp_path)
     run_id, target = admit_phase(journal, repository)
     settle(journal, repository, run_id, target)
@@ -490,7 +637,250 @@ def test_convergence_requires_final_verification_and_its_exact_candidate_scope(t
     assert journal.agent_campaign_result("campaign").converged
 
 
-def test_blocking_unstarted_selection_must_preserve_original_phase_membership(tmp_path):
+def _recovery_review(
+    candidate: str,
+    *,
+    clean: bool = False,
+    scope: str = "scope",
+    reviewed_paths: tuple[str, ...] = ("repo/code.py",),
+) -> AgentReviewRecord:
+    return AgentReviewRecord.model_validate(
+        {
+            "reviewer": "review",
+            "candidate_identity": candidate,
+            "scope_identity": scope,
+            "skill_identity": "skill",
+            "verdict": "CLEAN" if clean else "FINDING",
+            "summary": "Review the exact failed candidate",
+            "reviewed_paths": reviewed_paths,
+            "findings": ()
+            if clean
+            else (
+                {
+                    "finding_id": "defect",
+                    "explanation": "The native regression proves a defect",
+                    "evidence": ({"path": "repo/code.py", "sha256": "a" * 64, "line": 1},),
+                },
+            ),
+        }
+    )
+
+
+def _recovery_adjudication() -> AgentAdjudicationRecord:
+    return AgentAdjudicationRecord.model_validate(
+        {
+            "candidate_identity": "candidate",
+            "scope_identity": "scope",
+            "dispositions": (
+                {
+                    "reviewer": "review",
+                    "finding_id": "defect",
+                    "decision": "repair",
+                    "rationale": "Confirmed native failure",
+                },
+            ),
+            "queue": (
+                {
+                    "queue_id": "repair-defect",
+                    "findings": ({"reviewer": "review", "finding_id": "defect"},),
+                    "rationale": "Repair the current failed candidate",
+                    "regression_expectation": "The native check passes",
+                },
+            ),
+        }
+    )
+
+
+@pytest.mark.parametrize("added_path", (False, True))
+def test_recovered_regression_decision_preserves_failed_run_and_reopens_convergence(
+    tmp_path: Path,
+    added_path: bool,
+) -> None:
+    final_scope = "scope-after-created-path" if added_path else "scope"
+    journal, repository, _ = campaign(
+        tmp_path,
+        initial_phase="regression",
+        maximum_runs=7,
+        write_roots=("code.py", "added.py") if added_path else ("code.py",),
+    )
+    phases = (
+        ("regression", "candidate", "scope", 1, 1, None),
+        ("review", "candidate", "scope", 2, 0, _recovery_review("candidate")),
+        ("adjudicate", "candidate", "scope", 2, 0, _recovery_adjudication()),
+        ("repair", "candidate", "scope", 2, 0, None),
+        ("regression", "after", final_scope, 2, 0, None),
+        (
+            "review",
+            "after",
+            final_scope,
+            3,
+            0,
+            _recovery_review(
+                "after",
+                clean=True,
+                scope=final_scope,
+                reviewed_paths=("repo/code.py", "repo/added.py")
+                if added_path
+                else ("repo/code.py",),
+            ),
+        ),
+        ("verification", "after", final_scope, 3, 0, None),
+    )
+    for index, (phase, candidate, scope, review_pass, code, record) in enumerate(phases):
+        run_id, target = admit_phase(
+            journal,
+            repository,
+            ordinal=index + 1,
+            phase=phase,
+            candidate=candidate,
+            scope=scope,
+            review_pass=review_pass,
+            recoverable=index == 0,
+        )
+        settle(
+            journal,
+            repository,
+            run_id,
+            target,
+            exit_code=code,
+            record=record,
+            worktree_files_after=("added.py",) if added_path and phase == "repair" else (),
+        )
+        if index + 1 < len(phases):
+            marker = regression_recovery(journal.read_view().required_run_detail(run_id))
+            journal.commit_agent_campaign_decision(
+                decision(
+                    journal,
+                    decision_id=f"advance-{index}",
+                    next_phase=phases[index + 1][0],
+                    candidate=phases[index + 1][1],
+                    scope=phases[index + 1][2],
+                    recovery=marker,
+                )
+            )
+    terminal = decision(
+        journal,
+        stop=AgentRepairStopReason.CONVERGED,
+        decision_id="converged",
+        candidate="after",
+        scope=final_scope,
+    )
+    journal.commit_agent_campaign_decision(terminal)
+    original = journal.read_view().required_run_detail("campaign")
+    assert original.outcome.value != "SUCCESS"
+    original_evidence = original.operations[0].evidence
+    assert isinstance(original_evidence, FleetPlanOperationEvidence)
+    assert original_evidence.plan is not None
+    assert original_evidence.plan.steps[0].settlement.outcome == "FAILED"
+    reopened = Journal(LocalDatabase(tmp_path / "state.db"))
+    result = reopened.agent_campaign_result("campaign")
+    assert result.converged and result.admitted_run_ids == (
+        "campaign",
+        "second",
+        "phase-3",
+        "phase-4",
+        "phase-5",
+        "phase-6",
+        "phase-7",
+    )
+    assert reopened.read_view().required_run_detail("campaign") == original
+    if added_path:
+        assert result.campaign_journal is not None
+        assert result.campaign_journal.phases[3].context.scope_identity == "scope"
+        assert result.campaign_journal.phases[4].context.scope_identity == final_scope
+        assert result.campaign_journal.terminal_decision is not None
+        assert result.campaign_journal.terminal_decision.scope_identity == final_scope
+
+
+@pytest.mark.parametrize("forgery", ("missing", "operation", "physical", "candidate", "scope"))
+def test_regression_recovery_is_accepted_before_successor_effect_only_for_exact_result(
+    tmp_path: Path, forgery: str
+) -> None:
+    journal, repository, _ = campaign(tmp_path, initial_phase="regression")
+    run_id, target = admit_phase(journal, repository, phase="regression", recoverable=True)
+    settle(journal, repository, run_id, target, exit_code=1)
+    marker = regression_recovery(journal.read_view().required_run_detail(run_id))
+    assert marker is not None
+    if forgery == "missing":
+        marker = None
+    elif forgery == "physical":
+        marker = marker.model_copy(
+            update={
+                "feedback": (
+                    marker.feedback[0].model_copy(
+                        update={"physical_execution_id": "foreign-process"}
+                    ),
+                )
+            }
+        )
+    else:
+        key = {
+            "operation": "operation_id",
+            "candidate": "candidate_identity",
+            "scope": "scope_identity",
+        }[forgery]
+        marker = marker.model_copy(update={key: "foreign"})
+    before = journal.read_view().revision
+    with pytest.raises(JournalConflict, match="safely settled regression recovery"):
+        journal.commit_agent_campaign_decision(
+            decision(journal, next_phase="review", recovery=marker)
+        )
+    assert journal.read_view().revision == before
+    assert journal.read_view().run_detail("second") is None
+
+
+@pytest.mark.parametrize("forgery", ("missing", "text", "candidate", "run"))
+def test_new_agent_phase_cannot_replace_committed_regression_feedback(
+    tmp_path: Path, forgery: str
+) -> None:
+    journal, repository, _ = campaign(tmp_path, initial_phase="regression")
+    run_id, target = admit_phase(journal, repository, phase="regression", recoverable=True)
+    settle(journal, repository, run_id, target, exit_code=1)
+    detail = journal.read_view().required_run_detail(run_id)
+    marker = regression_recovery(detail)
+    assert marker is not None
+    feedback = regression_feedback_context(detail, marker)
+    journal.commit_agent_campaign_decision(
+        decision(journal, next_phase="review", next_step_ids=("review", "agent"), recovery=marker)
+    )
+    correct = json.dumps({"regression_feedback": feedback})
+    changed = json.loads(correct)
+    if forgery == "missing":
+        changed = {}
+    elif forgery == "text":
+        changed["regression_feedback"]["feedback"][0]["text"] = "different failure"
+    elif forgery == "candidate":
+        changed["regression_feedback"]["candidate_identity"] = "foreign-candidate"
+    else:
+        changed["regression_feedback"]["fleet_run_id"] = "foreign-run"
+    before = journal.read_view().revision
+    with pytest.raises(JournalConflict, match="regression feedback"):
+        admit_phase(
+            journal,
+            repository,
+            ordinal=2,
+            phase="review",
+            review_pass=2,
+            with_agent=True,
+            agent_context=json.dumps(changed),
+        )
+    assert journal.read_view().revision == before
+    assert journal.read_view().run_detail("second") is None
+    admitted, _ = admit_phase(
+        journal,
+        repository,
+        ordinal=2,
+        phase="review",
+        review_pass=2,
+        with_agent=True,
+        agent_context=correct,
+    )
+    assert admitted == "second"
+
+
+def test_blocking_unstarted_selection_must_preserve_original_phase_membership(
+    tmp_path: Path,
+) -> None:
     journal, _, _ = campaign(tmp_path)
     terminal = decision(journal, stop=AgentRepairStopReason.EXECUTION_UNRESOLVED)
     selected = AgentCampaignUnstartedSelection(
@@ -508,10 +898,14 @@ def test_blocking_unstarted_selection_must_preserve_original_phase_membership(tm
     selected = selected.model_copy(update={"phase": "review", "selected_step_ids": ("review",)})
     terminal = terminal.model_copy(update={"unstarted_selection": selected})
     journal.commit_agent_campaign_decision(terminal)
-    assert journal.agent_campaign("campaign").terminal_decision.unstarted_selection == selected
+    committed = journal.agent_campaign("campaign").terminal_decision
+    assert committed is not None
+    assert committed.unstarted_selection == selected
 
 
-def test_redaction_expansion_retains_bounded_idempotent_canonical_diagnostic(tmp_path):
+def test_redaction_expansion_retains_bounded_idempotent_canonical_diagnostic(
+    tmp_path: Path,
+) -> None:
     journal, _, _ = campaign(tmp_path)
     message = "token=x " * (MAX_AGENT_CAMPAIGN_MESSAGE_CHARS // len("token=x "))
     assert len(message) <= MAX_AGENT_CAMPAIGN_MESSAGE_CHARS
@@ -523,6 +917,7 @@ def test_redaction_expansion_retains_bounded_idempotent_canonical_diagnostic(tmp
     )
     committed = journal.commit_agent_campaign_decision(terminal)
     retained = committed.terminal_decision
+    assert retained is not None
     assert retained.message == TRUNCATED_AGENT_CAMPAIGN_MESSAGE
     assert len(retained.message) <= MAX_AGENT_CAMPAIGN_MESSAGE_CHARS
     assert "token=x" not in committed.model_dump_json()
@@ -544,7 +939,9 @@ def test_redaction_expansion_retains_bounded_idempotent_canonical_diagnostic(tmp
         "phase_campaign",
     ],
 )
-def test_test_passed_publication_requires_its_accepted_native_test(tmp_path, contradiction):
+def test_test_passed_publication_requires_its_accepted_native_test(
+    tmp_path: Path, contradiction: str
+) -> None:
     initial_phase = "test" if contradiction != "phase_campaign" else "review"
     journal, repository, _ = campaign(
         tmp_path, initial_phase=initial_phase, failure_driven=contradiction != "phase_campaign"
@@ -576,8 +973,8 @@ def test_test_passed_publication_requires_its_accepted_native_test(tmp_path, con
 
 @pytest.mark.parametrize("prior_cleanup", ["VERIFIED", "UNVERIFIED"])
 def test_test_passed_reference_preserves_prior_failure_and_requires_all_cleanup(
-    tmp_path, prior_cleanup
-):
+    tmp_path: Path, prior_cleanup: Literal["VERIFIED", "UNVERIFIED"]
+) -> None:
     journal, repository, _ = campaign(tmp_path, initial_phase="test", failure_driven=True)
     run_id, target = admit_phase(journal, repository, phase="test", failure_driven=True)
     settle(
@@ -616,11 +1013,16 @@ def test_test_passed_reference_preserves_prior_failure_and_requires_all_cleanup(
     reopened = Journal(LocalDatabase(tmp_path / "state.db"))
     receipt = reopened.agent_campaign_result("campaign")
     assert receipt.test_passed
+    assert receipt.campaign_journal is not None
+    assert receipt.campaign_journal.terminal_decision is not None
     assert receipt.campaign_journal.terminal_decision.passed_test_step_id == "test"
-    assert receipt.attempts[0].operations[0].evidence.plan.steps[0].settlement.outcome == "FAILED"
+    original_evidence = receipt.attempts[0].operations[0].evidence
+    assert isinstance(original_evidence, FleetPlanOperationEvidence)
+    assert original_evidence.plan is not None
+    assert original_evidence.plan.steps[0].settlement.outcome == "FAILED"
 
 
-def test_test_passed_reference_is_mandatory_only_for_that_decision(tmp_path):
+def test_test_passed_reference_is_mandatory_only_for_that_decision(tmp_path: Path) -> None:
     journal, _, _ = campaign(tmp_path)
     with pytest.raises(ValueError, match="accepted native test reference"):
         decision(journal, stop=AgentRepairStopReason.TEST_PASSED)
@@ -628,7 +1030,9 @@ def test_test_passed_reference_is_mandatory_only_for_that_decision(tmp_path):
         decision(journal, stop=AgentRepairStopReason.CANCELLED, passed_test_step_id="test")
 
 
-def test_convergence_consumes_canonical_service_completion_before_publication(tmp_path):
+def test_convergence_consumes_canonical_service_completion_before_publication(
+    tmp_path: Path,
+) -> None:
     journal, repository, _ = campaign(tmp_path)
     run_id, target = admit_phase(journal, repository)
     settlement = PlanStepSettlementEvidence(

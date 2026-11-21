@@ -527,6 +527,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                         package.mkdir()
                         content = yaml.safe_load(templates.source(f"agents/{phase}").content)
                         content["steps"][0]["success_codes"] = [0, 1]
+                        content["steps"][0].pop("regression_failure", None)
                     (package / "goon.yml").write_text(yaml.safe_dump(content, sort_keys=False))
                     (package / "README.md").write_text(f"# agents/{phase}\n")
                 path.write_text(
@@ -852,7 +853,9 @@ max_output_tokens = 8192
                         repository_id=repository_id(repo),
                         budget=AgentRepairBudget(
                             max_attempts=passes,
-                            timeout_seconds=45,
+                            # This positive vector includes six claimed workers
+                            # and cold producer preparation, not a latency bound.
+                            timeout_seconds=120 if scenario == "accepted_nonzero" else 45,
                             # Exercise a stalled model request after cold producer
                             # startup, rather than racing that startup on busy hosts.
                             step_timeout_seconds=5 if scenario == "timeout" else 10,

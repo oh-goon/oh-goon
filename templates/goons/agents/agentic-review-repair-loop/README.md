@@ -22,4 +22,17 @@ Select registered Skills and a provider, and set the review-pass, write-root and
 
 Reviews share one frozen candidate. Findings feed adjudication, repair and regression checks; each changed candidate restarts at reviewer one. Completion requires fresh CLEAN records from every reviewer and successful final verification on that candidate. Each phase uses the ordinary Run lifecycle; convergence does not confer APP certification.
 
+A declared ordinary regression failure can start another fresh review when its
+native process has settled safely and complete, bounded stdout feedback is
+available. Review, adjudication and repair receive that candidate-bound feedback;
+the failed Run remains failed history. Missing feedback, uncertain cleanup,
+cancellation, timeouts and undeclared failures stop the campaign. A CLEAN review
+cannot override a known failed regression on the same candidate.
+
+Recovery consumes the original deadline and pass/Run budgets. The next repair
+uses fresh repository evidence and current file preimages, then must pass the
+unchanged regression command, fresh review and final verification. Frozen Skills,
+harness selection and allowed write roots continue to apply. See the
+[regression script contract](../regression/README.md) for exit codes and feedback.
+
 Copy this Composite into a project-owned catalog to replace, append or reorder reviewers. Edit the ordered `phase: review` imports and their `with.skill` bindings. The controller accepts any registered Skill; native Git owns external Skill checkout and pinning.
