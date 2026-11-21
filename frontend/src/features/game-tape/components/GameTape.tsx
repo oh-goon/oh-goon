@@ -329,15 +329,17 @@ function GameTapeRecovery({
 }) {
   const { t } = useTranslation();
   const action = gameTapeRecoveryAction(detail.feedback, detail.run.fleet_run_id, detail.journal_revision, detail.run.status, detail.outcome);
-  if (action === "none" || detail.run.status !== "FAILED") return null;
+  if (detail.run.status !== "FAILED") return null;
   const failure = detail.run.failure;
-  const handler = action === "open-recovery" ? onOpenRecovery : onOpenRunActions;
+  const handler = action === "none" ? undefined : action === "open-recovery" ? onOpenRecovery : onOpenRunActions;
   const actionKey = action === "open-recovery" ? "openRecovery" : "openRunActions";
   return <section className="game-tape-recovery" aria-label={t("gameTape.recovery.title")}>
     <div>
-      <span className="eyebrow">{t("gameTape.recovery.eyebrow")}</span>
-      <strong>{t(`gameTape.recovery.${action}.title`)}</strong>
-      <p>{t(`gameTape.recovery.${action}.description`)}</p>
+      {action === "none" ? <strong>{t("history.runError")}</strong> : <>
+        <span className="eyebrow">{t("gameTape.recovery.eyebrow")}</span>
+        <strong>{t(`gameTape.recovery.${action}.title`)}</strong>
+        <p>{t(`gameTape.recovery.${action}.description`)}</p>
+      </>}
       <small>{failure.code} · {failure.message}</small>
     </div>
     {handler ? <button className="button button--secondary" type="button" onClick={handler}>
