@@ -497,7 +497,7 @@ def _run_selected(
             skill=skill,
             task=task,
             verification=verification,
-            **({"prior_context": prior_context} if prior_context is not None else {}),
+            prior_context=prior_context,
         )
         print(f"Fleet Run ID: {admitted.fleet_run_id}", file=sys.stderr)
         _print_handoff_reference(admitted.fleet_run_id)
