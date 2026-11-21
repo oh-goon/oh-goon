@@ -66,8 +66,10 @@ independently readable. Diagnostic loss must not turn a successful command into
 failure or a failed command into success.
 
 Python Goon preparation runs native `uv sync` before its application command.
-If a required wheel write fails during preparation, the native nonzero exit
-remains the Step attempt's observed result and the application does not start.
+If a required wheel write or environment installation fails during preparation,
+the native nonzero exit remains the Step attempt's observed result and the
+application does not start. A built wheel or populated cache alone does not
+establish a prepared environment.
 Its declared output can be reported `MISSING`; this is not an accepted retained
 artifact. The Step command still describes the authored application, while
 native process events retain the preparation process lifecycle. Frozen preparation
