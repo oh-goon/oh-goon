@@ -7,13 +7,15 @@ disclosure, admission, result publication or native configuration parsing.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Literal, get_args
+from typing import Literal, TypedDict, get_args
 
 from pydantic import Field, field_validator, model_validator
 
+from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_review import MAX_REVIEW_BYTES, review_scope
@@ -29,6 +31,29 @@ from oh_goon.core.product_identity import stable_id
 _MAX_RESULT_BYTES = 1024 * 1024
 _MAX_FINDINGS = 128
 _MAX_FINDING_CHARS = 4000
+
+
+class AgentTaskReadback(TypedDict):
+    task_summary: str
+    task_sha256: str
+    task_omitted_characters: int
+    task_redacted: bool
+
+
+def captured_task_readback(task: str) -> AgentTaskReadback:
+    """Bounded untrusted context from the exact captured task, never new intent.
+
+    The digest identifies original bytes. Omissions count the redacted text;
+    a summary is neither the complete task nor authority to repeat its effects.
+    """
+    safe = redact_diagnostic_text(task)
+    return {
+        "task_summary": safe[:2048],
+        "task_sha256": hashlib.sha256(task.encode("utf-8")).hexdigest(),
+        "task_omitted_characters": max(0, len(safe) - 2048),
+        "task_redacted": safe != task,
+    }
+
 
 HarnessRole = AgentResultRole
 HarnessCapability = Literal[

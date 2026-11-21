@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FleetRunStatus, OperationAction } from "@generated/enums";
 import type { FailedFleetRun, OperationAction as OperationActionModel } from "@generated/models";
 import { gameTapeRecoveryAction, sameRunRepositoryIds } from "@/features/game-tape/runRecovery";
+import { fixtureRunFeedback } from "../../../e2e/fixtures/runFeedback";
 
 function failedRun(code: string, action: OperationActionModel = OperationAction.EXECUTE_PLAN): FailedFleetRun {
   return {
@@ -30,27 +31,20 @@ function failedRun(code: string, action: OperationActionModel = OperationAction.
 }
 
 describe("gameTapeRecoveryAction", () => {
-  it("uses durable readmission only for executor placement loss", () => {
-    expect(gameTapeRecoveryAction(failedRun("EXECUTOR_PLACEMENT_LOST"), true)).toBe("readmit-placement");
+  it.each(["readmit-placement", "open-recovery", "run-same-target", "none"] as const)("presents the backend action %s for the exact Run cut", (action) => {
+    expect(gameTapeRecoveryAction(fixtureRunFeedback("run-1", { recovery_action: action }), "run-1", 203)).toBe(action);
   });
 
-  it("routes uncertain repository effects to evidence-first Recovery", () => {
-    expect(gameTapeRecoveryAction(failedRun("REPOSITORY_EFFECT_OUTCOME_UNKNOWN"), true)).toBe("open-recovery");
-    expect(gameTapeRecoveryAction(failedRun("RUN_PARTIALLY_COMMITTED_BY_RESTART"), true)).toBe("open-recovery");
+  it("does not authorize controls from absent, foreign, omitted or stale feedback", () => {
+    expect(gameTapeRecoveryAction(undefined, "run-1")).toBe("none");
+    expect(gameTapeRecoveryAction(fixtureRunFeedback("other", { recovery_action: "run-same-target" }), "run-1")).toBe("none");
+    expect(gameTapeRecoveryAction(fixtureRunFeedback("run-1", { recovery_action: "run-same-target", fleet_run_id: null }), "run-1")).toBe("none");
+    expect(gameTapeRecoveryAction(fixtureRunFeedback("run-1", { recovery_action: "run-same-target" }), "run-1", 204)).toBe("none");
+    expect(gameTapeRecoveryAction(fixtureRunFeedback("run-1", { recovery_action: "run-same-target" }), "run-1", 203, "RUNNING")).toBe("none");
+    expect(gameTapeRecoveryAction(fixtureRunFeedback("run-1", { recovery_action: "run-same-target" }), "run-1", 203, "FAILED", "SUCCESS")).toBe("none");
   });
 
-  it("reruns the exact recorded target for ordinary execution failures", () => {
-    const run = failedRun("COMMAND_FAILED");
-    expect(gameTapeRecoveryAction(run, true)).toBe("run-same-target");
-    expect(sameRunRepositoryIds(run)).toEqual(["repo-a", "repo-b"]);
-  });
-
-  it("uses projected rerun policy rather than action identity", () => {
-    expect(
-      gameTapeRecoveryAction(failedRun("COMMAND_FAILED", OperationAction.PREPARE_REVIEW), true),
-    ).toBe("run-same-target");
-    expect(
-      gameTapeRecoveryAction(failedRun("COMMAND_FAILED", OperationAction.EXECUTE_PLAN), false),
-    ).toBe("none");
+  it("preserves the original recorded repository targets", () => {
+    expect(sameRunRepositoryIds(failedRun("COMMAND_FAILED"))).toEqual(["repo-a", "repo-b"]);
   });
 });

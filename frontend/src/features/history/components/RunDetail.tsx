@@ -47,12 +47,10 @@ export function RunDetail({ detail, summary, actionsDisabled, onRunAgain, onRead
   const action = run.capability.action;
   const failure = fleetRunFailure(run);
   const hasEnforcerReceipt = detail.game_tape.enforcer_receipt_available;
-  const failureRecovery = gameTapeRecoveryAction(run, detail.rerun_supported);
+  const failureRecovery = gameTapeRecoveryAction(detail.feedback, run.fleet_run_id, detail.journal_revision, run.status, detail.outcome);
   const lineage = runLineage(detail.execution);
   const rerunBlocked =
-    !detail.rerun_supported ||
-    failureRecovery === "readmit-placement" ||
-    failureRecovery === "open-recovery" ||
+    failureRecovery !== "run-same-target" ||
     actionsDisabled ||
     included === 0;
   const [targetPage, setTargetPage] = useState(0);
@@ -90,7 +88,7 @@ export function RunDetail({ detail, summary, actionsDisabled, onRunAgain, onRead
         </div>
       ) : null}
 
-      {detail.rerun_supported || failureRecovery === "readmit-placement" || failureRecovery === "open-recovery" ? (
+      {failureRecovery !== "none" || hasEnforcerReceipt ? (
         <div className="run-detail-actions">
           {failureRecovery === "readmit-placement" ? <button
             className="button button--secondary"
@@ -104,7 +102,7 @@ export function RunDetail({ detail, summary, actionsDisabled, onRunAgain, onRead
             disabled={actionsDisabled}
             onClick={onOpenRecovery}
           >{t("gameTape.recovery.openRecovery")}</button> : null}
-          {failureRecovery !== "readmit-placement" && failureRecovery !== "open-recovery" ? <button
+          {failureRecovery === "run-same-target" ? <button
             className="button button--secondary"
             type="button"
             disabled={rerunBlocked}

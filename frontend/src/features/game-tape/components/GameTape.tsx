@@ -18,6 +18,7 @@ import { GameTapePerformance } from "@/features/game-tape/components/GameTapePer
 import { GameTapePlayByPlay } from "@/features/game-tape/components/GameTapePlayByPlay";
 import { GameTapeSearch } from "@/features/game-tape/components/GameTapeSearch";
 import { GameTapeSummary } from "@/features/game-tape/components/GameTapeSummary";
+import { GameTapeRunFeedback } from "@/features/game-tape/components/GameTapeRunFeedback";
 import { GameTapeTimeline } from "@/features/game-tape/components/GameTapeTimeline";
 import { GameTapeVerification } from "@/features/game-tape/components/GameTapeVerification";
 import { statusTone } from "@/features/game-tape/gameTapeFormat";
@@ -203,6 +204,7 @@ function GameTapeRun({
       onOpenRecovery={onOpenRecovery}
     />
     <GameTapeAuthorityWhyNot tape={tape} />
+    <GameTapeRunFeedback feedback={detail.feedback} runId={detail.run.fleet_run_id} journalRevision={detail.journal_revision} status={detail.run.status} outcome={detail.outcome} />
     {hasIssues ? <GameTapeIssueOverview
       issues={tape.issue_focus ?? []}
       issueCount={issueCount}
@@ -326,7 +328,7 @@ function GameTapeRecovery({
   onOpenRecovery?: () => void;
 }) {
   const { t } = useTranslation();
-  const action = gameTapeRecoveryAction(detail.run, detail.rerun_supported);
+  const action = gameTapeRecoveryAction(detail.feedback, detail.run.fleet_run_id, detail.journal_revision, detail.run.status, detail.outcome);
   if (action === "none" || detail.run.status !== "FAILED") return null;
   const failure = detail.run.failure;
   const handler = action === "open-recovery" ? onOpenRecovery : onOpenRunActions;

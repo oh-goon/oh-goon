@@ -12,6 +12,7 @@ from oh_goon.core.models.agent_repair import (
 )
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import requested_fleet_repository_scope
+from oh_goon.core.models.run_feedback import RunFeedback
 from oh_goon.core.models.run_launch import ManagedApplicationLaunchReceipt
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
@@ -83,6 +84,7 @@ class AgentCampaignResult(BaseModel):
 
     schema_name: Literal["oh-goon.agent-campaign-result/v2"] = Field(alias="schema")
     campaign_id: str
+    feedback: RunFeedback | None = None
     journal_revision: int | None
     invocation_result: AgentCampaignInvocationResult | None = Field(
         default=None, exclude_if=lambda value: value is None

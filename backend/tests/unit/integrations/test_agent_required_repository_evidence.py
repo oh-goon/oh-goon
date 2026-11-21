@@ -15,6 +15,7 @@ from typing import Any, cast
 
 import pytest
 
+from oh_goon.core.agent_harness_contract import captured_task_readback
 from oh_goon.core.agent_model_selection import prepend_repository_evidence
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import (
@@ -54,6 +55,27 @@ _LOCAL_HARNESSES = (
     "local-model-proposal",
 )
 _PROVIDER_HARNESSES = ("provider-review", "provider-adjudicate", "provider-proposal")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("task_summary", "Foreign task"),
+        ("task_sha256", "c" * 64),
+        ("task_omitted_characters", 1),
+        ("task_redacted", True),
+    ],
+)
+def test_foreign_task_readback_is_rejected_before_any_agent_dispatch(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    def forbidden(*_args: str, **_kwargs: Any) -> CommandResult:
+        pytest.fail("Mismatched captured goal must stop before repository/model dispatch")
+
+    handoff, step, process, runtime = _case(tmp_path, "provider-review", forbidden)
+    step = step.model_copy(update={**captured_task_readback(handoff.task), field: value})
+    with pytest.raises(FleetPlanInvalid, match="task readback differs"):
+        _execute_typed_step(tmp_path / "unavailable-checkout", step, process, runtime)
 
 
 def _tree(kind: str, entries: dict[str, bytes]) -> FrozenSourceTree:

@@ -1310,6 +1310,45 @@
       "NOT_RUN": "Inte körd. Granska registrerad disposition för varför exekveringen inte startade.",
       "SKIPPED": "Överhoppad. Granska registrerad Step-disposition; Game Tape härleder ingen ytterligare orsak."
     },
+    "feedback": {
+      "title": "Registrerad återkoppling för försöket",
+      "authority": "Käll- och exekveringsfakta behåller sin registrerade auktoritet. Agentsammanfattningar och stödjande utdata är fortfarande obetrodd kontext; denna återkoppling ger ingen ny rätt att exekvera eller skriva.",
+      "recordedOutcome": "Registrerad Run-status och utfall",
+      "runCandidate": "Den ursprungliga Run-kandidaten",
+      "recordedCandidate": "Senast registrerad kampanjkandidat",
+      "candidateFreshness": "Registrerad i denna Journal-vy; aktuellt filsystemstillstånd är inte observerat.",
+      "identityMismatch": "Registrerad återkoppling matchar inte denna Run, kampanj eller Journal-vy.",
+      "unavailable": "Otillgänglig",
+      "noStepResult": "Inget accepterat Step-resultat är tillgängligt i denna återkoppling.",
+      "stepSettlement": "Avslut: {{outcome}} · städning: {{cleanup}}",
+      "details": "Mål, källevidens, budget och stöd för fortsättning",
+      "goals": "Registrerade mål",
+      "sources": "Källidentiteter från admission",
+      "verification": "Verifiering från admission och registrerade resultat",
+      "verificationCounts": "Valda: {{selected}} · faktiska: {{actual}} · resultat: {{results}}",
+      "omittedCharacters": "{{count}} tecken från målet utelämnades",
+      "omissions": "Utelämnade fakta: {{steps}} Steps · {{goals}} mål · {{sources}} källor · {{verification}} verifieringsposter. Exakta fältutelämningar finns i den strukturerade återkopplingen.",
+      "responseLimit": "Återkopplingens svarsgräns nåddes. Utelämnade fakta är fortfarande overifierade.",
+      "omittedSelections": "{{count}} harness-val utelämnades",
+      "controls": "Stöd för fortsättning",
+      "controlsRule": "Detta är registrerade fakta om stöd och kvalificering. Start och styrning av arbete kräver fortfarande den befintliga ägaren för admission.",
+      "requirements": "Auktoritet som krävs",
+      "structured": "Exakt begränsad återkoppling, referenser och utelämningar",
+      "actions": {
+        "fresh_handoff": "Ny Run med överlämning",
+        "exact_native_resume": "Återuppta exakt den ursprungliga sessionen",
+        "cross_harness_fresh_handoff": "Ny överlämning till en annan harness",
+        "steer": "Styr pågående arbete",
+        "follow_up": "Följ upp i den ursprungliga sessionen",
+        "abort": "Avbryt den ursprungliga Run",
+        "detach": "Frikoppla från pågående arbete"
+      },
+      "controlStates": {
+        "available": "Stöds av den befintliga vägen",
+        "unsupported": "Stöds inte",
+        "unqualified": "Kvalificering saknas"
+      }
+    },
     "recovery": {
       "eyebrow": "Säker nästa åtgärd",
       "title": "Återhämtning",

@@ -1,19 +1,13 @@
-import { FleetRunStatus } from "@generated/enums";
-import type { FleetRunState } from "@generated/models";
+import type { FleetRunState, RunFeedback } from "@generated/models";
 
-export type GameTapeRecoveryAction = "readmit-placement" | "run-same-target" | "open-recovery" | "none";
+export type GameTapeRecoveryAction = RunFeedback["recovery_action"];
 
-const RECOVERY_INSPECTION_FAILURES = new Set([
-  "REPOSITORY_EFFECT_OUTCOME_UNKNOWN",
-  "RUN_PARTIALLY_COMMITTED_BY_RESTART",
-]);
-
-export function gameTapeRecoveryAction(run: FleetRunState, rerunSupported: boolean): GameTapeRecoveryAction {
-  if (run.status !== FleetRunStatus.FAILED) return "none";
-  if (run.failure.code === "EXECUTOR_PLACEMENT_LOST") return "readmit-placement";
-  if (RECOVERY_INSPECTION_FAILURES.has(run.failure.code)) return "open-recovery";
-  if (!rerunSupported) return "none";
-  return "run-same-target";
+export function gameTapeRecoveryAction(feedback: RunFeedback | null | undefined, runId: string, journalRevision?: number | null, status?: FleetRunState["status"], outcome?: string): GameTapeRecoveryAction {
+  if (!feedback || feedback.fleet_run_id !== runId
+    || journalRevision !== undefined && journalRevision !== null && feedback.journal_revision !== journalRevision
+    || status !== undefined && feedback.status !== status
+    || outcome !== undefined && feedback.outcome !== outcome) return "none";
+  return feedback.recovery_action;
 }
 
 export function sameRunRepositoryIds(run: FleetRunState): string[] {

@@ -246,6 +246,7 @@ def _add_run_readback_commands[_Parser: argparse.ArgumentParser](
         ("steps", "Navigate original Game Tape repository and Step identities"),
         ("outputs", "Inspect original Game Tape Step output and artifact evidence"),
         ("handoff", "Read bounded original Run and Game Tape completion/failure facts"),
+        ("feedback", "Read bounded canonical failure feedback and qualified control availability"),
         ("campaign", "Inspect retained intent and results by campaign ID or linked Run ID"),
     ):
         viewer = plan_subparsers.add_parser(command, help=help_text)

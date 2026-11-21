@@ -16,6 +16,7 @@ from oh_goon.core.models.agent_providers import (
     AgentMessage,
     AgentProviderError,
     AgentReply,
+    AgentResponseTruncated,
     ProviderHistoryAuthorizationRequired,
     ResolvedAgentModel,
     validate_provider_history_policy,
@@ -188,6 +189,8 @@ def _reply(selected: ResolvedAgentModel, payload: object) -> AgentReply:
             raise ValueError("provider error")
         api = selected.provider.api
         if api == "ollama":
+            if payload.get("done") is True and payload.get("done_reason") == "length":
+                raise AgentResponseTruncated("Selected provider reached its output-token limit")
             if payload.get("done") is not True or payload.get("done_reason", "stop") != "stop":
                 raise ValueError("incomplete response")
             text = payload["message"]["content"]
@@ -200,10 +203,18 @@ def _reply(selected: ResolvedAgentModel, payload: object) -> AgentReply:
                 raise ValueError("expected one choice")
             choice = choices[0]
             finish = choice["finish_reason"]
+            if finish == "length":
+                raise AgentResponseTruncated("Selected provider reached its output-token limit")
             if finish != "stop" or choice.get("error") or choice["message"].get("tool_calls"):
                 raise ValueError("incomplete response")
             text = choice["message"]["content"]
         elif api == "openai-responses":
+            if (
+                payload.get("status") == "incomplete"
+                and isinstance(payload.get("incomplete_details"), dict)
+                and payload["incomplete_details"].get("reason") == "max_output_tokens"
+            ):
+                raise AgentResponseTruncated("Selected provider reached its output-token limit")
             if payload.get("status") != "completed":
                 raise ValueError("incomplete response")
             texts = []
@@ -220,6 +231,8 @@ def _reply(selected: ResolvedAgentModel, payload: object) -> AgentReply:
             finish = "completed"
         else:
             finish = payload["stop_reason"]
+            if finish == "max_tokens":
+                raise AgentResponseTruncated("Selected provider reached its output-token limit")
             if finish not in {"end_turn", "stop_sequence"}:
                 raise ValueError("incomplete response")
             texts = []

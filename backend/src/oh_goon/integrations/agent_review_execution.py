@@ -188,7 +188,12 @@ def execute_provider_agent(
         )
     finally:
         request_file.unlink(missing_ok=True)
-    return accept_agent_phase_output(step, handoff, from_command(result))
+    # This private adapter owns exit 3 exclusively for the typed provider
+    # truncation refusal. Neither model text nor ordinary command exits select it.
+    outcome = from_command(result)
+    if result.returncode == 3:
+        outcome = replace(outcome, failure_kind="model_output_truncated")
+    return accept_agent_phase_output(step, handoff, outcome)
 
 
 def accept_agent_phase_output(
@@ -275,7 +280,7 @@ def accept_agent_phase_output(
 
 
 def _worker(path: Path) -> int:
-    from oh_goon.core.models.agent_providers import AgentProviderError
+    from oh_goon.core.models.agent_providers import AgentProviderError, AgentResponseTruncated
     from oh_goon.integrations.agent_provider_client import AgentProviderClient
 
     # The original Step prepared this bounded private request and explicit headers.
@@ -300,6 +305,9 @@ def _worker(path: Path) -> int:
         answer = AgentProviderClient().complete(
             selected, tuple(AgentMessage(**item) for item in payload["messages"])
         )
+    except AgentResponseTruncated as exc:
+        print(str(exc), file=sys.stderr)
+        return 3
     except AgentProviderError as exc:
         print(str(exc), file=sys.stderr)
         return 2

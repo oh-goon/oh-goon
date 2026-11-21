@@ -17,6 +17,7 @@ from oh_goon.core.models.agent_providers import (
     AgentMessage,
     AgentProviderError,
     AgentProvidersConfig,
+    AgentResponseTruncated,
     ResolvedAgentModel,
 )
 from oh_goon.engine.command import run_command
@@ -85,6 +86,41 @@ def response_for(api: str) -> dict[str, object]:
         "stop_reason": "end_turn",
         "content": [{"type": "text", "text": "hello"}],
     }
+
+
+@pytest.mark.parametrize(
+    "api",
+    ["ollama", "openai-chat-completions", "openai-responses", "anthropic-messages"],
+)
+def test_provider_output_limit_remains_a_typed_refusal(api: str) -> None:
+    payload: dict[str, Any] = response_for(api)
+
+    def handler(_request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json=payload)
+
+    client = AgentProviderClient(transport=httpx2.MockTransport(handler))
+    messages = [AgentMessage("user", "Selected task")]
+    assert client.complete(selection(api), messages).text == "hello"
+    if api == "ollama":
+        payload["done_reason"] = "length"
+    elif api == "openai-chat-completions":
+        payload["choices"][0]["finish_reason"] = "length"
+    elif api == "openai-responses":
+        payload.update(status="incomplete", incomplete_details={"reason": "max_output_tokens"})
+    else:
+        payload["stop_reason"] = "max_tokens"
+    with pytest.raises(AgentResponseTruncated):
+        client.complete(selection(api), messages)
+
+
+def test_unknown_incomplete_response_is_not_labeled_a_token_limit() -> None:
+    payload = {"status": "incomplete", "incomplete_details": {"reason": "unknown"}}
+    client = AgentProviderClient(
+        transport=httpx2.MockTransport(lambda _: httpx2.Response(200, json=payload))
+    )
+    with pytest.raises(AgentProviderError) as error:
+        client.complete(selection("openai-responses"), [AgentMessage("user", "Task")])
+    assert not isinstance(error.value, AgentResponseTruncated)
 
 
 @pytest.mark.parametrize(
@@ -456,7 +492,7 @@ def test_incomplete_tool_or_empty_responses_fail_explicitly(api, payload):
     def handler(request):
         return httpx2.Response(200, json=payload)
 
-    with pytest.raises(AgentProviderError, match="completed text response"):
+    with pytest.raises(AgentProviderError):
         AgentProviderClient(transport=httpx2.MockTransport(handler)).complete(
             selection(api), [AgentMessage("user", "hello")]
         )

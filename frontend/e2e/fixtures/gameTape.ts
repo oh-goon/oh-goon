@@ -104,6 +104,7 @@ export function fixtureUnadmittedCampaignResult(campaignId = "campaign-browser-r
   };
   return {
     schema: "oh-goon.agent-campaign-result/v2", campaign_id: campaignId, journal_revision: 203,
+    feedback: null,
     result: "incomplete", complete: true, intent, runs: [], repositories: [],
     incomplete_reasons: ["No admitted campaign Runs are available"],
     controller_result: { availability: "journal", stop_reason: "execution_unresolved", decision_id: "initial-refusal" },
