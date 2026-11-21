@@ -10,10 +10,15 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from oh_goon.core.agent_campaign_settlement import (
+    regression_feedback_context,
+    regression_recovery,
+)
 from oh_goon.core.agent_review_plan import agent_review_phases
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.fleet_plan_output_refs import step_output_reference
+from oh_goon.core.models.agent_repair import AgentRegressionRecovery
 from oh_goon.core.models.agent_repair import AgentRepairStopReason as Stop
 from oh_goon.core.models.agent_review import (
     AgentAdjudicationRecord,
@@ -339,6 +344,8 @@ class AgentReviewRepairCampaign:
         self.message = ""
         self.reviews: tuple[AgentReviewRecord, ...] = ()
         self.adjudication: AgentAdjudicationRecord | None = None
+        self.regression_recovery: AgentRegressionRecovery | None = None
+        self.regression_feedback: dict[str, Any] | None = None
         self.history = {self.candidate_identity}
         self.finding_history: set[tuple[tuple[str, str], ...]] = set()
         self.original_digest = build_execution_lock(plan, external_identities=lock_artifacts).digest
@@ -418,16 +425,19 @@ class AgentReviewRepairCampaign:
                 if handoff is None:
                     raise FleetPlanInvalid("review context lacks its original source handoff")
                 reviews.append(review_wire_record(record, handoff, record.reviewer))
+        context_data: dict[str, Any] = {
+            "candidate_identity": self.candidate_identity,
+            "scope_identity": self.scope_identity,
+            "write_roots": self.write_roots,
+            "reviews": reviews,
+            "adjudication": self.adjudication.model_dump(mode="json")
+            if self.adjudication
+            else None,
+        }
+        if self.regression_feedback is not None:
+            context_data["regression_feedback"] = self.regression_feedback
         context = json.dumps(
-            {
-                "candidate_identity": self.candidate_identity,
-                "scope_identity": self.scope_identity,
-                "write_roots": self.write_roots,
-                "reviews": reviews,
-                "adjudication": self.adjudication.model_dump(mode="json")
-                if self.adjudication
-                else None,
-            },
+            context_data,
             separators=(",", ":"),
         )
         if len(context.encode()) > 65536:
@@ -529,6 +539,8 @@ class AgentReviewRepairCampaign:
         return identity
 
     def advance(self, detail: FleetRunDetail) -> Stop | None:
+        self.regression_recovery = None
+        recovery: AgentRegressionRecovery | None = None
         if (
             getattr(getattr(detail.run, "failure", None), "code", None)
             == "OPERATION_DEADLINE_EXPIRED"
@@ -547,13 +559,29 @@ class AgentReviewRepairCampaign:
         try:
             steps = completed_phase_steps(detail, self.plan)
         except FleetPlanInvalid:
-            return {
-                "review": Stop.REVIEW_INCOMPLETE,
-                "adjudicate": Stop.ADJUDICATION_INCOMPLETE,
-                "repair": Stop.APPLY_FAILED,
-                "regression": Stop.REGRESSION_FAILED,
-                "verification": Stop.VERIFICATION_FAILED,
-            }[self.phase]
+            if self.phase == "regression":
+                recovery = regression_recovery(detail)
+                if recovery is None:
+                    return Stop.REGRESSION_FAILED
+                if (
+                    not isinstance(detail.run.target, FleetPlanTarget)
+                    or detail.run.target.plan.plan_id != self.plan.plan_id
+                    or recovery.candidate_identity != self.candidate_identity
+                    or recovery.scope_identity != self.scope_identity
+                ):
+                    raise FleetPlanInvalid(
+                        "regression recovery differs from its admitted candidate"
+                    ) from None
+                self.regression_feedback = regression_feedback_context(detail, recovery)
+                steps = ()
+            else:
+                return {
+                    "review": Stop.REVIEW_INCOMPLETE,
+                    "adjudicate": Stop.ADJUDICATION_INCOMPLETE,
+                    "repair": Stop.APPLY_FAILED,
+                    "regression": Stop.REGRESSION_FAILED,
+                    "verification": Stop.VERIFICATION_FAILED,
+                }[self.phase]
         if self.phase == "review":
             records = []
             for step in steps:
@@ -583,6 +611,8 @@ class AgentReviewRepairCampaign:
             if fingerprint:
                 self.finding_history.add(fingerprint)
             if all(record.verdict == "CLEAN" for record in self.reviews):
+                if self.regression_feedback is not None:
+                    return Stop.REGRESSION_FAILED
                 self.phase = "verification"
             elif any(
                 record.verdict in ("LEAVE_ALONE", "INSUFFICIENT_EVIDENCE")
@@ -616,9 +646,12 @@ class AgentReviewRepairCampaign:
             if candidate in self.history:
                 return Stop.NO_PROGRESS
             self.history.add(candidate)
+            self.regression_feedback = None
             self.phase = "regression"
         elif self.phase == "regression":
             self._recapture(require_unchanged=True)
+            if recovery is None:
+                self.regression_feedback = None
             self.review_pass += 1
             self.reviews = ()
             self.adjudication = None
@@ -631,4 +664,5 @@ class AgentReviewRepairCampaign:
         except FleetPlanInvalid as exc:
             self.message = str(exc)
             return Stop.FEEDBACK_UNAVAILABLE
+        self.regression_recovery = recovery
         return None

@@ -762,6 +762,7 @@ class BubblewrapProcessIsolation:
                         pass_fds=(status.fileno(),),
                         max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
                         retain_output_tail=request.retain_output_tail,
+                        preserve_stdout_whitespace=request.preserve_stdout_whitespace,
                     )
                 except (
                     CommandTimeoutExpired,
@@ -1042,6 +1043,7 @@ class BubblewrapProcessIsolation:
                         runtime_supervision=runtime_supervision,
                         pass_fds=inherited_fds,
                         max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
+                        preserve_stdout_whitespace=request.preserve_stdout_whitespace,
                     )
                     # This confirms only this process's original bind-FD release.
                     # It is not unmounting, LACE teardown, or an Agent execution grant.

@@ -23,6 +23,8 @@ from oh_goon.core.models.fleet_plan import (
     StepStatusCondition,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
+    PlanOutputEvidence,
+    PlanRetainedStreamOutputEvidence,
     PlanStepExecution,
     PublishedPlanOutputEvidence,
 )
@@ -95,17 +97,32 @@ def collect_published_outputs(
     *,
     producer_execution_identity: str | None = None,
     streams: Mapping[str, str] | None = None,
+    stdout_evidence: PlanOutputEvidence | None = None,
+    physical_execution_id: str | None = None,
 ) -> tuple[dict[str, str], tuple[PublishedPlanOutputEvidence, ...]]:
     values: dict[str, str] = {}
     evidence: list[PublishedPlanOutputEvidence] = []
     for output in getattr(step, "outputs", ()):
+        retained_stream = None
         if isinstance(output, PlanStreamOutput):
             if streams is None or output.stream not in streams:
                 raise FleetPlanInvalid("Native attempt output is unavailable for publication")
-            payload = streams[output.stream].encode("utf-8")
+            try:
+                payload = streams[output.stream].encode("utf-8")
+            except UnicodeEncodeError as exc:
+                raise FleetPlanInvalid("Native attempt output must be UTF-8 text") from exc
             if len(payload) > output.max_bytes:
                 raise FleetPlanInvalid(
                     f"Fleet plan step {step.step_id} output {output.name} exceeds {output.max_bytes} bytes"
+                )
+            if output.retain and (
+                stdout_evidence is None
+                or not physical_execution_id
+                or len(payload) != stdout_evidence.byte_count
+                or hashlib.sha256(payload).hexdigest() != stdout_evidence.sha256
+            ):
+                raise FleetPlanInvalid(
+                    "Retained stdout requires its complete original native stream and execution"
                 )
         else:
             payload = _read_published_output(
@@ -126,6 +143,15 @@ def collect_published_outputs(
                 f"Fleet plan step {step.step_id} output {output.name} cannot contain NUL bytes"
             )
         canonical_payload = value.encode("utf-8")
+        if isinstance(output, PlanStreamOutput) and output.retain:
+            assert stdout_evidence is not None and physical_execution_id is not None
+            retained_stream = PlanRetainedStreamOutputEvidence(
+                text=value,
+                sha256=hashlib.sha256(canonical_payload).hexdigest(),
+                byte_count=len(canonical_payload),
+                source=stdout_evidence,
+                physical_execution_id=physical_execution_id,
+            )
         values[output.name] = value
         evidence.append(
             PublishedPlanOutputEvidence(
@@ -133,6 +159,7 @@ def collect_published_outputs(
                 sha256=hashlib.sha256(canonical_payload).hexdigest(),
                 byte_count=len(canonical_payload),
                 producer_execution_identity=producer_execution_identity,
+                retained_stream=retained_stream,
             )
         )
     return values, tuple(evidence)

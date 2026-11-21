@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from oh_goon.core.agent_campaign_settlement import campaign_convergence_error
 from oh_goon.core.models.agent_repair import AgentCampaignReadback, AgentRepairStopReason
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord, AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
@@ -300,10 +301,12 @@ def project_agent_campaign(
                 or phase.execution_digest != target.execution_digest
             ):
                 reasons.append("The retained phase selection differs from admitted execution")
-        if decision.stop_reason is AgentRepairStopReason.CONVERGED and any(
-            row["outcome"] != "SUCCESS" or row["unverified_step_ids"] for row in runs
-        ):
-            reasons.append("The converged campaign decision conflicts with retained Run results")
+        if decision.stop_reason is AgentRepairStopReason.CONVERGED:
+            error = campaign_convergence_error(
+                campaign, tuple(detail for _, detail, _ in members), decision
+            )
+            if error is not None:
+                reasons.append(error)
         if decision.stop_reason is AgentRepairStopReason.TEST_PASSED:
             passed = (
                 next(

@@ -9,7 +9,11 @@ from pathlib import Path
 from oh_goon.core.agent_review_plan import agent_phase_role
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.file_digest import sha256_file_with_size
-from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedPlanStep
+from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
+    ResolvedCommandStep,
+    ResolvedPlanStep,
+)
 from oh_goon.core.models.fleet_plan_evidence import (
     MissingPlanArtifact,
     PlanArtifactEvidence,
@@ -27,6 +31,7 @@ from oh_goon.integrations._fleet_plan_step_dataflow import (
 from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
     output_contract_failure,
+    step_succeeded,
 )
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.fleet_content_store import FleetContentObject, FleetContentStore
@@ -178,12 +183,31 @@ def _published_outputs(
     *,
     producer_execution_identity: str | None = None,
 ) -> AttemptPublication:
+    collection_step = step
+    if (
+        isinstance(step, ResolvedCommandStep)
+        and step.regression_failure is not None
+        and step_succeeded(step, outcome)
+    ):
+        # Declared regression feedback describes failure only. Passing native
+        # output still obeys every other authored publication contract.
+        collection_step = step.model_copy(
+            update={
+                "outputs": tuple(
+                    output
+                    for output in step.outputs
+                    if output.name != step.regression_failure.feedback
+                )
+            }
+        )
     try:
         values, evidence = collect_published_outputs(
             repository,
-            step,
+            collection_step,
             producer_execution_identity=producer_execution_identity,
             streams={"stdout": outcome.stdout, "stderr": outcome.stderr},
+            stdout_evidence=outcome.stdout_evidence,
+            physical_execution_id=outcome.physical_execution_id,
         )
     except FleetPlanInvalid as exc:
         return AttemptPublication(

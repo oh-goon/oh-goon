@@ -54,12 +54,12 @@ The main engineering boundaries are:
 - **Focused verification.** Edit and merge feedback can select relevant real checks without redefining the complete release owner.
 
 The [canonical execution lifecycle requirements](docs/development/OH_GOON_CANONICAL_EXECUTION_LIFECYCLE_REQUIREMENTS.md)
-specify the next custody boundary: one claimed isolated worker beneath the same
-FleetRun admission and Step/Attempt owners. That migration is tracked by
-[HUG-180](https://linear.app/hugloss/issue/HUG-180) and
-[HUG-181](https://linear.app/hugloss/issue/HUG-181); the current runtime still
-submits Runs through the thread-based supervisor. Process workers must strengthen
-this lifecycle without adding an execution route.
+define the implemented custody boundary: each admitted Run uses a fresh claimed
+process worker beneath the same FleetRun admission and Step/Attempt owners.
+Observer threads do not execute another Run lifecycle. See the
+[supervisor contract](docs/development/EXECUTION_SUPERVISOR.md) for bounded shutdown
+and recovery. The separately selected strict physical and cross-environment
+qualifications remain scoped evidence; fresh workers alone do not establish them.
 
 ## Private code discovery and catalog example
 

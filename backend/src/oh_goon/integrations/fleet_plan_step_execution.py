@@ -59,6 +59,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
 from oh_goon.core.models.fleet_plan_execution_policy import FleetPlanRunLimits, PlanExecutionPolicy
 from oh_goon.core.models.fleet_plan_observation_steps import ResolvedDependencyInventoryStep
 from oh_goon.core.models.fleet_plan_requirements import UV_PROJECT_SELECTION_SWITCHES
+from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.path_authority import (
@@ -157,6 +158,7 @@ class CommandRunner(Protocol):
         terminal: CommandTerminal | None = None,
         input_data: bytes | None = None,
         retain_output_tail: bool = False,
+        preserve_stdout_whitespace: bool = False,
         read_only_mounts: tuple[StandardReadOnlyMount, ...] = (),
         broker_directory: Path | None = None,
         read_only_workspace: bool = False,
@@ -177,6 +179,7 @@ class _CommandRunOptions(TypedDict, total=False):
     terminal: CommandTerminal | None
     input_data: bytes | None
     retain_output_tail: bool
+    preserve_stdout_whitespace: bool
     read_only_mounts: tuple[StandardReadOnlyMount, ...]
     broker_directory: Path | None
     read_only_workspace: bool
@@ -192,6 +195,10 @@ class _IsolatedExecuteOptions(TypedDict, total=False):
     stream_output: CommandOutputObserver
     process_observer: CommandProcessObserver | None
     runtime_supervision: CommandRuntimeSupervision
+
+
+class _CommandCaptureOptions(TypedDict, total=False):
+    preserve_stdout_whitespace: bool
 
 
 class _ObservationFields(TypedDict):
@@ -1155,6 +1162,12 @@ def _execute_command_step(
                 f"Managed uv argv mode differs from resolved step {step.step_id}"
             )
         argv = ("uv", "run", "--no-sync", *rebound[3:])
+    capture_options: _CommandCaptureOptions = {}
+    if any(
+        isinstance(output, PlanStreamOutput) and output.stream == "stdout" and output.retain
+        for output in step.outputs
+    ):
+        capture_options["preserve_stdout_whitespace"] = True
     outcome = from_command(
         process.command_runner(
             *argv,
@@ -1163,6 +1176,7 @@ def _execute_command_step(
             cancel_requested=runtime.cancel_requested,
             env=environment,
             runtime_supervision=runtime.runtime_supervision,
+            **capture_options,
         )
     )
     if step.uv is not None:
@@ -1357,6 +1371,7 @@ def _direct_step_command_runner(
     private_configuration_directory: Path | None = None,
     preserve_native_executable_path: bool = True,
     retain_output_tail: bool = False,
+    preserve_stdout_whitespace: bool = False,
 ) -> CommandResult:
     if (
         read_only_mounts
@@ -1383,6 +1398,7 @@ def _direct_step_command_runner(
         terminal=terminal,
         input_data=input_data,
         max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
+        preserve_stdout_whitespace=preserve_stdout_whitespace,
     )
 
 
@@ -1618,6 +1634,7 @@ def _isolated_command_runner(
         stream_output: CommandOutputObserver | None = None,
         process_observer: CommandProcessObserver | None = None,
         runtime_supervision: CommandRuntimeSupervision | None = None,
+        preserve_stdout_whitespace: bool = False,
         **native_options: Any,
     ) -> CommandResult:
         if native_options:
@@ -1643,6 +1660,7 @@ def _isolated_command_runner(
             diagnostics=diagnostics,
             trusted_local_consent=trusted_local_consent,
             trusted_local_scope=trusted_local_scope,
+            preserve_stdout_whitespace=preserve_stdout_whitespace,
             # No effect authority here until the original Enforcer/LACE owner
             # supplies a validated effect-time port in a separate checkpoint.
             local_resource_intent=(

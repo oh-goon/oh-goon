@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -12,6 +13,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     FailedPlanStepExecution,
     FailedPlanStepTeardownEvidence,
     PlanArtifactEvidence,
+    PlanRetainedStreamOutputEvidence,
     PlanStepAttemptEvidence,
     PlanStepExecution,
     PublishedPlanOutputEvidence,
@@ -363,6 +365,28 @@ class FleetPlanStepSequence:
         artifacts: tuple[PlanArtifactEvidence, ...],
     ) -> None:
         outcome = redact_host_secrets(step, record.outcome, host_environment)
+        outputs = []
+        for output in record.output_evidence:
+            retained = output.retained_stream
+            if retained is not None:
+                # Redact the original captured stream before canonicalizing it,
+                # so stripping cannot hide the boundary of a protected value.
+                text = outcome.stdout.strip()
+                payload = text.encode("utf-8")
+                retained = (
+                    PlanRetainedStreamOutputEvidence(
+                        text=text,
+                        sha256=hashlib.sha256(payload).hexdigest(),
+                        byte_count=len(payload),
+                        source=retained.source,
+                        physical_execution_id=retained.physical_execution_id,
+                        redacted=retained.redacted or text != retained.text,
+                    )
+                    if len(payload) <= 2048
+                    else None
+                )
+                output = output.model_copy(update={"retained_stream": retained})
+            outputs.append(output)
         if outcome.stdout:
             self._stdout.append(outcome.stdout[:MAX_TRANSIENT_STEP_OUTPUT])
         if outcome.stderr:
@@ -377,7 +401,7 @@ class FleetPlanStepSequence:
             ),
             attempts=record.attempts,
             artifacts=artifacts,
-            outputs=record.output_evidence,
+            outputs=tuple(outputs),
             started_at=record.started_at,
             finished_at=record.finished_at,
         )

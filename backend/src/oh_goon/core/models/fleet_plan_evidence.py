@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from enum import StrEnum
 from ipaddress import IPv4Address
 from pathlib import Path
@@ -36,12 +37,43 @@ class PlanOutputEvidence(ImmutableModel):
     line_count: int = Field(ge=0)
 
 
+class PlanRetainedStreamOutputEvidence(ImmutableModel):
+    """Bounded retained text, separate from its original native stdout identity."""
+
+    text: str = Field(max_length=2048)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    byte_count: int = Field(ge=0, le=2048)
+    source: PlanOutputEvidence
+    physical_execution_id: str = Field(min_length=1)
+    redacted: bool = False
+
+    @model_validator(mode="after")
+    def verify_text_identity(self) -> PlanRetainedStreamOutputEvidence:
+        try:
+            payload = self.text.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError("Retained stream text must be UTF-8") from exc
+        if (
+            "\x00" in self.text
+            or self.text != self.text.strip()
+            or len(payload) > 2048
+            or self.source.byte_count > 2048
+            or len(payload) != self.byte_count
+            or hashlib.sha256(payload).hexdigest() != self.sha256
+        ):
+            raise ValueError("Retained stream text differs from its bounded identity")
+        return self
+
+
 class PublishedPlanOutputEvidence(ImmutableModel):
     name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     byte_count: int = Field(ge=0)
     producer_execution_identity: str | None = Field(
         default=None, pattern=r"^attempt-output-[0-9a-f]{64}$"
+    )
+    retained_stream: PlanRetainedStreamOutputEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
     )
 
 
@@ -366,6 +398,9 @@ class PlanUvPreparationEvidence(ImmutableModel):
 
 class PlanStepAttemptEvidence(ImmutableModel):
     attempt: int = Field(ge=1, le=5)
+    physical_execution_id: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
     argv: tuple[str, ...] = Field(default_factory=tuple)
     returncode: int
     observed_returncode: int | None = None

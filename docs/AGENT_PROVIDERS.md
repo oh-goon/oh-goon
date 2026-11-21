@@ -664,6 +664,15 @@ execution. The controller captures the changed candidate once before subsequent
 reasoning and refuses changes outside the admitted repair phase. Select the
 existing `repair.review_passes`, `repair.write_roots`,
 `repair.timeout_seconds` and `repair.step_timeout_seconds` selections in `run.yml`; each phase remains a separately admitted Fleet Run.
+An explicitly declared ordinary regression failure may supply complete retained
+stdout to fresh review, adjudication and repair after verified process quiescence
+and cleanup. Recovery preserves the failed Run, original budgets, frozen command
+and Skill selections, and admitted write roots. It recaptures repository evidence
+and requires current proposal preimages. Missing or truncated feedback,
+undeclared failures, timeout, cancellation or uncertain settlement stop recovery.
+A known failed candidate cannot converge from CLEAN review alone: a changed
+candidate must pass regression, fresh review and final verification. Journal
+admission and campaign readback validate the same linked recovery evidence.
 This profile does not provide strict/untrusted execution. It cannot be combined
 with `codex_login`, broker inference, native argument/config-directory overrides
 or resource caps.

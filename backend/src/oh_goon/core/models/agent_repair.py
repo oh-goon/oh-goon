@@ -157,6 +157,34 @@ class AgentCampaignRunEvidence(ImmutableModel):
     operation_ids: tuple[str, ...] = ()
 
 
+class AgentRegressionFeedbackReference(ImmutableModel):
+    """Exact retained native diagnostic consumed by a recovery decision."""
+
+    step_id: str = Field(min_length=1)
+    attempt: Literal[1] = 1
+    output_name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
+    physical_execution_id: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    byte_count: int = Field(ge=1, le=2048)
+
+
+class AgentRegressionRecovery(ImmutableModel):
+    """A settled failed regression remains immutable while a fresh cycle repairs it."""
+
+    fleet_run_id: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1)
+    candidate_identity: str = Field(min_length=1)
+    scope_identity: str = Field(min_length=1)
+    feedback: tuple[AgentRegressionFeedbackReference, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_feedback(self) -> AgentRegressionRecovery:
+        identities = tuple((item.step_id, item.attempt, item.output_name) for item in self.feedback)
+        if len(set(identities)) != len(identities):
+            raise ValueError("Regression recovery feedback must identify unique Step outputs")
+        return self
+
+
 class AgentCampaignUnstartedSelection(ImmutableModel):
     """A requested identity with no admitted Run at the decision read cut."""
 
@@ -185,6 +213,9 @@ class AgentCampaignDecision(ImmutableModel):
     stop_reason: AgentRepairStopReason | None = None
     passed_test_step_id: str | None = Field(default=None, min_length=1)
     unresolved_run_ids: tuple[str, ...] = ()
+    regression_recovery: AgentRegressionRecovery | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     message: str = Field(default="", max_length=MAX_AGENT_CAMPAIGN_MESSAGE_CHARS)
 
     @model_validator(mode="after")
@@ -201,6 +232,10 @@ class AgentCampaignDecision(ImmutableModel):
             raise ValueError("terminal decision cannot select another phase")
         if self.unstarted_selection is not None and self.stop_reason is None:
             raise ValueError("Unstarted selection requires a blocking terminal decision")
+        if self.regression_recovery is not None and (
+            self.stop_reason is not None or self.next_phase != "review"
+        ):
+            raise ValueError("Regression recovery requires a fresh review advancement")
         return self
 
 

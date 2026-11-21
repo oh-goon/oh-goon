@@ -527,6 +527,7 @@ def test_native_loop_reserves_review_and_retains_each_phase(
                         package.mkdir()
                         content = yaml.safe_load(templates.source(f"agents/{phase}").content)
                         content["steps"][0]["success_codes"] = [0, 1]
+                        content["steps"][0].pop("regression_failure", None)
                     (package / "goon.yml").write_text(yaml.safe_dump(content, sort_keys=False))
                     (package / "README.md").write_text(f"# agents/{phase}\n")
                 path.write_text(

@@ -154,4 +154,5 @@ class TrustedLocalProcessIsolation:
             require_process_group_quiescence=True,
             parent_death_signal=True,
             max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
+            preserve_stdout_whitespace=request.preserve_stdout_whitespace,
         )

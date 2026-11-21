@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 from shutil import copytree
+from typing import Any
 
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
@@ -19,10 +20,10 @@ from tests.factories.shipped_templates import PLAN_TEMPLATES
 def agent_review_case(
     tmp_path: Path,
     *,
-    endpoint="http://127.0.0.1:12345",
-    plan_template="agents/agentic-review-repair-loop",
+    endpoint: str = "http://127.0.0.1:12345",
+    plan_template: str = "agents/agentic-review-repair-loop",
     native_agent: ResolvedNativeAgent | None = None,
-):
+) -> tuple[FleetPlanResolver, Path, Path, dict[str, Any]]:
     names = (
         "single-source-of-truth-review",
         "semantic-redecision-review",
@@ -79,7 +80,7 @@ def agent_review_case(
             )
         templates = GoonTemplateStore(native_templates)
     resolver = FleetPlanResolver(goon_templates=templates)
-    options = dict(
+    options: dict[str, Any] = dict(
         inputs={
             "repo": "local:repo",
             "regression_command": "check",

@@ -92,6 +92,7 @@ class StandardIsolatedProcessRequest:
     host_network: bool = False
     protected_execution: bool = False
     retain_output_tail: bool = False
+    preserve_stdout_whitespace: bool = False
     termination_requested: Callable[[], TerminationSignal | None] | None = field(
         default=None, repr=False
     )
@@ -112,6 +113,7 @@ class StandardIsolatedProcessRequest:
             or type(self.allowed_write_roots) is not tuple
             or len(self.allowed_write_roots) > 32
             or type(self.retain_output_tail) is not bool
+            or type(self.preserve_stdout_whitespace) is not bool
         ):
             raise FleetPlanInvalid("Standard sandbox requires resolved workspace and launch intent")
         workspace = self.workspace.resolve(strict=True)
@@ -287,6 +289,7 @@ class NativeProfileCommandRunner:
         host_network: bool = False,
         preserve_native_executable_path: bool = True,
         retain_output_tail: bool = False,
+        preserve_stdout_whitespace: bool = False,
     ) -> CommandResult:
         workspace = self.repository
         native_agent = self.native_agent
@@ -299,6 +302,8 @@ class NativeProfileCommandRunner:
         sandboxed = native_agent.profile.backend == "bubblewrap"
         if type(retain_output_tail) is not bool:
             raise FleetPlanInvalid("Native output tail selection must be a boolean")
+        if type(preserve_stdout_whitespace) is not bool:
+            raise FleetPlanInvalid("Native stdout whitespace selection must be a boolean")
         if cancel_requested is not None and cancel_requested():
             raise OperationCancelledError("Native workload cancelled before process launch")
         if allowed_write_roots and (not protected or allowed_write_roots != admitted_roots):
@@ -338,6 +343,7 @@ class NativeProfileCommandRunner:
                 input_source=input_source,
                 max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
                 retain_output_tail=retain_output_tail,
+                preserve_stdout_whitespace=preserve_stdout_whitespace,
                 preserve_native_executable_path=preserve_native_executable_path,
             )
         assert standard_backend is not None and workspace_pin is not None
@@ -365,6 +371,7 @@ class NativeProfileCommandRunner:
                 host_network=host_network,
                 protected_execution=protected,
                 retain_output_tail=retain_output_tail,
+                preserve_stdout_whitespace=preserve_stdout_whitespace,
                 termination_requested=termination_requested,
             )
             return standard_backend.execute(
@@ -525,6 +532,11 @@ class IsolatedProcessRequest:
     trusted_local_consent: TrustedLocalRunConsent | None = None
     trusted_local_scope: TrustedLocalRunScope | None = None
     trusted_local_effect_authority: TrustedLocalEffectAuthority | None = None
+    preserve_stdout_whitespace: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.preserve_stdout_whitespace) is not bool:
+            raise FleetPlanInvalid("Strict stdout whitespace selection must be a boolean")
 
 
 def isolation_backend_evidence(backend: ProcessIsolationBackend) -> PlanIsolationBackendEvidence:

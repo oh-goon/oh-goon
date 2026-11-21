@@ -3,3 +3,9 @@ inputs:
 steps:
 - id: check
   run: "'./${{ inputs.regression_command }}'"
+  outputs:
+    regression_feedback: {stream: stdout, max_bytes: 2048, retain: true}
+  regression_failure:
+    exit_codes: [1]
+    feedback: regression_feedback
+    reason: The selected regression script uses exit 1 for ordinary failed code checks; other failures must use distinct exit codes.

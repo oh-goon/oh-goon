@@ -1,3 +1,4 @@
+import hashlib
 import os
 import subprocess
 import sys
@@ -31,6 +32,43 @@ def test_run_command_supports_working_directory_and_environment(tmp_path: Path) 
 
     assert result.returncode == 0
     assert result.stdout == f"{tmp_path.name} ready"
+
+
+@pytest.mark.parametrize("preserve", [False, True])
+def test_run_command_can_preserve_complete_stdout_whitespace_without_tail_capture(
+    preserve: bool,
+) -> None:
+    raw = " \u00e9 \t\r\n\n".encode()
+    result = run_command(
+        sys.executable,
+        "-S",
+        "-c",
+        "import os; os.write(1, bytes.fromhex('20c3a920090d0a0a')); os._exit(13)",
+        preserve_stdout_whitespace=preserve,
+        max_capture_bytes_per_stream=64,
+    )
+    assert result.returncode == 13
+    assert result.stdout == (raw.decode() if preserve else raw.decode().rstrip())
+    if preserve:
+        assert result.stdout_evidence is not None
+        assert result.stdout_evidence.sha256 == hashlib.sha256(raw).hexdigest()
+        assert result.stdout_evidence.byte_count == len(raw)
+    else:
+        assert result.stdout_evidence is None
+    assert result.stdout_truncated is False
+    assert result.supervisor.final_process_group_quiescent is True
+
+
+def test_stdout_whitespace_preservation_does_not_select_tail_capture() -> None:
+    with pytest.raises(CommandOutputLimitExceeded):
+        run_command(
+            sys.executable,
+            "-S",
+            "-c",
+            "import os; os.write(1, b'x' * 65)",
+            preserve_stdout_whitespace=True,
+            max_capture_bytes_per_stream=64,
+        )
 
 
 def test_run_command_reports_process_birth_while_command_is_live() -> None:
