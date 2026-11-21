@@ -1,4 +1,4 @@
-"""Real artifact, native uv-build and passive log ENOSPC around claimed Runs.
+"""Real artifact, native uv preparation and passive log ENOSPC around claimed Runs.
 
 Only an eight-MiB tmpfs in a disposable user/mount/PID namespace is filled.
 The database, Journal, native application and execution scratch stay on healthy
@@ -12,6 +12,7 @@ they preserve native success/failure without treating the log as result authorit
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import re
@@ -23,11 +24,11 @@ import stat
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 from time import monotonic
 from typing import Any
 
-import pytest
 import yaml
 
 from oh_goon.application import ApplicationRuntime
@@ -49,15 +50,6 @@ from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.execution.lease_environment import SystemLeaseEnvironment
 
 MIB = 1024 * 1024
-pytestmark = [
-    pytest.mark.process,
-    pytest.mark.no_resume,
-    pytest.mark.skipif(
-        sys.platform != "linux"
-        or any(shutil.which(tool) is None for tool in ("uv", "unshare", "mount", "strace")),
-        reason="real storage faults require native Linux namespaces, mount, strace and uv",
-    ),
-]
 
 _PRODUCER = """import json
 import os
@@ -107,7 +99,48 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 """
 
 
-def _package(root: Path, *, uv_preparation: bool = False, diagnostic_exit: bool = False) -> None:
+_UV_INSTALL_BACKEND = """import json
+import os
+from pathlib import Path
+import zipfile
+
+def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+    project = Path(__file__).parent
+    filename = 'isolated_build-1.0.0-py3-none-any.whl'
+    with zipfile.ZipFile(Path(wheel_directory) / filename, 'w',
+            compression=zipfile.ZIP_DEFLATED) as wheel:
+        wheel.writestr('isolated_app.py', (project / 'isolated_app.py').read_text())
+        with wheel.open('isolated_payload.bin', 'w') as stream:
+            for _ in range(32):
+                stream.write(b'x' * 65536)
+        wheel.writestr('isolated_build-1.0.0.dist-info/METADATA',
+            'Metadata-Version: 2.1\\nName: isolated-build\\nVersion: 1.0.0\\n')
+        wheel.writestr('isolated_build-1.0.0.dist-info/WHEEL',
+            'Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n')
+        wheel.writestr('isolated_build-1.0.0.dist-info/entry_points.txt',
+            '[console_scripts]\\nisolated-build = isolated_app:main\\n')
+        wheel.writestr('isolated_build-1.0.0.dist-info/RECORD', '')
+    if Path(FLAG).exists():
+        with Path(READY).open('w') as stream:
+            stream.write(json.dumps({'pid': os.getpid(), 'build_parent_pid': os.getppid(),
+                'cwd': str(project.resolve()),
+                'wheel_directory': str(Path(wheel_directory).resolve()),
+                'uv_link_mode': os.environ.get('UV_LINK_MODE'),
+                'uv_environment': os.environ.get('UV_PROJECT_ENVIRONMENT'),
+                'uv_cache': os.environ.get('UV_CACHE_DIR')}))
+        with Path(HOLD).open('rb') as stream:
+            stream.read(1)
+    return filename
+"""
+
+
+def _package(
+    root: Path,
+    *,
+    uv_preparation: bool = False,
+    uv_install: bool = False,
+    diagnostic_exit: bool = False,
+) -> None:
     from tests.factories.python_goon_projects import write_isolated_build_project
 
     repository = root / "repositories/target"
@@ -130,13 +163,24 @@ def _package(root: Path, *, uv_preparation: bool = False, diagnostic_exit: bool 
         )
         inputs["native_exit"] = {"type": "integer", "default": 0}
         command += " ${{ inputs.native_exit }}"
-    if uv_preparation:
+    if uv_install:
+        payload_sha256 = hashlib.sha256(b"x" * (2 * MIB)).hexdigest()
+        producer = producer.replace(
+            "def main():\n",
+            "def main():\n    import hashlib\n"
+            "    payload = Path(__file__).with_name('isolated_payload.bin')\n"
+            f"    assert payload.stat().st_size == {2 * MIB}\n"
+            "    with payload.open('rb') as stream:\n"
+            f"        assert hashlib.file_digest(stream, 'sha256').hexdigest() == {payload_sha256!r}\n",
+        )
+    if uv_preparation or uv_install:
         producer = producer.replace(
             "def main():\n",
             f"def main():\n    Path({str(root / 'application-ran')!r}).write_text('ran')\n",
         )
         (package / "backend.py").write_text(
-            _UV_BACKEND.replace("FLAG", repr(str(root / "uv-fault-enabled")))
+            (_UV_INSTALL_BACKEND if uv_install else _UV_BACKEND)
+            .replace("FLAG", repr(str(root / "uv-fault-enabled")))
             .replace("READY", repr(str(root / "build-ready")))
             .replace("HOLD", repr(str(root / "build-hold")))
         )
@@ -263,7 +307,8 @@ def _witness(root: Path, boundary: str) -> None:
     layout = ApplicationStatePathLayout.from_database(Path(os.environ["OH_GOON_DB"]))
     # Staging and its atomic object destination must stay on the same native
     # filesystem. The reference record has its own same-directory publication.
-    uv_preparation = boundary == "uv-preparation"
+    uv_install = boundary == "uv-install"
+    uv_preparation = boundary in {"uv-preparation", "uv-install"}
     mount = (
         layout.run_workspaces
         if uv_preparation
@@ -278,12 +323,15 @@ def _witness(root: Path, boundary: str) -> None:
     runtime = ApplicationRuntime.build(standard_local=True)
     running: str | None = None
     filler_bytes: int | None = None
+    free_bytes_before_install: int | None = None
     ready_fd: int | None = None
     pidfds: list[int] = []
     tracer: subprocess.Popen[bytes] | None = None
     uv_boundary: dict[str, Any] | None = None
     trace_errors = (root / "trace.stderr").open("wb")
     try:
+        if uv_install:
+            assert os.environ["UV_LINK_MODE"] == "copy"
         runtime.locations.add(repository.parent)
         runtime.plans.lock(plan)
         target = runtime.plans.prepare_execution_target(plan, repository=repository)
@@ -413,6 +461,40 @@ def _witness(root: Path, boundary: str) -> None:
                     ).relative_to(root)
                 ),
             }
+            if uv_install:
+                assert native["uv_link_mode"] == "copy"
+                assert isinstance(native["uv_environment"], str)
+                assert isinstance(native["uv_cache"], str)
+                native_environment = Path(native["uv_environment"])
+                native_cache = Path(native["uv_cache"])
+                assert native_environment.resolve(strict=True).is_relative_to(mount)
+                assert native_cache.resolve(strict=True).is_relative_to(mount)
+                assert not native_cache.is_relative_to(native_environment)
+                with Path(f"/proc/{uv_started.pid}/cmdline").open("rb") as stream:
+                    raw_arguments = stream.read(8193)
+                assert len(raw_arguments) <= 8192
+                arguments = [os.fsdecode(item) for item in raw_arguments.split(b"\0") if item]
+                assert arguments[1:2] == ["sync"] and "--frozen" in arguments
+                wheel_file = root / uv_boundary["wheel_file"]
+                wheel_sha256, wheel_bytes = sha256_file_with_size(wheel_file)
+                assert wheel_bytes < 64 * 1024
+                with zipfile.ZipFile(wheel_file) as wheel:
+                    wheel_payload = wheel.getinfo("isolated_payload.bin")
+                    assert (
+                        wheel_payload.file_size == 2 * MIB
+                        and wheel_payload.compress_size < 64 * 1024
+                    )
+                    assert wheel.testzip() is None
+                assert observe_process_birth(uv_started.pid) == uv_birth
+                uv_boundary.update(
+                    uv_arguments=arguments,
+                    uv_environment=str(native_environment.relative_to(root)),
+                    uv_cache=str(native_cache.relative_to(root)),
+                    uv_link_mode="copy",
+                    closed_wheel_sha256=wheel_sha256,
+                    closed_wheel_bytes=wheel_bytes,
+                    installed_payload_bytes=2 * MIB,
+                )
             (root / "native-fault-boundary.json").write_text(
                 json.dumps(uv_boundary, sort_keys=True)
             )
@@ -426,10 +508,13 @@ def _witness(root: Path, boundary: str) -> None:
             for path in (layout.content_store / "references").rglob("*")
             if path.is_file()
         }
-        # Observe the already-launched worker only. Following future children
-        # would perturb the original native preexec/startup custody handshake.
+        # Existing boundaries trace already-launched processes only. Copy
+        # installation follows native UV threads, never the Run worker's
+        # future Git/exec-guard children.
         traced_pids = (
-            (lease.custody.owner_pid, *native_pids)
+            (uv_started.pid,)
+            if uv_install
+            else (lease.custody.owner_pid, *native_pids)
             if uv_preparation
             else (lease.custody.owner_pid,)
         )
@@ -440,16 +525,22 @@ def _witness(root: Path, boundary: str) -> None:
             [
                 "strace",
                 "-qq",
+                *(["-ff"] if uv_install else []),
                 "-s",
                 "0",
                 "-yy",
                 "-e",
-                "trace=write,pwrite64,writev,fsync,fdatasync",
-                "-e",
-                "status=failed",
+                "trace=write,pwrite64,writev,copy_file_range,sendfile,fallocate,ftruncate,openat,openat2,mkdir,mkdirat,rename,renameat,renameat2,link,linkat,fsync,fdatasync"
+                if uv_install
+                else "trace=write,pwrite64,writev,fsync,fdatasync",
+                *([] if uv_install else ["-e", "status=failed"]),
                 "-o",
                 str(root / "kernel.trace"),
-                *(argument for tid in thread_ids for argument in ("-p", str(tid))),
+                *(
+                    argument
+                    for tid in ((uv_started.pid,) if uv_install else thread_ids)
+                    for argument in ("-p", str(tid))
+                ),
             ],
             stdout=subprocess.DEVNULL,
             stderr=trace_errors,
@@ -475,6 +566,14 @@ def _witness(root: Path, boundary: str) -> None:
             select.select([], [], [], 0.01)
         if boundary == "references" or uv_preparation:
             filler_bytes = _fill_mount(mount)
+        if uv_install:
+            assert filler_bytes is not None and filler_bytes > 3 * MIB
+            with (mount / "owned-filler").open("r+b") as stream:
+                stream.truncate(filler_bytes - 3 * MIB)
+            filler_bytes -= 3 * MIB
+            capacity = os.statvfs(mount)
+            free_bytes_before_install = capacity.f_bavail * capacity.f_frsize
+            assert 3 * MIB <= free_bytes_before_install <= 3 * MIB + capacity.f_frsize
         with (root / ("build-hold" if uv_preparation else "hold")).open("wb") as channel:
             channel.write(b"x")
         failed = runtime.runs.wait_for_terminal(running, timeout=60)
@@ -583,7 +682,9 @@ def _witness(root: Path, boundary: str) -> None:
         assert failed_step.project_source == healthy_step.project_source
         report = {
             "boundary": boundary,
-            "fault_scope": "native uv wheel build before application"
+            "fault_scope": "native uv copy installation before application"
+            if uv_install
+            else "native uv wheel build before application"
             if uv_preparation
             else "retained artifact publication",
             "mount": facts,
@@ -595,6 +696,7 @@ def _witness(root: Path, boundary: str) -> None:
             "run_status": recorded["status"],
             "cleanup": failed_step.settlement.cleanup,
             "filler_bytes": filler_bytes,
+            **({"free_bytes_before_install": free_bytes_before_install} if uv_install else {}),
             "uv_preparation": failed_step.attempts[0].uv_preparation.model_dump(mode="json")
             if uv_preparation and failed_step.attempts[0].uv_preparation is not None
             else None,
@@ -606,6 +708,21 @@ def _witness(root: Path, boundary: str) -> None:
             )[0],
             "fresh_runtime_and_cli_readback": True,
         }
+        if uv_install:
+            from oh_goon.integrations.hashmarks import (
+                loaded_hashmarks_version,
+                require_loaded_hashmarks_runtime,
+            )
+
+            report.update(
+                producer_implementation_identity=require_loaded_hashmarks_runtime(),
+                producer_version=loaded_hashmarks_version(),
+                worker_birth=birth.to_payload(),
+                worker_lease_identity=lease.custody.owner_identity,
+                process_identity_scope="PIDs/births observed inside disposable PID namespace; not reusable host PID authority",
+                pid_namespace_inode=Path("/proc/self/ns/pid").stat().st_ino,
+                mount_namespace_inode=Path("/proc/self/ns/mnt").stat().st_ino,
+            )
         (root / "result.json").write_text(json.dumps(report, sort_keys=True))
     finally:
         try:
@@ -1022,7 +1139,9 @@ def _diagnostic_witness(root: Path, native_exit: int) -> None:
             original_error.add_note(f"Owned log-pressure fixture cleanup failed: {cleanup_error}")
 
 
-def _run_fault_witness(tmp_path: Path, boundary: str) -> None:
+def _run_fault_witness(
+    tmp_path: Path, boundary: str, *, selected_python: Path | None = None
+) -> dict[str, Any]:
     probe = subprocess.run(
         [
             "unshare",
@@ -1049,9 +1168,15 @@ def _run_fault_witness(tmp_path: Path, boundary: str) -> None:
     _package(
         root,
         uv_preparation=boundary == "uv-preparation",
+        uv_install=boundary == "uv-install",
         diagnostic_exit=boundary.startswith("diagnostics-"),
     )
     environment = _environment(root)
+    python = Path(sys.executable) if selected_python is None else selected_python
+    if selected_python is not None:
+        environment["UV_PYTHON"] = str(selected_python)
+    if boundary == "uv-install":
+        environment["UV_LINK_MODE"] = "copy"
     trace = root / "kernel.trace"
     command = [
         "unshare",
@@ -1064,7 +1189,7 @@ def _run_fault_witness(tmp_path: Path, boundary: str) -> None:
         "--fork",
         "--mount-proc",
         "--kill-child=KILL",
-        sys.executable,
+        str(python),
         "-I",
         str(Path(__file__).resolve()),
         str(root),
@@ -1090,9 +1215,33 @@ def _run_fault_witness(tmp_path: Path, boundary: str) -> None:
         body, diagnostic = output.read(128 * 1024 + 1), errors.read(128 * 1024 + 1)
     assert len(body) <= 128 * 1024 and len(diagnostic) <= 128 * 1024
     assert process.returncode == 0, (body[-8192:], diagnostic[-8192:])
-    with trace.open("rb") as stream:
-        native_trace = stream.read(128 * 1024 + 1)
-    assert len(native_trace) <= 128 * 1024
+    trace_limit = (512 if boundary == "uv-install" else 128) * 1024
+    if boundary == "uv-install":
+        shards = sorted(root.glob("kernel.trace.*"))
+        assert shards and len(shards) <= 128
+        trace_parts: list[bytes] = []
+        retained_bytes = 0
+        for shard in shards:
+            namespace_pid = shard.name.removeprefix("kernel.trace.")
+            assert namespace_pid.isdigit()
+            with shard.open("rb") as stream:
+                raw_trace = stream.read(trace_limit - retained_bytes + 1)
+            assert retained_bytes + len(raw_trace) <= trace_limit
+            # Native -ff output has no interleaved other-TID records. Retain
+            # its actual namespace PID from the native shard filename.
+            prefixed = b"".join(
+                namespace_pid.encode("ascii") + b" " + line + b"\n"
+                for line in raw_trace.splitlines()
+            )
+            retained_bytes += len(prefixed)
+            assert retained_bytes <= trace_limit
+            trace_parts.append(prefixed)
+        native_trace = b"".join(trace_parts)
+        trace.write_bytes(native_trace)
+    else:
+        with trace.open("rb") as stream:
+            native_trace = stream.read(trace_limit + 1)
+    assert len(native_trace) <= trace_limit
     mount_path = str(
         root
         / "data/oh-goon"
@@ -1100,7 +1249,7 @@ def _run_fault_witness(tmp_path: Path, boundary: str) -> None:
             "diagnostics/diagnostics.jsonl"
             if boundary.startswith("diagnostics-")
             else "run-workspaces"
-            if boundary == "uv-preparation"
+            if boundary in {"uv-preparation", "uv-install"}
             else f"content-store/{boundary}"
         )
     )
@@ -1117,8 +1266,30 @@ def _run_fault_witness(tmp_path: Path, boundary: str) -> None:
             if re.match(rf"{uv_boundary['backend_pid']}\s+write\(", line)
             and str(root / uv_boundary["wheel_file"]) in line
         ]
+    if boundary == "uv-install":
+        uv_boundary = json.loads((root / "native-fault-boundary.json").read_text())
+        native_environment = str(root / uv_boundary["uv_environment"])
+        native_cache = str(root / uv_boundary["uv_cache"])
+        assert failures and all(native_environment in line for line in failures), (
+            "native cache/build ENOSPC cannot qualify environment installation",
+            failures,
+        )
+        failures = [line for line in failures if "isolated_payload.bin" in line]
+        assert failures, "no required installed-payload operation returned native ENOSPC"
+        cache_writes = [
+            line
+            for line in native_trace.decode().splitlines()
+            if re.match(r"\d+\s+(?:write|pwrite64|writev)\(\d+<", line)
+            and native_cache in line
+            and "isolated_payload.bin>" in line
+            and re.search(r"= \d+$", line)
+            and native_environment not in line
+        ]
+        cache_bytes = sum(int(line.rsplit("= ", 1)[1]) for line in cache_writes)
+        assert cache_bytes == 2 * MIB, "native cache extraction did not finish the complete payload"
     assert failures, "no product retention write returned native ENOSPC on the selected mount"
-    result = json.loads((root / "result.json").read_text())
+    result: dict[str, Any] = json.loads((root / "result.json").read_text())
+    assert isinstance(result, dict)
     if boundary.startswith("diagnostics-"):
         failures = [
             line
@@ -1130,7 +1301,36 @@ def _run_fault_witness(tmp_path: Path, boundary: str) -> None:
         kernel_errno=errno.ENOSPC,
         failed_product_syscalls=[line.replace(str(root), "<fixture>") for line in failures],
     )
+    if boundary == "uv-install":
+        result.update(
+            cache_payload_written_bytes=cache_bytes,
+            trace_format="native per-TID shards; namespace PID prefix copied from native filename",
+            cache_payload_write_syscalls=[
+                line.replace(str(root), "<fixture>") for line in cache_writes
+            ],
+        )
     print("RUN_STORAGE_REAL_ENOSPC=" + json.dumps(result, sort_keys=True), flush=True)
+    return result
+
+
+if __name__ == "__main__":
+    if sys.argv[2].startswith("diagnostics-"):
+        _diagnostic_witness(Path(sys.argv[1]), int(sys.argv[2].partition("-")[2]))
+    else:
+        _witness(Path(sys.argv[1]), sys.argv[2])
+    raise SystemExit(0)
+else:
+    import pytest
+
+    pytestmark = [
+        pytest.mark.process,
+        pytest.mark.no_resume,
+        pytest.mark.skipif(
+            sys.platform != "linux"
+            or any(shutil.which(tool) is None for tool in ("uv", "unshare", "mount", "strace")),
+            reason="real storage faults require native Linux namespaces, mount, strace and uv",
+        ),
+    ]
 
 
 @pytest.mark.parametrize("boundary", ("staging", "references"))
@@ -1142,13 +1342,10 @@ def test_claimed_run_reports_real_uv_preparation_enospc(tmp_path: Path) -> None:
     _run_fault_witness(tmp_path, "uv-preparation")
 
 
+def test_claimed_run_reports_real_uv_installation_enospc(tmp_path: Path) -> None:
+    _run_fault_witness(tmp_path, "uv-install")
+
+
 @pytest.mark.parametrize("native_exit", (0, 23))
 def test_log_enospc_preserves_claimed_run_result(tmp_path: Path, native_exit: int) -> None:
     _run_fault_witness(tmp_path, f"diagnostics-{native_exit}")
-
-
-if __name__ == "__main__":
-    if sys.argv[2].startswith("diagnostics-"):
-        _diagnostic_witness(Path(sys.argv[1]), int(sys.argv[2].partition("-")[2]))
-    else:
-        _witness(Path(sys.argv[1]), sys.argv[2])
