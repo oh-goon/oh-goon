@@ -356,6 +356,73 @@ The selected Linux Bubblewrap namespace proof covers its original admitted
 writer scopes. Installed Pi/model, strict custody, other hosts and foreign
 namespace qualification remain separate; HUG-19 still owns native persistence.
 
+### Two independent candidate Runs
+
+The public Python runtime has an explicit opt-in capacity selection for two
+fresh headless Pi/Bubblewrap candidates over distinct registered repositories
+in one runtime and database. The default
+capacity remains one. Configure the existing managed native profiles and select
+their public runtime/executable as above; native sessions, homes, scratch,
+writers, source/checkpoint bindings and outputs remain separate per Run.
+
+Select a native user slice with finite aggregate CPU, memory, swap and PID
+controls. Start the controller in a child scope whose local controls are
+unlimited while retaining those shared ancestor limits. The worker scopes
+receive their own complete ceilings under that same slice. For example, an
+operator-selected environment can be prepared with native systemd commands:
+
+```sh
+systemctl --user set-property --runtime ohgoonagents.slice \
+  CPUQuota=200% MemoryMax=2G MemorySwapMax=0 TasksMax=512
+systemd-run --user --scope --slice=ohgoonagents.slice \
+  --property=CPUQuota= --property=CPUWeight=100 \
+  --property=MemoryMax=infinity --property=MemorySwapMax=infinity \
+  --property=TasksMax=infinity --property=MemoryAccounting=yes \
+  --property=TasksAccounting=yes -- /absolute/backend/.venv/bin/python orchestration.py
+```
+
+This selects a new native environment; it does not turn the Make test governor
+into production capacity or waive a running caller's private constraints.
+Missing delegation/controllers or mismatched controls refuse before workload
+effects. The original native manager remains the resource authority.
+
+```python
+from oh_goon.application import ApplicationRuntime
+from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
+from oh_goon.core.models.run_resources import RunConcurrencyPolicy
+from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+
+policy = RunConcurrencyPolicy(
+    aggregate_slice="ohgoonagents.slice",
+    aggregate_resources=CicdResourcePolicy(cpu_millis=2000, memory_mib=2048, max_processes=512),
+    worker_resources=CicdResourcePolicy(cpu_millis=800, memory_mib=512, max_processes=128),
+    controller_reserve=CicdResourcePolicy(cpu_millis=400, memory_mib=512, max_processes=128),
+)
+runtime = ApplicationRuntime.build(
+    standard_local=True,
+    standard_process_isolation=BubblewrapProcessIsolation("/usr/bin/bwrap"),
+    run_concurrency=policy,
+)
+```
+
+Use that same `runtime.plans.run_native_agent(..., candidate=True)` owner with
+each independently resolved native selection and registered repository. Keep
+the runtime alive and explicitly shut it down after observing its Runs. A third
+request reports busy; there is no implicit queue or waiting retry. Runs
+over the same registered subject remain refused even with distinct candidates,
+because uncertain effects are currently quarantined by repository. Profiles
+with separately selected Step resource scopes, interactive terminals, other
+workload modes and a different controller cannot borrow these slots.
+
+Run terminal status does not imply its native resource slot is already free.
+The original native scope must settle first. Dirty/unpromoted candidate data,
+uncertain namespace/writer facts and lost acknowledgements retain their own
+history and recovery boundaries. Read the actual Run and resource observation
+before repeating a request after uncertainty. Per-worker cancellation/crash
+does not authorize effects on its sibling; aggregate/global resource pressure
+remains a shared failure domain. Measured benefit is scoped to the recorded
+task/harness/environment and never raises defaults automatically.
+
 ### Ephemeral Pi RPC
 
 A Pi-only managed profile may explicitly select `pi_rpc: true`:

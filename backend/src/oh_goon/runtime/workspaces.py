@@ -33,7 +33,7 @@ from oh_goon.core.product_identity import new_checkpoint_id, new_workspace_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import FleetRunEventType
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
-from oh_goon.engine.git import GitService
+from oh_goon.engine.git import GitService, workspace_metadata_git_environment
 from oh_goon.integrations._copy_transport import copy_regular_file
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.source_snapshot import (
@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     from oh_goon.runtime.workspace_leases import NativeWorkspaceQuiescence
 
 
-def _worktree_git_environment() -> dict[str, str]:
+def _worktree_git_environment(*, executable_path: str | None = None) -> dict[str, str]:
     """Return the minimal Git environment while preserving admitted executable lookup.
 
     Worktree metadata commands intentionally avoid host/system Git configuration, but
@@ -62,17 +62,7 @@ def _worktree_git_environment() -> dict[str, str]:
     the frozen Git capability even though startup/admission had proved it.
     """
 
-    return {
-        "PATH": os.environ.get("PATH", os.defpath),
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_COUNT": "2",
-        "GIT_CONFIG_KEY_0": "core.fsmonitor",
-        "GIT_CONFIG_VALUE_0": "false",
-        "GIT_CONFIG_KEY_1": "core.hooksPath",
-        "GIT_CONFIG_VALUE_1": os.devnull,
-        "GIT_OPTIONAL_LOCKS": "0",
-    }
+    return workspace_metadata_git_environment(executable_path=executable_path)
 
 
 def _worktree_git_service(git: GitService | None = None) -> GitService:

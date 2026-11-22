@@ -13,7 +13,8 @@ class _RuntimeSafetyCutBase:
     """Facts that remain meaningful even when Journal integrity cannot be established."""
 
     durable_revision: int
-    active_lease: ExecutionLease | None
+    active_leases: tuple[ExecutionLease, ...]
+    retained_leases: tuple[ExecutionLease, ...]
     effect_attempts: tuple[RepositoryEffectAttempt, ...]
     active_schedules: tuple[ScheduleRunRecord, ...]
 

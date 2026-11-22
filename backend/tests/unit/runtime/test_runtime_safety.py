@@ -83,7 +83,8 @@ def _degraded_service(database: LocalDatabase | None = None) -> RuntimeSafetySer
             return ConsistentRuntimeSafetyCut(
                 durable_revision=self.current_durable_revision(),
                 journal=JournalReadView.from_entries((), "test"),
-                active_lease=None,
+                active_leases=(),
+                retained_leases=(),
                 effect_attempts=(),
                 active_schedules=(),
             )
@@ -100,7 +101,8 @@ def test_journal_corrupt_safety_cut_requires_integrity_error() -> None:
     with pytest.raises(ValueError, match="requires an integrity error"):
         JournalCorruptRuntimeSafetyCut(
             durable_revision=0,
-            active_lease=None,
+            active_leases=(),
+            retained_leases=(),
             effect_attempts=(),
             active_schedules=(),
             journal_error="",
@@ -159,7 +161,8 @@ def test_recorded_safety_is_always_assessed_and_admitted_cut_is_consistent() -> 
     cut = ConsistentRuntimeSafetyCut(
         durable_revision=0,
         journal=JournalReadView.from_entries((), "test"),
-        active_lease=None,
+        active_leases=(),
+        retained_leases=(),
         effect_attempts=(),
         active_schedules=(),
     )

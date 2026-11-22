@@ -41,7 +41,8 @@ class _SafetyProof:
         return ConsistentRuntimeSafetyCut(
             durable_revision=self._proof.durable_revision or 0,
             journal=JournalReadView.from_entries((), "test"),
-            active_lease=None,
+            active_leases=(),
+            retained_leases=(),
             effect_attempts=(),
             active_schedules=(),
         )
@@ -95,7 +96,8 @@ class _CommitDuringSafetyProof:
         return ConsistentRuntimeSafetyCut(
             durable_revision=self._database.durable_revision(),
             journal=self._journal.read_view(),
-            active_lease=None,
+            active_leases=(),
+            retained_leases=(),
             effect_attempts=(),
             active_schedules=(),
         )
@@ -126,7 +128,8 @@ class _ClaimDuringSafetyProof:
         return ConsistentRuntimeSafetyCut(
             durable_revision=self._database.durable_revision(),
             journal=JournalReadView.from_entries((), "test"),
-            active_lease=None,
+            active_leases=(),
+            retained_leases=(),
             effect_attempts=(),
             active_schedules=(),
         )

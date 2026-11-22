@@ -26,6 +26,7 @@ from oh_goon.core.models.recovery import (
     RestartRecoveryAction,
     RestartRecoveryFinding,
 )
+from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission
 from oh_goon.core.models.schedule_execution import ScheduleRunRecord
 from oh_goon.core.product_identity import validate_repository_attempt_operation_id
 from oh_goon.core.vocabulary import EffectAttemptOwner
@@ -45,7 +46,8 @@ from oh_goon.services.effect_quarantine import effect_quarantines
 
 class _SafetyCutFields(TypedDict):
     durable_revision: int
-    active_lease: ExecutionLease | None
+    active_leases: tuple[ExecutionLease, ...]
+    retained_leases: tuple[ExecutionLease, ...]
     effect_attempts: tuple[RepositoryEffectAttempt, ...]
     active_schedules: tuple[ScheduleRunRecord, ...]
 
@@ -78,7 +80,8 @@ class SystemInvariantAuditor:
         durable_revision = read_durable_revision(connection)
         common: _SafetyCutFields = dict(
             durable_revision=durable_revision,
-            active_lease=self._execution.active_lease_in(connection),
+            active_leases=self._execution.active_leases_in(connection),
+            retained_leases=self._execution.retained_leases_in(connection),
             effect_attempts=tuple(self._attempts.all_in(connection)),
             active_schedules=tuple(self._schedules.active_in(connection)),
         )
@@ -127,9 +130,11 @@ class SystemInvariantAuditor:
 
     def _execution_findings(self, cut: ConsistentRuntimeSafetyCut) -> list[InvariantFinding]:
         findings: list[InvariantFinding] = []
-        active_run = cut.journal.active_run()
-        lease = cut.active_lease
-        if lease is not None and lease.kind == "FLEET":
+        budgets: set[str] = set()
+        concurrent = 0
+        for lease in cut.retained_leases:
+            if lease.kind != "FLEET":
+                continue
             detail = cut.journal.run_detail(lease.fleet_run_id or "")
             if detail is None:
                 findings.append(
@@ -141,7 +146,38 @@ class SystemInvariantAuditor:
                         target=lease.fleet_run_id or lease.token,
                     )
                 )
-            elif detail.run.status.terminal:
+                continue
+            admission = (
+                detail.execution.concurrency
+                if isinstance(detail.execution, DirectFleetExecutionAdmission)
+                else None
+            )
+            if lease.concurrency_identity is not None:
+                if admission is None or admission.identity != lease.concurrency_identity:
+                    findings.append(
+                        InspectLeaseFinding(
+                            finding_type="INSPECT_LEASE",
+                            code="CONCURRENT_RESERVATION_DIFFERS_FROM_ADMISSION",
+                            severity=InvariantSeverity.ERROR,
+                            message="Concurrent resource reservation differs from original Run admission",
+                            target=detail.run.fleet_run_id,
+                        )
+                    )
+                else:
+                    concurrent += 1
+                    budgets.add(admission.budget_identity)
+            reserved = lease.custody is not None and lease.custody.phase == "RESOURCE_RESERVED"
+            if reserved and not detail.run.status.terminal:
+                findings.append(
+                    InspectLeaseFinding(
+                        finding_type="INSPECT_LEASE",
+                        code="RESOURCE_RESERVATION_WITHOUT_TERMINAL_RUN",
+                        severity=InvariantSeverity.ERROR,
+                        message="Closing native resource occupancy requires a terminal original Run",
+                        target=detail.run.fleet_run_id,
+                    )
+                )
+            elif detail.run.status.terminal and lease in cut.active_leases:
                 findings.append(
                     InspectLeaseFinding(
                         finding_type="INSPECT_LEASE",
@@ -151,21 +187,34 @@ class SystemInvariantAuditor:
                         target=detail.run.fleet_run_id,
                     )
                 )
-        if active_run is not None and not (
-            lease is not None
-            and lease.kind == "FLEET"
-            and lease.fleet_run_id == active_run.fleet_run_id
+        if len(cut.retained_leases) > 1 and (
+            concurrent != len(cut.retained_leases) or len(budgets) != 1
         ):
             findings.append(
-                RestartRecoveryFinding(
-                    finding_type="RESTART_RECOVERY",
-                    code="ACTIVE_RUN_WITHOUT_LEASE",
+                PlainInvariantFinding(
+                    finding_type="PLAIN",
+                    code="INCOMPATIBLE_CONCURRENT_EXECUTION_RESERVATIONS",
                     severity=InvariantSeverity.ERROR,
-                    message=f"Active FleetRun {active_run.fleet_run_id} has no active execution lease",
-                    fleet_run_id=active_run.fleet_run_id,
+                    message="Multiple retained execution reservations lack one original concurrent budget",
                 )
             )
-        if lease is not None and lease.kind == "DIRECT":
+        for active_run in cut.journal.active_runs():
+            if not any(
+                lease.kind == "FLEET" and lease.fleet_run_id == active_run.fleet_run_id
+                for lease in cut.active_leases
+            ):
+                findings.append(
+                    RestartRecoveryFinding(
+                        finding_type="RESTART_RECOVERY",
+                        code="ACTIVE_RUN_WITHOUT_LEASE",
+                        severity=InvariantSeverity.ERROR,
+                        message=f"Active FleetRun {active_run.fleet_run_id} has no active execution lease",
+                        fleet_run_id=active_run.fleet_run_id,
+                    )
+                )
+        for lease in cut.active_leases:
+            if lease.kind != "DIRECT":
+                continue
             owned = [
                 attempt
                 for attempt in cut.effect_attempts
@@ -178,10 +227,7 @@ class SystemInvariantAuditor:
                         finding_type="INSPECT_LEASE",
                         code="DIRECT_LEASE_WITHOUT_EXACT_EFFECT_ATTEMPT",
                         severity=InvariantSeverity.ERROR,
-                        message=(
-                            "Direct execution lease must own exactly one CLAIMED/EFFECT_STARTED "
-                            f"attempt; observed {len(owned)}"
-                        ),
+                        message=f"Direct execution lease must own exactly one CLAIMED/EFFECT_STARTED attempt; observed {len(owned)}",
                         target=lease.token,
                     )
                 )
@@ -203,8 +249,8 @@ class SystemInvariantAuditor:
                         operation_id=attempt.operation_id,
                     )
                 )
-            if attempt.status in LIVE_OWNED_EFFECT_STATUSES and not _live_attempt_owned_by_lease(
-                attempt, cut.active_lease
+            if attempt.status in LIVE_OWNED_EFFECT_STATUSES and not any(
+                _live_attempt_owned_by_lease(attempt, lease) for lease in cut.active_leases
             ):
                 findings.append(
                     ReconcileEffectAttemptFinding(

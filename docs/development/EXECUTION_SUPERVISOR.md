@@ -14,16 +14,52 @@ to one fresh native Run-worker process. The supervisor owns bounded active Run
 observations and process-local failure reporting; its observer thread runs only
 the existing native command owner. It accepts a prepared `RunWorkerLaunch`,
 never a Fleet execution callable or a reusable worker pool. The conservative
-one-active-Run limit remains in force per runtime. Its
+one-active-Run limit remains the default per runtime. Explicit native capacity
+is described below. Its
 `ACCEPTING → QUIESCING → CLOSED` states control local submission; they are not
 durable Run status.
 
 The [SQLite execution lease](../../backend/src/oh_goon/runtime/execution/sqlite_lease.py)
-also admits only one live execution across runtimes sharing that database. A
+also defaults to one live execution across runtimes sharing that database. A
 second runtime, different repository or another native profile does not bypass
 that atomic lease. Busy refusal prevents a second admitted worker/Step; supported
 preflight and source capture may already have occurred before final admission.
 It is not a claim of zero preparatory processes or source transport.
+
+### Opt-in native capacity
+
+`ApplicationRuntime.build(run_concurrency=...)` selects the bounded two-Run
+contract in the [current architecture decision](ARCHITECTURE_DECISIONS.md#explicit-capacity-for-two-independent-native-runs).
+It requires an already selected native aggregate slice, full worker ceilings
+and controller reserve, headless owned Pi/Bubblewrap candidates over distinct
+registered subjects, and one
+original controller/session/database. A third request is busy; another runtime
+cannot borrow a slot. DIRECT and global mutation fences still consider every
+retained execution lease. There is no queue or automatic capacity promotion.
+
+The original supervisor launches each fresh worker in a distinct native scope.
+A deferred sealed scope intent describes requested authority; the child
+establishes its actual native scope before opening SQLite or claiming the
+ticket. A separate bounded readiness exchange lets the original parent pin the
+kernel witness before acknowledging the child. This exchange grants no Run
+result. The native owner verifies limits and the shared aggregate identity;
+scope movement that abandons caller limits remains refused.
+
+Logical Run completion and physical scope retirement are different facts. An
+opt-in lease retains a non-executable resource reservation after logical
+completion. The original native owner establishes quiescence, and the original
+lifecycle appends the scoped resource observation before releasing that exact
+reservation. Failed cleanup retains its original callback/witness for bounded
+retry. A successful sibling or consumed diagnostic cannot clear uncertainty.
+For a dead nonterminal worker, scoped recovery retains failure/unknown history
+before resource settlement; no parent exit manufactures success or rollback.
+
+Restart follows the same original lease and native scope intent. Lost native
+witnesses remain unknown. Any environment-specific manager/journal witness is
+qualified separately; neither an absent unit/path nor a loaded-looking process
+name is sufficient. Native advertised executable artifact identity is not
+loaded-image attestation. Candidate writer/output retention remains with its
+existing workspace owner even when CPU-scope closure is known.
 
 Eligible repository targets may run in parallel beneath one claimed worker through
 the existing [target scheduler](../../backend/src/oh_goon/services/fleet_target_scheduler.py)

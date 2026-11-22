@@ -472,8 +472,12 @@ class CausalRunJournal:
         # The same original Fleet lease, not a caller-supplied selected scope,
         # cancellation-free and never a recovery-only custodian.
         try:
-            lease = self.connection.execute("""SELECT lease_token, kind, fleet_run_id,
-                cancel_requested_at, owner_session_id FROM execution_lease WHERE singleton=1""").fetchone()
+            lease = self.connection.execute(
+                """SELECT lease_token, kind, fleet_run_id,
+                cancel_requested_at, owner_session_id FROM execution_lease
+                WHERE fleet_run_id=? AND lease_token=?""",
+                (run_id, lease_identity),
+            ).fetchone()
         except sqlite3.Error as exc:
             raise CausalJournalError("original Fleet execution lease unavailable") from exc
         if (

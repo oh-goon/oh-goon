@@ -23,6 +23,6 @@ class FleetService:
             repositories,
             durable_revision=state.durable_revision,
             journal_revision=state.journal.revision,
-            active_fleet_run=state.journal.active_run_detail(),
+            active_fleet_runs=state.journal.active_run_details(),
             latest_fleet_runs=state.journal.latest_run_details(),
         )

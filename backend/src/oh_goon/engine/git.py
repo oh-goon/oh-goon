@@ -7,7 +7,7 @@ import stat
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from oh_goon.core.errors import StateConflict
 from oh_goon.core.models.provenance import RepositoryStateFingerprint
@@ -59,6 +59,59 @@ class GitObservation:
 
 
 _DEFAULT_TIMEOUT = object()
+
+
+def workspace_metadata_git_environment(*, executable_path: str | None = None) -> dict[str, str]:
+    """Resolve the native metadata environment once, or verify an explicit PATH."""
+    selected = os.environ.get("PATH", os.defpath) if executable_path is None else executable_path
+    if not selected or not selected.isprintable() or len(selected.encode("utf-8")) > 32768:
+        raise ValueError("Native Git metadata requires a bounded captured executable PATH")
+    return {
+        "PATH": selected,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "core.fsmonitor",
+        "GIT_CONFIG_VALUE_0": "false",
+        "GIT_CONFIG_KEY_1": "core.hooksPath",
+        "GIT_CONFIG_VALUE_1": os.devnull,
+        "GIT_OPTIONAL_LOCKS": "0",
+    }
+
+
+def require_workspace_metadata_git_environment(environment: object) -> dict[str, str]:
+    """Accept only the exact metadata policy, without another ambient resolution."""
+    if not isinstance(environment, Mapping) or not all(
+        type(name) is str and type(value) is str for name, value in environment.items()
+    ):
+        raise ValueError("Native Git metadata environment is invalid")
+    values = dict(environment)
+    selected = values.get("PATH")
+    if not isinstance(selected, str) or values != workspace_metadata_git_environment(
+        executable_path=selected
+    ):
+        raise ValueError("Native Git metadata environment differs from its original policy")
+    return values
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceMetadataGitCommandRunner:
+    """Exact native lifecycle metadata owner; never an untrusted payload runner."""
+
+    environment_items: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        if len(dict(self.environment_items)) != len(self.environment_items):
+            raise ValueError("Native Git metadata environment has duplicate fields")
+        require_workspace_metadata_git_environment(dict(self.environment_items))
+
+    @property
+    def environment(self) -> dict[str, str]:
+        return dict(self.environment_items)
+
+    def __call__(self, *argv: str, **options: Any) -> CommandResult:
+        options.pop("env", None)
+        return run_command(*argv, env=self.environment, **options)
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,10 +6,14 @@ from enum import StrEnum
 from math import isfinite
 from pathlib import Path
 from threading import Condition, Lock, Thread
+from typing import TYPE_CHECKING
+
+from pydantic import JsonValue
 
 from oh_goon.core.errors import ErrorKind, ExecutionBusy, RuntimeQuiescing, StateConflict
 from oh_goon.core.models.background import BackgroundFailure, RunWorkerExitCode
 from oh_goon.core.models.diagnostic import DiagnosticEvent
+from oh_goon.core.models.run_resources import RunConcurrencyAdmission
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.vocabulary import BackgroundFailureStage
@@ -19,6 +23,9 @@ from oh_goon.engine.command import (
     CommandProcessLifecycleEvent,
     run_command,
 )
+
+if TYPE_CHECKING:
+    from oh_goon.runtime.execution.coordinator import ExecutionTicket
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -45,10 +52,35 @@ class RunWorkerLaunch:
     on_exit: Callable[[int | None], None] | None = field(default=None, repr=False)
     cleanup: Callable[[], None] | None = field(default=None, repr=False)
     admission: RunWorkerAdmission | None = field(default=None, repr=False)
+    finalize: Callable[[], object] | None = field(default=None, repr=False)
+    finalization_cleanup: Callable[[], None] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not self.argv or not self.cwd.is_absolute():
             raise ValueError("Run worker requires one explicit native launch and working directory")
+        if self.finalization_cleanup is not None and self.finalize is None:
+            raise ValueError("Run worker resource handles require their original finalizer")
+
+
+@dataclass(frozen=True, slots=True)
+class RunWorkerPreparation:
+    """Resolved metadata and transport preparation for exactly one original Run."""
+
+    fleet_run_id: str
+    prepare: Callable[[ExecutionTicket], RunWorkerLaunch] = field(repr=False)
+    concurrency: RunConcurrencyAdmission | None = None
+    deferred_resource_scope: dict[str, JsonValue] | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.concurrency is not None and self.concurrency.fleet_run_id != self.fleet_run_id:
+            raise ValueError("Run worker resources differ from their original Run")
+        if (self.concurrency is None) != (self.deferred_resource_scope is None):
+            raise ValueError("Run worker capacity requires its exact private resource transport")
+
+    def __call__(self, ticket: ExecutionTicket) -> RunWorkerLaunch:
+        if ticket.require_fleet_run_id() != self.fleet_run_id:
+            raise StateConflict("Run worker preparation differs from its admission ticket")
+        return self.prepare(ticket)
 
 
 @dataclass(slots=True)
@@ -61,6 +93,13 @@ class _WorkerObservation:
     pid: int | None = None
     process_identity: str | None = None
     termination: TerminationSignal | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingWorkerFinalization:
+    observation: _WorkerObservation
+    retry: Callable[[], None] | None = field(repr=False)
+    retry_lock: Lock = field(default_factory=Lock, repr=False, compare=False)
 
 
 class RunSupervisorState(StrEnum):
@@ -91,11 +130,13 @@ class RunExecutionSupervisor:
         diagnostics: DiagnosticEmitter | None = None,
         failure_retention: int = 64,
     ) -> None:
-        if max_active_runs != 1:
-            raise ValueError("Run worker phase one admits one active FleetRun per runtime")
+        if type(max_active_runs) is not int or max_active_runs not in {1, 2}:
+            raise ValueError("Run worker capacity must be one or two active FleetRuns")
         if type(failure_retention) is not int or failure_retention < 1:
             raise ValueError("Run worker failure retention must be positive")
         self._active: dict[str, _WorkerObservation] = {}
+        self._pending_finalization: dict[str, _PendingWorkerFinalization] = {}
+        self._max_active_runs = max_active_runs
         self._lock = Lock()
         self._condition = Condition(self._lock)
         self._state = RunSupervisorState.ACCEPTING
@@ -122,11 +163,18 @@ class RunExecutionSupervisor:
         """Linearize a pending submission at the caller's canonical admission write cut."""
         with self._condition:
             self._require_accepting_locked()
-            if self._active:
-                raise ExecutionBusy("This runtime already supervises an active FleetRun")
+            self._require_capacity_locked(fleet_run_id)
             admission = RunWorkerAdmission(fleet_run_id)
             self._active[fleet_run_id] = _WorkerObservation(admission=admission)
             return admission
+
+    def _require_capacity_locked(self, fleet_run_id: str) -> None:
+        if fleet_run_id in self._active or fleet_run_id in self._pending_finalization:
+            raise ExecutionBusy(
+                f"Fleet run is already submitted or awaiting finalization: {fleet_run_id}"
+            )
+        if len(self._active) + len(self._pending_finalization) >= self._max_active_runs:
+            raise ExecutionBusy("This runtime already supervises its active FleetRun capacity")
 
     def abandon_admission(self, admission: RunWorkerAdmission) -> None:
         """Retire only this unsubmitted registration after rollback/preparation failure."""
@@ -159,8 +207,7 @@ class RunExecutionSupervisor:
                 self._require_accepting_locked()
                 if observed is not None:
                     raise ExecutionBusy(f"Fleet run is already submitted: {fleet_run_id}")
-                if self._active:
-                    raise ExecutionBusy("This runtime already supervises an active FleetRun")
+                self._require_capacity_locked(fleet_run_id)
                 observed = _WorkerObservation()
                 self._active[fleet_run_id] = observed
             observed.submitted = True
@@ -219,11 +266,29 @@ class RunExecutionSupervisor:
             return tuple(self._active)
 
     def require_containment_complete(self) -> None:
+        # Retry only callbacks captured by the original observation. A public
+        # caller cannot acknowledge native absence with a Run ID or boolean.
+        # Callback effects remain in the original native/lifecycle owners and
+        # never execute while the supervisor lock is held.
         with self._condition:
-            if self._active or (
-                self._last_failure is not None
-                and self._last_failure.code == "RUN_WORKER_CONTAINMENT_FAILED"
-            ):
+            pending = tuple(self._pending_finalization.items())
+        for fleet_run_id, original in pending:
+            if original.retry is None:
+                continue
+            with original.retry_lock:
+                with self._condition:
+                    if self._pending_finalization.get(fleet_run_id) is not original:
+                        continue
+                try:
+                    original.retry()
+                except Exception:
+                    continue
+                with self._condition:
+                    if self._pending_finalization.get(fleet_run_id) is original:
+                        self._pending_finalization.pop(fleet_run_id)
+                        self._condition.notify_all()
+        with self._condition:
+            if self._active or self._pending_finalization:
                 raise StateConflict("Run worker containment is unverified")
 
     def take_failure(self, fleet_run_id: str) -> BackgroundFailure | None:
@@ -279,6 +344,7 @@ class RunExecutionSupervisor:
     ) -> None:
         failure: BackgroundFailure | None = None
         returncode: int | None = None
+        native_quiescent = False
 
         def termination_requested() -> TerminationSignal | None:
             with self._lock:
@@ -311,6 +377,7 @@ class RunExecutionSupervisor:
                 retain_output_tail=True,
             )
             returncode = result.returncode
+            native_quiescent = result.supervisor.final_process_group_quiescent
             if returncode != 0:
                 failure = _worker_failure(returncode=returncode)
         except BaseException as exc:
@@ -319,6 +386,7 @@ class RunExecutionSupervisor:
             # Native stderr and argv can carry sensitive runtime material.
             # Keep only the fixed execution observation in this local mailbox.
             if isinstance(exc, CommandAuthorityTerminatedError):
+                native_quiescent = exc.supervisor.final_process_group_quiescent
                 failure = _worker_failure(
                     code=(
                         "RUN_WORKER_FORCED_CONTAINMENT"
@@ -357,10 +425,22 @@ class RunExecutionSupervisor:
                         ),
                     )
                 )
+            callback_failed = False
+            finalizer_succeeded = False
+
+            def retry_original_finalization() -> None:
+                if observed.started and launch.on_exit is not None:
+                    launch.on_exit(returncode)
+                if launch.finalize is not None:
+                    launch.finalize()
+                if launch.finalization_cleanup is not None:
+                    launch.finalization_cleanup()
+
             if observed.started and launch.on_exit is not None:
                 try:
                     launch.on_exit(returncode)
                 except BaseException:
+                    callback_failed = True
                     if failure is None:
                         failure = _worker_failure(
                             code="RUN_WORKER_EXIT_OBSERVATION_FAILED",
@@ -376,6 +456,32 @@ class RunExecutionSupervisor:
                             execution_affected=False,
                             diagnostic_capability_affected="worker_exit_observation",
                             failure_class="worker_exit_observation",
+                            fleet_run_id=fleet_run_id,
+                        )
+                    )
+            if launch.finalize is not None:
+                try:
+                    launch.finalize()
+                    if launch.finalization_cleanup is not None:
+                        launch.finalization_cleanup()
+                    finalizer_succeeded = True
+                except BaseException:
+                    callback_failed = True
+                    if failure is None:
+                        failure = _worker_failure(
+                            code="RUN_WORKER_FINALIZATION_FAILED",
+                            message="Run worker resource finalization remains unverified",
+                        )
+                    self._emit(
+                        DiagnosticEvent(
+                            severity="WARNING",
+                            source="run_supervisor",
+                            owner="RunExecutionSupervisor",
+                            operation="finalize_worker_resources",
+                            message="Run worker resource finalization remains unverified",
+                            execution_affected=False,
+                            diagnostic_capability_affected="worker_resource_finalization",
+                            failure_class="worker_resource_finalization",
                             fleet_run_id=fleet_run_id,
                         )
                     )
@@ -397,13 +503,25 @@ class RunExecutionSupervisor:
                         )
             with self._condition:
                 observed.finished = True
-                self._active.pop(fleet_run_id, None)
-                self._last_failure = failure
-                if failure is not None:
-                    self._failed_runs.pop(fleet_run_id, None)
-                    self._failed_runs[fleet_run_id] = failure
-                    while len(self._failed_runs) > self._failure_retention:
-                        self._failed_runs.pop(next(iter(self._failed_runs)))
+                # An old observer cannot remove or publish failure against
+                # another registration generation with the same Run ID.
+                if self._active.get(fleet_run_id) is observed:
+                    self._active.pop(fleet_run_id)
+                    if callback_failed or (
+                        observed.started and not native_quiescent and not finalizer_succeeded
+                    ):
+                        self._pending_finalization[fleet_run_id] = _PendingWorkerFinalization(
+                            observed,
+                            retry_original_finalization
+                            if launch.finalize is not None or native_quiescent
+                            else None,
+                        )
+                    self._last_failure = failure
+                    if failure is not None:
+                        self._failed_runs.pop(fleet_run_id, None)
+                        self._failed_runs[fleet_run_id] = failure
+                        while len(self._failed_runs) > self._failure_retention:
+                            self._failed_runs.pop(next(iter(self._failed_runs)))
                 self._condition.notify_all()
 
 
@@ -415,6 +533,10 @@ def _worker_failure(
         RunWorkerExitCode.RUNTIME_IDENTITY_REFUSED: (
             "RUNTIME_IDENTITY_REFUSED",
             "loaded runtime identity was refused",
+        ),
+        RunWorkerExitCode.RESOURCE_SCOPE_REFUSED: (
+            "RESOURCE_SCOPE_REFUSED",
+            "original native worker resource scope was refused",
         ),
         RunWorkerExitCode.DATABASE_UNAVAILABLE: (
             "DATABASE_UNAVAILABLE",

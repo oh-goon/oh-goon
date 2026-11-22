@@ -75,7 +75,7 @@ def _require_settled_reset_authority(path: Path, connection: sqlite3.Connection)
     view = JournalReadView.from_entries(
         tuple(JournalFactStore.load_entries(connection)), "local-state-reset"
     )
-    if view.active_run() is not None:
+    if view.active_runs():
         raise StateConflict(
             "Local-state reset refuses active or unresolved Runs; settle them through the original lifecycle"
         )

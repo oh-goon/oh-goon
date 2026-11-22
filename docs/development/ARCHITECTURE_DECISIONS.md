@@ -46,6 +46,59 @@ durable state and terminalization; worker exit, logs and Game Tape remain
 evidence/projections. Native session, Schedule and client identities never
 become Run custody or recovery authority.
 
+### Explicit capacity for two independent native Runs
+
+The default execution capacity remains one Run. An explicit
+`ApplicationRuntime.build(run_concurrency=RunConcurrencyPolicy(...))` selects
+two slots for fresh, headless owned Pi/Bubblewrap candidates over distinct
+registered repositories in the same runtime and SQLite database. Both retain their original admission, ticket,
+fresh claimed worker, repository subject and exclusive candidate writer.
+DIRECT effects, strict execution and other workload modes retain their
+exclusive boundaries. This adds no worker pool, waiting queue or scheduler.
+Same-subject candidate overlap remains refused because quarantine authority is
+currently repository-scoped; separate candidate paths do not change that scope.
+
+The selected environment has one bounded native systemd user slice and a
+distinct capped scope for every worker. Aggregate CPU, memory and PID limits,
+worker ceilings and controller reserve are explicit. Worker ceilings plus
+reserve cannot exceed the aggregate intent. The reserve is capacity withheld
+from workers; it does not assert a separate hard controller ceiling. Native
+systemd/cgroup controls remain the resource authority. An unavailable manager,
+missing controller, changed scope identity or migration that abandons caller
+limits refuses before executable work. A per-worker memory failure stays in
+that worker's scope; aggregate/global pressure is a shared failure domain.
+
+The existing execution-lease table owns both atomic reservations and custody.
+Schema 95 uses bounded slots with exact Run/token joins; older stores remain
+preserved and refused by the existing schema owner. Same-controller capacity
+cannot be borrowed by a different runtime. Global scope/reset/scratch mutation
+fences consider every retained slot, including physical closure pending after
+logical completion. Final admission refreshes its safety revision in the same
+writer cut while reusing captured targets and source evidence; sibling progress
+does not authorize a scope/source substitution or another repository walk.
+
+A sealed deferred worker-scope intent describes a future worker without
+inventing its PID or envelope. The child observes its actual scope before
+opening SQLite or claiming custody; its parent independently pins the native
+object before acknowledging readiness. Logical Run completion retains the
+reservation until original scope quiescence is established and the original
+lifecycle records convergence. Native process exit and diagnostics do not
+manufacture a Run result. Scoped recovery, cancellation and shutdown address
+each original Run independently; one sibling cannot settle another's facts.
+
+Restart closure needs original independent native evidence. Missing witnesses
+retain uncertainty and capacity rather than converting an absent path, age or
+acknowledgement into proof. The selected manager's structured records and
+garbage-collection behavior require their own environment-specific
+qualification; an executable artifact hash is not loaded-image attestation.
+Workspace/output uncertainty remains separate from CPU-scope closure.
+
+Fleet snapshots contain the complete `active_fleet_runs` cut. The existing
+single-pane `active_fleet_run` output is derived from that cut; it is no longer
+a separately accepted source fact. Browser review can follow its own Run while
+acknowledging both durable identities. Measured one-versus-two evidence never
+raises defaults automatically; no-benefit and inconclusive results are retained.
+
 ### Repository effects have one owner-neutral durable lifecycle
 A repository effect is claimed, started, settled and reconciled through one durable lifecycle independent of which executor implementation performed it. Durable facts, not process memory, determine recovery.
 

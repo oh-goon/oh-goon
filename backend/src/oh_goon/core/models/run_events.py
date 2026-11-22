@@ -26,7 +26,10 @@ from oh_goon.core.models.run_launch import (
     ApplicationLaunchReceipt,
     UnmanagedApplicationLaunchReceipt,
 )
-from oh_goon.core.models.run_resources import RunResourceEnvelopeObservation
+from oh_goon.core.models.run_resources import (
+    RunResourceEnvelopeEvidence,
+    RunResourceEnvelopeObservation,
+)
 from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
 from oh_goon.core.models.target import OperationTarget
@@ -87,11 +90,21 @@ class RunStartedEvent(_FleetRunEventBase):
 class RunResourcesObservedEvent(_FleetRunEventBase):
     event_type: Literal[FleetRunEventType.RUN_RESOURCES_OBSERVED]
     observation: RunResourceEnvelopeObservation
+    worker_resource_envelope: RunResourceEnvelopeEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_run_binding(self) -> RunResourcesObservedEvent:
         if self.observation.fleet_run_id != self.fleet_run_id:
             raise ValueError("Native resource observation must belong to the same Run")
+        if self.worker_resource_envelope is not None and (
+            self.worker_resource_envelope.subject != "worker"
+            or self.worker_resource_envelope.fleet_run_id != self.fleet_run_id
+            or self.worker_resource_envelope.unit_name != self.observation.unit_name
+            or self.worker_resource_envelope.invocation_id != self.observation.invocation_id
+        ):
+            raise ValueError("Worker resource observation differs from its actual launch envelope")
         return self
 
 

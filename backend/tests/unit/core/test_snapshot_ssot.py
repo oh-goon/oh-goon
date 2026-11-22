@@ -16,6 +16,7 @@ from oh_goon.core.models.run import (
     CompletedFleetRun,
     FleetRunDetail,
     FleetRunProgress,
+    RunningFleetRun,
 )
 from oh_goon.core.models.run_admission import (
     DirectFleetExecutionAdmission,
@@ -123,7 +124,7 @@ def test_snapshot_accepts_prestart_cancellation_and_preserves_known_time_fence(
         [],
         durable_revision=1,
         journal_revision=1,
-        active_fleet_run=detail,
+        active_fleet_runs=(detail,),
         latest_fleet_runs=[],
     )
     assert snapshot.active_fleet_run is not None
@@ -133,7 +134,7 @@ def test_snapshot_accepts_prestart_cancellation_and_preserves_known_time_fence(
             provenance=snapshot.provenance.model_copy(
                 update={"generated_at": run.accepted_at - timedelta(seconds=1)}
             ),
-            active_fleet_run=detail,
+            active_fleet_runs=(detail,),
         )
 
 
@@ -236,7 +237,7 @@ def test_summary_attention_is_repository_union_not_max_of_independent_counts(
 
     summary = build_fleet_summary(
         FleetProjectionContext.build(
-            repositories, None, [run_detail(second_update.report, "fleet-update")]
+            repositories, (), [run_detail(second_update.report, "fleet-update")]
         )
     )
 
@@ -371,7 +372,7 @@ def test_summary_does_not_treat_direct_update_as_fleet_run_result(tmp_path: Path
     )
     repository = fleet_repository(catalog, init=init, update=direct_update)
 
-    summary = build_fleet_summary(FleetProjectionContext.build([repository], None, []))
+    summary = build_fleet_summary(FleetProjectionContext.build([repository], (), []))
 
     assert summary.updated == 0
     assert summary.unchanged == 0
@@ -390,14 +391,14 @@ def test_snapshot_derives_summary_attention_and_review_from_source_facts(tmp_pat
         [repository],
         durable_revision=1,
         journal_revision=1,
-        active_fleet_run=None,
+        active_fleet_runs=(),
         latest_fleet_runs=[],
     )
     rebuilt = build_fleet_snapshot(
         [repository],
         durable_revision=1,
         journal_revision=1,
-        active_fleet_run=None,
+        active_fleet_runs=(),
         latest_fleet_runs=[],
     )
 
@@ -422,15 +423,64 @@ def test_snapshot_provenance_uses_only_source_facts_not_computed_run_views(tmp_p
     detail = run_detail(report, "snapshot-source-facts")
     context = FleetProjectionContext.build(
         repositories=(),
-        active_fleet_run=detail,
+        active_fleet_runs=(detail,),
         latest_fleet_runs=(detail,),
     )
 
     payload = snapshot_payload(context, durable_revision=7, journal_revision=5)
     latest = payload["latest_fleet_runs"][0]
-    active = payload["active_fleet_run"]
+    active = payload["active_fleet_runs"][0]
 
     assert "game_tape" not in latest
     assert "plan_trust_receipts" not in latest
     assert "outcome" not in latest
     assert "outcome" not in active
+
+
+def test_snapshot_retains_both_active_runs_and_binds_secondary_progress(tmp_path: Path) -> None:
+    details = []
+    repositories = []
+    for name in ("first", "second"):
+        catalog = entry(tmp_path / name)
+        catalog.repository.path.mkdir()
+        completed = run_detail(
+            make_operation_report(catalog.repository, OperationAction.INIT), name
+        )
+        running = RunningFleetRun(
+            status=FleetRunStatus.RUNNING,
+            fleet_run_id=name,
+            capability=completed.run.capability,
+            target=completed.run.target,
+            repository_scope=completed.run.repository_scope,
+            targets=completed.run.targets,
+            accepted_at=completed.run.accepted_at,
+            started_at=completed.run.started_at,
+            progress=FleetRunProgress(total=1, succeeded=0, failed=0),
+        )
+        details.append(completed.model_copy(update={"run": running, "operations": ()}))
+        repositories.append(fleet_repository(catalog))
+
+    def snapshot(active):
+        return build_fleet_snapshot(
+            repositories,
+            durable_revision=7,
+            journal_revision=5,
+            active_fleet_runs=active,
+            latest_fleet_runs=[],
+        )
+
+    observed = snapshot(details)
+    assert [detail.run.fleet_run_id for detail in observed.active_fleet_runs] == ["first", "second"]
+    assert observed.active_fleet_run == details[0]
+    progressed = details[1].model_copy(
+        update={
+            "run": details[1].run.model_copy(
+                update={"progress": FleetRunProgress(total=1, succeeded=1, failed=0)}
+            )
+        }
+    )
+    assert (
+        snapshot((details[0], progressed)).provenance.snapshot_id != observed.provenance.snapshot_id
+    )
+    with pytest.raises(ValidationError, match="unique identities"):
+        snapshot((details[0], details[0]))

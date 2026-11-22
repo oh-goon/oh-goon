@@ -45,6 +45,7 @@ from oh_goon.core.models.run_admission import (
     ExplicitRepositoryScope,
     FleetRepositoryScope,
     FleetRunAdmissionIntent,
+    require_concurrent_candidate_admission,
 )
 from oh_goon.core.models.run_events import (
     FleetRunEvent,
@@ -60,6 +61,7 @@ from oh_goon.core.models.run_events import (
     StorageMaintenanceRecordedEvent,
 )
 from oh_goon.core.models.run_resources import (
+    RunConcurrencyAdmission,
     RunResourceEnvelopeEvidence,
     RunResourceEnvelopeObservation,
 )
@@ -96,6 +98,7 @@ from oh_goon.runtime.journal_view import JournalReadView
 
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_step_execution import StepLifecycleObserver
+    from oh_goon.integrations.run_resource_envelope import VerifiedWorkerResourceClosure
 
 
 class RunResourceObservationContext(ImmutableModel):
@@ -733,8 +736,6 @@ class Journal:
         self, expected: RunResourceEnvelopeEvidence
     ) -> RunResourceObservationContext:
         """Capture the final verified child cut after its last runtime write."""
-        from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
-
         with self._database.transaction() as connection:
             view = self._facts.read_view(connection)
             detail = view.required_run_detail(expected.fleet_run_id)
@@ -749,16 +750,7 @@ class Journal:
                 raise InvalidRunTransition("Run resource context requires a terminal original Run")
             if detail.resource_observation is not None:
                 raise InvalidRunTransition("Run resource observation is already recorded")
-            # A quarantined filesystem outcome does not establish a live effect
-            # owner. Recording native resource facts leaves that semantic state
-            # untouched; live claims and unresolved canonical reports still refuse.
-            if any(
-                attempt.status in LIVE_OWNED_EFFECT_STATUSES
-                for attempt in RepositoryEffectAttemptStore(self._database).by_fleet_run_in(
-                    connection, expected.fleet_run_id
-                )
-            ) or any(report.resource_settlement == "UNRESOLVED" for report in detail.operations):
-                raise InvalidRunTransition("Run resource context requires settled original effects")
+            self._require_settled_resource_observation_in(connection, detail)
             events = view.run_events(expected.fleet_run_id).events
             revision, fact_hash = self._facts.current_head(connection)
             if revision != view.revision:
@@ -776,6 +768,89 @@ class Journal:
                     detail.run.status,
                 ),
             )
+
+    def _require_settled_resource_observation_in(
+        self,
+        connection: sqlite3.Connection,
+        detail: FleetRunDetail,
+        *,
+        physical_worker_scope: bool = False,
+    ) -> None:
+        from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
+
+        # Quarantined repository output remains unknown. Resource closure does
+        # not rewrite it; live effects and unresolved native reports still refuse.
+        if (
+            not detail.run.status.terminal
+            or any(
+                attempt.status in LIVE_OWNED_EFFECT_STATUSES
+                for attempt in RepositoryEffectAttemptStore(self._database).by_fleet_run_in(
+                    connection, detail.run.fleet_run_id
+                )
+            )
+            or (
+                not physical_worker_scope
+                and any(report.resource_settlement == "UNRESOLVED" for report in detail.operations)
+            )
+        ):
+            raise InvalidRunTransition("Run resource context requires settled original effects")
+
+    def record_worker_resource_observation_in(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        fleet_run_id: str,
+        concurrency: RunConcurrencyAdmission,
+        envelope: RunResourceEnvelopeEvidence | None,
+        observation: RunResourceEnvelopeObservation,
+        proof: VerifiedWorkerResourceClosure,
+    ) -> RunResourceEnvelopeObservation:
+        """Append original worker closure in its reservation-release writer cut."""
+        self._database.require_atomic_write_cut(connection)
+        from oh_goon.integrations.run_resource_envelope import VerifiedWorkerResourceClosure
+
+        if type(proof) is not VerifiedWorkerResourceClosure or proof.observation != observation:
+            raise InvalidRunTransition(
+                "Worker resource observation lacks its original native verifier"
+            )
+        proof.require_matches(concurrency, envelope)
+        view = self._facts.read_view(connection)
+        detail = view.required_run_detail(fleet_run_id)
+        if (
+            not isinstance(detail.execution, DirectFleetExecutionAdmission)
+            or detail.execution.concurrency != concurrency
+            or concurrency.fleet_run_id != fleet_run_id
+        ):
+            raise InvalidRunTransition("Worker resource observation lacks its original admission")
+        # Exact native worker closure settles only CPU/memory/PID occupancy.
+        # Unknown storage/Mat/Step facts remain canonical and are not upgraded.
+        self._require_settled_resource_observation_in(
+            connection, detail, physical_worker_scope=True
+        )
+        existing = detail.resource_observation
+        if existing is not None:
+            if (
+                existing.cleanup != "VERIFIED"
+                or detail.worker_resource_envelope != envelope
+                or existing.fleet_run_id != observation.fleet_run_id
+                or existing.unit_name != observation.unit_name
+                or existing.invocation_id != observation.invocation_id
+            ):
+                raise InvalidRunTransition(
+                    "Worker resource closure differs from recorded convergence"
+                )
+            return existing
+        events = view.run_events(fleet_run_id).events
+        candidate = RunResourcesObservedEvent(
+            event_type=FleetRunEventType.RUN_RESOURCES_OBSERVED,
+            sequence=events[-1].sequence + 1,
+            fleet_run_id=fleet_run_id,
+            observation=observation,
+            worker_resource_envelope=envelope,
+        )
+        project_fleet_run_detail([*events, candidate], view.operation)
+        self._facts.append_run_event(connection, candidate)
+        return observation
 
     @staticmethod
     def record_run_resource_observation_from_context(
@@ -926,12 +1001,62 @@ class Journal:
                 "pre-work Fleet admission requires an existing SQLite transaction"
             )
         view = self._facts.read_view(connection)
-        active = view.active_run()
-        if active is not None:
+        active = view.active_runs()
+        concurrency = (
+            intent.execution.concurrency
+            if isinstance(intent.execution, DirectFleetExecutionAdmission)
+            else None
+        )
+        if active and concurrency is None:
             raise JournalConflict(
-                f"Fleet run {active.fleet_run_id} ({active.action.value}) is already "
-                f"{active.status.value.lower()}"
+                f"Fleet run {active[0].fleet_run_id} ({active[0].action.value}) is already "
+                f"{active[0].status.value.lower()}"
             )
+        if concurrency is not None:
+            require_concurrent_candidate_admission(intent.target, concurrency)
+            if concurrency.fleet_run_id != fleet_run_id:
+                raise JournalConflict("Concurrent admission belongs to another Run")
+            from oh_goon.runtime.execution.sqlite_lease import SQLiteExecutionLeaseStore
+
+            leases = SQLiteExecutionLeaseStore(self._database)
+            if leases.concurrency_in(connection, fleet_run_id) != concurrency:
+                raise JournalConflict(
+                    "Concurrent Journal publication lacks its original reservation"
+                )
+            assert isinstance(intent.target, FleetPlanTarget)
+            candidate = intent.target.candidate_workspace
+            assert candidate is not None
+            allocated = {candidate.workspace.workspace_id, candidate.source_workspace.workspace_id}
+            for lease in leases.retained_leases_in(connection):
+                if lease.fleet_run_id == fleet_run_id:
+                    continue
+                if lease.kind != "FLEET" or lease.fleet_run_id is None:
+                    raise JournalConflict(
+                        "Concurrent Journal admission conflicts with Direct ownership"
+                    )
+                other = view.required_run_detail(lease.fleet_run_id)
+                if (
+                    not isinstance(other.execution, DirectFleetExecutionAdmission)
+                    or other.execution.concurrency is None
+                    or other.execution.concurrency.budget_identity != concurrency.budget_identity
+                    or not isinstance(other.run.target, FleetPlanTarget)
+                    or other.run.target.candidate_workspace is None
+                ):
+                    raise JournalConflict(
+                        "Concurrent Journal admission differs from retained capacity"
+                    )
+                previous = other.run.target.candidate_workspace
+                if allocated & {
+                    previous.workspace.workspace_id,
+                    previous.source_workspace.workspace_id,
+                }:
+                    raise JournalConflict(
+                        "Concurrent Runs cannot share an owned candidate allocation"
+                    )
+                if candidate.workspace.repository_id == previous.workspace.repository_id:
+                    raise JournalConflict(
+                        "Initial concurrent Runs require distinct registered repository subjects"
+                    )
         if view.run_detail(fleet_run_id) is not None:
             raise JournalConflict(f"Fleet run already exists: {fleet_run_id}")
         _require_valid_readmission(view, fleet_run_id, intent, repository_scope, targets)
@@ -1069,6 +1194,12 @@ class Journal:
 
     def active_run_detail(self) -> FleetRunDetail | None:
         return self.read_view().active_run_detail()
+
+    def active_runs(self) -> tuple[FleetRunState, ...]:
+        return self.read_view().active_runs()
+
+    def active_run_details(self) -> tuple[FleetRunDetail, ...]:
+        return self.read_view().active_run_details()
 
     def run_events(
         self, fleet_run_id: str, after: int = 0, *, limit: int | None = None

@@ -45,6 +45,10 @@ from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionTicket
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
+from oh_goon.services.fleet_plan_candidate import (
+    capture_workspace_control_git_environment,
+    restore_workspace_control_git,
+)
 from oh_goon.services.fleet_run_execution import FleetRunExecution
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.fleet_target_scheduler import FleetTargetScheduler
@@ -68,6 +72,9 @@ class WorkerGitConfiguration(ImmutableModel):
     native_agent: ResolvedNativeAgent | None = Field(default=None, repr=False)
     native_observation: bool = False
     metadata_only: bool = Field(default=False, strict=True)
+    metadata_environment: dict[str, str] | None = Field(
+        default=None, exclude_if=lambda value: value is None, repr=False
+    )
 
     @model_validator(mode="after")
     def require_native_binding(self) -> WorkerGitConfiguration:
@@ -82,6 +89,14 @@ class WorkerGitConfiguration(ImmutableModel):
         )
         if self.native_observation is not expected_observation:
             raise ValueError("Native Git observation differs from its selected backend")
+        if self.metadata_environment is not None:
+            if self.native_agent is not None or not self.metadata_only:
+                raise ValueError("Metadata Git cannot inherit a payload execution binding")
+            restore_workspace_control_git(
+                executable=self.executable,
+                default_timeout_seconds=self.default_timeout_seconds,
+                environment=self.metadata_environment,
+            )
         return self
 
     @classmethod
@@ -93,6 +108,14 @@ class WorkerGitConfiguration(ImmutableModel):
                 "Run worker requires native Git configuration without injected callbacks"
             )
         runner = git.command_runner
+        captured_metadata = capture_workspace_control_git_environment(git)
+        if captured_metadata is not None:
+            return cls(
+                executable=git.executable,
+                default_timeout_seconds=git.default_timeout_seconds,
+                metadata_only=True,
+                metadata_environment=captured_metadata,
+            )
         if runner is None and git.observation_runner is None:
             return cls(
                 executable=git.executable,
@@ -135,6 +158,12 @@ class WorkerGitConfiguration(ImmutableModel):
         )
 
     def restore(self, *, isolation: ProcessIsolationBackend | None = None) -> GitService:
+        if self.metadata_environment is not None:
+            return restore_workspace_control_git(
+                executable=self.executable,
+                default_timeout_seconds=self.default_timeout_seconds,
+                environment=self.metadata_environment,
+            )
         if self.native_agent is not None:
             assert self.native_repository is not None
             runner = native_profile_command_runner(
@@ -178,6 +207,9 @@ class RunWorkerConfiguration(ImmutableModel):
     require_compiled_fleet_contract: bool
     run_resource_scope: dict[str, JsonValue] | None = Field(repr=False)
     run_resource_envelope: RunResourceEnvelopeEvidence | None
+    deferred_worker_resource_scope: dict[str, JsonValue] | None = Field(
+        default=None, exclude_if=lambda value: value is None, repr=False
+    )
 
     @model_validator(mode="after")
     def require_complete_binding(self) -> RunWorkerConfiguration:
@@ -209,6 +241,17 @@ class RunWorkerConfiguration(ImmutableModel):
                 self.run_resource_envelope.fleet_run_id != self.fleet_run_id
             ):
                 raise ValueError("Run worker resource evidence differs from selected Run")
+        if self.deferred_worker_resource_scope is not None:
+            from oh_goon.integrations.run_resource_envelope import DeferredWorkerResourceScope
+
+            deferred = DeferredWorkerResourceScope.from_payload(self.deferred_worker_resource_scope)
+            if (
+                not self.standard_local_fleet
+                or self.run_resource_scope is not None
+                or self.run_resource_envelope is not None
+                or deferred.admission.fleet_run_id != self.fleet_run_id
+            ):
+                raise ValueError("Deferred worker resources differ from original Run configuration")
         return self
 
 
@@ -217,6 +260,16 @@ def capture_runtime_worker_configuration(
 ) -> RunWorkerConfiguration:
     """Capture the already resolved parent inputs, including only this Run's enrollment."""
     paths = ApplicationStatePathLayout.from_database(foundation.database.path)
+    deferred_payload: dict[str, JsonValue] | None = None
+    if foundation.run_capacity is not None:
+        from oh_goon.integrations.run_resource_envelope import prepare_worker_resource_scope
+
+        if foundation.terminal is not None:
+            raise FleetPlanInvalid("Concurrent Run workers require headless execution")
+        deferred_payload = cast(
+            dict[str, JsonValue],
+            prepare_worker_resource_scope(fleet_run_id, foundation.run_capacity).to_payload(),
+        )
     return RunWorkerConfiguration(
         fleet_run_id=fleet_run_id,
         hashmarks_implementation_identity=require_loaded_hashmarks_runtime(),
@@ -250,6 +303,7 @@ def capture_runtime_worker_configuration(
             else None
         ),
         run_resource_envelope=foundation.run_resource_envelope,
+        deferred_worker_resource_scope=deferred_payload,
     )
 
 
@@ -261,12 +315,47 @@ def build_claimed_run_execution(
     terminal: CommandTerminal | None,
     live_output: GameTapeLiveOutputStore,
     diagnostics: DiagnosticEmitter,
+    worker_resource_envelope: RunResourceEnvelopeEvidence | None = None,
 ) -> FleetRunExecution:
     """Build only the existing execution graph after the canonical worker claim."""
     if claimed_ticket.require_fleet_run_id() != configuration.fleet_run_id:
         raise FleetPlanInvalid("Run worker configuration differs from claimed Run")
     execution = ExecutionCoordinator(database)
     execution.require_claimed_fleet_worker(claimed_ticket)
+    resource_scope = (
+        ResolvedRunResourceScope.from_payload(configuration.run_resource_scope)
+        if configuration.run_resource_scope is not None
+        else None
+    )
+    resource_envelope = configuration.run_resource_envelope
+    if configuration.deferred_worker_resource_scope is not None:
+        from oh_goon.integrations.run_resource_envelope import DeferredWorkerResourceScope
+
+        deferred = DeferredWorkerResourceScope.from_payload(
+            configuration.deferred_worker_resource_scope
+        )
+        if (
+            worker_resource_envelope is None
+            or worker_resource_envelope.subject != "worker"
+            or worker_resource_envelope.fleet_run_id != configuration.fleet_run_id
+            or worker_resource_envelope.unit_name != deferred.admission.worker_unit_name
+            or worker_resource_envelope.resources != deferred.admission.policy.worker_resources
+        ):
+            raise FleetPlanInvalid("Claimed worker lacks its actual native resource envelope")
+        reservation = execution.activate(claimed_ticket).observe(
+            lambda connection: execution.worker_resource_reservation_in(
+                connection, configuration.fleet_run_id
+            )
+        )
+        if (
+            reservation is None
+            or reservation.admission != deferred.admission
+            or reservation.envelope != worker_resource_envelope
+        ):
+            raise FleetPlanInvalid("Claimed worker resources differ from original durable custody")
+        resource_scope, resource_envelope = deferred.scope, worker_resource_envelope
+    elif worker_resource_envelope is not None:
+        raise FleetPlanInvalid("Unselected worker resource evidence cannot alter composition")
     journal = Journal(database)
     executor_configuration = restore_worker_executor_configuration(
         configuration.executor_configuration
@@ -311,12 +400,8 @@ def build_claimed_run_execution(
         require_compiled_fleet_contract=configuration.require_compiled_fleet_contract,
         fleet_provisioner=fleet_provisioner,
         standard_local_fleet=configuration.standard_local_fleet,
-        run_resource_scope=(
-            ResolvedRunResourceScope.from_payload(configuration.run_resource_scope)
-            if configuration.run_resource_scope is not None
-            else None
-        ),
-        run_resource_envelope=configuration.run_resource_envelope,
+        run_resource_scope=resource_scope,
+        run_resource_envelope=resource_envelope,
     )
     attempts = RepositoryEffectAttemptStore(database)
     effects = RepositoryEffectExecution(

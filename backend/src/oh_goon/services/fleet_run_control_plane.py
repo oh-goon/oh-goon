@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import sqlite3
+
+    from oh_goon.integrations.run_resource_envelope import ResolvedNativeRuntimeBudget
     from oh_goon.services.fleet_local_lace_takeover import OriginalLocalLaceTakeoverCoordinator
 
 from collections.abc import Callable, Generator
@@ -12,9 +15,9 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
 from oh_goon.core.capability_registry import (
@@ -86,7 +89,7 @@ from oh_goon.core.models.run_admission import (
 )
 from oh_goon.core.models.run_events import FleetRunEventBatch
 from oh_goon.core.models.run_launch import ManagedApplicationLaunchReceipt
-from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
+from oh_goon.core.models.run_resources import RunConcurrencyAdmission, RunResourceEnvelopeEvidence
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget, OperationTarget
 from oh_goon.core.path_authority import RepositoryScopedPath
@@ -118,7 +121,11 @@ from oh_goon.integrations.exact_file_write import (
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.runtime.database import ExistingDatabaseAppendContext
 from oh_goon.runtime.execution import ExecutionTicket, RunExecutionSupervisor
-from oh_goon.runtime.execution.run_supervisor import RunWorkerAdmission, RunWorkerLaunch
+from oh_goon.runtime.execution.run_supervisor import (
+    RunWorkerAdmission,
+    RunWorkerLaunch,
+    RunWorkerPreparation,
+)
 from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal, RunResourceObservationContext
 from oh_goon.runtime.lifecycle import RuntimeDrainPolicy
@@ -145,6 +152,12 @@ class FleetRunShutdownObservation:
 
     run_ids: tuple[str, ...]
     containment_deadline: float
+
+
+class _ConcurrentAdmissionArguments(TypedDict, total=False):
+    concurrency: RunConcurrencyAdmission
+    refresh_concurrency_in: Callable[[sqlite3.Connection], int]
+    deferred_worker_resource_scope: dict[str, JsonValue]
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,6 +419,8 @@ class FleetRunControlPlane:
         content_store: FleetContentStore | None = None,
         worker_configuration: Callable[[str], Callable[[ExecutionTicket], RunWorkerLaunch]]
         | None = None,
+        worker_exit_recovery: Callable[[str], None] | None = None,
+        run_capacity: ResolvedNativeRuntimeBudget | None = None,
     ) -> None:
         self._admission = admission
         self._journal = journal
@@ -417,6 +432,8 @@ class FleetRunControlPlane:
         self._schedule_executions = schedule_executions
         self._content_store = content_store
         self._worker_configuration = worker_configuration
+        self._worker_exit_recovery = worker_exit_recovery
+        self._run_capacity = run_capacity
         self._drain_runs: tuple[str, ...] = ()
 
     def require_cli_plan_preparation(self, fleet_run_id: str | None) -> None:
@@ -743,11 +760,53 @@ class FleetRunControlPlane:
             if self._worker_configuration is None:
                 raise FleetPlanInvalid("New FleetRun admission requires the Run worker launcher")
             prepare_worker = self._worker_configuration(fleet_run_id)
-            plan = self._admission.plan(
-                intent,
-                repository_scope=repository_scope,
-                expected_repository_instance_ids=expected_repository_instance_ids,
+            concurrency = (
+                prepare_worker.concurrency if type(prepare_worker) is RunWorkerPreparation else None
             )
+            if self._run_capacity is None:
+                if concurrency is not None:
+                    raise StateConflict("Concurrent Run admission has no original runtime budget")
+            elif (
+                concurrency is None
+                or concurrency.budget_identity != self._run_capacity.identity
+                or concurrency.fleet_run_id != fleet_run_id
+            ):
+                raise StateConflict("Run worker resources differ from the original runtime budget")
+            if concurrency is None:
+                plan = self._admission.plan(
+                    intent,
+                    repository_scope=repository_scope,
+                    expected_repository_instance_ids=expected_repository_instance_ids,
+                )
+            else:
+                plan = self._admission.plan(
+                    intent,
+                    repository_scope=repository_scope,
+                    expected_repository_instance_ids=expected_repository_instance_ids,
+                    concurrency=concurrency,
+                )
+            concurrent_admission: _ConcurrentAdmissionArguments = {}
+            if concurrency is not None:
+                assert type(prepare_worker) is RunWorkerPreparation
+                if prepare_worker.deferred_resource_scope is None:
+                    raise StateConflict("Run worker capacity lacks its original private transport")
+
+                def refresh_concurrency_in(connection: sqlite3.Connection) -> int:
+                    assert concurrency is not None
+                    return self._admission.refresh_concurrent_plan_in(
+                        connection,
+                        plan,
+                        intent,
+                        repository_scope=repository_scope,
+                        concurrency=concurrency,
+                        expected_repository_instance_ids=expected_repository_instance_ids,
+                    ).durable_revision
+
+                concurrent_admission = {
+                    "concurrency": concurrency,
+                    "refresh_concurrency_in": refresh_concurrency_in,
+                    "deferred_worker_resource_scope": prepare_worker.deferred_resource_scope,
+                }
             # The Plan's revision is the CAS authority for the original Fleet
             # admission transaction; re-read the occurrence after that cut to
             # prevent a cancelled/completed child slipping through planning.
@@ -792,6 +851,7 @@ class FleetRunControlPlane:
                                 schedule_run_id=schedule_run_id,
                                 admission_check=self._supervisor.require_accepting,
                                 before_admission=register_admission,
+                                **concurrent_admission,
                             )
                         except JournalConflict:
                             existing = _matching_existing_run(
@@ -1282,6 +1342,14 @@ class FleetRunControlPlane:
     ) -> FleetRunShutdownObservation:
         try:
             self._supervisor.require_containment_complete()
+            # A registration captured before the admission commit may have
+            # rolled back. Only after every original native scope is settled
+            # may a successful canonical read exclude that exact absent Run.
+            # Read/identity/storage ambiguity still raises and preserves scope.
+            view = self._journal.read_view()
+            self._drain_runs = tuple(
+                run_id for run_id in self._drain_runs if view.run_detail(run_id) is not None
+            )
             self._supervisor.shutdown(wait=False)
         except BaseException as exc:
             if cancellation_error is not None:
@@ -1296,17 +1364,35 @@ class FleetRunControlPlane:
         # Recovery preserves that result while checking the original scope.
         return FleetRunShutdownObservation(self._drain_runs, containment_deadline)
 
-    def cancel_active_for_shutdown(self) -> FleetRunState | None:
+    def cancel_active_for_shutdown(self) -> tuple[FleetRunState, ...]:
         """Cancel only work submitted to this runtime's original supervisor."""
-        active = self._journal.active_run()
-        if active is None or active.status.terminal:
-            return active
-        if not self._supervisor.is_active(active.fleet_run_id):
-            return None
-        try:
-            return self.cancel(active.fleet_run_id)
-        except InvalidRunTransition:
-            return self.get(active.fleet_run_id).run
+        observed = self._supervisor.quiesce()
+        states: list[FleetRunState] = []
+        failure: BaseException | None = None
+        for fleet_run_id in observed:
+            try:
+                detail = self._journal.read_view().run_detail(fleet_run_id)
+                # A pending registration may still be inside the original
+                # admission transaction, or that transaction may roll back.
+                if detail is None:
+                    continue
+                if detail.run.status.terminal:
+                    states.append(detail.run)
+                    continue
+                try:
+                    states.append(self.cancel(fleet_run_id))
+                except InvalidRunTransition:
+                    states.append(self.get(fleet_run_id).run)
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+                else:
+                    failure.add_note(
+                        f"Another original Run cancellation failed: {type(error).__name__}"
+                    )
+        if failure is not None:
+            raise failure
+        return tuple(states)
 
     def shutdown(
         self, *, wait: bool = True, policy: RuntimeDrainPolicy | None = None
@@ -1384,7 +1470,28 @@ class FleetRunControlPlane:
                 return
 
         try:
-            launch = replace(prepare_worker(ticket), on_exit=observe_exit, admission=admission)
+            prepared_launch = prepare_worker(ticket)
+            resource_finalizer = prepared_launch.finalize
+            finalizer: Callable[[], object] | None = None
+            if resource_finalizer is not None:
+                from oh_goon.integrations.run_resource_envelope import VerifiedWorkerResourceClosure
+
+                def finalize_original_worker() -> None:
+                    proof = resource_finalizer()
+                    if type(proof) is not VerifiedWorkerResourceClosure:
+                        raise StateConflict("Original native worker closure proof is unavailable")
+                    if not self.get(fleet_run_id).run.status.terminal:
+                        if self._worker_exit_recovery is None:
+                            raise StateConflict(
+                                "Original scoped worker-exit recovery is unavailable"
+                            )
+                        self._worker_exit_recovery(fleet_run_id)
+                    self._lifecycle.release_worker_reservation(fleet_run_id, ticket, proof)
+
+                finalizer = finalize_original_worker
+            launch = replace(
+                prepared_launch, on_exit=observe_exit, admission=admission, finalize=finalizer
+            )
             self._supervisor.submit(fleet_run_id, launch)
         except BaseException as exc:
             # Submission rejection happens after admission created both RUN_ADMITTED

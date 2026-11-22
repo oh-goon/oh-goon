@@ -26,7 +26,7 @@ class ProjectionTargetSelection:
         catalog = self._repositories.list(state)
         projection = FleetProjectionContext.build(
             [repository_view(entry, state.journal) for entry in catalog],
-            state.journal.active_run_detail(),
+            state.journal.active_run_details(),
             state.journal.latest_run_details(),
         )
         review = build_review_preparation(projection)

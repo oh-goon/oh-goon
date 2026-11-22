@@ -1,6 +1,18 @@
 import type { CausalityRevision } from "@/domain/concurrency/CausalityClock";
-import type { FleetRunDetail, FleetRunState } from "@generated/models";
+import type { FleetRunDetail, FleetRunState, FleetSnapshot } from "@generated/models";
 import { isFleetRunTerminal } from "@/domain/fleet/runLifecycle";
+
+export function snapshotActiveRunDetails(snapshot: FleetSnapshot | null | undefined): readonly FleetRunDetail[] {
+  return snapshot?.active_fleet_runs ?? (snapshot?.active_fleet_run ? [snapshot.active_fleet_run] : []);
+}
+
+export function observedActiveRunDetail(
+  snapshot: FleetSnapshot | null | undefined,
+  locallyOwnedRunId: string | undefined,
+): FleetRunDetail | null {
+  const details = snapshotActiveRunDetails(snapshot);
+  return details.find((detail) => detail.run.fleet_run_id === locallyOwnedRunId) ?? details[0] ?? null;
+}
 
 export interface LocalRunObservation {
   readonly run: FleetRunState;
@@ -41,7 +53,7 @@ interface DetailInput extends FleetRunOwnershipProjection {
 /**
  * Project execution identity without letting detail availability become a lifecycle owner.
  *
- * Backend active_fleet_run remains durable truth. liveRun is only a causally ordered local
+ * Backend active_fleet_runs owns durable membership. liveRun is only a causally ordered local
  * event/mutation overlay. Event observations and Fleet snapshots carry the backend Journal
  * watermark so same-identity lifecycle facts are ordered by the durable owner, not by a
  * frontend status rank. Mutation-local observations use the frontend causality clock until a

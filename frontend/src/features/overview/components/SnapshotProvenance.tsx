@@ -21,6 +21,7 @@ export function SnapshotProvenance({ fleet }: SnapshotProvenanceProps) {
     timeStyle: "medium",
   }).format(new Date(provenance.generated_at));
   const latest = fleet.latest_fleet_runs ?? [];
+  const active = fleet.active_fleet_runs ?? (fleet.active_fleet_run ? [fleet.active_fleet_run] : []);
   const latestTitle = latest
     .map((detail) => `${detail.run.capability.capability_id}: ${detail.run.fleet_run_id}`)
     .join("\n");
@@ -31,7 +32,7 @@ export function SnapshotProvenance({ fleet }: SnapshotProvenanceProps) {
         .map((state) => state.report),
     ),
     ...latest.flatMap((detail) => detail.operations ?? []),
-    ...(fleet.active_fleet_run?.operations ?? []),
+    ...active.flatMap((detail) => detail.operations ?? []),
   ];
   const policyIds = [...new Set(reports.flatMap((report) => {
     const policyId = operationPolicyId(report);

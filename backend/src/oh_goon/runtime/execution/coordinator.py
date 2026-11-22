@@ -6,20 +6,28 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from threading import Lock
 from time import monotonic
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import JsonValue
 
 from oh_goon.core.errors import OwnershipLost
+from oh_goon.core.models.run_resources import RunConcurrencyAdmission, RunResourceEnvelopeEvidence
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution.lease_environment import LeaseEnvironment
 from oh_goon.runtime.execution.sqlite_lease import (
     ExecutionCustody,
     ExecutionLease,
     SQLiteExecutionLeaseStore,
+    WorkerResourceReservation,
 )
 
 T = TypeVar("T")
+
+if TYPE_CHECKING:
+    from oh_goon.integrations.run_resource_envelope import (
+        VerifiedWorkerResourceClaim,
+        VerifiedWorkerResourceClosure,
+    )
 
 PREPARATION_CANCELLATION_OBSERVATION_INTERVAL_SECONDS = 0.25
 
@@ -94,8 +102,8 @@ class ExecutionTicket:
             or custody.owner_identity is None
         ):
             raise OwnershipLost("exact unclaimed Fleet capability required for worker handoff")
-        return {
-            "version": 1,
+        payload: dict[str, JsonValue] = {
+            "version": 2 if self._lease.concurrency_identity is not None else 1,
             "fleet_run_id": self._lease.fleet_run_id,
             "lease_token": self._lease.token,
             "predecessor": {
@@ -105,6 +113,9 @@ class ExecutionTicket:
                 "owner_identity": custody.owner_identity,
             },
         }
+        if self._lease.concurrency_identity is not None:
+            payload["concurrency_identity"] = self._lease.concurrency_identity
+        return payload
 
     @classmethod
     def from_worker_handoff(cls, payload: dict[str, JsonValue]) -> ExecutionTicket:
@@ -112,9 +123,14 @@ class ExecutionTicket:
         invalid = "invalid protected Fleet worker capability"
         if (
             type(payload) is not dict
-            or set(payload) != {"version", "fleet_run_id", "lease_token", "predecessor"}
+            or set(payload)
+            not in (
+                {"version", "fleet_run_id", "lease_token", "predecessor"},
+                {"version", "fleet_run_id", "lease_token", "predecessor", "concurrency_identity"},
+            )
             or type(payload.get("version")) is not int
-            or payload["version"] != 1
+            or payload["version"] not in (1, 2)
+            or (payload["version"] == 2) != ("concurrency_identity" in payload)
         ):
             raise OwnershipLost(invalid)
         run_id = payload["fleet_run_id"]
@@ -133,6 +149,7 @@ class ExecutionTicket:
         session = predecessor["owner_session_id"]
         pid = predecessor["owner_pid"]
         birth = predecessor["owner_identity"]
+        concurrency_identity = payload.get("concurrency_identity")
         if (
             not isinstance(session, str)
             or not session
@@ -141,6 +158,8 @@ class ExecutionTicket:
             or pid < 1
             or not isinstance(birth, str)
             or not birth
+            or concurrency_identity is not None
+            and (not isinstance(concurrency_identity, str) or not concurrency_identity)
         ):
             raise OwnershipLost(invalid)
         return ExecutionTicket(
@@ -149,6 +168,7 @@ class ExecutionTicket:
                 kind="FLEET",
                 fleet_run_id=run_id,
                 custody=ExecutionCustody("ADMITTED_UNCLAIMED", session, pid, birth),
+                concurrency_identity=concurrency_identity,
             )
         )
 
@@ -300,11 +320,15 @@ class ExecutionCoordinator:
         *,
         expected_durable_revision: int,
         mutate: Callable[[sqlite3.Connection], T],
+        concurrency: RunConcurrencyAdmission | None = None,
+        deferred_worker_resource_scope: dict[str, JsonValue] | None = None,
     ) -> tuple[ExecutionTicket, T]:
         lease, result = self._leases.acquire_fleet_with(
             fleet_run_id,
             expected_durable_revision=expected_durable_revision,
             mutate=mutate,
+            concurrency=concurrency,
+            deferred_worker_resource_scope=deferred_worker_resource_scope,
         )
         return ExecutionTicket(lease), result
 
@@ -314,12 +338,16 @@ class ExecutionCoordinator:
         fleet_run_id: str,
         *,
         expected_durable_revision: int,
+        concurrency: RunConcurrencyAdmission | None = None,
+        deferred_worker_resource_scope: dict[str, JsonValue] | None = None,
     ) -> ExecutionTicket:
         """Create one Fleet execution owner inside a caller-owned admission transaction."""
         lease = self._leases.acquire_fleet_in(
             connection,
             fleet_run_id,
             expected_durable_revision=expected_durable_revision,
+            concurrency=concurrency,
+            deferred_worker_resource_scope=deferred_worker_resource_scope,
         )
         return ExecutionTicket(lease)
 
@@ -344,8 +372,15 @@ class ExecutionCoordinator:
         ticket.require_fleet_run_id()
         self._leases.assert_executable_owner(ticket._lease)
 
-    def claim_fleet_worker(self, ticket: ExecutionTicket) -> ExecutionTicket:
+    def claim_fleet_worker(
+        self,
+        ticket: ExecutionTicket,
+        *,
+        resource_envelope: RunResourceEnvelopeEvidence | None = None,
+        resource_claim: VerifiedWorkerResourceClaim | None = None,
+    ) -> ExecutionTicket:
         """Claim an already admitted Run; never create or rediscover its work."""
+        from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission
         from oh_goon.core.vocabulary import FleetRunStatus
         from oh_goon.runtime.journal import Journal
 
@@ -360,8 +395,24 @@ class ExecutionCoordinator:
             detail = journal.read_view_from_connection(connection).run_detail(fleet_run_id)
             if detail is None or detail.run.status is not FleetRunStatus.QUEUED:
                 raise OwnershipLost("Fleet run is no longer awaiting worker claim")
+            admitted = (
+                detail.execution.concurrency
+                if isinstance(detail.execution, DirectFleetExecutionAdmission)
+                else None
+            )
+            if self._leases.concurrency_in(connection, fleet_run_id) != admitted:
+                raise OwnershipLost(
+                    "Worker resource reservation differs from original Run admission"
+                )
 
-        return ExecutionTicket(self._leases.claim_fleet_worker(ticket._lease, require_admitted))
+        return ExecutionTicket(
+            self._leases.claim_fleet_worker(
+                ticket._lease,
+                require_admitted,
+                resource_envelope=resource_envelope,
+                resource_claim=resource_claim,
+            )
+        )
 
     def activate_submission_failure(self, ticket: ExecutionTicket) -> ExecutionSession:
         """Give the original unclaimed admission only atomic terminal settlement."""
@@ -405,6 +456,63 @@ class ExecutionCoordinator:
 
     def active_lease_in(self, transaction: sqlite3.Connection) -> ExecutionLease | None:
         return self._leases.active_lease_in(transaction)
+
+    def active_leases_in(self, connection: sqlite3.Connection) -> tuple[ExecutionLease, ...]:
+        return self._leases.active_leases_in(connection)
+
+    def require_capacity_in(
+        self, connection: sqlite3.Connection, concurrency: RunConcurrencyAdmission | None = None
+    ) -> None:
+        self._leases.require_capacity_in(connection, concurrency)
+
+    def retained_leases_in(self, connection: sqlite3.Connection) -> tuple[ExecutionLease, ...]:
+        return self._leases.retained_leases_in(connection)
+
+    def active_fleet_lease_in(
+        self, connection: sqlite3.Connection, fleet_run_id: str
+    ) -> ExecutionLease | None:
+        return self._leases.active_fleet_lease_in(connection, fleet_run_id)
+
+    def retained_fleet_lease_in(
+        self, connection: sqlite3.Connection, fleet_run_id: str
+    ) -> ExecutionLease | None:
+        return self._leases.retained_fleet_lease_in(connection, fleet_run_id)
+
+    def concurrency_in(
+        self, connection: sqlite3.Connection, fleet_run_id: str
+    ) -> RunConcurrencyAdmission | None:
+        return self._leases.concurrency_in(connection, fleet_run_id)
+
+    def worker_resource_reservation_in(
+        self, connection: sqlite3.Connection, fleet_run_id: str
+    ) -> WorkerResourceReservation | None:
+        return self._leases.worker_resource_reservation_in(connection, fleet_run_id)
+
+    def release_worker_reservation_with(
+        self,
+        ticket: ExecutionTicket,
+        proof: VerifiedWorkerResourceClosure,
+        mutate: Callable[[sqlite3.Connection, WorkerResourceReservation | None], T],
+    ) -> T:
+        if type(ticket) is not ExecutionTicket or ticket.recovery_only:
+            raise OwnershipLost("Original worker reservation ticket required")
+        return self._leases.release_worker_reservation_with(ticket._lease, proof, mutate)
+
+    def reserve_dead_fleet_resources_in(
+        self, connection: sqlite3.Connection, fleet_run_id: str
+    ) -> None:
+        self._leases.reserve_dead_fleet_resources_in(connection, fleet_run_id)
+
+    def release_recovered_worker_reservation_with(
+        self,
+        fleet_run_id: str,
+        proof: VerifiedWorkerResourceClosure,
+        mutate: Callable[[sqlite3.Connection, WorkerResourceReservation | None], T],
+    ) -> T:
+        return self._leases.release_recovered_worker_reservation_with(fleet_run_id, proof, mutate)
+
+    def assert_fleet_idle_in(self, connection: sqlite3.Connection, fleet_run_id: str) -> None:
+        self._leases.assert_fleet_idle_in(connection, fleet_run_id)
 
     def owned_fleet_ticket_in(
         self, connection: sqlite3.Connection, fleet_run_id: str

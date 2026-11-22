@@ -108,6 +108,23 @@ class RepositoryEffectRecovery:
             or (fleet_run_id is None and quiescence_timeout_seconds != 0)
         ):
             raise ValueError("Native quiescence wait requires a finite bounded worker-exit scope")
+        if fleet_run_id is None:
+            with self._database.transaction() as connection:
+                retained = self._execution.retained_leases_in(connection)
+                concurrent = any(lease.concurrency_identity is not None for lease in retained)
+                run_ids = tuple(
+                    run.fleet_run_id
+                    for run in self._journal.read_view_from_connection(connection).active_runs()
+                )
+            if concurrent or len(run_ids) > 1:
+                # Startup enumerates the original Runs. A live sibling does not
+                # authorize or prevent another Run's independent reconciliation.
+                for selected in run_ids:
+                    try:
+                        self.recover(fleet_run_id=selected)
+                    except ExecutionBusy:
+                        continue
+                return
         if fleet_run_id is not None:
             if type(fleet_run_id) is not str or not fleet_run_id:
                 raise StateConflict("Worker-exit recovery requires an exact Fleet Run identity")
@@ -138,7 +155,13 @@ class RepositoryEffectRecovery:
                 # terminal scope needs no global-idle mutation or sweep.
                 _require_original_process_quiescence(detail, attempts=pending)
                 return
-        if self._execution.active_lease() is not None:
+        with self._database.transaction() as connection:
+            live = (
+                self._execution.active_fleet_lease_in(connection, fleet_run_id) is not None
+                if fleet_run_id is not None
+                else bool(self._execution.active_leases_in(connection))
+            )
+        if live:
             if fleet_run_id is not None:
                 raise ExecutionBusy("Live execution custody prevents worker-exit recovery")
             return
@@ -151,7 +174,7 @@ class RepositoryEffectRecovery:
                 self._recover_attempt(attempt)
             if recovering_run_id is not None:
                 with self._database.transaction(write=True) as connection:
-                    self._execution.assert_idle(connection)
+                    self._require_recovery_idle_in(connection, recovering_run_id)
                     self._journal.record_reconciliation_lifecycle_in(
                         connection,
                         recovering_run_id,
@@ -173,7 +196,7 @@ class RepositoryEffectRecovery:
             return
         try:
             with self._database.transaction(write=True) as connection:
-                self._execution.assert_idle(connection)
+                self._require_recovery_idle_in(connection, run_id)
                 self._journal.record_reconciliation_lifecycle_in(
                     connection,
                     run_id,
@@ -189,7 +212,9 @@ class RepositoryEffectRecovery:
             "but before a canonical operation report was committed"
         )
         try:
-            disposition = self._settle_startup_interruption(observed.operation_id, note)
+            disposition = self._settle_startup_interruption(
+                observed.operation_id, note, fleet_run_id=observed.fleet_run_id
+            )
             if disposition is RepositoryEffectInterruptionDisposition.OUTCOME_UNKNOWN:
                 self.reconcile(observed.operation_id)
         except OperationNotFound:
@@ -200,11 +225,13 @@ class RepositoryEffectRecovery:
         self,
         operation_id: str,
         note: str,
+        *,
+        fleet_run_id: str | None = None,
     ) -> RepositoryEffectInterruptionDisposition:
         expected: RepositoryEffectInterruptionEvidence | None = None
         try:
             with self._database.transaction(write=True) as connection:
-                self._execution.assert_idle(connection)
+                self._require_recovery_idle_in(connection, fleet_run_id)
                 expected = self._settlement.settle_interruption_evidence_in(
                     connection,
                     operation_id,
@@ -254,7 +281,7 @@ class RepositoryEffectRecovery:
                 _require_original_process_quiescence(
                     view.required_run_detail(current.fleet_run_id), attempts=(current,)
                 )
-            self._execution.assert_idle(connection)
+            self._require_recovery_idle_in(connection, current.fleet_run_id)
             result = self._reconciler.reconcile(
                 current.repository.path,
                 current.operation_id,
@@ -317,7 +344,7 @@ class RepositoryEffectRecovery:
                         ),
                         attempts=(current,),
                     )
-                self._execution.assert_idle(connection)
+                self._require_recovery_idle_in(connection, current.fleet_run_id)
                 self._settlement.acknowledge_in(connection, current, evidence)
         except (OperationNotFound, StateConflict):
             existing = _acknowledgement_replay(self._journal.read_view(), operation_id, note)
@@ -349,7 +376,7 @@ class RepositoryEffectRecovery:
                     return None
                 self._execution.assert_dead_fleet_worker_in(connection, fleet_run_id)
             else:
-                retained = self._execution.retained_lease_in(connection)
+                retained = self._execution.retained_fleet_lease_in(connection, run.fleet_run_id)
                 if (
                     retained is not None
                     and retained.custody is not None
@@ -357,7 +384,7 @@ class RepositoryEffectRecovery:
                 ):
                     self._execution.assert_dead_fleet_worker_in(connection, detail.run.fleet_run_id)
             quiescent_processes = _require_original_process_quiescence(detail, attempts=unresolved)
-            self._execution.assert_idle(connection)
+            self._require_recovery_idle_in(connection, run.fleet_run_id)
             uncertain = [
                 attempt
                 for attempt in unresolved
@@ -379,8 +406,17 @@ class RepositoryEffectRecovery:
                 connection, detail, quiescent_processes=quiescent_processes
             )
             self._terminalize_recovered_run(connection, run, uncertain)
+            self._execution.reserve_dead_fleet_resources_in(connection, run.fleet_run_id)
             FleetExecutorCapacityReservations.release_run_in(connection, run.fleet_run_id)
             return run.fleet_run_id
+
+    def _require_recovery_idle_in(
+        self, connection: sqlite3.Connection, fleet_run_id: str | None
+    ) -> None:
+        if fleet_run_id is None:
+            self._execution.assert_idle(connection)
+        else:
+            self._execution.assert_fleet_idle_in(connection, fleet_run_id)
 
     def _record_interrupted_process_uncertainty(
         self,

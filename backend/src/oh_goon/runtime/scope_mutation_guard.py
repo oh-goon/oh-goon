@@ -17,8 +17,8 @@ class DurableScopeMutationGuard:
 
     def require_idle(self, connection: sqlite3.Connection) -> None:
         self.execution.assert_scope_idle(connection)
-        active = self.journal.read_view_from_connection(connection).active_run()
-        if active is not None:
+        active = self.journal.read_view_from_connection(connection).active_runs()
+        if active:
             raise DurableStateBusy(
-                f"Cannot change durable fleet state while run {active.fleet_run_id} is active"
+                f"Cannot change durable fleet state while run {active[0].fleet_run_id} is active"
             )

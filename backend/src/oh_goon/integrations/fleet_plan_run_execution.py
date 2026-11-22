@@ -47,7 +47,7 @@ from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
-from oh_goon.engine.git import GitObservation, GitService
+from oh_goon.engine.git import GitObservation, GitService, WorkspaceMetadataGitCommandRunner
 from oh_goon.integrations._fleet_plan_host_resources import preflight_run_capabilities
 from oh_goon.integrations._fleet_plan_step_dataflow import (
     validate_step_declared_paths,
@@ -504,6 +504,18 @@ class FleetPlanRunExecutor:
             workspace_directory_fd=workspace_directory_fd,
             require_candidate_current=require_candidate_current,
         )
+        if (
+            workspace_materialization is not None
+            and type(self._git) is GitService
+            and self._git.metadata_only is True
+            and type(self._git.command_runner) is WorkspaceMetadataGitCommandRunner
+            and self._git.observation_runner is self._git.command_runner
+        ):
+            # Native payload Git remains unavailable in a candidate's masked
+            # namespace. Its original trusted lifecycle owner reads only host
+            # metadata after the same native profile/FD binding was validated.
+            # Never copy this host-only policy onto the payload command runner.
+            return self._git
         return replace(
             self._git,
             command_runner=runner,

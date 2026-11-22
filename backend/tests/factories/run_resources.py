@@ -7,6 +7,8 @@ from oh_goon.core.models.fleet_plan_step_contract import PlanStepCapabilities
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission, FleetRunAdmissionIntent
 from oh_goon.core.models.run_resources import (
+    NativeRuntimeSliceEvidence,
+    RunConcurrencyPolicy,
     RunResourceEnvelopeEvidence,
     RunResourceEnvelopeObservation,
 )
@@ -15,6 +17,38 @@ from oh_goon.core.vocabulary import OperationAction
 from tests.factories.capabilities import capability_snapshot
 from tests.factories.fleet_plan_targets import structural_fleet_plan_target
 from tests.factories.run_admission import repository_admissions_for
+
+
+def run_concurrency_policy(**changes: object) -> RunConcurrencyPolicy:
+    """Complete finite example, not a native capability or product default."""
+    return RunConcurrencyPolicy.model_validate(
+        {
+            "aggregate_slice": "qualified.slice",
+            "aggregate_resources": {"cpu_millis": 2000, "memory_mib": 1536, "max_processes": 640},
+            "worker_resources": {"cpu_millis": 750, "memory_mib": 512, "max_processes": 256},
+            "controller_reserve": {"cpu_millis": 500, "memory_mib": 512, "max_processes": 128},
+            **changes,
+        }
+    )
+
+
+def native_runtime_slice_evidence() -> NativeRuntimeSliceEvidence:
+    """Structurally valid aggregate observations, never an original native proof."""
+    selected = run_concurrency_policy()
+    return NativeRuntimeSliceEvidence(
+        unit_name=selected.aggregate_slice,
+        invocation_id="a" * 32,
+        controller_birth=ProcessBirthIdentity(pid=100, boot_id="test-boot", start_ticks=3),
+        controller_cgroup_device=1,
+        controller_cgroup_inode=2,
+        cgroup_device=1,
+        cgroup_inode=3,
+        resources=selected.aggregate_resources,
+        cpu_max="200000 100000",
+        memory_max_bytes=1536 * 1024 * 1024,
+        memory_swap_max_bytes=0,
+        pids_max=640,
+    )
 
 
 def run_resource_envelope(fleet_run_id: str = "resource-run") -> RunResourceEnvelopeEvidence:

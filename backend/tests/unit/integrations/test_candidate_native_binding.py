@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
@@ -16,6 +17,8 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
+from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
 from oh_goon.engine.command import CommandResult
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
@@ -23,8 +26,10 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     native_profile_command_runner,
     require_native_workspace_scope,
 )
+from oh_goon.integrations.fleet_plan_run_execution import FleetPlanRunExecutor
 from oh_goon.runtime.execution_assignments import ExecutionAssignmentAuthority
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
+from oh_goon.services.fleet_plan_candidate import workspace_control_git
 from tests.factories.execution_materialization import ready_execution_materialization_candidate
 
 
@@ -105,6 +110,57 @@ def test_candidate_uses_exact_materialization_fd_and_original_verifier(candidate
     with pytest.raises(WorkspaceLeaseLost):
         runner("/usr/bin/true", cwd=path, env={"PATH": os.defpath})
     assert len(captured) == 1
+
+
+@pytest.mark.process
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="Selected native Bubblewrap boundary")
+def test_candidate_host_metadata_is_not_rebound_into_git_masked_payload(candidate):
+    path, descriptor, materialization, selected, _old_backend = candidate
+    backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")
+    selected = replace(selected, backend_configuration_id=backend.configuration_identity())
+    git = workspace_control_git(GitService())
+    executor = FleetPlanRunExecutor(
+        git,
+        process_isolation_backends=(),
+        standard_process_isolation=backend,
+        workspace_pin=RepositoryWorkspaceAuthority.pin_repository_subject,
+    )
+    plan = ResolvedFleetPlan.create(
+        name="candidate-metadata",
+        description="",
+        execution=MaintenanceExecutionPolicy(),
+        native_agent=selected,
+        steps=(ResolvedCommandStep(step_id="verify", argv=("/usr/bin/true",)),),
+    )
+    marker = (path / ".git").read_bytes()
+    observed = executor.git_for_plan(
+        path,
+        plan,
+        workspace_materialization=materialization,
+        workspace_directory_fd=descriptor,
+        require_candidate_current=lambda: None,
+    ).observe(path)
+    assert observed.is_repository and observed.head_sha is not None
+    # The host-only routing change cannot bypass the original binding guard.
+    with pytest.raises(FleetPlanInvalid, match="directory"):
+        executor.git_for_plan(
+            path,
+            plan,
+            workspace_materialization=materialization,
+            require_candidate_current=lambda: None,
+        )
+    runner = native_profile_command_runner(
+        path,
+        selected,
+        backend,
+        RepositoryWorkspaceAuthority.pin_repository_subject,
+        workspace_materialization=materialization,
+        workspace_directory_fd=descriptor,
+        require_candidate_current=lambda: None,
+    )
+    result = runner("/usr/bin/git", "status", "--porcelain", cwd=path, env={"PATH": os.defpath})
+    assert result.returncode != 0
+    assert (path / ".git").read_bytes() == marker
 
 
 def test_linked_workspace_cannot_borrow_an_unbound_native_runner(candidate):

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { FleetRunStatus } from "@generated/enums";
-import type { FleetRunDetail, FleetRunState } from "@generated/models";
-import { bindFleetRunDetails, projectFleetRunOwnership, retainCompletedLocalRun } from "@/app/fleetRun/runStatusProjection";
+import type { FleetRunDetail, FleetRunState, FleetSnapshot } from "@generated/models";
+import { bindFleetRunDetails, observedActiveRunDetail, projectFleetRunOwnership, retainCompletedLocalRun, snapshotActiveRunDetails } from "@/app/fleetRun/runStatusProjection";
 
 function run(fleetRunId: string, status: FleetRunState["status"]): FleetRunState {
   return { fleet_run_id: fleetRunId, status } as FleetRunState;
@@ -32,6 +32,17 @@ function observed(
 }
 
 describe("Fleet Run status ownership", () => {
+  it("retains both durable Runs and reviews the locally owned secondary Run", () => {
+    const first = detail("run-a", FleetRunStatus.RUNNING);
+    const second = detail("run-b", FleetRunStatus.RUNNING);
+    const snapshot = { active_fleet_runs: [first, second], active_fleet_run: first } as FleetSnapshot;
+    expect(snapshotActiveRunDetails(snapshot)).toEqual([first, second]);
+    expect(observedActiveRunDetail(snapshot, "run-b")).toBe(second);
+    expect(observedActiveRunDetail(snapshot, undefined)).toBe(first);
+    expect(observedActiveRunDetail(snapshot, "missing-run")).toBe(first);
+    expect(observedActiveRunDetail({ active_fleet_runs: [], active_fleet_run: first } as FleetSnapshot, "run-a")).toBeNull();
+  });
+
   it("revokes an old local completion handoff when durable truth owns a different active Run", () => {
     const completed = run("run-a", FleetRunStatus.COMPLETED);
     expect(retainCompletedLocalRun(completed, "run-b")).toBeNull();

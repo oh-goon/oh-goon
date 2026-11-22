@@ -10,7 +10,7 @@ from typing import Literal, cast
 
 import pytest
 
-from oh_goon.core.errors import ExecutionBusy, RuntimeQuiescing
+from oh_goon.core.errors import ExecutionBusy, RuntimeQuiescing, StateConflict
 from oh_goon.core.models.background import RunWorkerExitCode
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.vocabulary import BackgroundFailureStage
@@ -465,6 +465,115 @@ def test_supervisor_never_executes_submitted_callables_in_control_process() -> N
         supervisor.shutdown(wait=True)
 
 
-def test_phase_one_rejects_multiple_active_runs() -> None:
-    with pytest.raises(ValueError, match="one active FleetRun"):
-        RunExecutionSupervisor(max_active_runs=2)
+@pytest.mark.parametrize("capacity", [0, 3, True, None])
+def test_supervisor_rejects_unbounded_or_untyped_capacity(capacity: object) -> None:
+    with pytest.raises(ValueError, match="one or two active FleetRuns"):
+        RunExecutionSupervisor(max_active_runs=cast(int, capacity))
+
+
+def test_two_pending_slots_keep_exact_registration_and_rollback_identity() -> None:
+    supervisor = RunExecutionSupervisor(max_active_runs=2)
+    first = supervisor.register_admission("first")
+    with pytest.raises(ExecutionBusy, match="already submitted"):
+        supervisor.register_admission("first")
+    second = supervisor.register_admission("second")
+    with pytest.raises(ExecutionBusy, match="capacity"):
+        supervisor.register_admission("third")
+    supervisor.abandon_admission(RunWorkerAdmission("first"))
+    assert supervisor.is_active("first") and supervisor.is_active("second")
+    supervisor.abandon_admission(first)
+    replacement = supervisor.register_admission("first")
+    supervisor.abandon_admission(first)
+    assert supervisor.is_active("first") and supervisor.is_active("second")
+    supervisor.abandon_admission(replacement)
+    supervisor.abandon_admission(second)
+    supervisor.require_containment_complete()
+    supervisor.shutdown()
+
+
+@pytest.mark.process
+def test_two_native_workers_progress_independently_and_third_never_launches(tmp_path: Path) -> None:
+    supervisor = RunExecutionSupervisor(max_active_runs=2)
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    launch_a, release_a, ready_a, pids_a = _blocked_worker(first)
+    launch_b, release_b, ready_b, pids_b = _blocked_worker(second)
+    marker = tmp_path / "third-not-started"
+    try:
+        supervisor.submit("first", launch_a)
+        supervisor.submit("second", launch_b)
+        assert ready_a.wait(5) and ready_b.wait(5)
+        assert len(set((*pids_a, *pids_b, os.getpid()))) == 3
+        with pytest.raises(ExecutionBusy, match="capacity"):
+            supervisor.submit(
+                "third",
+                _launch(
+                    tmp_path, "import pathlib,sys; pathlib.Path(sys.argv[1]).touch()", str(marker)
+                ),
+            )
+        assert not marker.exists()
+        release_a.touch()
+        assert supervisor.wait_until_inactive("first", timeout=5)
+        assert supervisor.is_active("second")
+        assert not supervisor.wait_until_idle(timeout=0)
+    finally:
+        release_a.touch()
+        release_b.touch()
+        supervisor.shutdown()
+    supervisor.require_containment_complete()
+
+
+@pytest.mark.process
+def test_both_pre_quiesce_admissions_launch_without_reopening_ingress(tmp_path: Path) -> None:
+    supervisor = RunExecutionSupervisor(max_active_runs=2)
+    first = supervisor.register_admission("first")
+    second = supervisor.register_admission("second")
+    assert supervisor.quiesce() == ("first", "second")
+    with pytest.raises(RuntimeQuiescing):
+        supervisor.register_admission("third")
+    supervisor.submit("first", replace(_launch(tmp_path, "pass"), admission=first))
+    supervisor.submit("second", replace(_launch(tmp_path, "pass"), admission=second))
+    supervisor.shutdown()
+    supervisor.require_containment_complete()
+
+
+@pytest.mark.process
+def test_other_success_and_consumed_diagnostics_cannot_release_failed_resource_finalization(
+    tmp_path: Path,
+) -> None:
+    supervisor = RunExecutionSupervisor(max_active_runs=2)
+    released = Event()
+    attempts: list[bool] = []
+    canary = "private-resource-capability"
+
+    def finalize() -> None:
+        attempts.append(True)
+        if not released.is_set():
+            raise RuntimeError(canary)
+
+    try:
+        supervisor.submit("unsettled", replace(_launch(tmp_path, "pass"), finalize=finalize))
+        assert supervisor.wait_until_inactive("unsettled", timeout=5)
+        supervisor.submit("healthy", _launch(tmp_path, "pass"))
+        assert supervisor.wait_until_inactive("healthy", timeout=5)
+        assert supervisor.snapshot().last_failure is None
+        failure = supervisor.take_failure("unsettled")
+        assert failure is not None and failure.code == "RUN_WORKER_FINALIZATION_FAILED"
+        assert canary not in failure.model_dump_json()
+        assert supervisor.take_failure("unsettled") is None
+        with pytest.raises(StateConflict, match="containment is unverified"):
+            supervisor.require_containment_complete()
+        other = supervisor.register_admission("other")
+        with pytest.raises(ExecutionBusy, match="capacity"):
+            supervisor.register_admission("third")
+        supervisor.abandon_admission(other)
+        released.set()
+        supervisor.require_containment_complete()
+        replacement = supervisor.register_admission("replacement")
+        supervisor.abandon_admission(replacement)
+        assert len(attempts) == 3
+    finally:
+        released.set()
+        supervisor.require_containment_complete()
+        supervisor.shutdown()

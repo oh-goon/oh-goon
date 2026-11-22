@@ -70,7 +70,10 @@ from oh_goon.core.models.run_events import (
     TerminationRequestedEvent,
 )
 from oh_goon.core.models.run_launch import ApplicationLaunchReceipt
-from oh_goon.core.models.run_resources import RunResourceEnvelopeObservation
+from oh_goon.core.models.run_resources import (
+    RunResourceEnvelopeEvidence,
+    RunResourceEnvelopeObservation,
+)
 from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceFact
 from oh_goon.core.models.target import OperationTarget
@@ -110,6 +113,7 @@ class _RunFold:
     storage_maintenance: list[FleetContentMaintenanceFact] = field(default_factory=list)
     lifecycle_events: list[FleetRunEvent] = field(default_factory=list)
     resource_observation: RunResourceEnvelopeObservation | None = None
+    worker_resource_envelope: RunResourceEnvelopeEvidence | None = None
 
     @classmethod
     def from_admitted(cls, event: RunAdmittedEvent) -> _RunFold:
@@ -150,7 +154,33 @@ class _RunFold:
                 else None
             )
             observed = event.observation
-            if (
+            worker = event.worker_resource_envelope
+            concurrency = (
+                self.execution.concurrency
+                if isinstance(self.execution, DirectFleetExecutionAdmission)
+                else None
+            )
+            if worker is not None:
+                if (
+                    concurrency is None
+                    or worker.subject != "worker"
+                    or worker.fleet_run_id != concurrency.fleet_run_id
+                    or worker.unit_name != concurrency.worker_unit_name
+                    or worker.resources != concurrency.policy.worker_resources
+                    or worker.process_birth == concurrency.aggregate.controller_birth
+                ):
+                    raise InvalidRunTransition(
+                        "Worker native resource envelope differs from original concurrent admission"
+                    )
+                admitted = worker
+            never_started = (
+                concurrency is not None
+                and worker is None
+                and observed.invocation_id is None
+                and observed.fleet_run_id == concurrency.fleet_run_id
+                and observed.unit_name == concurrency.worker_unit_name
+            )
+            if not never_started and (
                 admitted is None
                 or admitted.fleet_run_id != observed.fleet_run_id
                 or admitted.unit_name != observed.unit_name
@@ -162,6 +192,7 @@ class _RunFold:
             if self.resource_observation is not None:
                 raise InvalidRunTransition("Run resource observation is already recorded")
             self.resource_observation = observed
+            self.worker_resource_envelope = worker
             self.lifecycle_events.append(event)
             return
         reconciliation_events = (
@@ -584,6 +615,7 @@ class _RunFold:
             run=state,
             execution=self.execution,
             resource_observation=self.resource_observation,
+            worker_resource_envelope=self.worker_resource_envelope,
             repository_admissions=self.repository_admissions,
             application_launch=self.application_launch,
             scheduling=self.scheduling,

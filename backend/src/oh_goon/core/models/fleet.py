@@ -311,8 +311,14 @@ class FleetSummary(ImmutableModel):
 class FleetSnapshot(ImmutableModel):
     provenance: FleetSnapshotProvenance
     repositories: tuple[FleetRepository, ...] = Field(default_factory=tuple)
-    active_fleet_run: FleetRunDetail | None = None
+    active_fleet_runs: tuple[FleetRunDetail, ...] = Field(default_factory=tuple)
     latest_fleet_runs: tuple[FleetRunDetail, ...] = Field(default_factory=tuple)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def active_fleet_run(self) -> FleetRunDetail | None:
+        """Primary observed Run for single-pane review; the plural cut owns membership."""
+        return self.active_fleet_runs[0] if self.active_fleet_runs else None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -339,7 +345,7 @@ class FleetSnapshot(ImmutableModel):
         from oh_goon.core.projections.fleet_context import FleetProjectionContext
 
         return FleetProjectionContext.build(
-            self.repositories, self.active_fleet_run, self.latest_fleet_runs
+            self.repositories, self.active_fleet_runs, self.latest_fleet_runs
         )
 
     @model_validator(mode="after")
@@ -347,6 +353,9 @@ class FleetSnapshot(ImmutableModel):
         repository_ids = [repository.repository.repository_id for repository in self.repositories]
         if len(repository_ids) != len(set(repository_ids)):
             raise ValueError("FleetSnapshot repositories must contain unique repository identities")
+        active_ids = [detail.run.fleet_run_id for detail in self.active_fleet_runs]
+        if len(active_ids) != len(set(active_ids)):
+            raise ValueError("FleetSnapshot active Runs must have unique identities")
         return self
 
     @model_validator(mode="after")
@@ -413,8 +422,8 @@ class FleetSnapshot(ImmutableModel):
 
     def _run_details(self) -> list[FleetRunDetail]:
         details = list(self.latest_fleet_runs)
-        if self.active_fleet_run is not None and all(
-            detail.run.fleet_run_id != self.active_fleet_run.run.fleet_run_id for detail in details
-        ):
-            details.append(self.active_fleet_run)
+        seen = {detail.run.fleet_run_id for detail in details}
+        details.extend(
+            detail for detail in self.active_fleet_runs if detail.run.fleet_run_id not in seen
+        )
         return details
