@@ -5,6 +5,7 @@ import json
 import stat
 import sys
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -18,6 +19,7 @@ from oh_goon.integrations.hashmarks.development_verification import (
 )
 from oh_goon.repository_tooling import development_verification as owner
 from oh_goon.repository_tooling import python_project_checks
+from oh_goon.repository_tooling import verification_gate_control as gate_owner
 from oh_goon.repository_tooling.frontend_test_results import (
     native_frontend_temporary_base,
 )
@@ -52,6 +54,107 @@ def test_private_json_transport_publishes_and_reopens_real_files(
     owner._write_transport(target, {"status": "MERGE_PROOF_READY"}, source)
     assert owner._read_json(target) == {"status": "MERGE_PROOF_READY"}
     assert list(scratch.iterdir()) == [target]
+
+
+def test_public_nomination_preserves_large_native_packets_through_compact_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "feature.py").write_text("def answer():\n    return 'höst 🍂'\n")
+    (source / "tests").mkdir()
+    verifier = "tests/test_feature.py"
+    (source / verifier).write_text(
+        "from feature import answer\ndef test_answer():\n    assert answer() == 'höst 🍂'\n"
+    )
+    (source / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\ntestpaths = ['tests']\n"
+    )
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    baseline = nominate_changed_verification(
+        source, ("feature.py",), required=(verifier,)
+    )
+    original = baseline["observations"][0]
+    assert original["state"] == "LINKED" and original["nominations"]
+    assert original["qualification"]["negative_evidence_admissible"] is False
+    packet = dict(baseline, observations=[])
+    compact = json.JSONEncoder(separators=(",", ":"))
+    old_limit = 4 * 1024 * 1024
+    copies = (old_limit - len(compact.encode(packet).encode()) - 128) // (
+        len(compact.encode(original).encode()) + 1
+    )
+    packet["observations"] = [original] * copies
+    assert len(compact.encode(packet).encode()) < old_limit
+    assert len(json.dumps(packet).encode()) > old_limit
+
+    # Replay intact observations from the valid producer baseline at its read
+    # boundary. Repeating the explicitly supplied member changes transport size,
+    # not the producer's per-member selection, provenance or qualifications.
+    native = SimpleNamespace(
+        index=SimpleNamespace(sync=lambda: None),
+        source=SimpleNamespace(member=lambda _member: ({"state": "unknown"}, None)),
+        reads=SimpleNamespace(observe=lambda _operation: packet),
+    )
+    monkeypatch.setattr(
+        "oh_goon.integrations.hashmarks.development_verification.repository_evidence_scope",
+        lambda _root: nullcontext(SimpleNamespace(native=native)),
+    )
+    observed = nominate_changed_verification(
+        source, ("feature.py",) * copies, required=(verifier,)
+    )
+    assert observed == packet
+    scratch = tmp_path / "control"
+    scratch.mkdir(mode=0o700)
+    target = scratch / "plan.json"
+    owner._write_transport(target, {"evidence": observed}, source)
+    assert owner._read_json(target) == gate_owner._read(target) == {"evidence": packet}
+    assert observed["required_checks"] == baseline["required_checks"]
+    assert observed["owner_coverage"] == "not-claimed"
+
+    larger_copies = copies * 3 // 2
+    packet["observations"] = [original] * larger_copies
+    assert old_limit < len(compact.encode(packet).encode()) < 8 * 1024 * 1024
+    observed = nominate_changed_verification(source, ("feature.py",) * larger_copies)
+    owner._write_transport(target, {"evidence": observed}, source)
+    assert owner._read_json(target) == gate_owner._read(target) == {"evidence": packet}
+
+    packet["observations"] = [original] * (copies * 3)
+    with pytest.raises(ValueError, match="exceeds the bounded transport"):
+        nominate_changed_verification(source, ("feature.py",) * (copies * 3))
+
+
+@pytest.mark.parametrize("failure", ["overflow", "nonserializable"])
+def test_bounded_json_publication_preserves_previous_bytes_and_cleans_failed_staging(
+    tmp_path: Path, failure: str
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    scratch = tmp_path / "control"
+    scratch.mkdir(mode=0o700)
+    target = scratch / "result.json"
+    limit = 8 * 1024 * 1024
+    payload: dict[str, Any] = {"message": "höst 🍂", "padding": ""}
+    overhead = (
+        len(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()) + 1
+    )
+    payload["padding"] = "x" * (limit - overhead)
+    owner._write_transport(target, payload, source)
+    assert target.stat().st_size == limit
+    assert owner._read_json(target) == gate_owner._read(target) == payload
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    previous = target.read_bytes()
+    if failure == "overflow":
+        payload["padding"] += "x"
+        expected = ValueError
+    else:
+        payload["padding"] = "partially staged"
+        payload["z"] = object()
+        expected = TypeError
+    for selected in (target, scratch / "unpublished.json"):
+        with pytest.raises(expected):
+            owner._write_transport(selected, payload, source)
+        assert target.read_bytes() == previous
+        assert list(scratch.iterdir()) == [target]
 
 
 @pytest.mark.parametrize("with_report", [False, True])

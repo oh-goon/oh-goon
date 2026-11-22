@@ -198,8 +198,11 @@ def nominate_changed_verification(
         packet = native.reads.observe(nominate_root)
     if require_loaded_hashmarks_runtime() != implementation:
         raise ValueError("Hashmarks implementation changed during nomination")
-    if len(json.dumps(packet).encode("utf-8")) > 4 * 1024 * 1024:
-        raise ValueError("Hashmarks development evidence exceeds the bounded transport")
+    transported_bytes = 0
+    for chunk in json.JSONEncoder(separators=(",", ":")).iterencode(packet):
+        transported_bytes += len(chunk.encode("utf-8"))
+        if transported_bytes > 8 * 1024 * 1024:
+            raise ValueError("Hashmarks development evidence exceeds the bounded transport")
     return packet
 
 
