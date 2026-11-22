@@ -1212,6 +1212,368 @@ def test_exact_fast_proof_does_not_claim_daily_full() -> None:
     _validate(*_proof())
 
 
+def _certification_gate_case() -> tuple[dict[str, Any], dict[str, Any]]:
+    ordinary = "backend/tests/unit/services/test_ordinary.py"
+    native = "backend/tests/integration/engine/test_native_proof.py"
+    support = "backend/tests/factories/native_proof.py"
+    plan, result = _proof(source="backend/src/oh_goon/behavior.py", test_file=ordinary)
+    plan["changed_paths"].extend((native, support))
+    evidence = plan["evidence"]
+    evidence["pytest_admission"] = {
+        "collection_marker": admission_owner._MERGE_MARKER,
+        "collection": {
+            "selected": [{"file": ordinary, "selector": ordinary + "::test_result"}],
+            "deselected": [
+                {
+                    "file": native,
+                    "selector": native + "::test_native",
+                    "certification": "true",
+                }
+            ],
+        },
+    }
+    evidence["observations"].append(
+        {
+            "changed_path": native,
+            "state": "CHANGED_TEST",
+            "nominations": [
+                {
+                    "workspace_prefix": "",
+                    "nomination": {
+                        "available": True,
+                        "runner_evidence": "pytest",
+                        "verification_target": {"path": native},
+                    },
+                }
+            ],
+        }
+    )
+    member = {"path": support, "state": "known-present", "member_revision": "source:1"}
+    nomination = {
+        "available": True,
+        "runner_evidence": "pytest",
+        "source_member_revision": "verifier:1",
+        "verification_target": {"path": native},
+    }
+    relationship = {
+        "source": support,
+        "target": native,
+        "relation_kind": "direct-reference",
+        "reference_evidence": {"direct_reference": True},
+        "supporting_source_members": [
+            member,
+            {"path": native, "state": "known-present", "member_revision": "verifier:1"},
+        ],
+    }
+    scope = {"completeness": "incomplete", "negative_evidence_admissible": False}
+    evidence["observations"].append(
+        {
+            "changed_path": support,
+            "state": "LINKED",
+            "qualification": scope,
+            "nominations": [
+                {
+                    "workspace_prefix": "",
+                    "nomination": nomination,
+                    "relationships": [relationship],
+                }
+            ],
+            "changed_set": {
+                "changed_paths": [support],
+                "freshness": "current",
+                "negative_evidence_admissible": False,
+                "targets": [{"path": native, "nomination": nomination}],
+                "changes": [
+                    {
+                        "path": support,
+                        "classification": {
+                            "kind": "verification-support",
+                            "source_member_revision": member["member_revision"],
+                        },
+                        "source": {"member": member},
+                        "consumer_scope": scope,
+                        "relationships": [relationship],
+                    }
+                ],
+            },
+        }
+    )
+    evidence["certification_deferred"] = gate.certification_deferred_scope(
+        plan["changed_paths"], evidence
+    )
+    result["plan"] = copy.deepcopy(plan)
+    return plan, result
+
+
+def test_certification_deferral_retains_ordinary_pass_only() -> None:
+    plan, result = _certification_gate_case()
+    original = copy.deepcopy(plan["evidence"]["observations"])
+    files, members = validate_merge_proof(
+        plan,
+        result,
+        candidate=plan["candidate"],
+        base=plan["base"],
+        changed_paths=plan["changed_paths"],
+        control_base=plan["base"],
+    )
+    assert files == frozenset(plan["pytest"])
+    assert members == frozenset(path + "::test_result" for path in plan["pytest"])
+    assert plan["evidence"]["certification_deferred"] == {
+        "status": "NOT_RUN",
+        "marker": admission_owner._MERGE_MARKER,
+        "changed_tests": ["backend/tests/integration/engine/test_native_proof.py"],
+        "support_consumers": {
+            "backend/tests/factories/native_proof.py": [
+                "backend/tests/integration/engine/test_native_proof.py"
+            ]
+        },
+        "consumer_coverage": "not-claimed",
+    }
+    assert plan["evidence"]["observations"] == original
+
+
+def test_certification_deferral_keeps_production_execution() -> None:
+    plan, result = _certification_gate_case()
+
+    def validate() -> None:
+        validate_merge_proof(
+            plan,
+            result,
+            candidate=plan["candidate"],
+            base=plan["base"],
+            changed_paths=plan["changed_paths"],
+            control_base=plan["base"],
+        )
+
+    validate()
+    result["outcomes"] = [
+        row for row in result["outcomes"] if row["owner"] != "Native pytest"
+    ]
+    with pytest.raises(ValueError):
+        validate()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "claimed-pass",
+        "wrong-marker",
+        "unmarked-filter",
+        "daily-only",
+        "slow-only",
+        "empty",
+        "foreign-file",
+        "production-file",
+        "ordinary-selected",
+        "missing-relationship",
+        "residual-consumer",
+        "policy-required",
+        "stale-observation",
+        "stale-source-packet",
+    ),
+)
+def test_certification_deferral_cannot_hide_unqualified_or_ordinary_work(
+    fault: str,
+) -> None:
+    plan, _result = _certification_gate_case()
+    evidence = plan["evidence"]
+    gate.require_certification_deferred_scope(plan["changed_paths"], evidence)
+    admission = evidence["pytest_admission"]
+    native = admission["collection"]["deselected"][0]
+    support = evidence["observations"][-1]
+    if fault == "claimed-pass":
+        evidence["certification_deferred"]["status"] = "PASS"
+    elif fault == "wrong-marker":
+        admission["collection_marker"] = "certification"
+    elif fault in {"unmarked-filter", "daily-only", "slow-only"}:
+        native.pop("certification")
+        if fault != "unmarked-filter":
+            native[fault.removesuffix("-only")] = "true"
+    elif fault == "empty":
+        admission["collection"]["deselected"] = []
+    elif fault == "foreign-file":
+        native["selector"] = "backend/tests/foreign.py::test_native"
+    elif fault == "production-file":
+        source = "backend/src/oh_goon/native_proof.py"
+        old = native["file"]
+        native.update(file=source, selector=source + "::test_native")
+        observation = evidence["observations"][-2]
+        observation["changed_path"] = source
+        observation["nominations"][0]["nomination"]["verification_target"]["path"] = (
+            source
+        )
+        plan["changed_paths"] = [
+            source if path == old else path for path in plan["changed_paths"]
+        ]
+    elif fault == "ordinary-selected":
+        admission["collection"]["selected"].append(
+            {"file": native["file"], "selector": native["file"] + "::test_ordinary"}
+        )
+    elif fault == "missing-relationship":
+        support["nominations"][0]["relationships"] = []
+    elif fault == "stale-observation":
+        evidence["observations"][-2]["stale"] = True
+    elif fault == "stale-source-packet":
+        evidence["observations"][-2]["changed_set"] = {"freshness": "stale"}
+    elif fault == "residual-consumer":
+        original = support["nominations"][0]
+        projected = copy.deepcopy(original)
+        target = "backend/tests/unit/services/test_residual.py"
+        projected["nomination"]["verification_target"]["path"] = target
+        relationship = projected["relationships"][0]
+        relationship["target"] = target
+        relationship["supporting_source_members"][-1]["path"] = target
+        support["nominations"].append(projected)
+        support["changed_set"]["targets"].append(
+            {"path": target, "nomination": projected["nomination"]}
+        )
+        support["changed_set"]["changes"][0]["relationships"].append(relationship)
+        assert gate.bounded_verification_support_targets(support) == frozenset(
+            {native["file"], target}
+        )
+    else:
+        plan["changed_paths"].append("Makefile")
+        source = VERIFICATION_POLICY_TESTS[0]
+        old = native["file"]
+        native.update(file=source, selector=source + "::test_native")
+        observation = evidence["observations"][-2]
+        observation["changed_path"] = source
+        observation["nominations"][0]["nomination"]["verification_target"]["path"] = (
+            source
+        )
+        plan["changed_paths"] = [
+            source if path == old else path for path in plan["changed_paths"]
+        ]
+        assert source in gate.required_policy_tests(plan["changed_paths"])
+    with pytest.raises(ValueError, match="Certification deferral differs"):
+        gate.require_certification_deferred_scope(plan["changed_paths"], evidence)
+
+
+@pytest.fixture(scope="module")
+def native_certification_collection(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, Any]:
+    root = tmp_path_factory.mktemp("trusted-certification-collection")
+    plan, _result = _certification_gate_case()
+    native = plan["evidence"]["certification_deferred"]["changed_tests"][0]
+    files = {
+        "backend/pyproject.toml": (
+            '[tool.pytest.ini_options]\ntestpaths=["tests"]\n'
+            'markers=["certification: explicit native qualification"]\n'
+        ),
+        native: (
+            "import pytest\n@pytest.mark.certification\n"
+            "def test_native(): raise AssertionError('must not execute during ordinary collection')\n"
+        ),
+        "backend/tests/unit/services/test_ordinary.py": "def test_result(): assert True\n",
+        "scripts/tests/test_tooling.py": "def test_tooling(): assert True\n",
+        "tests/integration/test_cross_owner.py": "def test_cross_owner(): assert True\n",
+    }
+    for relative, contents in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents)
+    trusted = Path(__file__).resolve().parents[2]
+    environment = Path(sys.prefix)
+    source_identity = package_slim.canonical_source_identity(root)
+    requests = gate._ordinary_collection_requests(
+        root, trusted_root=trusted, environment=environment, env=os.environ
+    )
+    receipt = gate._ordinary_candidate_collection(
+        root,
+        trusted_root=trusted,
+        environment=environment,
+        changed_paths=plan["changed_paths"],
+        source_identity=source_identity,
+        requests=requests,
+        env=os.environ,
+        certification_files=(native,),
+    )
+    gate.require_certification_reobserved(
+        plan["changed_paths"], plan["evidence"], receipt
+    )
+    assert receipt["execution"] == "not-performed"
+    return {"plan": plan, "receipt": receipt, "root": root}
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "lost-marker",
+        "wrong-actual-expression",
+        "wrong-request-expression",
+        "wrong-context-expression",
+        "foreign-file",
+        "changed-membership",
+        "ordinary-selected",
+    ),
+)
+def test_certification_deferral_requires_independent_exact_native_recollection(
+    native_certification_collection: dict[str, Any], fault: str
+) -> None:
+    plan = native_certification_collection["plan"]
+    receipt = copy.deepcopy(native_certification_collection["receipt"])
+    native = receipt["contexts"][0]["deselected"][0]
+    if fault == "lost-marker":
+        native.pop("certification")
+    elif fault == "wrong-actual-expression":
+        receipt["contexts"][0]["runtime"]["marker_expression"] = "not daily"
+    elif fault == "wrong-request-expression":
+        receipt["contexts"][0]["request"]["marker"] = "not daily"
+    elif fault == "wrong-context-expression":
+        receipt["contexts"][1]["runtime"]["marker_expression"] = "certification"
+    elif fault == "foreign-file":
+        receipt["certification_files"] = ["backend/tests/foreign.py"]
+    elif fault == "changed-membership":
+        native["selector"] += "[additional]"
+    else:
+        receipt["contexts"][0]["selected"].append(
+            {"file": native["file"], "selector": native["file"] + "::test_ordinary"}
+        )
+    with pytest.raises(ValueError, match="Independent"):
+        gate.require_certification_reobserved(
+            plan["changed_paths"], plan["evidence"], receipt
+        )
+
+
+def test_independent_recollection_finds_hidden_ordinary_cases(
+    native_certification_collection: dict[str, Any], tmp_path: Path
+) -> None:
+    original = native_certification_collection
+    plan = original["plan"]
+    root = tmp_path / "source"
+    shutil.copytree(original["root"], root)
+    native = plan["evidence"]["certification_deferred"]["changed_tests"][0]
+    with (root / native).open("a") as stream:
+        stream.write("\ndef test_ordinary(): raise AssertionError('collection only')\n")
+    trusted = Path(__file__).resolve().parents[2]
+    environment = Path(sys.prefix)
+    requests = gate._ordinary_collection_requests(
+        root, trusted_root=trusted, environment=environment, env=os.environ
+    )
+    receipt = gate._ordinary_candidate_collection(
+        root,
+        trusted_root=trusted,
+        environment=environment,
+        changed_paths=plan["changed_paths"],
+        source_identity=package_slim.canonical_source_identity(root),
+        requests=requests,
+        env=os.environ,
+        certification_files=(native,),
+    )
+    assert any(
+        row["selector"] == native + "::test_ordinary"
+        for context in receipt["contexts"]
+        for row in context["selected"]
+    )
+    with pytest.raises(
+        ValueError, match="Independent native certification disposition"
+    ):
+        gate.require_certification_reobserved(
+            plan["changed_paths"], plan["evidence"], receipt
+        )
+
+
 def _documentation_proof(
     *, behavioral: bool = True, document_path: str = "docs/guide.md"
 ) -> tuple[dict[str, Any], dict[str, Any]]:

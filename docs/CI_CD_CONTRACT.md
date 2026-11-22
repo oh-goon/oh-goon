@@ -122,9 +122,10 @@ Verification-support sources may use the named **bounded verification-support
 proof** when an intact native changed-set packet supplies positive consumer
 relationships bound to the exact source and verifier revisions. Existing native
 collection and successful execution must include a qualified consumer; an empty
-or cadence-deselected target alone supplies no proof. Dynamic consumer scope
-remains incomplete and no whole-owner coverage is claimed. Missing or
-unqualified relationships retain `SELECTION_UNVERIFIED`.
+or cadence-deselected target alone supplies no proof. The explicit native
+certification disposition below records deferral rather than execution proof.
+Dynamic consumer scope remains incomplete and no whole-owner coverage is
+claimed. Missing or unqualified relationships retain `SELECTION_UNVERIFIED`.
 
 The **bounded native owner proofs** use the existing owners when a current
 producer observation cannot qualify a consumer relationship. They are execution
@@ -221,9 +222,23 @@ The existing native pytest collector resolves all advisory Python verifiers befo
 plan admission, using the execution configuration and cadence. Evidence retains
 selected and deselected members and empty advisory targets; a support file with
 no collected tests cannot count as a source's required verifier. Changed tests
-and mandatory policy checks still need ordinary executable members. The original
-batch owner independently collects the admitted files for execution; the plan's
-file set and the exact native execution membership remain separately checked.
+and mandatory policy checks need ordinary executable members, with the explicit
+native certification disposition below. The original batch owner independently
+collects the admitted files for execution; the plan's file set and the exact
+native execution membership remain separately checked.
+
+Ordinary admission may retain `certification_deferred` with `status: NOT_RUN`
+for a nonempty test file whose native deselected members all carry pytest's
+actual `certification` marker under the fixed ordinary exclusion. Test-owned
+support may retain the same disposition only through intact producer-qualified
+positive relationships to those certification consumers. This does not prove
+complete consumer scope or classify the deferred work as passed. Changed
+production sources still require ordinary qualified proof, and mandatory policy
+checks must execute. Empty tests, missing relationships, unrelated filters and
+slow/daily exclusion alone do not qualify. The trusted controller independently
+recollects the same ordinary contexts, including the recorded support consumers,
+and verifies their native marker facts before accepting the deferral. Selected
+native qualification remains specific to its harness, mode and environment.
 
 Outside these bounded routes, other added components, removed or forked
 components, changes to optional/group/build declarations,

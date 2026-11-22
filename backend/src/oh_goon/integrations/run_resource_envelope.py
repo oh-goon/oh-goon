@@ -162,6 +162,9 @@ class ResolvedRunResourceScope:
             )
         ):
             raise FleetPlanInvalid("Whole-Run resource transport authority is invalid")
+        slice_arguments = [
+            item for item in prefix if item == "--slice" or item.startswith("--slice=")
+        ]
         try:
             scope = cls(
                 fleet_run_id=payload["fleet_run_id"],
@@ -194,7 +197,12 @@ class ResolvedRunResourceScope:
             or "--expand-environment=no" not in prefix
             or not isinstance(scope.target_slice, str)
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,248}\.slice", scope.target_slice) is None
-            or f"--slice={scope.target_slice}" not in prefix
+            or (
+                slice_arguments != [f"--slice={scope.target_slice}"]
+                # Legacy CLI transport predates explicit target-slice authority
+                # and may retain the native implicit app.slice default.
+                and not ("target_slice" not in payload and not slice_arguments)
+            )
         ):
             raise FleetPlanInvalid("Whole-Run resource transport identity is invalid")
         return scope

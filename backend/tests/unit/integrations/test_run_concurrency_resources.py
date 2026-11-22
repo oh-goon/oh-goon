@@ -79,6 +79,19 @@ def test_deferred_scope_transport_retains_resolved_manager_and_exact_admission(
     assert f"--slice={restored.budget.policy.aggregate_slice}" in restored.scope.command_prefix
 
 
+@pytest.mark.parametrize("selection", ["missing", "conflicting"])
+def test_explicit_worker_slice_transport_requires_one_matching_native_selector(deferred, selection):
+    payload = deferred.scope.to_payload()
+    if selection == "missing":
+        payload["command_prefix"] = [
+            item for item in payload["command_prefix"] if not item.startswith("--slice=")
+        ]
+    else:
+        payload["command_prefix"].insert(-1, "--slice=foreign.slice")
+    with pytest.raises(FleetPlanInvalid):
+        resources.ResolvedRunResourceScope.from_payload(payload)
+
+
 @pytest.mark.parametrize("changed", ["run", "unit", "slice", "environment", "journal-tool"])
 def test_scope_substitution_cannot_reuse_original_admission(deferred, changed):
     payload = deferred.to_payload()
