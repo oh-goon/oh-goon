@@ -59,6 +59,7 @@ from oh_goon.repository_tooling.verification_gate_control import (
     admitted_static_projects,
     behavioral_pytest_targets,
     bounded_verification_support_targets,
+    certification_deferred_scope,
     documentation_asset_candidates,
     documentation_proof_paths,
     get_bounded_owner_proofs,
@@ -69,6 +70,7 @@ from oh_goon.repository_tooling.verification_gate_control import (
     native_changed_paths,
     non_executable_documentation,
     require_bounded_owner_proofs,
+    require_certification_deferred_scope,
     require_native_pytest_pass,
     require_verification_support_proof,
     required_policy_obligations,
@@ -462,6 +464,8 @@ def _collect_pytest_proof(
     collection = collect_native_pytest(
         tuple(root / path for path in sorted(pytest)), marker=_MERGE_MARKER, invocation=invocation
     )
+    if collection.runtime and collection.runtime.get("marker_expression") != _MERGE_MARKER:
+        raise ValueError("Native ordinary pytest collection changed its marker")
     selected_files = {row["file"] for row in collection.selected}
     if not selected_files <= {target.split("::", 1)[0] for target in pytest}:
         raise ValueError("Native pytest collection escaped the admitted test files")
@@ -486,6 +490,7 @@ def _collect_pytest_proof(
     )
     admission["collection"] = collection.payload()
     admission["collection_context"] = invocation.correctness_context()
+    admission["collection_marker"] = (collection.runtime or {}).get("marker_expression")
     deselected = collected_targets(collection.deselected)
     admission["empty_advisory_targets"] = sorted(pytest - selected - deselected)
     admission["targets_without_selected_members"] = sorted(pytest - selected)
@@ -820,6 +825,13 @@ def admit_change(
         row["file"] for packet in project_admissions for row in packet["collection"]["selected"]
     }
     if pytest_collected or project_admissions:
+        deferred = certification_deferred_scope(changed, evidence, removed_paths=removed)
+        if deferred:
+            evidence["certification_deferred"] = deferred
+        deferred_paths = set(deferred.get("changed_tests", [])) | set(
+            deferred.get("support_consumers", {})
+        )
+        support_paths -= set(deferred.get("support_consumers", {}))
         unverified.extend(
             _pytest_observation_gaps(
                 evidence,
@@ -828,7 +840,8 @@ def admit_change(
                 | removed_paths
                 | upgrade_paths
                 | set(static_projects)
-                | owner_paths,
+                | owner_paths
+                | deferred_paths,
             )
         )
     if frontend and (not unverified or focused_feedback):
@@ -1168,6 +1181,9 @@ def require_merge_selection(root: Path, plan: ChangeVerificationPlan) -> None:
         - set(plan.removed_paths)
         - set(assets)
     )
+    deferred = require_certification_deferred_scope(
+        plan.changed_paths, plan.evidence, removed_paths=plan.removed_paths
+    )
     behavioral_pytest = behavioral_pytest_targets(plan.pytest, plan.evidence, current_paths)
     if (
         plan.behavioral_status == "REQUIRED"
@@ -1177,6 +1193,7 @@ def require_merge_selection(root: Path, plan: ChangeVerificationPlan) -> None:
             or non_executable_documentation(root, path)
             or path in assets
             or path in static_projects
+            or path in deferred
             for path in plan.changed_paths
         )
     ):
