@@ -394,6 +394,33 @@ def test_slot_two_cancellation_stays_a_live_original_request(prepared_candidates
         ).fetchone()[0]
 
 
+def test_terminal_cancellation_replay_does_not_touch_live_sibling(prepared_candidates):
+    stack, first, second = (
+        prepared_candidates,
+        prepared_candidates.first,
+        prepared_candidates.second,
+    )
+    ticket, _ = admit(stack, first, prepare(stack, first))
+    terminal = stack.lifecycle.finish_admitted(ticket, FleetRunTerminalIntent.CANCEL)
+    admit(stack, second, prepare(stack, second))
+    revision = stack.database.durable_revision()
+    sibling_events = stack.journal.read_view().run_events(second.run_id).events
+    assert stack.lifecycle.cancel(first.run_id) == terminal
+    assert stack.lifecycle.cancel(first.run_id) == terminal
+    assert stack.journal.read_view().run_events(second.run_id).events == sibling_events
+    assert stack.database.durable_revision() == revision
+    with stack.database.transaction() as connection:
+        sibling = stack.execution.active_fleet_lease_in(connection, second.run_id)
+        assert sibling is not None
+        assert (
+            connection.execute(
+                "SELECT cancel_requested_at FROM execution_lease WHERE fleet_run_id=?",
+                (second.run_id,),
+            ).fetchone()[0]
+            is None
+        )
+
+
 def test_passive_native_observations_cannot_issue_canonical_closure_or_free_capacity(
     prepared_candidates,
 ):

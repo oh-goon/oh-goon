@@ -87,9 +87,19 @@ def test_remaining_slot_two_blocks_direct_serial_scope_and_reset_without_cross_c
         local_state(database).add_location(tmp_path / "new-location")
     with pytest.raises(StateConflict, match="execution_lease"):
         reset_local_state(database.path)
+    revision = database.durable_revision()
+    with pytest.raises(OwnershipLost, match="no longer owns"):
+        with database.transaction(write=True) as connection:
+            store.request_fleet_cancel_in(connection, "run-a")
+    assert database.durable_revision() == revision
     with database.transaction(write=True) as connection:
-        assert store.request_fleet_cancel_in(connection, "run-a") is False
         assert store.active_fleet_lease_in(connection, "run-b") == remaining
+        assert (
+            connection.execute(
+                "SELECT cancel_requested_at FROM execution_lease WHERE fleet_run_id='run-b'"
+            ).fetchone()[0]
+            is None
+        )
         assert store.request_fleet_cancel_in(connection, "run-b") is True
         rows = connection.execute(
             "SELECT fleet_run_id,cancel_requested_at FROM execution_lease"
@@ -97,6 +107,58 @@ def test_remaining_slot_two_blocks_direct_serial_scope_and_reset_without_cross_c
         assert (
             len(rows) == 1 and rows[0]["fleet_run_id"] == "run-b" and rows[0]["cancel_requested_at"]
         )
+
+
+def test_closing_run_cancellation_keeps_its_reservation_and_live_sibling_unchanged(tmp_path):
+    database = LocalDatabase(tmp_path / "state.sqlite")
+    store = SQLiteExecutionLeaseStore(database)
+    first, second = reserve(database, store, "run-a"), reserve(database, store, "run-b")
+    store.finish_submission_as_owner(first, lambda _connection: None)
+    with database.transaction(write=True) as connection:
+        before = store.retained_leases_in(connection)
+        assert store.request_fleet_cancel_in(connection, "run-a") is False
+        assert store.retained_leases_in(connection) == before
+        assert store.active_fleet_lease_in(connection, "run-b") == second
+        assert (
+            connection.execute(
+                "SELECT cancel_requested_at FROM execution_lease WHERE fleet_run_id='run-b'"
+            ).fetchone()[0]
+            is None
+        )
+
+
+def test_dead_worker_cancellation_uses_its_retained_slot_without_reclaiming_sibling(tmp_path):
+    database = LocalDatabase(tmp_path / "state.sqlite")
+    store = SQLiteExecutionLeaseStore(database)
+    first, second = reserve(database, store, "run-a"), reserve(database, store, "run-b")
+    ended = subprocess.run(
+        [sys.executable, "-c", "import os; print(os.getpid())"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    # Reconstruct the retained crash cut. This establishes no native resource
+    # closure or executable claim, and the physical reservation must remain.
+    with database.transaction(write=True) as connection:
+        connection.execute(
+            "UPDATE execution_lease SET custody_phase='WORKER_OWNED', "
+            "owner_pid=?, owner_identity='ended-test-worker', owner_session_id='ended-worker' "
+            "WHERE lease_token=?",
+            (int(ended.stdout.strip()), first.token),
+        )
+        before = store.retained_leases_in(connection)
+        assert store.request_fleet_cancel_in(connection, "run-a") is False
+        assert store.retained_leases_in(connection) == before
+        assert store.active_fleet_lease_in(connection, "run-b") == second
+        assert (
+            connection.execute(
+                "SELECT cancel_requested_at FROM execution_lease WHERE fleet_run_id='run-b'"
+            ).fetchone()[0]
+            is None
+        )
+    with pytest.raises(ExecutionBusy, match="capacity is full"):
+        reserve(database, store, "run-c")
 
 
 def test_logical_finish_retains_nonexecutable_resource_occupancy(tmp_path):

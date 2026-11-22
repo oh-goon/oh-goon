@@ -448,7 +448,7 @@ class ExecutionCoordinator:
         connection: sqlite3.Connection,
         fleet_run_id: str,
     ) -> bool:
-        """Mark cancellation or reclaim a dead owner in one caller write transaction."""
+        """Cancel exact Run custody; another active owner cannot prove its absence."""
         return self._leases.request_fleet_cancel_in(connection, fleet_run_id)
 
     def active_lease(self) -> ExecutionLease | None:

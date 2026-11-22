@@ -779,12 +779,16 @@ class SQLiteExecutionLeaseStore:
     ) -> bool:
         """Mark one live Fleet owner cancelled inside the caller-owned transaction.
 
-        Returns ``False`` when no live owner remains. Dead-owner row reclamation is
-        performed in this same transaction so the caller can atomically resolve the
-        orphaned FleetRun before committing.
+        A retained dead or closing reservation may resolve only its own Run.
+        Missing custody cannot establish an orphan while another owner is active.
+        Dead-owner reclamation stays inside the caller's canonical write cut.
         """
+        self._database.require_atomic_write_cut(connection)
+        retained = self.retained_fleet_lease_in(connection, fleet_run_id)
         row = self._active_lease_row(connection, remove_dead=True, fleet_run_id=fleet_run_id)
         if row is None:
+            if retained is None and self.active_leases_in(connection):
+                raise OwnershipLost("Fleet run no longer owns the active execution lease")
             return False
         if str(row["kind"]) != "FLEET" or row["fleet_run_id"] != fleet_run_id:
             raise OwnershipLost("Fleet run no longer owns the active execution lease")
@@ -792,9 +796,19 @@ class SQLiteExecutionLeaseStore:
             """
             UPDATE execution_lease
             SET cancel_requested_at = ?
-            WHERE lease_token = ?
+            WHERE lease_token = ? AND kind='FLEET' AND fleet_run_id=?
+                AND custody_phase=? AND owner_session_id=? AND owner_pid=?
+                AND owner_identity IS ?
             """,
-            (self._environment.now().isoformat(), str(row["lease_token"])),
+            (
+                self._environment.now().isoformat(),
+                str(row["lease_token"]),
+                fleet_run_id,
+                row["custody_phase"],
+                row["owner_session_id"],
+                row["owner_pid"],
+                row["owner_identity"],
+            ),
         )
         if cursor.rowcount != 1:
             raise OwnershipLost("Execution lease changed before cancellation request")
