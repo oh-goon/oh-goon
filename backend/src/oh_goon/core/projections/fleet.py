@@ -33,10 +33,10 @@ def build_fleet_snapshot(
     *,
     durable_revision: int,
     journal_revision: int,
-    active_fleet_run: FleetRunDetail | None,
+    active_fleet_runs: list[FleetRunDetail] | tuple[FleetRunDetail, ...],
     latest_fleet_runs: list[FleetRunDetail],
 ) -> FleetSnapshot:
-    context = FleetProjectionContext.build(repositories, active_fleet_run, latest_fleet_runs)
+    context = FleetProjectionContext.build(repositories, active_fleet_runs, latest_fleet_runs)
     provenance = build_snapshot_provenance(
         context,
         durable_revision=durable_revision,
@@ -45,6 +45,6 @@ def build_fleet_snapshot(
     return FleetSnapshot(
         provenance=provenance,
         repositories=context.repositories,
-        active_fleet_run=context.active_fleet_run,
+        active_fleet_runs=context.active_fleet_runs,
         latest_fleet_runs=context.latest_fleet_runs,
     )

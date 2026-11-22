@@ -149,10 +149,14 @@ def _lease_connection():
     conn.execute("""CREATE TABLE execution_lease (
         singleton INTEGER, lease_token TEXT, owner_session_id TEXT, owner_pid INTEGER,
         owner_identity TEXT, kind TEXT, fleet_run_id TEXT, cancel_requested_at TEXT,
-        custody_phase TEXT NOT NULL
+        custody_phase TEXT NOT NULL,
+        concurrency_json TEXT, deferred_worker_resource_scope_json TEXT,
+        worker_resource_envelope_json TEXT, controller_session_id TEXT,
+        controller_pid INTEGER, controller_identity TEXT
     )""")
     conn.execute(
-        "INSERT INTO execution_lease VALUES "
+        "INSERT INTO execution_lease (singleton,lease_token,owner_session_id,owner_pid,"
+        "owner_identity,kind,fleet_run_id,cancel_requested_at,custody_phase) VALUES "
         "(1,'tok','old-session',41,'birth-41','FLEET','run-one',NULL,'WORKER_OWNED')"
     )
     return conn

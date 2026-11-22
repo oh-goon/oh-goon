@@ -11,7 +11,7 @@ import type { CatalogRunRequest, FleetRunDetail, FleetRunOverview, FleetRunState
 import type { WriteCommandResult } from "@/domain/mutations/WriteCommandResult";
 import { readScopesForResources, readScopesInvalidatedByFleetProgress } from "@/domain/reads/readResources";
 import { watchFleetRun } from "@/app/fleetRun/watchFleetRun";
-import { bindFleetRunDetails, projectFleetRunOwnership, retainCompletedLocalRun, type LocalRunObservation } from "@/app/fleetRun/runStatusProjection";
+import { bindFleetRunDetails, observedActiveRunDetail, projectFleetRunOwnership, retainCompletedLocalRun, snapshotActiveRunDetails, type LocalRunObservation } from "@/app/fleetRun/runStatusProjection";
 import { newFleetRunId } from "@/domain/identity/commandIdentity";
 import { canonicalIdentity } from "@/domain/identity/canonicalValue";
 import type { ReadResource } from "@/domain/reads/ReadResource";
@@ -113,9 +113,10 @@ export function FleetRunProvider({ children }: { children: ReactNode }) {
   if (pendingStarts.current === null) pendingStarts.current = new PendingCommandIdentitySet(newFleetRunId);
 
 
-  const observedActiveDetail = fleet.resource.data === null
-    ? (bootstrapFleet?.active_fleet_run ?? null)
-    : (fleet.resource.data.active_fleet_run ?? null);
+  const observedActiveDetail = observedActiveRunDetail(
+    fleet.resource.data ?? bootstrapFleet,
+    liveRun?.run.fleet_run_id,
+  );
   const observedActiveKnown = fleet.resource.data !== null || bootstrapFleet !== undefined;
   const observedCausalityRevision = fleet.resource.data !== null
     ? fleet.resource.causalityRevision
@@ -169,7 +170,7 @@ export function FleetRunProvider({ children }: { children: ReactNode }) {
     const snapshot = fleet.resource.data;
     if (snapshot === null) return;
     pendingStarts.current!.observeDurableIdentities([
-      ...(snapshot.active_fleet_run ? [snapshot.active_fleet_run.run.fleet_run_id] : []),
+      ...snapshotActiveRunDetails(snapshot).map((detail) => detail.run.fleet_run_id),
       ...(snapshot.latest_fleet_runs ?? []).map((detail) => detail.run.fleet_run_id),
     ]);
   }, [fleet.resource.revision]);

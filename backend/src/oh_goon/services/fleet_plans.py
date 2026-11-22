@@ -164,6 +164,7 @@ if TYPE_CHECKING:
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
     from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
     from oh_goon.core.models.candidate_workspace import CandidateRunInspection
+    from oh_goon.core.models.run_resources import RunConcurrencyPolicy
     from oh_goon.integrations.fleet_content_store import FleetContentStore
     from oh_goon.runtime.database import LocalDatabase
     from oh_goon.services.repositories import RepositoryService
@@ -187,6 +188,7 @@ class FleetPlanService:
         git_service: GitService | None = None,
         repositories: RepositoryService | None = None,
         workspace_database: LocalDatabase | None = None,
+        run_concurrency: RunConcurrencyPolicy | None = None,
     ) -> None:
         self._resolver = resolver
         self._runs = runs
@@ -200,6 +202,7 @@ class FleetPlanService:
         self._git_service = git_service
         self._repositories = repositories
         self._workspace_database = workspace_database
+        self._run_concurrency = run_concurrency
 
     def inspect_agent_continuation(
         self,
@@ -357,7 +360,19 @@ class FleetPlanService:
                     raise FleetPlanInvalid(
                         "Candidate execution requires one exact registered subject"
                     )
-                selected = self._prepare_native_agent(selected, workspace, read_only_workspace=True)
+                if self._run_concurrency is not None and any(
+                    value is not None for value in selected.profile.resources.model_dump().values()
+                ):
+                    raise FleetPlanInvalid(
+                        "Two-Run candidate resources use their admitted worker scopes; "
+                        "an independently selected Step scope is unsupported"
+                    )
+                selected = self._prepare_native_agent(
+                    selected,
+                    workspace,
+                    read_only_workspace=True,
+                    allow_candidate_metadata=self._run_concurrency is not None,
+                )
                 fleet_run_id = fleet_run_id or new_fleet_run_id()
                 candidate_admission = prepare_candidate_workspace(
                     database=self._workspace_database,
@@ -515,6 +530,7 @@ class FleetPlanService:
         workspace: Path,
         *,
         read_only_workspace: bool = False,
+        allow_candidate_metadata: bool = False,
     ) -> ResolvedNativeAgent:
         """Bind and preflight the original backend before any native Run admission."""
         if selected.connection is not None:
@@ -582,12 +598,24 @@ class FleetPlanService:
         ):
             raise FleetPlanInvalid("Native read-only phases require the selected isolated backend")
         backend = self._standard_process_isolation
+        metadata_git = False
+        if allow_candidate_metadata:
+            from oh_goon.services.fleet_plan_candidate import (
+                capture_workspace_control_git_environment,
+            )
+
+            if self._run_concurrency is None:
+                raise FleetPlanInvalid("Candidate metadata requires admitted runtime capacity")
+            metadata_git = (
+                self._git_service is not None
+                and capture_workspace_control_git_environment(self._git_service) is not None
+            )
         if selected.profile.backend == "bubblewrap":
             if (
                 self._git_service is None
                 or self._git_service.command_runner is None
                 or self._git_service.observation_runner is None
-            ):
+            ) and not metadata_git:
                 raise FleetPlanInvalid(
                     "Native isolation requires the runtime's scoped Git execution boundary"
                 )

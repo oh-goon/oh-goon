@@ -55,17 +55,25 @@ def seeded(tmp_path: Path):
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), lease_token TEXT UNIQUE,
         owner_session_id TEXT, owner_pid INTEGER, owner_identity TEXT,
         kind TEXT, fleet_run_id TEXT, acquired_at TEXT, cancel_requested_at TEXT,
-        custody_phase TEXT NOT NULL)""")
+        custody_phase TEXT NOT NULL,
+        concurrency_json TEXT, deferred_worker_resource_scope_json TEXT,
+        worker_resource_envelope_json TEXT, controller_session_id TEXT,
+        controller_pid INTEGER, controller_identity TEXT)""")
     conn.execute(
-        "INSERT INTO execution_lease VALUES (1,?,?,?,?,?,?,?,NULL,'WORKER_OWNED')",
+        "INSERT INTO execution_lease (singleton,lease_token,owner_session_id,owner_pid,"
+        "owner_identity,kind,fleet_run_id,acquired_at,cancel_requested_at,custody_phase) "
+        "VALUES (1,?,?,?,?,?,?,?,NULL,'WORKER_OWNED')",
         ("lease-one", "old-session", 41, "old-birth", "FLEET", "run-one", "before"),
     )
     env = Host()
     owner = SimpleNamespace(path=path, session_id="new-session")
+    active_write_cut = False
 
     @contextmanager
     def transaction(*, write=False):
+        nonlocal active_write_cut
         conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+        active_write_cut = write
         try:
             yield conn
         except BaseException:
@@ -73,8 +81,17 @@ def seeded(tmp_path: Path):
             raise
         else:
             conn.execute("COMMIT")
+        finally:
+            active_write_cut = False
+
+    def require_atomic_write_cut(connection: sqlite3.Connection) -> None:
+        # This disposable historical fixture permits malformed-row negatives;
+        # it is not a LocalDatabase schema or runtime-admission substitute.
+        if connection is not conn or not active_write_cut or not conn.in_transaction:
+            raise RuntimeError("original fixture atomic write cut required")
 
     owner.transaction = transaction
+    owner.require_atomic_write_cut = require_atomic_write_cut
     coordinator = ExecutionCoordinator(owner, lease_environment=env)
     return conn, journal, coordinator, env
 
@@ -241,9 +258,14 @@ def test_original_intent_without_predecessor_reconciliation_cannot_transfer(tmp_
     conn.execute("""CREATE TABLE execution_lease (
         singleton INTEGER PRIMARY KEY, lease_token TEXT UNIQUE, owner_session_id TEXT,
         owner_pid INTEGER, owner_identity TEXT, kind TEXT, fleet_run_id TEXT,
-        acquired_at TEXT, cancel_requested_at TEXT, custody_phase TEXT NOT NULL)""")
+        acquired_at TEXT, cancel_requested_at TEXT, custody_phase TEXT NOT NULL,
+        concurrency_json TEXT, deferred_worker_resource_scope_json TEXT,
+        worker_resource_envelope_json TEXT, controller_session_id TEXT,
+        controller_pid INTEGER, controller_identity TEXT)""")
     conn.execute(
-        "INSERT INTO execution_lease VALUES (1,'lease-one','old-session',41,"
+        "INSERT INTO execution_lease (singleton,lease_token,owner_session_id,owner_pid,"
+        "owner_identity,kind,fleet_run_id,acquired_at,cancel_requested_at,custody_phase) "
+        "VALUES (1,'lease-one','old-session',41,"
         "'old-birth','FLEET','run-one','before',NULL,'WORKER_OWNED')"
     )
     coordinator = ExecutionCoordinator(

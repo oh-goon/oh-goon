@@ -41,6 +41,10 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
 from oh_goon.integrations.hashmarks import require_loaded_hashmarks_runtime
 from oh_goon.runtime._executor_configuration import restore_worker_isolation_configuration
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
+from oh_goon.services.fleet_plan_candidate import (
+    capture_workspace_control_git_environment,
+    workspace_control_git,
+)
 from tests.factories.capabilities import capability_snapshot
 
 
@@ -425,6 +429,37 @@ def test_native_git_payload_rejects_incomplete_or_weakened_scope(
     payload = captured.model_dump(mode="json")
     payload[field] = False if field == "native_observation" else None
     with pytest.raises(ValueError):
+        worker.WorkerGitConfiguration.model_validate(payload)
+
+
+def test_worker_metadata_git_retains_captured_environment_without_ambient_rediscovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", "/original/frozen/tool-search")
+    selected = workspace_control_git(GitService(executable="/usr/bin/git"))
+    captured_environment = capture_workspace_control_git_environment(selected)
+    assert captured_environment is not None
+    captured = worker.WorkerGitConfiguration.capture(selected)
+    monkeypatch.setenv("PATH", "/another/runtime/tool-search")
+    restored = worker.WorkerGitConfiguration.model_validate_json(
+        captured.model_dump_json()
+    ).restore()
+    assert capture_workspace_control_git_environment(restored) == captured_environment
+    assert restored.run("config", "--get", "core.fsmonitor", cwd=tmp_path).stdout.strip() == "false"
+    assert restored.metadata_only
+
+
+@pytest.mark.parametrize("corruption", ["weak-policy", "extra-environment", "no-metadata"])
+def test_worker_metadata_git_refuses_changed_policy_before_effects(corruption: str) -> None:
+    selected = workspace_control_git(GitService())
+    payload = worker.WorkerGitConfiguration.capture(selected).model_dump(mode="json")
+    if corruption == "weak-policy":
+        payload["metadata_environment"]["GIT_CONFIG_VALUE_0"] = "true"
+    elif corruption == "extra-environment":
+        payload["metadata_environment"]["PRIVATE_UNADMITTED_ENV"] = "must-not-cross"
+    else:
+        payload["metadata_only"] = False
+    with pytest.raises((ValueError, FleetPlanInvalid)):
         worker.WorkerGitConfiguration.model_validate(payload)
 
 

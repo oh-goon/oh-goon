@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
+from pydantic import JsonValue
+
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
 from oh_goon.core.enforcer_lace_trust import (
     UNPROVISIONED_FLEET_ADMISSION,
@@ -36,9 +38,14 @@ from oh_goon.core.models.run_admission import (
     FleetRunAdmissionIntent,
     PlanRepositoryAdmissionEvidence,
     StrictFleetExecutionAdmission,
+    require_concurrent_candidate_admission,
 )
 from oh_goon.core.models.run_launch import ApplicationLaunchReceipt, ManagedApplicationLaunchReceipt
-from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
+from oh_goon.core.models.run_resources import (
+    RunConcurrencyAdmission,
+    RunResourceEnvelopeEvidence,
+    RunResourceEnvelopeObservation,
+)
 from oh_goon.core.models.scheduling import SchedulingPriority
 from oh_goon.core.models.target import (
     AgentStepDeliveryReference,
@@ -70,11 +77,15 @@ if TYPE_CHECKING:
     from oh_goon.core.ports.original_mount_intent import OriginalMountIntentDescriptor
     from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
     from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
-    from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
+    from oh_goon.integrations.run_resource_envelope import (
+        ResolvedRunResourceScope,
+        VerifiedWorkerResourceClosure,
+    )
     from oh_goon.runtime.enforcer_lace_fleet_resource_owner import (
         OriginalFleetLocalLaceRecoveryOwner,
         OriginalFleetLocalLaceReservation,
     )
+    from oh_goon.runtime.execution.sqlite_lease import WorkerResourceReservation
 
 
 @dataclass(frozen=True, slots=True)
@@ -464,9 +475,25 @@ class FleetRunLifecycle:
         schedule_run_id: str | None = None,
         admission_check: Callable[[], None] | None = None,
         before_admission: Callable[[str], None] | None = None,
+        concurrency: RunConcurrencyAdmission | None = None,
+        refresh_concurrency_in: Callable[[sqlite3.Connection], int] | None = None,
+        deferred_worker_resource_scope: dict[str, JsonValue] | None = None,
     ) -> tuple[ExecutionTicket, FleetRunState]:
         if admission_check is not None:
             admission_check()
+        if concurrency is not None:
+            require_concurrent_candidate_admission(intent.target, concurrency)
+            if (
+                concurrency.fleet_run_id != fleet_run_id
+                or refresh_concurrency_in is None
+                or self._require_authenticated_fleet
+                or self._run_resource_envelope is not None
+            ):
+                raise StateConflict(
+                    "Concurrent admission requires one original ordinary worker-scope cut"
+                )
+        elif refresh_concurrency_in is not None or deferred_worker_resource_scope is not None:
+            raise StateConflict("Concurrent state refresh has no selected admission")
         if isinstance(intent.target, FleetPlanTarget) and not repository_admissions:
             raise StateConflict(
                 "Fleet Plan admission is missing repository/Plan evidence before RUN_ADMITTED"
@@ -657,6 +684,7 @@ class FleetRunLifecycle:
             execution=DirectFleetExecutionAdmission(
                 rerun_from_run_id=rerun_from_run_id,
                 resource_envelope=self._require_run_resource_envelope(fleet_run_id),
+                concurrency=concurrency,
             ),
             repository_admissions=repository_admissions,
             application_launch=application_launch,
@@ -671,6 +699,19 @@ class FleetRunLifecycle:
             )
 
         try:
+            if concurrency is not None:
+                assert refresh_concurrency_in is not None
+                with self._database.transaction(write=True) as connection:
+                    self._database.require_atomic_write_cut(connection)
+                    revision = refresh_concurrency_in(connection)
+                    ticket = self._execution.reserve_fleet_in(
+                        connection,
+                        fleet_run_id,
+                        expected_durable_revision=revision,
+                        concurrency=concurrency,
+                        deferred_worker_resource_scope=deferred_worker_resource_scope,
+                    )
+                    return ticket, admit_direct_in(connection)
             return self._execution.reserve_fleet_with(
                 fleet_run_id,
                 expected_durable_revision=expected_durable_revision,
@@ -1527,6 +1568,36 @@ class FleetRunLifecycle:
         """Materialize and validate the exact admitted Fleet owner."""
         session = self._execution.activate(ticket)
         fleet_run_id = session.require_fleet_run_id()
+
+        def require_worker_join(connection: sqlite3.Connection) -> None:
+            detail = self._journal.read_view_from_connection(connection).required_run_detail(
+                fleet_run_id
+            )
+            concurrency = (
+                detail.execution.concurrency
+                if isinstance(detail.execution, DirectFleetExecutionAdmission)
+                else None
+            )
+            if concurrency is None:
+                if (
+                    self._run_resource_envelope is not None
+                    and self._run_resource_envelope.subject == "worker"
+                ):
+                    raise StateConflict("Native worker envelope has no concurrent Run admission")
+                return
+            reservation = self._execution.worker_resource_reservation_in(connection, fleet_run_id)
+            if (
+                reservation is None
+                or reservation.admission != concurrency
+                or reservation.envelope is None
+                or reservation.envelope != self._run_resource_envelope
+                or self._run_resource_scope is None
+            ):
+                raise StateConflict(
+                    "Native worker resource custody differs from original admission"
+                )
+
+        session.observe(require_worker_join)
         if (
             self._run_resource_scope is not None
             and fleet_run_id != self._run_resource_scope.fleet_run_id
@@ -1702,7 +1773,7 @@ class FleetRunLifecycle:
                 # deny the original signer the ability to prove teardown.
                 custody = connection.execute(
                     "SELECT owner_session_id FROM execution_lease "
-                    "WHERE singleton=1 AND fleet_run_id=?",
+                    "WHERE kind='FLEET' AND fleet_run_id=?",
                     (fleet_run_id,),
                 ).fetchone()
                 if custody is not None and str(custody[0]).startswith("recovery:"):
@@ -1712,7 +1783,7 @@ class FleetRunLifecycle:
                 # A live owner can receive ordinary cancellation. For a dead
                 # owner, the generic cancel path would erase the original lease;
                 # preserve signed LACE resource custody before that mutation.
-                if self._execution.active_lease_in(connection) is None:
+                if self._execution.active_fleet_lease_in(connection, fleet_run_id) is None:
                     require_no_original_lace_intent_before_reclamation_in(
                         connection,
                         fleet_run_id,
@@ -1726,6 +1797,7 @@ class FleetRunLifecycle:
                     FleetRunTerminalIntent.CANCEL,
                 )
                 self._executor_pool.release_run_in(connection, fleet_run_id)
+                self._execution.reserve_dead_fleet_resources_in(connection, fleet_run_id)
         except BaseException:
             if not owner_validated:
                 raise
@@ -1770,6 +1842,79 @@ class FleetRunLifecycle:
         failure: FleetRunFailure | None = None,
     ) -> FleetRunState:
         return self.finish(self._execution.activate_submission_failure(ticket), intent, failure)
+
+    def worker_resource_reservation(self, fleet_run_id: str) -> WorkerResourceReservation | None:
+        with self._database.transaction() as connection:
+            return self._execution.worker_resource_reservation_in(connection, fleet_run_id)
+
+    def release_worker_reservation(
+        self, fleet_run_id: str, ticket: ExecutionTicket, proof: VerifiedWorkerResourceClosure
+    ) -> RunResourceEnvelopeObservation:
+        """Persist original native convergence and release only its exact closing row."""
+        if (
+            ticket.require_fleet_run_id() != fleet_run_id
+            or proof.admission.fleet_run_id != fleet_run_id
+        ):
+            raise StateConflict("Native worker closure belongs to another Run")
+
+        def record(
+            connection: sqlite3.Connection, reservation: WorkerResourceReservation | None
+        ) -> RunResourceEnvelopeObservation:
+            return self._record_worker_resource_closure_in(
+                connection, fleet_run_id, proof, reservation
+            )
+
+        return self._execution.release_worker_reservation_with(ticket, proof, record)
+
+    def reconcile_worker_reservation(
+        self, fleet_run_id: str, proof: VerifiedWorkerResourceClosure
+    ) -> RunResourceEnvelopeObservation:
+        """Original native restart proof closes one already reconciled dead controller."""
+        if proof.admission.fleet_run_id != fleet_run_id:
+            raise StateConflict("Recovered native resources belong to another Run")
+        return self._execution.release_recovered_worker_reservation_with(
+            fleet_run_id,
+            proof,
+            lambda connection, reservation: self._record_worker_resource_closure_in(
+                connection,
+                fleet_run_id,
+                proof,
+                reservation,
+            ),
+        )
+
+    def _record_worker_resource_closure_in(
+        self,
+        connection: sqlite3.Connection,
+        fleet_run_id: str,
+        proof: VerifiedWorkerResourceClosure,
+        reservation: WorkerResourceReservation | None,
+    ) -> RunResourceEnvelopeObservation:
+        if reservation is None:
+            detail = self._journal.read_view_from_connection(connection).required_run_detail(
+                fleet_run_id
+            )
+            existing = detail.resource_observation
+            if (
+                not detail.run.status.terminal
+                or not isinstance(detail.execution, DirectFleetExecutionAdmission)
+                or detail.execution.concurrency != proof.admission
+                or detail.worker_resource_envelope != proof.envelope
+                or existing is None
+                or existing.cleanup != "VERIFIED"
+                or existing.unit_name != proof.observation.unit_name
+                or existing.invocation_id != proof.observation.invocation_id
+            ):
+                raise StateConflict("Missing worker reservation has no matching canonical closure")
+            return existing
+        return self._journal.record_worker_resource_observation_in(
+            connection,
+            fleet_run_id=fleet_run_id,
+            concurrency=reservation.admission,
+            envelope=reservation.envelope,
+            observation=proof.observation,
+            proof=proof,
+        )
 
 
 def _execution_authority_in(

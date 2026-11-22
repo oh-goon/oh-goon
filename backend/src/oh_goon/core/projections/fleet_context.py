@@ -17,7 +17,7 @@ class FleetProjectionContext:
 
     repositories: tuple[FleetRepository, ...]
     included: tuple[FleetRepository, ...]
-    active_fleet_run: FleetRunDetail | None
+    active_fleet_runs: tuple[FleetRunDetail, ...]
     latest_fleet_runs: tuple[FleetRunDetail, ...]
     current_updates_by_repository: Mapping[str, OperationState]
 
@@ -25,7 +25,7 @@ class FleetProjectionContext:
     def build(
         cls,
         repositories: list[FleetRepository] | tuple[FleetRepository, ...],
-        active_fleet_run: FleetRunDetail | None,
+        active_fleet_runs: list[FleetRunDetail] | tuple[FleetRunDetail, ...],
         latest_fleet_runs: list[FleetRunDetail] | tuple[FleetRunDetail, ...],
     ) -> FleetProjectionContext:
         repository_cut = tuple(repositories)
@@ -41,10 +41,14 @@ class FleetProjectionContext:
         return cls(
             repositories=repository_cut,
             included=included,
-            active_fleet_run=active_fleet_run,
+            active_fleet_runs=tuple(active_fleet_runs),
             latest_fleet_runs=latest_cut,
             current_updates_by_repository=updates,
         )
+
+    @property
+    def active_fleet_run(self) -> FleetRunDetail | None:
+        return self.active_fleet_runs[0] if self.active_fleet_runs else None
 
     def latest_run_exact(
         self,
@@ -71,9 +75,8 @@ class FleetProjectionContext:
         return max(matches, key=run_order, default=None)
 
     def run_details(self) -> tuple[FleetRunDetail, ...]:
-        if self.active_fleet_run is None or any(
-            detail.run.fleet_run_id == self.active_fleet_run.run.fleet_run_id
-            for detail in self.latest_fleet_runs
-        ):
-            return self.latest_fleet_runs
-        return (*self.latest_fleet_runs, self.active_fleet_run)
+        seen = {detail.run.fleet_run_id for detail in self.latest_fleet_runs}
+        return (
+            *self.latest_fleet_runs,
+            *(detail for detail in self.active_fleet_runs if detail.run.fleet_run_id not in seen),
+        )

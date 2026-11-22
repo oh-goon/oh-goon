@@ -20,7 +20,7 @@ from oh_goon.core.models.run_launch import (
     ApplicationLaunchReceipt,
     UnmanagedApplicationLaunchReceipt,
 )
-from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
+from oh_goon.core.models.run_resources import RunConcurrencyAdmission, RunResourceEnvelopeEvidence
 from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
@@ -180,6 +180,39 @@ class DirectFleetExecutionAdmission(ImmutableModel):
     resource_envelope: RunResourceEnvelopeEvidence | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    concurrency: RunConcurrencyAdmission | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+
+def require_concurrent_candidate_admission(
+    target: OperationTarget | None, concurrency: RunConcurrencyAdmission
+) -> None:
+    """The initial two-Run capability is one fresh managed Pi/Bubblewrap candidate."""
+    if not isinstance(target, FleetPlanTarget) or target.candidate_workspace is None:
+        raise FleetPlanInvalid("Two-Run execution requires an owned candidate Plan")
+    try:
+        target.require_candidate_native_intent()
+    except ValueError as error:
+        raise FleetPlanInvalid(str(error)) from error
+    native = target.plan.native_agent
+    if (
+        target.candidate_workspace.fleet_run_id != concurrency.fleet_run_id
+        or isinstance(target.plan.execution, CicdExecutionPolicy)
+        or native is None
+        or native.agent != "pi"
+        or native.interactive
+        or native.profile.backend != "bubblewrap"
+        or native.profile.sandbox_owner != "harness"
+        or native.connection is None
+        or native.profile.inference_profile is None
+        or native.definition.arguments
+        or native.definition.configuration_directory is not None
+        or any(value is not None for value in native.profile.resources.model_dump().values())
+    ):
+        raise FleetPlanInvalid(
+            "Two-Run execution requires headless managed Pi/Bubblewrap without a separate Step resource scope"
+        )
 
 
 class StrictFleetExecutionAdmission(ImmutableModel):

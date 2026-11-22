@@ -90,6 +90,7 @@ def _build_fleet_services(
         FleetTargetSelector(repositories, migration, league),
         foundation.auditor,
         foundation.runtime_safety,
+        execution=foundation.execution,
     )
     lifecycle = FleetRunLifecycle(
         foundation.database,
@@ -123,6 +124,10 @@ def _build_fleet_services(
         content_store=foundation.content_store,
         worker_configuration=lambda fleet_run_id: capture_run_worker_submission(
             foundation, fleet_run_id
+        ),
+        run_capacity=foundation.run_capacity,
+        worker_exit_recovery=lambda run_id: foundation.effect_recovery.recover(
+            fleet_run_id=run_id, quiescence_timeout_seconds=0.0
         ),
     )
 
@@ -181,6 +186,7 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
         git_service=foundation.git_service,
         repositories=repositories,
         workspace_database=foundation.database,
+        run_concurrency=foundation.run_capacity.policy if foundation.run_capacity else None,
     )
     shared_plan_store = (
         SharedPlanFileStore(initialize=False)
@@ -224,7 +230,11 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
         diagnostics=foundation.diagnostics,
         schedules=schedules,
         system_health=system_health,
-        recovery=RecoveryService(foundation.effect_recovery, foundation.runtime_safety),
+        recovery=RecoveryService(
+            foundation.effect_recovery,
+            foundation.runtime_safety,
+            settle_worker_resources=runs.reconcile_worker_resources,
+        ),
         journal_diagnostics=JournalDiagnosticsService(foundation.database),
         plans=plans,
         goon=GoonService(league, plans, GitLabCiGoonMigrator(GitLabComponentFetcher())),

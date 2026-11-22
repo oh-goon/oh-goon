@@ -79,6 +79,13 @@ observation is recomputed. Partial observations and required-check rows from a
 failed attempt are discarded; repeated drift or unavailable evidence fails
 without weakening selection or requiring a manually warmed index.
 
+Development nomination, plan and result aggregates each have an 8 MiB JSON
+transport bound. Compact JSON preserves all producer packets and qualifications;
+the writer counts encoded bytes while staging and refuses oversized output
+before atomic publication. The matching readers reject oversized input. This
+transport budget does not change native nomination limits, test membership or
+coverage claims, and overflow remains `SELECTION_UNVERIFIED`.
+
 The same admission is available locally through `make check` or `make test`.
 Use a focused owner test while editing; these front doors do not run unrelated
 complete suites. `VERIFY_BASE=<commit> make check` selects an explicit comparison.

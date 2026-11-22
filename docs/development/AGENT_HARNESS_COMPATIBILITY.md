@@ -524,10 +524,19 @@ queue, silently serializing native work or widening worker capacity.
 
 | Requested concurrency | Current owner and scope |
 | --- | --- |
-| Another active Run in one runtime | `RunExecutionSupervisor` permits one active Run; a second admission refuses. A different harness/profile does not grant another slot. |
-| Another runtime using the same SQLite database | The singleton execution lease remains authoritative across processes and repositories. A live owner's lease is not stolen or expired by elapsed time. |
+| Another active Run in one runtime | The default supervisor/lease policy permits one active Run. The explicit two-Run candidate policy below uses its original admission and resource owners; another harness/profile alone grants no slot. |
+| Another runtime using the same SQLite database | Existing execution-lease reservations remain authoritative across processes and repositories. Another controller cannot borrow a selected runtime's budget; live ownership is never expired by elapsed time. |
 | Parallel repository targets within one Run | Existing Fleet target scheduling follows the admitted Plan's parallel-safety/parallelism policy. Current Agent ingress requires one candidate repository and one frozen native selection; it is not a mixed-native parallel-target mode. |
 | Independent databases/state roots | These are separate authority domains. Their existence does not qualify shared-database admission, aggregate capacity or concurrent same-workspace mutation. An unresolved writer still needs its original drain/fencing proof. |
+
+The explicit [two-Run decision](ARCHITECTURE_DECISIONS.md#explicit-capacity-for-two-independent-native-runs)
+selects two fresh headless owned Pi/Bubblewrap candidates, with a shared bounded
+native slice and distinct worker scopes. It retains the current Pi protocol,
+context, input/privacy and native session adaptations. No harness upgrade or
+cross-Run session sharing is implied. Qualification is tied to the actual
+public implementation, source, task and native environment exercised;
+mixed-harness overlap and unavailable environments remain unqualified. The
+default HUG-122/HUG-130 refusal evidence retains its original scope.
 
 Busy refusal is at atomic admission, not a new early native guard. Supported
 preflight/capture and source transport may precede it. No second admitted native

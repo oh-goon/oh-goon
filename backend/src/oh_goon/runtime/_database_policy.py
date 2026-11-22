@@ -16,8 +16,8 @@ from oh_goon.runtime._sqlite_authority_gate import sqlite_authority_gate
 from oh_goon.runtime.local_state_maintenance import LocalStateCompatibility, LocalStateInspection
 from oh_goon.runtime.schema_version_policy import DurableSchemaDisposition, DurableSchemaPolicy
 
-# Schema 94 distinguishes admitted, worker-owned and recovery-only execution custody.
-DATABASE_SCHEMA_VERSION = 94
+# Schema 95 binds bounded concurrent reservations and closing native resource custody.
+DATABASE_SCHEMA_VERSION = 95
 DATABASE_SCHEMA_POLICY = DurableSchemaPolicy(
     name="Local oh-goon database", current=DATABASE_SCHEMA_VERSION
 )

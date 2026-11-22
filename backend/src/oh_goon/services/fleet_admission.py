@@ -31,13 +31,16 @@ from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry, RepositoryIdentity
 from oh_goon.core.models.run import FleetRunState
 from oh_goon.core.models.run_admission import (
+    ExplicitRepositoryScope,
     FleetRepositoryScope,
     FleetRunAdmissionIntent,
     PlanRepositoryAdmissionEvidence,
     fleet_readmission_parent,
     fleet_rerun_parent,
+    require_concurrent_candidate_admission,
 )
 from oh_goon.core.models.run_events import RunAdmittedEvent
+from oh_goon.core.models.run_resources import RunConcurrencyAdmission
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.path_authority import RepositoryPathSpace
 from oh_goon.core.product_identity import repository_subject_instance_id
@@ -73,6 +76,8 @@ class FleetAdmissionPlan:
     durable_revision: int
     targets: tuple[IncludedRepositoryCatalogEntry, ...]
     repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...]
+    scope_locations: tuple[Path, ...] | None = None
+    scope_exclusions: tuple[tuple[str, str, str], ...] = ()
 
 
 _PublicationResult = TypeVar("_PublicationResult")
@@ -105,11 +110,14 @@ class FleetAdmissionPlanner:
         selectors: FleetTargetSelector,
         auditor: SystemInvariantAuditor,
         runtime_safety: RuntimeSafetyService,
+        *,
+        execution: ExecutionCoordinator | None = None,
     ) -> None:
         self._state = state
         self._selectors = selectors
         self._auditor = auditor
         self._runtime_safety = runtime_safety
+        self._execution = execution
 
     @staticmethod
     def admit_runtime_cut(
@@ -258,7 +266,7 @@ class FleetAdmissionPlanner:
         # Do not use an alternative database connection (or a second BEGIN).
         if not connection.in_transaction:
             raise TrustProtocolError("strict placement must own one active write transaction")
-        lease = execution.active_lease_in(connection)
+        lease = execution.active_fleet_lease_in(connection, fleet_run_id)
         if lease is None or lease.kind != "FLEET" or lease.fleet_run_id != fleet_run_id:
             raise TrustProtocolError("strict placement does not own original Fleet lease")
         binding.require_matching(
@@ -366,7 +374,7 @@ class FleetAdmissionPlanner:
         def admit_in(connection: sqlite3.Connection) -> FleetRunState:
             if before_admission is not None:
                 before_admission(run_id)
-            lease = execution.active_lease_in(connection)
+            lease = execution.active_fleet_lease_in(connection, run_id)
             if lease is None or lease.kind != "FLEET" or lease.fleet_run_id != run_id:
                 raise TrustProtocolError("original Fleet reservation must own exact policy Run")
             capture = PreworkRunCapture.capture(
@@ -461,7 +469,7 @@ class FleetAdmissionPlanner:
         def admit_in(connection: sqlite3.Connection) -> FleetRunState:
             if before_admission is not None:
                 before_admission(run_id)
-            lease = execution.active_lease_in(connection)
+            lease = execution.active_fleet_lease_in(connection, run_id)
             if lease is None or lease.kind != "FLEET" or lease.fleet_run_id != run_id:
                 raise TrustProtocolError("Fleet reservation did not create the exact Run lease")
             return cls.publish_atomic_fleet_prework_ingress(
@@ -782,19 +790,15 @@ class FleetAdmissionPlanner:
         *,
         repository_scope: FleetRepositoryScope,
         expected_repository_instance_ids: dict[str, str] | None = None,
+        concurrency: RunConcurrencyAdmission | None = None,
     ) -> FleetAdmissionPlan:
         with self._state.database.transaction() as connection:
             cut = self._auditor.read_cut_in(connection)
             admitted_cut = self.admit_runtime_cut(self._runtime_safety, cut=cut)
             state = self._state.read_view_in(connection, journal=admitted_cut.journal)
-
-        if admitted_cut.active_lease is not None:
-            owner = (
-                f"Fleet execution {admitted_cut.active_lease.fleet_run_id}"
-                if admitted_cut.active_lease.kind == "FLEET"
-                else "Direct execution"
-            )
-            raise ExecutionBusy(f"{owner} is already active")
+            if concurrency is not None:
+                require_concurrent_candidate_admission(intent.target, concurrency)
+            self._require_capacity_in(connection, admitted_cut, concurrency)
         if state.durable_revision != admitted_cut.durable_revision:
             raise AssertionError("Fleet admission cut produced mismatched durable revisions")
 
@@ -813,6 +817,93 @@ class FleetAdmissionPlanner:
             durable_revision=admitted_cut.durable_revision,
             targets=targets,
             repository_admissions=repository_admissions,
+            scope_locations=state.locations,
+            scope_exclusions=self._scope_exclusions(state),
+        )
+
+    @staticmethod
+    def _scope_exclusions(state: LocalStateReadView) -> tuple[tuple[str, str, str], ...]:
+        return tuple(
+            sorted(
+                (path, value["reason"], value["excluded_at"])
+                for path, value in state.exclusions.items()
+            )
+        )
+
+    def _require_capacity_in(
+        self,
+        connection: sqlite3.Connection,
+        cut: ConsistentRuntimeSafetyCut,
+        concurrency: RunConcurrencyAdmission | None,
+    ) -> None:
+        if self._execution is not None:
+            self._execution.require_capacity_in(connection, concurrency)
+            return
+        if concurrency is not None:
+            raise CapabilityUnavailable("Concurrent planning requires its original execution owner")
+        if cut.active_leases or any(
+            lease.concurrency_identity is not None for lease in cut.retained_leases
+        ):
+            raise ExecutionBusy("Fleet or Direct execution is already active")
+
+    def refresh_concurrent_plan_in(
+        self,
+        connection: sqlite3.Connection,
+        prepared: FleetAdmissionPlan,
+        intent: ResolvedCapabilityIntent,
+        *,
+        repository_scope: FleetRepositoryScope,
+        concurrency: RunConcurrencyAdmission,
+        expected_repository_instance_ids: dict[str, str] | None = None,
+    ) -> FleetAdmissionPlan:
+        """Refresh only original mutable state inside the final admission writer cut.
+
+        Frozen repository evidence and exact targets are transported unchanged.
+        Sibling progress may advance the global revision, but cannot make stale
+        scope, requirements or physical subjects into a new admission.
+        """
+        self._state.database.require_atomic_write_cut(connection)
+        require_concurrent_candidate_admission(intent.target, concurrency)
+        cut = self._auditor.read_cut_in(connection)
+        admitted = self.admit_runtime_cut(self._runtime_safety, cut=cut)
+        state = self._state.read_view_in(connection, journal=admitted.journal)
+        if prepared.scope_locations is None or (
+            state.locations != prepared.scope_locations
+            or self._scope_exclusions(state) != prepared.scope_exclusions
+        ):
+            raise TargetSelectionError("Fleet scope changed after concurrent source preparation")
+        if (
+            not isinstance(repository_scope, ExplicitRepositoryScope)
+            or tuple(sorted(entry.repository.repository_id for entry in prepared.targets))
+            != repository_scope.repository_ids
+        ):
+            raise TargetSelectionError(
+                "Concurrent admission requires its exact prepared repository scope"
+            )
+        if not intent.definition.fleet_supported:
+            raise CapabilityUnavailable("Concurrent capability no longer supports Fleet execution")
+        selected = list(prepared.targets)
+        for requirement in intent.definition.requirements:
+            self._validate_requirement(requirement, selected, intent.target, state)
+        source_instances = {
+            e.repository_id: e.source_authority.subject_instance_id
+            for e in prepared.repository_admissions
+        }
+        self._validate_repository_instances(prepared.targets, source_instances)
+        self._validate_repository_instances(prepared.targets, expected_repository_instance_ids)
+        self.require_effects_for_cut(
+            self._runtime_safety,
+            admitted,
+            safety=intent.definition.safety,
+            repository_ids=tuple(entry.repository.repository_id for entry in prepared.targets),
+        )
+        self._require_capacity_in(connection, admitted, concurrency)
+        return FleetAdmissionPlan(
+            admitted.durable_revision,
+            prepared.targets,
+            prepared.repository_admissions,
+            prepared.scope_locations,
+            prepared.scope_exclusions,
         )
 
     @staticmethod

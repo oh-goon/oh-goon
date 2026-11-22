@@ -20,6 +20,7 @@ class RunWorkerExitCode(IntEnum):
     BOOTSTRAP_FAILED = 74
     EXECUTION_FAILED = 75
     CANCELLATION_OBSERVED = 76
+    RESOURCE_SCOPE_REFUSED = 77
 
 
 class BackgroundFailure(ImmutableModel):

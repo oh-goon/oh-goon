@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import signal
 import stat
 import sys
@@ -50,6 +51,7 @@ def standard_resource_scope_command(
     *,
     query_executable: str | None = None,
     manager_environment: Mapping[str, str] | None = None,
+    target_slice: str = STANDARD_RESOURCE_SLICE,
 ) -> tuple[str, ...]:
     """Delegate ordinary whole-workload caps and cleanup to the native user manager.
 
@@ -67,14 +69,18 @@ def standard_resource_scope_command(
         raise FleetPlanInvalid(
             "Standard workload resource caps require an explicitly selected native systemd-run"
         )
-    _require_standard_scope_inheritance(query_executable, manager_environment)
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,248}\.slice", target_slice) is None:
+        raise FleetPlanInvalid("Native resource target must be one explicit systemd slice")
+    _require_standard_scope_inheritance(
+        query_executable, manager_environment, target_slice=target_slice
+    )
     command = [
         executable,
         "--user",
         "--scope",
         "--quiet",
         "--collect",
-        f"--slice={STANDARD_RESOURCE_SLICE}",
+        f"--slice={target_slice}",
     ]
     if policy.memory_bytes is not None:
         command.extend(
@@ -141,6 +147,8 @@ def _standard_cgroup_path(
 def _require_standard_scope_inheritance(
     query_executable: str | None,
     manager_environment: Mapping[str, str] | None,
+    *,
+    target_slice: str = STANDARD_RESOURCE_SLICE,
 ) -> None:
     """Refuse a native scope that abandons caller aggregate resource controls.
 
@@ -175,7 +183,7 @@ def _require_standard_scope_inheritance(
                 "--user",
                 "--no-pager",
                 "show",
-                STANDARD_RESOURCE_SLICE,
+                target_slice,
                 "--property=ControlGroup",
                 "--value",
                 env=dict(manager_environment),
@@ -189,7 +197,7 @@ def _require_standard_scope_inheritance(
         if result.returncode != 0:
             raise FleetPlanInvalid("Native resource scope target slice is unavailable")
         target = _standard_cgroup_path(root, result.stdout.strip(), mountinfo=mountinfo)
-        if target.name != STANDARD_RESOURCE_SLICE:
+        if target.name != target_slice:
             raise FleetPlanInvalid("Native resource scope target slice mapping is ambiguous")
         target_identity = _exact_cgroup_identity(target)
         with _bound_cgroup_directory(target, target_identity) as target_handle:

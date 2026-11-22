@@ -6954,6 +6954,16 @@
         "additionalProperties": false,
         "description": "Fleet execution admitted without strict executor placement.",
         "properties": {
+          "concurrency": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunConcurrencyAdmission"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "kind": {
             "const": "direct",
             "default": "direct",
@@ -7723,7 +7733,7 @@
             "type": "integer"
           },
           "schema_version": {
-            "default": 94,
+            "default": 95,
             "minimum": 1.0,
             "title": "Schema Version",
             "type": "integer"
@@ -10636,6 +10646,16 @@
             },
             "title": "Storage Maintenance",
             "type": "array"
+          },
+          "worker_resource_envelope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunResourceEnvelopeEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -11454,7 +11474,16 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Primary observed Run for single-pane review; the plural cut owns membership.",
+            "readOnly": true
+          },
+          "active_fleet_runs": {
+            "items": {
+              "$ref": "#/components/schemas/FleetRunDetail"
+            },
+            "title": "Active Fleet Runs",
+            "type": "array"
           },
           "attention": {
             "$ref": "#/components/schemas/FleetAttention",
@@ -11495,6 +11524,7 @@
         },
         "required": [
           "provenance",
+          "active_fleet_run",
           "summary",
           "attention",
           "review_preparation"
@@ -19529,6 +19559,151 @@
           }
         },
         "title": "NativeAgentProfile",
+        "type": "object"
+      },
+      "NativeRuntimeSliceEvidence": {
+        "additionalProperties": false,
+        "description": "Actual native aggregate observations, not a caller-issued resource grant.",
+        "properties": {
+          "cgroup_device": {
+            "minimum": 1.0,
+            "title": "Cgroup Device",
+            "type": "integer"
+          },
+          "cgroup_inode": {
+            "minimum": 1.0,
+            "title": "Cgroup Inode",
+            "type": "integer"
+          },
+          "controller_birth": {
+            "$ref": "#/components/schemas/ProcessBirthIdentity"
+          },
+          "controller_cgroup_device": {
+            "minimum": 1.0,
+            "title": "Controller Cgroup Device",
+            "type": "integer"
+          },
+          "controller_cgroup_inode": {
+            "minimum": 1.0,
+            "title": "Controller Cgroup Inode",
+            "type": "integer"
+          },
+          "cpu_max": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Cpu Max",
+            "type": "string"
+          },
+          "invocation_id": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Invocation Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "systemd_user_slice",
+            "default": "systemd_user_slice",
+            "title": "Kind",
+            "type": "string"
+          },
+          "manager_birth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProcessBirthIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "manager_executable": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager Executable"
+          },
+          "manager_executable_artifact_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager Executable Artifact Sha256"
+          },
+          "manager_uid": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager Uid"
+          },
+          "manager_version": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager Version"
+          },
+          "memory_max_bytes": {
+            "minimum": 67108864.0,
+            "title": "Memory Max Bytes",
+            "type": "integer"
+          },
+          "memory_swap_max_bytes": {
+            "const": 0,
+            "default": 0,
+            "title": "Memory Swap Max Bytes",
+            "type": "integer"
+          },
+          "pids_max": {
+            "minimum": 16.0,
+            "title": "Pids Max",
+            "type": "integer"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/CicdResourcePolicy"
+          },
+          "unit_name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,248}\\.slice$",
+            "title": "Unit Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unit_name",
+          "invocation_id",
+          "controller_birth",
+          "controller_cgroup_device",
+          "controller_cgroup_inode",
+          "cgroup_device",
+          "cgroup_inode",
+          "resources",
+          "cpu_max",
+          "memory_max_bytes",
+          "pids_max"
+        ],
+        "title": "NativeRuntimeSliceEvidence",
         "type": "object"
       },
       "NativeServiceExecutionEvidence": {
@@ -29952,6 +30127,90 @@
         "title": "RunCompletedEvent",
         "type": "object"
       },
+      "RunConcurrencyAdmission": {
+        "additionalProperties": false,
+        "description": "Shared native budget plus one original Run's distinct scope intent.",
+        "properties": {
+          "aggregate": {
+            "$ref": "#/components/schemas/NativeRuntimeSliceEvidence"
+          },
+          "budget_identity": {
+            "readOnly": true,
+            "title": "Budget Identity",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "identity": {
+            "readOnly": true,
+            "title": "Identity",
+            "type": "string"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/RunConcurrencyPolicy"
+          },
+          "worker_scope_identity": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Worker Scope Identity",
+            "type": "string"
+          },
+          "worker_unit_name": {
+            "maxLength": 255,
+            "pattern": "^oh-goon-run-[A-Za-z0-9_.-]+\\.scope$",
+            "title": "Worker Unit Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy",
+          "aggregate",
+          "fleet_run_id",
+          "worker_unit_name",
+          "worker_scope_identity",
+          "budget_identity",
+          "identity"
+        ],
+        "title": "RunConcurrencyAdmission",
+        "type": "object"
+      },
+      "RunConcurrencyPolicy": {
+        "additionalProperties": false,
+        "description": "Explicit two-worker ceilings under one operator-selected native slice.",
+        "properties": {
+          "aggregate_resources": {
+            "$ref": "#/components/schemas/CicdResourcePolicy"
+          },
+          "aggregate_slice": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,248}\\.slice$",
+            "title": "Aggregate Slice",
+            "type": "string"
+          },
+          "controller_reserve": {
+            "$ref": "#/components/schemas/CicdResourcePolicy"
+          },
+          "max_active_runs": {
+            "const": 2,
+            "default": 2,
+            "title": "Max Active Runs",
+            "type": "integer"
+          },
+          "worker_resources": {
+            "$ref": "#/components/schemas/CicdResourcePolicy"
+          }
+        },
+        "required": [
+          "aggregate_slice",
+          "aggregate_resources",
+          "worker_resources",
+          "controller_reserve"
+        ],
+        "title": "RunConcurrencyPolicy",
+        "type": "object"
+      },
       "RunFailedEvent": {
         "additionalProperties": false,
         "properties": {
@@ -31141,6 +31400,19 @@
             "title": "Cgroup Inode",
             "type": "integer"
           },
+          "control_group": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Control Group"
+          },
           "cpu_max": {
             "maxLength": 128,
             "minLength": 1,
@@ -31233,6 +31505,15 @@
           },
           "resources": {
             "$ref": "#/components/schemas/CicdResourcePolicy"
+          },
+          "subject": {
+            "default": "cli",
+            "enum": [
+              "cli",
+              "worker"
+            ],
+            "title": "Subject",
+            "type": "string"
           },
           "unit_name": {
             "maxLength": 255,
@@ -31329,6 +31610,33 @@
               }
             ],
             "title": "Memory Peak Bytes"
+          },
+          "native_witness": {
+            "anyOf": [
+              {
+                "enum": [
+                  "original_kernel_scope",
+                  "original_systemd_journal"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Witness"
+          },
+          "native_witness_identity": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Witness Identity"
           },
           "oom_kill_count": {
             "anyOf": [
@@ -31428,6 +31736,16 @@
             "minimum": 1.0,
             "title": "Sequence",
             "type": "integer"
+          },
+          "worker_resource_envelope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunResourceEnvelopeEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

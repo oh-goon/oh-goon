@@ -8,33 +8,55 @@ CREATE TABLE IF NOT EXISTS locations (
 );
 
 CREATE TABLE IF NOT EXISTS execution_lease (
-    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    -- Historical column name; this is the bounded reservation slot, not authority.
+    singleton INTEGER PRIMARY KEY CHECK (singleton IN (1, 2)),
     lease_token TEXT NOT NULL UNIQUE CHECK (length(lease_token) > 0),
     owner_session_id TEXT NOT NULL,
     owner_pid INTEGER NOT NULL,
     owner_identity TEXT,
     custody_phase TEXT NOT NULL CHECK (
-        custody_phase IN ('DIRECT_OWNED', 'ADMITTED_UNCLAIMED', 'WORKER_OWNED', 'RECOVERY_OWNED')
+        custody_phase IN ('DIRECT_OWNED', 'ADMITTED_UNCLAIMED', 'WORKER_OWNED', 'RECOVERY_OWNED', 'RESOURCE_RESERVED')
     ),
     kind TEXT NOT NULL CHECK (kind IN ('DIRECT', 'FLEET')),
     fleet_run_id TEXT,
     acquired_at TEXT NOT NULL,
     cancel_requested_at TEXT,
+    concurrency_json TEXT CHECK (concurrency_json IS NULL OR json_valid(concurrency_json)),
+    deferred_worker_resource_scope_json TEXT CHECK (
+        deferred_worker_resource_scope_json IS NULL OR json_valid(deferred_worker_resource_scope_json)
+    ),
+    worker_resource_envelope_json TEXT CHECK (
+        worker_resource_envelope_json IS NULL OR json_valid(worker_resource_envelope_json)
+    ),
+    controller_session_id TEXT,
+    controller_pid INTEGER,
+    controller_identity TEXT,
     CHECK (
         (kind = 'DIRECT' AND fleet_run_id IS NULL AND custody_phase = 'DIRECT_OWNED')
         OR (kind = 'FLEET' AND fleet_run_id IS NOT NULL AND length(fleet_run_id) > 0
-            AND custody_phase IN ('ADMITTED_UNCLAIMED', 'WORKER_OWNED', 'RECOVERY_OWNED'))
+            AND custody_phase IN ('ADMITTED_UNCLAIMED', 'WORKER_OWNED', 'RECOVERY_OWNED', 'RESOURCE_RESERVED'))
     ),
     CHECK (owner_pid > 0 AND length(owner_session_id) > 0),
     CHECK (owner_identity IS NULL OR length(owner_identity) > 0),
     CHECK (
-        custody_phase NOT IN ('WORKER_OWNED', 'RECOVERY_OWNED')
+        custody_phase NOT IN ('WORKER_OWNED', 'RECOVERY_OWNED', 'RESOURCE_RESERVED')
         OR (owner_identity IS NOT NULL AND length(owner_identity) > 0)
     ),
     CHECK (
         (custody_phase = 'RECOVERY_OWNED') = (substr(owner_session_id, 1, 9) = 'recovery:')
-    )
+    ),
+    CHECK (
+        concurrency_json IS NULL
+        OR (kind='FLEET' AND controller_session_id IS NOT NULL
+            AND length(controller_session_id)>0 AND controller_pid IS NOT NULL AND controller_pid>0
+            AND controller_identity IS NOT NULL AND length(controller_identity)>0)
+    ),
+    CHECK (custody_phase <> 'RESOURCE_RESERVED' OR concurrency_json IS NOT NULL),
+    CHECK (worker_resource_envelope_json IS NULL OR concurrency_json IS NOT NULL),
+    CHECK ((concurrency_json IS NULL) = (deferred_worker_resource_scope_json IS NULL))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS execution_lease_fleet_run
+    ON execution_lease(fleet_run_id) WHERE kind='FLEET';
 
 
 CREATE TABLE IF NOT EXISTS executor_placement_queue (

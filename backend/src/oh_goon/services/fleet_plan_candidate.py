@@ -6,10 +6,10 @@ import math
 import os
 import stat
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from oh_goon.core.errors import FleetPlanInvalid, StateConflict, WorkspaceFenceUnproven
 from oh_goon.core.models.agent_providers import ResolvedNativeAgent
@@ -29,8 +29,11 @@ from oh_goon.core.models.workspace import WorkspaceRef
 from oh_goon.core.models.workspace_lease import WorkspaceLease
 from oh_goon.core.product_identity import repository_subject_instance_id, stable_id
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
-from oh_goon.engine.command import CommandResult, run_command
-from oh_goon.engine.git import GitService
+from oh_goon.engine.git import (
+    GitService,
+    WorkspaceMetadataGitCommandRunner,
+    require_workspace_metadata_git_environment,
+)
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.fleet_plan_native_steps import require_native_agent_compatibility
 from oh_goon.integrations.fleet_plan_process_isolation import NativeProfileCommandRunner
@@ -45,21 +48,11 @@ from oh_goon.services.agent_authoring_sources import require_native_agent_source
 from oh_goon.services.repositories import RepositoryService
 
 
-def _controlled_git_command(
-    *argv: str, _environment: dict[str, str], **options: Any
-) -> CommandResult:
-    # This is trusted lifecycle metadata, not an agent command or a fallback
-    # execution boundary. Host/repository fsmonitor and hooks grant no effects.
-    options.pop("env", None)
-    return run_command(*argv, env=_environment, **options)
-
-
 def workspace_control_git(git: GitService | None = None) -> GitService:
     selected = git or GitService()
     runner = selected.command_runner
-    if isinstance(runner, partial) and runner.func is _controlled_git_command:
-        if selected.observation_runner is not runner:
-            raise FleetPlanInvalid("Candidate Git observation policy differs from control policy")
+    if type(runner) is WorkspaceMetadataGitCommandRunner:
+        capture_workspace_control_git_environment(selected)
         return selected
     reader = selected.observation_runner
     if (runner is not None and not isinstance(runner, NativeProfileCommandRunner)) or (
@@ -72,10 +65,43 @@ def workspace_control_git(git: GitService | None = None) -> GitService:
         raise FleetPlanInvalid(
             "Candidate metadata does not support a custom Git execution provider"
         )
-    command = partial(_controlled_git_command, _environment=_worktree_git_environment())
-    return GitService(
+    return restore_workspace_control_git(
         executable=selected.executable,
         default_timeout_seconds=selected.default_timeout_seconds,
+        environment=_worktree_git_environment(),
+    )
+
+
+def _require_workspace_control_git_environment(environment: object) -> dict[str, str]:
+    try:
+        return require_workspace_metadata_git_environment(environment)
+    except ValueError:
+        raise FleetPlanInvalid(
+            "Candidate Git metadata environment differs from its original policy"
+        ) from None
+
+
+def capture_workspace_control_git_environment(git: GitService) -> dict[str, str] | None:
+    """Capture only the exact canonical metadata owner, without another discovery."""
+    runner = git.command_runner
+    if type(runner) is not WorkspaceMetadataGitCommandRunner:
+        return None
+    if git.observation_runner is not runner or git.metadata_only is not True:
+        raise FleetPlanInvalid("Candidate Git observation policy differs from control policy")
+    assert isinstance(runner, WorkspaceMetadataGitCommandRunner)
+    return _require_workspace_control_git_environment(runner.environment)
+
+
+def restore_workspace_control_git(
+    *, executable: str, default_timeout_seconds: float, environment: Mapping[str, str]
+) -> GitService:
+    """Restore the transported owner without reading ambient PATH/configuration."""
+    command = WorkspaceMetadataGitCommandRunner(
+        tuple(_require_workspace_control_git_environment(environment).items())
+    )
+    return GitService(
+        executable=executable,
+        default_timeout_seconds=default_timeout_seconds,
         command_runner=command,
         observation_runner=command,
         metadata_only=True,

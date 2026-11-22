@@ -26,11 +26,10 @@ def snapshot_payload(
             repo.model_dump(mode="json", exclude_computed_fields=True)
             for repo in context.repositories
         ],
-        "active_fleet_run": (
-            context.active_fleet_run.model_dump(mode="json", exclude_computed_fields=True)
-            if context.active_fleet_run
-            else None
-        ),
+        "active_fleet_runs": [
+            detail.model_dump(mode="json", exclude_computed_fields=True)
+            for detail in context.active_fleet_runs
+        ],
         "latest_fleet_runs": [
             detail.model_dump(mode="json", exclude_computed_fields=True)
             for detail in context.latest_fleet_runs

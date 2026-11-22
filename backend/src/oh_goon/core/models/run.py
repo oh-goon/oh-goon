@@ -31,7 +31,10 @@ from oh_goon.core.models.run_launch import (
     ApplicationLaunchReceipt,
     UnmanagedApplicationLaunchReceipt,
 )
-from oh_goon.core.models.run_resources import RunResourceEnvelopeObservation
+from oh_goon.core.models.run_resources import (
+    RunResourceEnvelopeEvidence,
+    RunResourceEnvelopeObservation,
+)
 from oh_goon.core.models.scheduling import SchedulingEnvelope
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceFact
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
@@ -228,6 +231,9 @@ class FleetRunDetail(ImmutableModel):
     run: FleetRunState
     execution: FleetExecutionAdmission
     resource_observation: RunResourceEnvelopeObservation | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    worker_resource_envelope: RunResourceEnvelopeEvidence | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     repository_admissions: tuple[PlanRepositoryAdmissionEvidence, ...]

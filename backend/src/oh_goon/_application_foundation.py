@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
+    from oh_goon.integrations.run_resource_envelope import (
+        ResolvedNativeRuntimeBudget,
+        ResolvedRunResourceScope,
+    )
     from oh_goon.native_issuer.enforcer_lace_execution_environment_issuer import (
         InventorySnapshotIdentity,
     )
@@ -15,7 +18,7 @@ from oh_goon.core.capability_model import CapabilityRunnerKind
 from oh_goon.core.capability_registry import capability_definitions
 from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
 from oh_goon.core.models.diagnostic import DiagnosticEvent
-from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
+from oh_goon.core.models.run_resources import RunConcurrencyPolicy, RunResourceEnvelopeEvidence
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.ports.candidate_execution import CandidateExecutionContext
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest, CapabilityRunner
@@ -100,6 +103,7 @@ class RuntimeFoundation:
     startup_purpose: RuntimeStartupPurpose = "application"
     run_resource_scope: ResolvedRunResourceScope | None = None
     run_resource_envelope: RunResourceEnvelopeEvidence | None = None
+    run_capacity: ResolvedNativeRuntimeBudget | None = None
     executor_configuration: ExecutorPoolConfiguration | None = None
     executor_inventory_identity: InventorySnapshotIdentity | None = None
 
@@ -264,6 +268,7 @@ def build_runtime_foundation(
     startup_purpose: RuntimeStartupPurpose = "application",
     run_resource_scope: ResolvedRunResourceScope | None = None,
     run_resource_envelope: RunResourceEnvelopeEvidence | None = None,
+    run_concurrency: RunConcurrencyPolicy | None = None,
 ) -> RuntimeFoundation:
     """Compose the selected local or strict Fleet execution profile.
 
@@ -296,6 +301,36 @@ def build_runtime_foundation(
     # Repository evidence has one required producer in every execution profile.
     # Reject an unavailable runtime before opening state or recovering effects.
     require_loaded_hashmarks_runtime()
+    run_capacity = None
+    if run_concurrency is not None:
+        from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+        from oh_goon.integrations.run_resource_envelope import capture_native_runtime_budget
+        from oh_goon.services.fleet_plan_candidate import (
+            capture_workspace_control_git_environment,
+            workspace_control_git,
+        )
+
+        if (
+            not standard_local
+            or startup_purpose == "observation"
+            or terminal is not None
+            or run_resource_scope is not None
+            or type(standard_process_isolation) is not BubblewrapProcessIsolation
+        ):
+            raise TrustProtocolError(
+                "Two-Run capacity requires headless ordinary candidate execution "
+                "with the selected Bubblewrap backend and native aggregate slice"
+            )
+        if git_service is None:
+            git_service = workspace_control_git()
+        elif capture_workspace_control_git_environment(git_service) is None:
+            raise TrustProtocolError(
+                "Two-Run capacity requires the canonical metadata Git owner; "
+                "one repository's native Git binding cannot be shared by independent Runs"
+            )
+        # The native owner resolves and checks the complete selected budget
+        # before state creation, recovery, source capture or worker admission.
+        run_capacity = capture_native_runtime_budget(run_concurrency)
     local = _build_local_state_foundation(startup_purpose=startup_purpose)
     database = local.database
     state_paths = ApplicationStatePathLayout.from_database(database.path)
@@ -346,7 +381,10 @@ def build_runtime_foundation(
             )
         )
     )
-    supervisor = RunExecutionSupervisor(diagnostics=diagnostics)
+    supervisor = RunExecutionSupervisor(
+        diagnostics=diagnostics,
+        max_active_runs=run_concurrency.max_active_runs if run_concurrency is not None else 1,
+    )
     inventory_identity: InventorySnapshotIdentity | None = None
     if fleet_provisioner is not None:
         from oh_goon.native_issuer.enforcer_lace_execution_environment_issuer import (
@@ -427,6 +465,7 @@ def build_runtime_foundation(
         startup_purpose=startup_purpose,
         run_resource_scope=run_resource_scope,
         run_resource_envelope=run_resource_envelope,
+        run_capacity=run_capacity,
         executor_configuration=configuration,
         executor_inventory_identity=inventory_identity,
     )

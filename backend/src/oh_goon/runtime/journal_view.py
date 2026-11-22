@@ -212,6 +212,15 @@ class JournalReadView:
         detail = self._index.run_details_by_id[self._index.active_run_ids[0]]
         return detail.run.model_copy(deep=True)
 
+    def active_runs(self) -> tuple[FleetRunState, ...]:
+        return tuple(
+            self._index.run_details_by_id[run_id].run.model_copy(deep=True)
+            for run_id in self._index.active_run_ids
+        )
+
+    def active_run_details(self) -> tuple[FleetRunDetail, ...]:
+        return tuple(self.required_run_detail(run_id) for run_id in self._index.active_run_ids)
+
     def active_run_detail(self) -> FleetRunDetail | None:
         state = self.active_run()
         return self.run_detail(state.fleet_run_id) if state is not None else None

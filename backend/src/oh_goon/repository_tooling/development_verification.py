@@ -20,7 +20,11 @@ from pydantic import ConfigDict, Field
 
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.engine.command import CommandCancelledError, CommandTimeoutExpired, run_command
-from oh_goon.integrations.exact_file_write import publish_text_file
+from oh_goon.integrations.exact_file_write import (
+    exact_file_write_lock,
+    prepared_text_file,
+    replace_prepared_file,
+)
 from oh_goon.integrations.hashmarks import (
     nominate_changed_verification,
     project_dependency_verification,
@@ -1670,7 +1674,23 @@ def _write_transport(path: Path, payload: Mapping[str, Any], root: Path) -> None
     metadata = target.parent.stat(follow_symlinks=False)
     if metadata.st_mode & 0o077:
         raise ValueError("Verification transport parent must be private")
-    publish_text_file(target, json.dumps(payload, sort_keys=True) + "\n")
+    with exact_file_write_lock(target), prepared_text_file(target, "") as temporary:
+        with temporary.open("wb") as stream:
+            transported_bytes = 0
+            for chunk in json.JSONEncoder(sort_keys=True, separators=(",", ":")).iterencode(
+                payload
+            ):
+                encoded = chunk.encode("utf-8")
+                transported_bytes += len(encoded)
+                if transported_bytes >= 8 * 1024 * 1024:
+                    # The final newline participates in the existing reader's
+                    # byte limit. Never publish a report it cannot reopen.
+                    raise ValueError("Verification evidence exceeds its transport bound")
+                stream.write(encoded)
+            stream.write(b"\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        replace_prepared_file(temporary, target)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -9,7 +9,7 @@ from oh_goon.runtime.lifecycle import RuntimeDrainPolicy, RuntimeLifecycleState
 
 if TYPE_CHECKING:
     from oh_goon._application_foundation import RuntimeStartupPurpose
-    from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
+    from oh_goon.core.models.run_resources import RunConcurrencyPolicy, RunResourceEnvelopeEvidence
     from oh_goon.engine.command import CommandTerminal
     from oh_goon.engine.git import GitService
     from oh_goon.integrations.fleet_plan_process_isolation import ProcessIsolationBackend
@@ -94,6 +94,7 @@ class ApplicationRuntime:
         startup_purpose: RuntimeStartupPurpose = "application",
         run_resource_scope: ResolvedRunResourceScope | None = None,
         run_resource_envelope: RunResourceEnvelopeEvidence | None = None,
+        run_concurrency: RunConcurrencyPolicy | None = None,
     ) -> ApplicationRuntime:
         # Concrete dependencies remain statically visible in the private application wiring
         # modules, but are materialized only when a process runtime is actually built.
@@ -109,6 +110,7 @@ class ApplicationRuntime:
                 startup_purpose=startup_purpose,
                 run_resource_scope=run_resource_scope,
                 run_resource_envelope=run_resource_envelope,
+                run_concurrency=run_concurrency,
                 standard_local=standard_local_profile(
                     standard_local, deployment_selected=fleet_provisioner is not None
                 ),

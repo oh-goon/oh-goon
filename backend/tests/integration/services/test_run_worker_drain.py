@@ -310,6 +310,24 @@ def test_admission_failure_or_ack_loss_converges_the_original_submission_slot(
     assert fixture.foundation.supervisor.wait_until_idle(timeout=0)
 
 
+def test_shutdown_ignores_only_a_proven_rolled_back_pending_registration(
+    fixture: _RunFixture,
+) -> None:
+    run_id = "rolled-back-pending-registration"
+    admission = None
+    with pytest.raises(RuntimeError, match="original writer rolled back"):
+        with fixture.foundation.database.transaction(write=True):
+            admission = fixture.foundation.supervisor.register_admission(run_id)
+            fixture.runtime.runs.quiesce()
+            raise RuntimeError("original writer rolled back")
+    assert admission is not None
+    fixture.foundation.supervisor.abandon_admission(admission)
+    assert fixture.foundation.state.journal.read_view().run_detail(run_id) is None
+    assert fixture.foundation.supervisor.wait_until_idle(timeout=0)
+    fixture.runtime.shutdown(wait_for_runs=False)
+    assert _lifecycle_state(fixture) is RuntimeLifecycleState.CLOSED
+
+
 def _stopped_claimed_worker(fixture: _RunFixture) -> int:
     foundation = fixture.foundation
     run_id = "stopped-worker"

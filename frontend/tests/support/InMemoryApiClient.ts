@@ -47,6 +47,8 @@ type QueuedFleetRead =
   | { readonly outcome: "fixture-error"; readonly error: Error; readonly gate: FleetReadGate | null };
 
 const EMPTY_FLEET: FleetSnapshot = {
+  active_fleet_run: null,
+  active_fleet_runs: [],
   attention: { action_required: 0, groups: [], healthy: 0 },
   provenance: {
     generated_at: "2026-08-10T12:00:00Z",

@@ -433,8 +433,8 @@ def test_packet_b_reads_two_original_runs_with_exact_scope_and_no_mutations(
         assert refused["_cli"]["exit_kind"] == "EVIDENCE_UNAVAILABLE"
         assert refused["fleet_run_id"] is None
 
-    # Exercise the actual copyable readback examples, without executing other
-    # source/application commands or interpreting their shell text.
+    # Exercise the actual copyable Run examples without interpreting shell text.
+    # Cancellation of this completed Run must refuse before sending a request.
     in_fence = False
     documented: list[list[str]] = []
     for line in (ROOT / "docs/QUICKSTART.md").read_text(encoding="utf-8").splitlines():
@@ -450,7 +450,7 @@ def test_packet_b_reads_two_original_runs_with_exact_scope_and_no_mutations(
     }
     for command in documented:
         arguments = [substitutions.get(token, token) for token in command[1:]]
-        expected_exit = 3 if arguments[1] == "logs" else 0
+        expected_exit = {"logs": 3, "cancel": 2}.get(arguments[1], 0)
         output = _cli(environment, tmp_path, *arguments, expected=expected_exit)
         if "--json" in arguments:
             report = json.loads(output)
@@ -464,6 +464,12 @@ def test_packet_b_reads_two_original_runs_with_exact_scope_and_no_mutations(
             if arguments[1] == "logs":
                 assert report["state"] == "UNAVAILABLE"
                 assert report["_cli"]["exit_kind"] == "EVIDENCE_UNAVAILABLE"
+            elif arguments[1] == "cancel":
+                assert report["code"] == "INVALID_RUN_TRANSITION"
+                assert report["execution_status"] == receipts[0]["status"]
+                assert report["execution_terminal"] is True
+                assert report["cancellation_requested"] is False
+                assert report["request_attempted"] is False
         else:
             assert receipts[0]["fleet_run_id"] in output
             if arguments[1] == "logs":
