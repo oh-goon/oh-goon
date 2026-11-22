@@ -835,7 +835,18 @@ def test_ai_explicit_ephemeral_reaches_original_run_as_headless_pi(
 @pytest.mark.parametrize(
     ("agent", "options", "code", "diagnostic"),
     [
-        ("pi", ["--session", "new"], "PI_SESSION_UNAVAILABLE", "session storage"),
+        (
+            "pi",
+            ["--session", "new", "--candidate"],
+            "PI_SESSION_SELECTION_INVALID",
+            "direct repository",
+        ),
+        (
+            "pi",
+            ["--session", "new", "--handoff-from", "prior-run"],
+            "PI_SESSION_UNAVAILABLE",
+            "fresh task",
+        ),
         ("pi", ["--session", "run:prior-run"], "PI_SESSION_UNAVAILABLE", "exact session reopening"),
         (
             "pi",
@@ -877,6 +888,16 @@ def test_ai_rejects_unavailable_or_conflicting_session_before_task_and_runtime(
     assert report["code"] == code
     assert diagnostic in report["safe_next_action"]
     assert "PRIVATE" not in str(report)
+    native_cli.build.assert_not_called()
+
+
+def test_ai_new_refuses_an_unqualified_native_profile_before_runtime(
+    native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main([*native_cli.argv, "--session", "new", "--json"]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["code"] == "PI_SESSION_UNAVAILABLE"
+    assert "dedicated managed Pi RPC" in report["safe_next_action"]
     native_cli.build.assert_not_called()
 
 

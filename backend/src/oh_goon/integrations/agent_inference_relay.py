@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import os
 import select
 import socket
@@ -21,6 +22,7 @@ from typing import Any
 
 from oh_goon.core.models.agent_providers import AgentProviderError
 from oh_goon.core.models.fleet_plan_step_primitives import PLAN_CONTRACT_RETURN_CODE
+from oh_goon.core.models.pi_session_storage import PI_SESSION_OBSERVATION_RECORD
 from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES, CommandTerminal, run_command
 from oh_goon.integrations.agent_pi_rpc import PiRpcControl
 
@@ -187,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--input-file", type=Path)
     parser.add_argument("--pi-rpc", action="store_true")
+    parser.add_argument("--pi-session-new", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
     command = options.command[1:] if options.command[:1] == ["--"] else options.command
@@ -194,6 +197,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("supply a native command and exactly one terminal/input mode")
     if options.pi_rpc and (options.interactive or options.input_file is None):
         parser.error("Pi RPC requires noninteractive frozen prompt input")
+    if options.pi_session_new and not options.pi_rpc:
+        parser.error("Private Pi session observations require Pi RPC")
     data = b""
     if options.input_file is not None:
         with options.input_file.open("rb") as stream:
@@ -201,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         if len(data) > MAX_COMMAND_INPUT_BYTES:
             parser.error("native input exceeds the command owner's byte bound")
     try:
-        rpc = PiRpcControl(data) if options.pi_rpc else None
+        rpc = PiRpcControl(data, persistent=options.pi_session_new) if options.pi_rpc else None
     except AgentProviderError as error:
         print(str(error), file=sys.stderr)
         return PLAN_CONTRACT_RETURN_CODE
@@ -242,10 +247,21 @@ def main(argv: list[str] | None = None) -> int:
             )
     if rpc is not None and result.returncode == 0:
         try:
-            rpc.finish()
+            observation = rpc.finish()
         except AgentProviderError as error:
             print(str(error), file=sys.stderr)
             return PLAN_CONTRACT_RETURN_CODE
+        if observation is not None:
+            if result.supervisor.final_process_group_quiescent is not True:
+                return PLAN_CONTRACT_RETURN_CODE
+            _write_all(
+                1,
+                json.dumps(
+                    {"type": PI_SESSION_OBSERVATION_RECORD, "data": observation.model_dump()},
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                + b"\n",
+            )
     return result.returncode if result.returncode >= 0 else 128 - result.returncode
 
 

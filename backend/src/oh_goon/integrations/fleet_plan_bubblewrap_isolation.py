@@ -988,6 +988,7 @@ class BubblewrapProcessIsolation:
                         process_observer=native_observer,
                         runtime_supervision=runtime_supervision,
                         terminal=request.terminal,
+                        require_process_group_quiescence=session is not None,
                         input_data=request.input_data,
                         input_source=request.input_source,
                         pass_fds=(

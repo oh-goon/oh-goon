@@ -277,6 +277,8 @@ def resolve_native_agent(
         raise AgentProviderError("Selected native agent is not allowed by the execution profile")
     if profile.pi_rpc and name != "pi":
         raise AgentProviderError("Pi RPC requires Pi execution")
+    definition = config.native_agents.get(name, NativeAgentDefinition())
+    require_pi_session_execution(session, agent=name, profile=profile, definition=definition)
     try:
         selected_workspace = workspace.resolve(strict=True)
         if not selected_workspace.is_dir():
@@ -294,7 +296,6 @@ def resolve_native_agent(
         raise AgentProviderError(
             "Selected native workspace is outside the profile's workspace roots"
         )
-    definition = config.native_agents.get(name, NativeAgentDefinition())
     if name in {"codex", "opencode"} and definition.configuration_directory is not None:
         raise AgentProviderError(
             "Native authentication and configuration remain service-owned; "

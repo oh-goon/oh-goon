@@ -213,6 +213,20 @@ def validate_repository_attempt_operation_id(
         )
 
 
+def pi_session_storage_id(
+    fleet_run_id: str, repository_id: str, step_id: str, attempt_number: int
+) -> str:
+    return stable_id(
+        "pi-session",
+        {
+            "run": fleet_run_id,
+            "repository": repository_id,
+            "step": step_id,
+            "attempt": attempt_number,
+        },
+    )
+
+
 def stable_id(prefix: str, payload: Any) -> str:
     """Hash canonical JSON-like data without coercing identity representation."""
     _require_stable_json_value(payload, set())

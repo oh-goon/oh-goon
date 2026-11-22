@@ -13,6 +13,7 @@ from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.models.target import OperationTarget
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
+from oh_goon.core.ports.pi_session_writer import PiSessionWriter
 from oh_goon.core.vocabulary import EffectBoundaryKind
 
 
@@ -30,6 +31,7 @@ class CapabilityExecutionRequest:
     admitted_run: FleetRunDetail | None = None
     require_execution_current: Callable[[], None] | None = None
     require_settlement_current: Callable[[], None] | None = None
+    pi_session_writer: PiSessionWriter | None = None
 
     def __post_init__(self) -> None:
         if self.attempt.capability != self.definition.durable_snapshot():
@@ -60,6 +62,14 @@ class CapabilityExecutionRequest:
                 raise ValueError("Fleet worker Run identity must match the admitted Run")
             if self.attempt.target != self.admitted_run.run.target:
                 raise ValueError("Fleet worker Plan target must match the admitted Run")
+        if self.pi_session_writer is not None and (
+            self.definition.runner_kind is not CapabilityRunnerKind.FLEET_PLAN
+            or self.attempt.fleet_run_id is None
+            or self.repository_admission is None
+            or self.isolation_backend is not None
+            or self.admitted_run is not None
+        ):
+            raise ValueError("Pi writer custody requires a direct admitted Fleet repository")
 
 
 class PreparedRunnerExecution(Protocol):

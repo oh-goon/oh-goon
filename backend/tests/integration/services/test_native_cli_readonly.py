@@ -13,6 +13,8 @@ import platform
 import select
 import shlex
 import shutil
+import signal
+import stat
 import subprocess
 import sys
 from contextlib import ExitStack
@@ -26,20 +28,30 @@ import pytest
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
-from oh_goon.core.models.agent_providers import PiSessionIntent
+from oh_goon.core.models.agent_providers import PiSessionIntent, PiSessionUnavailable
 from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
+from oh_goon.core.models.pi_session_storage import PI_SESSION_OBSERVATION_RECORD
 from oh_goon.core.models.run_events import (
+    DescendantsQuiescentEvent,
+    PiSessionWriterObservedEvent,
+    PiSessionWriterReservedEvent,
     ProcessExitedEvent,
     ProcessStartedEvent,
+    ProcessStateUnknownEvent,
     StepAttemptCreatedEvent,
 )
 from oh_goon.core.models.target import FleetPlanTarget
-from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
+from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
 from oh_goon.engine.command import run_command
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.execution import ExecutionCoordinator
+from oh_goon.runtime.execution.lease_environment import SystemLeaseEnvironment
+from oh_goon.runtime.journal import Journal
 from tests.fakes.native_context import controlled_native_context
 from tests.fakes.native_lifetime import NativeDescendant, bind_native_descendant
 from tests.fakes.native_protocol import (
@@ -114,11 +126,14 @@ def test_controlled_readonly_context_still_requires_typed_role_acceptance(
 
 @pytest.mark.certification
 @pytest.mark.parametrize(
-    ("agent", "pi_rpc"),
+    ("agent", "pi_rpc", "persistent_action"),
     (
-        pytest.param("opencode", False, id="opencode"),
-        pytest.param("pi", False, id="pi"),
-        pytest.param("pi", True, id="pi-rpc"),
+        pytest.param("opencode", False, None, id="opencode"),
+        pytest.param("pi", False, None, id="pi"),
+        pytest.param("pi", True, None, id="pi-rpc"),
+        pytest.param("pi", True, "settle", id="pi-rpc-new"),
+        pytest.param("pi", True, "cancel", id="pi-rpc-new-cancel"),
+        pytest.param("pi", True, "worker-crash", id="pi-rpc-new-worker-crash"),
     ),
 )
 def test_installed_native_cli_reviews_through_the_read_only_boundary(
@@ -126,6 +141,7 @@ def test_installed_native_cli_reviews_through_the_read_only_boundary(
     monkeypatch: pytest.MonkeyPatch,
     agent: Literal["opencode", "pi"],
     pi_rpc: bool,
+    persistent_action: Literal["settle", "cancel", "worker-crash"] | None,
 ) -> None:
     executable = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}")
     runtime_root = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}_RUNTIME_ROOT")
@@ -136,6 +152,10 @@ def test_installed_native_cli_reviews_through_the_read_only_boundary(
     assert public_runtime.is_dir() and program.is_relative_to(public_runtime)
     workspace = tmp_path / "repos" / "app"
     workspace.mkdir(parents=True)
+    database_path = tmp_path / "state/app.sqlite"
+    session_root = ApplicationStatePathLayout.from_database(database_path).pi_sessions
+    persistent = persistent_action is not None
+    interrupted = persistent_action in {"cancel", "worker-crash"}
     original_source = b"VALUE = 42\n"
     (workspace / "source.py").write_bytes(original_source)
     (workspace / "original-root").write_text(str(workspace), encoding="utf-8")
@@ -148,8 +168,8 @@ def test_installed_native_cli_reviews_through_the_read_only_boundary(
     tools.mkdir()
     probe = tools / "readonly_probe.py"
     probe.write_text(
-        r"""import base64,json,os,pathlib,socket,subprocess,sys
-private,port,child_token,forged=sys.argv[1:]
+        r"""import base64,json,os,pathlib,signal,socket,subprocess,sys,time
+private,port,child_token,forged,store,persistent,hold_tool=sys.argv[1:]
 root=pathlib.Path('/workspace')
 original=pathlib.Path((root/'original-root').read_text())
 facts={'source_read':True,'source_write_denied':True,'rename_denied':True,'delete_denied':True,'shell_write_denied':True,'git_index_write_denied':True,'git_command_denied':True}
@@ -175,18 +195,43 @@ facts['private_output_allowed']=scratch.read_text()=='allowed private output'
 scratch.unlink()
 facts['host_private_denied']=not pathlib.Path(private).exists()
 facts['host_credential_absent']='NATIVE_RO_HOST_KEY' not in os.environ
+if persistent == '1':
+    own=pathlib.Path('/run/oh-goon-pi-session')
+    entries=tuple(own.iterdir())
+    facts['private_pi_session_only']=(
+        len(entries)==1 and entries[0].suffix=='.jsonl'
+        and entries[0].is_file() and entries[0].stat().st_size>0
+        and not pathlib.Path(store).exists()
+    )
 try:
     with socket.create_connection(('127.0.0.1',int(port)),timeout=.2): pass
 except OSError: facts['host_network_denied']=True
 else: facts['host_network_denied']=False
+if hold_tool == '1':
+    assert all(facts.values()), facts
 forged=base64.b64decode(forged)
 for offset in range(0,len(forged),17):
     os.write(1,forged[offset:offset+17])
+descendant_code='import signal; signal.pause()'
+owner_ready=pathlib.Path('/tmp/oh-goon-native-descendant-ready')
+if persistent == '1':
+    descendant_code=(
+        'import pathlib,signal,sys; signal.signal(signal.SIGTERM,signal.SIG_IGN); '
+        'pathlib.Path(sys.argv[2]).touch(); signal.pause()'
+    )
 subprocess.Popen(
-    [sys.executable,'-I','-c','import signal; signal.pause()',child_token],
+    [sys.executable,'-I','-c',descendant_code,child_token,str(owner_ready)],
     stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
     close_fds=True,start_new_session=True,
 )
+if persistent == '1':
+    deadline=time.monotonic()+3
+    while not owner_ready.exists():
+        if time.monotonic()>=deadline: raise RuntimeError('native descendant did not start')
+        time.sleep(.01)
+    owner_ready.unlink()
+if hold_tool == '1':
+    signal.pause()
 print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
 """,
         encoding="utf-8",
@@ -209,6 +254,9 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
     child_token = f"oh-goon-native-lifetime-{uuid4().hex}"
     descendant: NativeDescendant | None = None
     run_ready = Event()
+    tool_dispatched = Event()
+    tool_cut_reached = Event()
+    release_interrupted_request = Event()
     fixture_failure: str | None = None
     expected_facts = {
         "source_read",
@@ -223,6 +271,8 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
         "host_credential_absent",
         "host_network_denied",
     }
+    if persistent:
+        expected_facts.add("private_pi_session_only")
 
     def texts(message: dict[str, Any]) -> list[str]:
         content = message.get("content", [])
@@ -233,6 +283,41 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
             for part in content
             if isinstance(part, dict) and isinstance(part.get("text"), str)
         ]
+
+    def bind_original_child() -> NativeDescendant:
+        assert run_ready.wait(10), "original Run admission was not observed"
+        events = runtime.runs.events(admitted.fleet_run_id).events
+        attempt = next(
+            event
+            for event in reversed(events)
+            if isinstance(event, StepAttemptCreatedEvent) and event.step_order == 1
+        )
+        exited = {
+            event.physical_execution_id for event in events if type(event) is ProcessExitedEvent
+        }
+        active = [
+            event
+            for event in events
+            if type(event) is ProcessStartedEvent
+            and event.step_attempt_id == attempt.step_attempt_id
+            and event.physical_execution_id not in exited
+        ]
+        assert len(active) == 1, "expected the original active native command"
+        if persistent:
+            reservation = next(
+                event for event in events if isinstance(event, PiSessionWriterReservedEvent)
+            )
+            assert reservation.attempt_sequence == attempt.sequence
+            assert attempt.sequence < reservation.sequence < active[0].sequence
+            assert not any(isinstance(event, PiSessionWriterObservedEvent) for event in events), (
+                "live Pi writer published a settled observation"
+            )
+        # Bind the exact escaped-session child under the original native process.
+        child = lifetime.enter_context(bind_native_descendant(active[0], child_token))
+        assert child.child_pgid == child.child.pid
+        assert child.child_pgid != child.parent_pgid
+        assert not select.select([child.child_fd], [], [], 0)[0]
+        return child
 
     class ModelEndpoint(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
@@ -249,6 +334,15 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                 assert self.path == "/v1/chat/completions"
                 assert self.headers["Authorization"] == "Bearer SYNTHETIC_RO_HOST_KEY"
                 assert body["model"] == "native-readonly-fixture"
+                if persistent and request_count == 1:
+                    assert run_ready.wait(10), "original Run admission was not observed"
+                    events = runtime.runs.events(admitted.fleet_run_id).events
+                    assert (
+                        len(
+                            [row for row in events if isinstance(row, PiSessionWriterReservedEvent)]
+                        )
+                        == 1
+                    ), "Pi made a model request without a durable writer reservation"
                 privileged = "\n".join(
                     text
                     for message in body["messages"]
@@ -340,6 +434,9 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                             str(endpoint.server_port),
                             child_token,
                             base64.b64encode(forged_output).decode("ascii"),
+                            str(session_root),
+                            str(int(persistent)),
+                            str(int(persistent_action == "worker-crash")),
                         )
                     )
                     field = "command" if "command" in properties else "cmd"
@@ -377,35 +474,14 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                             )
                     assert isinstance(native_proof, dict) and set(native_proof) == expected_facts
                     assert all(value is True for value in native_proof.values()), native_proof
-                    assert run_ready.wait(10), "original Run admission was not observed"
-                    events = runtime.runs.events(admitted.fleet_run_id).events
-                    attempt = next(
-                        event
-                        for event in reversed(events)
-                        if isinstance(event, StepAttemptCreatedEvent) and event.step_order == 1
-                    )
-                    exited = {
-                        event.physical_execution_id
-                        for event in events
-                        if type(event) is ProcessExitedEvent
-                    }
-                    active = [
-                        event
-                        for event in events
-                        if type(event) is ProcessStartedEvent
-                        and event.step_attempt_id == attempt.step_attempt_id
-                        and event.physical_execution_id not in exited
-                    ]
-                    assert len(active) == 1, "expected the original active native command"
                     assert descendant is None, "native child was already bound"
-                    # Hold the final model response until the exact escaped-session
-                    # child is alive below this Run's actual native process.
-                    descendant = lifetime.enter_context(
-                        bind_native_descendant(active[0], child_token)
-                    )
-                    assert descendant.child_pgid == descendant.child.pid
-                    assert descendant.child_pgid != descendant.parent_pgid
-                    assert not select.select([descendant.child_fd], [], [], 0)[0]
+                    descendant = bind_original_child()
+                    if persistent_action == "cancel":
+                        tool_cut_reached.set()
+                        assert release_interrupted_request.wait(50), (
+                            "The original Run did not settle while the tool follow-up was held"
+                        )
+                        return
                     record = {
                         "schema": "oh-goon.agent-review/v1",
                         **identity,
@@ -417,6 +493,8 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                     delta = {"role": "assistant", "content": json.dumps(record)}
                     finish = "stop"
                 self.reply(delta, finish)
+                if finish == "tool_calls":
+                    tool_dispatched.set()
             except Exception as error:
                 fixture_failure = fixture_failure or str(error)
                 # A valid non-review stop preserves the first fixture failure
@@ -447,7 +525,7 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
         def log_message(self, *_args: object) -> None:
             pass
 
-    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state/app.sqlite"))
+    monkeypatch.setenv("OH_GOON_DB", str(database_path))
     monkeypatch.setenv("NATIVE_RO_HOST_KEY", "SYNTHETIC_RO_HOST_KEY")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "host-data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "host-config"))
@@ -491,7 +569,13 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                 ),
                 encoding="utf-8",
             )
-            session = PiSessionIntent(mode="ephemeral") if pi_rpc else None
+            session = (
+                PiSessionIntent(mode="new")
+                if persistent
+                else PiSessionIntent(mode="ephemeral")
+                if pi_rpc
+                else None
+            )
             selected, backend, git = resolve_native_cli_selection(
                 agent=agent,
                 profile="readonly",
@@ -522,14 +606,173 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                     ),
                 )
                 run_ready.set()
-                detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
+                if persistent_action == "cancel":
+                    assert tool_cut_reached.wait(40), (fixture_failure, request_count)
+                    cancellation = runtime.runs.cancel(admitted.fleet_run_id)
+                    assert cancellation.status.cancel_request_satisfied
+                if persistent_action == "worker-crash":
+                    assert tool_dispatched.wait(40), (fixture_failure, request_count)
+                    descendant = bind_original_child()
+                    assert not select.select([descendant.parent_fd], [], [], 0)[0]
+                    database = LocalDatabase(database_path, read_only=True)
+                    with database.transaction() as connection:
+                        lease = ExecutionCoordinator(database).active_fleet_lease_in(
+                            connection, admitted.fleet_run_id
+                        )
+                    assert lease is not None and lease.custody is not None
+                    custody = lease.custody
+                    assert custody.phase == "WORKER_OWNED" and custody.owner_pid != os.getpid()
+                    worker_fd = os.pidfd_open(custody.owner_pid)
+                    try:
+                        assert not select.select([worker_fd], [], [], 0)[0]
+                        assert (
+                            SystemLeaseEnvironment().process_identity(custody.owner_pid)
+                            == custody.owner_identity
+                        )
+                        signal.pidfd_send_signal(worker_fd, signal.SIGKILL)
+                        assert select.select([worker_fd], [], [], 10)[0]
+                    finally:
+                        os.close(worker_fd)
+                    runtime.recovery.recover_worker_exit(
+                        admitted.fleet_run_id, quiescence_timeout_seconds=10
+                    )
+                detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=100)
                 assert isinstance(detail.run.target, FleetPlanTarget)
                 assert detail.run.target.plan.native_agent == selected
                 assert selected.session == session
-                assert descendant is not None, (fixture_failure, "native child cut not reached")
+                assert descendant is not None, (
+                    fixture_failure,
+                    "native child cut not reached",
+                    runtime.runs.game_tape_live_output(admitted.fleet_run_id).model_dump_json()[
+                        -8192:
+                    ],
+                )
                 assert select.select([descendant.child_fd], [], [], 0)[0], (
                     "native detached child outlived original Run terminal readback"
                 )
+                if persistent:
+                    events = (
+                        Journal(LocalDatabase(database_path, read_only=True))
+                        .run_events(admitted.fleet_run_id)
+                        .events
+                    )
+                    reservations = [
+                        row for row in events if isinstance(row, PiSessionWriterReservedEvent)
+                    ]
+                    observations = [
+                        row for row in events if isinstance(row, PiSessionWriterObservedEvent)
+                    ]
+                    assert len(reservations) == 1
+                    storage = session_root / reservations[0].storage_id
+                    assert tuple(session_root.iterdir()) == (storage,)
+                    assert stat.S_IMODE(storage.stat().st_mode) == 0o700
+                    (session_file,) = tuple(storage.iterdir())
+                    metadata = session_file.stat()
+                    assert metadata.st_size > 0 and metadata.st_nlink == 1
+                    if persistent_action == "worker-crash":
+                        assert not observations, "dead worker published Pi persistence"
+                        assert any(
+                            type(row) is ProcessStateUnknownEvent
+                            and row.pid == descendant.root.pid
+                            and row.sequence > reservations[0].sequence
+                            for row in events
+                        ), "original recovery synthesized a known command result after worker loss"
+                    else:
+                        assert len(observations) == 1
+                        observed = observations[0]
+                        assert observed.reservation_sequence == reservations[0].sequence
+                        assert any(
+                            type(row) is DescendantsQuiescentEvent
+                            and row.physical_execution_id
+                            == observed.observation.physical_execution_id
+                            and row.sequence == observed.quiescent_sequence
+                            and reservations[0].sequence < row.sequence < observed.sequence
+                            for row in events
+                        )
+                        if persistent_action == "cancel":
+                            assert observed.observation.persistence == "unknown"
+                            assert observed.observation.file is None
+                        else:
+                            assert observed.observation.persistence == "observed"
+                            assert observed.observation.session_id and observed.observation.leaf_id
+                            assert observed.observation.file_name == session_file.name
+                            file_evidence = observed.observation.file
+                            assert file_evidence is not None
+                            assert (
+                                file_evidence.device,
+                                file_evidence.inode,
+                                file_evidence.size,
+                            ) == (
+                                metadata.st_dev,
+                                metadata.st_ino,
+                                metadata.st_size,
+                            )
+                    readback = subprocess.run(
+                        (
+                            sys.executable,
+                            "-I",
+                            "-c",
+                            """
+import json, sys
+from pathlib import Path
+from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.journal import Journal
+
+journal = Journal(LocalDatabase(Path(sys.argv[1]), read_only=True))
+detail = journal.read_view().required_run_detail(sys.argv[2])
+steps = detail.game_tape.repositories[0].steps
+print(json.dumps([detail.run.fleet_run_id, detail.run.status, [step.status for step in steps]]))
+""",
+                            str(database_path),
+                            admitted.fleet_run_id,
+                        ),
+                        timeout=10,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    assert json.loads(readback.stdout) == [
+                        detail.run.fleet_run_id,
+                        detail.run.status.value,
+                        [step.status.value for step in detail.game_tape.repositories[0].steps],
+                    ]
+                    with pytest.raises(PiSessionUnavailable, match="exact session reopening"):
+                        resolve_native_cli_selection(
+                            agent="pi",
+                            profile="readonly",
+                            workspace=workspace,
+                            config_file=catalog,
+                            session=PiSessionIntent(
+                                mode="continue", prior_run_id=admitted.fleet_run_id
+                            ),
+                        )
+                    with pytest.raises(PiSessionUnavailable, match="fresh direct Run"):
+                        runtime.runs.rerun(
+                            admitted.fleet_run_id, new_fleet_run_id="disallowed-session-replay"
+                        )
+                    assert session_file.stat() == metadata
+                if interrupted:
+                    assert fixture_failure is None
+                    assert native_tool_requested
+                    interrupted_step, verifier = detail.game_tape.repositories[0].steps
+                    assert interrupted_step.settlement is not None
+                    if persistent_action == "cancel":
+                        assert request_count == qualified_requests == 2 + context_only_requests
+                        assert detail.run.status is FleetRunStatus.CANCELLED
+                        assert interrupted_step.status is GameTapeStatus.CANCELLED
+                        assert interrupted_step.settlement.cleanup == "VERIFIED"
+                        assert interrupted_step.cancellation is not None
+                        cancellation_supervisor = interrupted_step.cancellation.supervisor
+                        assert cancellation_supervisor is not None
+                        assert cancellation_supervisor.final_process_group_quiescent is True
+                    else:
+                        assert request_count == qualified_requests == 1 + context_only_requests
+                        assert detail.run.status is FleetRunStatus.FAILED
+                        assert interrupted_step.status is GameTapeStatus.INTERRUPTED
+                        assert interrupted_step.settlement.outcome == "INCOMPLETE"
+                    assert verifier.status is GameTapeStatus.NOT_RUN
+                    assert not verifier.attempts
+                    return
                 assert detail.outcome is FleetRunOutcome.SUCCESS, (
                     fixture_failure,
                     request_count,
@@ -559,6 +802,11 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                 if pi_rpc:
                     assert "--pi-rpc" in step.argv
                     assert step.argv[step.argv.index("--mode") + 1] == "rpc"
+                    if persistent:
+                        assert "--no-extensions" in step.argv
+                        assert "--session-dir" in step.argv and "--no-session" not in step.argv
+                    else:
+                        assert "--no-session" in step.argv
                 assert receipt is not None and receipt.workspace_read_only
                 assert receipt.host_and_external_ip_networking == "denied"
                 assert receipt.scoped_write_roots == () and receipt.protected_paths == (".git",)
@@ -575,6 +823,16 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                 records = [json.loads(line) for line in protocol["stdout"].split("\n") if line]
                 if pi_rpc:
                     assert all(record["type"] != "response" for record in records)
+                writer_records = [
+                    record for record in records if record["type"] == PI_SESSION_OBSERVATION_RECORD
+                ]
+                assert len(writer_records) == int(persistent)
+                if persistent:
+                    records = [
+                        record
+                        for record in records
+                        if record["type"] != PI_SESSION_OBSERVATION_RECORD
+                    ]
                 assert claims[0].native_event_count == len(records)
                 assert_no_forged_root_claims(records)
                 assert forged_output is not None
@@ -639,6 +897,7 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                     )
                 )
             finally:
+                release_interrupted_request.set()
                 runtime.shutdown(wait_for_runs=True)
         finally:
             endpoint.shutdown()

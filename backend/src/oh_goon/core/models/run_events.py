@@ -7,6 +7,7 @@ from pydantic import AwareDatetime, Field, model_validator
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
+from oh_goon.core.models.pi_session_storage import PiSessionWriterObservation
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import (
     FleetRunFailure,
@@ -138,6 +139,28 @@ class StepAttemptCreatedEvent(_FleetRunEventBase):
     step_order: int = Field(ge=1)
     attempt_number: int = Field(ge=1)
     step_attempt_id: str = Field(min_length=1)
+
+
+class PiSessionWriterReservedEvent(_FleetRunEventBase):
+    """Original Run-owned writer fence for one newly allocated Pi session."""
+
+    event_type: Literal[FleetRunEventType.PI_SESSION_WRITER_RESERVED]
+    repository_id: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1)
+    step_id: str = Field(min_length=1, max_length=80)
+    attempt_number: Literal[1]
+    attempt_sequence: int = Field(ge=1)
+    storage_id: str = Field(pattern=r"^pi-session-[0-9a-f]{64}$")
+    lease_binding: str = Field(pattern=r"^pi-writer-[0-9a-f]{64}$")
+
+
+class PiSessionWriterObservedEvent(_FleetRunEventBase):
+    """Observation after exact native process quiescence, without reuse authority."""
+
+    event_type: Literal[FleetRunEventType.PI_SESSION_WRITER_OBSERVED]
+    reservation_sequence: int = Field(ge=1)
+    quiescent_sequence: int = Field(ge=1)
+    observation: PiSessionWriterObservation
 
 
 class ProcessStartingEvent(_FleetRunEventBase):
@@ -288,6 +311,8 @@ type FleetRunEvent = Annotated[
     | StepReachedEvent
     | StepStartedEvent
     | StepAttemptCreatedEvent
+    | PiSessionWriterReservedEvent
+    | PiSessionWriterObservedEvent
     | ProcessStartingEvent
     | ProcessStartedEvent
     | TerminationRequestedEvent

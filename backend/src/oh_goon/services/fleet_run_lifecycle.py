@@ -20,7 +20,7 @@ from oh_goon.core.errors import (
     RunControlOwnerUnavailable,
     StateConflict,
 )
-from oh_goon.core.models.agent_providers import require_pi_session_execution
+from oh_goon.core.models.agent_providers import PiSessionUnavailable, require_pi_session_execution
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_executor import FleetExecutorPlacement
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
@@ -265,7 +265,23 @@ class FleetRunLifecycle:
                 agent=selected.agent,
                 interactive=selected.interactive,
                 handoff=target.agent_continuation is not None,
+                profile=selected.profile,
+                definition=selected.definition,
             )
+            if selected.creates_pi_session and (
+                readmitted_from_run_id is not None
+                or rerun_from_run_id is not None
+                or target.candidate_workspace is not None
+                or target.agent_repair is not None
+                or sum(step.kind == "agent" for step in target.plan.steps) != 1
+                or any(
+                    step.kind == "agent" and step.retry.max_attempts != 1
+                    for step in target.plan.steps
+                )
+            ):
+                raise PiSessionUnavailable(
+                    "New persistent Pi sessions require one Agent Step in a fresh direct Run"
+                )
         if isinstance(target, FleetPlanTarget) and target.candidate_workspace is not None:
             if (
                 run_id != target.candidate_workspace.fleet_run_id

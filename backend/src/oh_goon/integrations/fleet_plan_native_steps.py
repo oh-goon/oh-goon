@@ -27,13 +27,14 @@ from oh_goon.core.agent_harness_contract import (
 )
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
-from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
+from oh_goon.core.errors import FleetPlanInvalid, InvalidRunTransition, OperationDeadlineExpired
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     ResolvedNativeAgent,
     require_pi_session_execution,
 )
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord, review_output_schema
+from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.fleet_observation import (
     AgentHarnessObservation,
     NativeAgentObservation,
@@ -41,10 +42,17 @@ from oh_goon.core.models.fleet_observation import (
 )
 from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedAgentStep
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
+from oh_goon.core.models.pi_session_storage import (
+    PI_SESSION_NEW_FILE,
+    PiSessionNativeObservation,
+    PiSessionWriterObservation,
+)
+from oh_goon.core.ports.pi_session_writer import ReservedPiSessionWriter
 from oh_goon.engine.command import (
     MAX_COMMAND_INPUT_BYTES,
     CommandCancelledError,
     CommandOutputLimitExceeded,
+    CommandProcessLifecycleEvent,
     CommandTimeoutExpired,
 )
 from oh_goon.engine.errors import OperationCancelledError
@@ -104,7 +112,11 @@ def require_native_agent_compatibility(
 ) -> None:
     """Compatibility and path-separation checks shared by preflight and Step receiver."""
     require_pi_session_execution(
-        selected.session, agent=selected.agent, interactive=selected.interactive
+        selected.session,
+        agent=selected.agent,
+        interactive=selected.interactive,
+        profile=selected.profile,
+        definition=selected.definition,
     )
     if role not in {"report", "review", "adjudication", "proposal"}:
         raise FleetPlanInvalid("Native Agent result role is unsupported")
@@ -211,6 +223,11 @@ def prepare_native_step_input(
     require_native_agent_compatibility(
         selected, role=step.workload.role, terminal_available=runtime.terminal is not None
     )
+    new_pi_session = selected.creates_pi_session
+    if new_pi_session != (runtime.pi_session_writer is not None) or (
+        new_pi_session and runtime.lifecycle_observer is None
+    ):
+        raise FleetPlanInvalid("Native Pi requires its original claimed writer and Step lifecycle")
     if runtime.runtime_supervision is not None:
         raise FleetPlanInvalid("Native whole-Step deadline cannot use a fresh per-process watchdog")
     sandboxed = selected.profile.backend == "bubblewrap"
@@ -502,6 +519,53 @@ def _native_observation_from_protocol(
     )
 
 
+def _settle_pi_session_writer(
+    runtime: StepRuntime,
+    writer: ReservedPiSessionWriter,
+    physical_execution_id: str | None,
+    native: PiSessionNativeObservation | None,
+) -> None:
+    if physical_execution_id is None:
+        return
+    file = None
+    if native is not None:
+        try:
+            file = writer.observe_file()
+        except (FleetPlanInvalid, OperationCancelledError):
+            # File/cancellation evidence alone cannot establish persistence.
+            pass
+    observation = (
+        PiSessionWriterObservation(
+            physical_execution_id=physical_execution_id,
+            persistence="observed",
+            file=file,
+            session_id=native.session_id,
+            leaf_id=native.leaf_id,
+            file_name=PI_SESSION_NEW_FILE.name,
+        )
+        if native is not None and file is not None and file.size > 0
+        else PiSessionWriterObservation(
+            physical_execution_id=physical_execution_id, persistence="unknown"
+        )
+    )
+    try:
+        writer.settle(observation)
+    except InvalidRunTransition:
+        if runtime.diagnostics is not None:
+            runtime.diagnostics.emit(
+                DiagnosticEvent(
+                    severity="WARNING",
+                    source="pi_session",
+                    owner="NativeAgentStep",
+                    operation="observe_writer",
+                    message="Original Pi writer custody is unresolved",
+                    execution_affected=False,
+                    fleet_run_id=runtime.fleet_run_id,
+                    repository_id=runtime.repository_id,
+                )
+            )
+
+
 def execute_native_agent_step(
     repository: Path,
     step: ResolvedAgentStep,
@@ -511,14 +575,18 @@ def execute_native_agent_step(
     runtime: StepRuntime,
     *,
     deadline: float,
+    attempt_number: int,
 ) -> StepOutcome:
     """Run initial producer evidence and one native workload through the supplied runner."""
     assert step.workload.harness == "native"
     selected = step.workload.native_agent
     assert selected is not None
     sandboxed = selected.profile.backend == "bubblewrap"
-    private_output = selected.profile.codex_service is not None or (
-        sandboxed and selected.profile.sandbox_owner == "execution_backend"
+    new_pi_session = selected.creates_pi_session
+    private_output = (
+        new_pi_session
+        or selected.profile.codex_service is not None
+        or (sandboxed and selected.profile.sandbox_owner == "execution_backend")
     )
     if runtime.cancel_requested is not None and runtime.cancel_requested():
         raise OperationCancelledError("Native Agent cancelled before repository evidence")
@@ -570,12 +638,23 @@ def execute_native_agent_step(
     if runtime.cancel_requested is not None and runtime.cancel_requested():
         raise OperationCancelledError("Native Agent cancelled after repository evidence")
     model = selected.connection.resolve(process.host_environment) if selected.connection else None
-    parser = NativeAgentEventParser(selected.agent) if not selected.interactive else None
+    parser = (
+        NativeAgentEventParser(selected.agent, pi_session_new=new_pi_session)
+        if not selected.interactive
+        else None
+    )
     parser_error: str | None = None
     service_outcome: StepOutcome | None = None
     service_protocol: NativeAgentEvents | None = None
     service_execution: NativeServiceExecutionEvidence | None = None
     service_execution_failed = False
+    quiescent_pi_process: str | None = None
+
+    def observe_pi_process(event: CommandProcessLifecycleEvent) -> None:
+        nonlocal quiescent_pi_process
+        # The original Step observer has durably recorded this event first.
+        if event.kind == "DESCENDANTS_QUIESCENT":
+            quiescent_pi_process = event.physical_execution_id
 
     def consume_native_output(stream: Literal["stdout", "stderr"], text: str) -> None:
         nonlocal parser_error
@@ -588,7 +667,14 @@ def execute_native_agent_step(
             # original deadline, then refuse its claim at the typed boundary.
             parser_error = str(exc)
 
-    with ExitStack() as stack:
+    with ExitStack() as writer_scope, ExitStack() as stack:
+        writer = None
+        if new_pi_session:
+            assert runtime.pi_session_writer is not None
+            _remaining(deadline)
+            writer = writer_scope.enter_context(
+                runtime.pi_session_writer(step.step_id, attempt_number)
+            )
         control = Path(
             stack.enter_context(
                 tempfile.TemporaryDirectory(prefix="native-", dir=process.paths.tmp)
@@ -738,6 +824,7 @@ def execute_native_agent_step(
                 workspace=repository,
                 interactive=selected.interactive,
                 rpc=selected.profile.pi_rpc,
+                pi_session_directory=writer.directory if writer is not None else None,
             )
             if sandboxed:
                 base_url = "http://127.0.0.1:18743"
@@ -777,6 +864,7 @@ def execute_native_agent_step(
                         else ("--input-file", str(prompt_file))
                     ),
                     *(("--pi-rpc",) if invocation.input_protocol == "pi_rpc" else ()),
+                    *(("--pi-session-new",) if writer is not None else ()),
                     "--",
                     *argv,
                 )
@@ -793,10 +881,12 @@ def execute_native_agent_step(
                     input_data=input_data,
                     retain_output_tail=not selected.interactive,
                     stream_output=consume_native_output if parser is not None else None,
+                    process_observer=observe_pi_process if writer is not None else None,
                     read_only_mounts=tuple(mounts),
                     broker_directory=broker.socket_path.parent if sandboxed else None,
                     private_configuration_directory=private_configuration if sandboxed else None,
                     preserve_native_executable_path=not sandboxed,
+                    pi_session_directory=writer.directory if writer is not None else None,
                     read_only_workspace=sandboxed
                     and (
                         step.workload.role != "report"
@@ -811,7 +901,22 @@ def execute_native_agent_step(
                 if private_output:
                     error.stdout = ""
                     error.stderr = ""
+                if writer is not None and error.supervisor.final_process_group_quiescent:
+                    stack.close()
+                    _settle_pi_session_writer(runtime, writer, quiescent_pi_process, None)
                 raise
+            if writer is not None and result.supervisor.final_process_group_quiescent:
+                stack.close()
+                assert parser is not None
+                if result.physical_execution_id == quiescent_pi_process:
+                    _settle_pi_session_writer(
+                        runtime,
+                        writer,
+                        quiescent_pi_process,
+                        parser.pi_session_observation
+                        if result.returncode == 0 and parser_error is None
+                        else None,
+                    )
     outcome = service_outcome if service_outcome is not None else from_command(result)
     execution_returncode = (
         service_outcome.returncode if service_outcome is not None else result.returncode

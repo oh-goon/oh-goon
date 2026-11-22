@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from dataclasses import replace
+from functools import partial
 from typing import TypeVar
 
 from oh_goon.core.capability_model import ResolvedCapabilityIntent
@@ -13,6 +15,7 @@ from oh_goon.core.errors import (
     OwnershipLost,
     StateConflict,
 )
+from oh_goon.core.models.agent_providers import PiSessionUnavailable
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.effect_attempt import (
     ClaimedRepositoryEffectAttempt,
@@ -20,12 +23,16 @@ from oh_goon.core.models.effect_attempt import (
 )
 from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
 from oh_goon.core.models.operation import OperationExecution
+from oh_goon.core.models.pi_session_storage import PI_SESSION_NEW_FILE
 from oh_goon.core.models.repository import IncludedRepositoryCatalogEntry
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.models.termination import TerminationSignal
+from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest, PreparedRunnerExecution
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
+from oh_goon.core.ports.pi_session_writer import PiSessionWriter, ReservedPiSessionWriter
 from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.vocabulary import EffectAttemptStatus, EffectBoundaryKind, FleetRunEventType
 from oh_goon.engine.command import CommandProcessLifecycleEvent, observe_command_processes
@@ -36,6 +43,7 @@ from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionSession
 from oh_goon.runtime.fault_injection import FaultInjector, FaultPoint, NoFaultInjector
 from oh_goon.runtime.journal import Journal
+from oh_goon.runtime.pi_session_storage import create_pi_session_directory, observe_pi_session_file
 from oh_goon.services.capability_executor import CapabilityExecutor
 from oh_goon.services.repository_effect_fence import RepositoryEffectFence
 from oh_goon.services.repository_effect_preparation import mutate_pre_effect_attempt
@@ -65,6 +73,7 @@ class RepositoryEffectExecution:
         faults: FaultInjector | None = None,
         effect_fence: RepositoryEffectFence,
         settlement: RepositoryEffectSettlement,
+        state_paths: ApplicationStatePathLayout | None = None,
     ) -> None:
         self._executor = executor
         self._journal = journal
@@ -73,6 +82,7 @@ class RepositoryEffectExecution:
         self._faults = faults or NoFaultInjector()
         self._effect_fence = effect_fence
         self._settlement = settlement
+        self._state_paths = state_paths
 
     def effect_boundary(self, intent: ResolvedCapabilityIntent) -> EffectBoundaryKind:
         return self._executor.effect_boundary(intent)
@@ -247,6 +257,7 @@ class RepositoryEffectExecution:
                 require_settlement_current=self._execution_current(
                     session, attempt, validate_authority_in, check_cancellation=False
                 ),
+                pi_session_writer=self._pi_session_writer(session, attempt, repository_admission),
             )
             if activity is not None:
                 activity("Preparing immutable execution inputs for " + attempt.repository.path.name)
@@ -305,6 +316,56 @@ class RepositoryEffectExecution:
         finally:
             if prepared is not None:
                 prepared.close()
+
+    def _pi_session_writer(
+        self,
+        session: ExecutionSession,
+        attempt: ClaimedRepositoryEffectAttempt,
+        admission: PlanRepositoryAdmissionEvidence | None,
+    ) -> PiSessionWriter | None:
+        target = attempt.target
+        native = target.plan.native_agent if isinstance(target, FleetPlanTarget) else None
+        if native is None or native.session is None or native.session.mode != "new":
+            return None
+        layout = self._state_paths
+        if layout is None or admission is None or attempt.fleet_run_id is None:
+            raise PiSessionUnavailable("Pi writer requires original Fleet repository and storage")
+
+        @contextmanager
+        def reserve(
+            step_id: str, attempt_number: int
+        ) -> Generator[ReservedPiSessionWriter, None, None]:
+            repository = attempt.repository
+            reservation = self._journal.reserve_pi_session_writer(
+                session,
+                repository_id=repository.repository_id,
+                operation_id=attempt.operation_id,
+                step_id=step_id,
+                attempt_number=attempt_number,
+            )
+            with create_pi_session_directory(
+                layout=layout,
+                fleet_run_id=reservation.fleet_run_id,
+                repository=repository,
+                repository_admission=admission,
+                step_id=reservation.step_id,
+                attempt_number=reservation.attempt_number,
+                workspace=repository.path,
+                require_current=partial(
+                    self._journal.require_pi_session_writer, session, reservation
+                ),
+            ) as directory:
+                yield ReservedPiSessionWriter(
+                    directory=directory,
+                    observe_file=partial(
+                        observe_pi_session_file, directory, PI_SESSION_NEW_FILE.name
+                    ),
+                    settle=lambda observation: self._journal.observe_pi_session_writer(
+                        session, reservation, observation=observation
+                    ),
+                )
+
+        return reserve
 
     @staticmethod
     def _authority_termination_requested(

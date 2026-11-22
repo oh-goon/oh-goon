@@ -134,7 +134,7 @@ def test_authored_pi_session_freezes_into_original_plan_delivery_and_lock(
     ("session", "agent", "error"),
     [
         ("{mode: ephemeral}", "codex", "requires the Pi harness"),
-        ("{mode: new}", "pi", "qualified session storage"),
+        ("{mode: new}", "pi", "dedicated managed Pi RPC"),
         ("{mode: continue, prior_run_id: fleet-original}", "pi", "exact session reopening"),
     ],
 )
@@ -149,6 +149,7 @@ def test_authored_pi_session_refuses_before_original_agent_source_capture(
         AgentProviderError,
         NativeAgentDefinition,
         NativeAgentProfile,
+        PiSessionIntent,
         ResolvedNativeAgent,
     )
 
@@ -162,6 +163,7 @@ def test_authored_pi_session_refuses_before_original_agent_source_capture(
         definition=NativeAgentDefinition(executable="/native/agent"),
         profile=NativeAgentProfile(backend="bubblewrap"),
         executable_sha256="a" * 64,
+        session=PiSessionIntent(mode="new") if session == "{mode: new}" else None,
     )
     monkeypatch.setattr(
         "oh_goon.services.agent_authoring_sources.capture_agent_sources",
@@ -207,7 +209,7 @@ def test_resolver_refuses_unqualified_direct_pi_selection_before_source_analysis
         session=PiSessionIntent(mode="new"),
     )
     resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(tmp_path / "goons"))
-    with pytest.raises(PiSessionUnavailable, match="qualified session storage"):
+    with pytest.raises(PiSessionUnavailable, match="dedicated managed Pi RPC"):
         resolver.resolve_frozen_agents(
             tmp_path / "absent-plan.yml",
             inputs={},

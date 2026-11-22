@@ -428,6 +428,7 @@ def build_runtime_foundation(
         git,
         effect_fence=RepositoryEffectFence(git),
         settlement=effect_settlement,
+        state_paths=state_paths,
     )
     direct_operations = DirectEffectAdmission(
         local.journal,

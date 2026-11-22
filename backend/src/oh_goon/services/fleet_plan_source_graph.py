@@ -190,6 +190,14 @@ class FleetPlanSourceGraph:
         if session is not None and native_implementation is not None:
             require_pi_session_execution(session, agent=native_implementation)
         if (
+            session is not None
+            and session.mode == "new"
+            and (len(agent_steps) != 1 or require_review_phases)
+        ):
+            raise FleetPlanInvalid(
+                "New persistent Pi sessions require one Agent Step in a fresh Run"
+            )
+        if (
             model_selected is False
             and not native_selected
             and any(

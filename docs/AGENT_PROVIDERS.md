@@ -145,16 +145,29 @@ executable and workspace in the resolved workload and execution lock. All
 explicit session choices in one Plan must agree. This applies to initialized
 workflows and eligible Shared Plans. Codex and OpenCode refuse a Pi selector.
 
-`--session new` and `--session run:RUN_ID` select persistent creation and
-continuation. Both currently return `PI_SESSION_UNAVAILABLE` before Run
-admission. Their authored equivalents are `session: {mode: new}` and
-`session: {mode: continue, prior_run_id: RUN_ID}`. Private storage, single writer
-custody and exact native reopen are separate work packages. HUG-41 provides a
-private storage boundary for the exact selected Run, repository and Step. HUG-42
-must reserve the writer in the original Run before production use. HUG-43 owns
-exact native reopen. Use
-`--handoff-from RUN_ID` to give a fresh Run bounded context from an earlier Run.
-Combining it with exact native continuation is rejected.
+Use `--session new` with a dedicated managed Pi RPC Bubblewrap profile to
+create a private session in a fresh Run. The Run must select one direct Git
+repository and one native Agent Step. Ordinary independent verifier Steps
+still determine verification results. The authored Step equivalent is
+`session: {mode: new}`.
+
+```sh
+oh-goon ai --agent pi --profile pi-rpc --session new --prompt-file task.txt
+```
+
+The claimed Step reserves the writer in the original Journal before giving Pi
+its private directory. Read the reservation and any session-file observation
+with `oh-goon runs events RUN_ID --after 0 --json`. A reservation alone leaves
+the write unconfirmed. A file observation records bounded metadata after the
+original process settles. The Run keeps its own outcome and verification
+results. New-session Runs require a fresh task, with the built-in managed
+configuration and a serial runtime. Candidate workspaces, repair campaigns,
+Step resource caps, custom native arguments and configuration, and Run replay
+are unsupported for this mode.
+
+`--session run:RUN_ID` and `session: {mode: continue, prior_run_id: RUN_ID}`
+return `PI_SESSION_UNAVAILABLE` until HUG-43 qualifies exact native reopen.
+Use `--handoff-from RUN_ID` on an ephemeral Run for bounded prior-Run context.
 
 Broker-backed native reasoning requires an explicit managed inference connection so qualified
 Hashmarks context reaches every model request, including follow-up and compaction.

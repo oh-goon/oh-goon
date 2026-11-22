@@ -9,6 +9,11 @@ from typing import Any
 import pytest
 
 from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.pi_session_storage import (
+    PI_SESSION_NEW_FILE,
+    PI_SESSION_OBSERVATION_RECORD,
+    PiSessionNativeObservation,
+)
 from oh_goon.integrations.agent_native_execution import NativeAgentEventParser
 from oh_goon.integrations.agent_pi_rpc import PiRpcControl
 
@@ -110,6 +115,176 @@ def _final_identity(control: PiRpcControl) -> None:
     )
     assert control.read_input(1024) == b""
     control.finish()
+
+
+def _persistent_start() -> PiRpcControl:
+    control = PiRpcControl(b"prompt", persistent=True)
+    _commands(control)
+    assert (
+        control.feed_stdout(
+            _response(
+                "oh-goon:state",
+                "get_state",
+                {
+                    "sessionId": "native-session",
+                    "sessionFile": str(PI_SESSION_NEW_FILE),
+                    "messageCount": 0,
+                },
+            )
+        )
+        == ()
+    )
+    return control
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_persistent_rpc_observes_same_file_and_final_leaf_without_retaining_entries(
+    reverse: bool,
+) -> None:
+    control = _persistent_start()
+    assert control.read_input(1024) is None
+    assert (
+        control.feed_stdout(
+            _response(
+                "oh-goon:entries",
+                "get_entries",
+                {
+                    "leafId": "setup-leaf",
+                    "entries": [{"id": "setup-leaf", "type": "thinking_level_change"}],
+                },
+            )
+        )
+        == ()
+    )
+    [prompt] = _commands(control)
+    assert prompt["id"] == "oh-goon:prompt"
+    _ack(control)
+    terminal = _line({"type": "agent_settled", "aborted": True})
+    assert control.feed_stdout(terminal) == (terminal,)
+    assert _commands(control) == [
+        {"id": "oh-goon:final-state", "type": "get_state"},
+        {"id": "oh-goon:final-entries", "type": "get_entries"},
+    ]
+    replies = [
+        _response(
+            "oh-goon:final-state",
+            "get_state",
+            {"sessionId": "native-session", "sessionFile": str(PI_SESSION_NEW_FILE)},
+        ),
+        _response(
+            "oh-goon:final-entries",
+            "get_entries",
+            {"leafId": "native-leaf", "entries": [{"private": "PRIVATE_TRANSCRIPT"}]},
+        ),
+    ]
+    if reverse:
+        replies.reverse()
+    assert control.feed_stdout(replies[0]) == ()
+    assert control.read_input(1024) is None
+    assert control.feed_stdout(replies[1]) == ()
+    assert control.read_input(1024) == b""
+    assert control.finish() == PiSessionNativeObservation(
+        session_id="native-session", leaf_id="native-leaf"
+    )
+
+
+def test_persistent_rpc_refuses_existing_branch_before_admitting_prompt() -> None:
+    control = _persistent_start()
+    with pytest.raises(AgentProviderError, match="prior message entries"):
+        control.feed_stdout(
+            _response(
+                "oh-goon:entries",
+                "get_entries",
+                {"leafId": "prior-leaf", "entries": [{"id": "prior-leaf", "type": "message"}]},
+            )
+        )
+    assert control.read_input(1024) == b""
+
+
+@pytest.mark.parametrize("message_count", [1, False, None])
+def test_persistent_rpc_requires_a_native_empty_conversation(message_count: object) -> None:
+    control = PiRpcControl(b"prompt", persistent=True)
+    _commands(control)
+    with pytest.raises(AgentProviderError, match="conversation history"):
+        control.feed_stdout(
+            _response(
+                "oh-goon:state",
+                "get_state",
+                {
+                    "sessionId": "native-session",
+                    "sessionFile": str(PI_SESSION_NEW_FILE),
+                    "messageCount": message_count,
+                },
+            )
+        )
+    assert control.read_input(1024) == b""
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_persistent_rpc_preserves_original_settlement_when_final_leaf_is_unavailable(
+    success: bool,
+) -> None:
+    control = _persistent_start()
+    control.feed_stdout(
+        _response("oh-goon:entries", "get_entries", {"leafId": None, "entries": []})
+    )
+    _commands(control)
+    _ack(control)
+    control.feed_stdout(_line({"type": "agent_settled", "aborted": False}))
+    _commands(control)
+    control.feed_stdout(
+        _response(
+            "oh-goon:final-state",
+            "get_state",
+            {"sessionId": "native-session", "sessionFile": str(PI_SESSION_NEW_FILE)},
+        )
+    )
+    assert (
+        control.feed_stdout(
+            _line(
+                {
+                    "id": "oh-goon:final-entries",
+                    "type": "response",
+                    "command": "get_entries",
+                    "success": success,
+                    "data": {"leafId": None, "entries": []} if success else None,
+                }
+            )
+        )
+        == ()
+    )
+    assert control.read_input(1024) == b""
+    assert control.finish() is None
+
+
+def test_persistent_rpc_refuses_a_session_path_outside_the_original_selected_file() -> None:
+    control = PiRpcControl(b"prompt", persistent=True)
+    _commands(control)
+    with pytest.raises(AgentProviderError, match="exact selected private session file"):
+        control.feed_stdout(
+            _response(
+                "oh-goon:state",
+                "get_state",
+                {"sessionId": "native-session", "sessionFile": "/workspace/session.jsonl"},
+            )
+        )
+    assert control.read_input(1024) == b""
+
+
+def test_native_pi_child_cannot_emit_private_relay_observation() -> None:
+    observation = PiSessionNativeObservation(session_id="native-session", leaf_id="native-leaf")
+    private_record = _line(
+        {"type": PI_SESSION_OBSERVATION_RECORD, "data": observation.model_dump(mode="json")}
+    )
+    control = _persistent_start()
+    with pytest.raises(AgentProviderError, match="relay-owned control record"):
+        control.feed_stdout(private_record)
+    parser = NativeAgentEventParser("pi", pi_session_new=True)
+    parser.feed(private_record[:30])
+    parser.feed(private_record[30:])
+    events = parser.finish(returncode=0)
+    assert parser.pi_session_observation == observation
+    assert events.event_count == 0 and events.observations == () and not events.settled
 
 
 @pytest.mark.parametrize("reverse", [False, True])

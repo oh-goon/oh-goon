@@ -13,7 +13,8 @@ from oh_goon.core.agent_campaign_settlement import (
 )
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.effect_attempts import LIVE_OWNED_EFFECT_STATUSES
-from oh_goon.core.errors import InvalidRunTransition, JournalConflict
+from oh_goon.core.errors import InvalidRunTransition, JournalConflict, OwnershipLost, PiSessionBusy
+from oh_goon.core.execution_lifecycle_validation import pi_writer_step_settled
 from oh_goon.core.models.agent_repair import (
     MAX_AGENT_CAMPAIGN_MESSAGE_CHARS,
     TRUNCATED_AGENT_CAMPAIGN_MESSAGE,
@@ -30,6 +31,7 @@ from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
 from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
+from oh_goon.core.models.pi_session_storage import PiSessionWriterObservation
 from oh_goon.core.models.reconciliation import (
     RepositoryEffectAcknowledgementEvidence,
     RepositoryEffectReconciliationEvidence,
@@ -48,8 +50,11 @@ from oh_goon.core.models.run_admission import (
     require_concurrent_candidate_admission,
 )
 from oh_goon.core.models.run_events import (
+    DescendantsQuiescentEvent,
     FleetRunEvent,
     FleetRunEventBatch,
+    PiSessionWriterObservedEvent,
+    PiSessionWriterReservedEvent,
     RepositoryCompletedEvent,
     RunAdmittedEvent,
     RunCancelledEvent,
@@ -58,6 +63,7 @@ from oh_goon.core.models.run_events import (
     RunFailedEvent,
     RunResourcesObservedEvent,
     RunStartedEvent,
+    StepAttemptCreatedEvent,
     StorageMaintenanceRecordedEvent,
 )
 from oh_goon.core.models.run_resources import (
@@ -67,6 +73,7 @@ from oh_goon.core.models.run_resources import (
 )
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
+from oh_goon.core.product_identity import pi_session_storage_id, stable_id
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
@@ -75,6 +82,7 @@ from oh_goon.core.vocabulary import (
     FleetRunTerminalIntent,
     OperationAction,
 )
+from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.runtime.database import ExistingDatabaseAppendContext, LocalDatabase
 from oh_goon.runtime.journal_admission_validation import (
     _require_valid_readmission,
@@ -99,6 +107,7 @@ from oh_goon.runtime.journal_view import JournalReadView
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_step_execution import StepLifecycleObserver
     from oh_goon.integrations.run_resource_envelope import VerifiedWorkerResourceClosure
+    from oh_goon.runtime.execution import ExecutionSession
 
 
 class RunResourceObservationContext(ImmutableModel):
@@ -710,6 +719,134 @@ class Journal:
                 cancellation=cancellation,
             )
 
+    def reserve_pi_session_writer(
+        self,
+        session: ExecutionSession,
+        *,
+        repository_id: str,
+        operation_id: str,
+        step_id: str,
+        attempt_number: int,
+    ) -> PiSessionWriterReservedEvent:
+        """Consume the original Step attempt once, before allocating writable Pi files."""
+        fleet_run_id = session.require_fleet_run_id()
+
+        def reserve(connection: sqlite3.Connection) -> PiSessionWriterReservedEvent:
+            self._database.require_atomic_write_cut(connection)
+            if session.cancel_requested_in(connection):
+                raise OperationCancelledError("Fleet cancellation fences Pi writer reservation")
+            view = self._facts.read_view(connection)
+            events = view.run_events(fleet_run_id).events
+            if any(isinstance(item, PiSessionWriterReservedEvent) for item in events):
+                raise PiSessionBusy("Original Pi session writer lineage was already reserved")
+            attempt = next(
+                (
+                    item
+                    for item in events
+                    if isinstance(item, StepAttemptCreatedEvent)
+                    and item.repository_id == repository_id
+                    and item.operation_id == operation_id
+                    and item.step_id == step_id
+                    and item.attempt_number == attempt_number
+                ),
+                None,
+            )
+            if attempt is None or attempt.attempt_number != 1:
+                raise InvalidRunTransition("Pi writer requires the original first Step attempt")
+            event = PiSessionWriterReservedEvent(
+                event_type=FleetRunEventType.PI_SESSION_WRITER_RESERVED,
+                fleet_run_id=fleet_run_id,
+                sequence=len(events) + 1,
+                repository_id=repository_id,
+                operation_id=operation_id,
+                step_id=step_id,
+                attempt_number=1,
+                attempt_sequence=attempt.sequence,
+                storage_id=pi_session_storage_id(fleet_run_id, repository_id, step_id, 1),
+                lease_binding=_pi_session_lease_binding(session),
+            )
+            project_fleet_run_detail([*events, event], view.operation)
+            self._facts.append_run_event(connection, event)
+            return event
+
+        return session.mutate(reserve)
+
+    def require_pi_session_writer(
+        self, session: ExecutionSession, reservation: PiSessionWriterReservedEvent
+    ) -> None:
+        """Fence writable allocation and launch against the original live owner."""
+
+        def require_current(connection: sqlite3.Connection) -> None:
+            if session.cancel_requested_in(connection):
+                raise OperationCancelledError("Fleet cancellation fences Pi writer use")
+            self._require_pi_session_writer_in(
+                self._facts.read_view(connection), session, reservation
+            )
+
+        session.observe(require_current)
+
+    def observe_pi_session_writer(
+        self,
+        session: ExecutionSession,
+        reservation: PiSessionWriterReservedEvent,
+        *,
+        observation: PiSessionWriterObservation,
+    ) -> None:
+        """Record bounded persistence evidence under the exact original writer fence."""
+
+        def observe(connection: sqlite3.Connection) -> None:
+            self._database.require_atomic_write_cut(connection)
+            view = self._facts.read_view(connection)
+            events = self._require_pi_session_writer_in(view, session, reservation)
+            quiet = next(
+                (
+                    item
+                    for item in events[reservation.sequence :]
+                    if isinstance(item, DescendantsQuiescentEvent)
+                    and item.physical_execution_id == observation.physical_execution_id
+                ),
+                None,
+            )
+            if quiet is None:
+                raise InvalidRunTransition(
+                    "Pi writer requires exact original process-tree quiescence"
+                )
+            event = PiSessionWriterObservedEvent(
+                event_type=FleetRunEventType.PI_SESSION_WRITER_OBSERVED,
+                fleet_run_id=reservation.fleet_run_id,
+                sequence=len(events) + 1,
+                reservation_sequence=reservation.sequence,
+                quiescent_sequence=quiet.sequence,
+                observation=observation,
+            )
+            project_fleet_run_detail([*events, event], view.operation)
+            self._facts.append_run_event(connection, event)
+
+        session.mutate(observe)
+
+    @staticmethod
+    def _require_pi_session_writer_in(
+        view: JournalReadView, session: ExecutionSession, reservation: PiSessionWriterReservedEvent
+    ) -> tuple[FleetRunEvent, ...]:
+        if (
+            session.recovery_only
+            or reservation.fleet_run_id != session.require_fleet_run_id()
+            or reservation.lease_binding != _pi_session_lease_binding(session)
+        ):
+            raise OwnershipLost("Pi writer differs from the original Fleet execution owner")
+        batch = view.run_events(reservation.fleet_run_id)
+        events = batch.events
+        later = events[reservation.sequence :]
+        if (
+            batch.run.status not in {FleetRunStatus.RUNNING, FleetRunStatus.CANCELLING}
+            or not 1 <= reservation.sequence <= len(events)
+            or events[reservation.sequence - 1] != reservation
+            or any(isinstance(item, PiSessionWriterObservedEvent) for item in later)
+            or pi_writer_step_settled(reservation, later)
+        ):
+            raise OwnershipLost("Pi writer reservation is stale, settled, or unknown")
+        return events
+
     def record_storage_maintenance(
         self,
         *,
@@ -1205,3 +1342,10 @@ class Journal:
         self, fleet_run_id: str, after: int = 0, *, limit: int | None = None
     ) -> FleetRunEventBatch:
         return self.read_view().run_events(fleet_run_id, after, limit=limit)
+
+
+def _pi_session_lease_binding(session: ExecutionSession) -> str:
+    return stable_id(
+        "pi-writer",
+        {"run": session.require_fleet_run_id(), "lease": session.original_fleet_lease_token()},
+    )

@@ -42,6 +42,7 @@ from oh_goon.core.path_authority import (
 from oh_goon.core.path_layouts import AttemptPathLayout, RunPathLayout
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
+from oh_goon.core.ports.pi_session_writer import PiSessionWriter
 from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.errors import OperationCancelledError
@@ -240,6 +241,7 @@ class FleetPlanRunExecutor:
         repository_id: str | None = None,
         lifecycle_observer: StepLifecycleObserver | None = None,
         agent_delivery_for: Callable[[str, str], bytes] | None = None,
+        pi_session_writer: PiSessionWriter | None = None,
         execution_limits: FleetPlanRunLimits | None = None,
         repair_context: AgentRepairContext | None = None,
         execution_target: FleetPlanTarget | None = None,
@@ -270,6 +272,14 @@ class FleetPlanRunExecutor:
             raise FleetPlanInvalid("Candidate execution has no current materialization")
         if plan.execution.purpose is ExecutionPurpose.CICD:
             raise FleetPlanInvalid("Strict CI/CD plans require execute_strict_run")
+        selected = plan.native_agent
+        new_pi_session = selected is not None and selected.creates_pi_session
+        if new_pi_session != (pi_session_writer is not None) or (
+            new_pi_session and lifecycle_observer is None
+        ):
+            raise FleetPlanInvalid(
+                "New Pi execution requires its original claimed writer and Step lifecycle"
+            )
         retention_store = self._require_direct_retention(plan, repository_id)
         runtime = self._step_runtime(
             cancel_requested,
@@ -296,6 +306,7 @@ class FleetPlanRunExecutor:
             if execution_target is not None
             else ExecutionIdentity(digest=build_execution_lock(plan).digest),
             native_profile=plan.native_agent,
+            pi_session_writer=pi_session_writer,
             workspace_materialization=workspace_materialization,
             workspace_directory_fd=workspace_directory_fd,
             require_candidate_current=require_candidate_current,
