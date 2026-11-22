@@ -102,20 +102,43 @@ def require_pi_session_execution(
     agent: str,
     interactive: bool = False,
     handoff: bool = False,
+    profile: NativeAgentProfile | None = None,
+    definition: NativeAgentDefinition | None = None,
 ) -> None:
-    """Protect current execution until the persistent session owners can admit it."""
+    """Refuse unsupported choices before resolving or launching a native workload."""
     if session is None:
         return
     if agent != "pi":
         raise PiSessionSelectionError("Pi session selection requires the Pi harness")
     if session.mode == "continue" and handoff:
         raise PiSessionSelectionError("Pi continuation cannot be combined with --handoff-from")
-    if session.mode == "new":
-        raise PiSessionUnavailable("New persistent Pi sessions require qualified session storage")
     if session.mode == "continue":
         raise PiSessionUnavailable("Pi continuation requires qualified exact session reopening")
     if interactive:
-        raise PiSessionSelectionError("Explicit ephemeral Pi sessions require headless execution")
+        raise PiSessionSelectionError("Explicit Pi session selection requires headless execution")
+    if session.mode == "new" and handoff:
+        raise PiSessionUnavailable(
+            "New persistent Pi sessions require a fresh task without a handoff"
+        )
+    if (
+        session.mode == "new"
+        and profile is not None
+        and (
+            profile.backend != "bubblewrap"
+            or profile.allowed_agents != ("pi",)
+            or profile.sandbox_owner != "harness"
+            or profile.inference_profile is None
+            or not profile.pi_rpc
+            or any(value is not None for value in profile.resources.model_dump().values())
+            or definition is None
+            or definition.configuration_directory is not None
+            or bool(definition.arguments)
+        )
+    ):
+        raise PiSessionUnavailable(
+            "New persistent Pi sessions require a dedicated managed Pi RPC Bubblewrap profile "
+            "with its default native configuration and no separate Step resource scope"
+        )
 
 
 class AgentResponseTruncated(AgentProviderError):
@@ -583,6 +606,10 @@ class ResolvedNativeAgent:
     interactive: bool = False
     backend_configuration_id: str | None = None
     session: Annotated[PiSessionIntent | None, Field(exclude_if=lambda value: value is None)] = None
+
+    @property
+    def creates_pi_session(self) -> bool:
+        return self.session is not None and self.session.mode == "new"
 
     @property
     def disclosure_recipients(self) -> tuple[str, ...]:

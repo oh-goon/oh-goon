@@ -9,6 +9,7 @@ from oh_goon.core.errors import InvalidRunTransition
 from oh_goon.core.execution_lifecycle_validation import (
     ExecutionLifecycleEvent,
     validate_execution_lifecycle,
+    validate_pi_session_writer,
 )
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_plan_evidence import (
@@ -42,6 +43,8 @@ from oh_goon.core.models.run_events import (
     OutputAbandonedEvent,
     OutputFinalizedEvent,
     OutputQuarantinedEvent,
+    PiSessionWriterObservedEvent,
+    PiSessionWriterReservedEvent,
     ProcessExitedEvent,
     ProcessStartedEvent,
     ProcessStartingEvent,
@@ -207,6 +210,10 @@ class _RunFold:
             raise InvalidRunTransition("Fleet run lifecycle cannot continue after terminalization")
         if isinstance(event, reconciliation_events):
             self._apply_reconciliation_lifecycle(event)
+            self.lifecycle_events.append(event)
+            return
+        if isinstance(event, (PiSessionWriterReservedEvent, PiSessionWriterObservedEvent)):
+            validate_pi_session_writer(state, event, self.lifecycle_events)
             self.lifecycle_events.append(event)
             return
         if isinstance(

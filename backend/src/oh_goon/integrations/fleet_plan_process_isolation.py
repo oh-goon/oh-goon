@@ -323,6 +323,7 @@ class NativeProfileCommandRunner:
         preserve_native_executable_path: bool = True,
         retain_output_tail: bool = False,
         preserve_stdout_whitespace: bool = False,
+        pi_session_directory: PiSessionDirectoryPin | None = None,
     ) -> CommandResult:
         workspace = self.repository
         native_agent = self.native_agent
@@ -339,6 +340,12 @@ class NativeProfileCommandRunner:
             raise FleetPlanInvalid("Native output tail selection must be a boolean")
         if type(preserve_stdout_whitespace) is not bool:
             raise FleetPlanInvalid("Native stdout whitespace selection must be a boolean")
+        if pi_session_directory is not None and (
+            native_agent.agent != "pi"
+            or not native_agent.creates_pi_session
+            or not native_agent.profile.pi_rpc
+        ):
+            raise FleetPlanInvalid("Native session pin requires the selected fresh Pi writer")
         if cancel_requested is not None and cancel_requested():
             raise OperationCancelledError("Native workload cancelled before process launch")
         if allowed_write_roots and (not protected or allowed_write_roots != admitted_roots):
@@ -361,6 +368,7 @@ class NativeProfileCommandRunner:
                 or host_network
                 or broker_directory is not None
                 or private_configuration_directory is not None
+                or pi_session_directory is not None
             ):
                 raise FleetPlanInvalid("Requested physical native guarantees require Bubblewrap")
             return run_command(
@@ -416,6 +424,7 @@ class NativeProfileCommandRunner:
                 termination_requested=termination_requested,
                 workspace_materialization=self.workspace_materialization,
                 workspace_directory_fd=self.workspace_directory_fd,
+                pi_session_directory=pi_session_directory,
             )
             return standard_backend.execute(
                 request,

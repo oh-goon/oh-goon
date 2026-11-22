@@ -255,7 +255,11 @@ class FleetPlanResolver:
 
         if native_agent is not None:
             require_pi_session_execution(
-                native_agent.session, agent=native_agent.agent, interactive=native_agent.interactive
+                native_agent.session,
+                agent=native_agent.agent,
+                interactive=native_agent.interactive,
+                profile=native_agent.profile,
+                definition=native_agent.definition,
             )
             if repository is None:
                 raise FleetPlanInvalid(

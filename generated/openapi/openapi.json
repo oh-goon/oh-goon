@@ -10678,6 +10678,8 @@
             "OUTPUT_ABANDONED": "#/components/schemas/OutputAbandonedEvent",
             "OUTPUT_FINALIZED": "#/components/schemas/OutputFinalizedEvent",
             "OUTPUT_QUARANTINED": "#/components/schemas/OutputQuarantinedEvent",
+            "PI_SESSION_WRITER_OBSERVED": "#/components/schemas/PiSessionWriterObservedEvent",
+            "PI_SESSION_WRITER_RESERVED": "#/components/schemas/PiSessionWriterReservedEvent",
             "PROCESS_EXITED": "#/components/schemas/ProcessExitedEvent",
             "PROCESS_STARTED": "#/components/schemas/ProcessStartedEvent",
             "PROCESS_STARTING": "#/components/schemas/ProcessStartingEvent",
@@ -10728,6 +10730,12 @@
           },
           {
             "$ref": "#/components/schemas/StepAttemptCreatedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/PiSessionWriterReservedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/PiSessionWriterObservedEvent"
           },
           {
             "$ref": "#/components/schemas/ProcessStartingEvent"
@@ -21144,6 +21152,34 @@
         "title": "PathMissingCondition",
         "type": "object"
       },
+      "PiSessionFileObservation": {
+        "additionalProperties": false,
+        "description": "Bounded native file metadata observed under the original directory pin.",
+        "properties": {
+          "device": {
+            "minimum": 0.0,
+            "title": "Device",
+            "type": "integer"
+          },
+          "inode": {
+            "exclusiveMinimum": 0.0,
+            "title": "Inode",
+            "type": "integer"
+          },
+          "size": {
+            "minimum": 0.0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "device",
+          "inode",
+          "size"
+        ],
+        "title": "PiSessionFileObservation",
+        "type": "object"
+      },
       "PiSessionIntent": {
         "additionalProperties": false,
         "description": "One Pi mode and, for continuation, an exact original Fleet Run reference.",
@@ -21174,6 +21210,200 @@
           "mode"
         ],
         "title": "PiSessionIntent",
+        "type": "object"
+      },
+      "PiSessionWriterObservation": {
+        "additionalProperties": false,
+        "description": "Persistence observation after the exact native writer became quiescent.",
+        "properties": {
+          "file": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PiSessionFileObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name"
+          },
+          "leaf_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leaf Id"
+          },
+          "persistence": {
+            "enum": [
+              "observed",
+              "unknown"
+            ],
+            "title": "Persistence",
+            "type": "string"
+          },
+          "physical_execution_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Physical Execution Id",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "physical_execution_id",
+          "persistence"
+        ],
+        "title": "PiSessionWriterObservation",
+        "type": "object"
+      },
+      "PiSessionWriterObservedEvent": {
+        "additionalProperties": false,
+        "description": "Observation after exact native process quiescence, without reuse authority.",
+        "properties": {
+          "event_type": {
+            "const": "PI_SESSION_WRITER_OBSERVED",
+            "title": "Event Type",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "observation": {
+            "$ref": "#/components/schemas/PiSessionWriterObservation"
+          },
+          "quiescent_sequence": {
+            "minimum": 1.0,
+            "title": "Quiescent Sequence",
+            "type": "integer"
+          },
+          "reservation_sequence": {
+            "minimum": 1.0,
+            "title": "Reservation Sequence",
+            "type": "integer"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "fleet_run_id",
+          "event_type",
+          "reservation_sequence",
+          "quiescent_sequence",
+          "observation"
+        ],
+        "title": "PiSessionWriterObservedEvent",
+        "type": "object"
+      },
+      "PiSessionWriterReservedEvent": {
+        "additionalProperties": false,
+        "description": "Original Run-owned writer fence for one newly allocated Pi session.",
+        "properties": {
+          "attempt_number": {
+            "const": 1,
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "attempt_sequence": {
+            "minimum": 1.0,
+            "title": "Attempt Sequence",
+            "type": "integer"
+          },
+          "event_type": {
+            "const": "PI_SESSION_WRITER_RESERVED",
+            "title": "Event Type",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "lease_binding": {
+            "pattern": "^pi-writer-[0-9a-f]{64}$",
+            "title": "Lease Binding",
+            "type": "string"
+          },
+          "operation_id": {
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "repository_id": {
+            "minLength": 1,
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "step_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Step Id",
+            "type": "string"
+          },
+          "storage_id": {
+            "pattern": "^pi-session-[0-9a-f]{64}$",
+            "title": "Storage Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "fleet_run_id",
+          "event_type",
+          "repository_id",
+          "operation_id",
+          "step_id",
+          "attempt_number",
+          "attempt_sequence",
+          "storage_id",
+          "lease_binding"
+        ],
+        "title": "PiSessionWriterReservedEvent",
         "type": "object"
       },
       "PlacementQueueSnapshot": {

@@ -4,18 +4,23 @@ from collections.abc import Sequence
 from typing import TypedDict
 
 from oh_goon.core.errors import InvalidRunTransition
+from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedNativeAgentWorkload
 from oh_goon.core.models.run import CancellingFleetRun, FleetRunState, RunningFleetRun
+from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     FleetRunEvent,
     OutputAbandonedEvent,
     OutputFinalizedEvent,
     OutputQuarantinedEvent,
+    PiSessionWriterObservedEvent,
+    PiSessionWriterReservedEvent,
     ProcessExitedEvent,
     ProcessStartedEvent,
     ProcessStartingEvent,
     ProcessStateUnknownEvent,
     RepositoryStartedEvent,
+    RunAdmittedEvent,
     StepAttemptCreatedEvent,
     StepCancelledEvent,
     StepFailedEvent,
@@ -25,8 +30,10 @@ from oh_goon.core.models.run_events import (
     StepSucceededEvent,
     TerminationRequestedEvent,
 )
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.product_identity import (
     fleet_step_attempt_id,
+    pi_session_storage_id,
     validate_repository_attempt_operation_id,
 )
 
@@ -54,6 +61,130 @@ class _PhysicalState(TypedDict):
 
 _STEP_TERMINAL = (StepSucceededEvent, StepFailedEvent, StepSkippedEvent, StepCancelledEvent)
 _OUTPUT = (OutputFinalizedEvent, OutputAbandonedEvent, OutputQuarantinedEvent)
+
+
+def validate_pi_session_writer(
+    state: FleetRunState,
+    event: PiSessionWriterReservedEvent | PiSessionWriterObservedEvent,
+    history: Sequence[FleetRunEvent],
+) -> None:
+    if isinstance(event, PiSessionWriterReservedEvent):
+        if not isinstance(state, RunningFleetRun):
+            raise InvalidRunTransition("Pi writer reservation requires a running Fleet Run")
+        _validate_pi_session_reservation(event, history)
+        return
+    if not isinstance(state, (RunningFleetRun, CancellingFleetRun)):
+        raise InvalidRunTransition("Pi writer observation requires its current Fleet Run")
+    reservation = _preceding_event(history, event.reservation_sequence)
+    if not isinstance(reservation, PiSessionWriterReservedEvent):
+        raise InvalidRunTransition("Pi writer observation requires the original reservation")
+    if any(isinstance(item, PiSessionWriterObservedEvent) for item in history):
+        raise InvalidRunTransition("Pi writer observation was already committed")
+    quiet = _preceding_event(history, event.quiescent_sequence)
+    processes = [
+        item
+        for item in history[reservation.sequence :]
+        if type(item) is ProcessStartingEvent and _same_pi_attempt(item, reservation)
+    ]
+    if (
+        not isinstance(quiet, DescendantsQuiescentEvent)
+        or not _same_pi_attempt(quiet, reservation)
+        or quiet.physical_execution_id != event.observation.physical_execution_id
+        or len(processes) != 1
+        or processes[0].physical_execution_id != quiet.physical_execution_id
+        or processes[0].sequence >= quiet.sequence
+    ):
+        raise InvalidRunTransition("Pi writer requires exact original process-tree quiescence")
+    if pi_writer_step_settled(reservation, history[reservation.sequence :]):
+        raise InvalidRunTransition("Pi writer observation cannot follow Step settlement")
+    if event.observation.persistence == "observed" and not any(
+        isinstance(item, ProcessExitedEvent)
+        and item.physical_execution_id == quiet.physical_execution_id
+        for item in history[processes[0].sequence : quiet.sequence - 1]
+    ):
+        raise InvalidRunTransition("Pi file observation requires an observed original writer exit")
+
+
+def _validate_pi_session_reservation(
+    event: PiSessionWriterReservedEvent, history: Sequence[FleetRunEvent]
+) -> None:
+    admitted = history[0]
+    if not isinstance(admitted, RunAdmittedEvent):
+        raise InvalidRunTransition("Pi writer requires its original Fleet admission")
+    target = admitted.target
+    execution = admitted.execution
+    if (
+        not isinstance(execution, DirectFleetExecutionAdmission)
+        or execution.rerun_from_run_id is not None
+        or execution.concurrency is not None
+        or not isinstance(target, FleetPlanTarget)
+        or target.candidate_workspace is not None
+        or target.agent_repair is not None
+        or target.agent_continuation is not None
+        or len(admitted.targets) != 1
+        or admitted.targets[0].repository_id != event.repository_id
+        or len(admitted.repository_admissions) != 1
+        or event.step_id not in admitted.repository_admissions[0].active_step_ids
+    ):
+        raise InvalidRunTransition("Pi writer requires one fresh direct Fleet Agent attempt")
+    steps = [step for step in target.plan.steps if isinstance(step, ResolvedAgentStep)]
+    native = target.plan.native_agent
+    if (
+        len(steps) != 1
+        or steps[0].step_id != event.step_id
+        or steps[0].retry.max_attempts != 1
+        or not isinstance(steps[0].workload, ResolvedNativeAgentWorkload)
+        or native is None
+        or steps[0].workload.native_agent != native
+        or native.agent != "pi"
+        or native.interactive
+        or not native.profile.pi_rpc
+        or native.connection is None
+        or native.backend_configuration_id is None
+        or native.session is None
+        or native.session.mode != "new"
+    ):
+        raise InvalidRunTransition("Pi writer differs from the original admitted session and Step")
+    attempt = _preceding_event(history, event.attempt_sequence)
+    if not isinstance(attempt, StepAttemptCreatedEvent) or not _same_pi_attempt(attempt, event):
+        raise InvalidRunTransition("Pi writer requires the exact original Step attempt")
+    if event.storage_id != pi_session_storage_id(
+        event.fleet_run_id, event.repository_id, event.step_id, event.attempt_number
+    ):
+        raise InvalidRunTransition("Pi writer storage differs from its original Step attempt")
+    if any(isinstance(item, PiSessionWriterReservedEvent) for item in history):
+        raise InvalidRunTransition("Pi writer cannot reserve its original lineage more than once")
+    if pi_writer_step_settled(event, history[attempt.sequence :]):
+        raise InvalidRunTransition("Pi writer cannot reserve a settled Step attempt")
+
+
+def _preceding_event(history: Sequence[FleetRunEvent], sequence: int) -> FleetRunEvent | None:
+    if 1 <= sequence <= len(history):
+        return history[sequence - 1]
+    return None
+
+
+def _same_pi_attempt(
+    event: StepAttemptCreatedEvent | ProcessStartingEvent, reservation: PiSessionWriterReservedEvent
+) -> bool:
+    return (
+        event.repository_id == reservation.repository_id
+        and event.operation_id == reservation.operation_id
+        and event.step_id == reservation.step_id
+        and event.attempt_number == reservation.attempt_number
+    )
+
+
+def pi_writer_step_settled(
+    reservation: PiSessionWriterReservedEvent, events: Sequence[FleetRunEvent]
+) -> bool:
+    return any(
+        isinstance(item, _STEP_TERMINAL)
+        and item.repository_id == reservation.repository_id
+        and item.operation_id == reservation.operation_id
+        and item.step_id == reservation.step_id
+        for item in events
+    )
 
 
 def validate_execution_lifecycle(
@@ -231,7 +362,29 @@ def _physical(event: ProcessStartingEvent, step: Sequence[FleetRunEvent]) -> Non
         raise InvalidRunTransition(
             f"{event.event_type.value} step_attempt_id must match its Step attempt"
         )
+    if type(event) is ProcessStartingEvent:
+        _require_single_pi_writer_launch(event, step)
     _physical_sequence(event, step)
+
+
+def _require_single_pi_writer_launch(
+    event: ProcessStartingEvent, step: Sequence[FleetRunEvent]
+) -> None:
+    reservation = next(
+        (
+            item
+            for item in step
+            if isinstance(item, PiSessionWriterReservedEvent) and _same_pi_attempt(event, item)
+        ),
+        None,
+    )
+    if reservation is not None and any(
+        type(item) is ProcessStartingEvent
+        and item.sequence > reservation.sequence
+        and _same_pi_attempt(item, reservation)
+        for item in step
+    ):
+        raise InvalidRunTransition("Original Pi writer cannot launch after crossing its launch cut")
 
 
 def _physical_sequence(event: ProcessStartingEvent, history: Sequence[FleetRunEvent]) -> None:

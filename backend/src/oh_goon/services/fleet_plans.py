@@ -26,6 +26,7 @@ from oh_goon.core.execution_lock_identity import build_execution_lock, verify_ex
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentProvidersConfig,
+    PiSessionUnavailable,
     ResolvedNativeAgent,
     require_pi_session_execution,
 )
@@ -302,7 +303,13 @@ class FleetPlanService:
             agent=selected.agent,
             interactive=selected.interactive,
             handoff=prior_context is not None or continuation_receipt is not None,
+            profile=selected.profile,
+            definition=selected.definition,
         )
+        if selected.creates_pi_session and (candidate or self._run_concurrency is not None):
+            raise PiSessionUnavailable(
+                "New persistent Pi sessions require a direct repository in a serial runtime"
+            )
         if not self._standard_local_fleet or self._content_store is None:
             raise FleetPlanInvalid("Native Agent hosting requires ordinary Fleet execution")
         if (
@@ -550,6 +557,12 @@ class FleetPlanService:
         allow_candidate_metadata: bool = False,
     ) -> ResolvedNativeAgent:
         """Bind and preflight the original backend before any native Run admission."""
+        if selected.creates_pi_session:
+            from oh_goon.runtime.pi_session_storage import require_pi_session_repository
+
+            if self._run_concurrency is not None:
+                raise PiSessionUnavailable("New persistent Pi sessions require a serial runtime")
+            require_pi_session_repository(workspace)
         if selected.connection is not None:
             selected.connection.selection.require_history_authorization()
         from oh_goon.integrations.fleet_plan_bubblewrap_isolation import (
@@ -1542,6 +1555,10 @@ class FleetPlanService:
                 "bounded Agent repair requires explicit standard-local execution"
             )
         if native_agent is not None:
+            if native_agent.creates_pi_session:
+                raise PiSessionUnavailable(
+                    "New persistent Pi sessions require a standalone fresh Run"
+                )
             if review_write_roots is None:
                 raise FleetPlanInvalid("Native repair requires the complete review campaign")
             if native_workspace is None or agent_connection is not None:

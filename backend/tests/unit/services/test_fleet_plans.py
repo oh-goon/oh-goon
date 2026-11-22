@@ -798,7 +798,7 @@ def test_current_history_policy_precedes_new_admission_but_preserves_recorded_re
 
 @pytest.mark.parametrize("mode", ["prepared", "rerun"])
 @pytest.mark.parametrize("selector", ["new", "run:prior-run"])
-def test_persistent_pi_session_refuses_prepared_start_and_rerun_before_work(
+def test_unqualified_start_and_persistent_rerun_refuse_before_work(
     tmp_path: Path, selector: str, mode: str
 ) -> None:
     database = LocalDatabase(tmp_path / "pi-admission.db")
@@ -818,7 +818,16 @@ def test_persistent_pi_session_refuses_prepared_start_and_rerun_before_work(
                     agent="pi",
                     profile_name="isolated",
                     definition=NativeAgentDefinition(executable=sys.executable),
-                    profile=NativeAgentProfile(backend="bubblewrap"),
+                    profile=(
+                        NativeAgentProfile(
+                            backend="bubblewrap",
+                            allowed_agents=("pi",),
+                            inference_profile="broker",
+                            pi_rpc=True,
+                        )
+                        if mode == "rerun"
+                        else NativeAgentProfile(backend="bubblewrap")
+                    ),
                     executable_sha256="a" * 64,
                     session=PiSessionIntent.from_selector(selector),
                 )
@@ -842,7 +851,12 @@ def test_persistent_pi_session_refuses_prepared_start_and_rerun_before_work(
             terminalize_run(journal, "recorded-run", FleetRunTerminalIntent.CANCEL)
         view = journal.read_view()
         recorded = view.run_detail("recorded-run")
-        with pytest.raises(PiSessionUnavailable):
+        expected = (
+            ("fresh direct Run" if mode == "rerun" else "dedicated managed Pi RPC")
+            if selector == "new"
+            else "exact session reopening"
+        )
+        with pytest.raises(PiSessionUnavailable, match=expected):
             if mode == "rerun":
                 assert recorded is not None and recorded.run.target == target
                 plane.rerun("recorded-run", new_fleet_run_id="new-run")

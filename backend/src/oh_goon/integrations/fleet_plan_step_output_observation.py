@@ -51,6 +51,7 @@ def observed_command_runner(
             and (
                 selected.profile.sandbox_owner == "execution_backend"
                 or selected.profile.codex_service is not None
+                or native_options.get("pi_session_directory") is not None
             )
             and bool(argv)
             and (

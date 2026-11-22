@@ -411,5 +411,6 @@ def build_claimed_run_execution(
         git,
         effect_fence=RepositoryEffectFence(git),
         settlement=RepositoryEffectSettlement(database, journal, attempts),
+        state_paths=ApplicationStatePathLayout.from_database(database.path),
     )
     return FleetRunExecution(lifecycle, FleetTargetScheduler(effects), live_output, diagnostics)

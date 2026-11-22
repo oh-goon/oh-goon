@@ -7,15 +7,25 @@ import stat
 import sys
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.pi_session_storage import PiSessionDirectoryPin
+from oh_goon.core.models.agent_providers import PiSessionUnavailable
+from oh_goon.core.models.pi_session_storage import PiSessionDirectoryPin, PiSessionFileObservation
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.core.product_identity import repository_subject_instance_id, stable_id
+from oh_goon.core.product_identity import pi_session_storage_id, repository_subject_instance_id
+
+
+def require_pi_session_repository(workspace: Path) -> None:
+    """Refuse unsupported repository layouts before native preflight."""
+    try:
+        mode = (workspace / ".git").lstat().st_mode
+    except OSError:
+        mode = 0
+    if not stat.S_ISDIR(mode):
+        raise PiSessionUnavailable("New persistent Pi sessions require a direct Git repository")
 
 
 def _mount_id(fd: int) -> bytes:
@@ -159,15 +169,7 @@ def create_pi_session_directory(
         raise FleetPlanInvalid(
             "Pi session storage differs from the admitted direct Git workspace and Step"
         )
-    leaf = stable_id(
-        "pi-session",
-        {
-            "run": fleet_run_id,
-            "repository": repository.repository_id,
-            "step": step_id,
-            "attempt": attempt_number,
-        },
-    )
+    leaf = pi_session_storage_id(fleet_run_id, repository.repository_id, step_id, attempt_number)
     with ExitStack() as owned:
         try:
             state_fd, check_state, state_mounts = _pin_path(layout.root, owned)
@@ -229,15 +231,6 @@ def create_pi_session_directory(
         )
 
 
-@dataclass(frozen=True, slots=True)
-class PiSessionFileObservation:
-    """Bounded native file metadata, without any inferred save or reopen result."""
-
-    device: int
-    inode: int
-    size: int
-
-
 def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionFileObservation:
     """Observe an exact Pi-supplied basename after the original process settles."""
     if (
@@ -274,6 +267,8 @@ def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionF
             named = os.stat(name, dir_fd=pin.directory_fd, follow_symlinks=False)
             if named != info or named.st_ctime_ns != info.st_ctime_ns:
                 raise FleetPlanInvalid("Original Pi session file changed before observation")
-            return PiSessionFileObservation(info.st_dev, info.st_ino, info.st_size)
+            return PiSessionFileObservation(
+                device=info.st_dev, inode=info.st_ino, size=info.st_size
+            )
         except OSError as exc:
             raise FleetPlanInvalid("Original Pi session file is unavailable") from exc

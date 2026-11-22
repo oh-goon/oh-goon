@@ -1,4 +1,4 @@
-// OPENAPI_SHA256: ee6377cca1126b9c93cf9ce45fe867b9907797c579e178cda6bb99fdd55b479c
+// OPENAPI_SHA256: cd890d51a4e5050c1db59f9846660db72f9b4d6666331fc7e00c20d8c66f1fbe
 // AUTO-GENERATED static runtime validators compiled from FastAPI/OpenAPI.
 // Component validators live in deterministic internal shards; transport consumes this facade only.
 // This file executes schema-specific checks; it does not interpret JSON Schema at runtime.
@@ -29,23 +29,24 @@ import { validateGameTapeRunDiff } from "@generated/validatorParts/validatorPart
 import { validateIncludeRepositoryRequest, validateIncludedRepositoryCatalogEntry } from "@generated/validatorParts/validatorPart027";
 import { validateLeagueLineupCatalog, validateLeagueLineupDocument, validateLeagueLineupInspection, validateLeagueLineupSaveRequest } from "@generated/validatorParts/validatorPart029";
 import { validateLeagueMap, validateLocationRequest, validateLocationsResponse } from "@generated/validatorParts/validatorPart030";
-import { validatePlacementQueueSnapshot } from "@generated/validatorParts/validatorPart034";
-import { validatePlanTemplateCatalog } from "@generated/validatorParts/validatorPart039";
-import { validatePrivacyResponse } from "@generated/validatorParts/validatorPart040";
-import { validateQueueCancelRequest, validateQueueReprioritizeRequest } from "@generated/validatorParts/validatorPart041";
-import { validateRecoveryAcknowledgeRequest, validateRecoveryReconcileRequest, validateRecoveryStatus, validateRemoveLocationRequest } from "@generated/validatorParts/validatorPart042";
-import { validateRepositoryCatalogEntry, validateRepositoryDependencyPage } from "@generated/validatorParts/validatorPart043";
-import { validateRunArtifactExport, validateRunArtifactExportRequest } from "@generated/validatorParts/validatorPart048";
-import { validateRunFeedback } from "@generated/validatorParts/validatorPart049";
-import { validateScheduleCatalog, validateScheduleDefinition, validateScheduleDeleteRequest, validateScheduleOccurrence, validateScheduleOccurrenceRepositoryPage, validateScheduleReplace, validateScheduleRunRequest } from "@generated/validatorParts/validatorPart052";
-import { validateScoutFindingsPage, validateScoutGoonDetail, validateScoutGoonLeadersPage, validateScoutHealth, validateScoutMetricDictionary, validateScoutOverview } from "@generated/validatorParts/validatorPart054";
-import { validateScoutPlanDetail, validateScoutRepositoryDetail } from "@generated/validatorParts/validatorPart055";
-import { validateScoutRunEvidence, validateScoutSearchPage } from "@generated/validatorParts/validatorPart056";
-import { validateSharedPlanCatalog, validateSharedPlanDocument, validateSharedPlanFromTemplateRequest, validateSharedPlanInputInspection } from "@generated/validatorParts/validatorPart057";
-import { validateSharedPlanLockPreview, validateSharedPlanLockPreviewRequest, validateSharedPlanPreview, validateSharedPlanPreviewRequest, validateSharedPlanRepairRequest, validateSharedPlanRunHistory, validateSharedPlanRunRequest, validateSharedPlanSaveRequest } from "@generated/validatorParts/validatorPart058";
-import { validateSharedPlanScheduleCreateRequest } from "@generated/validatorParts/validatorPart059";
-import { validateSystemHealth, validateTeamRunRequest } from "@generated/validatorParts/validatorPart060";
-import { validateWaitingPlacementQueueEntry } from "@generated/validatorParts/validatorPart062";
+import { validatePlacementQueueSnapshot } from "@generated/validatorParts/validatorPart035";
+import { validatePlanTemplateCatalog, validatePrivacyResponse } from "@generated/validatorParts/validatorPart040";
+import { validateQueueCancelRequest, validateQueueReprioritizeRequest } from "@generated/validatorParts/validatorPart042";
+import { validateRecoveryAcknowledgeRequest, validateRecoveryReconcileRequest, validateRecoveryStatus, validateRemoveLocationRequest, validateRepositoryCatalogEntry } from "@generated/validatorParts/validatorPart043";
+import { validateRepositoryDependencyPage } from "@generated/validatorParts/validatorPart044";
+import { validateRunArtifactExport, validateRunArtifactExportRequest } from "@generated/validatorParts/validatorPart049";
+import { validateRunFeedback } from "@generated/validatorParts/validatorPart050";
+import { validateScheduleCatalog } from "@generated/validatorParts/validatorPart052";
+import { validateScheduleDefinition, validateScheduleDeleteRequest, validateScheduleOccurrence, validateScheduleOccurrenceRepositoryPage, validateScheduleReplace, validateScheduleRunRequest } from "@generated/validatorParts/validatorPart053";
+import { validateScoutFindingsPage } from "@generated/validatorParts/validatorPart054";
+import { validateScoutGoonDetail, validateScoutGoonLeadersPage, validateScoutHealth, validateScoutMetricDictionary, validateScoutOverview } from "@generated/validatorParts/validatorPart055";
+import { validateScoutPlanDetail, validateScoutRepositoryDetail } from "@generated/validatorParts/validatorPart056";
+import { validateScoutRunEvidence, validateScoutSearchPage } from "@generated/validatorParts/validatorPart057";
+import { validateSharedPlanCatalog, validateSharedPlanDocument, validateSharedPlanFromTemplateRequest, validateSharedPlanInputInspection } from "@generated/validatorParts/validatorPart058";
+import { validateSharedPlanLockPreview, validateSharedPlanLockPreviewRequest, validateSharedPlanPreview, validateSharedPlanPreviewRequest, validateSharedPlanRepairRequest, validateSharedPlanRunHistory, validateSharedPlanRunRequest, validateSharedPlanSaveRequest } from "@generated/validatorParts/validatorPart059";
+import { validateSharedPlanScheduleCreateRequest } from "@generated/validatorParts/validatorPart060";
+import { validateSystemHealth, validateTeamRunRequest } from "@generated/validatorParts/validatorPart061";
+import { validateWaitingPlacementQueueEntry } from "@generated/validatorParts/validatorPart063";
 
 export { ContractValidationError } from "@generated/validatorRuntime";
 

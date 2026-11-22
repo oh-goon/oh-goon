@@ -278,6 +278,7 @@ class FleetPlanRunner:
             )
             if target.agent_deliveries
             else None,
+            pi_session_writer=request.pi_session_writer,
             repair_context=target.agent_repair,
             execution_target=target,
             execution_limits=target.agent_repair.limits

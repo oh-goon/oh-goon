@@ -165,6 +165,10 @@ class JournalConflict(StateConflict):
     code = "JOURNAL_CONFLICT"
 
 
+class PiSessionBusy(StateConflict):
+    code = "PI_SESSION_BUSY"
+
+
 class ExecutionBusy(StateConflict):
     code = "EXECUTION_BUSY"
     retryable = True

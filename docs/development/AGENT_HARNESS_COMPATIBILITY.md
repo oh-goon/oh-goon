@@ -932,10 +932,10 @@ exact and short native selectors, duplicate selectors, equals forms, the
 terminator, missing values and positional task inputs. Explicit ephemeral
 intent selects headless Pi and travels with its resolved profile, executable
 and original Run Step. The JSON and RPC headless launchers continue to select
-`--no-session`. Creation and exact continuation are typed choices and refuse
-before work until their original storage, writer custody and reopen authorities
-are available. The native parser proof covers argument ownership. Extension
-code that changes the effective session remains in HUG-136's scope.
+`--no-session` for ephemeral Runs. HUG-40 defined both persistent choices
+and fenced them at admission. The native parser proof covers argument
+ownership. Extension code that changes the effective session remains in
+HUG-136's scope.
 
 ### Private Pi session storage — HUG-41
 
@@ -958,10 +958,24 @@ Journal remained outside the namespace. The installed ephemeral RPC Run also
 passed through the claimed worker with its managed inference broker.
 
 This scope establishes native storage and command cleanup. Resistance to
-unmanaged host writers and aliases they create remains unqualified. Writer
-custody, crash recovery and exact reopen belong to HUG-42 and HUG-43. The
-existing public admission guard continues to refuse the persistent session
-choices until those owners authorize them.
+unmanaged host writers and aliases they create remains unqualified.
+
+### Original Pi writer custody — HUG-42
+
+The existing claimed worker can admit a fresh managed Pi RPC session for one
+direct Git repository and one native Agent Step in a serial local Run. Pi uses
+the original scoped storage owner and a fixed private session file. Native
+extensions and caller-owned native configuration are outside this mode.
+
+The original Step attempt records its writer reservation before exposing the
+writable directory. The original lease and recorded attempt fence allocation,
+launch, and post-exit observation. A duplicate reservation refuses. File
+metadata and bounded native identity can be recorded only after the original
+process tree settles. Missing or interrupted evidence leaves the reservation
+unconfirmed, even after Run recovery. The file stays with the original Run.
+The observed metadata is separate from the verifier result and carries no
+permission to reopen. HUG-43 owns exact reopen, including effective native
+configuration and branch identity.
 
 ## Native model usage observations — HUG-222, 2026-11-22
 

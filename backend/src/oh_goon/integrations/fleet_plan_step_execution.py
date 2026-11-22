@@ -62,6 +62,7 @@ from oh_goon.core.models.fleet_plan_observation_steps import ResolvedDependencyI
 from oh_goon.core.models.fleet_plan_requirements import UV_PROJECT_SELECTION_SWITCHES
 from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
+from oh_goon.core.models.pi_session_storage import PiSessionDirectoryPin
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.path_authority import (
     RepositoryPathSpace,
@@ -70,6 +71,7 @@ from oh_goon.core.path_authority import (
 from oh_goon.core.path_layouts import AttemptPathLayout
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
+from oh_goon.core.ports.pi_session_writer import PiSessionWriter
 from oh_goon.core.ports.step_output import StepOutputObserver
 from oh_goon.core.time import utc_now
 from oh_goon.engine.command import (
@@ -167,6 +169,7 @@ class CommandRunner(Protocol):
         host_network: bool = False,
         private_configuration_directory: Path | None = None,
         preserve_native_executable_path: bool = True,
+        pi_session_directory: PiSessionDirectoryPin | None = None,
     ) -> CommandResult: ...
 
 
@@ -188,6 +191,7 @@ class _CommandRunOptions(TypedDict, total=False):
     host_network: bool
     private_configuration_directory: Path | None
     preserve_native_executable_path: bool
+    pi_session_directory: PiSessionDirectoryPin | None
 
 
 class _IsolatedExecuteOptions(TypedDict, total=False):
@@ -260,6 +264,7 @@ class StepRuntime:
     execution_identity: ExecutionIdentity | None = None
     workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None = None
     native_profile: ResolvedNativeAgent | None = None
+    pi_session_writer: PiSessionWriter | None = None
     workspace_materialization: ExecutionMaterialization | None = None
     workspace_directory_fd: int | None = None
     require_candidate_current: Callable[[], None] | None = None
@@ -385,6 +390,7 @@ def execute_direct_step(
                         runtime.repository_id,
                     ),
                     runtime,
+                    attempt_number=attempt_number,
                 )
             if process_boundary_settled(outcome) is not True:
                 if runtime.on_unsettled_run_process is not None:
@@ -487,6 +493,7 @@ def execute_strict_step(
             runtime.repository_id,
         ),
         runtime,
+        attempt_number=attempt_number,
     )
 
 
@@ -495,6 +502,8 @@ def _execute_typed_step(
     step: ResolvedPlanStep,
     process: _StepProcess,
     runtime: StepRuntime,
+    *,
+    attempt_number: int,
 ) -> StepOutcome:
     try:
         if isinstance(step, ResolvedAgentStep):
@@ -574,6 +583,7 @@ def _execute_typed_step(
                         process,
                         runtime,
                         deadline=native_deadline,
+                        attempt_number=attempt_number,
                     )
                 observation_step = ResolvedCommandStep(
                     step_id=handoff.step_id,
@@ -1386,6 +1396,7 @@ def _direct_step_command_runner(
     preserve_native_executable_path: bool = True,
     retain_output_tail: bool = False,
     preserve_stdout_whitespace: bool = False,
+    pi_session_directory: PiSessionDirectoryPin | None = None,
 ) -> CommandResult:
     if (
         read_only_mounts
@@ -1394,6 +1405,7 @@ def _direct_step_command_runner(
         or allowed_write_roots
         or host_network
         or private_configuration_directory is not None
+        or pi_session_directory is not None
         or not preserve_native_executable_path
         or retain_output_tail
     ):
