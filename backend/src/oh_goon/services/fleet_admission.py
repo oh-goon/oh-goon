@@ -876,6 +876,13 @@ class FleetAdmissionPlanner:
         if not isinstance(target, FleetPlanTarget):
             return ()
 
+        if target.candidate_workspace is not None and (
+            len(selected) != 1
+            or selected[0].repository.repository_id
+            != target.candidate_workspace.workspace.repository_id
+        ):
+            raise TargetSelectionError("Candidate execution requires its exact registered subject")
+
         reviewed = target.reviewed_repository_source
         if reviewed is not None and len(selected) != 1:
             raise TargetSelectionError(

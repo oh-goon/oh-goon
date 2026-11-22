@@ -14,9 +14,14 @@ import pytest
 
 import oh_goon.runtime.execution_evidence_acceptance as acceptance_module
 from oh_goon.core.errors import ExecutionEvidenceRejected
+from oh_goon.core.models.execution_materialization import (
+    ExecutionMaterialization,
+    execution_materialization_fingerprint,
+)
 from oh_goon.core.models.workspace_lease import WorkspaceLease
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution_evidence_acceptance import ExecutionEvidenceAcceptanceAuthority
+from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
 NOW = datetime(2026, 10, 15, 8, 0, tzinfo=UTC)
 
@@ -44,7 +49,7 @@ def _acceptance_ledger(tmp_path: Path, monkeypatch, *, expiry_seconds: int = 60)
         issued_at=NOW - timedelta(seconds=60),
         expires_at=NOW + timedelta(seconds=expiry_seconds),
     )
-    materialization = SimpleNamespace(
+    materialization = ExecutionMaterialization.model_construct(
         attempt_id=assignment.attempt_id,
         materialization_id="materialization-a",
         workspace_id=workspace.workspace_id,
@@ -61,6 +66,13 @@ def _acceptance_ledger(tmp_path: Path, monkeypatch, *, expiry_seconds: int = 60)
         producer_contract_version="hashmarks.repository-work-selection.v1",
         producer_contract_identity="sha256:contract",
         producer_work_identity="sha256:work",
+        created_at=NOW - timedelta(seconds=30),
+    )
+    materialization = ExecutionMaterialization.model_validate(
+        {
+            **materialization.model_dump(),
+            "resolved_fingerprint": execution_materialization_fingerprint(materialization),
+        }
     )
     with database.transaction(write=True) as conn:
         conn.execute(
@@ -128,16 +140,15 @@ def _acceptance_ledger(tmp_path: Path, monkeypatch, *, expiry_seconds: int = 60)
                 materialization.executor_id,
                 materialization.executor_generation,
                 materialization.resolved_fingerprint,
-                '{"producer":"hashmarks","producer_artifact_identity":"sha256:producer",'
-                '"producer_contract_version":"hashmarks.repository-work-selection.v1",'
-                '"producer_contract_identity":"sha256:contract","producer_work_identity":"sha256:work"}',
+                materialization.model_dump_json(),
             ),
         )
     # Never install a second runtime owner. In this SQL-focused test only,
     # the expensive original physical source/quiescence preflight is held stable;
     # accept() still executes original durable reads, validation and persistence.
-    authority = object.__new__(ExecutionEvidenceAcceptanceAuthority)
-    authority._database = database
+    authority = ExecutionEvidenceAcceptanceAuthority(
+        database, workspaces=RepositoryWorkspaceAuthority(database, initialize=False)
+    )
     monkeypatch.setattr(authority, "_validate_live_authority", lambda *a, **kw: None)
     return database, workspace, assignment, lease, materialization, authority
 
@@ -236,8 +247,9 @@ def test_lost_ack_retry_cannot_create_second_acceptance(tmp_path, monkeypatch):
     monkeypatch.setattr(acceptance_module, "utc_now", lambda: NOW)
     _accept(authority, w, a, lease, m)  # committed, caller loses acknowledgment
     reopened = LocalDatabase(tmp_path / "ledger.db", journal_mode="DELETE")
-    authority = object.__new__(ExecutionEvidenceAcceptanceAuthority)
-    authority._database = reopened
+    authority = ExecutionEvidenceAcceptanceAuthority(
+        reopened, workspaces=RepositoryWorkspaceAuthority(reopened, initialize=False)
+    )
     monkeypatch.setattr(authority, "_validate_live_authority", lambda *args, **kwargs: None)
     with pytest.raises(ExecutionEvidenceRejected, match="already accepted"):
         _accept(authority, w, a, lease, m, "sha256:retry")

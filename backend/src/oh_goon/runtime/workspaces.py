@@ -9,9 +9,10 @@ import stat
 import tempfile
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, TypedDict, cast
+from typing import TYPE_CHECKING, Callable, TypedDict, cast
 
 from oh_goon.core.errors import (
     CandidateCheckpointNotFound,
@@ -21,22 +22,34 @@ from oh_goon.core.errors import (
     WorkspaceStateStale,
     WorkspaceTransitionInvalid,
 )
+from oh_goon.core.models.execution_materialization import ExecutionMaterialization
+from oh_goon.core.models.operation import FleetPlanOperationEvidence
+from oh_goon.core.models.run_events import ProcessStartingEvent, StepCancelledEvent
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.models.workspace import CandidateCheckpoint, WorkspaceRef, WorkspaceState
 from oh_goon.core.path_authority import canonical_path, ensure_private_directory, storage_component
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.product_identity import new_checkpoint_id, new_workspace_id
 from oh_goon.core.time import utc_now
+from oh_goon.core.vocabulary import FleetRunEventType
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
 from oh_goon.engine.git import GitService
 from oh_goon.integrations._copy_transport import copy_regular_file
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.source_snapshot import (
+    SourcePathValidator,
     SourceSnapshotBinding,
     snapshot_source_directory,
     source_snapshot_identity,
     verify_clean_source_snapshot,
 )
 from oh_goon.runtime.database import LocalDatabase
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.run import FleetRunDetail
+    from oh_goon.core.models.workspace_lease import WorkspaceLease
+    from oh_goon.runtime.journal_view import JournalReadView
+    from oh_goon.runtime.workspace_leases import NativeWorkspaceQuiescence
 
 
 def _worktree_git_environment() -> dict[str, str]:
@@ -53,7 +66,18 @@ def _worktree_git_environment() -> dict[str, str]:
         "PATH": os.environ.get("PATH", os.defpath),
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "core.fsmonitor",
+        "GIT_CONFIG_VALUE_0": "false",
+        "GIT_CONFIG_KEY_1": "core.hooksPath",
+        "GIT_CONFIG_VALUE_1": os.devnull,
+        "GIT_OPTIONAL_LOCKS": "0",
     }
+
+
+def _worktree_git_service(git: GitService | None = None) -> GitService:
+    selected = git or GitService()
+    return selected if selected.metadata_only else replace(selected, metadata_only=True)
 
 
 _ALLOWED_TRANSITIONS: dict[WorkspaceLifecycleState, frozenset[WorkspaceLifecycleState]] = {
@@ -117,6 +141,7 @@ class _RetirementReceipt(TypedDict):
     common_inode: int
     destination_device: int
     destination_inode: int
+    destination_mode: int
     git_marker_sha256: str
     checkpoint_sha256: str
     checkpoint_byte_count: int
@@ -131,10 +156,14 @@ class RepositoryWorkspaceAuthority:
     workspace that later execution attempts may receive through explicit assignment.
     """
 
-    def __init__(self, database: LocalDatabase) -> None:
+    def __init__(self, database: LocalDatabase, *, initialize: bool = True) -> None:
         self._database = database
         layout = ApplicationStatePathLayout.from_database(database.path)
-        self._root = ensure_private_directory(layout.managed_workspaces)
+        self._root = (
+            ensure_private_directory(layout.managed_workspaces)
+            if initialize
+            else layout.managed_workspaces
+        )
 
     @staticmethod
     @contextmanager
@@ -391,6 +420,9 @@ class RepositoryWorkspaceAuthority:
         source: Path,
         *,
         expected_state_version: int,
+        source_path_validator: SourcePathValidator | None = None,
+        max_bytes: int | None = None,
+        max_entries: int | None = None,
     ) -> tuple[WorkspaceState, SourceSnapshotBinding]:
         """Publish one clean source-only READ_SNAPSHOT and advance ALLOCATED -> READY.
 
@@ -429,6 +461,9 @@ class RepositoryWorkspaceAuthority:
                 source,
                 staging,
                 label=f"READ_SNAPSHOT {workspace.workspace_id}",
+                source_path_validator=source_path_validator,
+                max_bytes=max_bytes,
+                max_entries=max_entries,
             )
             binding = SourceSnapshotBinding(snapshot_path=staging, identity=identity)
             verify_clean_source_snapshot(binding, label="staged READ_SNAPSHOT")
@@ -657,11 +692,11 @@ class RepositoryWorkspaceAuthority:
 
         verify_clean_source_snapshot(source_snapshot, label="candidate source snapshot")
         source_repository = canonical_path(source_repository)
-        service = git or GitService()
-        root = service.root(source_repository)
+        service = _worktree_git_service(git)
+        root = service.root(source_repository, env=_worktree_git_environment())
         if root is None or root != source_repository:
             raise WorkspaceStateStale("Candidate source must be the canonical Git repository root")
-        source_observation = service.observe(source_repository)
+        source_observation = service.observe(source_repository, env=_worktree_git_environment())
         if source_observation.head_sha != workspace.base_revision:
             raise WorkspaceStateStale(
                 "Candidate base revision does not match source repository HEAD: "
@@ -732,7 +767,7 @@ class RepositoryWorkspaceAuthority:
             identity = source_snapshot_identity(destination)
             if identity != source_snapshot.identity:
                 raise WorkspaceStateStale("Candidate bytes differ from admitted source snapshot")
-            observation = service.observe(destination)
+            observation = service.observe(destination, env=_worktree_git_environment())
             if observation.head_sha != workspace.base_revision or observation.changed_files:
                 raise WorkspaceStateStale(
                     "Candidate worktree is not clean at its declared base revision"
@@ -968,7 +1003,7 @@ class RepositoryWorkspaceAuthority:
             or self.reference(workspace.workspace_id) != workspace
         ):
             raise WorkspaceStateStale("Worktree reconciliation requires exact durable identity")
-        service = git or GitService()
+        service = _worktree_git_service(git)
         with self._database.transaction(write=True) as connection:
             state = self._state_for_update(connection, workspace.workspace_id)
             payload = self._read_worktree_marker(workspace, state)
@@ -1087,11 +1122,11 @@ class RepositoryWorkspaceAuthority:
 
     @staticmethod
     def _require_no_ever_started_writer(connection: sqlite3.Connection, workspace_id: str) -> None:
-        """Until independent native LACE is qualified, never infer absence from an ACK.
+        """Legacy writer controls never infer physical absence from a stored ACK.
 
-        A settled lease or locally stored fence is NOT an independent physical
-        observer. This development path supports only candidates that never
-        delegated writer authority. Full writer-bearing cleanup remains gated.
+        Native namespace materializations carry separate original-backend facts
+        and are independently checked by this owner's namespace retirement cut.
+        Generic process-group, cgroup and remote writer controls stay unqualified.
         """
         row = connection.execute(
             "SELECT 1 FROM workspace_leases WHERE workspace_id=? "
@@ -1100,6 +1135,304 @@ class RepositoryWorkspaceAuthority:
         ).fetchone()
         if row is not None:
             raise WorkspaceStateStale("Native Git retirement requires independent writer absence")
+
+    def _require_native_writer_absence(
+        self,
+        connection: sqlite3.Connection,
+        workspace_id: str,
+        *,
+        physical_identity: tuple[int, int, int] | None = None,
+    ) -> None:
+        """Join every native writer to original accepted Run/Step facts in this cut.
+
+        Lease status and fence JSON are coordination data, never the physical
+        witness. Missing results after cancellation/crash preserve the candidate.
+        """
+        from oh_goon.runtime.journal import Journal
+        from oh_goon.runtime.workspace_leases import require_native_workspace_quiescence
+
+        rows = connection.execute(
+            "SELECT * FROM execution_materializations WHERE workspace_id=?",
+            (workspace_id,),
+        ).fetchall()
+        materializations = tuple(
+            ExecutionMaterialization.model_validate(json.loads(row["payload_json"])) for row in rows
+        )
+        if not any(value.writer_scope_kind is not None for value in materializations):
+            return
+        if any(value.writer_scope_kind != "native_namespace_scope" for value in materializations):
+            raise WorkspaceStateStale(
+                "Unqualified materialization prevents native writer retirement"
+            )
+        if len({value.lease_id for value in materializations}) != len(materializations):
+            raise WorkspaceStateStale("Ambiguous native writer materializations prevent retirement")
+        if physical_identity is None or any(
+            (value.workspace_device, value.workspace_inode, value.workspace_mode)
+            != physical_identity
+            for value in materializations
+        ):
+            raise WorkspaceStateStale(
+                "Native retirement physical workspace differs from its writers"
+            )
+        checkpoints = connection.execute(
+            "SELECT sha256, byte_count, entry_count FROM candidate_checkpoints "
+            "WHERE workspace_id=? AND parent_checkpoint_id IS NULL",
+            (workspace_id,),
+        ).fetchall()
+        current = connection.execute(
+            "SELECT c.sha256, c.byte_count, c.entry_count FROM candidate_checkpoints AS c "
+            "JOIN workspace_state AS s ON s.current_checkpoint_id=c.checkpoint_id "
+            "WHERE s.workspace_id=? AND c.workspace_id=s.workspace_id",
+            (workspace_id,),
+        ).fetchone()
+        if len(checkpoints) != 1 or current is None or tuple(current) != tuple(checkpoints[0]):
+            raise WorkspaceStateStale(
+                "Native retirement preserves source changed from the original candidate"
+            )
+        view = Journal(self._database).read_view_from_connection(connection)
+        for row, materialization in zip(rows, materializations, strict=True):
+            if any(
+                row[name] != getattr(materialization, name)
+                for name in (
+                    "materialization_id",
+                    "workspace_id",
+                    "attempt_id",
+                    "assignment_id",
+                    "assignment_fingerprint",
+                    "input_checkpoint_id",
+                    "lease_id",
+                    "lease_generation",
+                    "executor_id",
+                    "executor_generation",
+                    "resolved_fingerprint",
+                )
+            ):
+                raise WorkspaceStateStale("Native writer durable materialization differs")
+            lease = connection.execute(
+                "SELECT * FROM workspace_leases WHERE lease_id=?", (materialization.lease_id,)
+            ).fetchone()
+            if (
+                lease is None
+                or lease["status"] not in {"RELEASED", "EXPIRED"}
+                or any(
+                    lease[name] != getattr(materialization, name)
+                    for name in (
+                        "workspace_id",
+                        "attempt_id",
+                        "assignment_id",
+                        "assignment_fingerprint",
+                        "input_checkpoint_id",
+                        "lease_generation",
+                        "executor_id",
+                        "executor_generation",
+                    )
+                )
+            ):
+                raise WorkspaceStateStale("Native writer lease is unsettled or changed")
+            report = view.operation(materialization.attempt_id)
+            if report is None:
+                self._cancelled_native_writer_quiescence(view, materialization)
+                continue
+            if not isinstance(report.evidence, FleetPlanOperationEvidence):
+                raise WorkspaceStateStale("Original native writer operation result is unavailable")
+            run_id = report.provenance.fleet_run_id
+            detail = view.run_detail(run_id) if run_id is not None else None
+            target = report.target
+            receipt = report.evidence.candidate_receipt
+            if (
+                detail is None
+                or not detail.run.status.terminal
+                or not isinstance(target, FleetPlanTarget)
+                or target != detail.run.target
+                or target.candidate_workspace is None
+                or target.candidate_workspace.workspace.workspace_id != workspace_id
+                or target.candidate_workspace.fleet_run_id != run_id
+                or target.candidate_workspace.workspace.repository_id
+                != report.repository.repository_id
+                or target.plan.native_agent is None
+                or target.plan.native_agent.profile.backend != "bubblewrap"
+                or target.plan.native_agent.profile.sandbox_owner != "harness"
+                or target.plan.native_agent.agent != "pi"
+                or target.plan.native_agent.interactive
+                or receipt is not None
+                and (
+                    receipt.materialization != materialization
+                    or receipt.workspace != target.candidate_workspace.workspace
+                )
+                or tuple((step.step_id, step.kind) for step in report.evidence.plan.steps)
+                != tuple((step.step_id, step.kind) for step in target.plan.steps)
+            ):
+                raise WorkspaceStateStale("Original native writer result authority is incomplete")
+            physical = []
+            scopes = []
+            for step in report.evidence.plan.steps:
+                if step.status == "SKIPPED" and not step.attempts:
+                    continue
+                if step.settlement.cleanup != "VERIFIED" or not step.attempts:
+                    raise WorkspaceStateStale("Native writer Step cleanup is unavailable")
+                for attempt in step.attempts:
+                    isolation = attempt.standard_isolation
+                    if (
+                        attempt.physical_execution_id is None
+                        or attempt.supervisor is None
+                        or attempt.supervisor.final_process_group_quiescent is not True
+                        or isolation is None
+                        or isolation.filesystem_cleanup != "verified"
+                        or isolation.workspace_writer_scope is None
+                    ):
+                        raise WorkspaceStateStale("Native writer namespace closure is unavailable")
+                    physical.append(attempt.physical_execution_id)
+                    scopes.append(isolation.workspace_writer_scope)
+            configuration = target.plan.native_agent.backend_configuration_id
+            if configuration is None:
+                raise WorkspaceStateStale("Original native writer backend identity is unavailable")
+            canonical_physical = self.native_writer_launch_ids(detail, materialization)
+            if len(set(canonical_physical)) != len(canonical_physical) or set(
+                canonical_physical
+            ) != set(physical):
+                raise WorkspaceStateStale("Native writer result omitted original physical launches")
+            require_native_workspace_quiescence(
+                materialization,
+                scopes=tuple(scopes),
+                physical_execution_ids=tuple(physical),
+                backend_configuration_id=configuration,
+            )
+
+    @staticmethod
+    def native_writer_launch_ids(
+        detail: FleetRunDetail, materialization: ExecutionMaterialization
+    ) -> tuple[str, ...]:
+        target = detail.run.target
+        if (
+            not isinstance(target, FleetPlanTarget)
+            or target.candidate_workspace is None
+            or target.candidate_workspace.fleet_run_id != detail.run.fleet_run_id
+            or target.candidate_workspace.workspace.workspace_id != materialization.workspace_id
+            or target.candidate_workspace.checkpoint.checkpoint_id
+            != materialization.input_checkpoint_id
+        ):
+            raise WorkspaceStateStale("Native writer Run has no original candidate authority")
+        repository_id = target.candidate_workspace.workspace.repository_id
+        starting = tuple(
+            event
+            for event in detail.lifecycle_events
+            if isinstance(event, ProcessStartingEvent)
+            and event.event_type is FleetRunEventType.PROCESS_STARTING
+            and event.workspace_materialization_id is not None
+        )
+        if any(
+            event.workspace_materialization_id != materialization.materialization_id
+            or event.operation_id != materialization.attempt_id
+            or event.repository_id != repository_id
+            or event.step_id not in {step.step_id for step in target.plan.steps}
+            for event in starting
+        ):
+            raise WorkspaceStateStale("Native writer launch has foreign materialization authority")
+        return tuple(event.physical_execution_id for event in starting)
+
+    @staticmethod
+    def _cancelled_native_writer_quiescence(
+        view: JournalReadView, materialization: ExecutionMaterialization
+    ) -> NativeWorkspaceQuiescence:
+        """Read complete original cancellation facts; do not invent a product result."""
+        from oh_goon.runtime.workspace_leases import (
+            NativeWorkspaceQuiescence,
+            require_native_workspace_quiescence,
+        )
+
+        candidates = tuple(
+            detail
+            for detail in view.run_details()
+            if isinstance(detail.run.target, FleetPlanTarget)
+            and detail.run.target.candidate_workspace is not None
+            and detail.run.target.candidate_workspace.workspace.workspace_id
+            == materialization.workspace_id
+            and detail.run.target.candidate_workspace.fleet_run_id == detail.run.fleet_run_id
+        )
+        if len(candidates) != 1:
+            raise WorkspaceStateStale("Original cancelled writer Run authority is unavailable")
+        detail = candidates[0]
+        target = detail.run.target
+        assert isinstance(target, FleetPlanTarget) and target.candidate_workspace is not None
+        native = target.plan.native_agent
+        if (
+            not detail.run.status.terminal
+            or native is None
+            or native.agent != "pi"
+            or native.profile.backend != "bubblewrap"
+            or native.profile.sandbox_owner != "harness"
+            or native.interactive
+            or native.backend_configuration_id is None
+            or materialization.input_checkpoint_id
+            != target.candidate_workspace.checkpoint.checkpoint_id
+        ):
+            raise WorkspaceStateStale(
+                "Original cancelled writer is not a terminal qualified candidate"
+            )
+        physical = RepositoryWorkspaceAuthority.native_writer_launch_ids(detail, materialization)
+        scopes = []
+        for event in detail.lifecycle_events:
+            if (
+                not isinstance(event, StepCancelledEvent)
+                or event.operation_id != materialization.attempt_id
+            ):
+                continue
+            cancellation = event.cancellation
+            if cancellation is None or cancellation.standard_isolation is None:
+                continue
+            isolation = cancellation.standard_isolation
+            if (
+                isolation.workspace_writer_scope is None
+                or isolation.filesystem_cleanup != "verified"
+                or cancellation.supervisor is None
+                or cancellation.supervisor.final_process_group_quiescent is not True
+                or cancellation.physical_execution_id
+                != isolation.workspace_writer_scope.physical_execution_id
+            ):
+                raise WorkspaceStateStale("Cancelled native writer namespace closure is incomplete")
+            scopes.append(isolation.workspace_writer_scope)
+        require_native_workspace_quiescence(
+            materialization,
+            scopes=tuple(scopes),
+            physical_execution_ids=physical,
+            backend_configuration_id=native.backend_configuration_id,
+        )
+        return NativeWorkspaceQuiescence(tuple(scopes), physical, native.backend_configuration_id)
+
+    def recorded_cancelled_writer_quiescence(
+        self, workspace: WorkspaceRef, lease: WorkspaceLease
+    ) -> NativeWorkspaceQuiescence:
+        """Observe exact canonical closure for explicitly authorized cleanup only."""
+        from oh_goon.runtime.journal import Journal
+        from oh_goon.runtime.workspace_leases import WorkspaceLeaseStore
+
+        if (
+            self.reference(workspace.workspace_id) != workspace
+            or lease.workspace_id != workspace.workspace_id
+        ):
+            raise WorkspaceStateStale("Cancelled writer cleanup belongs to another workspace")
+        with self._database.transaction() as connection:
+            materialization = WorkspaceLeaseStore._native_materialization_in(connection, lease)
+            if materialization is None:
+                raise WorkspaceStateStale("Cancelled writer has no native materialization")
+            view = Journal(self._database).read_view_from_connection(connection)
+            if view.operation(materialization.attempt_id) is not None:
+                raise WorkspaceStateStale(
+                    "Cancelled cleanup cannot replace an original operation result"
+                )
+            return self._cancelled_native_writer_quiescence(view, materialization)
+
+    @staticmethod
+    def _require_no_native_ignored_output(
+        connection: sqlite3.Connection, workspace_id: str, path: Path, git: GitService
+    ) -> None:
+        native = connection.execute(
+            "SELECT 1 FROM execution_materializations WHERE workspace_id=? "
+            "AND json_extract(payload_json, '$.writer_scope_kind')='native_namespace_scope' LIMIT 1",
+            (workspace_id,),
+        ).fetchone()
+        if native is not None:
+            git.require_no_ignored_files(path, env=_worktree_git_environment())
 
     def _worktree_retirement_preflight(
         self, workspace: WorkspaceRef, *, expected_state_version: int, git: GitService
@@ -1137,6 +1470,11 @@ class RepositoryWorkspaceAuthority:
             info = path.lstat()
             if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
                 raise WorkspaceStateStale("Native Git retirement destination replaced")
+            self._require_native_writer_absence(
+                connection,
+                workspace.workspace_id,
+                physical_identity=(info.st_dev, info.st_ino, info.st_mode),
+            )
             marker = path / ".git"
             if (
                 marker.is_symlink()
@@ -1177,6 +1515,7 @@ class RepositoryWorkspaceAuthority:
                 raise WorkspaceStateStale(
                     "Native Git retirement refuses dirty or changed candidate"
                 )
+            self._require_no_native_ignored_output(connection, workspace.workspace_id, path, git)
             checkpoint = connection.execute(
                 "SELECT sha256, byte_count, entry_count FROM candidate_checkpoints WHERE checkpoint_id=? "
                 "AND workspace_id=?",
@@ -1207,6 +1546,7 @@ class RepositoryWorkspaceAuthority:
                 "common_inode": common_info.st_ino,
                 "destination_device": info.st_dev,
                 "destination_inode": info.st_ino,
+                "destination_mode": info.st_mode,
                 "git_marker_sha256": str(row["git_marker_sha256"]),
                 "checkpoint_sha256": identity.sha256,
                 "checkpoint_byte_count": identity.byte_count,
@@ -1291,11 +1631,11 @@ class RepositoryWorkspaceAuthority:
     ) -> WorkspaceState:
         """One original-owner native Git removal followed by SQLite RELEASED cut.
 
-        Only FINALIZED, clean, never-delegated worktrees qualify until an
-        independent writer-absence witness is available. A Git subprocess
-        failure can leave effects; its receipt is retained for restart proof.
+        FINALIZED worktrees must be clean and either never delegated or have
+        complete original native namespace closure. Changed and ignored output
+        stays retained. A Git failure keeps its receipt for original-owner replay.
         """
-        service = git or GitService()
+        service = _worktree_git_service(git)
         payload = self._worktree_retirement_preflight(
             workspace,
             expected_state_version=expected_state_version,
@@ -1331,6 +1671,10 @@ class RepositoryWorkspaceAuthority:
             observed = service.observe(path, env=_worktree_git_environment())
             if observed.head_sha != workspace.base_revision or observed.changed_files:
                 raise WorkspaceStateStale("Native Git candidate changed during retirement prework")
+            with self._database.transaction() as connection:
+                self._require_no_native_ignored_output(
+                    connection, workspace.workspace_id, path, service
+                )
             identity = source_snapshot_identity(path)
             if (identity.sha256, identity.byte_count, identity.entry_count) != (
                 payload["checkpoint_sha256"],
@@ -1378,7 +1722,7 @@ class RepositoryWorkspaceAuthority:
                 or (opened.st_dev, opened.st_ino) != (observed.st_dev, observed.st_ino)
             ):
                 raise WorkspaceStateStale("Native Git retirement receipt replaced during replay")
-            return self._reconcile_retirement_locked(workspace, git=git or GitService())
+            return self._reconcile_retirement_locked(workspace, git=_worktree_git_service(git))
         finally:
             os.close(descriptor)
 
@@ -1403,6 +1747,18 @@ class RepositoryWorkspaceAuthority:
             if state.lifecycle_state is WorkspaceLifecycleState.FINALIZED:
                 self._require_no_unsettled_writer(connection, state)
                 self._require_no_ever_started_writer(connection, workspace.workspace_id)
+                mode = payload.get("destination_mode")
+                self._require_native_writer_absence(
+                    connection,
+                    workspace.workspace_id,
+                    physical_identity=(
+                        payload["destination_device"],
+                        payload["destination_inode"],
+                        mode,
+                    )
+                    if isinstance(mode, int) and not isinstance(mode, bool)
+                    else None,
+                )
                 row = connection.execute(
                     "SELECT base_revision, git_marker_sha256 FROM workspace_worktrees WHERE workspace_id=?",
                     (workspace.workspace_id,),
@@ -1476,7 +1832,7 @@ class RepositoryWorkspaceAuthority:
                 raise CandidateCheckpointStale(
                     f"Candidate bytes changed after checkpoint {checkpoint.checkpoint_id}"
                 )
-            observation = (git or GitService()).observe(path)
+            observation = _worktree_git_service(git).observe(path, env=_worktree_git_environment())
             if observation.head_sha != workspace.base_revision:
                 raise CandidateCheckpointStale(
                     "Candidate Git base revision changed after checkpoint"
@@ -1522,8 +1878,8 @@ class RepositoryWorkspaceAuthority:
 
         path = self.physical_path(workspace)
         self._verify_worktree_metadata(workspace, path)
-        service = git or GitService()
-        observation = service.observe(path)
+        service = _worktree_git_service(git)
+        observation = service.observe(path, env=_worktree_git_environment())
         if observation.head_sha != workspace.base_revision:
             raise CandidateCheckpointStale("Candidate Git base revision changed before checkpoint")
         identity = source_snapshot_identity(path)
@@ -1624,6 +1980,8 @@ class RepositoryWorkspaceAuthority:
             current = self._state_for_update(connection, workspace_id)
             self._require_version(current, expected_state_version)
             self._require_transition(current.lifecycle_state, next_state)
+            if next_state is WorkspaceLifecycleState.FINALIZED:
+                self._require_no_unsettled_writer(connection, current)
             return self._write_state(connection, current=current, next_state=next_state)
 
     def release(self, workspace_id: str, *, expected_state_version: int) -> WorkspaceState:
@@ -1894,6 +2252,9 @@ class RepositoryWorkspaceAuthority:
 
     @staticmethod
     def _require_no_unsettled_writer(connection: sqlite3.Connection, state: WorkspaceState) -> None:
+        RepositoryWorkspaceAuthority._require_no_admitted_candidate_in(
+            connection, state.workspace_id
+        )
         if state.current_lease_id is not None:
             raise WorkspaceStateStale(
                 f"Workspace release requires settled lease: {state.workspace_id}"
@@ -1901,7 +2262,11 @@ class RepositoryWorkspaceAuthority:
         row = connection.execute(
             """SELECT lease_id FROM workspace_leases WHERE workspace_id=?
                AND (status IN ('ACTIVE', 'QUARANTINED') OR
-                   (writer_authority_kind IS NOT NULL AND fence_evidence_json IS NULL))
+                   ((writer_authority_kind IS NOT NULL OR EXISTS (
+                       SELECT 1 FROM execution_materializations m
+                       WHERE m.lease_id=workspace_leases.lease_id
+                       AND json_extract(m.payload_json, '$.writer_scope_kind')='native_namespace_scope'
+                   )) AND fence_evidence_json IS NULL))
                LIMIT 1""",
             (state.workspace_id,),
         ).fetchone()
@@ -1909,6 +2274,33 @@ class RepositoryWorkspaceAuthority:
             raise WorkspaceStateStale(
                 f"Workspace release has unproven writer quiescence: {state.workspace_id}"
             )
+
+    @staticmethod
+    def _require_no_admitted_candidate_in(
+        connection: sqlite3.Connection, workspace_id: str
+    ) -> None:
+        # Consume the canonical Journal read owner in this same write cut.
+        # This is also the established local-state reset's read construction;
+        # no mutable workspace/Run reference registry is introduced.
+        from oh_goon.core.models.target import FleetPlanTarget
+        from oh_goon.runtime.journal_store import JournalFactStore
+        from oh_goon.runtime.journal_view import JournalReadView
+
+        view = JournalReadView.from_entries(
+            tuple(JournalFactStore.load_entries(connection)), "workspace-lifecycle"
+        )
+        for detail in view.run_details():
+            target = detail.run.target
+            if detail.run.status.terminal or not isinstance(target, FleetPlanTarget):
+                continue
+            candidate = target.candidate_workspace
+            if candidate is not None and workspace_id in {
+                candidate.workspace.workspace_id,
+                candidate.source_workspace.workspace_id,
+            }:
+                raise WorkspaceStateStale(
+                    "Workspace is still referenced by an admitted nonterminal candidate Run"
+                )
 
     def _verify_worktree_metadata(self, workspace: WorkspaceRef, path: Path) -> None:
         marker = path / ".git"

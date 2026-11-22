@@ -246,6 +246,15 @@ class FleetRunLifecycle:
         rerun_from_run_id: str | None = None,
     ) -> None:
         """Reject uncut Fleet ingress before Plan work, replay, or native observation."""
+        if isinstance(target, FleetPlanTarget) and target.candidate_workspace is not None:
+            if (
+                run_id != target.candidate_workspace.fleet_run_id
+                or readmitted_from_run_id is not None
+                or rerun_from_run_id is not None
+            ):
+                raise FleetPlanInvalid(
+                    "Candidate execution requires its exact fresh Run admission identity"
+                )
         if isinstance(target, FleetPlanTarget) and target.agent_repair is not None:
             repair = target.agent_repair
             if readmitted_from_run_id is not None or rerun_from_run_id is not None:

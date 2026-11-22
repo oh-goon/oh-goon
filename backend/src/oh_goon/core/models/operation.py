@@ -6,6 +6,7 @@ from pydantic import Field, model_validator
 
 from oh_goon.core.capability_model import operation_evidence_kind
 from oh_goon.core.models.base import ImmutableModel
+from oh_goon.core.models.candidate_execution_receipt import CandidateExecutionReceipt
 from oh_goon.core.models.canonical_result_semantics import CanonicalPlanResult
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.explanation import ReasonCode
@@ -17,7 +18,7 @@ from oh_goon.core.models.policy import PolicySnapshot
 from oh_goon.core.models.provenance import OperationProvenance
 from oh_goon.core.models.recipe import UvRecipeResult
 from oh_goon.core.models.repository import RepositoryIdentity
-from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.vocabulary import (
     AuditState,
     CheckState,
@@ -350,6 +351,9 @@ class FleetPlanOperationEvidence(StrictModel):
     kind: Literal["FLEET_PLAN"]
     plan: FleetPlanResult
     canonical_result: CanonicalPlanResult | None = None
+    candidate_receipt: CandidateExecutionReceipt | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 OperationEvidence = Annotated[
@@ -430,6 +434,16 @@ class OperationReport(StrictModel):
         """Consume canonical Step cleanup without reconstructing process success."""
         if not isinstance(self.evidence, FleetPlanOperationEvidence):
             return "SETTLED"
+        if (
+            isinstance(self.target, FleetPlanTarget)
+            and self.target.candidate_workspace is not None
+            and (
+                self.evidence.candidate_receipt is None
+                or self.evidence.candidate_receipt.settlement != "checkpointed"
+                or self.evidence.candidate_receipt.source_cleanup == "unverified"
+            )
+        ):
+            return "UNRESOLVED"
         for step in self.evidence.plan.steps:
             if (
                 step.settlement.cleanup == "UNVERIFIED"
@@ -461,6 +475,18 @@ class OperationReport(StrictModel):
                 f"Operation action {self.action.value} requires {expected.value} evidence, "
                 f"not {self.evidence.kind}"
             )
+        if isinstance(self.evidence, FleetPlanOperationEvidence):
+            receipt = self.evidence.candidate_receipt
+            if receipt is not None and (
+                not isinstance(self.target, FleetPlanTarget)
+                or self.target.candidate_workspace is None
+                or receipt.workspace != self.target.candidate_workspace.workspace
+                or receipt.workspace.repository_id != self.repository.repository_id
+                or receipt.assignment.attempt_id != self.provenance.operation_id
+                or receipt.materialization.input_checkpoint_id
+                != self.target.candidate_workspace.checkpoint.checkpoint_id
+            ):
+                raise ValueError("Candidate receipt does not belong to this original Run effect")
         return self
 
     @model_validator(mode="after")

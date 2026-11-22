@@ -186,6 +186,21 @@ def _add_run_readback_commands[_Parser: argparse.ArgumentParser](
     history.add_argument("--before-revision", type=_admission_revision)
     history.add_argument("--limit", type=_event_page_limit, default=20)
     history.add_argument("--json", action="store_true", dest="as_json")
+    candidate = plan_subparsers.add_parser(
+        "candidate", help="Inspect the real owned workspace and current state of a candidate Run"
+    )
+    candidate.add_argument("fleet_run_id")
+    candidate.add_argument("--json", action="store_true", dest="as_json")
+    retire = plan_subparsers.add_parser(
+        "retire-candidate", help="Explicitly retire a qualified clean candidate through its owner"
+    )
+    retire.add_argument("fleet_run_id")
+    retire.add_argument("--expected-state-version", type=int, required=True)
+    retire.add_argument("--authorize", action="store_true", required=True)
+    retire.add_argument(
+        "--reconcile", action="store_true", help="Reconcile an existing owned retirement receipt"
+    )
+    retire.add_argument("--json", action="store_true", dest="as_json")
     investigate = plan_subparsers.add_parser(
         "investigate", help="Inspect a stopped campaign and its current candidate for a fresh Run"
     )

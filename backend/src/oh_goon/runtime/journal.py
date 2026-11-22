@@ -583,6 +583,7 @@ class Journal:
             *,
             attempt_number: int | None = None,
             physical_execution_id: str | None = None,
+            workspace_materialization_id: str | None = None,
             pid: int | None = None,
             process_identity: str | None = None,
             returncode: int | None = None,
@@ -599,6 +600,7 @@ class Journal:
                 step_order=step_order,
                 attempt_number=attempt_number,
                 physical_execution_id=physical_execution_id,
+                workspace_materialization_id=workspace_materialization_id,
                 pid=pid,
                 process_identity=process_identity,
                 returncode=returncode,
@@ -621,6 +623,7 @@ class Journal:
         step_order: int | None = None,
         attempt_number: int | None = None,
         physical_execution_id: str | None = None,
+        workspace_materialization_id: str | None = None,
         pid: int | None = None,
         process_identity: str | None = None,
         returncode: int | None = None,
@@ -650,6 +653,7 @@ class Journal:
             termination_reason,
             output_count,
             cancellation,
+            workspace_materialization_id,
         )
         identity = _execution_lifecycle_identity(candidate)
         for existing in events:
@@ -674,6 +678,7 @@ class Journal:
         step_order: int | None = None,
         attempt_number: int | None = None,
         physical_execution_id: str | None = None,
+        workspace_materialization_id: str | None = None,
         pid: int | None = None,
         process_identity: str | None = None,
         returncode: int | None = None,
@@ -693,6 +698,7 @@ class Journal:
                 step_order=step_order,
                 attempt_number=attempt_number,
                 physical_execution_id=physical_execution_id,
+                workspace_materialization_id=workspace_materialization_id,
                 pid=pid,
                 process_identity=process_identity,
                 returncode=returncode,

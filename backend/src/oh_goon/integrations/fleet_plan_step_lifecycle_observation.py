@@ -39,6 +39,7 @@ def lifecycle_command_runner(
                 event.kind,
                 attempt_number=attempt_number,
                 physical_execution_id=event.physical_execution_id,
+                workspace_materialization_id=event.workspace_materialization_id,
                 pid=event.pid,
                 process_identity=event.process_identity,
                 returncode=event.returncode,

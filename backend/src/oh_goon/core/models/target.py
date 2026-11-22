@@ -16,6 +16,7 @@ from oh_goon.core.models.caller_input_file import (
     CallerInputFileIdentity,
     ScheduledCallerFileReceipt,
 )
+from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
 from oh_goon.core.models.execution_identity import (
     ExecutionIdentity,
     ResolvedExecutionReference,
@@ -99,6 +100,9 @@ class FleetPlanTarget(ImmutableModel):
         default=None, exclude_if=lambda value: value is None
     )
     agent_continuation: AgentContinuationReceipt | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    candidate_workspace: CandidateWorkspaceAdmission | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
@@ -193,6 +197,30 @@ class FleetPlanTarget(ImmutableModel):
             raise ValueError(
                 "scheduled caller source is not bound to this resolved execution target"
             )
+        candidate = self.candidate_workspace
+        if candidate is not None:
+            native = self.plan.native_agent
+            if (
+                self.agent_repair is not None
+                or native is None
+                or native.agent != "pi"
+                or native.interactive
+                or native.profile.backend != "bubblewrap"
+                or native.profile.sandbox_owner != "harness"
+                or native.connection is None
+                or native.definition.arguments
+                or native.definition.configuration_directory is not None
+                or not self.plan.steps
+                or not isinstance(self.plan.steps[0], ResolvedAgentStep)
+                or self.plan.steps[0].workload.harness != "native"
+                or self.plan.steps[0].workload.role != "report"
+                or any(
+                    not isinstance(step, ResolvedCommandStep) or step.project_source is not None
+                    for step in self.plan.steps[1:]
+                )
+                or self.reviewed_repository_source != candidate.source
+            ):
+                raise ValueError("Candidate execution requires its explicit isolated native intent")
         continuation = self.agent_continuation
         if continuation is not None:
             review = continuation.review

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import stat
+from typing import Literal
 
 from oh_goon.core.errors import (
     ExecutionAssignmentStale,
@@ -52,6 +55,8 @@ class ExecutionMaterializationAuthority:
         producer_contract_version: str | None = None,
         producer_contract_identity: str | None = None,
         producer_work_identity: str | None = None,
+        writer_scope_kind: Literal["native_namespace_scope"] | None = None,
+        workspace_directory_fd: int | None = None,
     ) -> ExecutionMaterialization:
         try:
             durable_assignment = self._assignments.assignment(assignment.assignment_id)
@@ -72,6 +77,38 @@ class ExecutionMaterializationAuthority:
             raise ExecutionMaterializationStale("Assignment checkpoint is no longer current")
         if current_lease.input_checkpoint_id != checkpoint.checkpoint_id:
             raise ExecutionMaterializationStale("Lease checkpoint differs from current candidate")
+        if writer_scope_kind is not None and (
+            assignment.filesystem_authority != "candidate_mutation"
+            or current_lease.writer_authority_kind is not None
+            or not {"private_filesystem", "private_pid_namespace"}.issubset(
+                assignment.isolation_requirements
+            )
+        ):
+            raise ExecutionMaterializationStale(
+                "Native workspace writer scope requires private PID-namespace mutation authority"
+            )
+        physical: dict[str, int] = {}
+        physical_path = self._workspaces.physical_path(workspace)
+        if writer_scope_kind is not None:
+            if workspace_directory_fd is None:
+                raise ExecutionMaterializationStale(
+                    "Native workspace requires its retained root descriptor"
+                )
+            held = os.fstat(workspace_directory_fd)
+            path_info = physical_path.lstat()
+            if not stat.S_ISDIR(held.st_mode) or (held.st_dev, held.st_ino, held.st_mode) != (
+                path_info.st_dev,
+                path_info.st_ino,
+                path_info.st_mode,
+            ):
+                raise ExecutionMaterializationStale("Native workspace root descriptor differs")
+            physical = {
+                "workspace_device": held.st_dev,
+                "workspace_inode": held.st_ino,
+                "workspace_mode": held.st_mode,
+            }
+        elif workspace_directory_fd is not None:
+            raise ExecutionMaterializationStale("Root descriptor requires a native writer scope")
 
         selected_tools = assignment.tool_ids if tool_ids is None else tuple(tool_ids)
         selected_artifacts = (
@@ -107,6 +144,8 @@ class ExecutionMaterializationAuthority:
             "producer_contract_version": producer_contract_version,
             "producer_contract_identity": producer_contract_identity,
             "producer_work_identity": producer_work_identity,
+            **({"writer_scope_kind": writer_scope_kind} if writer_scope_kind is not None else {}),
+            **physical,
         }
         fingerprint = stable_id("execution-materialization", payload)
         value = ExecutionMaterialization.model_validate(
@@ -118,6 +157,30 @@ class ExecutionMaterializationAuthority:
             }
         )
         with self._database.transaction(write=True) as connection:
+            if writer_scope_kind is not None:
+                assert workspace_directory_fd is not None
+                held = os.fstat(workspace_directory_fd)
+                current = physical_path.lstat()
+                workspace_row = connection.execute(
+                    "SELECT repository_id, base_revision, kind FROM workspaces WHERE workspace_id=?",
+                    (workspace.workspace_id,),
+                ).fetchone()
+                if (
+                    (current.st_dev, current.st_ino, current.st_mode)
+                    != (held.st_dev, held.st_ino, held.st_mode)
+                    or physical
+                    != {
+                        "workspace_device": held.st_dev,
+                        "workspace_inode": held.st_ino,
+                        "workspace_mode": held.st_mode,
+                    }
+                    or workspace_row is None
+                    or tuple(workspace_row)
+                    != (workspace.repository_id, workspace.base_revision, workspace.kind.value)
+                ):
+                    raise ExecutionMaterializationStale(
+                        "Native workspace changed before persistence"
+                    )
             # Rejoin the durable lease/checkpoint at the write cut.  Historical records are
             # not execution authority when current workspace state has moved.
             state_row = connection.execute(
@@ -125,7 +188,7 @@ class ExecutionMaterializationAuthority:
                 (workspace.workspace_id,),
             ).fetchone()
             lease_row = connection.execute(
-                "SELECT status, lease_generation, assignment_id, assignment_fingerprint, input_checkpoint_id, executor_id, executor_generation FROM workspace_leases WHERE lease_id=?",
+                "SELECT status, lease_generation, assignment_id, assignment_fingerprint, input_checkpoint_id, executor_id, executor_generation, writer_authority_kind FROM workspace_leases WHERE lease_id=?",
                 (current_lease.lease_id,),
             ).fetchone()
             if (
@@ -140,6 +203,9 @@ class ExecutionMaterializationAuthority:
                 or lease_row["input_checkpoint_id"] != checkpoint.checkpoint_id
                 or lease_row["executor_id"] != current_lease.executor_id
                 or int(lease_row["executor_generation"]) != current_lease.executor_generation
+                or (
+                    writer_scope_kind is not None and lease_row["writer_authority_kind"] is not None
+                )
             ):
                 raise ExecutionMaterializationStale(
                     "Assignment, lease, or checkpoint moved before materialization persistence"

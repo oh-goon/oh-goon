@@ -67,6 +67,7 @@ class WorkerGitConfiguration(ImmutableModel):
     native_repository: Path | None = None
     native_agent: ResolvedNativeAgent | None = Field(default=None, repr=False)
     native_observation: bool = False
+    metadata_only: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def require_native_binding(self) -> WorkerGitConfiguration:
@@ -94,7 +95,9 @@ class WorkerGitConfiguration(ImmutableModel):
         runner = git.command_runner
         if runner is None and git.observation_runner is None:
             return cls(
-                executable=git.executable, default_timeout_seconds=git.default_timeout_seconds
+                executable=git.executable,
+                default_timeout_seconds=git.default_timeout_seconds,
+                metadata_only=git.metadata_only,
             )
         if (
             type(runner) is not NativeProfileCommandRunner
@@ -102,6 +105,9 @@ class WorkerGitConfiguration(ImmutableModel):
             or runner.termination_requested is not None
             or runner.repair_context is not None
             or runner.backend is not isolation
+            or runner.workspace_materialization is not None
+            or runner.workspace_directory_fd is not None
+            or runner.require_candidate_current is not None
         ):
             raise FleetPlanInvalid(
                 "Run worker requires native Git configuration without injected callbacks"
@@ -125,6 +131,7 @@ class WorkerGitConfiguration(ImmutableModel):
             native_repository=runner.repository,
             native_agent=deepcopy(runner.native_agent),
             native_observation=read_only,
+            metadata_only=git.metadata_only,
         )
 
     def restore(self, *, isolation: ProcessIsolationBackend | None = None) -> GitService:
@@ -143,9 +150,12 @@ class WorkerGitConfiguration(ImmutableModel):
                 observation_runner=partial(runner, read_only_workspace=True)
                 if self.native_observation
                 else None,
+                metadata_only=self.metadata_only,
             )
         return GitService(
-            executable=self.executable, default_timeout_seconds=self.default_timeout_seconds
+            executable=self.executable,
+            default_timeout_seconds=self.default_timeout_seconds,
+            metadata_only=self.metadata_only,
         )
 
 

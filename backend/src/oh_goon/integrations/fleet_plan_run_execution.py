@@ -12,6 +12,7 @@ from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.models.agent_repair import AgentRepairContext
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.execution_identity import ExecutionIdentity
+from oh_goon.core.models.execution_materialization import ExecutionMaterialization
 from oh_goon.core.models.fleet_plan import (
     MissingConfigPolicy,
     ResolvedCommandStep,
@@ -132,13 +133,28 @@ class FleetPlanRunExecutor:
         plan: ResolvedFleetPlan,
         *,
         cancel_requested: Callable[[], bool] | None,
+        execution_workspace: Path | None = None,
+        workspace_materialization: ExecutionMaterialization | None = None,
+        workspace_directory_fd: int | None = None,
+        require_candidate_current: Callable[[], None] | None = None,
     ) -> None:
         """Revalidate one already-admitted non-CI/CD run before effect-start."""
 
         if plan.execution.purpose is ExecutionPurpose.CICD:
             raise FleetPlanInvalid("Strict CI/CD plans require prepare_strict_run")
         self._require_direct_retention(plan, repository.repository_id)
-        self._preflight_direct_steps(repository.path, plan, cancel_requested=cancel_requested)
+        if (workspace_materialization is None) != (require_candidate_current is None):
+            raise FleetPlanInvalid("Candidate preparation requires its complete current binding")
+        if execution_workspace is not None and workspace_materialization is None:
+            raise FleetPlanInvalid("A physical workspace path does not grant candidate authority")
+        self._preflight_direct_steps(
+            execution_workspace or repository.path,
+            plan,
+            cancel_requested=cancel_requested,
+            workspace_materialization=workspace_materialization,
+            workspace_directory_fd=workspace_directory_fd,
+            require_candidate_current=require_candidate_current,
+        )
 
     def prepare_strict_run(
         self,
@@ -227,12 +243,31 @@ class FleetPlanRunExecutor:
         execution_limits: FleetPlanRunLimits | None = None,
         repair_context: AgentRepairContext | None = None,
         execution_target: FleetPlanTarget | None = None,
+        workspace_materialization: ExecutionMaterialization | None = None,
+        workspace_directory_fd: int | None = None,
+        require_candidate_current: Callable[[], None] | None = None,
     ) -> PlanExecutionOutcome:
         """Execute one already-preflighted direct plan through live host authority."""
 
         if execution_target is not None:
             if execution_target.plan != plan:
                 raise FleetPlanInvalid("Admitted execution target differs from the selected Plan")
+        if workspace_materialization is not None and (
+            execution_target is None
+            or execution_target.candidate_workspace is None
+            or workspace_materialization.workspace_id
+            != execution_target.candidate_workspace.workspace.workspace_id
+            or workspace_materialization.input_checkpoint_id
+            != execution_target.candidate_workspace.checkpoint.checkpoint_id
+            or require_candidate_current is None
+        ):
+            raise FleetPlanInvalid("Candidate materialization differs from its admitted target")
+        if (
+            execution_target is not None
+            and execution_target.candidate_workspace is not None
+            and workspace_materialization is None
+        ):
+            raise FleetPlanInvalid("Candidate execution has no current materialization")
         if plan.execution.purpose is ExecutionPurpose.CICD:
             raise FleetPlanInvalid("Strict CI/CD plans require execute_strict_run")
         retention_store = self._require_direct_retention(plan, repository_id)
@@ -248,12 +283,22 @@ class FleetPlanRunExecutor:
         )
         runtime = replace(
             runtime,
-            git=self.git_for_plan(repository, plan, termination_requested=termination_requested),
+            git=self.git_for_plan(
+                repository,
+                plan,
+                termination_requested=termination_requested,
+                workspace_materialization=workspace_materialization,
+                workspace_directory_fd=workspace_directory_fd,
+                require_candidate_current=require_candidate_current,
+            ),
             execution_policy=plan.execution,
             execution_identity=execution_target.identity
             if execution_target is not None
             else ExecutionIdentity(digest=build_execution_lock(plan).digest),
             native_profile=plan.native_agent,
+            workspace_materialization=workspace_materialization,
+            workspace_directory_fd=workspace_directory_fd,
+            require_candidate_current=require_candidate_current,
         )
         if not any(getattr(step, "project_source", None) is not None for step in plan.steps):
             sequence = FleetPlanStepSequence(repository, runtime, output_observer)
@@ -442,6 +487,9 @@ class FleetPlanRunExecutor:
         plan: ResolvedFleetPlan,
         *,
         termination_requested: Callable[[], TerminationSignal | None] | None = None,
+        workspace_materialization: ExecutionMaterialization | None = None,
+        workspace_directory_fd: int | None = None,
+        require_candidate_current: Callable[[], None] | None = None,
     ) -> GitService:
         """Keep native Git hooks within this Plan's frozen physical profile."""
         if plan.native_agent is None:
@@ -452,6 +500,9 @@ class FleetPlanRunExecutor:
             self._standard_process_isolation,
             self._workspace_pin,
             termination_requested=termination_requested,
+            workspace_materialization=workspace_materialization,
+            workspace_directory_fd=workspace_directory_fd,
+            require_candidate_current=require_candidate_current,
         )
         return replace(
             self._git,
@@ -580,8 +631,17 @@ class FleetPlanRunExecutor:
         plan: ResolvedFleetPlan,
         *,
         cancel_requested: Callable[[], bool] | None,
+        workspace_materialization: ExecutionMaterialization | None = None,
+        workspace_directory_fd: int | None = None,
+        require_candidate_current: Callable[[], None] | None = None,
     ) -> None:
-        self.git_for_plan(repository, plan)
+        self.git_for_plan(
+            repository,
+            plan,
+            workspace_materialization=workspace_materialization,
+            workspace_directory_fd=workspace_directory_fd,
+            require_candidate_current=require_candidate_current,
+        )
         for step in plan.steps:
             self._preflight_common(repository, step, cancel_requested=cancel_requested)
             if not isinstance(step, ResolvedCommandStep) or step.project_source is None:

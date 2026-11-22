@@ -18,6 +18,7 @@ from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
 )
+from oh_goon.core.models.execution_materialization import ExecutionMaterialization
 from oh_goon.core.models.fleet_observation import FleetObservationEvidence
 from oh_goon.core.models.fleet_plan_release_evidence import (
     KubernetesRolloutVerificationEvidence,
@@ -28,6 +29,7 @@ from oh_goon.core.models.fleet_plan_requirements import RequirementCount, UvLock
 from oh_goon.core.models.fleet_plan_retry import PlanRetryDecisionEvidence
 from oh_goon.core.models.fleet_plan_tool_authority import PlanHostToolAuthorityEvidence
 from oh_goon.core.models.shard_execution import CanonicalShardExecutionEvidence
+from oh_goon.core.process_birth import ProcessBirthIdentity
 from oh_goon.core.product_identity import stable_id
 
 
@@ -280,6 +282,28 @@ class PlanResourceEvidence(ImmutableModel):
         return stable_id("plan-resource-policy", resource_policy_payload(self))
 
 
+class PlanWorkspaceWriterScopeEvidence(ImmutableModel):
+    """Original backend observations for one exact candidate-writer namespace.
+
+    This bounds only the original Linux Bubblewrap namespace. It supplies no
+    independent authority over host, remote or otherwise unadmitted writers.
+    """
+
+    kind: Literal["linux_bubblewrap_pid_namespace"] = "linux_bubblewrap_pid_namespace"
+    materialization: ExecutionMaterialization
+    physical_execution_id: str = Field(min_length=1)
+    backend_configuration_id: str = Field(min_length=1)
+    namespace_device: int = Field(ge=0)
+    namespace_inode: int = Field(ge=1)
+    workspace_device: int = Field(ge=0)
+    workspace_inode: int = Field(ge=1)
+    workspace_mode: int = Field(ge=0)
+    init_process: ProcessBirthIdentity
+    namespace_distinct: Literal[True] = True
+    init_death_observed: Literal[True] = True
+    observed_at: AwareDatetime
+
+
 class PlanStandardIsolationEvidence(ImmutableModel):
     """Observed ordinary sandbox execution, without strict source/runtime custody."""
 
@@ -295,6 +319,9 @@ class PlanStandardIsolationEvidence(ImmutableModel):
     private_configuration_overlay: bool = False
     resources: PlanResourceEvidence | None = None
     resource_owner: Literal["none", "systemd_user_scope"]
+    workspace_writer_scope: PlanWorkspaceWriterScopeEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_resource_owner(self) -> PlanStandardIsolationEvidence:

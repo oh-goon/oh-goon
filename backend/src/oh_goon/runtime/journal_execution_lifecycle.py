@@ -45,6 +45,7 @@ class _PhysicalFields(LifecycleRootFields):
     attempt_number: int | None
     step_attempt_id: str | None
     physical_execution_id: str
+    workspace_materialization_id: str | None
 
 
 class _StartedFields(_PhysicalFields):
@@ -70,6 +71,7 @@ def _execution_lifecycle_event(
     termination_reason: str | None = None,
     output_count: int | None = None,
     cancellation: PlanStepCancellationEvidence | None = None,
+    workspace_materialization_id: str | None = None,
 ) -> FleetRunEvent:
     if cancellation is not None:
         if event_type is not FleetRunEventType.STEP_CANCELLED:
@@ -104,6 +106,7 @@ def _execution_lifecycle_event(
         returncode,
         termination_reason,
         output_count,
+        workspace_materialization_id,
     )
 
 
@@ -165,6 +168,7 @@ def _physical_event(
     returncode: int | None,
     termination_reason: str | None,
     output_count: int | None,
+    workspace_materialization_id: str | None = None,
 ) -> FleetRunEvent:
     if step is not None and attempt_number is None:
         raise ValueError(f"{event_type.value} requires attempt_number")
@@ -181,6 +185,7 @@ def _physical_event(
         if step is not None and attempt_number is not None
         else None,
         "physical_execution_id": physical_execution_id,
+        "workspace_materialization_id": workspace_materialization_id,
     }
     if event_type is FleetRunEventType.PROCESS_STARTING:
         return ProcessStartingEvent(event_type=event_type, **common)

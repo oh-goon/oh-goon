@@ -136,6 +136,9 @@ class ProcessStartingEvent(_FleetRunEventBase):
     attempt_number: int | None = Field(default=None, ge=1)
     step_attempt_id: str | None = Field(default=None, min_length=1)
     physical_execution_id: str = Field(min_length=1)
+    workspace_materialization_id: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def require_complete_process_scope(self) -> ProcessStartingEvent:

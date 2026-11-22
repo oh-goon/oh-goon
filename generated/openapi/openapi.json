@@ -1,6 +1,132 @@
 {
   "components": {
     "schemas": {
+      "AcceptedExecutionEvidence": {
+        "additionalProperties": false,
+        "description": "Authority receipt for raw executor evidence accepted before result semantics.",
+        "properties": {
+          "acceptance_fingerprint": {
+            "minLength": 1,
+            "title": "Acceptance Fingerprint",
+            "type": "string"
+          },
+          "acceptance_id": {
+            "minLength": 1,
+            "title": "Acceptance Id",
+            "type": "string"
+          },
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "assignment_fingerprint": {
+            "minLength": 1,
+            "title": "Assignment Fingerprint",
+            "type": "string"
+          },
+          "assignment_id": {
+            "minLength": 1,
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "attempt_id": {
+            "minLength": 1,
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "evidence_artifact_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Artifact Ids",
+            "type": "array"
+          },
+          "executor_generation": {
+            "minimum": 1.0,
+            "title": "Executor Generation",
+            "type": "integer"
+          },
+          "executor_id": {
+            "minLength": 1,
+            "title": "Executor Id",
+            "type": "string"
+          },
+          "input_checkpoint_id": {
+            "minLength": 1,
+            "title": "Input Checkpoint Id",
+            "type": "string"
+          },
+          "lease_generation": {
+            "minimum": 1.0,
+            "title": "Lease Generation",
+            "type": "integer"
+          },
+          "lease_id": {
+            "minLength": 1,
+            "title": "Lease Id",
+            "type": "string"
+          },
+          "materialization_fingerprint": {
+            "minLength": 1,
+            "title": "Materialization Fingerprint",
+            "type": "string"
+          },
+          "materialization_id": {
+            "minLength": 1,
+            "title": "Materialization Id",
+            "type": "string"
+          },
+          "output_checkpoint_id": {
+            "minLength": 1,
+            "title": "Output Checkpoint Id",
+            "type": "string"
+          },
+          "producer_work_identity": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer Work Identity"
+          },
+          "result_identity": {
+            "minLength": 1,
+            "title": "Result Identity",
+            "type": "string"
+          },
+          "workspace_id": {
+            "minLength": 1,
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "acceptance_id",
+          "attempt_id",
+          "assignment_id",
+          "assignment_fingerprint",
+          "workspace_id",
+          "input_checkpoint_id",
+          "output_checkpoint_id",
+          "lease_id",
+          "lease_generation",
+          "executor_id",
+          "executor_generation",
+          "materialization_id",
+          "materialization_fingerprint",
+          "result_identity",
+          "acceptance_fingerprint",
+          "accepted_at"
+        ],
+        "title": "AcceptedExecutionEvidence",
+        "type": "object"
+      },
       "AdoptUvPreview": {
         "additionalProperties": false,
         "properties": {
@@ -2261,6 +2387,34 @@
           }
         ]
       },
+      "AttemptBudget": {
+        "additionalProperties": false,
+        "properties": {
+          "max_processes": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Processes"
+          },
+          "wall_time_seconds": {
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Wall Time Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "wall_time_seconds"
+        ],
+        "title": "AttemptBudget",
+        "type": "object"
+      },
       "AttemptsExhaustedPlanRetryDecisionEvidence": {
         "additionalProperties": false,
         "properties": {
@@ -2908,6 +3062,239 @@
           "cancel_requested_at"
         ],
         "title": "CancellingFleetRun",
+        "type": "object"
+      },
+      "CandidateCheckpoint": {
+        "additionalProperties": false,
+        "description": "Durable identity for one observed state of a mutable candidate workspace.",
+        "properties": {
+          "assignment_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment Id"
+          },
+          "attempt_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          },
+          "byte_count": {
+            "minimum": 0.0,
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "changed_paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed Paths",
+            "type": "array"
+          },
+          "checkpoint_id": {
+            "minLength": 1,
+            "title": "Checkpoint Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "entry_count": {
+            "minimum": 0.0,
+            "title": "Entry Count",
+            "type": "integer"
+          },
+          "parent_checkpoint_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Checkpoint Id"
+          },
+          "source_sha256": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Source Sha256",
+            "type": "string"
+          },
+          "workspace_id": {
+            "minLength": 1,
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "checkpoint_id",
+          "workspace_id",
+          "source_sha256",
+          "byte_count",
+          "entry_count",
+          "created_at"
+        ],
+        "title": "CandidateCheckpoint",
+        "type": "object"
+      },
+      "CandidateExecutionReceipt": {
+        "additionalProperties": false,
+        "description": "Describe settlement; model text and a historical receipt grant no effects.",
+        "properties": {
+          "acceptance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AcceptedExecutionEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "assignment": {
+            "$ref": "#/components/schemas/ExecutionAssignment"
+          },
+          "checkpoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidateCheckpoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lease": {
+            "$ref": "#/components/schemas/WorkspaceLease"
+          },
+          "materialization": {
+            "$ref": "#/components/schemas/ExecutionMaterialization"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "settlement": {
+            "enum": [
+              "checkpointed",
+              "retained_incomplete"
+            ],
+            "title": "Settlement",
+            "type": "string"
+          },
+          "source_cleanup": {
+            "default": "retained",
+            "enum": [
+              "retained",
+              "verified",
+              "unverified"
+            ],
+            "title": "Source Cleanup",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkspaceState"
+          },
+          "workspace": {
+            "$ref": "#/components/schemas/WorkspaceRef"
+          }
+        },
+        "required": [
+          "workspace",
+          "state",
+          "assignment",
+          "lease",
+          "materialization",
+          "settlement"
+        ],
+        "title": "CandidateExecutionReceipt",
+        "type": "object"
+      },
+      "CandidateWorkspaceAdmission": {
+        "additionalProperties": false,
+        "description": "Bind registered source to a real owned initial candidate, without granting a writer.",
+        "properties": {
+          "checkpoint": {
+            "$ref": "#/components/schemas/CandidateCheckpoint"
+          },
+          "fleet_run_id": {
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/RepositorySourceAuthority"
+          },
+          "source_workspace": {
+            "$ref": "#/components/schemas/WorkspaceRef"
+          },
+          "state_version": {
+            "minimum": 1.0,
+            "title": "State Version",
+            "type": "integer"
+          },
+          "workspace": {
+            "$ref": "#/components/schemas/WorkspaceRef"
+          },
+          "workspace_ctime_ns": {
+            "pattern": "^[0-9]+$",
+            "title": "Workspace Ctime Ns",
+            "type": "string"
+          },
+          "workspace_device": {
+            "minimum": 0.0,
+            "title": "Workspace Device",
+            "type": "integer"
+          },
+          "workspace_inode": {
+            "minimum": 1.0,
+            "title": "Workspace Inode",
+            "type": "integer"
+          },
+          "workspace_mode": {
+            "minimum": 0.0,
+            "title": "Workspace Mode",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "source",
+          "source_workspace",
+          "workspace",
+          "checkpoint",
+          "state_version",
+          "workspace_device",
+          "workspace_inode",
+          "workspace_mode",
+          "workspace_ctime_ns"
+        ],
+        "title": "CandidateWorkspaceAdmission",
         "type": "object"
       },
       "CanonicalChildResult": {
@@ -6483,6 +6870,18 @@
               }
             ],
             "title": "Step Order"
+          },
+          "workspace_materialization_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Materialization Id"
           }
         },
         "required": [
@@ -6836,6 +7235,136 @@
         "title": "ExclusionRecord",
         "type": "object"
       },
+      "ExecutionAssignment": {
+        "additionalProperties": false,
+        "description": "Complete immutable authority resolved before an execution effect is allowed.",
+        "properties": {
+          "assignment_fingerprint": {
+            "minLength": 1,
+            "title": "Assignment Fingerprint",
+            "type": "string"
+          },
+          "assignment_id": {
+            "minLength": 1,
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "attempt_budget": {
+            "$ref": "#/components/schemas/AttemptBudget"
+          },
+          "attempt_id": {
+            "minLength": 1,
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delegation_limit": {
+            "default": 0,
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Delegation Limit",
+            "type": "integer"
+          },
+          "filesystem_authority": {
+            "enum": [
+              "read_only",
+              "candidate_mutation"
+            ],
+            "title": "Filesystem Authority",
+            "type": "string"
+          },
+          "git_authority": {
+            "default": "none",
+            "enum": [
+              "none",
+              "read",
+              "write"
+            ],
+            "title": "Git Authority",
+            "type": "string"
+          },
+          "input_artifact_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Artifact Ids",
+            "type": "array"
+          },
+          "input_checkpoint_id": {
+            "minLength": 1,
+            "title": "Input Checkpoint Id",
+            "type": "string"
+          },
+          "isolation_requirements": {
+            "default": [
+              "private_filesystem"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Isolation Requirements",
+            "type": "array"
+          },
+          "network_authority": {
+            "default": "none",
+            "enum": [
+              "none",
+              "declared"
+            ],
+            "title": "Network Authority",
+            "type": "string"
+          },
+          "process_authority": {
+            "const": "isolated",
+            "default": "isolated",
+            "title": "Process Authority",
+            "type": "string"
+          },
+          "publish_authority": {
+            "default": false,
+            "title": "Publish Authority",
+            "type": "boolean"
+          },
+          "secret_grants": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Secret Grants",
+            "type": "array"
+          },
+          "tool_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tool Ids",
+            "type": "array"
+          },
+          "workspace_id": {
+            "minLength": 1,
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assignment_id",
+          "attempt_id",
+          "workspace_id",
+          "input_checkpoint_id",
+          "filesystem_authority",
+          "attempt_budget",
+          "assignment_fingerprint",
+          "created_at"
+        ],
+        "title": "ExecutionAssignment",
+        "type": "object"
+      },
       "ExecutionBucketWindow": {
         "additionalProperties": false,
         "description": "One canonical UTC bucket boundary shared by every repository row.",
@@ -6872,6 +7401,212 @@
           "digest"
         ],
         "title": "ExecutionIdentity",
+        "type": "object"
+      },
+      "ExecutionMaterialization": {
+        "additionalProperties": false,
+        "description": "Immutable projection of already-admitted authority plus external-work provenance.",
+        "properties": {
+          "assignment_fingerprint": {
+            "minLength": 1,
+            "title": "Assignment Fingerprint",
+            "type": "string"
+          },
+          "assignment_id": {
+            "minLength": 1,
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "attempt_id": {
+            "minLength": 1,
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "executor_generation": {
+            "minimum": 1.0,
+            "title": "Executor Generation",
+            "type": "integer"
+          },
+          "executor_id": {
+            "minLength": 1,
+            "title": "Executor Id",
+            "type": "string"
+          },
+          "input_artifact_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Artifact Ids",
+            "type": "array"
+          },
+          "input_checkpoint_id": {
+            "minLength": 1,
+            "title": "Input Checkpoint Id",
+            "type": "string"
+          },
+          "lease_generation": {
+            "minimum": 1.0,
+            "title": "Lease Generation",
+            "type": "integer"
+          },
+          "lease_id": {
+            "minLength": 1,
+            "title": "Lease Id",
+            "type": "string"
+          },
+          "materialization_id": {
+            "minLength": 1,
+            "title": "Materialization Id",
+            "type": "string"
+          },
+          "producer": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer"
+          },
+          "producer_artifact_identity": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer Artifact Identity"
+          },
+          "producer_contract_identity": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer Contract Identity"
+          },
+          "producer_contract_version": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer Contract Version"
+          },
+          "producer_work_identity": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer Work Identity"
+          },
+          "resolved_fingerprint": {
+            "minLength": 1,
+            "title": "Resolved Fingerprint",
+            "type": "string"
+          },
+          "tool_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tool Ids",
+            "type": "array"
+          },
+          "workspace_device": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Device"
+          },
+          "workspace_id": {
+            "minLength": 1,
+            "title": "Workspace Id",
+            "type": "string"
+          },
+          "workspace_inode": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Inode"
+          },
+          "workspace_mode": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Mode"
+          },
+          "writer_scope_kind": {
+            "anyOf": [
+              {
+                "const": "native_namespace_scope",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writer Scope Kind"
+          }
+        },
+        "required": [
+          "materialization_id",
+          "attempt_id",
+          "assignment_id",
+          "assignment_fingerprint",
+          "workspace_id",
+          "input_checkpoint_id",
+          "lease_id",
+          "lease_generation",
+          "executor_id",
+          "executor_generation",
+          "resolved_fingerprint",
+          "created_at"
+        ],
+        "title": "ExecutionMaterialization",
         "type": "object"
       },
       "ExecutionStatusCount": {
@@ -8695,6 +9430,16 @@
       "FleetPlanOperationEvidence": {
         "additionalProperties": false,
         "properties": {
+          "candidate_receipt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidateExecutionReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "canonical_result": {
             "anyOf": [
               {
@@ -9403,6 +10148,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/CallerInputFileIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidate_workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidateWorkspaceAdmission"
               },
               {
                 "type": "null"
@@ -19552,6 +20307,18 @@
               }
             ],
             "title": "Step Order"
+          },
+          "workspace_materialization_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Materialization Id"
           }
         },
         "required": [
@@ -19656,6 +20423,18 @@
               }
             ],
             "title": "Step Order"
+          },
+          "workspace_materialization_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Materialization Id"
           }
         },
         "required": [
@@ -19760,6 +20539,18 @@
               }
             ],
             "title": "Step Order"
+          },
+          "workspace_materialization_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Materialization Id"
           }
         },
         "required": [
@@ -22162,6 +22953,16 @@
           "workspace_read_only": {
             "title": "Workspace Read Only",
             "type": "boolean"
+          },
+          "workspace_writer_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanWorkspaceWriterScopeEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -22961,6 +23762,90 @@
         "title": "PlanValueNamespace",
         "type": "string"
       },
+      "PlanWorkspaceWriterScopeEvidence": {
+        "additionalProperties": false,
+        "description": "Original backend observations for one exact candidate-writer namespace.\n\nThis bounds only the original Linux Bubblewrap namespace. It supplies no\nindependent authority over host, remote or otherwise unadmitted writers.",
+        "properties": {
+          "backend_configuration_id": {
+            "minLength": 1,
+            "title": "Backend Configuration Id",
+            "type": "string"
+          },
+          "init_death_observed": {
+            "const": true,
+            "default": true,
+            "title": "Init Death Observed",
+            "type": "boolean"
+          },
+          "init_process": {
+            "$ref": "#/components/schemas/ProcessBirthIdentity"
+          },
+          "kind": {
+            "const": "linux_bubblewrap_pid_namespace",
+            "default": "linux_bubblewrap_pid_namespace",
+            "title": "Kind",
+            "type": "string"
+          },
+          "materialization": {
+            "$ref": "#/components/schemas/ExecutionMaterialization"
+          },
+          "namespace_device": {
+            "minimum": 0.0,
+            "title": "Namespace Device",
+            "type": "integer"
+          },
+          "namespace_distinct": {
+            "const": true,
+            "default": true,
+            "title": "Namespace Distinct",
+            "type": "boolean"
+          },
+          "namespace_inode": {
+            "minimum": 1.0,
+            "title": "Namespace Inode",
+            "type": "integer"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "physical_execution_id": {
+            "minLength": 1,
+            "title": "Physical Execution Id",
+            "type": "string"
+          },
+          "workspace_device": {
+            "minimum": 0.0,
+            "title": "Workspace Device",
+            "type": "integer"
+          },
+          "workspace_inode": {
+            "minimum": 1.0,
+            "title": "Workspace Inode",
+            "type": "integer"
+          },
+          "workspace_mode": {
+            "minimum": 0.0,
+            "title": "Workspace Mode",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "materialization",
+          "physical_execution_id",
+          "backend_configuration_id",
+          "namespace_device",
+          "namespace_inode",
+          "workspace_device",
+          "workspace_inode",
+          "workspace_mode",
+          "init_process",
+          "observed_at"
+        ],
+        "title": "PlanWorkspaceWriterScopeEvidence",
+        "type": "object"
+      },
       "PolicySnapshot": {
         "additionalProperties": false,
         "properties": {
@@ -23369,6 +24254,18 @@
               }
             ],
             "title": "Step Order"
+          },
+          "workspace_materialization_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Materialization Id"
           }
         },
         "required": [
@@ -23486,6 +24383,18 @@
               }
             ],
             "title": "Step Order"
+          },
+          "workspace_materialization_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Materialization Id"
           }
         },
         "required": [
@@ -23585,6 +24494,18 @@
               }
             ],
             "title": "Step Order"
+          },
+          "workspace_materialization_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Materialization Id"
           }
         },
         "required": [
@@ -23705,6 +24626,18 @@
               }
             ],
             "title": "Step Order"
+          },
+          "workspace_materialization_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Materialization Id"
           }
         },
         "required": [
@@ -35726,6 +36659,18 @@
               }
             ],
             "title": "Step Order"
+          },
+          "workspace_materialization_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Materialization Id"
           }
         },
         "required": [
@@ -36713,6 +37658,132 @@
         "title": "WaitingPlacementQueueEntry",
         "type": "object"
       },
+      "WorkspaceKind": {
+        "description": "Canonical durable workspace materialization kind.",
+        "enum": [
+          "READ_SNAPSHOT",
+          "WORKTREE"
+        ],
+        "title": "WorkspaceKind",
+        "type": "string"
+      },
+      "WorkspaceLease": {
+        "additionalProperties": false,
+        "properties": {
+          "assignment_fingerprint": {
+            "minLength": 1,
+            "title": "Assignment Fingerprint",
+            "type": "string"
+          },
+          "assignment_id": {
+            "minLength": 1,
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "attempt_id": {
+            "minLength": 1,
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "executor_generation": {
+            "minimum": 1.0,
+            "title": "Executor Generation",
+            "type": "integer"
+          },
+          "executor_id": {
+            "minLength": 1,
+            "title": "Executor Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "input_checkpoint_id": {
+            "minLength": 1,
+            "title": "Input Checkpoint Id",
+            "type": "string"
+          },
+          "issued_at": {
+            "format": "date-time",
+            "title": "Issued At",
+            "type": "string"
+          },
+          "lease_generation": {
+            "minimum": 1.0,
+            "title": "Lease Generation",
+            "type": "integer"
+          },
+          "lease_id": {
+            "minLength": 1,
+            "title": "Lease Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "minLength": 1,
+            "title": "Workspace Id",
+            "type": "string"
+          },
+          "writer_authority_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writer Authority Id"
+          },
+          "writer_authority_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "cgroup",
+                  "process_group",
+                  "remote_backend"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writer Authority Kind"
+          }
+        },
+        "required": [
+          "lease_id",
+          "workspace_id",
+          "attempt_id",
+          "assignment_id",
+          "assignment_fingerprint",
+          "executor_id",
+          "executor_generation",
+          "input_checkpoint_id",
+          "lease_generation",
+          "issued_at",
+          "expires_at"
+        ],
+        "title": "WorkspaceLease",
+        "type": "object"
+      },
+      "WorkspaceLifecycleState": {
+        "description": "Backend-owned durable lifecycle for one workspace identity.",
+        "enum": [
+          "REQUESTED",
+          "ALLOCATED",
+          "READY",
+          "IN_USE",
+          "FINALIZED",
+          "RELEASED",
+          "FAILED"
+        ],
+        "title": "WorkspaceLifecycleState",
+        "type": "string"
+      },
       "WorkspaceMode": {
         "enum": [
           "root",
@@ -36721,6 +37792,38 @@
         "title": "WorkspaceMode",
         "type": "string"
       },
+      "WorkspaceRef": {
+        "additionalProperties": false,
+        "description": "Stable workspace identity; never filesystem path or mutable lifecycle authority.",
+        "properties": {
+          "base_revision": {
+            "minLength": 1,
+            "title": "Base Revision",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkspaceKind"
+          },
+          "repository_id": {
+            "minLength": 1,
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "minLength": 1,
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "repository_id",
+          "base_revision",
+          "kind"
+        ],
+        "title": "WorkspaceRef",
+        "type": "object"
+      },
       "WorkspaceScope": {
         "enum": [
           "ROOT_ONLY",
@@ -36728,6 +37831,62 @@
         ],
         "title": "WorkspaceScope",
         "type": "string"
+      },
+      "WorkspaceState": {
+        "additionalProperties": false,
+        "description": "Immutable snapshot of the one durable mutable workspace-state row.",
+        "properties": {
+          "current_checkpoint_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Checkpoint Id"
+          },
+          "current_lease_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Lease Id"
+          },
+          "lifecycle_state": {
+            "$ref": "#/components/schemas/WorkspaceLifecycleState"
+          },
+          "state_version": {
+            "minimum": 0.0,
+            "title": "State Version",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "workspace_id": {
+            "minLength": 1,
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "lifecycle_state",
+          "state_version",
+          "updated_at"
+        ],
+        "title": "WorkspaceState",
+        "type": "object"
       },
       "WorktreeState": {
         "enum": [

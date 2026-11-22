@@ -27,7 +27,7 @@ from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest, PreparedRunnerExecution
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.product_identity import repository_attempt_operation_id
-from oh_goon.core.vocabulary import EffectBoundaryKind, FleetRunEventType
+from oh_goon.core.vocabulary import EffectAttemptStatus, EffectBoundaryKind, FleetRunEventType
 from oh_goon.engine.command import CommandProcessLifecycleEvent, observe_command_processes
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
@@ -121,6 +121,7 @@ class RepositoryEffectExecution:
                     operation_id=operation_id,
                     event_type=FleetRunEventType(event.kind),
                     physical_execution_id=event.physical_execution_id,
+                    workspace_materialization_id=event.workspace_materialization_id,
                     pid=event.pid,
                     process_identity=event.process_identity,
                     returncode=event.returncode,
@@ -240,6 +241,12 @@ class RepositoryEffectExecution:
                 repository_admission=repository_admission,
                 local_lace_intent_for=local_lace_intent_for,
                 admitted_run=admitted_run,
+                require_execution_current=self._execution_current(
+                    session, attempt, validate_authority_in
+                ),
+                require_settlement_current=self._execution_current(
+                    session, attempt, validate_authority_in, check_cancellation=False
+                ),
             )
             if activity is not None:
                 activity("Preparing immutable execution inputs for " + attempt.repository.path.name)
@@ -333,6 +340,33 @@ class RepositoryEffectExecution:
             return None
 
         return observe
+
+    def _execution_current(
+        self,
+        session: ExecutionSession,
+        attempt: ClaimedRepositoryEffectAttempt,
+        validate_authority_in: Callable[[sqlite3.Connection], None] | None,
+        *,
+        check_cancellation: bool = True,
+    ) -> Callable[[], None]:
+        """Transport only the original claimed effect owner's current authority."""
+
+        def require_current() -> None:
+            def verify(connection: sqlite3.Connection) -> None:
+                if check_cancellation and session.cancel_requested_in(connection):
+                    raise OperationCancelledError("Candidate execution was cancelled before launch")
+                if validate_authority_in is not None:
+                    validate_authority_in(connection)
+                current = self._attempts.get_in(connection, attempt.operation_id)
+                if current.identity != attempt.identity or current.status not in {
+                    EffectAttemptStatus.CLAIMED,
+                    EffectAttemptStatus.EFFECT_STARTED,
+                }:
+                    raise OwnershipLost("Candidate execution's original effect claim changed")
+
+            session.observe(verify)
+
+        return require_current
 
     def _start_effect_in(
         self, connection: sqlite3.Connection, attempt: ClaimedRepositoryEffectAttempt

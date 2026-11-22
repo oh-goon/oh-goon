@@ -296,6 +296,66 @@ Exact native resume, steering, clearing pending work and native detach remain
 unsupported. A fresh continuation does not establish installed harness or
 environment qualification, or HUG-81's held-out usability evidence.
 
+### Owned native candidates
+
+Select `ai --candidate` to edit an owned candidate while retaining the developer
+checkout. The initial mode is headless Pi with a harness-owned Bubblewrap profile
+and explicit managed inference. The flag selects headless execution; custom
+native arguments/configuration directories and other candidate modes are
+unsupported. Existing direct execution keeps its existing contract.
+
+```sh
+oh-goon ai --agent pi --profile isolated-managed --workspace REPOSITORY \
+  --candidate --prompt-file /private/task.txt --verify 'python verify.py'
+oh-goon runs candidate RUN_ID --json
+```
+
+The source must be a registered, included, clean canonical Git repository. The
+same repository remains the Run subject. Its captured `READ_SNAPSHOT` and mutable
+`WORKTREE` have distinct durable workspace identities. Configured physical
+workspace roots must permit the candidate; selecting this mode does not widen a
+profile. Lifecycle Git commands disable hooks/fsmonitor and refuse configured
+external clean/process filters. Native tools see no shared Git administration;
+Git operations inside this initial candidate mode are unsupported.
+
+The proposed Run ID is printed before preparation. After uncertain admission,
+inspect that exact ID instead of submitting another Run automatically. The
+original claimed worker binds the assignment, lease and materialization before
+effects. The native backend gates payload execution on the current binding and
+an observed private PID namespace. Verification uses that same owned candidate.
+The result records the actual candidate and checkpoint, with the developer
+checkout retained as provenance. Recorded checkpoints and paths are observations,
+not a fresh source admission or another write grant.
+
+Dirty, changed-HEAD or unpromoted Git-ignored output remains retained. A clean
+Git status does not establish that newly written ignored bytes are disposable.
+Checkpoints record identity and
+provenance; they do not copy or promote the edited bytes. Read the owner-resolved
+path with `runs candidate` to inspect retained work. The initial route creates a
+fresh candidate; it does not resume a changed candidate or promote it into the
+developer checkout.
+
+Retirement is an explicit operation for a qualified clean candidate:
+
+```sh
+oh-goon runs retire-candidate RUN_ID --expected-state-version VERSION --authorize
+# Reconcile an existing owned retirement/cancellation cleanup after fresh readback:
+oh-goon runs retire-candidate RUN_ID --expected-state-version VERSION --authorize --reconcile
+```
+
+The original workspace/Git owner checks current versions, registration, clean
+checkpoint-identical bytes and canonical backend lifetime evidence before native
+removal. Released leases, parent exit and caller booleans are insufficient.
+Complete cancellation closure may support explicit clean cleanup without
+creating a successful code result. Dirty output, incomplete scope records and
+unknown writers remain retained. Interrupted Git removal uses its original
+receipt; source snapshot release follows candidate release. These cleanup
+observations do not rewrite the original Run result.
+
+The selected Linux Bubblewrap namespace proof covers its original admitted
+writer scopes. Installed Pi/model, strict custody, other hosts and foreign
+namespace qualification remain separate; HUG-19 still owns native persistence.
+
 ### Ephemeral Pi RPC
 
 A Pi-only managed profile may explicitly select `pi_rpc: true`:

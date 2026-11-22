@@ -43,6 +43,70 @@ def _repository(root: Path) -> Path:
     return repository
 
 
+def test_native_git_ignored_output_inventory_protects_bytes_despite_clean_status(tmp_path):
+    repository = _repository(tmp_path)
+    (repository / ".git" / "info" / "exclude").write_text("frontend/dist/\n")
+    git = GitService()
+    git.require_no_ignored_files(repository)
+    output = repository / "frontend" / "dist" / "result.bin"
+    output.parent.mkdir(parents=True)
+    output.write_bytes(b"unique unpromoted result")
+    assert git.observe(repository).changed_files == ()
+    with pytest.raises(StateConflict, match="ignored output"):
+        git.require_no_ignored_files(repository)
+    assert output.read_bytes() == b"unique unpromoted result"
+
+
+@pytest.mark.parametrize(
+    "incomplete",
+    [
+        CommandResult(1, "", "failed"),
+        CommandResult(0, "", "", stdout_truncated=True),
+        CommandResult(0, "", "could not read directory"),
+    ],
+)
+def test_ignored_output_inventory_failure_or_truncation_does_not_prove_absence(
+    tmp_path, incomplete
+):
+    git = GitService(command_runner=lambda *_args, **_options: CommandResult(0, "", ""))
+    git.require_no_ignored_files(tmp_path)
+    uncertain = GitService(command_runner=lambda *_args, **_options: incomplete)
+    with pytest.raises(StateConflict, match="inventory is incomplete"):
+        uncertain.require_no_ignored_files(tmp_path)
+
+
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="native user permission denial")
+def test_native_git_permission_warning_does_not_prove_ignored_output_absent(tmp_path):
+    repository = _repository(tmp_path)
+    (repository / ".git" / "info" / "exclude").write_text("ignored/\n")
+    git = GitService()
+    git.require_no_ignored_files(repository)
+    hidden = repository / "ignored"
+    hidden.mkdir()
+    output = hidden / "valuable.bin"
+    output.write_bytes(b"unique unpromoted result")
+    hidden.chmod(0)
+    try:
+        with pytest.raises(StateConflict, match="inventory is incomplete"):
+            git.require_no_ignored_files(repository)
+    finally:
+        hidden.chmod(0o700)
+    assert output.read_bytes() == b"unique unpromoted result"
+
+
+def test_native_git_ignored_output_inventory_stays_bounded_and_preserves_files(tmp_path):
+    repository = _repository(tmp_path)
+    (repository / ".git" / "info" / "exclude").write_text("*.result\n")
+    git = GitService()
+    git.require_no_ignored_files(repository)
+    outputs = [repository / (str(index) + "x" * 240 + ".result") for index in range(40)]
+    for output in outputs:
+        output.write_bytes(b"unique unpromoted result")
+    with pytest.raises(StateConflict, match="inventory is incomplete"):
+        git.require_no_ignored_files(repository)
+    assert all(output.read_bytes() == b"unique unpromoted result" for output in outputs)
+
+
 def test_observe_collects_repository_state_with_one_git_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
