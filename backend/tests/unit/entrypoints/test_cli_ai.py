@@ -17,7 +17,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli import main
 from oh_goon.cli_parser import build_parser
 from oh_goon.core.errors import FleetPlanInvalid, RepositoryEffectQuarantined
-from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.agent_providers import AgentProviderError, PiSessionIntent
 from oh_goon.core.models.game_tape import GameTapeSummary
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
 from oh_goon.engine.command import CommandResult, run_command
@@ -820,6 +820,66 @@ def test_ai_terminal_mode_flags_are_mutually_exclusive() -> None:
         )
 
 
+def test_ai_explicit_ephemeral_reaches_original_run_as_headless_pi(
+    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    argv = [argument for argument in native_cli.argv if argument != "--headless"]
+    assert main([*argv, "--session", "ephemeral"]) == 0
+    selected = native_cli.runtime.plans.run_native_agent.call_args.kwargs["selected"]
+    assert selected.session == PiSessionIntent(mode="ephemeral")
+    assert selected.interactive is False
+
+
+@pytest.mark.parametrize(
+    ("agent", "options", "code", "diagnostic"),
+    [
+        ("pi", ["--session", "new"], "PI_SESSION_UNAVAILABLE", "session storage"),
+        ("pi", ["--session", "run:prior-run"], "PI_SESSION_UNAVAILABLE", "exact session reopening"),
+        (
+            "pi",
+            ["--session", "run:prior-run", "--handoff-from", "other-run"],
+            "PI_SESSION_SELECTION_INVALID",
+            "--handoff-from",
+        ),
+        ("codex", ["--session", "ephemeral"], "PI_SESSION_SELECTION_INVALID", "Pi harness"),
+        ("opencode", ["--session", "new"], "PI_SESSION_SELECTION_INVALID", "Pi harness"),
+        ("pi", ["--session", "run:"], "PI_SESSION_SELECTION_INVALID", "run:<RUN_ID>"),
+        ("pi", ["--session", "run:../PRIVATE"], "PI_SESSION_SELECTION_INVALID", "run:<RUN_ID>"),
+        (
+            "pi",
+            ["--session", "ephemeral", "--session", "ephemeral"],
+            "PI_SESSION_SELECTION_INVALID",
+            "Select one Pi session",
+        ),
+        (
+            "pi",
+            ["--session", "ephemeral", "--interactive"],
+            "PI_SESSION_SELECTION_INVALID",
+            "headless execution",
+        ),
+    ],
+)
+def test_ai_rejects_unavailable_or_conflicting_session_before_task_and_runtime(
+    native_cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    agent: str,
+    options: list[str],
+    code: str,
+    diagnostic: str,
+) -> None:
+    for name in ("_task", "load_agent_providers", "resolve_native_cli_selection"):
+        monkeypatch.setattr(cli_ai, name, Mock(side_effect=AssertionError(name)))
+    assert main(["ai", "--agent", agent, "--json", *options]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["code"] == code
+    assert diagnostic in report["safe_next_action"]
+    assert "PRIVATE" not in str(report)
+    native_cli.build.assert_not_called()
+
+
 def test_native_plan_run_reuses_frozen_cli_selection_and_original_run_owner(
     native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -856,6 +916,7 @@ inputs:
 steps:
 - uses: agent
   harness: native
+  session: {mode: ephemeral}
   task: inspect this project
   requested_effects:
     repository_access: read_only
@@ -886,6 +947,7 @@ steps:
     load.assert_called_once_with(native_cli.config)
     call = native_cli.runtime.plans.run.call_args.kwargs
     assert call["native_agent"].agent == "pi"
+    assert call["native_agent"].session == PiSessionIntent(mode="ephemeral")
     assert call["native_workspace"] == native_cli.workspace
     assert "agent_connection" not in call
     assert native_cli.build.call_args.kwargs["git_service"].command_runner is not None
@@ -1307,13 +1369,19 @@ def test_native_service_rejects_invalid_prior_context_before_fresh_source_or_run
     from oh_goon.core.errors import FleetPlanInvalid
     from oh_goon.services.fleet_plans import FleetPlanService
 
+    selected, _, _ = cli_ai.resolve_native_cli_selection(
+        agent="pi",
+        profile="isolated",
+        workspace=native_cli.workspace,
+        config_file=native_cli.config,
+    )
     runs, resolver = Mock(), Mock()
     service = FleetPlanService(
         resolver, runs, Mock(), Mock(), Mock(), content_store=Mock(), standard_local_fleet=True
     )
     with pytest.raises(FleetPlanInvalid, match="Prior Run handoff"):
         service.run_native_agent(
-            selected=Mock(),
+            selected=selected,
             workspace=native_cli.workspace,
             skill=None,
             task="New task",
@@ -1573,6 +1641,12 @@ def test_native_prior_json_recursion_error_is_typed_before_source_or_run(
     from oh_goon.core.errors import FleetPlanInvalid
     from oh_goon.services.fleet_plans import FleetPlanService
 
+    selected, _, _ = cli_ai.resolve_native_cli_selection(
+        agent="pi",
+        profile="isolated",
+        workspace=native_cli.workspace,
+        config_file=native_cli.config,
+    )
     runs, resolver = Mock(), Mock()
     service = FleetPlanService(
         resolver, runs, Mock(), Mock(), Mock(), content_store=Mock(), standard_local_fleet=True
@@ -1583,7 +1657,7 @@ def test_native_prior_json_recursion_error_is_typed_before_source_or_run(
     )
     with pytest.raises(FleetPlanInvalid, match="Prior Run handoff") as rejected:
         service.run_native_agent(
-            selected=Mock(),
+            selected=selected,
             workspace=native_cli.workspace,
             skill=None,
             task="New task",

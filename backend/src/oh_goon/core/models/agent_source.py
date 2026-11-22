@@ -17,6 +17,7 @@ from typing import Any, cast
 
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.agent_providers import PiSessionIntent
 from oh_goon.core.models.fleet_plan import AgentStepRequestedEffects
 from oh_goon.core.product_identity import stable_id
 from oh_goon.core.source_tree_policy import is_grader_private_source_path
@@ -214,6 +215,7 @@ class FrozenAgentStepHandoff:
     requested_effects: AgentStepRequestedEffects = field(default_factory=AgentStepRequestedEffects)
     authority: str = "PREWORK_NOT_ADMITTED"
     effect_permission: str = "NONE"
+    session: PiSessionIntent | None = None
 
     def verify(self) -> None:
         self.source.verify()
@@ -235,6 +237,10 @@ class FrozenAgentStepHandoff:
             raise FleetPlanInvalid("AG-02B Step handoff contract is incomplete")
         if type(self.requested_effects) is not AgentStepRequestedEffects:
             raise FleetPlanInvalid("SKILL-3B requested effects must use the typed Step contract")
+        if self.session is not None and (
+            type(self.session) is not PiSessionIntent or self.harness != "native"
+        ):
+            raise FleetPlanInvalid("Frozen Pi session intent requires a native Agent Step")
         if self.authority != "PREWORK_NOT_ADMITTED" or self.effect_permission != "NONE":
             raise FleetPlanInvalid("AG-02B prework handoff cannot grant execution authority")
 
@@ -255,6 +261,8 @@ class FrozenAgentStepHandoff:
             identity["requested_effects"] = self.requested_effects.model_dump(
                 mode="json", exclude_none=True
             )
+        if self.session is not None:
+            identity["session"] = self.session.model_dump(mode="json")
         return stable_id("agent-step-prework-handoff-v1", identity)
 
     def encode_prework_delivery(self) -> bytes:
@@ -292,6 +300,8 @@ class FrozenAgentStepHandoff:
             step_payload["requested_effects"] = self.requested_effects.model_dump(
                 mode="json", exclude_none=True
             )
+        if self.session is not None:
+            step_payload["session"] = self.session.model_dump(mode="json")
         packet = canonical_bytes(
             {
                 "schema": _PREWORK_PACKET_SCHEMA,
@@ -355,11 +365,10 @@ class FrozenAgentStepHandoff:
         ):
             raise FleetPlanInvalid("AG-02B2A delivery cannot claim admitted or effect authority")
         step_keys = {"owner_source_sha256", "step_id", "harness", "task", "timeout_seconds"}
-        if type(obj["step"]) is not dict or set(obj["step"]) not in (
-            step_keys,
-            step_keys | {"requested_effects"},
+        if type(obj["step"]) is not dict or not (
+            step_keys <= set(obj["step"]) <= step_keys | {"requested_effects", "session"}
         ):
-            raise FleetPlanInvalid("SKILL-3B invalid requested-effects transport shape")
+            raise FleetPlanInvalid("AG-02B2A invalid Step transport shape")
         raw_step = obj["step"]
         raw_source = _exact_dict(
             obj["source"],
@@ -403,6 +412,14 @@ class FrozenAgentStepHandoff:
             )
         except (ValueError, TypeError) as exc:
             raise FleetPlanInvalid("SKILL-3B invalid typed requested effects") from exc
+        try:
+            session = (
+                PiSessionIntent.model_validate(raw_step["session"])
+                if "session" in raw_step
+                else None
+            )
+        except (ValueError, TypeError) as exc:
+            raise FleetPlanInvalid("AG-02B2A invalid typed Pi session intent") from exc
         handoff = FrozenAgentStepHandoff(
             source=source,
             owner_source_sha256=raw_step["owner_source_sha256"],
@@ -411,6 +428,7 @@ class FrozenAgentStepHandoff:
             task=raw_step["task"],
             timeout_seconds=timeout,
             requested_effects=requested_effects,
+            session=session,
         )
         handoff.verify()
         if (

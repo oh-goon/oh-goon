@@ -26,6 +26,7 @@ import pytest
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
+from oh_goon.core.models.agent_providers import PiSessionIntent
 from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
@@ -34,6 +35,7 @@ from oh_goon.core.models.run_events import (
     ProcessStartedEvent,
     StepAttemptCreatedEvent,
 )
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.engine.command import run_command
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
@@ -489,8 +491,13 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                 ),
                 encoding="utf-8",
             )
+            session = PiSessionIntent(mode="ephemeral") if pi_rpc else None
             selected, backend, git = resolve_native_cli_selection(
-                agent=agent, profile="readonly", workspace=workspace, config_file=catalog
+                agent=agent,
+                profile="readonly",
+                workspace=workspace,
+                config_file=catalog,
+                session=session,
             )
             assert selected.profile.sandbox_owner == "harness"
             runtime = ApplicationRuntime.build(
@@ -516,6 +523,9 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                 )
                 run_ready.set()
                 detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id)
+                assert isinstance(detail.run.target, FleetPlanTarget)
+                assert detail.run.target.plan.native_agent == selected
+                assert selected.session == session
                 assert descendant is not None, (fixture_failure, "native child cut not reached")
                 assert select.select([descendant.child_fd], [], [], 0)[0], (
                     "native detached child outlived original Run terminal readback"

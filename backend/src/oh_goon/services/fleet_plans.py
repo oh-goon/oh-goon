@@ -27,6 +27,7 @@ from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentProvidersConfig,
     ResolvedNativeAgent,
+    require_pi_session_execution,
 )
 from oh_goon.core.models.agent_repair import (
     MAX_AGENT_CAMPAIGN_MESSAGE_CHARS,
@@ -296,6 +297,12 @@ class FleetPlanService:
         """
         if type(candidate) is not bool:
             raise FleetPlanInvalid("Candidate selection requires an explicit boolean")
+        require_pi_session_execution(
+            selected.session,
+            agent=selected.agent,
+            interactive=selected.interactive,
+            handoff=prior_context is not None or continuation_receipt is not None,
+        )
         if not self._standard_local_fleet or self._content_store is None:
             raise FleetPlanInvalid("Native Agent hosting requires ordinary Fleet execution")
         if (
@@ -524,6 +531,16 @@ class FleetPlanService:
                     )
             raise
 
+    def _require_native_git_scope(self) -> None:
+        if (
+            self._git_service is None
+            or self._git_service.command_runner is None
+            or self._git_service.observation_runner is None
+        ):
+            raise FleetPlanInvalid(
+                "Native isolation requires the runtime's scoped Git execution boundary"
+            )
+
     def _prepare_native_agent(
         self,
         selected: ResolvedNativeAgent,
@@ -611,14 +628,8 @@ class FleetPlanService:
                 and capture_workspace_control_git_environment(self._git_service) is not None
             )
         if selected.profile.backend == "bubblewrap":
-            if (
-                self._git_service is None
-                or self._git_service.command_runner is None
-                or self._git_service.observation_runner is None
-            ) and not metadata_git:
-                raise FleetPlanInvalid(
-                    "Native isolation requires the runtime's scoped Git execution boundary"
-                )
+            if not metadata_git:
+                self._require_native_git_scope()
             if not isinstance(backend, BubblewrapProcessIsolation):
                 raise FleetPlanInvalid("The selected ordinary isolation backend is unavailable")
             identity = backend.configuration_identity()
@@ -705,8 +716,9 @@ class FleetPlanService:
                 ) from None
             roots.append(resolved)
         graph = self._resolver.analyze_source(plan_path, root_expected_name=root_expected_name)
-        graph.validate_agent_selection(
+        session = graph.validate_agent_selection(
             native_selected=selection.implementation is not None,
+            native_implementation=selection.implementation,
             model_selected=selection.model_profile is not None,
             require_review_phases=require_review_phases,
         )
@@ -726,6 +738,7 @@ class FleetPlanService:
                 selection.profile,
                 workspace=repository,
                 environment=os.environ,
+                session=session,
             )
             read_only_workspace = all(
                 step.requested_effects.repository_access == "read_only"
@@ -1187,9 +1200,15 @@ class FleetPlanService:
                 source_graph = _selected_source_graph(
                     self._resolver, plan_path, source_graph=source_graph
                 )
-                source_graph.validate_agent_selection(
-                    native_selected=True, require_review_phases=False
+                session = source_graph.validate_agent_selection(
+                    native_selected=True,
+                    native_implementation=native_agent.agent,
+                    require_review_phases=False,
                 )
+                if session is not None and session != native_agent.session:
+                    raise FleetPlanInvalid(
+                        "Authored Pi session differs from the resolved native selection"
+                    )
                 read_only_workspace = all(
                     step.requested_effects.repository_access == "read_only"
                     for owner, identifier in source_graph.agent_step_sources()
@@ -1529,13 +1548,15 @@ class FleetPlanService:
                 raise FleetPlanInvalid(
                     "Native repair requires one explicit workspace and its frozen native selection"
                 )
+            require_pi_session_execution(
+                native_agent.session, agent=native_agent.agent, interactive=native_agent.interactive
+            )
+            if native_agent.profile.backend == "bubblewrap":
+                self._require_native_git_scope()
             native_workspace = native_workspace.resolve(strict=True)
             # A campaign contains a later writable apply phase even though its
             # reasoning phases must retain read-only preflight semantics.
             require_native_workspace_runtime_separation(native_workspace, read_only_workspace=False)
-            native_agent = self._prepare_native_agent(
-                native_agent, native_workspace, read_only_workspace=True
-            )
         content_store = self._content_store
         if type(budget) is not AgentRepairBudget:
             raise FleetPlanInvalid("repair requires explicit typed attempt and deadline limits")
@@ -1713,6 +1734,23 @@ class FleetPlanService:
                     cancel_requested=capture_options["cancel_requested"],
                 )
                 capture_options["source_graph"] = source_graph
+            if prepared_agent_plan is None and native_agent is not None:
+                assert source_graph is not None and native_workspace is not None
+                session = source_graph.validate_agent_selection(
+                    native_selected=True,
+                    native_implementation=native_agent.agent,
+                    require_review_phases=True,
+                )
+                if session is not None and session != native_agent.session:
+                    raise FleetPlanInvalid(
+                        "Authored Pi session differs from the resolved native selection"
+                    )
+                if (stop := stop_requested()) is not None:
+                    return result(stop)
+                native_agent = self._prepare_native_agent(
+                    native_agent, native_workspace, read_only_workspace=True
+                )
+                capture_options["native_agent"] = native_agent
             if review_write_roots is not None:
                 plan, handoffs, source_sha = (
                     (

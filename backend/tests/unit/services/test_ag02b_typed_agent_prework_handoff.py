@@ -60,6 +60,165 @@ def test_original_atomic_goon_compiles_explicit_typed_agent_step_without_shell()
     assert not hasattr(step, "command")
 
 
+@pytest.mark.parametrize("source_kind", ["plan", "goon"])
+def test_authored_pi_session_freezes_into_original_plan_delivery_and_lock(
+    tmp_path: Path,
+    source_kind: str,
+) -> None:
+    from dataclasses import replace
+
+    from oh_goon.core.execution_lock_identity import build_execution_lock, verify_execution_lock
+    from oh_goon.core.models.agent_providers import (
+        NativeAgentDefinition,
+        NativeAgentProfile,
+        PiSessionIntent,
+        ResolvedNativeAgent,
+    )
+    from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
+    from oh_goon.core.models.fleet_plan import ResolvedFleetPlan
+
+    step = "- uses: agent\n  harness: native\n  task: Inspect the supplied source\n"
+    resolver, source, options, goon, repository = _case(tmp_path, step)
+    options.pop("expected_source_sha256")
+    spec = goon / "goon.yml"
+    if source_kind == "goon":
+        source = spec
+    native = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="native-source-prework",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+    )
+    implicit, implicit_deliveries, _ = resolver.resolve_frozen_agents(
+        source, native_agent=native, repository=repository, **options
+    )
+    assert implicit.native_agent == native
+    assert all(item.session is None for item in implicit_deliveries.values())
+    spec.write_text(spec.read_text() + "  session: {mode: ephemeral}\n", encoding="utf-8")
+    graph = resolver.analyze_source(source)
+    intent = PiSessionIntent.from_selector("ephemeral")
+    assert (
+        graph.validate_agent_selection(native_selected=True, native_implementation="pi") == intent
+    )
+    with pytest.raises(FleetPlanInvalid, match="differs from the resolved native selection"):
+        resolver.resolve_frozen_agents(
+            source, native_agent=native, repository=repository, source_graph=graph, **options
+        )
+    selected = replace(native, session=intent)
+    resolved, deliveries, _ = resolver.resolve_frozen_agents(
+        source, native_agent=selected, repository=repository, source_graph=graph, **options
+    )
+    restored = ResolvedFleetPlan.model_validate_json(resolved.model_dump_json())
+    assert restored.native_agent == selected
+    assert restored == resolved
+    assert restored.steps[0].kind == "agent"
+    assert restored.steps[0].workload.harness == "native"
+    assert restored.steps[0].workload.native_agent == selected
+    handoff = next(iter(deliveries.values()))
+    packet = handoff.encode_prework_delivery()
+    assert (
+        FrozenAgentStepHandoff.decode_prework_delivery(
+            packet, expected_handoff_identity=handoff.handoff_identity
+        ).session
+        == intent
+    )
+    stale = build_execution_lock(implicit)
+    current = build_execution_lock(restored)
+    assert current.digest != stale.digest
+    with pytest.raises(FleetPlanInvalid, match="stale"):
+        verify_execution_lock(current, stale)
+
+
+@pytest.mark.parametrize(
+    ("session", "agent", "error"),
+    [
+        ("{mode: ephemeral}", "codex", "requires the Pi harness"),
+        ("{mode: new}", "pi", "qualified session storage"),
+        ("{mode: continue, prior_run_id: fleet-original}", "pi", "exact session reopening"),
+    ],
+)
+def test_authored_pi_session_refuses_before_original_agent_source_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    session: str,
+    agent: str,
+    error: str,
+) -> None:
+    from oh_goon.core.models.agent_providers import (
+        AgentProviderError,
+        NativeAgentDefinition,
+        NativeAgentProfile,
+        ResolvedNativeAgent,
+    )
+
+    resolver, source, options, _, repository = _case(
+        tmp_path, f"- uses: agent\n  harness: native\n  task: inspect\n  session: {session}\n"
+    )
+    options.pop("expected_source_sha256")
+    selected = ResolvedNativeAgent(
+        agent="pi" if agent == "pi" else "codex",
+        profile_name="native-source-prework",
+        definition=NativeAgentDefinition(executable="/native/agent"),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+    )
+    monkeypatch.setattr(
+        "oh_goon.services.agent_authoring_sources.capture_agent_sources",
+        lambda *_args, **_kwargs: pytest.fail("Unsupported selection reached source capture"),
+    )
+    with pytest.raises(AgentProviderError, match=error):
+        resolver.resolve_frozen_agents(
+            source, native_agent=selected, repository=repository, **options
+        )
+
+
+def test_conflicting_authored_session_modes_refuse_one_run(tmp_path: Path) -> None:
+    resolver, source, _, _, _ = _case(
+        tmp_path,
+        "- uses: agent\n  id: first\n  harness: native\n  task: inspect\n"
+        "  session: {mode: ephemeral}\n"
+        "- uses: agent\n  id: second\n  harness: native\n  task: report\n"
+        "  session: {mode: new}\n",
+    )
+    with pytest.raises(FleetPlanInvalid, match="conflicting Pi session intents"):
+        resolver.analyze_source(source).validate_agent_selection(
+            native_selected=True, native_implementation="pi"
+        )
+
+
+def test_resolver_refuses_unqualified_direct_pi_selection_before_source_analysis(
+    tmp_path: Path,
+) -> None:
+    from oh_goon.core.models.agent_providers import (
+        NativeAgentDefinition,
+        NativeAgentProfile,
+        PiSessionIntent,
+        PiSessionUnavailable,
+        ResolvedNativeAgent,
+    )
+
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="native-source-prework",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap"),
+        executable_sha256="a" * 64,
+        session=PiSessionIntent(mode="new"),
+    )
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(tmp_path / "goons"))
+    with pytest.raises(PiSessionUnavailable, match="qualified session storage"):
+        resolver.resolve_frozen_agents(
+            tmp_path / "absent-plan.yml",
+            inputs={},
+            repository_root=tmp_path,
+            skill_root=tmp_path,
+            allowed_acceptance=(),
+            native_agent=selected,
+            repository=tmp_path,
+        )
+
+
 @pytest.mark.parametrize(
     "step",
     [
@@ -67,6 +226,8 @@ def test_original_atomic_goon_compiles_explicit_typed_agent_step_without_shell()
         "- uses: agent\n  harness: opencode\n  task: check\n  argv: [sh, -c, id]\n",
         "- uses: agent\n  harness: opencode\n  task: check\n  model_endpoint: https://evil.invalid\n",
         "- uses: agent\n  harness: opencode\n  task: check\n  credentials: secret\n",
+        "- uses: agent\n  harness: local-search\n  task: search:check\n  session: {mode: ephemeral}\n",
+        "- uses: agent\n  harness: native\n  task: check\n  session: {mode: continue}\n",
         "- uses: agent\n  harness: bad/name\n  task: check\n",
         "- uses: agent\n  harness: opencode\n",
     ],

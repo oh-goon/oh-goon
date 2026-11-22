@@ -20,6 +20,7 @@ from oh_goon.core.errors import (
     RunControlOwnerUnavailable,
     StateConflict,
 )
+from oh_goon.core.models.agent_providers import require_pi_session_execution
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_executor import FleetExecutorPlacement
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep, ResolvedFleetPlan
@@ -257,6 +258,14 @@ class FleetRunLifecycle:
         rerun_from_run_id: str | None = None,
     ) -> None:
         """Reject uncut Fleet ingress before Plan work, replay, or native observation."""
+        if isinstance(target, FleetPlanTarget) and target.plan.native_agent is not None:
+            selected = target.plan.native_agent
+            require_pi_session_execution(
+                selected.session,
+                agent=selected.agent,
+                interactive=selected.interactive,
+                handoff=target.agent_continuation is not None,
+            )
         if isinstance(target, FleetPlanTarget) and target.candidate_workspace is not None:
             if (
                 run_id != target.candidate_workspace.fleet_run_id

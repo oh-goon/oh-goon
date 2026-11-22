@@ -131,6 +131,28 @@ native authentication or start a model server. New native `init` selections also
 with the `isolated-managed` profile; existing `run.yml` selections stay explicit.
 Missing configuration fails before work.
 
+Select an explicit ephemeral Pi session with `oh-goon ai --agent pi --session
+ephemeral --prompt-file task.txt`. The selector uses headless Pi with its native
+`--no-session` mode. A headless Pi Run without a selector also uses
+`--no-session`. An authored native Agent Step can declare the same selection:
+
+```yaml
+session: {mode: ephemeral}
+```
+
+The original Plan and Goon resolution binds the selection to the native profile,
+executable and workspace in the resolved workload and execution lock. All
+explicit session choices in one Plan must agree. This applies to initialized
+workflows and eligible Shared Plans. Codex and OpenCode refuse a Pi selector.
+
+`--session new` and `--session run:RUN_ID` select persistent creation and
+continuation. Both currently return `PI_SESSION_UNAVAILABLE` before Run
+admission. Their authored equivalents are `session: {mode: new}` and
+`session: {mode: continue, prior_run_id: RUN_ID}`. Private storage, single writer
+custody and exact native reopen are tracked in HUG-41 through HUG-43. Use
+`--handoff-from RUN_ID` to give a fresh Run bounded context from an earlier Run.
+Combining it with exact native continuation is rejected.
+
 Broker-backed native reasoning requires an explicit managed inference connection so qualified
 Hashmarks context reaches every model request, including follow-up and compaction.
 OpenCode and Pi support the selected Chat Completions, Responses or Anthropic wire

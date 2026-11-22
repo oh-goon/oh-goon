@@ -25,6 +25,7 @@ from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import FleetRunSource, FleetRunStatus, OperationAction
 from oh_goon.integrations.run_resource_envelope import ResolvedRunResourceScope
 from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionSession, ExecutionTicket
+from oh_goon.runtime.journal import Journal
 from oh_goon.services.fleet_run_control_plane import FleetRunControlPlane
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from tests.factories.capabilities import capability_snapshot
@@ -231,10 +232,17 @@ def test_native_resource_scope_activation_keeps_the_original_run_identity(
     monkeypatch.setattr(process_birth, "observe_process_birth", lambda: worker_birth)
     verify_member = Mock()
     monkeypatch.setattr(native_resources, "verify_worker_run_resource_scope", verify_member)
+    fleet_run_id = "another-run" if foreign else evidence.fleet_run_id
+    connection = object()
+    journal = Mock(spec=Journal)
+    run_lookup = journal.read_view_from_connection.return_value.required_run_detail
+    run_lookup.return_value = SimpleNamespace(execution=DirectFleetExecutionAdmission())
+    lifecycle._journal = journal
     session = cast(
         ExecutionSession,
         SimpleNamespace(
-            require_fleet_run_id=lambda: "another-run" if foreign else evidence.fleet_run_id
+            require_fleet_run_id=lambda: fleet_run_id,
+            observe=lambda read: read(connection),
         ),
     )
     activate = Mock(return_value=session)
@@ -250,6 +258,8 @@ def test_native_resource_scope_activation_keeps_the_original_run_identity(
             lifecycle._run_resource_scope, evidence, worker_birth=worker_birth
         )
     activate.assert_called_once_with(ticket)
+    journal.read_view_from_connection.assert_called_once_with(connection)
+    run_lookup.assert_called_once_with(fleet_run_id)
 
 
 def test_self_rerun_does_not_read_journal_or_invoke_gate() -> None:

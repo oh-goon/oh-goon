@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, PrivateAttr, TypeAdapter, field_validator, model_validator
 
 from oh_goon.core.fleet_plan_validation import validate_resolved_plan
-from oh_goon.core.models.agent_providers import AgentConnection, ResolvedNativeAgent
+from oh_goon.core.models.agent_providers import (
+    AgentConnection,
+    PiSessionIntent,
+    ResolvedNativeAgent,
+)
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan_composition import (
@@ -349,6 +353,7 @@ class AgentPlanStep(ImmutableModel):
     kind: Literal["agent"] = "agent"
     step_id: str = Field(min_length=1, max_length=80)
     harness: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    session: PiSessionIntent | None = Field(default=None, exclude_if=lambda value: value is None)
     role: AgentResultRole = Field(default="report", exclude_if=lambda value: value == "report")
     task: str = Field(min_length=1, max_length=MAX_AGENT_TASK_CHARS)
     # Only a named earlier original Fleet Step output may become untrusted model feedback.
@@ -356,6 +361,12 @@ class AgentPlanStep(ImmutableModel):
     when: StepCondition | None = None
     timeout_seconds: float = Field(default=3600, gt=0, le=21600)
     requested_effects: AgentStepRequestedEffects = Field(default_factory=AgentStepRequestedEffects)
+
+    @model_validator(mode="after")
+    def validate_session_harness(self) -> Self:
+        if self.session is not None and self.harness != "native":
+            raise ValueError("Pi session intent requires a native Agent Step")
+        return self
 
     @field_validator("harness")
     @classmethod

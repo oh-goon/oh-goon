@@ -539,6 +539,35 @@ def test_installed_pi_missing_option_values_consume_owned_transport(pi_probe: _P
             validate_native_agent_arguments("pi", fragment)
 
 
+def test_installed_pi_preserves_exact_and_duplicate_native_session_options(
+    pi_probe: _PiProbe,
+) -> None:
+    cases = {
+        "path": (("--session", "selected.jsonl"), "session", "selected.jsonl"),
+        "id": (("--session-id", "selected-id"), "sessionId", "selected-id"),
+        "directory": (("--session-dir", "selected-dir"), "sessionDir", "selected-dir"),
+        "continue": (("--continue",), "continue", True),
+        "continue-short": (("-c",), "continue", True),
+        "resume": (("--resume",), "resume", True),
+        "resume-short": (("-r",), "resume", True),
+        "fork": (("--fork", "selected.jsonl"), "fork", "selected.jsonl"),
+        "print": (("--print", "extra-task"), "print", True),
+        "print-short": (("-p",), "print", True),
+        "duplicate-path": (
+            ("--session", "first.jsonl", "--session", "last.jsonl"),
+            "session",
+            "last.jsonl",
+        ),
+    }
+    observed = _native_arguments(pi_probe, {name: case[0] for name, case in cases.items()})
+    for name, (fragment, native_field, value) in cases.items():
+        assert observed[name][native_field] == value, name
+        assert observed[name]["mode"] == "json" and observed[name]["noSession"] is True
+        with pytest.raises(AgentProviderError, match="owned terminal/task/session transport"):
+            validate_native_agent_arguments("pi", fragment)
+    assert observed["print"]["messages"] == ["extra-task"]
+
+
 def test_installed_pi_reserved_equals_options_reach_extension_flag_map(pi_probe: _PiProbe) -> None:
     values = {
         "mode": "rpc",

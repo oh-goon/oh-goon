@@ -20,6 +20,8 @@ from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     NativeAgentDefinition,
     NativeAgentProfile,
+    PiSessionIntent,
+    PiSessionUnavailable,
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.fleet_plan import (
@@ -694,11 +696,19 @@ def _history_admission_target(connection: AgentConnection, *, native: bool) -> F
         if selected is not None
         else ResolvedProviderAgentWorkload(harness="provider-review", connection=connection)
     )
+    return _agent_admission_target(workload)
+
+
+def _agent_admission_target(
+    workload: ResolvedNativeAgentWorkload | ResolvedProviderAgentWorkload,
+) -> FleetPlanTarget:
     plan = ResolvedFleetPlan.create(
-        name="history-admission",
+        name="agent-admission",
         description="Current permission before any Step",
         execution=MaintenanceExecutionPolicy(),
-        native_agent=selected,
+        native_agent=workload.native_agent
+        if isinstance(workload, ResolvedNativeAgentWorkload)
+        else None,
         steps=(
             ResolvedCommandStep(step_id="before-agent", argv=("would-run-before-agent",)),
             ResolvedAgentStep(
@@ -783,6 +793,67 @@ def test_current_history_policy_precedes_new_admission_but_preserves_recorded_re
             == recorded
         )
         assert journal.read_view().revision == revision
+        assert effects.mock_calls == []
+
+
+@pytest.mark.parametrize("mode", ["prepared", "rerun"])
+@pytest.mark.parametrize("selector", ["new", "run:prior-run"])
+def test_persistent_pi_session_refuses_prepared_start_and_rerun_before_work(
+    tmp_path: Path, selector: str, mode: str
+) -> None:
+    database = LocalDatabase(tmp_path / "pi-admission.db")
+    with database.execution_connection_scope():
+        journal = Journal(database)
+        effects: Any = Mock()
+        effects.plan.side_effect = AssertionError("Unavailable Pi session reached planning")
+        lifecycle = FleetRunLifecycle(
+            database, journal, effects, effects, standard_local_fleet=True
+        )
+        plane = FleetRunControlPlane(
+            effects, journal, lifecycle, effects, effects, effects, worker_configuration=effects
+        )
+        target = _agent_admission_target(
+            ResolvedNativeAgentWorkload(
+                native_agent=ResolvedNativeAgent(
+                    agent="pi",
+                    profile_name="isolated",
+                    definition=NativeAgentDefinition(executable=sys.executable),
+                    profile=NativeAgentProfile(backend="bubblewrap"),
+                    executable_sha256="a" * 64,
+                    session=PiSessionIntent.from_selector(selector),
+                )
+            )
+        )
+        repository = RepositoryIdentity.model_validate({"path": tmp_path / "repo"})
+        repository_ids = {repository.repository_id}
+        if mode == "rerun":
+            admit_run(
+                journal,
+                "recorded-run",
+                FleetRunAdmissionIntent(
+                    target=target,
+                    capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
+                    execution=DirectFleetExecutionAdmission(),
+                    repository_admissions=repository_admissions_for(target, [repository]),
+                ),
+                fleet_repository_scope(repository_ids),
+                [repository],
+            )
+            terminalize_run(journal, "recorded-run", FleetRunTerminalIntent.CANCEL)
+        view = journal.read_view()
+        recorded = view.run_detail("recorded-run")
+        with pytest.raises(PiSessionUnavailable):
+            if mode == "rerun":
+                assert recorded is not None and recorded.run.target == target
+                plane.rerun("recorded-run", new_fleet_run_id="new-run")
+            else:
+                plane.start_prepared_plan(
+                    target, repository_ids=repository_ids, fleet_run_id="new-run"
+                )
+        after = journal.read_view()
+        assert after.revision == view.revision
+        assert after.run_detail("recorded-run") == recorded
+        assert after.run_detail("new-run") is None
         assert effects.mock_calls == []
 
 

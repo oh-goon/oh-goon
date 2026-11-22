@@ -925,6 +925,18 @@ not start Pi or load an extension. [Native unit tests][native-tests],
 early refusals and valid caller options. Requalify framing on a native upgrade;
 these results do not certify arbitrary extensions or new persistent modes.
 
+### Pi session intent — HUG-40
+
+Retain the Pi 1.3.0 task and option framing. The installed parser probes cover
+exact and short native selectors, duplicate selectors, equals forms, the
+terminator, missing values and positional task inputs. Explicit ephemeral
+intent selects headless Pi and travels with its resolved profile, executable
+and original Run Step. The JSON and RPC headless launchers continue to select
+`--no-session`. Creation and exact continuation are typed choices and refuse
+before work until their original storage, writer custody and reopen authorities
+are available. The native parser proof covers argument ownership. Extension
+code that changes the effective session remains in HUG-136's scope.
+
 ## Native model usage observations — HUG-222, 2026-11-22
 
 **Disposition: retain** the existing Codex service transport, scoped native

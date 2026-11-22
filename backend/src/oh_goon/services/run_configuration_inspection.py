@@ -115,6 +115,7 @@ def inspect_run_configuration(
     if snapshot.selection.agent is not None:
         graph.validate_agent_selection(
             native_selected=snapshot.selection.agent.implementation is not None,
+            native_implementation=snapshot.selection.agent.implementation,
             require_review_phases=snapshot.selection.repair is not None,
             model_selected=snapshot.selection.agent.model_profile is not None,
         )

@@ -116,11 +116,12 @@ def prepare_configuration(
         raise FleetPlanInvalid("Agent execution requires a single repository")
     if (agent is not None) != agent_source:
         raise FleetPlanInvalid("agent selection must match the selected source's Agent contract")
-    if agent_source:
-        graph.validate_agent_selection(
-            native_selected=agent is not None and agent.implementation is not None,
+    if agent is not None:
+        args._pi_session = graph.validate_agent_selection(
+            native_selected=agent.implementation is not None,
+            native_implementation=agent.implementation,
             require_review_phases=repair is not None,
-            model_selected=agent is not None and agent.model_profile is not None,
+            model_selected=agent.model_profile is not None,
         )
     args._source_graph = graph
     args._configuration_targets = targets

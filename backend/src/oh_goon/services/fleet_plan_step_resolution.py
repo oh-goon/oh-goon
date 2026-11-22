@@ -303,6 +303,7 @@ def require_agent_step_handoff(
         or step.task != handoff.task
         or step.timeout_seconds != handoff.timeout_seconds
         or step.requested_effects != handoff.requested_effects
+        or step.session != handoff.session
     ):
         raise FleetPlanInvalid("Agent Step meaning changed after source capture")
 
@@ -329,6 +330,8 @@ def resolve_delivered_agent_step(
     if handoff.harness == "native":
         if not isinstance(native_agent, ResolvedNativeAgent):
             raise FleetPlanInvalid("native Agent requires an explicitly resolved native selection")
+        if handoff.session is not None and native_agent.session != handoff.session:
+            raise FleetPlanInvalid("Frozen Pi session differs from the resolved native selection")
         if (
             role not in {"report", "review", "adjudication", "proposal"}
             or requested.capabilities.egress.mode != "none"
