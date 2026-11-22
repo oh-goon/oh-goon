@@ -21144,6 +21144,38 @@
         "title": "PathMissingCondition",
         "type": "object"
       },
+      "PiSessionIntent": {
+        "additionalProperties": false,
+        "description": "One Pi mode and, for continuation, an exact original Fleet Run reference.",
+        "properties": {
+          "mode": {
+            "enum": [
+              "ephemeral",
+              "new",
+              "continue"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "prior_run_id": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,159}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prior Run Id"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "PiSessionIntent",
+        "type": "object"
+      },
       "PlacementQueueSnapshot": {
         "additionalProperties": false,
         "properties": {
@@ -28725,6 +28757,16 @@
           "profile_name": {
             "title": "Profile Name",
             "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PiSessionIntent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

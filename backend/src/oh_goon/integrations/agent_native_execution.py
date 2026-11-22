@@ -17,7 +17,11 @@ from pathlib import Path
 from typing import Any, Literal
 
 from oh_goon.core.agent_harness_contract import AgentHarnessObservation
-from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNativeAgent
+from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
+    ResolvedNativeAgent,
+    require_pi_session_execution,
+)
 
 _MAX_EVENT_STREAM_BYTES = 1024 * 1024
 _MAX_EVENT_RECORD_BYTES = 256 * 1024
@@ -259,6 +263,9 @@ def native_agent_command(
     Pi's additive system file preserves its native base prompt. Headless input
     stays file-backed rather than expanding private repository data in argv.
     """
+    require_pi_session_execution(
+        selected.session, agent=selected.agent, interactive=interactive or selected.interactive
+    )
     if type(rpc) is not bool or rpc and (selected.agent != "pi" or interactive):
         raise AgentProviderError("RPC input is supported only for noninteractive Pi")
     if selected.agent not in ("opencode", "pi", "codex"):

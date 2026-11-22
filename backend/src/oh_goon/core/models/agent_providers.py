@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import ConfigDict, Field, JsonValue, SecretStr, field_validator, model_validator
@@ -52,6 +52,70 @@ class AgentProviderError(InvalidRequest):
     def __init__(self, message: str, *, usage: ModelUsageReport | None = None) -> None:
         super().__init__(message)
         self.usage = usage
+
+
+class PiSessionSelectionError(AgentProviderError):
+    """A fixed diagnostic that does not expose the caller's selection text."""
+
+    code = "PI_SESSION_SELECTION_INVALID"
+
+
+class PiSessionUnavailable(PiSessionSelectionError):
+    """The selected persistent mode lacks the required session authority."""
+
+    code = "PI_SESSION_UNAVAILABLE"
+
+
+class PiSessionIntent(ImmutableModel):
+    """One Pi mode and, for continuation, an exact original Fleet Run reference."""
+
+    mode: Literal["ephemeral", "new", "continue"]
+    prior_run_id: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,159}$",
+        exclude_if=lambda value: value is None,
+    )
+
+    @model_validator(mode="after")
+    def require_exact_reference(self) -> PiSessionIntent:
+        if (self.mode == "continue") != (self.prior_run_id is not None):
+            raise ValueError("A prior Fleet Run ID is required for continuation only")
+        return self
+
+    @classmethod
+    def from_selector(cls, selector: str) -> PiSessionIntent:
+        if selector == "ephemeral":
+            return cls(mode="ephemeral")
+        if selector == "new":
+            return cls(mode="new")
+        if selector.startswith("run:"):
+            try:
+                return cls(mode="continue", prior_run_id=selector.removeprefix("run:"))
+            except ValueError:
+                pass
+        raise PiSessionSelectionError("Select a Pi session with ephemeral, new, or run:<RUN_ID>")
+
+
+def require_pi_session_execution(
+    session: PiSessionIntent | None,
+    *,
+    agent: str,
+    interactive: bool = False,
+    handoff: bool = False,
+) -> None:
+    """Protect current execution until the persistent session owners can admit it."""
+    if session is None:
+        return
+    if agent != "pi":
+        raise PiSessionSelectionError("Pi session selection requires the Pi harness")
+    if session.mode == "continue" and handoff:
+        raise PiSessionSelectionError("Pi continuation cannot be combined with --handoff-from")
+    if session.mode == "new":
+        raise PiSessionUnavailable("New persistent Pi sessions require qualified session storage")
+    if session.mode == "continue":
+        raise PiSessionUnavailable("Pi continuation requires qualified exact session reopening")
+    if interactive:
+        raise PiSessionSelectionError("Explicit ephemeral Pi sessions require headless execution")
 
 
 class AgentResponseTruncated(AgentProviderError):
@@ -518,6 +582,7 @@ class ResolvedNativeAgent:
     connection: AgentConnection | None = None
     interactive: bool = False
     backend_configuration_id: str | None = None
+    session: Annotated[PiSessionIntent | None, Field(exclude_if=lambda value: value is None)] = None
 
     @property
     def disclosure_recipients(self) -> tuple[str, ...]:

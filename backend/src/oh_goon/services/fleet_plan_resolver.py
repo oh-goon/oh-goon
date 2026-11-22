@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.fleet_plan_composition import bind_inputs, validate_condition_dependencies
-from oh_goon.core.models.agent_providers import ResolvedNativeAgent
+from oh_goon.core.models.agent_providers import ResolvedNativeAgent, require_pi_session_execution
 from oh_goon.core.models.execution_lock_models import LockedSkillSource
 from oh_goon.core.models.fleet_plan import (
     AgentPlanStep,
@@ -253,10 +253,14 @@ class FleetPlanResolver:
         )
         from oh_goon.services.fleet_plan_step_resolution import require_agent_step_handoff
 
-        if native_agent is not None and repository is None:
-            raise FleetPlanInvalid(
-                "Native Agent capture requires its explicit repository workspace"
+        if native_agent is not None:
+            require_pi_session_execution(
+                native_agent.session, agent=native_agent.agent, interactive=native_agent.interactive
             )
+            if repository is None:
+                raise FleetPlanInvalid(
+                    "Native Agent capture requires its explicit repository workspace"
+                )
         private_native_roots = (
             (Path(native_agent.profile.codex_service.home),)
             if native_agent is not None and native_agent.profile.codex_service is not None
@@ -284,10 +288,17 @@ class FleetPlanResolver:
                 )
             if root_expected_name is not None and graph.root.compiled.name != root_expected_name:
                 raise FleetPlanInvalid("Captured Agent source differs from the selected Plan name")
-            graph.validate_agent_selection(
+            authored_session = graph.validate_agent_selection(
                 native_selected=native_agent is not None,
+                native_implementation=native_agent.agent if native_agent is not None else None,
                 require_review_phases=require_review_phases,
             )
+            if authored_session is not None and (
+                native_agent is None or native_agent.session != authored_session
+            ):
+                raise FleetPlanInvalid(
+                    "Authored Pi session differs from the resolved native selection"
+                )
             source_sha = graph.root.source_sha256
             if source_sha is None:
                 raise FleetPlanInvalid("Agent Plan source fingerprint is unavailable")
@@ -365,6 +376,7 @@ class FleetPlanResolver:
                     task=step.task,
                     timeout_seconds=step.timeout_seconds,
                     requested_effects=step.requested_effects,
+                    session=step.session,
                 )
                 handoff.verify()
                 deliveries[occurrence] = handoff
@@ -464,6 +476,7 @@ class FleetPlanResolver:
                     task=authored.task,
                     timeout_seconds=authored.timeout_seconds,
                     requested_effects=authored.requested_effects,
+                    session=authored.session,
                 )
             elif type(handoff) is not FrozenAgentStepHandoff:
                 raise FleetPlanInvalid("Agent source requires an original immutable handoff")
@@ -1029,6 +1042,7 @@ class FleetPlanResolver:
             task=step.task,
             timeout_seconds=step.timeout_seconds,
             requested_effects=step.requested_effects,
+            session=step.session,
         )
         handoff.verify()
         return handoff

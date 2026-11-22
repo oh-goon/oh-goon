@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 
 from oh_goon.core.errors import FleetPlanInvalid, FleetPlanSourceAcquisitionRequired
+from oh_goon.core.models.agent_providers import PiSessionIntent, require_pi_session_execution
 from oh_goon.core.models.fleet_plan import (
     CommandPlanStep,
     CompiledExecutionTemplate,
@@ -142,9 +143,10 @@ class FleetPlanSourceGraph:
         self,
         *,
         native_selected: bool,
+        native_implementation: str | None = None,
         require_review_phases: bool | None = None,
         model_selected: bool | None = None,
-    ) -> None:
+    ) -> PiSessionIntent | None:
         """Refuse source/selection conflicts before registry acquisition or model capture."""
         from oh_goon.core.agent_review_plan import validate_agent_phase_steps
         from oh_goon.core.models.fleet_plan import AgentPlanStep, AgentStepRequestedEffects
@@ -176,6 +178,17 @@ class FleetPlanSourceGraph:
             raise FleetPlanInvalid(
                 "Selected native/provider agent differs from the authored harness"
             )
+        session: PiSessionIntent | None = None
+        for step in agent_steps:
+            if step.session is None:
+                continue
+            if session is not None and step.session != session:
+                raise FleetPlanInvalid(
+                    "One native Run cannot select conflicting Pi session intents"
+                )
+            session = step.session
+        if session is not None and native_implementation is not None:
+            require_pi_session_execution(session, agent=native_implementation)
         if (
             model_selected is False
             and not native_selected
@@ -195,6 +208,7 @@ class FleetPlanSourceGraph:
             )
         if require_review_phases:
             validate_agent_phase_steps(steps, owners)
+        return session
 
     def node(self, path: Path) -> FleetPlanSourceNode:
         node = self._nodes.get(canonical_path(path))

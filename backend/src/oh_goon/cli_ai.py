@@ -25,7 +25,10 @@ from oh_goon.core.models.agent_providers import (
     DEFAULT_NATIVE_AGENT,
     AgentProviderError,
     AgentProvidersConfig,
+    PiSessionIntent,
+    PiSessionSelectionError,
     ResolvedNativeAgent,
+    require_pi_session_execution,
 )
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.runtime.agent_providers import (
@@ -117,6 +120,12 @@ def add_ai_command[_Parser: argparse.ArgumentParser](
         "--handoff-from",
         metavar="RUN_ID",
         help="Seed a fresh native session from one explicit durable Run handoff as untrusted context",
+    )
+    parser.add_argument(
+        "--session",
+        action="append",
+        metavar="MODE",
+        help="Choose ephemeral, new, or run:RUN_ID for Pi. Only ephemeral is available.",
     )
     parser.add_argument("--config", type=Path, help="Provider/native execution catalog")
     parser.add_argument("task", nargs="?", help="Task text, alternative to --prompt/--prompt-file")
@@ -213,6 +222,7 @@ def resolve_native_cli_selection(
     workspace: Path,
     config_file: Path | None,
     interactive: bool | None = False,
+    session: PiSessionIntent | None = None,
 ) -> tuple[ResolvedNativeAgent, ProcessIsolationBackend | None, GitService]:
     """Resolve a single catalog and native workload before application mutation."""
     from oh_goon.engine.git import GitService
@@ -227,7 +237,7 @@ def resolve_native_cli_selection(
         else AgentProvidersConfig()
     )
     selected = resolve_native_agent(
-        config, agent, profile, workspace=workspace, environment=os.environ
+        config, agent, profile, workspace=workspace, environment=os.environ, session=session
     )
     if interactive is None:
         interactive = (
@@ -267,12 +277,23 @@ def native_plan_selection(
         profile=args.native_profile,
         workspace=workspace,
         config_file=args.agent_providers_file,
+        session=getattr(args, "_pi_session", None),
     )
 
 
 def run_ai_command(args: argparse.Namespace) -> int:
     try:
-        interactive = _interactive(args)
+        choices = args.session or ()
+        if len(choices) > 1:
+            raise PiSessionSelectionError("Select one Pi session with --session")
+        session = PiSessionIntent.from_selector(choices[0]) if choices else None
+        require_pi_session_execution(
+            session,
+            agent=args.agent,
+            interactive=args.interactive,
+            handoff=args.handoff_from is not None,
+        )
+        interactive = False if session is not None else _interactive(args)
         task = _task(args)
         workspace = args.workspace.expanduser().resolve(strict=True)
         skill = args.skill.expanduser().resolve(strict=True) if args.skill is not None else None
@@ -288,6 +309,7 @@ def run_ai_command(args: argparse.Namespace) -> int:
             workspace=workspace,
             config_file=args.config,
             interactive=interactive,
+            session=session,
         )
         if getattr(args, "candidate", False):
             from oh_goon.core.errors import FleetPlanInvalid
@@ -347,6 +369,8 @@ def run_ai_command(args: argparse.Namespace) -> int:
             action = (
                 requirement[1] + " This refusal grants no execution, repair or replay authority."
             )
+        if isinstance(exc, PiSessionSelectionError):
+            action = str(exc)
         harness = args.agent if args.agent in {"opencode", "pi", "codex"} else "unknown"
         requested_mode = (
             "interactive"

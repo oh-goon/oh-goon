@@ -28,7 +28,11 @@ from oh_goon.core.agent_harness_contract import (
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid, OperationDeadlineExpired
-from oh_goon.core.models.agent_providers import AgentProviderError, ResolvedNativeAgent
+from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
+    ResolvedNativeAgent,
+    require_pi_session_execution,
+)
 from oh_goon.core.models.agent_review import AgentAdjudicationRecord, review_output_schema
 from oh_goon.core.models.fleet_observation import (
     AgentHarnessObservation,
@@ -99,6 +103,9 @@ def require_native_agent_compatibility(
     selected: ResolvedNativeAgent, *, role: str = "report", terminal_available: bool = False
 ) -> None:
     """Compatibility and path-separation checks shared by preflight and Step receiver."""
+    require_pi_session_execution(
+        selected.session, agent=selected.agent, interactive=selected.interactive
+    )
     if role not in {"report", "review", "adjudication", "proposal"}:
         raise FleetPlanInvalid("Native Agent result role is unsupported")
     if selected.profile.pi_rpc and (selected.agent != "pi" or selected.interactive):
@@ -243,6 +250,8 @@ def prepare_native_step_input(
         optional_capabilities=("observations",),
         required_capabilities=("terminal",) if selected.interactive else (),
     )
+    if prepared.handoff.session is not None and prepared.handoff.session != selected.session:
+        raise FleetPlanInvalid("Authored Pi session differs from the admitted native selection")
     if (
         selected.profile.sandbox_owner == "execution_backend"
         and prepared.requested_effects.repository_access != "read_only"

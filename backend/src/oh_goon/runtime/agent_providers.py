@@ -24,7 +24,9 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentDefinition,
     NativeAgentName,
     NativeAgentProfile,
+    PiSessionIntent,
     ResolvedNativeAgent,
+    require_pi_session_execution,
 )
 from oh_goon.integrations.agent_native_execution import (
     native_executable_sha256,
@@ -243,6 +245,7 @@ def resolve_native_agent(
     *,
     workspace: Path,
     environment: Mapping[str, str],
+    session: PiSessionIntent | None = None,
 ) -> ResolvedNativeAgent:
     """Resolve one native program through OS lookup and explicit caller policy.
 
@@ -257,6 +260,7 @@ def resolve_native_agent(
         profile_name = config.default_native_profile or DEFAULT_NATIVE_AGENT_PROFILE
     # mypy requires the cast after membership validation; ty narrows it.
     name = cast(NativeAgentName, agent)  # ty: ignore[redundant-cast]
+    require_pi_session_execution(session, agent=name)
     profile = config.native_profiles.get(profile_name)
     if profile is None:
         if profile_name == "local":
@@ -396,6 +400,7 @@ def resolve_native_agent(
         profile=frozen_profile,
         executable_sha256=digest,
         connection=connection,
+        session=session,
     )
 
 

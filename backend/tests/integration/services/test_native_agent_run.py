@@ -36,10 +36,12 @@ from oh_goon.core.models.agent_providers import (
     CodexLoginConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
+    PiSessionIntent,
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_events import ProcessStartedEvent, StepAttemptCreatedEvent
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.vocabulary import FleetRunEventType, FleetRunOutcome, GameTapeStatus
 from oh_goon.engine.command import run_command
 from oh_goon.engine.git import GitService
@@ -565,7 +567,7 @@ def _assert_native_run_surfaces(runtime: ApplicationRuntime, run_id: str) -> Non
     with closing(authenticated_api_client(app)) as client:
         response = client.get(f"/api/fleet/runs/{run_id}")
         assert response.status_code == 200
-        assert response.json() == detail.model_dump(mode="json")
+        assert response.json() == detail.model_dump(mode="json", by_alias=True)
         assert _native_run_cli_readback(run_id, "tape") == response.json()["game_tape"]
         handoff = _native_run_cli_readback(run_id, "handoff")
         assert handoff == run_handoff_projection(detail)
@@ -733,6 +735,7 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
                 executable_sha256=native_executable_sha256(executable),
                 connection=connection,
                 backend_configuration_id=backend.configuration_identity(),
+                session=PiSessionIntent(mode="ephemeral") if agent == "pi" else None,
             )
             if runtime is not None:
                 runtime.shutdown(wait_for_runs=True)
@@ -853,6 +856,12 @@ def test_cross_harness_handoff_keeps_separate_runs_and_original_verification(
         for run_id, agent in zip(run_ids, ("codex", "pi", "opencode"), strict=True):
             detail = reloaded.runs.get(run_id)
             assert detail.run.fleet_run_id == detail.game_tape.fleet_run_id == run_id
+            target = detail.run.target
+            assert isinstance(target, FleetPlanTarget) and target.plan.native_agent is not None
+            assert target.plan.native_agent.agent == agent
+            assert target.plan.native_agent.session == (
+                PiSessionIntent(mode="ephemeral") if agent == "pi" else None
+            )
             steps = detail.game_tape.repositories[0].steps
             observations.append(steps[0].native_agent_observations[0])
             snapshots.append(
