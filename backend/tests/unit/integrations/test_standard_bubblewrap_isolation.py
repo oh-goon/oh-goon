@@ -22,8 +22,12 @@ from typing import Any
 
 import pytest
 
-from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.errors import CapabilityUnavailable, FleetPlanInvalid
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
+from oh_goon.core.models.pi_session_storage import (
+    PI_SESSION_SANDBOX_DIRECTORY,
+    PiSessionDirectoryPin,
+)
 from oh_goon.engine.command import (
     CommandCancelledError,
     CommandOutputLimitExceeded,
@@ -622,6 +626,142 @@ def test_application_state_binding_cannot_be_replaced_by_another_runtime(
         )
 
 
+def test_pi_session_root_is_not_resolved_to_a_replacement_in_worker_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    root = tmp_path / "pi-sessions"
+    replacement = tmp_path / "unrelated-directory"
+    replacement.mkdir()
+    root.symlink_to(replacement, target_is_directory=True)
+    backend.bind_application_state(private_paths=(root,), read_only_paths=(), pi_session_root=root)
+    captured = backend.capture_worker_configuration()
+    worker = BubblewrapProcessIsolation.from_worker_configuration(captured)
+    assert worker.capture_worker_configuration() == captured
+    assert captured.pi_session_root == root
+    assert captured.application_state_paths == ((root,), ())
+
+
+@pytest.mark.parametrize("before_launch", ["current", "replaced", "unexpected-entry"])
+def test_pi_session_descriptor_binds_only_at_workload_birth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before_launch: str
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    private = tmp_path / "private-sessions"
+    private.mkdir(mode=0o700)
+    selected = private / "one-original-step"
+    selected.mkdir(mode=0o700)
+    backend.bind_application_state(
+        private_paths=(private,), read_only_paths=(), pi_session_root=private
+    )
+    descriptor = os.open(selected, os.O_RDONLY | os.O_DIRECTORY)
+    calls: list[tuple[tuple[str, ...], tuple[int, ...]]] = []
+    workload_started = False
+
+    def observe(event: CommandProcessLifecycleEvent) -> None:
+        if event.kind != "PROCESS_STARTING":
+            return
+        if before_launch == "replaced":
+            selected.rename(private / "renamed")
+            selected.mkdir(mode=0o700)
+        elif before_launch == "unexpected-entry":
+            (selected / "unselected").symlink_to(workspace)
+
+    def command(*argv: str, **options: Any) -> CommandResult:
+        nonlocal workload_started
+        calls.append((argv, options["pass_fds"]))
+        if "--bind-fd" in argv:
+            options["process_observer"](
+                CommandProcessLifecycleEvent(
+                    kind="PROCESS_STARTING", physical_execution_id="pi-session-launch"
+                )
+            )
+            workload_started = True
+        _native_exec_ack(argv)
+        return CommandResult(returncode=0, stdout="", stderr="")
+
+    try:
+        monkeypatch.setattr(module, "run_command", command)
+        request = _request(
+            backend,
+            workspace,
+            read_only_workspace=True,
+            pi_session_directory=PiSessionDirectoryPin(
+                selected, descriptor, workspace, lambda: None
+            ),
+        )
+        if before_launch != "current":
+            diagnostic = "descriptor differs" if before_launch == "replaced" else "empty directory"
+            with pytest.raises(FleetPlanInvalid, match=diagnostic):
+                backend.execute(request, timeout=1, cancel_requested=None, process_observer=observe)
+        else:
+            backend.execute(request, timeout=1, cancel_requested=None, process_observer=observe)
+        assert workload_started == (before_launch == "current")
+        assert len(calls) == 2
+        probe, probe_fds = calls[0]
+        assert probe[-1] == "/bin/true"
+        assert "--bind-fd" not in probe and descriptor not in probe_fds
+        launch, inherited = calls[1]
+        assert launch.count("--bind-fd") == 1 and inherited.count(descriptor) == 1
+        index = launch.index("--bind-fd")
+        assert launch[index + 1 : index + 3] == (str(descriptor), str(PI_SESSION_SANDBOX_DIRECTORY))
+        assert str(selected) not in launch and str(private) not in launch
+        assert launch[launch.index("/workspace") - 2] == "--ro-bind"
+    finally:
+        os.close(descriptor)
+
+
+@pytest.mark.parametrize("unavailable", ["foreign-fd", "guest-shadow", "resource-wrapper"])
+def test_pi_session_mount_refuses_unqualified_native_request_before_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unavailable: str
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    private = tmp_path / "private-sessions"
+    private.mkdir(mode=0o700)
+    selected = private / "one-original-step"
+    selected.mkdir(mode=0o700)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir(mode=0o700)
+    backend.bind_application_state(
+        private_paths=(private,), read_only_paths=(), pi_session_root=private
+    )
+    descriptor = os.open(
+        foreign if unavailable == "foreign-fd" else selected, os.O_RDONLY | os.O_DIRECTORY
+    )
+    monkeypatch.setattr(
+        module,
+        "run_command",
+        lambda *a, **kw: pytest.fail("unqualified session mount reached launch"),
+    )
+    try:
+        request = _request(
+            backend,
+            workspace,
+            pi_session_directory=PiSessionDirectoryPin(
+                selected, descriptor, workspace, lambda: None
+            ),
+            read_only_mounts=(StandardReadOnlyMount(foreign, PI_SESSION_SANDBOX_DIRECTORY),)
+            if unavailable == "guest-shadow"
+            else (),
+            resources=CicdResourcePolicy(cpu_millis=1000)
+            if unavailable == "resource-wrapper"
+            else CicdResourcePolicy(),
+        )
+        if unavailable == "resource-wrapper":
+            with pytest.raises(CapabilityUnavailable, match="direct descriptor transport"):
+                backend.execute(request, timeout=1, cancel_requested=None)
+        else:
+            text = "descriptor differs" if unavailable == "foreign-fd" else "explicit scope"
+            with pytest.raises(FleetPlanInvalid, match=text):
+                backend.execute(request, timeout=1, cancel_requested=None)
+    finally:
+        os.close(descriptor)
+
+
 @pytest.mark.parametrize("streaming_input", [False, True])
 def test_standard_launch_retains_namespace_cancellation_and_private_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, streaming_input: bool
@@ -1021,8 +1161,14 @@ def test_requested_caps_use_native_whole_workload_scope_for_preflight_and_launch
     backend.standard_resource_query_executable = str(resource_executable)
     from oh_goon.integrations import _fleet_plan_cgroup_resources
 
+    def require_selected_slice(
+        query: str | None, _environment: object, *, target_slice: str
+    ) -> None:
+        assert query == str(resource_executable)
+        assert target_slice == "app.slice"
+
     monkeypatch.setattr(
-        _fleet_plan_cgroup_resources, "_require_standard_scope_inheritance", lambda *_args: None
+        _fleet_plan_cgroup_resources, "_require_standard_scope_inheritance", require_selected_slice
     )
     calls: list[tuple[str, ...]] = []
 
@@ -1042,6 +1188,7 @@ def test_requested_caps_use_native_whole_workload_scope_for_preflight_and_launch
     for argv in calls:
         assert argv[0] == str(resource_executable)
         assert "--scope" in argv and "--collect" in argv
+        assert "--slice=app.slice" in argv
         assert "--property=CPUQuota=125%" in argv
         assert "--property=MemoryMax=67108864" in argv
         assert "--property=MemorySwapMax=0" in argv

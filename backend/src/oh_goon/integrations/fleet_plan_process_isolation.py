@@ -23,6 +23,7 @@ from oh_goon.core.models.fleet_plan_isolation import (
 )
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunScope as TrustedLocalRunScope
+from oh_goon.core.models.pi_session_storage import PiSessionDirectoryPin
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import ExplicitRepositoryScope, StrictFleetExecutionAdmission
 from oh_goon.core.models.target import FleetPlanTarget
@@ -99,6 +100,7 @@ class StandardIsolatedProcessRequest:
     )
     workspace_materialization: ExecutionMaterialization | None = None
     workspace_directory_fd: int | None = field(default=None, repr=False)
+    pi_session_directory: PiSessionDirectoryPin | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if (self.workspace_materialization is None) != (self.workspace_directory_fd is None):
@@ -107,6 +109,11 @@ class StandardIsolatedProcessRequest:
             type(self.workspace_directory_fd) is not int or self.workspace_directory_fd < 0
         ):
             raise FleetPlanInvalid("Candidate workspace directory handle is invalid")
+        if (
+            self.pi_session_directory is not None
+            and type(self.pi_session_directory) is not PiSessionDirectoryPin
+        ):
+            raise FleetPlanInvalid("Pi session mount requires the original directory pin")
         if (
             not self.workspace.is_absolute()
             or not self.cwd.is_absolute()

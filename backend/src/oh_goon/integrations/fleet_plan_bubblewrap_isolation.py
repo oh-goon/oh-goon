@@ -5,6 +5,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
@@ -30,6 +31,10 @@ from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.fleet_plan_isolation import (
     IsolationBackendCapabilities,
     IsolationKernelBoundary,
+)
+from oh_goon.core.models.pi_session_storage import (
+    PI_SESSION_SANDBOX_DIRECTORY,
+    PiSessionDirectoryPin,
 )
 from oh_goon.core.path_authority import HostSandboxPathMapping, map_host_text_to_sandbox
 from oh_goon.core.path_layouts import SANDBOX_PATHS, AttemptPathLayout
@@ -119,6 +124,7 @@ class BubblewrapWorkerConfiguration(ImmutableModel):
     standard_resource_query_executable: str | None
     standard_resource_environment: dict[str, str] = Field(repr=False)
     application_state_paths: tuple[tuple[Path, ...], tuple[Path, ...]] | None
+    pi_session_root: Path | None = Field(default=None, exclude_if=lambda path: path is None)
 
 
 class BubblewrapProcessIsolation:
@@ -187,6 +193,7 @@ class BubblewrapProcessIsolation:
         self._standard_capability_lock = Lock()
         self._standard_system_checked = False
         self._application_state_paths: tuple[tuple[Path, ...], tuple[Path, ...]] | None = None
+        self._pi_session_root: Path | None = None
 
     def capture_worker_configuration(self) -> BubblewrapWorkerConfiguration:
         """Capture actual resolved state; caches and live leases are never transported."""
@@ -208,6 +215,7 @@ class BubblewrapProcessIsolation:
             standard_resource_query_executable=self.standard_resource_query_executable,
             standard_resource_environment=dict(self._standard_resource_environment),
             application_state_paths=self._application_state_paths,
+            pi_session_root=self._pi_session_root,
         )
 
     @classmethod
@@ -234,14 +242,20 @@ class BubblewrapProcessIsolation:
         if configuration.application_state_paths is not None:
             private_paths, read_only_paths = configuration.application_state_paths
             backend.bind_application_state(
-                private_paths=private_paths, read_only_paths=read_only_paths
+                private_paths=private_paths,
+                read_only_paths=read_only_paths,
+                pi_session_root=configuration.pi_session_root,
             )
         if backend.capture_worker_configuration() != configuration:
             raise FleetPlanInvalid("Run worker Bubblewrap configuration changed after capture")
         return backend
 
     def bind_application_state(
-        self, *, private_paths: tuple[Path, ...], read_only_paths: tuple[Path, ...]
+        self,
+        *,
+        private_paths: tuple[Path, ...],
+        read_only_paths: tuple[Path, ...],
+        pi_session_root: Path | None = None,
     ) -> None:
         """Receive the original application's resolved state before recovery or execution.
 
@@ -250,15 +264,26 @@ class BubblewrapProcessIsolation:
         """
         if any(not path.is_absolute() for path in (*private_paths, *read_only_paths)):
             raise FleetPlanInvalid("Native application state requires resolved absolute paths")
+        if pi_session_root is not None and (
+            pi_session_root not in private_paths or ".." in pi_session_root.parts
+        ):
+            raise FleetPlanInvalid("Pi session storage requires its application-owned private root")
         binding = (
-            tuple(dict.fromkeys(path.resolve() for path in private_paths)),
+            tuple(
+                dict.fromkeys(
+                    path if path == pi_session_root else path.resolve() for path in private_paths
+                )
+            ),
             tuple(dict.fromkeys(path.resolve() for path in read_only_paths)),
         )
-        if self._application_state_paths not in (None, binding):
+        if self._application_state_paths is not None and (
+            self._application_state_paths != binding or self._pi_session_root != pi_session_root
+        ):
             raise FleetPlanInvalid(
                 "Native isolation is already bound to different application state"
             )
         self._application_state_paths = binding
+        self._pi_session_root = pi_session_root
 
     def _private_application_file_identities(self) -> frozenset[tuple[int, int]]:
         """Stat only the exact owner-bound artifacts, including newly created SQLite sidecars."""
@@ -266,14 +291,16 @@ class BubblewrapProcessIsolation:
         if self._application_state_paths is not None:
             for path in self._application_state_paths[0]:
                 try:
-                    metadata = path.stat()
+                    metadata = path.lstat() if path == self._pi_session_root else path.stat()
                 except FileNotFoundError:
                     continue
                 except OSError as exc:
                     raise FleetPlanInvalid(
                         "Native isolation cannot establish private application file identity"
                     ) from exc
-                if stat.S_ISREG(metadata.st_mode):
+                if stat.S_ISREG(metadata.st_mode) or (
+                    path == self._pi_session_root and stat.S_ISDIR(metadata.st_mode)
+                ):
                     identities.add((metadata.st_dev, metadata.st_ino))
         return frozenset(identities)
 
@@ -337,7 +364,12 @@ class BubblewrapProcessIsolation:
         try:
             result = self._execute_standard(
                 replace(
-                    request, argv=("/bin/true",), terminal=None, input_data=None, input_source=None
+                    request,
+                    argv=("/bin/true",),
+                    terminal=None,
+                    input_data=None,
+                    input_source=None,
+                    pi_session_directory=None,
                 ),
                 timeout=10.0,
                 cancel_requested=None,
@@ -404,9 +436,12 @@ class BubblewrapProcessIsolation:
         if self.require_local_resource_intent:
             raise FleetPlanInvalid("Strict custody configuration cannot consume ordinary authority")
         self._require_application_state_separation(request)
+        session_identity = self._require_pi_session_mount(request)
         if request.protected_execution:
             _require_standard_git_layout(request.workspace)
         private_file_identities = self._private_application_file_identities()
+        if session_identity is not None:
+            private_file_identities |= {session_identity}
         unsafe_environment = sorted(
             name
             for name in request.env
@@ -434,7 +469,7 @@ class BubblewrapProcessIsolation:
         request.require_workspace_current()
         if not request.cwd.is_dir() or not request.cwd.is_relative_to(request.workspace):
             raise FleetPlanInvalid("Standard sandbox workspace or cwd is no longer current")
-        private_roots = (
+        private_roots: tuple[PurePosixPath, ...] = (
             PurePosixPath("/workspace"),
             PurePosixPath(request.workspace),
             PurePosixPath("/proc"),
@@ -443,6 +478,8 @@ class BubblewrapProcessIsolation:
             PurePosixPath("/cache"),
             PurePosixPath("/run/oh-goon-broker"),
         )
+        if request.pi_session_directory is not None:
+            private_roots += (PI_SESSION_SANDBOX_DIRECTORY,)
         home = Path.home().resolve()
         if home.is_relative_to(request.workspace):
             raise FleetPlanInvalid(
@@ -557,6 +594,95 @@ class BubblewrapProcessIsolation:
                 )
         return private_file_identities, resource_scope
 
+    def _require_pi_session_mount(
+        self, request: StandardIsolatedProcessRequest
+    ) -> tuple[int, int] | None:
+        pin = request.pi_session_directory
+        if pin is None:
+            return None
+        if (
+            sys.platform != "linux"
+            or not hasattr(os, "O_PATH")
+            or request.terminal is not None
+            or request.protected_execution
+            or any(value is not None for value in request.resources.model_dump().values())
+        ):
+            raise CapabilityUnavailable(
+                "Pi session mount requires headless Linux Bubblewrap with direct descriptor transport"
+            )
+        root = self._pi_session_root
+        if (
+            root is None
+            or self._application_state_paths is None
+            or not isinstance(pin.path, Path)
+            or pin.path.parent != root
+            or pin.workspace != request.workspace
+            or not pin.path.is_absolute()
+            or ".." in pin.path.parts
+            or type(pin.directory_fd) is not int
+            or pin.directory_fd < 0
+            or not callable(pin.require_current)
+        ):
+            raise FleetPlanInvalid(
+                "Pi session mount is outside its original application or workspace"
+            )
+        private_paths, read_only_paths = self._application_state_paths
+        other_sources = (
+            request.workspace,
+            *_standard_system_roots(),
+            *request.allowed_write_roots,
+            *(m.source for m in request.read_only_mounts),
+            *(p for p in private_paths if p != root),
+            *read_only_paths,
+            *(
+                p
+                for p in (request.broker_directory, request.private_configuration_directory)
+                if p is not None
+            ),
+        )
+        if any(pin.path.is_relative_to(p) or p.is_relative_to(pin.path) for p in other_sources):
+            raise FleetPlanInvalid(
+                "Pi session mount overlaps another source or application control"
+            )
+        destination = PI_SESSION_SANDBOX_DIRECTORY
+        workspace_alias = PurePosixPath(request.workspace)
+        if workspace_alias.is_relative_to(destination) or destination.is_relative_to(
+            workspace_alias
+        ):
+            raise FleetPlanInvalid("Pi session mount overlaps the guest workspace alias")
+        return self._require_pi_session_pin_identity(pin)
+
+    def _require_pi_session_pin_identity(self, pin: PiSessionDirectoryPin) -> tuple[int, int]:
+        """Recheck the admitted name against the live descriptor without reopening its mount."""
+        pin.require_current()
+        root = self._pi_session_root
+        assert root is not None
+        try:
+            root_is_canonical = root.resolve(strict=True) == root
+            parent = root.lstat()
+            named = pin.path.lstat()
+            metadata = os.fstat(pin.directory_fd)
+        except (OSError, RuntimeError) as exc:
+            raise FleetPlanInvalid("Pi session mount directory identity is unavailable") from exc
+        if (
+            not root_is_canonical
+            or any(
+                not stat.S_ISDIR(obs.st_mode)
+                or stat.S_IMODE(obs.st_mode) != 0o700
+                or obs.st_uid != os.geteuid()
+                for obs in (parent, named, metadata)
+            )
+            or (metadata.st_dev, metadata.st_ino) != (named.st_dev, named.st_ino)
+        ):
+            raise FleetPlanInvalid("Pi session mount descriptor differs from its private directory")
+        try:
+            with os.scandir(pin.directory_fd) as entries:
+                if next(entries, None) is not None:
+                    raise FleetPlanInvalid("New Pi session mount requires an empty directory")
+        except OSError as exc:
+            raise FleetPlanInvalid("Pi session mount directory could not be inspected") from exc
+        return metadata.st_dev, metadata.st_ino
+
     def _standard_resource_scope(self, request: StandardIsolatedProcessRequest) -> tuple[str, ...]:
         return standard_resource_scope_command(
             request.resources,
@@ -592,6 +718,9 @@ class BubblewrapProcessIsolation:
         from oh_goon.integrations.fleet_plan_run import _write_minimal_etc
 
         temporary_base = Path(tempfile.gettempdir()).resolve()
+        session = request.pi_session_directory
+        if session is not None and temporary_base.is_relative_to(session.path):
+            raise FleetPlanInvalid("Native scratch cannot be created inside a Pi session directory")
         if request.protected_execution and temporary_base.is_relative_to(request.workspace):
             raise CapabilityUnavailable(
                 "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_setup; "
@@ -721,6 +850,10 @@ class BubblewrapProcessIsolation:
                     )
                 if request.broker_directory is not None:
                     args.extend(("--ro-bind", str(request.broker_directory), "/run/oh-goon-broker"))
+                if session is not None:
+                    args.extend(
+                        ("--bind-fd", str(session.directory_fd), str(PI_SESSION_SANDBOX_DIRECTORY))
+                    )
                 if writer_namespace is not None and (request.workspace / ".git").exists():
                     # Linked worktree administration remains exclusively with
                     # the trusted lifecycle Git owner. Keep this mask outside
@@ -829,6 +962,19 @@ class BubblewrapProcessIsolation:
                         writer_namespace.observe(event)
 
                     native_observer = observe_candidate_process
+                if session is not None:
+                    original_session_observer = (
+                        native_observer or current_command_process_observer()
+                    )
+
+                    def observe_session_process(event: CommandProcessLifecycleEvent) -> None:
+                        if original_session_observer is not None:
+                            original_session_observer(event)
+                        assert session is not None
+                        if event.kind == "PROCESS_STARTING":
+                            self._require_pi_session_pin_identity(session)
+
+                    native_observer = observe_session_process
                 try:
                     result = run_command(
                         *resource_scope,
@@ -847,6 +993,7 @@ class BubblewrapProcessIsolation:
                         pass_fds=(
                             status.fileno(),
                             *(writer_namespace.pass_fds if writer_namespace is not None else ()),
+                            *((session.directory_fd,) if session is not None else ()),
                         ),
                         max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
                         retain_output_tail=request.retain_output_tail,

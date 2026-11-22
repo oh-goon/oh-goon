@@ -937,6 +937,32 @@ before work until their original storage, writer custody and reopen authorities
 are available. The native parser proof covers argument ownership. Extension
 code that changes the effective session remains in HUG-136's scope.
 
+### Private Pi session storage — HUG-41
+
+The application's private state layout selects the `pi-sessions` root.
+Storage is created exclusively for the original Run, repository admission,
+Step and attempt, with pinned repository and directory identity. The selected
+Linux Bubblewrap backend binds just the open directory descriptor at
+`/run/oh-goon-pi-session`. Pi owns session file creation and writes through its
+native `--session-dir` interface. The directory survives disposable native
+configuration and sandbox cleanup. Metadata observation is limited to an exact
+native file name.
+
+The [installed storage test][pi-session-tests] covers Pi 1.3.0 with Bubblewrap
+0.11.1 on Linux 7.0.0-43, one fresh directory, and a read-only direct Git
+repository. Pi reported the same session and exact file before and after a
+settled turn. The file remained after process quiescence, configuration cleanup
+and descriptor close. Pi's native shell could read the selected file. The
+sibling session, original host path, synthetic personal store and synthetic
+Journal remained outside the namespace. The installed ephemeral RPC Run also
+passed through the claimed worker with its managed inference broker.
+
+This scope establishes native storage and command cleanup. Resistance to
+unmanaged host writers and aliases they create remains unqualified. Writer
+custody, crash recovery and exact reopen belong to HUG-42 and HUG-43. The
+existing public admission guard continues to refuse the persistent session
+choices until those owners authorize them.
+
 ## Native model usage observations — HUG-222, 2026-11-22
 
 **Disposition: retain** the existing Codex service transport, scoped native
