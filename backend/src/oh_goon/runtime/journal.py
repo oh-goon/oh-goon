@@ -778,8 +778,8 @@ class Journal:
     ) -> None:
         from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 
-        # Quarantined repository output remains unknown. Resource closure does
-        # not rewrite it; live effects and unresolved native reports still refuse.
+        # Quarantined repository output remains unknown. A worker's independently
+        # verified physical scope may close without upgrading those output facts.
         if (
             not detail.run.status.terminal
             or any(

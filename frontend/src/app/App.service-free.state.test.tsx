@@ -228,6 +228,8 @@ async function releaseRenderedFleetRead(read: DeferredFleetRead): Promise<"relea
 
 function fleetSnapshot(id: string, ready: number): FleetSnapshot {
   return {
+    active_fleet_run: null,
+    active_fleet_runs: [],
     attention: { action_required: 0, groups: [], healthy: ready },
     provenance: {
       generated_at: `2026-08-10T12:00:0${ready}Z`,

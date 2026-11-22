@@ -230,7 +230,11 @@ def build_product_services(foundation: RuntimeFoundation) -> ApplicationRuntime:
         diagnostics=foundation.diagnostics,
         schedules=schedules,
         system_health=system_health,
-        recovery=RecoveryService(foundation.effect_recovery, foundation.runtime_safety),
+        recovery=RecoveryService(
+            foundation.effect_recovery,
+            foundation.runtime_safety,
+            settle_worker_resources=runs.reconcile_worker_resources,
+        ),
         journal_diagnostics=JournalDiagnosticsService(foundation.database),
         plans=plans,
         goon=GoonService(league, plans, GitLabCiGoonMigrator(GitLabComponentFetcher())),

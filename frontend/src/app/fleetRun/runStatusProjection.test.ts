@@ -40,7 +40,7 @@ describe("Fleet Run status ownership", () => {
     expect(observedActiveRunDetail(snapshot, "run-b")).toBe(second);
     expect(observedActiveRunDetail(snapshot, undefined)).toBe(first);
     expect(observedActiveRunDetail(snapshot, "missing-run")).toBe(first);
-    expect(observedActiveRunDetail({ active_fleet_runs: [], active_fleet_run: first } as FleetSnapshot, "run-a")).toBeNull();
+    expect(observedActiveRunDetail({ active_fleet_runs: [], active_fleet_run: first } as unknown as FleetSnapshot, "run-a")).toBeNull();
   });
 
   it("revokes an old local completion handoff when durable truth owns a different active Run", () => {

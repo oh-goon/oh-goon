@@ -160,6 +160,10 @@ class _ConcurrentAdmissionArguments(TypedDict, total=False):
     deferred_worker_resource_scope: dict[str, JsonValue]
 
 
+class _ConcurrentPlanningArguments(TypedDict, total=False):
+    concurrency: RunConcurrencyAdmission
+
+
 @dataclass(frozen=True, slots=True)
 class FleetArtifactExport:
     """An explicitly promoted artifact verified against one recorded Run's evidence."""
@@ -772,19 +776,15 @@ class FleetRunControlPlane:
                 or concurrency.fleet_run_id != fleet_run_id
             ):
                 raise StateConflict("Run worker resources differ from the original runtime budget")
-            if concurrency is None:
-                plan = self._admission.plan(
-                    intent,
-                    repository_scope=repository_scope,
-                    expected_repository_instance_ids=expected_repository_instance_ids,
-                )
-            else:
-                plan = self._admission.plan(
-                    intent,
-                    repository_scope=repository_scope,
-                    expected_repository_instance_ids=expected_repository_instance_ids,
-                    concurrency=concurrency,
-                )
+            concurrent_planning: _ConcurrentPlanningArguments = {}
+            if concurrency is not None:
+                concurrent_planning["concurrency"] = concurrency
+            plan = self._admission.plan(
+                intent,
+                repository_scope=repository_scope,
+                expected_repository_instance_ids=expected_repository_instance_ids,
+                **concurrent_planning,
+            )
             concurrent_admission: _ConcurrentAdmissionArguments = {}
             if concurrency is not None:
                 assert type(prepare_worker) is RunWorkerPreparation
@@ -1336,6 +1336,24 @@ class FleetRunControlPlane:
     def quiesce(self) -> None:
         observed = self._supervisor.quiesce()
         self._drain_runs = tuple(dict.fromkeys((*self._drain_runs, *observed)))
+
+    def reconcile_worker_resources(self, fleet_run_id: str) -> None:
+        """Reconcile one retained old-controller scope through its native owner."""
+        reservation = self._lifecycle.worker_resource_reservation(fleet_run_id)
+        if reservation is None:
+            return
+        if reservation.envelope is None or reservation.deferred_resource_scope is None:
+            raise StateConflict("Original worker resource recovery facts are unavailable")
+        from oh_goon.integrations.run_resource_envelope import (
+            DeferredWorkerResourceScope,
+            recover_worker_resource_scope,
+        )
+
+        deferred = DeferredWorkerResourceScope.from_payload(reservation.deferred_resource_scope)
+        if deferred.admission != reservation.admission:
+            raise StateConflict("Stored worker resource recovery differs from its admission")
+        proof = recover_worker_resource_scope(deferred, reservation.envelope)
+        self._lifecycle.reconcile_worker_reservation(fleet_run_id, proof)
 
     def _finish_shutdown_observation(
         self, cancellation_error: BaseException | None, *, containment_deadline: float

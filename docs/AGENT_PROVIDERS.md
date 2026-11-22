@@ -423,6 +423,30 @@ does not authorize effects on its sibling; aggregate/global resource pressure
 remains a shared failure domain. Measured benefit is scoped to the recorded
 task/harness/environment and never raises defaults automatically.
 
+A worker launch that never establishes its actual envelope and original native
+witness may retain its resource reservation even when model work did not start.
+An absent acknowledgement or unit name cannot release it. That recovery cut
+remains explicitly uncertain and requires original-owner repair; no force-delete
+or automatic waiting retry is provided. Manager restart, a lost witness for a
+retained failed scope, and missing native journal evidence likewise retain
+uncertainty. The advertised manager executable artifact is identified; loaded
+manager image attestation is not claimed in this unprivileged mode.
+
+The 2026-11-22 native qualification used public Pi 1.3.0, Bubblewrap and the
+same Linux user manager 259.9. It covered clean overlap, cancellation and worker
+crash with sibling verification, and controller death followed by independent
+original-Run recovery. Three interleaved one-versus-two submission pairs verified
+all 12 controlled tasks. Pooled observed throughput was 79.76 versus 123.56
+verified tasks/hour under identical opt-in budgets; the user reported a
+responsive desktop. The local synthetic provider, shared wrong-output control,
+small sample and concurrent host load make this descriptive pipeline evidence.
+It does not compare against the default serial implementation or establish
+live-model quality, billing, energy or general uplift. EvalShot's existing
+first-correct-edit and host-attested comparison contracts do not establish this
+time-to-verified comparison; that qualification remains unavailable. Defaults
+remain serial. Exact observations and native qualifications are retained with
+[HUG-223](https://linear.app/hugloss/issue/HUG-223/agent-loopnexturgent-admit-two-isolated-original-agent-runs-in-one).
+
 ### Ephemeral Pi RPC
 
 A Pi-only managed profile may explicitly select `pi_rpc: true`:

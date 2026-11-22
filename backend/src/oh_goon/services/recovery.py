@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from oh_goon.core.models.recovery_status import RecoveryStatus
 from oh_goon.core.models.runtime_safety import RuntimeSafetyAssessment
 from oh_goon.services.effect_recovery import RepositoryEffectRecovery
@@ -13,9 +15,12 @@ class RecoveryService:
         self,
         recovery: RepositoryEffectRecovery,
         runtime_safety: RuntimeSafetyService,
+        *,
+        settle_worker_resources: Callable[[str], None] | None = None,
     ) -> None:
         self._recovery = recovery
         self._runtime_safety = runtime_safety
+        self._settle_worker_resources = settle_worker_resources
 
     def status(self) -> RecoveryStatus:
         return self._status_from(self._runtime_safety.assess())
@@ -27,6 +32,8 @@ class RecoveryService:
         self._recovery.recover(
             fleet_run_id=fleet_run_id, quiescence_timeout_seconds=quiescence_timeout_seconds
         )
+        if self._settle_worker_resources is not None:
+            self._settle_worker_resources(fleet_run_id)
         return self._status_from(self._runtime_safety.assess())
 
     def reconcile(self, operation_id: str, *, expected_record_version: int) -> RecoveryStatus:

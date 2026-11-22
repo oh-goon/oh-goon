@@ -112,6 +112,8 @@ function createFleetSnapshot(
   const needsAttention = fleetRepositories.filter((item) => item.needs_attention).length;
   const revision = includeScaleVariation ? 5000 : 203;
   return {
+    active_fleet_run: null,
+    active_fleet_runs: [],
     attention: { action_required: needsAttention, groups: [], healthy: fleetRepositories.length - needsAttention - excluded },
     provenance: {
       generated_at: generatedAt,

@@ -31,6 +31,7 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedAgentStep,
     ResolvedCommandStep,
     ResolvedFleetPlan,
+    ResolvedGitStep,
     ResolvedNativeAgentWorkload,
 )
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
@@ -323,6 +324,33 @@ def test_final_refresh_rejects_changed_capability_prerequisite(prepared_candidat
     with pytest.raises(TargetSelectionError, match="prerequisite is not satisfied"):
         admit(stack, case, prepared)
     assert stack.journal.read_view().run_detail(case.run_id) is None
+
+
+def test_concurrent_candidate_refuses_git_steps_before_source_planning(prepared_candidates):
+    stack, case = prepared_candidates, prepared_candidates.second
+    plan = ResolvedFleetPlan.create(
+        name=case.target.plan.name,
+        description="",
+        execution=case.target.plan.execution,
+        native_agent=case.target.plan.native_agent,
+        steps=(
+            case.target.plan.steps[0],
+            ResolvedGitStep(step_id="git", argv=("status", "--porcelain"), timeout_seconds=5),
+        ),
+    )
+    # Recheck a transported intent at the owning admission boundary even when a
+    # caller bypasses the normal target constructor's candidate-shape guard.
+    case.target = case.target.model_copy(
+        update={"plan": plan, "identity": structural_execution_identity(plan)}
+    )
+    case.intent = resolved_intent(OperationAction.EXECUTE_PLAN, case.target)
+    walks = stack.discovery.calls
+    with pytest.raises(FleetPlanInvalid, match="explicit isolated native intent"):
+        prepare(stack, case)
+    assert stack.discovery.calls == walks
+    assert stack.journal.read_view().run_detail(case.run_id) is None
+    with stack.database.transaction() as connection:
+        assert not stack.execution.retained_leases_in(connection)
 
 
 def test_atomic_journal_publication_refuses_same_candidate_even_with_a_new_passive_run_binding(

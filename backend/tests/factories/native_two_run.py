@@ -23,6 +23,7 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.run import FleetRunState
 from oh_goon.core.models.run_resources import RunConcurrencyPolicy
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
@@ -58,8 +59,7 @@ def _texts(message: dict[str, Any]) -> list[str]:
 
 
 @dataclass
-class NativeTwoRunCase:
-    runtime: ApplicationRuntime
+class NativeTwoRunProvider:
     repositories: dict[str, Path]
     selected: dict[str, ResolvedNativeAgent]
     entered: dict[str, Event]
@@ -71,7 +71,16 @@ class NativeTwoRunCase:
     errors: list[str]
     database_path: Path
 
-    def start(self, label: str):
+    def release_all(self) -> None:
+        for event in (*self.release.values(), *self.finish.values()):
+            event.set()
+
+
+@dataclass
+class NativeTwoRunCase(NativeTwoRunProvider):
+    runtime: ApplicationRuntime
+
+    def start(self, label: str) -> FleetRunState:
         return self.runtime.plans.run_native_agent(
             selected=self.selected[label],
             workspace=self.repositories[label],
@@ -81,10 +90,6 @@ class NativeTwoRunCase:
             fleet_run_id=f"two-run-{label}",
             verification=(PAIR_VERIFICATION_ARGV,),
         )
-
-    def release_all(self) -> None:
-        for event in (*self.release.values(), *self.finish.values()):
-            event.set()
 
     def active_reservations(self) -> dict[str, WorkerResourceReservation]:
         database = LocalDatabase(self.database_path, read_only=True)
@@ -99,9 +104,14 @@ class NativeTwoRunCase:
 
 
 @contextmanager
-def native_two_run_case(
-    root: Path, policy: RunConcurrencyPolicy, *, program: Path, public_runtime: Path
-) -> Generator[NativeTwoRunCase, None, None]:
+def native_two_run_provider(
+    root: Path,
+    policy: RunConcurrencyPolicy,
+    *,
+    program: Path,
+    public_runtime: Path,
+    probe_namespaces: bool = False,
+) -> Generator[NativeTwoRunProvider, None, None]:
     """No alternate executor: the fixture supplies only a selected model protocol."""
     root.mkdir(parents=True, exist_ok=True)
     version_home = root / "native-version-home"
@@ -179,11 +189,25 @@ def native_two_run_case(
                         if item.get("name") in {"bash", "shell", "shell_command", "exec_command"}
                     )
                     properties = tool["parameters"]["properties"]
-                    source = (
-                        "import json,os,pathlib,tempfile\n"
-                        f"owner={label!r}\n"
+                    source = f"import json,os,pathlib,tempfile\nowner={label!r}\n"
+                    facts_source = "{'owner':owner,'cwd':str(pathlib.Path.cwd()),'home':str(pathlib.Path.home()),'tmp':tempfile.gettempdir(),'pid':os.getpid()}"
+                    if probe_namespaces:
+                        source += (
+                            "namespace_probe={}\n"
+                            "for kind,root in [('home',pathlib.Path.home()),('tmp',pathlib.Path(tempfile.gettempdir()))]:\n"
+                            " marker=root/'.hug223-namespace-owner'\n"
+                            " descriptor=os.open(marker,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_CLOEXEC|os.O_NOFOLLOW,0o600)\n"
+                            " try: os.write(descriptor,owner.encode())\n"
+                            " finally: os.close(descriptor)\n"
+                            " assert marker.read_text()==owner\n"
+                            " observed=root.stat()\n"
+                            " namespace_probe[kind]=[observed.st_dev,observed.st_ino]\n"
+                            "namespace_probe['mount_namespace']=os.readlink('/proc/self/ns/mnt')\n"
+                        )
+                        facts_source = facts_source[:-1] + ",'namespaces':namespace_probe}"
+                    source += (
                         "pathlib.Path('code.py').write_text('VALUE = 42\\n')\n"
-                        "print('HUG223_FACTS:'+json.dumps({'owner':owner,'cwd':str(pathlib.Path.cwd()),'home':str(pathlib.Path.home()),'tmp':tempfile.gettempdir(),'pid':os.getpid()}))\n"
+                        f"print('HUG223_FACTS:'+json.dumps({facts_source}))\n"
                     )
                     command = shlex.join(("/usr/bin/python3", "-c", source))
                     arguments = {"command" if "command" in properties else "cmd": command}
@@ -257,7 +281,6 @@ def native_two_run_case(
     server.daemon_threads = True
     thread = Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
     thread.start()
-    runtime = None
     try:
         backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")
         config = AgentProvidersConfig.model_validate(
@@ -293,22 +316,60 @@ def native_two_run_case(
             )
             for label in repositories
         }
+        yield NativeTwoRunProvider(
+            repositories=repositories,
+            selected=selected,
+            entered=entered,
+            release=release,
+            written=written,
+            finish=finish,
+            requests=requests,
+            facts=facts,
+            errors=errors,
+            database_path=root / "state" / "application.sqlite",
+        )
+    finally:
+        for event in (*release.values(), *finish.values()):
+            event.set()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+@contextmanager
+def native_two_run_case(
+    root: Path,
+    policy: RunConcurrencyPolicy,
+    *,
+    program: Path,
+    public_runtime: Path,
+    probe_namespaces: bool = False,
+) -> Generator[NativeTwoRunCase, None, None]:
+    """Layer the original application over the separately owned model endpoint."""
+    with native_two_run_provider(
+        root,
+        policy,
+        program=program,
+        public_runtime=public_runtime,
+        probe_namespaces=probe_namespaces,
+    ) as provider:
+        backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")
         runtime = ApplicationRuntime.build(
             standard_local=True, standard_process_isolation=backend, run_concurrency=policy
         )
         runtime.locations.add(root / "repositories")
         case = NativeTwoRunCase(
-            runtime,
-            repositories,
-            selected,
-            entered,
-            release,
-            written,
-            finish,
-            requests,
-            facts,
-            errors,
-            root / "state" / "application.sqlite",
+            repositories=provider.repositories,
+            selected=provider.selected,
+            entered=provider.entered,
+            release=provider.release,
+            written=provider.written,
+            finish=provider.finish,
+            requests=provider.requests,
+            facts=provider.facts,
+            errors=provider.errors,
+            database_path=provider.database_path,
+            runtime=runtime,
         )
         try:
             yield case
@@ -317,9 +378,3 @@ def native_two_run_case(
             runtime.shutdown(
                 wait_for_runs=False, cancel_grace_seconds=2, containment_timeout_seconds=10
             )
-    finally:
-        for event in (*release.values(), *finish.values()):
-            event.set()
-        server.shutdown()
-        thread.join(timeout=2)
-        server.server_close()
