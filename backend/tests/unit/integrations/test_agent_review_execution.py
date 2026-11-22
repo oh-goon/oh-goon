@@ -290,15 +290,17 @@ def test_provider_adapter_still_rejects_untyped_clean_after_zero_exit(tmp_path):
         ),
     )
     runtime = SimpleNamespace(cancel_requested=None, runtime_supervision=None)
-    with pytest.raises(FleetPlanInvalid, match="record schema"):
-        execute_provider_agent(
-            step,
-            handoffs[step.step_id],
-            process,
-            runtime,
-            timeout=1,
-            repository_evidence="Producer-qualified evidence",
-        )
+    outcome = execute_provider_agent(
+        step,
+        handoffs[step.step_id],
+        process,
+        runtime,
+        timeout=1,
+        repository_evidence="Producer-qualified evidence",
+    )
+    assert outcome.returncode != 0
+    assert outcome.observed_returncode == 0
+    assert "record schema" in outcome.stderr
     assert not list(scratch.iterdir())
 
 

@@ -55,6 +55,7 @@ from oh_goon.engine.command import CommandCancelledError, CommandSupervisorRecei
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.integrations._fleet_plan_step_outcome import (
     StepOutcome,
+    model_usage_from_error,
     process_boundary_settled,
     settle_step_execution,
 )
@@ -149,6 +150,7 @@ def cancellation_evidence(
             if isinstance(physical, CommandCancelledError)
             else None,
             duration_ms=physical.duration_ms if isinstance(physical, CommandCancelledError) else 0,
+            model_usage=model_usage_from_error(error),
         )
     elif outcome.supervisor is not None and (
         outcome.supervisor.process_group_cleanup_requested
@@ -180,6 +182,7 @@ def cancellation_evidence(
         else None,
         physical_execution_id=outcome.physical_execution_id,
         duration_ms=outcome.duration_ms if outcome.physical_execution_id is not None else None,
+        model_usage=outcome.model_usage or model_usage_from_error(error),
     )
 
 
@@ -275,6 +278,7 @@ def attempt_evidence(
         supervisor=_supervisor_evidence(outcome.supervisor),
         execution_authority_economics=tuple(_economics_evidence(item) for item in economics),
         execution_authority=execution_authority,
+        model_usage=outcome.model_usage,
     )
 
 

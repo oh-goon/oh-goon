@@ -28,6 +28,7 @@ from oh_goon.core.models.fleet_plan_release_evidence import (
 from oh_goon.core.models.fleet_plan_requirements import RequirementCount, UvLockMode
 from oh_goon.core.models.fleet_plan_retry import PlanRetryDecisionEvidence
 from oh_goon.core.models.fleet_plan_tool_authority import PlanHostToolAuthorityEvidence
+from oh_goon.core.models.model_usage import ModelUsageReport
 from oh_goon.core.models.shard_execution import CanonicalShardExecutionEvidence
 from oh_goon.core.process_birth import ProcessBirthIdentity
 from oh_goon.core.product_identity import stable_id
@@ -457,6 +458,9 @@ class PlanStepAttemptEvidence(ImmutableModel):
         default_factory=tuple
     )
     execution_authority: PlanExecutionAuthorityDiagnosticEvidence | None = None
+    model_usage: ModelUsageReport | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class PlanStepSettlementEvidence(ImmutableModel):
@@ -526,6 +530,9 @@ class PlanStepCancellationEvidence(ImmutableModel):
     standard_isolation: PlanStandardIsolationEvidence | None = None
     physical_execution_id: str | None = Field(default=None, min_length=1)
     duration_ms: int | None = Field(default=None, ge=0)
+    model_usage: ModelUsageReport | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def require_cancellation_authority(self) -> PlanStepCancellationEvidence:

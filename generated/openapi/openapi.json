@@ -18993,6 +18993,233 @@
         "title": "MissingUvTool",
         "type": "object"
       },
+      "ModelUsageObservation": {
+        "additionalProperties": false,
+        "description": "One request measurement or one native cumulative snapshot.\n\nA cumulative snapshot replaces the preceding observation for that native\nscope; it is never an additive delta. Cache/reasoning quantities retain the\nproducer's inclusion semantics. No missing total or monetary cost is inferred.\nThe accepting Attempt or cancellation event supplies execution provenance.",
+        "properties": {
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "completeness": {
+            "enum": [
+              "reported",
+              "partial",
+              "malformed",
+              "unknown"
+            ],
+            "title": "Completeness",
+            "type": "string"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "null"
+          },
+          "implementation_identity": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Implementation Identity"
+          },
+          "input_semantics": {
+            "default": "unknown",
+            "enum": [
+              "includes_cache",
+              "excludes_cache",
+              "unknown"
+            ],
+            "title": "Input Semantics",
+            "type": "string"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "observation_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Observation Id",
+            "type": "string"
+          },
+          "output_semantics": {
+            "default": "unknown",
+            "enum": [
+              "includes_reasoning",
+              "unknown"
+            ],
+            "title": "Output Semantics",
+            "type": "string"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Tokens"
+          },
+          "reported_model": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Model"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
+          "scope": {
+            "enum": [
+              "request",
+              "native_thread"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "scope_identity": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Scope Identity",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "ollama",
+              "openai-chat-completions",
+              "openai-responses",
+              "anthropic-messages",
+              "codex-service"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Tokens"
+          },
+          "unit": {
+            "const": "tokens",
+            "default": "tokens",
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "observation_id",
+          "source",
+          "scope",
+          "scope_identity",
+          "completeness"
+        ],
+        "title": "ModelUsageObservation",
+        "type": "object"
+      },
+      "ModelUsageReport": {
+        "additionalProperties": false,
+        "description": "Allowlisted observations, retained once per original physical attempt.\n\nAbsent reports (including historical Attempts) mean unknown, never zero.\nCompleteness describes supplied telemetry, not completeness of model work.",
+        "properties": {
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/ModelUsageObservation"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "title": "Observations",
+            "type": "array"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "observations"
+        ],
+        "title": "ModelUsageReport",
+        "type": "object"
+      },
       "NamedGitPosition": {
         "additionalProperties": false,
         "properties": {
@@ -23036,6 +23263,16 @@
             "title": "Execution Authority Economics",
             "type": "array"
           },
+          "model_usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelUsageReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "observed_returncode": {
             "anyOf": [
               {
@@ -23278,6 +23515,16 @@
               }
             ],
             "title": "Duration Ms"
+          },
+          "model_usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelUsageReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "physical_execution_id": {
             "anyOf": [

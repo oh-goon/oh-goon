@@ -12,17 +12,33 @@ from oh_goon.cli import main
 @pytest.mark.parametrize(
     ("api", "suffix", "reply"),
     [
-        ("ollama", "/api/chat", {"done": True, "message": {"content": "hello"}}),
+        (
+            "ollama",
+            "/api/chat",
+            {
+                "done": True,
+                "message": {"content": "hello"},
+                "model": "reported-server-model",
+                "prompt_eval_count": 0,
+                "eval_count": 5,
+            },
+        ),
         (
             "openai-chat-completions",
             "/chat/completions",
-            {"choices": [{"finish_reason": "stop", "message": {"content": "hello"}}]},
+            {
+                "choices": [{"finish_reason": "stop", "message": {"content": "hello"}}],
+                "model": "reported-server-model",
+                "usage": {"prompt_tokens": 0, "completion_tokens": 5, "total_tokens": 5},
+            },
         ),
         (
             "openai-responses",
             "/responses",
             {
                 "status": "completed",
+                "model": "reported-server-model",
+                "usage": {"input_tokens": 0, "output_tokens": 5, "total_tokens": 5},
                 "output": [
                     {"type": "message", "content": [{"type": "output_text", "text": "hello"}]}
                 ],
@@ -31,7 +47,12 @@ from oh_goon.cli import main
         (
             "anthropic-messages",
             "/messages",
-            {"stop_reason": "end_turn", "content": [{"type": "text", "text": "hello"}]},
+            {
+                "stop_reason": "end_turn",
+                "content": [{"type": "text", "text": "hello"}],
+                "model": "reported-server-model",
+                "usage": {"input_tokens": 0, "output_tokens": 5},
+            },
         ),
     ],
 )
@@ -92,7 +113,15 @@ model = "server/model:tag"
             == 0
         )
         output = capsys.readouterr().out
-        assert json.loads(output)["text"] == "hello"
+        reply_record = json.loads(output)
+        assert reply_record["text"] == "hello"
+        usage = reply_record["usage"]["observations"][0]
+        assert usage["source"] == api and usage["scope"] == "request"
+        assert usage["requested_model"] == "server/model:tag"
+        assert usage["reported_model"] == "reported-server-model"
+        assert usage["input_tokens"] == 0 and usage["output_tokens"] == 5
+        assert usage["cost"] is usage["cache_read_tokens"] is None
+        assert usage["total_tokens"] == (5 if api.startswith("openai-") else None)
         assert "private-test-key" not in output
         assert len(observed) == 1
         path, headers, body = observed[0]

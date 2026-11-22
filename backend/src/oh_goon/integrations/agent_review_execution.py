@@ -9,6 +9,8 @@ from __future__ import annotations
 import base64
 import json
 import os
+import secrets
+import stat
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -19,8 +21,102 @@ from pydantic import SecretStr
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import AgentConnection, AgentMessage, ResolvedAgentModel
 from oh_goon.core.models.fleet_plan import ResolvedProviderAgentWorkload
+from oh_goon.core.models.model_usage import MAX_MODEL_USAGE_RECEIPT_BYTES, ModelUsageReport
 
 _HEADERS_ENV = "OH_GOON_AGENT_STEP_HEADERS"
+_USAGE_INVOCATION_ENV = "OH_GOON_AGENT_STEP_USAGE_ID"
+
+
+def _usage_path(request_path: Path) -> Path:
+    return request_path.with_suffix(".usage.json")
+
+
+def _write_provider_usage(
+    request_path: Path, invocation_id: object, usage: ModelUsageReport | None
+) -> None:
+    """Publish optional allowlisted telemetry, never the provider body or prompt."""
+    if (
+        not isinstance(invocation_id, str)
+        or len(invocation_id) != 32
+        or any(character not in "0123456789abcdef" for character in invocation_id)
+        or not isinstance(usage, ModelUsageReport)
+        or not hasattr(os, "fchmod")
+    ):
+        return
+    path = _usage_path(request_path)
+    pending = path.with_suffix(".pending")
+    try:
+        payload = json.dumps(
+            {"invocation_id": invocation_id, "usage": usage.model_dump(mode="json")},
+            ensure_ascii=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(payload) > MAX_MODEL_USAGE_RECEIPT_BYTES:
+            return
+        with pending.open("xb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(payload)
+        pending.replace(path)
+    except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
+        # Missing telemetry remains unknown. This optional observation cannot
+        # change the provider request's original return code or exception.
+        return
+
+
+def _unique_usage_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for name, value in pairs:
+        if name in fields:
+            raise ValueError("Duplicate provider telemetry field")
+        fields[name] = value
+    return fields
+
+
+def _read_provider_usage(request_path: Path, invocation_id: str) -> ModelUsageReport | None:
+    """Read one bounded original-invocation receipt without following a path alias."""
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    nonblocking = getattr(os, "O_NONBLOCK", None)
+    close_on_exec = getattr(os, "O_CLOEXEC", None)
+    if no_follow is None or nonblocking is None or close_on_exec is None:
+        return None
+    try:
+        descriptor = os.open(
+            _usage_path(request_path), os.O_RDONLY | no_follow | nonblocking | close_on_exec
+        )
+        with os.fdopen(descriptor, "rb") as stream:
+            metadata = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_size > MAX_MODEL_USAGE_RECEIPT_BYTES
+            ):
+                return None
+            data = stream.read(MAX_MODEL_USAGE_RECEIPT_BYTES + 1)
+        if len(data) > MAX_MODEL_USAGE_RECEIPT_BYTES:
+            return None
+        payload = json.loads(data, object_pairs_hook=_unique_usage_fields)
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"invocation_id", "usage"}
+            or payload["invocation_id"] != invocation_id
+        ):
+            return None
+        return ModelUsageReport.model_validate(payload["usage"])
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        return None
+
+
+def _cleanup_provider_request(request_path: Path) -> tuple[str, ...]:
+    failures = []
+    usage = _usage_path(request_path)
+    for path in (request_path, usage, usage.with_suffix(".pending")):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            failures.append("Private provider request/telemetry cleanup is incomplete")
+    return tuple(failures)
+
 
 if TYPE_CHECKING:
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff, FrozenSourceMember
@@ -150,7 +246,7 @@ def execute_provider_agent(
     timeout: float | None,
     repository_evidence: str,
 ) -> StepOutcome:
-    from oh_goon.integrations._fleet_plan_step_outcome import from_command
+    from oh_goon.integrations._fleet_plan_step_outcome import from_command, output_contract_failure
     from oh_goon.integrations.fleet_plan_environment import (
         require_exportable_host_environment_name,
         step_host_environment_names,
@@ -162,6 +258,7 @@ def execute_provider_agent(
         require_exportable_host_environment_name(name)
     selected = step.workload.connection.resolve(process.host_environment)
     payload = provider_agent_request(step, handoff, repository_evidence=repository_evidence)
+    invocation_id = secrets.token_hex(16)
     encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
     if len(encoded) > selected.provider.max_request_bytes:
         raise FleetPlanInvalid("complete Agent source exceeds the selected provider request budget")
@@ -173,6 +270,10 @@ def execute_provider_agent(
     environment[_HEADERS_ENV] = json.dumps(
         {name: value.get_secret_value() for name, value in selected.headers}
     )
+    environment[_USAGE_INVOCATION_ENV] = invocation_id
+    failure: BaseException | None = None
+    usage: ModelUsageReport | None = None
+    cleanup_failures: tuple[str, ...] = ()
     try:
         result = process.command_runner(
             sys.executable,
@@ -186,14 +287,30 @@ def execute_provider_agent(
             cancel_requested=runtime.cancel_requested,
             runtime_supervision=runtime.runtime_supervision,
         )
+    except BaseException as error:
+        failure = error
+        raise
     finally:
-        request_file.unlink(missing_ok=True)
+        usage = _read_provider_usage(request_file, invocation_id)
+        cleanup_failures = _cleanup_provider_request(request_file)
+        if failure is not None:
+            if usage is not None:
+                failure.__dict__["model_usage"] = usage
+            for diagnostic in cleanup_failures:
+                failure.add_note(diagnostic)
     # This private adapter owns exit 3 exclusively for the typed provider
     # truncation refusal. Neither model text nor ordinary command exits select it.
-    outcome = from_command(result)
+    outcome = replace(from_command(result), model_usage=usage)
+    if cleanup_failures:
+        outcome = replace(
+            outcome, stderr="\n".join((outcome.stderr.rstrip(), *cleanup_failures)).lstrip("\n")
+        )
     if result.returncode == 3:
         outcome = replace(outcome, failure_kind="model_output_truncated")
-    return accept_agent_phase_output(step, handoff, outcome)
+    try:
+        return accept_agent_phase_output(step, handoff, outcome)
+    except FleetPlanInvalid as error:
+        return output_contract_failure(step, error, outcome.argv, base=outcome)
 
 
 def accept_agent_phase_output(
@@ -290,6 +407,7 @@ def _worker(path: Path) -> int:
     connection = AgentConnection.model_validate(payload["connection"])
     model = connection.selection
     headers = json.loads(os.environ.pop(_HEADERS_ENV))
+    invocation_id = os.environ.pop(_USAGE_INVOCATION_ENV, None)
     selected = ResolvedAgentModel(
         profile=connection.profile,
         provider_name=connection.provider_name,
@@ -306,11 +424,14 @@ def _worker(path: Path) -> int:
             selected, tuple(AgentMessage(**item) for item in payload["messages"])
         )
     except AgentResponseTruncated as exc:
+        _write_provider_usage(path, invocation_id, exc.usage)
         print(str(exc), file=sys.stderr)
         return 3
     except AgentProviderError as exc:
+        _write_provider_usage(path, invocation_id, exc.usage)
         print(str(exc), file=sys.stderr)
         return 2
+    _write_provider_usage(path, invocation_id, answer.usage)
     if len(answer.text.encode("utf-8")) > 65536:
         print("Agent record exceeds its output budget", file=sys.stderr)
         return 2

@@ -916,6 +916,39 @@ not start Pi or load an extension. [Native unit tests][native-tests],
 early refusals and valid caller options. Requalify framing on a native upgrade;
 these results do not certify arbitrary extensions or new persistent modes.
 
+## Native model usage observations — HUG-222, 2026-11-22
+
+**Disposition: retain** the existing Codex service transport, scoped native
+thread/turn, process custody, permission and private-store adaptations. The
+[service execution owner][codex-execution] additionally consumes the selected
+0.164.0 `thread/tokenUsage/updated` notification only for its exact owned thread
+and turn. It retains one latest native `total` snapshot, with hashed scope
+handles, frozen executable identity, nullable counters and explicit uncertainty.
+Repeated callbacks and the notification's `last` field are not additive work.
+Malformed later telemetry preserves the preceding coherent snapshot with an
+incompleteness mark; failure or cancellation retains observation without changing
+the original process or result authority.
+
+The [native usage regressions](../../backend/tests/dependency_complete/test_native_model_usage.py)
+exercise absent, zero, bounded/invalid, cumulative/duplicate and foreign-scope
+observations, plus original cancellation and failed shutdown. One selected
+installed [original service Run][codex-run-tests] passed on Linux with the public
+Codex 0.164.0 release, disposable synthetic native configuration and a local
+Responses fixture: four model requests, native tool edits and compaction,
+independent verification, exact nonzero usage provenance in the receiving
+Attempt, and original process cleanup. This qualifies protocol observation, not
+live-account consumption, monetary cost, model quality or another environment.
+
+Pi CLI/RPC, OpenCode and Codex CLI usage remain unqualified/unknown in this
+delivery. In the selected Codex version, the CLI's terminal usage projects a
+thread total and can supply default zeros when no native usage notification was
+observed; it is not an independent per-request measurement. The selected
+[native schema](https://raw.githubusercontent.com/openai/codex/rust-v0.164.0/codex-rs/app-server-protocol/schema/json/v2/ThreadTokenUsageUpdatedNotification.json)
+and [CLI projection](https://raw.githubusercontent.com/openai/codex/rust-v0.164.0/codex-rs/exec/src/event_processor_with_jsonl_output.rs)
+retain those scope distinctions. No token total, reported model, cache/reasoning
+inclusion relation, or price is inferred from absent fields, request caps, text,
+native catalog prices or snapshots from different turns/Attempts.
+
 ## Upgrade and subtraction review
 
 For a native integration change, review the applicable IDs and record an explicit

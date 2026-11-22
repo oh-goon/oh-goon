@@ -1,4 +1,4 @@
-// OPENAPI_SHA256: 37eb2a28002005b7da49af139ed71ba14377ad78bdfe8b6fc9b40d080f585c72
+// OPENAPI_SHA256: 06fe7a6f30852703f7b5aa8cd20cf2b56e16bc4f2dddf0c0a85523510622ac97
 // AUTO-GENERATED static runtime validators compiled from FastAPI/OpenAPI.
 // Component validators live in deterministic internal shards; transport consumes this facade only.
 // This file executes schema-specific checks; it does not interpret JSON Schema at runtime.
@@ -30,8 +30,7 @@ import { validateIncludeRepositoryRequest, validateIncludedRepositoryCatalogEntr
 import { validateLeagueLineupCatalog, validateLeagueLineupDocument, validateLeagueLineupInspection, validateLeagueLineupSaveRequest } from "@generated/validatorParts/validatorPart029";
 import { validateLeagueMap, validateLocationRequest, validateLocationsResponse } from "@generated/validatorParts/validatorPart030";
 import { validatePlacementQueueSnapshot } from "@generated/validatorParts/validatorPart034";
-import { validatePlanTemplateCatalog } from "@generated/validatorParts/validatorPart038";
-import { validatePrivacyResponse } from "@generated/validatorParts/validatorPart039";
+import { validatePlanTemplateCatalog, validatePrivacyResponse } from "@generated/validatorParts/validatorPart039";
 import { validateQueueCancelRequest, validateQueueReprioritizeRequest } from "@generated/validatorParts/validatorPart041";
 import { validateRecoveryAcknowledgeRequest, validateRecoveryReconcileRequest, validateRecoveryStatus, validateRemoveLocationRequest, validateRepositoryCatalogEntry } from "@generated/validatorParts/validatorPart042";
 import { validateRepositoryDependencyPage } from "@generated/validatorParts/validatorPart043";

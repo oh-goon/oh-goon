@@ -64,6 +64,7 @@ def execute_fixture(
     protect_host_secret: bool = False,
     output_schema: dict[str, Any] | None = None,
     cancel_at: str | None = None,
+    requested_model: str = "native-model",
 ) -> tuple[
     Callable[[], execution.CodexServiceExecution],
     list[object],
@@ -114,7 +115,7 @@ def execute_fixture(
         profile=NativeAgentProfile(
             codex_service=CodexServiceConnection(
                 home=str(tmp_path / "native-home" / "native-state"),
-                model="native-model",
+                model=requested_model,
                 reasoning_effort="high",
             )
         ),
@@ -241,6 +242,7 @@ def execute_fixture(
 
         async def start_thread(self, **_kwargs: Any) -> dict[str, Any]:
             events.append("thread_start")
+            assert _kwargs["model"] == requested_model
             assert _kwargs["configuration"] == {
                 "features.incremental_tools": False,
                 "mcp_servers": {"PRIVATE_NATIVE_REGISTRATION": {"enabled": False}},

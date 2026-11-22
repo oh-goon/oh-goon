@@ -103,6 +103,8 @@ def _print_provider_refusal(args: argparse.Namespace, error: Exception, *, nativ
         report["execution_admitted"] = False
     else:
         report["schema"] = "oh-goon.provider-refusal/v1"
+        if isinstance(error, AgentProviderError) and error.usage is not None:
+            report["usage"] = error.usage.model_dump(mode="json")
     if args.as_json:
         print(json.dumps(report))
     else:
@@ -429,9 +431,11 @@ def run_provider_command(args: argparse.Namespace) -> int:
                 prompt = _prompt(args, selected.provider.max_request_bytes)
                 reply = AgentProviderClient().complete(selected, [AgentMessage("user", prompt)])
                 if args.as_json:
-                    print(
-                        json.dumps({"status": "model_reply", **asdict(reply)}, ensure_ascii=False)
+                    report = asdict(reply)
+                    report["usage"] = (
+                        reply.usage.model_dump(mode="json") if reply.usage is not None else None
                     )
+                    print(json.dumps({"status": "model_reply", **report}, ensure_ascii=False))
                 else:
                     print(reply.text)
                 return 0

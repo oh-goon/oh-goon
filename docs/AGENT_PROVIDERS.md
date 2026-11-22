@@ -1273,6 +1273,48 @@ parameters = { options = { temperature = 0.2, num_ctx = 8192 } }
 
 The current client performs one non-streaming text request and requests identity content encoding so response bytes can be bounded before decoding. Tool-call responses, missing text, truncated or incomplete output, malformed JSON, redirects and HTTP errors fail explicitly. There are no automatic retries, model pulls or fallback providers. JSON output includes the selected profile, provider, requested model, returned model identity when present, text and finish reason. It is model output, not a verification result or Game Tape qualification.
 
+## Observed model usage
+
+Usage is passive producer evidence, separate from the request token limit and
+the original Step's result. Direct provider replies expose nullable `usage`;
+`agent providers request --json` includes the same allowlisted report. Provider
+Steps retain it on the original physical Attempt, including a received report
+when text is truncated or fails its output contract. Run/Game Tape JSON exposes
+`attempts[].model_usage`, including through `oh-goon dev explain-run RUN_ID --json`;
+original cancellation evidence can retain an already received report.
+Historical Attempts without this field remain unknown.
+
+Each observation records its source protocol, request or native-thread scope,
+opaque scope identity, requested and actually reported model identities,
+available implementation identity, units and telemetry completeness. Missing
+quantities are `null`, distinct from a reported zero. Invalid optional values
+remain unknown without changing the operation result; missing receipts and
+unacknowledged work do not manufacture usage. No private transcript, credential,
+raw provider response or native session handle is part of the report.
+
+The direct HTTP client preserves actually reported OpenAI Chat/Responses input,
+output and total counts and their available cache/reasoning details. Those
+details are subsets, not additional consumption to add to the reported total.
+Anthropic input is uncached input; cache reads/writes retain their separate
+producer semantics. Ollama supplies prompt/evaluation counts where present.
+Missing totals are never reconstructed. All selected sources leave monetary
+`cost` unknown; a native model-catalogue price calculation is not a bill.
+
+Initial native usage support is the Codex service's explicit
+`thread/tokenUsage/updated` notification, after both its thread and turn match
+the original owner. Its latest reported cumulative thread snapshot replaces
+the previous snapshot; callbacks, `last` and `total` are never added together.
+Attempts retain their own observations without summing snapshots across retries
+or treating a cumulative thread total as one request's consumption. A malformed
+later update retains the preceding coherent snapshot with explicit partial/
+truncated telemetry. Usage cannot authorize work or change settlement.
+
+Codex CLI usage can contain a cumulative snapshot or default zeros without a
+measurement; it remains unknown here. Pi and OpenCode usage are also unqualified
+in this initial scope. Native protocol support does not qualify model quality,
+live-account billing, installed modes or other hosts. EvalShot owns evaluation
+and economic comparisons; this report supplies observed evidence only.
+
 ## Use from Python
 
 Resolve once from an explicitly provided environment, then send messages through the connection client:
