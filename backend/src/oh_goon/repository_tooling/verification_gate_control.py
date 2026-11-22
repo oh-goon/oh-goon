@@ -1807,8 +1807,12 @@ def validate_merge_proof(
         and not (
             contract_only
             or static_only
-            or all(
-                path in plain_docs or path in removed or path in deferred for path in changed_paths
+            or (
+                bool(deferred)
+                and all(
+                    path in plain_docs or path in removed or path in deferred
+                    for path in changed_paths
+                )
             )
         )
     ):
