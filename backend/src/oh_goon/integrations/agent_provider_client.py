@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import ssl
+import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any, NoReturn
 
 from oh_goon.core.models.agent_providers import (
@@ -21,6 +23,12 @@ from oh_goon.core.models.agent_providers import (
     ResolvedAgentModel,
     validate_provider_history_policy,
 )
+from oh_goon.core.models.model_usage import (
+    ModelUsageObservation,
+    ModelUsageReport,
+    reported_token_values,
+)
+from oh_goon.core.product_identity import stable_id
 
 
 class AgentProviderClient:
@@ -44,6 +52,10 @@ class AgentProviderClient:
             name.lower() == "anthropic-version" for name in headers
         ):
             headers["anthropic-version"] = "2023-06-01"
+
+        # The original client owns one request, including a provider that repeats
+        # an external response ID. Raw provider handles are never usage identity.
+        request_identity = stable_id("model-request", uuid.uuid4().hex)
 
         # Keep the required general HTTP dependency at this effect boundary.
         import httpx2
@@ -96,7 +108,129 @@ class AgentProviderClient:
             payload = json.loads(data, object_pairs_hook=_unique_pairs, parse_constant=_nonfinite)
         except (ValueError, UnicodeError, RecursionError):
             raise AgentProviderError("Provider returned invalid JSON") from None
-        return _reply(selected, payload)
+        usage = _usage(selected, payload, request_identity=request_identity)
+        try:
+            reply = _reply(selected, payload)
+        except AgentProviderError as exc:
+            exc.usage = usage
+            raise
+        return replace(reply, usage=usage)
+
+
+def _usage_model_identity(value: object, *, protected_values: tuple[str, ...]) -> str | None:
+    if (
+        isinstance(value, str)
+        and 1 <= len(value) <= 256
+        and value == value.strip()
+        and value.isprintable()
+        and not any(protected in value for protected in protected_values)
+    ):
+        return value
+    return None
+
+
+def _usage_detail(raw: dict[str, Any], name: str, field: str) -> object:
+    detail = raw.get(name)
+    if detail is None:
+        return None
+    # An invalid optional detail is unknown, without invalidating valid totals
+    # or the text outcome. The shared count parser records that loss honestly.
+    return detail.get(field) if isinstance(detail, dict) else object()
+
+
+def _usage(
+    selected: ResolvedAgentModel,
+    payload: object,
+    *,
+    request_identity: str,
+) -> ModelUsageReport | None:
+    if not isinstance(payload, dict):
+        return None
+    api = selected.provider.api
+    raw = payload if api == "ollama" else payload.get("usage")
+    if raw is None or (
+        api == "ollama" and not any(name in payload for name in ("prompt_eval_count", "eval_count"))
+    ):
+        return None
+    values: dict[str, object] = {}
+    if isinstance(raw, dict):
+        if api == "ollama":
+            values = {
+                "input_tokens": raw.get("prompt_eval_count"),
+                "output_tokens": raw.get("eval_count"),
+            }
+        elif api == "openai-chat-completions":
+            values = {
+                "input_tokens": raw.get("prompt_tokens"),
+                "output_tokens": raw.get("completion_tokens"),
+                "total_tokens": raw.get("total_tokens"),
+                "cache_read_tokens": _usage_detail(raw, "prompt_tokens_details", "cached_tokens"),
+                "cache_write_tokens": _usage_detail(
+                    raw, "prompt_tokens_details", "cache_write_tokens"
+                ),
+                "reasoning_tokens": _usage_detail(
+                    raw, "completion_tokens_details", "reasoning_tokens"
+                ),
+            }
+        elif api == "openai-responses":
+            values = {
+                "input_tokens": raw.get("input_tokens"),
+                "output_tokens": raw.get("output_tokens"),
+                "total_tokens": raw.get("total_tokens"),
+                "cache_read_tokens": _usage_detail(raw, "input_tokens_details", "cached_tokens"),
+                "cache_write_tokens": _usage_detail(
+                    raw, "input_tokens_details", "cache_write_tokens"
+                ),
+                "reasoning_tokens": _usage_detail(raw, "output_tokens_details", "reasoning_tokens"),
+            }
+        else:
+            values = {
+                "input_tokens": raw.get("input_tokens"),
+                "output_tokens": raw.get("output_tokens"),
+                "cache_read_tokens": raw.get("cache_read_input_tokens"),
+                "cache_write_tokens": raw.get("cache_creation_input_tokens"),
+            }
+    counts, completeness = reported_token_values(values)
+    if not isinstance(raw, dict):
+        completeness = "malformed"
+    # These are the exact values already resolved for this request, not another
+    # environment/configuration lookup. A model-name claim may echo credential
+    # material, including the raw token rather than the full Authorization value.
+    protected = set()
+    for name, secret in selected.headers:
+        value = secret.get_secret_value()
+        if value:
+            protected.add(value)
+            if value.strip():
+                protected.add(value.strip())
+        if name.lower() == "authorization":
+            parts = value.split(None, 1)
+            if len(parts) == 2 and parts[1]:
+                protected.add(parts[1])
+                if parts[1].strip():
+                    protected.add(parts[1].strip())
+    protected_values = tuple(protected)
+    observation = ModelUsageObservation(
+        observation_id=stable_id("model-usage", request_identity),
+        source=api,
+        scope="request",
+        scope_identity=request_identity,
+        requested_model=_usage_model_identity(selected.model, protected_values=protected_values),
+        reported_model=_usage_model_identity(
+            payload.get("model"), protected_values=protected_values
+        ),
+        input_semantics=(
+            "excludes_cache"
+            if api == "anthropic-messages"
+            else "includes_cache"
+            if api.startswith("openai-")
+            else "unknown"
+        ),
+        output_semantics="unknown" if api == "ollama" else "includes_reasoning",
+        completeness=completeness,
+        **counts,
+    )
+    return ModelUsageReport(observations=(observation,))
 
 
 def _request(

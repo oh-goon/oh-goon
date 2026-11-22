@@ -30,6 +30,7 @@ from oh_goon.core.models.fleet_plan_release_evidence import (
     PlanReleaseEffectEvidence,
 )
 from oh_goon.core.models.fleet_plan_step_primitives import StepFailurePolicy, StepLifecycle
+from oh_goon.core.models.model_usage import ModelUsageReport
 from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
 from oh_goon.engine.command_runtime_authority import RuntimeAuthorityReceipt
 from oh_goon.engine.errors import OperationCancelledError
@@ -68,6 +69,7 @@ class StepOutcome:
     observed_returncode: int | None = None
     resource_cleanup: Literal["verified", "unverified"] = "verified"
     failure_kind: Literal["model_output_truncated"] | None = None
+    model_usage: ModelUsageReport | None = None
 
     def __post_init__(self) -> None:
         if self.supervisor is not None and (
@@ -352,7 +354,17 @@ def timeout_outcome(step: ResolvedPlanStep, error: subprocess.TimeoutExpired) ->
         physical_execution_id=getattr(error, "physical_execution_id", None),
         standard_isolation=getattr(error, "standard_isolation", None),
         stdout_evidence=getattr(error, "stdout_evidence", None),
+        model_usage=model_usage_from_error(error),
     )
+
+
+def model_usage_from_error(error: BaseException) -> ModelUsageReport | None:
+    """Retain already-validated telemetry from the original native error owner."""
+    for original in (error, error.__cause__):
+        usage = getattr(original, "model_usage", None)
+        if isinstance(usage, ModelUsageReport):
+            return usage
+    return None
 
 
 def from_command(result: CommandResult) -> StepOutcome:

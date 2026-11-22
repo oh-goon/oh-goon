@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event, Thread
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import uuid4
 
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
@@ -26,6 +26,11 @@ from oh_goon.core.models.fleet_observation import (
     NativeServiceExecutionEvidence,
 )
 from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, PLAN_TIMEOUT_RETURN_CODE
+from oh_goon.core.models.model_usage import (
+    ModelUsageObservation,
+    ModelUsageReport,
+    reported_token_values,
+)
 from oh_goon.core.process_birth import ProcessBirthIdentity, observe_process_birth
 from oh_goon.core.product_identity import stable_id
 from oh_goon.engine.command import (
@@ -104,10 +109,79 @@ class _VisibleNativeTranscript:
 
     redact: Callable[[str], str]
     observe: Callable[[AgentHarnessObservation], None] | None = None
+    implementation_identity: str | None = None
+    requested_model: str | None = None
+    model_usage: ModelUsageReport | None = None
     observations: list[AgentHarnessObservation] = field(default_factory=list)
     event_count: int = 0
     omitted: int = 0
     retained_chars: int = 0
+
+    def observe_model_usage(self, value: object, *, thread: str, turn: str) -> None:
+        """Retain the latest owned native total, never additive callbacks or last+total."""
+        total = value.get("total") if isinstance(value, dict) else None
+        fields, completeness = reported_token_values(
+            {
+                "input_tokens": total.get("inputTokens"),
+                "output_tokens": total.get("outputTokens"),
+                "cache_read_tokens": total.get("cachedInputTokens"),
+                "cache_write_tokens": total.get("cacheWriteInputTokens"),
+                "reasoning_tokens": total.get("reasoningOutputTokens"),
+                "total_tokens": total.get("totalTokens"),
+            }
+            if isinstance(total, dict)
+            else {}
+        )
+        if not isinstance(total, dict):
+            completeness = "malformed"
+        previous = self.model_usage
+        if completeness != "reported" and previous is not None:
+            prior = previous.observations[0]
+            if any(
+                getattr(prior, name) is not None
+                for name in (
+                    "input_tokens",
+                    "output_tokens",
+                    "cache_read_tokens",
+                    "cache_write_tokens",
+                    "reasoning_tokens",
+                    "total_tokens",
+                )
+            ):
+                # A malformed later callback cannot erase a coherent known
+                # snapshot or splice counts from different native snapshots.
+                self.model_usage = ModelUsageReport(
+                    observations=(prior.model_copy(update={"completeness": "partial"}),),
+                    truncated=True,
+                )
+                return
+        requested = self.requested_model
+        if requested is not None and (
+            requested != requested.strip() or not requested.isprintable() or len(requested) > 256
+        ):
+            requested = None
+        if requested is not None:
+            try:
+                if self.redact(requested) != requested:
+                    requested = None
+            except Exception:
+                # Optional metadata that cannot be safely observed is unknown;
+                # it cannot replace the original native operation's result.
+                requested = None
+        observation = ModelUsageObservation(
+            observation_id=stable_id("codex-service-model-usage", {"thread": thread, "turn": turn}),
+            source="codex-service",
+            scope="native_thread",
+            scope_identity=stable_id("codex-service-model-usage-thread", {"thread": thread}),
+            implementation_identity=self.implementation_identity,
+            requested_model=requested,
+            reported_model=None,
+            completeness=completeness,
+            **fields,
+        )
+        self.model_usage = ModelUsageReport(
+            observations=(observation,), truncated=previous.truncated if previous else False
+        )
 
     def retain(self, kind: Literal["agent", "tool", "context"], text: str) -> None:
         remaining = min(4000, _MAX_VISIBLE_CHARS - self.retained_chars)
@@ -143,6 +217,7 @@ class CodexServiceExecutionFailure(AgentProviderError):
     ) -> None:
         super().__init__(outcome.stderr)
         self.outcome = outcome
+        self.model_usage = outcome.model_usage
         self.safe_diagnostics = safe_diagnostics
         self.native_event_count = native_event_count
         self.omitted_observations = omitted_observations
@@ -154,6 +229,7 @@ class CodexServiceExecutionCancelled(OperationCancelledError):
     def __init__(self, failure: CodexServiceExecutionFailure) -> None:
         super().__init__(failure.outcome.stderr)
         self.outcome = failure.outcome
+        self.model_usage = failure.outcome.model_usage
 
 
 def _execution_failure(
@@ -165,6 +241,7 @@ def _execution_failure(
     diagnostic_output: StepDiagnosticObserver | None = None,
     exception: BaseException | None = None,
     visible: NativeAgentEvents | None = None,
+    model_usage: ModelUsageReport | None = None,
     service_shutdown: bool = True,
 ) -> CodexServiceExecutionFailure:
     event = diagnostic_output(message, exception) if diagnostic_output is not None else None
@@ -205,6 +282,7 @@ def _execution_failure(
             runtime_authority=physical.runtime_authority,
             physical_execution_id=physical.physical_execution_id,
             standard_isolation=physical.standard_isolation,
+            model_usage=model_usage,
         ),
         safe_diagnostics=tuple(chunks),
         native_event_count=visible.event_count if visible is not None else 0,
@@ -308,9 +386,20 @@ async def _turn(
         _require_uncancelled(runtime)
         visible.event_count += 1
         params = message.get("params", {})
+        method = message.get("method")
+        if method == "thread/tokenUsage/updated":
+            # The client filters threads; repeat the exact scope join at this
+            # accepting owner so a foreign turn cannot replace this snapshot.
+            # Optional telemetry never supplies native result authority.
+            if (
+                isinstance(params, dict)
+                and params.get("threadId") == thread
+                and params.get("turnId") == turn
+            ):
+                visible.observe_model_usage(params.get("tokenUsage"), thread=thread, turn=turn)
+            continue
         if not isinstance(params, dict):
             raise AgentProviderError("Codex service returned invalid scoped progress")
-        method = message.get("method")
         if method == "item/completed":
             if params.get("turnId") != turn:
                 raise AgentProviderError("Codex service progress changed the owned turn")
@@ -432,7 +521,12 @@ def execute_codex_service_run(
         )
     }
     visible = _VisibleNativeTranscript(
-        process.redact_visible_output or redact_diagnostic_text, process.visible_output
+        process.redact_visible_output or redact_diagnostic_text,
+        process.visible_output,
+        implementation_identity=("sha256:" + selected.executable_sha256)
+        if selected.executable_sha256 is not None
+        else None,
+        requested_model=connection.model,
     )
     environment["TMPDIR"] = str(scratch)
     environment["CODEX_HOME"] = connection.home
@@ -458,6 +552,7 @@ def execute_codex_service_run(
             service_shutdown=False,
             diagnostic_output=process.diagnostic_output,
             visible=visible.snapshot(),
+            model_usage=visible.model_usage,
         )
 
     _require_uncancelled(runtime)
@@ -600,15 +695,20 @@ def execute_codex_service_run(
         stop.set()
         worker.join(timeout=12)
     if worker.is_alive() or len(results) != 1:
-        raise FleetPlanInvalid("Codex service process cleanup remains unverified")
+        failure = FleetPlanInvalid("Codex service process cleanup remains unverified")
+        cast(Any, failure).model_usage = visible.model_usage
+        raise failure
     physical = results[0]
     if not isinstance(physical, (CommandResult, CommandCancelledError)):
         if isinstance(physical, BaseException):
+            cast(Any, physical).model_usage = visible.model_usage
             for stream in ("stdout", "stderr"):
                 if hasattr(physical, stream):
                     setattr(physical, stream, "")
             raise physical
-        raise FleetPlanInvalid("Codex service process evidence is missing")
+        failure = FleetPlanInvalid("Codex service process evidence is missing")
+        cast(Any, failure).model_usage = visible.model_usage
+        raise failure
     if not physical.supervisor.final_process_group_quiescent:
         raise _execution_failure(
             "Codex service process cleanup remains unverified",
@@ -616,6 +716,7 @@ def execute_codex_service_run(
             argv,
             diagnostic_output=process.diagnostic_output,
             visible=visible.snapshot(),
+            model_usage=visible.model_usage,
         )
     if runtime.cancel_requested is not None and runtime.cancel_requested():
         cancelled = _execution_failure(
@@ -625,6 +726,7 @@ def execute_codex_service_run(
             service_shutdown=False,
             diagnostic_output=process.diagnostic_output,
             visible=visible.snapshot(),
+            model_usage=visible.model_usage,
             exception=primary,
         )
         raise CodexServiceExecutionCancelled(cancelled) from (
@@ -640,9 +742,11 @@ def execute_codex_service_run(
             else PLAN_CONTRACT_RETURN_CODE,
             diagnostic_output=process.diagnostic_output,
             visible=visible.snapshot(),
+            model_usage=visible.model_usage,
             exception=primary,
         ) from None
     if primary is not None:
+        cast(Any, primary).model_usage = visible.model_usage
         raise primary
     if protocol is None or not isinstance(physical, CommandCancelledError):
         raise _execution_failure(
@@ -651,6 +755,7 @@ def execute_codex_service_run(
             argv,
             diagnostic_output=process.diagnostic_output,
             visible=visible.snapshot(),
+            model_usage=visible.model_usage,
         )
     # The native turn result and the daemon's requested shutdown are distinct.
     # Keep the ACTUAL cancelled-daemon receipt, without synthesizing a command
@@ -666,6 +771,7 @@ def execute_codex_service_run(
         runtime_authority=physical.runtime_authority,
         physical_execution_id=physical.physical_execution_id,
         standard_isolation=physical.standard_isolation,
+        model_usage=visible.model_usage,
     )
     execution = NativeServiceExecutionEvidence(
         configuration_id=stable_id(

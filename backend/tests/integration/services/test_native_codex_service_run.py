@@ -341,6 +341,32 @@ def test_installed_codex_service_run_retains_context_and_verifies_independently(
             assert execution.process_cleanup == "verified", facts
             assert steps[0].attempts[0].supervisor is not None, facts
             assert steps[0].attempts[0].supervisor.final_process_group_quiescent is True, facts
+            usage = steps[0].attempts[0].model_usage
+            assert usage is not None and len(usage.observations) == 1, facts
+            measurement = usage.observations[0]
+            assert measurement.source == "codex-service", facts
+            assert measurement.scope == "native_thread", facts
+            assert measurement.implementation_identity == (
+                "sha256:" + native_executable_sha256(program)
+            ), facts
+            assert measurement.requested_model == "gpt-6.1-sol", facts
+            assert measurement.reported_model is None and measurement.cost is None, facts
+            assert measurement.input_tokens is not None and measurement.input_tokens > 0, facts
+            assert measurement.output_tokens is not None and measurement.output_tokens > 0, facts
+            assert measurement.completeness == "reported" and not usage.truncated, facts
+            (tmp_path / "service-run-usage-receipt.json").write_text(
+                json.dumps(
+                    {
+                        "fleet_run_id": admitted.fleet_run_id,
+                        "native_version": execution.native_version,
+                        "model_usage": usage.model_dump(mode="json"),
+                        "native_process_cleanup": execution.process_cleanup,
+                        "run_outcome": detail.outcome,
+                        "verification_value": verification_value,
+                        "synthetic_provider_requests": endpoint.request_count,
+                    }
+                )
+            )
         finally:
             if runtime is not None:
                 runtime.shutdown(wait_for_runs=True)

@@ -8,7 +8,11 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedPlanStep,
 )
 from oh_goon.engine.command import CommandOutputLimitExceeded
-from oh_goon.integrations._fleet_plan_step_outcome import StepOutcome, timeout_outcome
+from oh_goon.integrations._fleet_plan_step_outcome import (
+    StepOutcome,
+    model_usage_from_error,
+    timeout_outcome,
+)
 
 
 def bounded_execution_failure_outcome(
@@ -40,4 +44,5 @@ def _output_limit_outcome(step: ResolvedPlanStep, error: CommandOutputLimitExcee
         standard_isolation=getattr(error, "standard_isolation", None),
         physical_execution_id=getattr(error, "physical_execution_id", None),
         stdout_evidence=getattr(error, "stdout_evidence", None),
+        model_usage=model_usage_from_error(error),
     )

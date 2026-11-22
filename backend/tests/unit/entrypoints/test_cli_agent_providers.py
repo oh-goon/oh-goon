@@ -14,6 +14,7 @@ from oh_goon.core.models.agent_providers import (
     AgentMessage,
     AgentProviderError,
     AgentReply,
+    AgentResponseTruncated,
     ResolvedAgentModel,
 )
 
@@ -167,6 +168,56 @@ def test_explicit_request_uses_selected_profile_and_bounded_prompt(
     assert observed[0][0].model == "selected-model"
     assert observed[0][1][0].content == "explicit text"
     assert "PRIVATE_KEY" not in output
+
+
+@pytest.mark.parametrize("failure", [None, AgentProviderError, AgentResponseTruncated])
+def test_explicit_request_json_serializes_reported_zero_and_unknown_usage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    no_runtime: None,
+    failure: type[AgentProviderError] | None,
+) -> None:
+    from oh_goon.core.models.model_usage import ModelUsageObservation, ModelUsageReport
+    from oh_goon.integrations.agent_provider_client import AgentProviderClient
+
+    path = tmp_path / "providers.toml"
+    path.write_text(CONFIG)
+    monkeypatch.setenv("MY_KEY", "PRIVATE_KEY")
+    monkeypatch.setenv("MY_OTHER_KEY", "OTHER_PRIVATE_KEY")
+    usage = ModelUsageReport(
+        observations=(
+            ModelUsageObservation(
+                observation_id="reported-usage",
+                source="openai-responses",
+                scope="request",
+                scope_identity="original-request",
+                output_tokens=0,
+                completeness="reported",
+            ),
+        )
+    )
+
+    def complete(*_args: Any) -> AgentReply:
+        if failure is not None:
+            raise failure("PRIVATE_PROVIDER_ERROR_TEXT", usage=usage)
+        return AgentReply("review", "gateway", "selected-model", "hello", "completed", usage=usage)
+
+    monkeypatch.setattr(AgentProviderClient, "complete", complete)
+    assert main(
+        ["agent", "providers", "request", "--config", str(path), "--json", "--prompt", "Task"]
+    ) == (0 if failure is None else 2)
+    output = capsys.readouterr().out
+    report = json.loads(output)
+    if failure is None:
+        assert report["text"] == "hello" and report["status"] == "model_reply"
+    else:
+        assert report["status"] == "rejected" and report["code"] == failure.code
+    observation = report["usage"]["observations"][0]
+    assert observation["output_tokens"] == 0
+    assert observation["input_tokens"] is observation["cost"] is None
+    assert "PRIVATE_KEY" not in output
+    assert "PRIVATE_PROVIDER_ERROR_TEXT" not in output
 
 
 def test_missing_selected_key_fails_before_request(

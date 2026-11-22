@@ -14,6 +14,7 @@ from pydantic import ConfigDict, Field, JsonValue, SecretStr, field_validator, m
 from oh_goon.core.errors import InvalidRequest
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
+from oh_goon.core.models.model_usage import ModelUsageReport
 
 ProviderApi = Literal["ollama", "openai-chat-completions", "openai-responses", "anthropic-messages"]
 NativeAgentName = Literal["opencode", "pi", "codex"]
@@ -47,6 +48,10 @@ class AgentProviderError(InvalidRequest):
     """Safe provider/configuration refusal; messages never contain credential values."""
 
     code = "AGENT_PROVIDER_ERROR"
+
+    def __init__(self, message: str, *, usage: ModelUsageReport | None = None) -> None:
+        super().__init__(message)
+        self.usage = usage
 
 
 class AgentResponseTruncated(AgentProviderError):
@@ -529,3 +534,4 @@ class AgentReply:
     text: str
     finish_reason: str
     response_model: str | None = None
+    usage: ModelUsageReport | None = None
