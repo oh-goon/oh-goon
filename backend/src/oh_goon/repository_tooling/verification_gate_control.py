@@ -825,6 +825,139 @@ def prepare_static_project(root: Path, trusted_root: Path, source_identity: str)
 VERIFICATION_SUPPORT_OBLIGATION = "bounded verification-support proof"
 
 
+def certification_deferred_scope(
+    changed_paths: Sequence[str], evidence: Mapping[str, Any], *, removed_paths: Sequence[str] = ()
+) -> dict[str, Any]:
+    """Project explicitly native-only qualification, without an execution receipt."""
+    from oh_goon.repository_tooling.development_verification import _MERGE_MARKER
+
+    selected: set[str] = set()
+    deselected: dict[str, list[Mapping[str, Any]]] = {}
+    for key in ("pytest_admission", "dependency_admission"):
+        admission = evidence.get(key, {})
+        collection = admission.get("collection", {})
+        selected.update(row["file"] for row in collection.get("selected", []))
+        if admission.get("collection_marker") != _MERGE_MARKER:
+            continue
+        for row in collection.get("deselected", []):
+            deselected.setdefault(row["file"], []).append(row)
+    certification_files = {
+        path
+        for path, rows in deselected.items()
+        if path not in selected
+        and _source_path(path)
+        and path.startswith(("backend/tests/", "scripts/tests/", "tests/integration/"))
+        and len({row.get("selector") for row in rows}) == len(rows)
+        and all(
+            row.get("certification") == "true"
+            and isinstance(row.get("selector"), str)
+            and row["selector"].startswith(path + "::")
+            for row in rows
+        )
+    } - set(required_policy_tests(changed_paths))
+    changed = set(changed_paths) - set(removed_paths)
+    tests: set[str] = set()
+    support: dict[str, list[str]] = {}
+    for row in evidence.get("observations", []):
+        source = row.get("changed_path")
+        if (
+            source not in changed
+            or row.get("stale") is True
+            or row.get("changed_set", {}).get("freshness") == "stale"
+        ):
+            continue
+        if (
+            source in certification_files
+            and row.get("state") == "CHANGED_TEST"
+            and any(
+                projected.get("workspace_prefix", "") == ""
+                and projected.get("nomination", {}).get("available") is True
+                and projected["nomination"].get("runner_evidence") == "pytest"
+                and projected["nomination"].get("verification_target", {}).get("path") == source
+                for projected in row.get("nominations", [])
+            )
+        ):
+            tests.add(source)
+        if isinstance(source, str) and source.startswith(
+            ("backend/tests/", "scripts/tests/", "tests/integration/")
+        ):
+            targets = bounded_verification_support_targets(row)
+            if targets and targets <= certification_files:
+                support[source] = sorted(targets)
+    if not tests and not support:
+        return {}
+    return {
+        "status": "NOT_RUN",
+        "marker": _MERGE_MARKER,
+        "changed_tests": sorted(tests),
+        "support_consumers": support,
+        "consumer_coverage": "not-claimed",
+    }
+
+
+def require_certification_deferred_scope(
+    changed_paths: Sequence[str], evidence: Mapping[str, Any], *, removed_paths: Sequence[str] = ()
+) -> set[str]:
+    expected = certification_deferred_scope(changed_paths, evidence, removed_paths=removed_paths)
+    if evidence.get("certification_deferred", {}) != expected:
+        raise ValueError("Certification deferral differs from native collection or producer scope")
+    return set(expected.get("changed_tests", [])) | set(expected.get("support_consumers", {}))
+
+
+def require_certification_reobserved(
+    changed_paths: Sequence[str],
+    evidence: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    *,
+    removed_paths: Sequence[str] = (),
+) -> None:
+    """Join the NOT_RUN annotation to the original trusted native collection."""
+    from oh_goon.repository_tooling.development_verification import _MERGE_MARKER
+
+    require_certification_deferred_scope(changed_paths, evidence, removed_paths=removed_paths)
+    deferred = evidence.get("certification_deferred", {})
+    if not deferred:
+        return
+    files = set(deferred["changed_tests"]) | {
+        target for targets in deferred["support_consumers"].values() for target in targets
+    }
+    if receipt.get("certification_files") != sorted(files):
+        raise ValueError("Independent certification projection names another scope")
+    contexts = receipt.get("contexts", [])
+    if (
+        not isinstance(contexts, list)
+        or [row.get("name") for row in contexts] != ["backend", "tooling", "cross-owner"]
+        or any(
+            context.get("request", {}).get("marker") != _MERGE_MARKER
+            or context.get("runtime", {}).get("marker_expression") != _MERGE_MARKER
+            for context in contexts
+        )
+    ):
+        raise ValueError("Independent certification collection changed the ordinary marker")
+    native = {
+        name: [row for context in contexts for row in context.get(name, [])]
+        for name in ("selected", "deselected")
+    }
+    actual = dict(evidence)
+    actual.pop("dependency_admission", None)
+    actual["pytest_admission"] = {"collection_marker": _MERGE_MARKER, "collection": native}
+    if certification_deferred_scope(changed_paths, actual, removed_paths=removed_paths) != deferred:
+        raise ValueError("Independent native certification disposition differs from admission")
+    claimed_members = {
+        (row["file"], row["selector"], row.get("certification"))
+        for key in ("pytest_admission", "dependency_admission")
+        for row in evidence.get(key, {}).get("collection", {}).get("deselected", [])
+        if row["file"] in files
+    }
+    actual_members = {
+        (row["file"], row["selector"], row.get("certification"))
+        for row in native["deselected"]
+        if row["file"] in files
+    }
+    if claimed_members != actual_members:
+        raise ValueError("Independent native certification membership differs from admission")
+
+
 def bounded_verification_support_targets(observation: Mapping[str, Any]) -> frozenset[str]:
     """Bind positive native support relationships without claiming consumer completeness."""
     source = observation.get("changed_path")
@@ -911,6 +1044,10 @@ def require_verification_support_proof(
     require_complete: bool = True,
     admitted_owner_paths: frozenset[str] = frozenset(),
 ) -> None:
+    require_certification_deferred_scope(
+        plan.get("changed_paths", []), evidence, removed_paths=plan.get("removed_paths", [])
+    )
+    deferred_support = evidence.get("certification_deferred", {}).get("support_consumers", {})
     # The caller has already admitted the named native-artifact/smoke route.
     # Keep file-wide producer roles intact without repeating its proof for the
     # two dependency inputs. Every other support source retains this obligation.
@@ -926,6 +1063,7 @@ def require_verification_support_proof(
         and row.get("changed_path") not in plan.get("removed_paths", [])
         and row.get("changed_path") not in upgrade_inputs
         and row.get("changed_path") not in admitted_owner_paths
+        and row.get("changed_path") not in deferred_support
     }
     if not require_complete:
         if not plan.get("unverified"):
@@ -1547,6 +1685,9 @@ def validate_merge_proof(
     evidence = plan.get("evidence", {})
     if not isinstance(evidence, Mapping):
         raise ValueError("Producer evidence has an invalid shape")
+    deferred = require_certification_deferred_scope(
+        changed_paths, evidence, removed_paths=removed_paths
+    )
     project_targets = plan.get("project_pytest", [])
     project_admissions = evidence.get("project_pytest_admission", [])
     if (
@@ -1663,7 +1804,13 @@ def validate_merge_proof(
         and not (
             behavioral_pytest or project_targets or plan.get("frontend") or plan.get("browser")
         )
-        and not (contract_only or static_only)
+        and not (
+            contract_only
+            or static_only
+            or all(
+                path in plain_docs or path in removed or path in deferred for path in changed_paths
+            )
+        )
     ):
         raise ValueError("Executable changes have no behavioral proof")
     if (assets or (behavior_required and not contract_only)) and (
@@ -1814,7 +1961,7 @@ def validate_merge_proof(
         for observation in plan.get("evidence", {}).get("observations", [])
         if observation.get("state") == "CHANGED_TEST"
     }
-    if not changed_tests - removed <= executed_files:
+    if not changed_tests - removed - deferred <= executed_files:
         raise ValueError("Changed tests have no meaningful execution proof")
     observations = {row.get("changed_path"): row for row in evidence.get("observations", [])}
     for source in changed_paths:
@@ -1833,6 +1980,8 @@ def validate_merge_proof(
         if source in static_projects:
             continue
         if source in admitted_owner_paths:
+            continue
+        if source in deferred:
             continue
         observation = observations.get(source, {})
         if observation.get("stale") is True or observation.get("state") not in {
@@ -1930,6 +2079,7 @@ def _ordinary_candidate_collection(
     requests: Sequence[Mapping[str, Any]],
     env: Mapping[str, str],
     required_files: Sequence[str] = (),
+    certification_files: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Observe existing ordinary pytest contexts once; never execute their tests."""
     from types import MappingProxyType
@@ -1967,7 +2117,10 @@ def _ordinary_candidate_collection(
     required = set(required_files)
     if any(not _source_path(path) for path in required):
         raise ValueError("Ordinary required files are not canonical source members")
-    projected = changed | required
+    certification = set(certification_files)
+    if any(not _source_path(path) for path in certification):
+        raise ValueError("Certification projection names an unsafe source")
+    projected = changed | required | certification
     contexts: list[dict[str, Any]] = []
     admitted: list[tuple[str, Mapping[str, Any], PytestInvocation, tuple[Path, ...]]] = []
     for resolved in requests:
@@ -2016,6 +2169,8 @@ def _ordinary_candidate_collection(
             plugin_module=query["plugin_module"],
             expected_environment=environment,
         ).relative_to_source(cwd=invocation.cwd, source_root=root)
+        if native.runtime and native.runtime.get("marker_expression") != query["marker"]:
+            raise ValueError("Independent ordinary collection changed its native marker")
         if (
             sha256_file(collector) != collector_identity
             or canonical_source_identity(root) != source_identity
@@ -2027,7 +2182,9 @@ def _ordinary_candidate_collection(
                 "request": dict(native.request or {}),
                 "runtime": dict(native.runtime or {}),
                 "projection_scope": (
-                    "changed-and-required-source-files-after-complete-native-collection"
+                    "changed-required-and-certification-source-files-after-complete-native-collection"
+                    if certification
+                    else "changed-and-required-source-files-after-complete-native-collection"
                     if required
                     else "changed-source-files-after-complete-native-collection"
                 ),
@@ -2047,6 +2204,7 @@ def _ordinary_candidate_collection(
         "source_identity": source_identity,
         "changed_paths": sorted(changed),
         "required_files": sorted(required),
+        "certification_files": sorted(certification),
         "environment": str(environment),
         "collector_source": str(collector),
         "collector_sha256": collector_identity,
@@ -2430,6 +2588,7 @@ def _trusted_ordinary_probe(
     changed_paths: Sequence[str],
     source_identity: str,
     required_files: Sequence[str] = (),
+    certification_files: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Run base-owned collection control with candidate-native dependencies."""
     from oh_goon.core.file_digest import sha256_file
@@ -2442,6 +2601,7 @@ def _trusted_ordinary_probe(
         "changed_paths": sorted(set(changed_paths)),
         "source_identity": source_identity,
         "required_files": sorted(set(required_files)),
+        "certification_files": sorted(set(certification_files)),
     }
     request["contexts"] = _ordinary_collection_requests(
         root.resolve(strict=True), trusted_root=trusted, environment=environment, env=env
@@ -2463,6 +2623,7 @@ def _trusted_ordinary_probe(
         requests=request["contexts"],
         env=env,
         required_files=required_files,
+        certification_files=certification_files,
     )
     collector = trusted / "backend/src/oh_goon/repository_tooling/pytest_member_selection.py"
     if (
@@ -2471,6 +2632,7 @@ def _trusted_ordinary_probe(
         or receipt.get("source_identity") != source_identity
         or receipt.get("changed_paths") != request["changed_paths"]
         or receipt.get("required_files", []) != request["required_files"]
+        or receipt.get("certification_files", []) != request["certification_files"]
         or receipt.get("collector_source") != str(collector)
         or receipt.get("collector_sha256") != sha256_file(collector)
         or receipt.get("execution") != "not-performed"
@@ -2501,6 +2663,7 @@ def _candidate_producer_identity(
     source_identity: str | None = None,
     expected_producer_identity: str | None = None,
     required_files: Sequence[str] = (),
+    certification_files: Sequence[str] = (),
 ) -> str:
     """Observe the candidate's native locked package using only trusted code.
 
@@ -2521,8 +2684,9 @@ def _candidate_producer_identity(
 
     if ordinary_receipt is not None and (trusted_root is None or source_identity is None):
         raise ValueError("Native ordinary collection requires trusted source authority")
-    if required_files and (
-        ordinary_receipt is None or any(not _source_path(path) for path in required_files)
+    if (required_files or certification_files) and (
+        ordinary_receipt is None
+        or any(not _source_path(path) for path in (*required_files, *certification_files))
     ):
         raise ValueError("Native required owner files need explicit ordinary collection authority")
     if ordinary_receipt is not None and (
@@ -2738,6 +2902,7 @@ def _candidate_producer_identity(
                     changed_paths=ordinary_paths,
                     source_identity=source_identity,
                     required_files=required_files,
+                    certification_files=certification_files,
                 )
             )
             if canonical_source_identity(trusted_root) != trusted_source:
@@ -2882,6 +3047,17 @@ def main() -> int:
                 }
             )
         )
+        certification = evidence.get("certification_deferred", {})
+        certification_files = tuple(
+            sorted(
+                set(certification.get("changed_tests", []))
+                | {
+                    target
+                    for targets in certification.get("support_consumers", {}).values()
+                    for target in targets
+                }
+            )
+        )
         executed_files, executed_members = validate_merge_proof(
             plan,
             _read(args.result),
@@ -2900,7 +3076,7 @@ def main() -> int:
         ordinary_receipt: dict[str, Any] = {}
         # This chooses the existing Python execution capability, not which
         # paths are tests. Only actual ordinary native membership decides that.
-        ordinary_required = bool(required_files) or any(
+        ordinary_required = bool(required_files or certification_files) or any(
             Path(path).suffix == ".py" for path in set(changed_paths) - set(removed_paths)
         )
         other_verifiers = _trusted_other_changed_verifiers(
@@ -2921,6 +3097,7 @@ def main() -> int:
                 source_identity=plan["source_identity"] if ordinary_required else None,
                 expected_producer_identity=producer,
                 required_files=required_files,
+                **({"certification_files": certification_files} if certification_files else {}),
             )
             if producer != observed_producer:
                 raise ValueError("Producer implementation differs from trusted admission")
@@ -2932,6 +3109,9 @@ def main() -> int:
                 executed_files=executed_files,
                 executed_members=executed_members,
                 required_files=required_files,
+            )
+            require_certification_reobserved(
+                changed_paths, evidence, ordinary_receipt, removed_paths=removed_paths
             )
         _require_changed_project_test_execution(
             args.root,

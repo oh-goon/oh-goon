@@ -138,6 +138,92 @@ def test_base_collector_uses_native_default_scope_and_preserves_cadence_without_
     assert membership.request["plugin_module"] == "__main__"
 
 
+def test_native_certification_facts_follow_markers_without_reclassifying_other_deselection(
+    tmp_path: Path,
+) -> None:
+    checks = tmp_path / "checks"
+    checks.mkdir()
+    config = tmp_path / "pyproject.toml"
+    config.write_text(
+        '[tool.pytest.ini_options]\ntestpaths=["checks"]\n'
+        'markers=["certification: explicit native qualification", '
+        '"daily: separately selected journey", "slow: exhaustive variant"]\n'
+    )
+    (checks / "test_cases.py").write_text(
+        "import pytest\n"
+        "def test_ordinary_keep(): raise AssertionError('collection only')\n"
+        "def test_certification_named_but_unmarked(): raise AssertionError('collection only')\n"
+        "@pytest.mark.daily\n"
+        "def test_daily(): raise AssertionError('collection only')\n"
+        "@pytest.mark.slow\n"
+        "def test_slow(): raise AssertionError('collection only')\n"
+        "@pytest.mark.certification\n"
+        "def test_function(): raise AssertionError('collection only')\n"
+        "@pytest.mark.certification\n"
+        "class TestQualification:\n"
+        " def test_class(self): raise AssertionError('collection only')\n"
+        "@pytest.mark.parametrize('value', ["
+        "pytest.param(1, marks=pytest.mark.certification, id='native'),"
+        "pytest.param(2, id='ordinary')])\n"
+        "def test_parameter(value): raise AssertionError('collection only')\n"
+    )
+    (checks / "test_module.py").write_text(
+        "import pytest\npytestmark=pytest.mark.certification\n"
+        "def test_module(): raise AssertionError('collection only')\n"
+    )
+    invocation = replace(
+        resolve_pytest_invocation(qualified=True, pytest_config=config),
+        cwd=tmp_path,
+        source_root=tmp_path,
+        command_prefix=(
+            sys.executable,
+            "-I",
+            str(Path(collection_owner.__file__).resolve()),
+        ),
+    )
+    ordinary_marker = "not certification and not slow and not daily"
+    observed = collect_native_pytest(
+        (), marker=ordinary_marker, invocation=invocation, plugin_module="__main__"
+    )
+    certified = {
+        "checks/test_cases.py::test_function",
+        "checks/test_cases.py::TestQualification::test_class",
+        "checks/test_cases.py::test_parameter[native]",
+        "checks/test_module.py::test_module",
+    }
+    ordinary = {
+        "checks/test_cases.py::test_ordinary_keep",
+        "checks/test_cases.py::test_certification_named_but_unmarked",
+        "checks/test_cases.py::test_parameter[ordinary]",
+    }
+    assert {row["selector"] for row in observed.selected} == ordinary
+    assert {row["selector"] for row in observed.deselected} == certified | {
+        "checks/test_cases.py::test_daily",
+        "checks/test_cases.py::test_slow",
+    }
+    for row in (*observed.selected, *observed.deselected):
+        assert row.get("certification") == (
+            "true" if row["selector"] in certified else None
+        )
+
+    filtered = collect_native_pytest(
+        (),
+        marker=ordinary_marker,
+        invocation=replace(invocation, pytest_args=("-k", "test_ordinary_keep")),
+        plugin_module="__main__",
+    )
+    assert [row["selector"] for row in filtered.selected] == [
+        "checks/test_cases.py::test_ordinary_keep"
+    ]
+    assert {row["selector"] for row in filtered.deselected} == {
+        row["selector"] for row in observed.deselected
+    } | (ordinary - {"checks/test_cases.py::test_ordinary_keep"})
+    for row in filtered.deselected:
+        assert row.get("certification") == (
+            "true" if row["selector"] in certified else None
+        )
+
+
 def test_resume_tracks_unqualified_native_python_import_path(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[2]
     first_path = tmp_path / "first-imports"

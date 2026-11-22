@@ -51,6 +51,8 @@ def collected_item(item: Any, root: Path) -> dict[str, str]:
     file = path.relative_to(root).as_posix() if path.is_relative_to(root) else path.as_posix()
     suffix = item.nodeid.partition("::")[2]
     row = {"file": file, "selector": file + ("::" + suffix if suffix else "")}
+    if item.get_closest_marker("certification") is not None:
+        row["certification"] = "true"
     if item.get_closest_marker("no_resume") is not None:
         row["no_resume"] = "true"
     if item.get_closest_marker("native_resources") is not None:
