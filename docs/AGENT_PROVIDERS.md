@@ -149,7 +149,10 @@ workflows and eligible Shared Plans. Codex and OpenCode refuse a Pi selector.
 continuation. Both currently return `PI_SESSION_UNAVAILABLE` before Run
 admission. Their authored equivalents are `session: {mode: new}` and
 `session: {mode: continue, prior_run_id: RUN_ID}`. Private storage, single writer
-custody and exact native reopen are tracked in HUG-41 through HUG-43. Use
+custody and exact native reopen are separate work packages. HUG-41 provides a
+private storage boundary for the exact selected Run, repository and Step. HUG-42
+must reserve the writer in the original Run before production use. HUG-43 owns
+exact native reopen. Use
 `--handoff-from RUN_ID` to give a fresh Run bounded context from an earlier Run.
 Combining it with exact native continuation is rejected.
 

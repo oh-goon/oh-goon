@@ -341,6 +341,7 @@ def build_runtime_foundation(
             standard_process_isolation.bind_application_state(
                 private_paths=database.private_paths + state_paths.private_control_paths,
                 read_only_paths=(state_paths.extensions, state_paths.plan_tools),
+                pi_session_root=state_paths.pi_sessions,
             )
     lifecycle = RuntimeLifecycle()
     effect_attempts = RepositoryEffectAttemptStore(database)

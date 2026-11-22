@@ -10,26 +10,52 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import sys
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from threading import Lock
 from typing import Any, Literal
 
 import pytest
 
-from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
+from oh_goon.core.models.fleet_plan import (
+    ResolvedAgentStep,
+    ResolvedFleetPlan,
+    ResolvedNativeAgentWorkload,
+)
+from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
+from oh_goon.core.models.pi_session_storage import (
+    PI_SESSION_SANDBOX_DIRECTORY,
+    PiSessionDirectoryPin,
+)
+from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.engine.command import CommandCancelledError, CommandResult, run_command
 from oh_goon.integrations.agent_native_execution import (
     native_executable_sha256,
     validate_native_agent_arguments,
 )
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+from oh_goon.integrations.fleet_plan_preview import repository_plan_admission_evidence
 from oh_goon.integrations.fleet_plan_process_isolation import (
     StandardIsolatedProcessRequest,
     StandardReadOnlyMount,
 )
+from oh_goon.runtime.pi_session_storage import (
+    create_pi_session_directory,
+    observe_pi_session_file,
+)
+from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
 pytestmark = [
     pytest.mark.certification,
@@ -57,6 +83,18 @@ export default function (pi) {
           cacheWrite: 0, totalTokens: 0,
           cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}}};
       stream.push({type: "start", partial: output});
+      if (storageProbeCommand !== null && !context.messages.some(
+          m => m.role === "toolResult" && m.toolCallId === "wp02_storage_probe")) {
+        const toolCall = {type: "toolCall", id: "wp02_storage_probe", name: "bash",
+          arguments: {command: storageProbeCommand, timeout: 4}};
+        output.content.push(toolCall);
+        stream.push({type: "toolcall_start", contentIndex: 0, partial: output});
+        stream.push({type: "toolcall_end", contentIndex: 0, toolCall, partial: output});
+        output.stopReason = "toolUse";
+        stream.push({type: "done", reason: "toolUse", message: output});
+        stream.end();
+        return stream;
+      }
       if (users.at(-1)?.includes("WP00_HANG")) {
         const abort = () => {
           output.stopReason = "aborted";
@@ -80,6 +118,59 @@ export default function (pi) {
   });
 }
 """
+
+
+class _PersistentStorageProbeInput:
+    """Drive a selected installed storage probe through its original process input."""
+
+    def __init__(self, prompt: str) -> None:
+        self._lock = Lock()
+        self._outgoing = deque([self._encode("start", "get_state")])
+        self._prompt = self._encode("prompt", "prompt", message=prompt)
+        self._partial = ""
+        self._seen: set[str] = set()
+        self._settled = False
+        self._queried = False
+
+    @staticmethod
+    def _encode(identifier: str, kind: str, **fields: str) -> bytes:
+        return json.dumps({"id": identifier, "type": kind, **fields}).encode("utf-8") + b"\n"
+
+    def read_input(self, max_bytes: int) -> bytes | None:
+        with self._lock:
+            if self._outgoing:
+                wire = self._outgoing.popleft()
+                if len(wire) > max_bytes:
+                    self._outgoing.appendleft(wire[max_bytes:])
+                return wire[:max_bytes]
+            return b"" if {"final", "entries"} <= self._seen else None
+
+    def observe_stdout(self, text: str) -> None:
+        with self._lock:
+            records = (self._partial + text).split("\n")
+            self._partial = records.pop()
+            for line in records:
+                if not line:
+                    continue
+                assert len(line) <= 65536
+                record = json.loads(line)
+                if record["type"] == "response":
+                    assert record["success"] is True
+                    identifier = record["id"]
+                    assert identifier not in self._seen
+                    self._seen.add(identifier)
+                    if identifier == "start":
+                        self._outgoing.append(self._prompt)
+                elif record["type"] == "agent_settled":
+                    assert record["aborted"] is False
+                    assert not self._settled
+                    self._settled = True
+                if self._settled and "prompt" in self._seen and not self._queried:
+                    self._queried = True
+                    self._outgoing.extend(
+                        (self._encode("final", "get_state"), self._encode("entries", "get_entries"))
+                    )
+            assert len(self._partial) <= 65536
 
 
 @dataclass
@@ -108,15 +199,38 @@ class _PiProbe:
         session_id: str | None = None,
         cwd: Path | None = None,
         cancel_on_stream: bool = False,
+        persistent_storage: PiSessionDirectoryPin | None = None,
+        storage_probe_command: str | None = None,
     ) -> CommandResult:
+        storage_turn = None
+        if persistent_storage is not None:
+            assert mode == "rpc" and prompt is not None and storage_probe_command is not None
+            assert session is None and session_id is None and not cancel_on_stream
+            storage_turn = _PersistentStorageProbeInput(prompt)
+        else:
+            assert storage_probe_command is None
         self.launches += 1
         config = self.root / f"config-{self.launches}"
         config.mkdir(mode=0o700)
         extension = config / "provider.mjs"
-        extension.write_text(_PROVIDER, encoding="utf-8")
+        extension.write_text(
+            f"const storageProbeCommand = {json.dumps(storage_probe_command)};\n" + _PROVIDER,
+            encoding="utf-8",
+        )
         (config / "settings.json").write_text(
             json.dumps({"defaultProvider": "wp00", "defaultModel": "session-fixture"}),
             encoding="utf-8",
+        )
+        session_directory = (
+            PI_SESSION_SANDBOX_DIRECTORY if persistent_storage is not None else self.session.parent
+        )
+        selected_session = (
+            session_directory / "selected.jsonl"
+            if persistent_storage is not None
+            else session or self.session
+        )
+        workspace = (
+            persistent_storage.workspace if persistent_storage is not None else self.workspace
         )
         argv = (
             str(self.program),
@@ -129,7 +243,7 @@ class _PiProbe:
             "--no-skills",
             "--no-prompt-templates",
             "--no-themes",
-            "--no-tools",
+            *(("--tools", "bash") if storage_turn is not None else ("--no-tools",)),
             "--provider",
             "wp00",
             "--model",
@@ -137,19 +251,21 @@ class _PiProbe:
             "--thinking",
             "off",
             "--session-dir",
-            str(self.session.parent),
+            str(session_directory),
             *(
                 ("--session-id", session_id)
                 if session_id is not None
-                else ("--session", str(session or self.session))
+                else ("--session", str(selected_session))
             ),
-            *((prompt,) if prompt is not None else ()),
+            *((prompt,) if prompt is not None and storage_turn is None else ()),
         )
         streaming = False
         pending = ""
 
         def observe(_stream: Literal["stdout", "stderr"], text: str) -> None:
             nonlocal streaming, pending
+            if _stream == "stdout" and storage_turn is not None:
+                storage_turn.observe_stdout(text)
             if _stream != "stdout" or not cancel_on_stream:
                 return
             pending += text
@@ -164,8 +280,8 @@ class _PiProbe:
                     streaming = True
 
         request = StandardIsolatedProcessRequest(
-            workspace=self.workspace,
-            cwd=cwd or self.workspace / "project",
+            workspace=workspace,
+            cwd=cwd or (workspace if persistent_storage is not None else workspace / "project"),
             argv=argv,
             env={
                 "PATH": "/usr/bin:/bin",
@@ -179,8 +295,15 @@ class _PiProbe:
                 StandardReadOnlyMount(self.public_runtime, PurePosixPath(self.public_runtime)),
             ),
             private_configuration_directory=config,
+            read_only_workspace=persistent_storage is not None,
+            pi_session_directory=persistent_storage,
+            input_source=storage_turn,
             input_data=(
-                b'{"id":"state","type":"get_state"}\n{"id":"entries","type":"get_entries"}\n'
+                (
+                    b'{"id":"state","type":"get_state"}\n{"id":"entries","type":"get_entries"}\n'
+                    if storage_turn is None
+                    else None
+                )
                 if mode == "rpc"
                 else b""
             ),
@@ -398,6 +521,147 @@ def test_installed_pi_interrupted_turn_retains_prompt_without_success(pi_probe: 
         and entry["message"].get("stopReason") == "stop"
         for entry in entries["entries"]
     )
+
+
+def test_installed_pi_private_session_survives_original_command_and_config_cleanup(
+    pi_probe: _PiProbe,
+) -> None:
+    workspace = pi_probe.workspace / "project"
+    git = run_command("git", "init", "-q", str(workspace), timeout=10)
+    assert git.returncode == 0, git.stderr
+    source = workspace / "source.py"
+    source.write_text("EXPECTED = 42\n", encoding="utf-8")
+
+    state = pi_probe.root / "application-state"
+    state.mkdir(mode=0o700)
+    journal = state / "fixture-journal.sqlite"
+    journal.write_bytes(b"synthetic application control canary")
+    personal = pi_probe.root / "operator" / ".pi" / "agent" / "settings.json"
+    personal.parent.mkdir(parents=True)
+    personal.write_bytes(b"synthetic personal store canary")
+    layout = ApplicationStatePathLayout.from_database(journal)
+    pi_probe.backend.bind_application_state(
+        private_paths=(journal, personal.parent, *layout.private_control_paths),
+        read_only_paths=(layout.extensions, layout.plan_tools),
+        pi_session_root=layout.pi_sessions,
+    )
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="installed-storage-probe",
+        definition=NativeAgentDefinition(executable=str(pi_probe.program)),
+        profile=NativeAgentProfile(backend="bubblewrap", allowed_agents=("pi",)),
+        executable_sha256=native_executable_sha256(pi_probe.program),
+        backend_configuration_id=pi_probe.backend.configuration_identity(),
+    )
+    step = ResolvedAgentStep(
+        step_id="inspect-private-storage",
+        source_step_id="inspect-private-storage",
+        timeout_seconds=20,
+        delivery_sha256=hashlib.sha256(b"installed storage capability probe").hexdigest(),
+        handoff_identity="installed-storage-probe",
+        workload=ResolvedNativeAgentWorkload(native_agent=selected, role="review"),
+    )
+    plan = ResolvedFleetPlan.create(
+        name="installed-pi-private-storage",
+        description="",
+        execution=VerificationExecutionPolicy(),
+        steps=(step,),
+        native_agent=selected,
+    )
+    repository = RepositoryIdentity.model_validate({"path": workspace})
+    admission = repository_plan_admission_evidence(repository, plan)
+    with (
+        RepositoryWorkspaceAuthority.pin_repository_subject(workspace) as require_workspace,
+        create_pi_session_directory(
+            layout=layout,
+            fleet_run_id="installed-pi-storage-probe",
+            repository=repository,
+            repository_admission=admission,
+            step_id=step.step_id,
+            attempt_number=1,
+            workspace=workspace,
+            require_current=require_workspace,
+        ) as pin,
+    ):
+        sibling = layout.pi_sessions / "foreign-probe" / "foreign.jsonl"
+        sibling.parent.mkdir(mode=0o700)
+        sibling.write_bytes(b"synthetic unrelated session canary")
+        native_file = PI_SESSION_SANDBOX_DIRECTORY / "selected.jsonl"
+        # Pi's native shell can read its own selected session in this namespace.
+        # Check only bounded visibility and an actual denied write to test-owned source.
+        tool_probe = "\n".join(
+            [
+                "set -eu",
+                f"test -s {shlex.quote(str(native_file))}",
+                f"test -r {shlex.quote(str(native_file))}",
+                "test -r /workspace/source.py",
+                *(
+                    f"test ! -e {shlex.quote(str(path))}"
+                    for path in (sibling, journal, personal, pin.path / "selected.jsonl")
+                ),
+                "test ! -e /run/oh-goon-pi-session/foreign.jsonl",
+                "if (printf forbidden > /workspace/should-not-exist) 2>/dev/null; then exit 1; fi",
+                "printf 'WP02_SELECTED_FILE_VISIBLE\n'",
+            ]
+        )
+        result = pi_probe.launch(
+            mode="rpc",
+            prompt="Run the fixed private storage visibility probe.",
+            persistent_storage=pin,
+            storage_probe_command=tool_probe,
+        )
+        records = _records(result)
+        replies = {row["id"]: row for row in records if row["type"] == "response"}
+        assert set(replies) == {"start", "prompt", "final", "entries"}
+        assert replies["prompt"]["data"]["disposition"] == "started"
+        before, after = (
+            replies["start"]["data"],
+            replies["final"]["data"],
+        )
+        assert before["sessionFile"] == after["sessionFile"] == str(native_file)
+        assert before["sessionId"] == after["sessionId"] and before["sessionId"]
+        entries = replies["entries"]["data"]
+        assert entries["leafId"] == entries["entries"][-1]["id"]
+        tool_results = [
+            row["message"]
+            for row in entries["entries"]
+            if row["type"] == "message" and row["message"]["role"] == "toolResult"
+        ]
+        assert len(tool_results) == 1
+        assert tool_results[0]["toolCallId"] == "wp02_storage_probe"
+        assert tool_results[0]["isError"] is False
+        assert tool_results[0]["content"] == [
+            {"type": "text", "text": "WP02_SELECTED_FILE_VISIBLE\n"}
+        ]
+
+        receipt = observe_pi_session_file(pin, native_file.name)
+        assert receipt.size > 0
+        retained_file = pin.path / native_file.name
+        assert tuple(pin.path.iterdir()) == (retained_file,)
+        print(
+            json.dumps(
+                {
+                    "scope": "installed native storage capability",
+                    "session_id": after["sessionId"],
+                    "leaf_id": entries["leafId"],
+                    "file_bytes": receipt.size,
+                    "own_session_visible_to_shell": True,
+                    "foreign_and_control_paths_hidden": True,
+                }
+            )
+        )
+    assert not (pi_probe.root / "config-1").exists()
+    metadata = retained_file.stat()
+    assert (metadata.st_dev, metadata.st_ino, metadata.st_size) == (
+        receipt.device,
+        receipt.inode,
+        receipt.size,
+    )
+    assert source.read_text(encoding="utf-8") == "EXPECTED = 42\n"
+    assert not (workspace / "should-not-exist").exists()
+    assert sibling.read_bytes() == b"synthetic unrelated session canary"
+    assert journal.read_bytes() == b"synthetic application control canary"
+    assert personal.read_bytes() == b"synthetic personal store canary"
 
 
 def _native_arguments(probe: _PiProbe, fragments: Mapping[str, tuple[str, ...]]) -> dict[str, Any]:

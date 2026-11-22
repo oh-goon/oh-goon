@@ -45,6 +45,12 @@ class ApplicationStatePathLayout:
         return self.root / "workspaces"
 
     @property
+    def pi_sessions(self) -> Path:
+        """Private Pi-owned native bytes, with each directory scoped to its original Run."""
+
+        return self.root / "pi-sessions"
+
+    @property
     def executor_control(self) -> Path:
         """Private host-control state for local executor locks and recovery metadata."""
 
@@ -79,6 +85,7 @@ class ApplicationStatePathLayout:
         """Private cross-Run state, excluding explicitly disclosed execution scratch."""
         return (
             self.content_store,
+            self.pi_sessions,
             self.executor_control,
             self.local_launches,
             self.local_launch_bindings,

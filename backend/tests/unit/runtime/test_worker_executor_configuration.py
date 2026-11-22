@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_executor import FleetExecutorIdentity
+from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_opensandbox_isolation import (
     OpenSandboxProcessIsolation,
@@ -32,6 +33,8 @@ from tests.factories.path_authority import TEST_PATH_AUTHORITY
 
 
 def _backend(tmp_path: Path) -> BubblewrapProcessIsolation:
+    database = tmp_path / "app.sqlite"
+    layout = ApplicationStatePathLayout.from_database(database)
     backend = BubblewrapProcessIsolation(
         executable=sys.executable,
         control_state_root=tmp_path / "control",
@@ -41,8 +44,9 @@ def _backend(tmp_path: Path) -> BubblewrapProcessIsolation:
         standard_resource_environment={"XDG_RUNTIME_DIR": "/original/runtime"},
     )
     backend.bind_application_state(
-        private_paths=(tmp_path / "app.sqlite",),
+        private_paths=(database, *layout.private_control_paths),
         read_only_paths=(tmp_path / "extensions", tmp_path / "tools"),
+        pi_session_root=layout.pi_sessions,
     )
     return backend
 
@@ -82,7 +86,10 @@ def test_worker_rebinds_exact_resolved_inventory_without_ambient_discovery(
     assert actual.priority == 7 and actual.capacity == original.executors[0].capacity
     assert type(actual.backend) is BubblewrapProcessIsolation
     assert actual.backend is not backend
-    assert actual.backend.capture_worker_configuration() == backend.capture_worker_configuration()
+    rebound = actual.backend.capture_worker_configuration()
+    assert rebound == backend.capture_worker_configuration()
+    assert rebound.pi_session_root == tmp_path / "pi-sessions"
+    assert not rebound.pi_session_root.exists()
 
 
 def test_worker_rejects_backend_executable_replacement(tmp_path: Path) -> None:
