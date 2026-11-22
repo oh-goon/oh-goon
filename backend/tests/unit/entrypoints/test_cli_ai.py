@@ -1369,13 +1369,19 @@ def test_native_service_rejects_invalid_prior_context_before_fresh_source_or_run
     from oh_goon.core.errors import FleetPlanInvalid
     from oh_goon.services.fleet_plans import FleetPlanService
 
+    selected, _, _ = cli_ai.resolve_native_cli_selection(
+        agent="pi",
+        profile="isolated",
+        workspace=native_cli.workspace,
+        config_file=native_cli.config,
+    )
     runs, resolver = Mock(), Mock()
     service = FleetPlanService(
         resolver, runs, Mock(), Mock(), Mock(), content_store=Mock(), standard_local_fleet=True
     )
     with pytest.raises(FleetPlanInvalid, match="Prior Run handoff"):
         service.run_native_agent(
-            selected=Mock(),
+            selected=selected,
             workspace=native_cli.workspace,
             skill=None,
             task="New task",
@@ -1635,6 +1641,12 @@ def test_native_prior_json_recursion_error_is_typed_before_source_or_run(
     from oh_goon.core.errors import FleetPlanInvalid
     from oh_goon.services.fleet_plans import FleetPlanService
 
+    selected, _, _ = cli_ai.resolve_native_cli_selection(
+        agent="pi",
+        profile="isolated",
+        workspace=native_cli.workspace,
+        config_file=native_cli.config,
+    )
     runs, resolver = Mock(), Mock()
     service = FleetPlanService(
         resolver, runs, Mock(), Mock(), Mock(), content_store=Mock(), standard_local_fleet=True
@@ -1645,7 +1657,7 @@ def test_native_prior_json_recursion_error_is_typed_before_source_or_run(
     )
     with pytest.raises(FleetPlanInvalid, match="Prior Run handoff") as rejected:
         service.run_native_agent(
-            selected=Mock(),
+            selected=selected,
             workspace=native_cli.workspace,
             skill=None,
             task="New task",
