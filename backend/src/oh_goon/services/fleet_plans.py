@@ -736,6 +736,10 @@ class FleetPlanService:
             model_selected=selection.model_profile is not None,
             require_review_phases=require_review_phases,
         )
+        if session is not None and session.persistent:
+            raise PiSessionUnavailable(
+                "Persistent Pi sessions require a directly selected repository Run"
+            )
         native = None
         connection = None
         if selection.implementation is not None:

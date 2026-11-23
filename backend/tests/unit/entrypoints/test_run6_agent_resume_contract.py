@@ -32,6 +32,7 @@ class _Facts:
 
 class _Tape:
     def __init__(self, run_id: str, *, stage: str = "ADMISSION") -> None:
+        self.pi_session = None
         self.fleet_run_id = run_id
         self.artifact_observation = None
         self.plan_id = "plan-one"
@@ -157,6 +158,7 @@ class _CanonicalRuns:
             has_more=has_more,
             journal_revision=100,
             campaign_journal=None,
+            pi_session=None,
             model_dump=lambda *, mode: {
                 "events": [{"sequence": next_sequence, "code": "ORIGINAL_EVENT"}],
                 "next_sequence": next_sequence,

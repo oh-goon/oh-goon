@@ -87,6 +87,7 @@ class _OriginalRuns:
             next_sequence=7,
             journal_revision=80,
             has_more=False,
+            pi_session=None,
             model_dump=lambda *, mode: {
                 "run": {"fleet_run_id": run_id},
                 "events": [{"sequence": 7}],

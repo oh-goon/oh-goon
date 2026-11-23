@@ -28,6 +28,7 @@ class _Model:
 
 class _Tape:
     def __init__(self, status=GameTapeStatus.FAILED, *, focus=(), why_not=None, count=0):
+        self.pi_session = None
         self.status = status
         self.fleet_run_id = ""
         self.plan_id = "canonical-plan"

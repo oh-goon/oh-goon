@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import json
 
+from oh_goon.core.models.agent_providers import PiSessionIntent
 from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
+
+
+def pi_prior_run_readback(session: PiSessionIntent | None) -> dict[str, object]:
+    if session is None or session.prior_run_id is None:
+        return {}
+    return {
+        "prior_run_id": session.prior_run_id,
+        "prior_run_handoff_argv": ["oh-goon", "runs", "handoff", session.prior_run_id, "--json"],
+    }
 
 
 def print_safe_plan_diagnostic(

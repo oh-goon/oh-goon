@@ -168,6 +168,9 @@ class NativeAgentObservation(ImmutableModel):
     input_identity: str = Field(min_length=1, max_length=160)
     occurrence: str = Field(min_length=1, max_length=240)
     source_identity: str = Field(min_length=1, max_length=160)
+    skill_identity: str | None = Field(
+        default=None, min_length=1, max_length=160, exclude_if=lambda value: value is None
+    )
     role: Literal["report", "review", "adjudication", "proposal"]
     events: tuple[AgentHarnessObservation, ...] = Field(default=(), max_length=128)
     native_event_count: int = Field(ge=0)

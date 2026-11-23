@@ -1004,6 +1004,26 @@ respective owners. This mode does not qualify migration of native files,
 writes by other host processes, restored extensions, disk-full or power-loss
 durability, or portability to other runtimes.
 
+### Managed Pi operator journey — HUG-53
+
+**Disposition: retain** the exact Pi RPC reopen, original writer custody
+and fresh managed inference checks. The relay returns a bounded refusal
+code only for an observed protocol refusal after child-process cleanup.
+The accepted Step and independent verifier evidence remain under the
+original execution owners.
+
+The [installed operator proof](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+uses separate CLI processes with Pi 1.3.0 and Bubblewrap 0.11.1 on Linux.
+It creates a saved session, continues it through an initialized Plan and
+authored read-only Goon, then continues it through `ai` with new original
+Run IDs and verifiers. A further explicit handoff starts a separate
+OpenCode 2.1.2 Run. That handoff carries bounded Journal evidence.
+History commands report prior writer, the observed opaque native identity,
+persistence grade, current source and Skill identity, cleanup, and verifier
+outcome. Readback leaves availability unchecked and omits the native
+prompt, response, tool payload and private process arguments. The provider
+in this proof is synthetic.
+
 ## Native model usage observations — HUG-222, 2026-11-22
 
 **Disposition: retain** the existing Codex service transport, scoped native

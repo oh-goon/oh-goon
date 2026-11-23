@@ -23,6 +23,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
 )
 from oh_goon.core.models.fleet_plan_resources import CapturedProjectSource
 from oh_goon.core.models.game_tape_observability import GameTapeObservabilityReceipt
+from oh_goon.core.models.game_tape_pi_session import GameTapePiSessionEvidence
 from oh_goon.core.models.game_tape_team import GameTapeTeamComposition
 from oh_goon.core.models.provenance import MAX_SOURCE_LOCATION_LENGTH
 from oh_goon.core.models.repository import RepositoryIdentity
@@ -573,6 +574,9 @@ class GameTape(ImmutableModel):
     schema_name: Literal["oh-goon.game-tape/v1"] = "oh-goon.game-tape/v1"
     journal_revision: int | None = Field(default=None, ge=0)
     campaign_journal: AgentCampaignReadback | None = None
+    pi_session: GameTapePiSessionEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     terminal: bool = False
     configuration: PlanConfigurationEvidence | None = None
     fleet_run_id: str = Field(min_length=1)

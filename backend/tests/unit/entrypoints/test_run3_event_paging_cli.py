@@ -28,6 +28,7 @@ class _JournalOwner:
             next_sequence=after + 1,
             has_more=True,
             journal_revision=12,
+            pi_session=None,
             model_dump=lambda *, mode: {
                 "events": [{"sequence": after + 1}],
                 "next_sequence": after + 1,

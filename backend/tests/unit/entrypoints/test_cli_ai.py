@@ -63,6 +63,7 @@ def native_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespa
         run=SimpleNamespace(fleet_run_id="native-run", status=FleetRunStatus.COMPLETED),
         outcome=FleetRunOutcome.SUCCESS,
         game_tape=SimpleNamespace(
+            pi_session=None,
             repositories=(),
             why_not=None,
             summary=GameTapeSummary(
@@ -844,7 +845,7 @@ def test_ai_explicit_ephemeral_reaches_original_run_as_headless_pi(
         (
             "pi",
             ["--session", "new", "--handoff-from", "prior-run"],
-            "PI_SESSION_UNAVAILABLE",
+            "PI_SESSION_SELECTION_INVALID",
             "fresh task",
         ),
         (
@@ -902,8 +903,28 @@ def test_ai_persistent_session_refuses_an_unqualified_native_profile_before_runt
 ) -> None:
     assert main([*native_cli.argv, "--session", session, "--json"]) == 2
     report = json.loads(capsys.readouterr().out)
-    assert report["code"] == "PI_SESSION_UNAVAILABLE"
-    assert "dedicated managed Pi RPC" in report["safe_next_action"]
+    assert report["code"] == "PI_NATIVE_CONFIGURATION_MISMATCH"
+    assert "managed Pi RPC" in report["safe_next_action"]
+    native_cli.build.assert_not_called()
+
+
+def test_ai_exact_pi_refusal_reports_an_original_run_reference_without_private_detail(
+    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from oh_goon.core.models.agent_providers import PiSessionIdentityMismatch
+
+    monkeypatch.setattr(
+        cli_ai,
+        "resolve_native_cli_selection",
+        Mock(side_effect=PiSessionIdentityMismatch("/private/pi-state/session.jsonl")),
+    )
+    assert main([*native_cli.argv, "--session", "run:prior-run", "--json"]) == 2
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert report["code"] == "PI_SESSION_IDENTITY_MISMATCH"
+    assert report["prior_run_id"] == "prior-run"
+    assert report["prior_run_handoff_argv"] == ["oh-goon", "runs", "handoff", "prior-run", "--json"]
+    assert "/private/pi-state" not in captured.out + captured.err
     native_cli.build.assert_not_called()
 
 

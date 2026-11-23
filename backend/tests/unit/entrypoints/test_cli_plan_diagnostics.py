@@ -93,6 +93,7 @@ def test_plan_run_completed_attention_required_is_nonzero(monkeypatch, capsys):
         outcome=FleetRunOutcome.ATTENTION_REQUIRED,
         run=SimpleNamespace(status=FleetRunStatus.COMPLETED, fleet_run_id="run-attention"),
         game_tape=SimpleNamespace(
+            pi_session=None,
             why_not=None,
             repositories=(),
             summary=GameTapeSummary(

@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from pydantic import ConfigDict, Field, JsonValue, SecretStr, field_validator, model_validator
 
-from oh_goon.core.errors import InvalidRequest
+from oh_goon.core.errors import InvalidRequest, PiSessionRefusalCode
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.fleet_plan_isolation import CicdResourcePolicy
 from oh_goon.core.models.model_usage import ModelUsageReport
@@ -63,7 +63,31 @@ class PiSessionSelectionError(AgentProviderError):
 class PiSessionUnavailable(PiSessionSelectionError):
     """The selected persistent mode lacks the required session authority."""
 
-    code = "PI_SESSION_UNAVAILABLE"
+    code = PiSessionRefusalCode.UNAVAILABLE
+
+
+class NoPersistentPiSession(PiSessionUnavailable):
+    code = PiSessionRefusalCode.NO_PERSISTENT_SESSION
+
+
+class PiSessionIdentityMismatch(PiSessionUnavailable):
+    code = PiSessionRefusalCode.IDENTITY_MISMATCH
+
+
+class PiSessionCleanupUnverified(PiSessionUnavailable):
+    code = PiSessionRefusalCode.CLEANUP_UNVERIFIED
+
+
+class PiNativeConfigurationMismatch(PiSessionUnavailable):
+    code = PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH
+
+
+class PiSessionHistoryUnqualified(PiSessionUnavailable):
+    code = PiSessionRefusalCode.HISTORY_UNQUALIFIED
+
+
+class PiSessionSettlementUncertain(PiSessionUnavailable):
+    code = PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
 
 
 class PiSessionIntent(ImmutableModel):
@@ -119,7 +143,7 @@ def require_pi_session_execution(
     if interactive:
         raise PiSessionSelectionError("Explicit Pi session selection requires headless execution")
     if session.mode == "new" and handoff:
-        raise PiSessionUnavailable(
+        raise PiSessionSelectionError(
             "New persistent Pi sessions require a fresh task without a handoff"
         )
     if (
@@ -137,7 +161,7 @@ def require_pi_session_execution(
             or bool(definition.arguments)
         )
     ):
-        raise PiSessionUnavailable(
+        raise PiNativeConfigurationMismatch(
             "Persistent Pi sessions require a dedicated managed Pi RPC Bubblewrap profile "
             "with its default native configuration and no separate Step resource scope"
         )

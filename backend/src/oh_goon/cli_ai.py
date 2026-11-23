@@ -19,6 +19,7 @@ from threading import Event, Thread
 from typing import TYPE_CHECKING, TypedDict
 
 from oh_goon.application import ApplicationRuntime
+from oh_goon.cli_plan_diagnostics import pi_prior_run_readback
 from oh_goon.cli_result import CliTermination, record_cli_cleanup_failure
 from oh_goon.core.errors import FleetDomainError, RepositoryEffectQuarantined
 from oh_goon.core.models.agent_providers import (
@@ -30,6 +31,7 @@ from oh_goon.core.models.agent_providers import (
     ResolvedNativeAgent,
     require_pi_session_execution,
 )
+from oh_goon.core.plan_validation_diagnostics import pi_session_safe_next_action
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.runtime.agent_providers import (
     agent_providers_path,
@@ -119,13 +121,16 @@ def add_ai_command[_Parser: argparse.ArgumentParser](
     parser.add_argument(
         "--handoff-from",
         metavar="RUN_ID",
-        help="Seed a fresh native session from one explicit durable Run handoff as untrusted context",
+        help="Send selected Run evidence as untrusted context in a fresh native session. "
+        "Incompatible with persistent Pi selection.",
     )
     parser.add_argument(
         "--session",
         action="append",
         metavar="MODE",
-        help="Choose ephemeral, new, or run:RUN_ID for Pi. Persistence requires a dedicated managed Pi RPC profile.",
+        help="Pi session mode. ephemeral is disposable, new saves a session, and "
+        "run:RUN_ID reopens the exact saved session read-only. "
+        "Persistence requires a dedicated managed Pi RPC profile.",
     )
     parser.add_argument("--config", type=Path, help="Provider/native execution catalog")
     parser.add_argument("task", nargs="?", help="Task text, alternative to --prompt/--prompt-file")
@@ -286,6 +291,7 @@ def native_plan_selection(
 
 
 def run_ai_command(args: argparse.Namespace) -> int:
+    session = None
     try:
         choices = args.session or ()
         if len(choices) > 1:
@@ -343,7 +349,20 @@ def run_ai_command(args: argparse.Namespace) -> int:
                 handoff_from=args.handoff_from,
                 candidate=getattr(args, "candidate", False),
             )
-        if args.as_json:
+        if selected.uses_persistent_pi_session:
+            from oh_goon.cli_plan_run_readback import (
+                print_pi_session_readback,
+                run_handoff_projection,
+            )
+
+            if args.as_json:
+                print(json.dumps(run_handoff_projection(detail), indent=2))
+            else:
+                print(f"Fleet Run ID: {detail.run.fleet_run_id}")
+                print(f"Status: {detail.run.status.value}")
+                print(f"Outcome: {detail.outcome.value}")
+                print_pi_session_readback(detail.game_tape.pi_session)
+        elif args.as_json:
             print(detail.model_dump_json(indent=2))
         else:
             print(f"Status: {detail.run.status.value}")
@@ -375,8 +394,12 @@ def run_ai_command(args: argparse.Namespace) -> int:
             action = (
                 requirement[1] + " This refusal grants no execution, repair or replay authority."
             )
-        if isinstance(exc, PiSessionSelectionError):
+        pi_action = pi_session_safe_next_action(code)
+        if pi_action is not None:
+            action = pi_action
+        elif isinstance(exc, PiSessionSelectionError):
             action = str(exc)
+        prior_readback = pi_prior_run_readback(session) if pi_action is not None else {}
         harness = args.agent if args.agent in {"opencode", "pi", "codex"} else "unknown"
         requested_mode = (
             "interactive"
@@ -406,11 +429,14 @@ def run_ai_command(args: argparse.Namespace) -> int:
                         "code": code,
                         "safe_next_action": action,
                         **context,
+                        **prior_readback,
                     }
                 )
             )
         else:
             print(f"{code}: {action}", file=sys.stderr)
+            if prior_readback and session is not None and session.prior_run_id is not None:
+                _print_handoff_reference(session.prior_run_id)
             print(
                 f"Harness: {harness} | Requested mode: {requested_mode} | "
                 f"Missing capability: {context['missing_capability']} | Reason: {context['reason']}",
@@ -464,7 +490,10 @@ def _run_and_close(
             candidate=candidate,
         )
         if result not in (0, 130, 143):
-            _print_failure_stderr(runtime, detail)
+            if selected.uses_persistent_pi_session:
+                _print_recorded_failure(detail)
+            else:
+                _print_failure_stderr(runtime, detail)
     except BaseException:
         _shutdown_after_primary_failure(runtime)
         raise

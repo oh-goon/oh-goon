@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import JSONResponse
 
 from oh_goon.api.dependencies import fleet_plan_service, fleet_run_control_plane
 from oh_goon.api.schemas.catalog_showcase import RunArtifactExportRequest
@@ -12,6 +13,7 @@ from oh_goon.api.schemas.fleet import (
     FleetRunRequest,
 )
 from oh_goon.core.errors import FleetDomainError
+from oh_goon.core.game_tape_pi_session import fleet_run_detail_readback, fleet_run_event_readback
 from oh_goon.core.models.agent_continuation import (
     AgentContinuationInspection,
     AgentContinuationRequest,
@@ -398,19 +400,22 @@ def get_fleet_run(
     artifact_time_budget_seconds: Annotated[
         float | None, Query(gt=0, le=MAX_ARTIFACT_OBSERVATION_SECONDS)
     ] = None,
-) -> FleetRunDetail:
+) -> FleetRunDetail | JSONResponse:
     if observe_artifacts or any(
         value is not None
         for value in (artifact_limit, artifact_byte_budget, artifact_time_budget_seconds)
     ):
-        return control_plane.get(
+        detail = control_plane.get(
             fleet_run_id,
             observe_artifacts=observe_artifacts,
             artifact_limit=artifact_limit,
             artifact_byte_budget=artifact_byte_budget,
             artifact_time_budget_seconds=artifact_time_budget_seconds,
         )
-    return control_plane.get(fleet_run_id)
+    else:
+        detail = control_plane.get(fleet_run_id)
+    public = fleet_run_detail_readback(detail)
+    return JSONResponse(public) if public is not None else detail
 
 
 @router.get(
@@ -436,5 +441,8 @@ def fleet_run_events(
     after: int = Query(default=0, ge=0),
     limit: int | None = Query(default=None, ge=1, le=100),
     control_plane: FleetRunControlPlane = Depends(fleet_run_control_plane),
-) -> FleetRunEventBatch:
-    return control_plane.events(fleet_run_id, after, limit=limit)
+) -> FleetRunEventBatch | JSONResponse:
+    batch = control_plane.events(fleet_run_id, after, limit=limit)
+    if batch.pi_session is not None:
+        return JSONResponse(fleet_run_event_readback(batch))
+    return batch

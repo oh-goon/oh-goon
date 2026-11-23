@@ -13,11 +13,13 @@ from typing import Literal, Never
 
 from pydantic import Field
 
+from oh_goon.core.errors import PiSessionRefusalCode
 from oh_goon.core.models.agent_providers import AgentProviderError, ProviderApi
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_NEW_FILE,
     PI_SESSION_OBSERVATION_RECORD,
+    PI_SESSION_REFUSAL_RECORD,
     PiSessionNativeObservation,
 )
 from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES
@@ -69,6 +71,7 @@ class PiRpcControl:
         self._persistent = persistent or continuation is not None
         self._pending = bytearray()
         self._failure: str | None = None
+        self._refusal_code: PiSessionRefusalCode | None = None
         self._closed = False
         self._complete = False
         self._state_seen = False
@@ -138,8 +141,15 @@ class PiRpcControl:
                 else None
             )
 
-    def _fail(self, message: str) -> Never:
-        self._failure = self._failure or message
+    @property
+    def refusal_code(self) -> PiSessionRefusalCode | None:
+        with self._lock:
+            return self._refusal_code
+
+    def _fail(self, message: str, *, refusal: PiSessionRefusalCode | None = None) -> Never:
+        if self._failure is None:
+            self._failure = message
+            self._refusal_code = refusal
         self._closed = True
         self._outbox.clear()
         raise AgentProviderError(self._failure)
@@ -177,7 +187,7 @@ class PiRpcControl:
         if value["type"] == "response":
             self._response(value)
             return None
-        if value["type"] == PI_SESSION_OBSERVATION_RECORD:
+        if value["type"] in {PI_SESSION_OBSERVATION_RECORD, PI_SESSION_REFUSAL_RECORD}:
             self._fail("Pi RPC child emitted a relay-owned control record")
         if value["type"] == "extension_ui_request":
             self._fail("Pi RPC extension interaction is not qualified in headless execution")
@@ -218,7 +228,10 @@ class PiRpcControl:
             self._fail("Pi RPC did not report a bounded native session identity")
         if self._persistent:
             if data.get("sessionFile") != str(PI_SESSION_NEW_FILE):
-                self._fail("Pi RPC did not report its exact selected private session file")
+                self._fail(
+                    "Pi RPC did not report its exact selected private session file",
+                    refusal=PiSessionRefusalCode.IDENTITY_MISMATCH,
+                )
             if self._continuation is not None:
                 self._require_continuation_state(session_id, data)
             elif not self._state_seen and (
@@ -240,8 +253,16 @@ class PiRpcControl:
         continuation = self._continuation
         assert continuation is not None
         count = data.get("messageCount")
-        if session_id != continuation.prior.session_id or type(count) is not int or count < 1:
-            self._fail("Pi RPC did not reopen the admitted native session")
+        if session_id != continuation.prior.session_id:
+            self._fail(
+                "Pi RPC did not reopen the admitted native session",
+                refusal=PiSessionRefusalCode.IDENTITY_MISMATCH,
+            )
+        if type(count) is not int or count < 1:
+            self._fail(
+                "Pi RPC did not report qualified retained conversation history",
+                refusal=PiSessionRefusalCode.HISTORY_UNQUALIFIED,
+            )
         model = data.get("model")
         if not isinstance(model, dict) or any(
             model.get(key) != expected
@@ -252,7 +273,10 @@ class PiRpcControl:
                 ("baseUrl", continuation.base_url),
             )
         ):
-            self._fail("Pi RPC did not select the current managed inference model")
+            self._fail(
+                "Pi RPC did not select the current managed inference model",
+                refusal=PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH,
+            )
         if (
             data.get("isStreaming") is not False
             or data.get("isCompacting") is not False
@@ -306,7 +330,10 @@ class PiRpcControl:
                 self._fail("Pi RPC omitted its bounded native leaf observation")
             if self._continuation is not None:
                 if leaf != self._continuation.prior.leaf_id or data["entries"]:
-                    self._fail("Pi RPC did not reopen the admitted native leaf")
+                    self._fail(
+                        "Pi RPC did not reopen the admitted native leaf",
+                        refusal=PiSessionRefusalCode.IDENTITY_MISMATCH,
+                    )
             elif self._persistent and any(
                 isinstance(entry, dict) and entry.get("type") == "message"
                 for entry in data["entries"]
@@ -322,7 +349,10 @@ class PiRpcControl:
             self._request_final_if_settled()
         elif request_id == "oh-goon:final-state":
             if self._identity(data) != self._session_id:
-                self._fail("Pi RPC replaced the observed native session identity")
+                self._fail(
+                    "Pi RPC replaced the observed native session identity",
+                    refusal=PiSessionRefusalCode.IDENTITY_MISMATCH if self._persistent else None,
+                )
         if "oh-goon:final-state" in self._answered and (
             not self._persistent or "oh-goon:final-entries" in self._answered
         ):

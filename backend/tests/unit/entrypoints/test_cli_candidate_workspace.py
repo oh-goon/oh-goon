@@ -9,7 +9,12 @@ import pytest
 
 from oh_goon import cli_ai
 from oh_goon.cli_parser import build_parser
-from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
+    NativeAgentDefinition,
+    NativeAgentProfile,
+    ResolvedNativeAgent,
+)
 
 
 def test_candidate_cli_selects_headless_once_and_preserves_logical_subject(
@@ -19,7 +24,13 @@ def test_candidate_cli_selects_headless_once_and_preserves_logical_subject(
 ):
     workspace = tmp_path / "developer"
     workspace.mkdir()
-    selected = SimpleNamespace(interactive=False)
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated-managed",
+        definition=NativeAgentDefinition(executable="/public/bin/pi"),
+        profile=NativeAgentProfile(backend="bubblewrap", allowed_agents=("pi",)),
+        executable_sha256="a" * 64,
+    )
     resolve = Mock(return_value=(selected, object(), object()))
     execute = Mock(
         return_value=(

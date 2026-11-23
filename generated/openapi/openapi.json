@@ -5279,14 +5279,12 @@
           "failure_kind": {
             "anyOf": [
               {
-                "const": "model_output_truncated",
-                "type": "string"
+                "$ref": "#/components/schemas/PlanStepFailureKind"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Failure Kind"
+            ]
           },
           "finished_at": {
             "anyOf": [
@@ -8103,14 +8101,12 @@
           "failure_kind": {
             "anyOf": [
               {
-                "const": "model_output_truncated",
-                "type": "string"
+                "$ref": "#/components/schemas/PlanStepFailureKind"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Failure Kind"
+            ]
           },
           "finished_at": {
             "anyOf": [
@@ -10833,6 +10829,16 @@
             "title": "Next Sequence",
             "type": "integer"
           },
+          "pi_session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GameTapePiSessionEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "run": {
             "$ref": "#/components/schemas/FleetRunState"
           }
@@ -11755,6 +11761,16 @@
             "$ref": "#/components/schemas/GameTapeObservabilityReceipt",
             "description": "Expose the current Game Tape evidence-lifecycle policy without storing a per-run copy.",
             "readOnly": true
+          },
+          "pi_session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GameTapePiSessionEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "play_by_play": {
             "items": {
@@ -14160,6 +14176,241 @@
           "run_timing"
         ],
         "title": "GameTapePerformanceReport",
+        "type": "object"
+      },
+      "GameTapePiFollowingStep": {
+        "additionalProperties": false,
+        "properties": {
+          "settlement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanStepSettlementEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_id"
+        ],
+        "title": "GameTapePiFollowingStep",
+        "type": "object"
+      },
+      "GameTapePiSessionEvidence": {
+        "additionalProperties": false,
+        "description": "Recorded custody and Step facts. Availability is not checked by playback.",
+        "properties": {
+          "availability": {
+            "const": "not_checked",
+            "default": "not_checked",
+            "title": "Availability",
+            "type": "string"
+          },
+          "byte_identity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "digest_recorded",
+                  "metadata_only"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Identity"
+          },
+          "delivery_sha256": {
+            "title": "Delivery Sha256",
+            "type": "string"
+          },
+          "following_steps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/GameTapePiFollowingStep"
+            },
+            "maxItems": 8,
+            "title": "Following Steps",
+            "type": "array"
+          },
+          "handoff_identity": {
+            "title": "Handoff Identity",
+            "type": "string"
+          },
+          "implementation_identity": {
+            "pattern": "^pi:sha256:[0-9a-f]{64}$",
+            "title": "Implementation Identity",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "new",
+              "continue"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "native": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PiSessionNativeObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "omitted_following_steps": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Following Steps",
+            "type": "integer"
+          },
+          "persistence": {
+            "enum": [
+              "not_recorded",
+              "unknown",
+              "observed"
+            ],
+            "title": "Persistence",
+            "type": "string"
+          },
+          "prior_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prior Run Id"
+          },
+          "prior_writer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PiSessionContinuationOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quiescent_sequence": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quiescent Sequence"
+          },
+          "refusal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal Code"
+          },
+          "repository_id": {
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "repository_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RepositorySourceAuthority"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safe_next_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safe Next Action"
+          },
+          "settlement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanStepSettlementEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "skill_identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Identity"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          },
+          "writer_observation_sequence": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writer Observation Sequence"
+          },
+          "writer_reservation_sequence": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Writer Reservation Sequence"
+          }
+        },
+        "required": [
+          "mode",
+          "repository_id",
+          "step_id",
+          "implementation_identity",
+          "handoff_identity",
+          "delivery_sha256",
+          "persistence"
+        ],
+        "title": "GameTapePiSessionEvidence",
         "type": "object"
       },
       "GameTapeProducerImplementationInput": {
@@ -19449,6 +19700,19 @@
             "title": "Settled",
             "type": "boolean"
           },
+          "skill_identity": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Identity"
+          },
           "source_identity": {
             "maxLength": 160,
             "minLength": 1,
@@ -21252,6 +21516,46 @@
         ],
         "title": "PiSessionIntent",
         "type": "object"
+      },
+      "PiSessionNativeObservation": {
+        "additionalProperties": false,
+        "description": "Pi's correlated final identity and leaf, without conversation contents.",
+        "properties": {
+          "leaf_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Leaf Id",
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "leaf_id"
+        ],
+        "title": "PiSessionNativeObservation",
+        "type": "object"
+      },
+      "PiSessionRefusalCode": {
+        "enum": [
+          "PI_NO_PERSISTENT_SESSION",
+          "PI_SESSION_UNAVAILABLE",
+          "PI_SESSION_BUSY",
+          "PI_SESSION_IDENTITY_MISMATCH",
+          "PI_SESSION_CLEANUP_UNVERIFIED",
+          "PI_NATIVE_CONFIGURATION_MISMATCH",
+          "PI_SESSION_HISTORY_UNQUALIFIED",
+          "PI_SESSION_SETTLEMENT_UNCERTAIN"
+        ],
+        "title": "PiSessionRefusalCode",
+        "type": "string"
       },
       "PiSessionWriterObservation": {
         "additionalProperties": false,
@@ -24121,6 +24425,17 @@
           },
           {
             "$ref": "#/components/schemas/FailedPlanStepExecution"
+          }
+        ]
+      },
+      "PlanStepFailureKind": {
+        "anyOf": [
+          {
+            "const": "model_output_truncated",
+            "type": "string"
+          },
+          {
+            "$ref": "#/components/schemas/PiSessionRefusalCode"
           }
         ]
       },
@@ -36472,14 +36787,12 @@
           "failure_kind": {
             "anyOf": [
               {
-                "const": "model_output_truncated",
-                "type": "string"
+                "$ref": "#/components/schemas/PlanStepFailureKind"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Failure Kind"
+            ]
           },
           "finished_at": {
             "anyOf": [

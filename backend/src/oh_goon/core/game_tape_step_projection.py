@@ -6,6 +6,7 @@ from typing import Literal
 from oh_goon.core.game_tape_attempt_comparison import compare_adjacent_attempts
 from oh_goon.core.game_tape_identity import step_execution_id
 from oh_goon.core.game_tape_lifecycle import step_status
+from oh_goon.core.game_tape_pi_session import is_private_pi_step
 from oh_goon.core.models.fleet_observation import NativeAgentObservation
 from oh_goon.core.models.fleet_plan import (
     ResolvedAgentStep,
@@ -125,6 +126,31 @@ def _step_execution(
     finished_at = execution.finished_at if execution is not None else None
     returncode = getattr(execution, "returncode", None) if execution is not None else None
     transitions = compare_adjacent_attempts(execution.attempts) if execution is not None else ()
+    private_pi = is_private_pi_step(step)
+    attempts = execution.attempts if execution is not None else ()
+    outputs = _published_outputs(execution)
+    observations = (
+        tuple(
+            observation
+            for observation in execution.observations
+            if isinstance(observation, NativeAgentObservation)
+        )
+        if execution is not None
+        else ()
+    )
+    if private_pi:
+        attempts = tuple(attempt.model_copy(update={"argv": ()}) for attempt in attempts)
+        outputs = tuple(output.model_copy(update={"retained_stream": None}) for output in outputs)
+        observations = tuple(
+            observation.model_copy(
+                update={
+                    "events": (),
+                    "omitted_observations": observation.omitted_observations
+                    + len(observation.events),
+                }
+            )
+            for observation in observations
+        )
     return GameTapeStepExecution(
         step_execution_id=step_execution_id(fleet_run_id, repository_id, step.step_id),
         step_id=step.step_id,
@@ -138,7 +164,11 @@ def _step_execution(
         else cancellation.duration_ms
         if cancellation is not None
         else None,
-        command=execution.argv if execution is not None else _planned_argv(step),
+        command=()
+        if private_pi
+        else execution.argv
+        if execution is not None
+        else _planned_argv(step),
         working_directory=getattr(step, "working_directory", "."),
         project_source=step.project_source if isinstance(step, ResolvedCommandStep) else None,
         uv=step.uv if isinstance(step, ResolvedCommandStep) else None,
@@ -152,22 +182,14 @@ def _step_execution(
             else {}
         ),
         cancellation=cancellation,
-        attempts=execution.attempts if execution is not None else (),
+        attempts=attempts,
         attempt_transitions=transitions,
         stdout_evidence=execution.stdout_evidence if execution is not None else None,
         stderr_evidence=execution.stderr_evidence if execution is not None else None,
         output_names=_output_names(step, execution),
         artifacts=_artifacts(execution),
-        outputs=_published_outputs(execution),
-        native_agent_observations=(
-            tuple(
-                observation
-                for observation in execution.observations
-                if isinstance(observation, NativeAgentObservation)
-            )
-            if execution is not None
-            else ()
-        ),
+        outputs=outputs,
+        native_agent_observations=observations,
         reason=(
             execution.reason
             if isinstance(execution, SkippedPlanStepExecution)

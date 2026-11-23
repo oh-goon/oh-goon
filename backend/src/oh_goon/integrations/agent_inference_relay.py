@@ -22,7 +22,10 @@ from typing import Any
 
 from oh_goon.core.models.agent_providers import AgentProviderError
 from oh_goon.core.models.fleet_plan_step_primitives import PLAN_CONTRACT_RETURN_CODE
-from oh_goon.core.models.pi_session_storage import PI_SESSION_OBSERVATION_RECORD
+from oh_goon.core.models.pi_session_storage import (
+    PI_SESSION_OBSERVATION_RECORD,
+    PI_SESSION_REFUSAL_RECORD,
+)
 from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES, CommandTerminal, run_command
 from oh_goon.integrations.agent_pi_rpc import PiRpcContinuation, PiRpcControl
 
@@ -262,6 +265,16 @@ def main(argv: list[str] | None = None) -> int:
                 max_capture_bytes_per_stream=MAX_COMMAND_INPUT_BYTES,
                 stream_output=(None if transport is not None else stream_output),
             )
+    refusal_code = rpc.refusal_code if rpc is not None else None
+    if refusal_code is not None and result.supervisor.final_process_group_quiescent:
+        _write_all(
+            1,
+            json.dumps(
+                {"type": PI_SESSION_REFUSAL_RECORD, "code": refusal_code},
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n",
+        )
     if rpc is not None and result.returncode == 0:
         try:
             observation = rpc.finish()

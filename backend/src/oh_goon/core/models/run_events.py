@@ -7,6 +7,10 @@ from pydantic import AwareDatetime, Field, model_validator
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.capability import CapabilitySnapshot
 from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
+from oh_goon.core.models.game_tape_pi_session import GameTapePiSessionEvidence
+from oh_goon.core.models.pi_session_storage import (
+    PiSessionContinuationOrigin as PiSessionContinuationOrigin,
+)
 from oh_goon.core.models.pi_session_storage import PiSessionWriterObservation
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import (
@@ -139,20 +143,6 @@ class StepAttemptCreatedEvent(_FleetRunEventBase):
     step_order: int = Field(ge=1)
     attempt_number: int = Field(ge=1)
     step_attempt_id: str = Field(min_length=1)
-
-
-class PiSessionContinuationOrigin(ImmutableModel):
-    """The exact prior Run and its observed writer cut, never a filesystem selector."""
-
-    prior_run_id: str = Field(min_length=1, max_length=160)
-    reservation_sequence: int = Field(ge=1)
-    observation_sequence: int = Field(ge=1)
-
-    @model_validator(mode="after")
-    def require_observed_reservation(self) -> PiSessionContinuationOrigin:
-        if self.observation_sequence <= self.reservation_sequence:
-            raise ValueError("Pi continuation observation must follow its reservation")
-        return self
 
 
 class PiSessionWriterReservedEvent(_FleetRunEventBase):
@@ -363,6 +353,9 @@ class FleetRunEventBatch(ImmutableModel):
     next_sequence: int = Field(ge=0)
     journal_revision: int = Field(ge=0)
     has_more: bool = False
+    pi_session: GameTapePiSessionEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_batch_lineage(self) -> FleetRunEventBatch:

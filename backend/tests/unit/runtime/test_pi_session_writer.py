@@ -5,10 +5,17 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Barrier
+from unittest.mock import Mock
 
 import pytest
 
-from oh_goon.core.errors import InvalidRunTransition, OwnershipLost, PiSessionBusy
+from oh_goon.core.errors import (
+    ExecutionBusy,
+    InvalidRunTransition,
+    OwnershipLost,
+    PiSessionBusy,
+    PiSessionRefusalCode,
+)
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentModel,
@@ -39,6 +46,7 @@ from oh_goon.core.models.pi_session_storage import (
     PiSessionWriterObservation,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.run import FleetRunFailure
 from oh_goon.core.models.run_admission import (
     DirectFleetExecutionAdmission,
     FleetRunAdmissionIntent,
@@ -52,6 +60,7 @@ from oh_goon.core.models.run_events import (
 )
 from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
 from oh_goon.core.vocabulary import (
     FleetRunEventType,
     FleetRunStatus,
@@ -65,9 +74,16 @@ from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionSession
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.journal_store import JournalFactStore
-from tests.factories.capabilities import capability_snapshot
+from oh_goon.runtime.safety import RuntimeSafetyGate
+from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
+from oh_goon.services.fleet_admission import FleetAdmissionPlanner
+from oh_goon.services.invariant_auditor import SystemInvariantAuditor
+from oh_goon.services.runtime_safety import RuntimeSafetyService
+from oh_goon.services.target_selection import FleetTargetSelector
+from tests.factories.capabilities import capability_snapshot, resolved_intent
 from tests.factories.fleet_plan_targets import structural_execution_identity
 from tests.factories.journal import start_repository
+from tests.factories.local_state import local_state
 from tests.factories.operation_reports import make_operation_report
 from tests.factories.repository_effect_runtime import effect_recovery
 from tests.factories.run_admission import repository_admissions_for
@@ -468,6 +484,7 @@ def test_continuation_refuses_unqualified_original_persistence(tmp_path: Path, c
         )
         _accepted_pi_result(original)
         reason = "no qualified persistence observation"
+        code = PiSessionRefusalCode.HISTORY_UNQUALIFIED
     else:
         _observe_pi_file(original, reservation, sha256="a" * 64, leaf_id="leaf-a")
         recovered = LocalDatabase(database.path)
@@ -479,9 +496,14 @@ def test_continuation_refuses_unqualified_original_persistence(tmp_path: Path, c
             GitService(),
         ).recover(fleet_run_id="original")
         reason = "no accepted original Agent result"
+        code = PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
     before = original.journal.read_view()
-    with pytest.raises(PiSessionUnavailable, match=reason):
+    with pytest.raises(PiSessionUnavailable, match=reason) as refusal:
         _claim_attempt(database, "contender", prior_run_id="original")
+    assert refusal.value.code is code
+    diagnostic = safe_plan_diagnostic(refusal.value)
+    assert diagnostic["code"] == code
+    assert "runs handoff RUN_ID --json" in diagnostic["safe_next_action"]
     after = original.journal.read_view()
     assert after.revision == before.revision
     assert after.run_detail("contender") is None
@@ -489,15 +511,38 @@ def test_continuation_refuses_unqualified_original_persistence(tmp_path: Path, c
 
 
 @pytest.mark.parametrize(
-    ("prior_run_id", "repo_name", "executable_sha256", "reason"),
+    ("prior_run_id", "repo_name", "executable_sha256", "reason", "code"),
     [
-        ("unknown", "repo", "b" * 64, "no persistent Pi writer"),
-        ("original", "another", "b" * 64, "different repository subject"),
-        ("original", "repo", "c" * 64, "different native implementation"),
+        (
+            "unknown",
+            "repo",
+            "b" * 64,
+            "no persistent Pi writer",
+            PiSessionRefusalCode.NO_PERSISTENT_SESSION,
+        ),
+        (
+            "original",
+            "another",
+            "b" * 64,
+            "different repository subject",
+            PiSessionRefusalCode.IDENTITY_MISMATCH,
+        ),
+        (
+            "original",
+            "repo",
+            "c" * 64,
+            "different native implementation",
+            PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH,
+        ),
     ],
 )
 def test_pi_continuation_admission_refuses_unknown_or_foreign_prior_before_work(
-    tmp_path: Path, prior_run_id: str, repo_name: str, executable_sha256: str, reason: str
+    tmp_path: Path,
+    prior_run_id: str,
+    repo_name: str,
+    executable_sha256: str,
+    reason: str,
+    code: PiSessionRefusalCode,
 ) -> None:
     database = LocalDatabase(tmp_path / "state.db")
     original = _claim_attempt(database, "original")
@@ -506,7 +551,7 @@ def test_pi_continuation_admission_refuses_unknown_or_foreign_prior_before_work(
     _accepted_pi_result(original)
     before = original.journal.read_view()
 
-    with pytest.raises(PiSessionUnavailable, match=reason):
+    with pytest.raises(PiSessionUnavailable, match=reason) as refusal:
         _claim_attempt(
             database,
             "refused",
@@ -515,10 +560,78 @@ def test_pi_continuation_admission_refuses_unknown_or_foreign_prior_before_work(
             executable_sha256=executable_sha256,
         )
 
+    assert refusal.value.code is code
     after = original.journal.read_view()
     assert after.revision == before.revision
     assert after.run_detail("refused") is None
     assert ExecutionCoordinator(database).active_lease() is None
+
+
+def test_pi_busy_refusal_requires_an_active_writer_of_the_requested_lineage(tmp_path: Path) -> None:
+    original = _claim_attempt(LocalDatabase(tmp_path / "state.db"), "original")
+    original.reserve()
+    database = original.database
+    attempts = RepositoryEffectAttemptStore(database)
+    auditor = SystemInvariantAuditor(
+        database, original.journal, original.coordinator, attempts, ScheduleExecutionStore(database)
+    )
+    planner = FleetAdmissionPlanner(
+        local_state(database),
+        Mock(spec=FleetTargetSelector),
+        auditor,
+        RuntimeSafetyService(auditor, RuntimeSafetyGate()),
+        execution=original.coordinator,
+    )
+    original_scope = fleet_repository_scope({original.repository.repository_id})
+    before = original.journal.read_view().revision
+    with pytest.raises(PiSessionBusy) as busy:
+        planner.plan(
+            resolved_intent(OperationAction.EXECUTE_PLAN, _pi_target("original")),
+            repository_scope=original_scope,
+        )
+    assert safe_plan_diagnostic(busy.value)["code"] == "PI_SESSION_BUSY"
+    with pytest.raises(ExecutionBusy):
+        planner.plan(
+            resolved_intent(OperationAction.EXECUTE_PLAN, _pi_target("unrelated")),
+            repository_scope=original_scope,
+        )
+    assert original.journal.read_view().revision == before
+
+
+def test_pi_writer_without_quiescence_reports_cleanup_uncertainty_after_restart(
+    tmp_path: Path,
+) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    original.reserve()
+    observe = original.journal.execution_lifecycle_observer(
+        "original", original.repository.repository_id, original.operation_id
+    )
+    observe("agent", 1, "PROCESS_STARTING", attempt_number=1, physical_execution_id="writer")
+    for kind in ("PROCESS_STARTED", "PROCESS_STATE_UNKNOWN"):
+        observe(
+            "agent",
+            1,
+            kind,
+            attempt_number=1,
+            physical_execution_id="writer",
+            pid=123,
+            process_identity="original-birth",
+        )
+    original.session.finish(
+        lambda connection: original.journal.terminalize_run_in(
+            connection,
+            "original",
+            FleetRunTerminalIntent.FAIL,
+            FleetRunFailure.recovery("Original descendants have no quiescence proof"),
+        )
+    )
+    reopened = LocalDatabase(database.path)
+    before = Journal(reopened).run_events("original")
+    with pytest.raises(PiSessionUnavailable, match="cleanup is unverified") as refusal:
+        _claim_attempt(reopened, "contender", prior_run_id="original")
+    assert refusal.value.code is PiSessionRefusalCode.CLEANUP_UNVERIFIED
+    assert Journal(reopened).run_events("original") == before
 
 
 def test_interrupted_successor_never_releases_an_older_pi_predecessor(tmp_path: Path) -> None:
@@ -590,6 +703,15 @@ def test_restart_preserves_unobserved_writer_and_fences_late_settlement(
     assert post_crash.run.status is FleetRunStatus.FAILED
     assert post_crash.events[reservation.sequence - 1] == reservation
     assert not any(isinstance(event, PiSessionWriterObservedEvent) for event in post_crash.events)
+    evidence = post_crash.pi_session
+    assert evidence is not None
+    assert evidence == journal.read_view().required_run_detail("original").game_tape.pi_session
+    assert (evidence.persistence, evidence.native, evidence.availability) == (
+        "unknown",
+        None,
+        "not_checked",
+    )
+    assert (evidence.quiescent_sequence is not None) == (cut == "after_native_save")
     replacement = _claim_attempt(recovered, "replacement")
     successor = replacement.reserve()
     assert successor.storage_id != reservation.storage_id
