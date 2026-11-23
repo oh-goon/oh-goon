@@ -574,9 +574,16 @@ class JournalReadView:
     def pi_session_predecessor(
         self, prior_run_id: str, admission: RunAdmittedEvent
     ) -> tuple[PiSessionWriterReservedEvent, PiSessionWriterObservedEvent]:
-        return pi_session_predecessor(
+        writer, observation = pi_session_predecessor(
             prior_run_id, admission, self._index.events_by_run, self._index.pi_session_writer_heads
         )
+        self._require_pi_writer_resource_settlement(writer)
+        return writer, observation
+
+    def _require_pi_writer_resource_settlement(self, writer: PiSessionWriterReservedEvent) -> None:
+        operation = self._index.operations_by_id[writer.operation_id]
+        if operation.resource_settlement != "SETTLED":
+            raise PiSessionCleanupUnverified("Original Run resource cleanup is unverified")
 
     def pi_session_retirement_source(self, fleet_run_id: str) -> PiSessionRetirementSource:
         events = self._index.events_by_run.get(fleet_run_id, ())
@@ -585,9 +592,7 @@ class JournalReadView:
             writer, self._index.events_by_run, self._index.pi_session_writer_heads
         )
         observation = pi_session_qualified_observation(writer, events)
-        operation = self._index.operations_by_id[writer.operation_id]
-        if operation.resource_settlement != "SETTLED":
-            raise PiSessionCleanupUnverified("Original Run resource cleanup is unverified")
+        self._require_pi_writer_resource_settlement(writer)
         request = next(
             (event for event in events if isinstance(event, PiSessionRetirementRequestedEvent)),
             None,

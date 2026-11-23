@@ -34,13 +34,16 @@ from oh_goon.core.models.agent_providers import (
     PiSessionUnavailable,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.explanation import ReasonCode
 from oh_goon.core.models.fleet_plan import (
     ResolvedAgentStep,
+    ResolvedCommandStep,
     ResolvedFleetPlan,
     ResolvedNativeAgentWorkload,
 )
 from oh_goon.core.models.fleet_plan_evidence import (
     CompletedPlanStepExecution,
+    FailedPlanStepExecution,
     FleetPlanResult,
     PlanOutputEvidence,
     PlanStepSettlementEvidence,
@@ -78,13 +81,14 @@ from oh_goon.core.vocabulary import (
     FleetRunStatus,
     FleetRunTerminalIntent,
     OperationAction,
+    Verdict,
 )
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.fleet_plan_preview import repository_plan_admission_evidence
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
-from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionSession
+from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionSession, ExecutionTicket
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.journal_store import JournalFactStore
 from oh_goon.runtime.pi_session_storage import pin_pi_session_directory
@@ -105,7 +109,10 @@ from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
 def _pi_target(
-    prior_run_id: str | None = None, *, executable_sha256: str = "b" * 64
+    prior_run_id: str | None = None,
+    *,
+    executable_sha256: str = "b" * 64,
+    following_steps: tuple[ResolvedCommandStep, ...] = (),
 ) -> FleetPlanTarget:
     connection = AgentConnection(
         profile="fixture",
@@ -139,7 +146,7 @@ def _pi_target(
         name="pi-writer-journal",
         description="Durable ownership regression fixture",
         execution=MaintenanceExecutionPolicy(),
-        steps=(step,),
+        steps=(step, *following_steps),
         native_agent=native,
     )
     return FleetPlanTarget(
@@ -208,13 +215,16 @@ def _claim_attempt(
     repo_name: str = "repo",
     repository_path: Path | None = None,
     executable_sha256: str = "b" * 64,
+    following_steps: tuple[ResolvedCommandStep, ...] = (),
 ) -> _ClaimedPiAttempt:
     owner = ExecutionCoordinator(database)
     journal = Journal(database)
     repository = RepositoryIdentity.model_validate(
         {"name": "sample", "path": repository_path or database.path.parent / repo_name}
     )
-    target = _pi_target(prior_run_id, executable_sha256=executable_sha256)
+    target = _pi_target(
+        prior_run_id, executable_sha256=executable_sha256, following_steps=following_steps
+    )
     intent = FleetRunAdmissionIntent(
         target=target,
         capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
@@ -250,13 +260,21 @@ def _claim_attempt(
     return _ClaimedPiAttempt(worker_database, journal, worker, session, repository, operation_id)
 
 
-def _accepted_pi_result(attempt: _ClaimedPiAttempt) -> None:
+def _accepted_pi_result(
+    attempt: _ClaimedPiAttempt, *, following_failure: FailedPlanStepExecution | None = None
+) -> None:
     run_id = attempt.session.require_fleet_run_id()
     target = attempt.journal.run_events(run_id).run.target
     assert isinstance(target, FleetPlanTarget)
-    attempt.journal.execution_lifecycle_observer(
+    observe = attempt.journal.execution_lifecycle_observer(
         run_id, attempt.repository.repository_id, attempt.operation_id
-    )("agent", 1, "STEP_SUCCEEDED", returncode=0)
+    )
+    observe("agent", 1, "STEP_SUCCEEDED", returncode=0)
+    if following_failure is not None:
+        step_id = following_failure.step_id
+        observe(step_id, 2, "STEP_REACHED")
+        observe(step_id, 2, "STEP_STARTED")
+        observe(step_id, 2, "STEP_FAILED", returncode=following_failure.returncode)
     empty_output = PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
     result = CompletedPlanStepExecution(
         step_id="agent",
@@ -272,11 +290,17 @@ def _accepted_pi_result(attempt: _ClaimedPiAttempt) -> None:
     report = make_operation_report(
         attempt.repository,
         OperationAction.EXECUTE_PLAN,
+        verdict=Verdict.READY if following_failure is None else Verdict.FAILED,
+        reason_code=ReasonCode.READY if following_failure is None else ReasonCode.OPERATION_FAILED,
         target=target,
         fleet_run_id=run_id,
         operation_id=attempt.operation_id,
         evidence=FleetPlanOperationEvidence(
-            kind="FLEET_PLAN", plan=FleetPlanResult(plan_id=target.plan.plan_id, steps=(result,))
+            kind="FLEET_PLAN",
+            plan=FleetPlanResult(
+                plan_id=target.plan.plan_id,
+                steps=(result,) if following_failure is None else (result, following_failure),
+            ),
         ),
     )
 
@@ -367,7 +391,10 @@ def test_second_physical_pi_writer_is_refused_at_the_prelaunch_cut(tmp_path: Pat
     assert attempt.journal.run_events("run") == original
 
 
-def test_pi_observation_needs_original_process_quiescence_even_after_cancel(tmp_path: Path) -> None:
+@pytest.mark.parametrize("offer_observed_file", [False, True])
+def test_pi_observation_needs_original_process_quiescence_even_after_cancel(
+    tmp_path: Path, offer_observed_file: bool
+) -> None:
     attempt = _claim_attempt(LocalDatabase(tmp_path / "state.db"), "cancelled")
     before_reserve = "before-reservation"
     attempt.record_physical(before_reserve)
@@ -401,7 +428,19 @@ def test_pi_observation_needs_original_process_quiescence_even_after_cancel(tmp_
         pid=100,
         process_identity="fixture-native-process",
     )
-    attempt.journal.observe_pi_session_writer(attempt.session, reservation, observation=observation)
+    offered = (
+        PiSessionWriterObservation(
+            physical_execution_id=active,
+            persistence="observed",
+            file=PiSessionFileObservation(device=1, inode=2, size=10, sha256="a" * 64),
+            session_id="native-session",
+            leaf_id="leaf-a",
+            file_name="session.jsonl",
+        )
+        if offer_observed_file
+        else observation
+    )
+    attempt.journal.observe_pi_session_writer(attempt.session, reservation, observation=offered)
     verified = Journal(LocalDatabase(attempt.database.path)).run_events("cancelled").events
     receipt = verified[-1]
     assert isinstance(receipt, PiSessionWriterObservedEvent)
@@ -417,6 +456,9 @@ def test_continuation_retains_exact_predecessor_and_advances_only_latest_writer(
     original = _claim_attempt(database, "original")
     created = original.reserve()
     first = _observe_pi_file(original, created, sha256="a" * 64, leaf_id="leaf-a")
+    original_lease = original.coordinator.active_lease()
+    assert original_lease is not None
+    late_session = original.coordinator.activate(ExecutionTicket(original_lease))
     _accepted_pi_result(original)
 
     reopened = _claim_attempt(LocalDatabase(database.path), "next", prior_run_id="original")
@@ -438,10 +480,24 @@ def test_continuation_retains_exact_predecessor_and_advances_only_latest_writer(
         first.file,
         PiSessionNativeObservation(session_id="native-session", leaf_id="leaf-a"),
     )
-    before_stale_callback = reopened.journal.run_events("next")
+    reader = Journal(LocalDatabase(database.path, read_only=True))
+    before_original = reader.run_events("original")
+    before_stale_callback = reader.run_events("next")
+    next_lease = reopened.coordinator.active_lease()
+    assert next_lease is not None and next_lease.fleet_run_id == "next"
+    assert late_session.finished is False
     with pytest.raises(OwnershipLost):
-        original.journal.observe_pi_session_writer(original.session, created, observation=first)
-    assert reopened.journal.run_events("next") == before_stale_callback
+        original.journal.observe_pi_session_writer(late_session, created, observation=first)
+    with pytest.raises(OwnershipLost):
+        original.journal.require_pi_session_writer(late_session, created)
+    terminalize = Mock()
+    with pytest.raises(OwnershipLost):
+        late_session.finish(terminalize)
+    terminalize.assert_not_called()
+    assert reader.run_events("original") == before_original
+    assert reader.run_events("next") == before_stale_callback
+    assert reopened.coordinator.active_lease() == next_lease
+    reopened.journal.require_pi_session_writer(reopened.session, continued)
     replacement = continued.model_copy(
         update={
             "continuation": continued.continuation.model_copy(update={"observation_sequence": 99})
@@ -1013,3 +1069,47 @@ def test_pi_interrupted_allocation_follows_committed_writer_reservation(
     assert inspection.availability == "unavailable"
     assert inspection.refusal_code is PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
     assert list(leaf.iterdir()) == []
+
+
+def test_pi_continuation_requires_original_repository_resource_settlement(tmp_path: Path) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    verifier = ResolvedCommandStep(step_id="verify", argv=("/usr/bin/true",), timeout_seconds=5)
+    original = _claim_attempt(database, "original", following_steps=(verifier,))
+    reservation = original.reserve()
+    _observe_pi_file(original, reservation, sha256="a" * 64, leaf_id="last-leaf")
+    empty_output = PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
+    failed_verifier = FailedPlanStepExecution(
+        step_id=verifier.step_id,
+        kind="command",
+        returncode=1,
+        stdout_evidence=empty_output,
+        stderr_evidence=empty_output,
+        repository_state_before="before",
+        repository_state_after="after",
+        settlement=PlanStepSettlementEvidence(
+            outcome="INCOMPLETE",
+            cleanup="UNVERIFIED",
+            reason="CLEANUP_UNVERIFIED",
+            observed_returncode=0,
+        ),
+    )
+    _accepted_pi_result(original, following_failure=failed_verifier)
+
+    reopened = LocalDatabase(database.path)
+    journal = Journal(reopened)
+    history = journal.read_view()
+    detail = history.required_run_detail("original")
+    assert detail.run.status.terminal
+    assert detail.operations[0].resource_settlement == "UNRESOLVED"
+    inspect = journal.inspect_pi_session("original")
+    assert inspect.availability == "unverified"
+    assert inspect.refusal_code is PiSessionRefusalCode.CLEANUP_UNVERIFIED
+    with pytest.raises(PiSessionCleanupUnverified, match="Original Run resource cleanup"):
+        _claim_attempt(reopened, "contender", prior_run_id="original")
+    with pytest.raises(PiSessionCleanupUnverified, match="Original Run resource cleanup"):
+        journal.retire_pi_session("original")
+    final = journal.read_view()
+    assert final.revision == history.revision
+    assert final.required_run_detail("original") == detail
+    assert final.run_detail("contender") is None
+    assert ExecutionCoordinator(reopened).active_lease() is None

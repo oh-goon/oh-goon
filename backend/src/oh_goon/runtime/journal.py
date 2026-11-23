@@ -874,16 +874,24 @@ class Journal:
                 raise InvalidRunTransition(
                     "Pi writer requires exact original process-tree quiescence"
                 )
+            # File observation and its hashing happen outside the write transaction.
+            # Cancellation can win after the last filesystem fence and before this cut.
+            current_observation = observation
+            if observation.persistence == "observed" and session.cancel_requested_in(connection):
+                current_observation = PiSessionWriterObservation(
+                    physical_execution_id=observation.physical_execution_id,
+                    persistence="unknown",
+                )
             event = PiSessionWriterObservedEvent(
                 event_type=FleetRunEventType.PI_SESSION_WRITER_OBSERVED,
                 fleet_run_id=reservation.fleet_run_id,
                 sequence=len(events) + 1,
                 reservation_sequence=reservation.sequence,
                 quiescent_sequence=quiet.sequence,
-                observation=observation,
+                observation=current_observation,
             )
-            if observation.persistence == "observed" and (
-                observation.file is None or observation.file.sha256 is None
+            if current_observation.persistence == "observed" and (
+                current_observation.file is None or current_observation.file.sha256 is None
             ):
                 raise InvalidRunTransition(
                     "New Pi persistence observations require exact file bytes"
