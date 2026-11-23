@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -59,6 +60,8 @@ from tests.fakes.native_protocol import observe_native_protocol
 
 _SECRET = "synthetic-pi-journey-broker-key"
 _PRIVATE_TOOL_OUTPUT = "PI_NATIVE_PRIVATE_TOOL_OUTPUT_53"
+_TOOL_CALL_ID = "call-private-journey-tool"
+_TOOL_EFFECT = "native tool effect\n"
 _MODEL_REPLY = "The requested review is complete."
 _INTERRUPTED_REVIEW = "The interrupted review looks complete."
 _RECOVERED_REVIEW = "The current review completed after native retry."
@@ -89,6 +92,7 @@ def _provider(
     hold_request_number: int = 2,
     reply_after_hold: bool = False,
     continuation_result: _ContinuationResult | None = None,
+    initial_tool_command: str | None = None,
 ) -> Iterator[tuple[str, list[str], list[str], list[str], list[str]]]:
     errors: list[str] = []
     requests: list[str] = []
@@ -169,13 +173,14 @@ def _provider(
                         "tool_calls": [
                             {
                                 "index": 0,
-                                "id": "call-private-journey-tool",
+                                "id": _TOOL_CALL_ID,
                                 "type": "function",
                                 "function": {
                                     "name": "bash",
                                     "arguments": json.dumps(
                                         {
-                                            "command": f"printf %s {shlex.quote(_PRIVATE_TOOL_OUTPUT)}"
+                                            "command": initial_tool_command
+                                            or f"printf %s {shlex.quote(_PRIVATE_TOOL_OUTPUT)}"
                                         }
                                     ),
                                 },
@@ -882,6 +887,7 @@ def _held_pi_journey(
     hold_request_number: int = 2,
     reply_after_hold: bool = False,
     continuation_result: _ContinuationResult | None = None,
+    initial_tool_command: str | None = None,
 ) -> Iterator[_HeldPiJourney]:
     executable = os.environ.get("OH_GOON_NATIVE_PI")
     runtime_root = os.environ.get("OH_GOON_NATIVE_PI_RUNTIME_ROOT")
@@ -937,6 +943,7 @@ def _held_pi_journey(
         hold_request_number=hold_request_number,
         reply_after_hold=reply_after_hold,
         continuation_result=continuation_result,
+        initial_tool_command=initial_tool_command,
     ) as (
         url,
         requests,
@@ -990,14 +997,26 @@ def _held_pi_journey(
 
 
 @pytest.mark.certification
+@pytest.mark.parametrize("during_tool", [False, True], ids=["after-tool", "during-tool"])
 def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, during_tool: bool
 ) -> None:
     if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
         pytest.skip("The installed worker crash cut requires Linux pidfds")
-    with _held_pi_journey(tmp_path, monkeypatch) as journey:
+    # Both cuts execute the same append-only synthetic effect. The second
+    # keeps the original child alive before Pi can return the tool result.
+    command = f"printf %s {shlex.quote(_TOOL_EFFECT)} >> tool-effect.log"
+    command += (
+        " && exec /usr/bin/sleep 60"
+        if during_tool
+        else f" && printf %s {shlex.quote(_PRIVATE_TOOL_OUTPUT)}"
+    )
+    with _held_pi_journey(tmp_path, monkeypatch, initial_tool_command=command) as journey:
         database_path = journey.database_path
         session_root = ApplicationStatePathLayout.from_database(database_path).pi_sessions
+        effect = journey.repository / "tool-effect.log"
+        # Seed the file before admission so an append preserves repository-root identity.
+        effect.touch()
         log_path = tmp_path / "controller.log"
         with log_path.open("wb") as console:
             controller = subprocess.Popen(
@@ -1007,7 +1026,17 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
                 stderr=subprocess.STDOUT,
             )
         try:
-            assert journey.held_inference_arrived.wait(65), (
+            if during_tool:
+                deadline = time.monotonic() + 65
+                while (
+                    effect.stat().st_size == 0
+                    and controller.poll() is None
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.01)
+            else:
+                assert journey.held_inference_arrived.wait(65)
+            assert effect.read_text() == _TOOL_EFFECT, (
                 journey.errors,
                 log_path.read_text()[-3000:],
             )
@@ -1038,7 +1067,25 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
             before = native_file.stat()
             assert 0 < before.st_size < 1024 * 1024
             with native_file.open("rb") as stream:
-                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+                transcript = stream.read(before.st_size + 1)
+            assert len(transcript) == before.st_size
+            # Read only the synthetic test transcript to witness the native
+            # saved call and whether its result existed at the crash cut.
+            messages = [
+                entry["message"]
+                for entry in map(json.loads, transcript.splitlines())
+                if entry["type"] == "message"
+            ]
+            assert [
+                part["id"]
+                for message in messages
+                if message["role"] == "assistant"
+                for part in message["content"]
+                if part["type"] == "toolCall"
+            ] == [_TOOL_CALL_ID]
+            assert [
+                message["toolCallId"] for message in messages if message["role"] == "toolResult"
+            ] == ([] if during_tool else [_TOOL_CALL_ID])
 
             identity = SystemLeaseEnvironment()
             assert identity.process_identity(custody.owner_pid) == custody.owner_identity
@@ -1105,11 +1152,14 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
         with reopened.transaction() as connection:
             assert ExecutionCoordinator(reopened).retained_leases_in(connection) == ()
 
+        revision = journal.read_view().revision
         refused = journey.invoke(f"run:{run_id}", _TASKS[0])
         assert refused.returncode == 2, (refused.stdout[-3000:], refused.stderr[-3000:])
         assert json.loads(refused.stdout)["code"] == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
         assert journal.run_events(run_id) == failed
-        assert journey.requests == [_TASKS[0], _TASKS[0]] and not journey.errors
+        assert journal.read_view().revision == revision
+        assert journey.requests == [_TASKS[0]] * (1 if during_tool else 2) and not journey.errors
+        assert effect.read_text() == _TOOL_EFFECT
         assert tuple(session_root.iterdir()) == (slot,)
         after = native_file.stat()
         assert (after.st_dev, after.st_ino, after.st_size) == (
@@ -1118,7 +1168,7 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
             before.st_size,
         )
         with native_file.open("rb") as stream:
-            assert hashlib.file_digest(stream, "sha256").hexdigest() == digest
+            assert stream.read(before.st_size + 1) == transcript
 
 
 @pytest.mark.certification

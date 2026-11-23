@@ -454,6 +454,44 @@ def test_installed_pi_exact_reopen_retains_identity_leaf_and_conversation(
     assert pi_probe.session.read_bytes().startswith(retained)
 
 
+def test_installed_pi_provider_repair_only_adds_an_error_placeholder(pi_probe: _PiProbe) -> None:
+    transform = (
+        pi_probe.public_runtime
+        / "node_modules/@earendil-works/pi-ai/dist/api/transform-messages.js"
+    )
+    result = run_command(
+        "/usr/bin/node",
+        "--input-type=module",
+        "-e",
+        """
+import assert from 'node:assert/strict';
+const { transformMessages } = await import(process.argv[1]);
+const model = { id: 'fixture', provider: 'fixture', api: 'fixture', input: ['text'] };
+const history = [{ role: 'assistant', provider: model.provider, api: model.api,
+  model: model.id, stopReason: 'toolUse', content: [
+    { type: 'toolCall', id: 'original-call', name: 'fixture-effect', arguments: {} },
+  ] }];
+const before = JSON.stringify(history);
+const context = transformMessages(history, model);
+assert.equal(JSON.stringify(history), before);
+assert.equal(context.length, 2);
+assert.deepEqual(context[0], history[0]);
+const { timestamp, ...placeholder } = context[1];
+assert.deepEqual(placeholder, { role: 'toolResult', toolCallId: 'original-call',
+  toolName: 'fixture-effect', isError: true,
+  content: [{ type: 'text', text: 'No result provided' }] });
+""",
+        transform.as_uri(),
+        cwd=pi_probe.root,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(pi_probe.root)},
+        timeout=10,
+        max_capture_bytes_per_stream=4096,
+        require_process_group_quiescence=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.supervisor.final_process_group_quiescent
+
+
 _ISOLATED_SESSION_MODEL = "configured-session-fixture"
 _ISOLATED_SESSION_ENDPOINT = "http://127.0.0.1:1/v1"
 
