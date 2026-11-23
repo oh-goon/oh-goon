@@ -1004,6 +1004,29 @@ respective owners. This mode does not qualify migration of native files,
 writes by other host processes, restored extensions, disk-full or power-loss
 durability, or portability to other runtimes.
 
+### Installed exact reopen and refusal — HUG-70
+
+**Disposition: retain** the qualified Pi RPC exact-open gate. HUG-39's native
+JSON probe established the session header. The installed RPC observations add
+the actual session file, native ID and active leaf. The original Journal binds
+the repository subject and latest accepted writer. Its claimed Step pins the
+qualified saved bytes and checks the live native identity and branch before
+sending the prompt.
+
+| Boundary | Applicable proof |
+| --- | --- |
+| Same saved conversation and exact active leaf | [Installed restore and compaction][cli-compaction-tests] and the [initialized operator journey](../../backend/tests/integration/services/test_native_pi_session_journey.py) exercise separate claimed Runs, retained native context, fresh authority and verified cleanup. |
+| Native fallback or wrong branch | [Installed protocol probes][pi-session-tests] put real Pi replies through the exact-open gate. A fresh fallback identity, foreign session ID, older leaf and missing leaf fail before prompt delivery. A correlated refusal of the admitted history query records `PI_SESSION_HISTORY_UNQUALIFIED`. Invalid framing remains a protocol failure. |
+| Missing saved file or foreign repository | The [claimed-worker journey](../../backend/tests/integration/services/test_native_pi_session_journey.py) checks a wrong repository and a renamed original file. Both refuse native work and preserve the observed saved bytes. |
+| Personal stores | The [scoped storage proof](#private-pi-session-storage--hug-41) and [standard mount checks](#selected-pi-configuration-and-native-tools--hug-54) cover exclusion of other sessions and the default personal Pi store. |
+
+This proof selects Pi 1.3.0 with its public release entrypoint
+SHA-256 `e79626f2dd6f94aa45d30f3fa63cd84319a6eefcd150b353cfaf274366926774`,
+Bubblewrap 0.11.1 and Linux 7.0.0-43-generic. Repository ownership comes from
+admission. Native RPC supplies file, session and leaf facts. Version migration,
+native startup rewrite and the effective imported-runtime upgrade boundary
+retain their existing HUG-132 and HUG-137 qualification scope.
+
 ### Managed Pi operator journey — HUG-53
 
 **Disposition: retain** the exact Pi RPC reopen, original writer custody

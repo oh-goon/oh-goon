@@ -703,6 +703,38 @@ def test_continuation_refuses_an_unproved_branch_without_prompt(
     assert control.refusal_code is PiSessionRefusalCode.IDENTITY_MISMATCH
 
 
+@pytest.mark.parametrize(
+    ("command", "success", "code"),
+    [
+        ("get_entries", False, PiSessionRefusalCode.HISTORY_UNQUALIFIED),
+        ("get_state", False, None),
+        ("get_entries", 0, None),
+    ],
+)
+def test_only_a_correlated_native_history_refusal_establishes_the_reason(
+    command: str, success: object, code: PiSessionRefusalCode | None
+) -> None:
+    control = _reopen_control()
+    _commands(control)
+    control.feed_stdout(_response("oh-goon:state", "get_state", _reopen_state()))
+    with pytest.raises(AgentProviderError, match="refused or mismatched") as refusal:
+        control.feed_stdout(
+            _line(
+                {
+                    "type": "response",
+                    "id": "oh-goon:entries",
+                    "command": command,
+                    "success": success,
+                    "error": "private native diagnostic",
+                }
+            )
+        )
+    assert control.read_input(8192) == b""
+    assert control.session_identity is None
+    assert control.refusal_code is code
+    assert "private native diagnostic" not in str(refusal.value)
+
+
 def test_pi_refusal_record_is_private_to_the_relay_and_contains_only_a_known_code() -> None:
     code = PiSessionRefusalCode.IDENTITY_MISMATCH
     refusal = {"type": PI_SESSION_REFUSAL_RECORD, "code": code}
