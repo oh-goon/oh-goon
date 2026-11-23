@@ -13,6 +13,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Thread
@@ -27,15 +28,19 @@ from fastapi.testclient import TestClient
 from oh_goon.api.dependencies import fleet_run_control_plane
 from oh_goon.api.routes.fleet_runs import router as run_router
 from oh_goon.application import ApplicationRuntime
+from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.errors import PiSessionRefusalCode
+from oh_goon.core.models.agent_providers import PiSessionIntent
 from oh_goon.core.models.pi_session_storage import PI_SESSION_NEW_FILE
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
+    ProcessExitedEvent,
     ProcessStartedEvent,
     ProcessStateUnknownEvent,
     StepSucceededEvent,
+    TerminationRequestedEvent,
 )
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.vocabulary import FleetRunStatus
@@ -68,7 +73,9 @@ def _message_text(message: dict[str, Any]) -> str:
 
 @contextmanager
 def _provider(
-    hold_tool_followup: Callable[[], None] | None = None,
+    hold_inference: Callable[[], None] | None = None,
+    *,
+    hold_request_number: int = 2,
 ) -> Iterator[tuple[str, list[str], list[str], list[str], list[str]]]:
     errors: list[str] = []
     requests: list[str] = []
@@ -79,8 +86,8 @@ def _provider(
         def do_POST(self) -> None:
             try:
                 response = self.respond()
-                if hold_tool_followup is not None and len(requests) == 2:
-                    hold_tool_followup()
+                if hold_inference is not None and len(requests) == hold_request_number:
+                    hold_inference()
                     return
                 self.reply(*response)
             except Exception as error:
@@ -800,16 +807,36 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
         )
 
 
-@pytest.mark.certification
-def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@dataclass(frozen=True)
+class _HeldPiJourney:
+    repository: Path
+    skill: Path
+    database_path: Path
+    config: Path
+    ai: tuple[str, ...]
+    held_inference_arrived: Event
+    release_held_inference: Event
+    requests: list[str]
+    errors: list[str]
+
+    def invoke(self, session: str, task: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            (*self.ai, "--prompt", task, "--session", session),
+            cwd=self.repository,
+            capture_output=True,
+            text=True,
+            timeout=65,
+        )
+
+
+@contextmanager
+def _held_pi_journey(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, hold_request_number: int = 2
+) -> Iterator[_HeldPiJourney]:
     executable = os.environ.get("OH_GOON_NATIVE_PI")
     runtime_root = os.environ.get("OH_GOON_NATIVE_PI_RUNTIME_ROOT")
     if not executable or not runtime_root:
         pytest.skip("Select the installed Pi executable and public runtime root")
-    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
-        pytest.skip("The installed worker crash cut requires Linux pidfds")
     assert shutil.which("bwrap")
     public_runtime = Path(runtime_root).resolve(strict=True)
     program = Path(executable).resolve(strict=True)
@@ -824,7 +851,6 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
     skill.mkdir()
     (skill / "SKILL.md").write_text("# Session journey Skill\nReview the selected source.\n")
     database_path = tmp_path / "state" / "app.sqlite"
-    session_root = ApplicationStatePathLayout.from_database(database_path).pi_sessions
     config = tmp_path / "providers.json"
     for name, path in (
         ("HOME", tmp_path / "home"),
@@ -837,11 +863,11 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
         monkeypatch.setenv(name, str(path))
     monkeypatch.setenv("OH_GOON_TEST_PI_JOURNEY_KEY", _SECRET)
 
-    followup_arrived, release_followup = Event(), Event()
+    held_inference_arrived, release_held_inference = Event(), Event()
 
-    def hold_tool_followup() -> None:
-        followup_arrived.set()
-        assert release_followup.wait(65), "Fixture did not release the held inference"
+    def hold_inference() -> None:
+        held_inference_arrived.set()
+        assert release_held_inference.wait(65), "Fixture did not release the held inference"
 
     ai = (
         str(package_cli),
@@ -852,14 +878,17 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
         "pi-rpc",
         "--skill",
         str(skill),
-        "--prompt",
-        _TASKS[0],
         "--verify",
         "/usr/bin/true",
         "--json",
-        "--session",
     )
-    with _provider(hold_tool_followup) as (url, requests, errors, _, _):
+    with _provider(hold_inference, hold_request_number=hold_request_number) as (
+        url,
+        requests,
+        errors,
+        _,
+        _,
+    ):
         config.write_text(
             json.dumps(
                 {
@@ -889,13 +918,44 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
                 }
             )
         )
+        try:
+            yield _HeldPiJourney(
+                repository,
+                skill,
+                database_path,
+                config,
+                ai,
+                held_inference_arrived,
+                release_held_inference,
+                requests,
+                errors,
+            )
+        finally:
+            release_held_inference.set()
+
+
+@pytest.mark.certification
+def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        pytest.skip("The installed worker crash cut requires Linux pidfds")
+    with _held_pi_journey(tmp_path, monkeypatch) as journey:
+        database_path = journey.database_path
+        session_root = ApplicationStatePathLayout.from_database(database_path).pi_sessions
         log_path = tmp_path / "controller.log"
         with log_path.open("wb") as console:
             controller = subprocess.Popen(
-                (*ai, "new"), cwd=repository, stdout=console, stderr=subprocess.STDOUT
+                (*journey.ai, "--prompt", _TASKS[0], "--session", "new"),
+                cwd=journey.repository,
+                stdout=console,
+                stderr=subprocess.STDOUT,
             )
         try:
-            assert followup_arrived.wait(65), (errors, log_path.read_text()[-3000:])
+            assert journey.held_inference_arrived.wait(65), (
+                journey.errors,
+                log_path.read_text()[-3000:],
+            )
             database = LocalDatabase(database_path, read_only=True)
             lease = ExecutionCoordinator(database).active_lease()
             assert lease is not None and lease.fleet_run_id and lease.custody is not None
@@ -940,7 +1000,7 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
             finally:
                 os.close(worker)
         finally:
-            release_followup.set()
+            journey.release_held_inference.set()
             if controller.poll() is None:
                 try:
                     controller.wait(timeout=15)
@@ -990,13 +1050,11 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
         with reopened.transaction() as connection:
             assert ExecutionCoordinator(reopened).retained_leases_in(connection) == ()
 
-        refused = subprocess.run(
-            (*ai, f"run:{run_id}"), cwd=repository, capture_output=True, text=True, timeout=65
-        )
+        refused = journey.invoke(f"run:{run_id}", _TASKS[0])
         assert refused.returncode == 2, (refused.stdout[-3000:], refused.stderr[-3000:])
         assert json.loads(refused.stdout)["code"] == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
         assert journal.run_events(run_id) == failed
-        assert requests == [_TASKS[0], _TASKS[0]] and not errors
+        assert journey.requests == [_TASKS[0], _TASKS[0]] and not journey.errors
         assert tuple(session_root.iterdir()) == (slot,)
         after = native_file.stat()
         assert (after.st_dev, after.st_ino, after.st_size) == (
@@ -1006,3 +1064,122 @@ def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
         )
         with native_file.open("rb") as stream:
             assert hashlib.file_digest(stream, "sha256").hexdigest() == digest
+
+
+@pytest.mark.certification
+def test_installed_pi_active_continuation_fences_second_controller_through_cancel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _held_pi_journey(tmp_path, monkeypatch, hold_request_number=3) as journey:
+        initial = journey.invoke("new", _TASKS[0])
+        assert initial.returncode == 0, (initial.stdout[-3000:], initial.stderr[-3000:])
+        seed = json.loads(initial.stdout)
+        assert seed["outcome"] == "SUCCESS"
+        seed_id = seed["fleet_run_id"]
+        prior = f"run:{seed_id}"
+        selected, backend, git = resolve_native_cli_selection(
+            agent="pi",
+            profile="pi-rpc",
+            workspace=journey.repository,
+            config_file=journey.config,
+            session=PiSessionIntent(mode="continue", prior_run_id=seed_id),
+        )
+        runtime = ApplicationRuntime.build(
+            standard_local=True,
+            standard_process_isolation=backend,
+            git_service=git,
+            startup_purpose="workflow",
+        )
+        try:
+            writer = runtime.plans.run_native_agent(
+                selected=selected,
+                workspace=journey.repository,
+                skill=journey.skill,
+                task=_TASKS[1],
+                verification=(("/usr/bin/true",),),
+            )
+            run_id = writer.fleet_run_id
+            assert journey.held_inference_arrived.wait(65), journey.errors
+            reader = LocalDatabase(journey.database_path, read_only=True)
+            journal = Journal(reader)
+            coordinator = ExecutionCoordinator(reader)
+            live = journal.run_events(run_id)
+            live_revision = journal.read_view().revision
+            lease = coordinator.active_lease()
+            assert lease is not None and lease.fleet_run_id == run_id and lease.custody is not None
+            assert lease.custody.phase == "WORKER_OWNED" and lease.custody.owner_pid != os.getpid()
+            assert live.run.status is FleetRunStatus.RUNNING
+            assert journal.inspect_pi_session(seed_id).availability == "busy"
+            (reservation,) = (
+                event for event in live.events if isinstance(event, PiSessionWriterReservedEvent)
+            )
+            assert reservation.continuation is not None
+            assert reservation.continuation.prior_run_id == seed_id
+            (writer_start,) = (
+                event
+                for event in live.events
+                if type(event) is ProcessStartedEvent
+                and event.step_id == reservation.step_id
+                and event.sequence > reservation.sequence
+            )
+            busy = journey.invoke(prior, _TASKS[1])
+            assert busy.returncode == 2, (busy.stdout[-3000:], busy.stderr[-3000:])
+            assert json.loads(busy.stdout)["code"] == PiSessionRefusalCode.BUSY
+            assert coordinator.active_lease() == lease
+            assert journal.read_view().revision == live_revision
+            assert journey.requests == [_TASKS[0], _TASKS[0], _TASKS[1]]
+
+            cancel = runtime.runs.cancel(run_id)
+            assert cancel.status.cancel_request_satisfied
+            assert runtime.runs.wait_for_terminal(run_id, timeout=25).run.status is (
+                FleetRunStatus.CANCELLED
+            )
+        finally:
+            journey.release_held_inference.set()
+            runtime.shutdown(wait_for_runs=False, cancel_grace_seconds=2)
+
+        journal = Journal(LocalDatabase(journey.database_path, read_only=True))
+        retained = journal.run_events(run_id)
+        assert retained.run.status is FleetRunStatus.CANCELLED
+        assert retained.events[: len(live.events)] == live.events
+        original_lifetime = [
+            event
+            for event in retained.events
+            if isinstance(
+                event, (TerminationRequestedEvent, ProcessExitedEvent, DescendantsQuiescentEvent)
+            )
+            and event.physical_execution_id == writer_start.physical_execution_id
+        ]
+        assert [type(event) for event in original_lifetime] == [
+            TerminationRequestedEvent,
+            ProcessExitedEvent,
+            DescendantsQuiescentEvent,
+        ]
+        (observed,) = (
+            event for event in retained.events if isinstance(event, PiSessionWriterObservedEvent)
+        )
+        assert observed.reservation_sequence == reservation.sequence
+        assert observed.quiescent_sequence == original_lifetime[-1].sequence < observed.sequence
+        assert observed.observation.persistence == "unknown" and observed.observation.file is None
+        assert not any(isinstance(event, StepSucceededEvent) for event in retained.events)
+        assert coordinator.active_lease() is None
+
+        inspection = journal.inspect_pi_session(run_id)
+        assert inspection.availability == "unverified"
+        assert inspection.native is None
+        assert inspection.refusal_code == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+        assert journal.inspect_pi_session(seed_id).availability == "unavailable"
+        after_cancel = journey.invoke(f"run:{run_id}", _TASKS[2])
+        assert after_cancel.returncode == 2, (
+            after_cancel.stdout[-3000:],
+            after_cancel.stderr[-3000:],
+        )
+        assert json.loads(after_cancel.stdout)["code"] == "REPOSITORY_EFFECT_QUARANTINED"
+        final = journal.run_events(run_id)
+        assert (final.run, final.events, final.pi_session) == (
+            retained.run,
+            retained.events,
+            retained.pi_session,
+        )
+        assert journey.requests == [_TASKS[0], _TASKS[0], _TASKS[1]]
+        assert not journey.errors

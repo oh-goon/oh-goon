@@ -1065,6 +1065,31 @@ and unresolved process cleanup remain unverified. The fixture exercises
 process interruption. Power-loss durability and other host environments
 require separate qualification.
 
+### One Pi writer through cancellation and cleanup — HUG-75
+
+**Disposition**. Retain the claimed worker, SQLite writer reservation and
+Bubblewrap process ownership. When cancellation commits before the writer
+receipt, the same Journal transaction retains only an unknown persistence
+observation tied to verified descendant quiescence. A receipt committed
+before cancellation remains historical evidence. Continuation and retirement
+both require settled resources for the original repository operation.
+
+The [installed Pi test](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+pauses a continuation in its claimed worker. A second controller receives the
+busy refusal while the original lease and Journal revision remain current.
+Original cancellation records termination, exit and descendant quiescence
+for that same writer before recording unknown persistence. Fresh continuation
+of the cancelled writer is refused.
+
+The [Journal cases](../../backend/tests/unit/runtime/test_pi_session_writer.py)
+exercise the cancellation and publication order, stale callbacks after a new
+lease is acquired, and unresolved cleanup after an accepted Agent Step. The
+[claimed-worker process cases](../../backend/tests/integration/services/test_native_detached_lifetime.py)
+exercise descendant cleanup at completion, cancellation and deadline with a
+controlled Linux Bubblewrap workload. The installed proof uses the managed Pi
+1.3.0 profile. Custom persistent extensions and other host environments remain
+outside this qualification.
+
 ### Exact read-only Pi reopen — HUG-43
 
 **Disposition: retain** the Pi 1.3.0 RPC relay, managed inference bootstrap,
