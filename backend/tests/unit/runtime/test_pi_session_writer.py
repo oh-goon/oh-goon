@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
 import sqlite3
+import sys
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from threading import Barrier
 from unittest.mock import Mock
@@ -13,6 +16,7 @@ import pytest
 
 from oh_goon.core.errors import (
     ExecutionBusy,
+    FleetPlanInvalid,
     InvalidRunTransition,
     OwnershipLost,
     PiSessionBusy,
@@ -77,11 +81,13 @@ from oh_goon.core.vocabulary import (
 )
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
+from oh_goon.integrations.fleet_plan_preview import repository_plan_admission_evidence
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionSession
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.journal_store import JournalFactStore
+from oh_goon.runtime.pi_session_storage import pin_pi_session_directory
 from oh_goon.runtime.safety import RuntimeSafetyGate
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
 from oh_goon.services.fleet_admission import FleetAdmissionPlanner
@@ -200,19 +206,24 @@ def _claim_attempt(
     *,
     prior_run_id: str | None = None,
     repo_name: str = "repo",
+    repository_path: Path | None = None,
     executable_sha256: str = "b" * 64,
 ) -> _ClaimedPiAttempt:
     owner = ExecutionCoordinator(database)
     journal = Journal(database)
     repository = RepositoryIdentity.model_validate(
-        {"name": "sample", "path": database.path.parent / repo_name}
+        {"name": "sample", "path": repository_path or database.path.parent / repo_name}
     )
     target = _pi_target(prior_run_id, executable_sha256=executable_sha256)
     intent = FleetRunAdmissionIntent(
         target=target,
         capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
         execution=DirectFleetExecutionAdmission(),
-        repository_admissions=repository_admissions_for(target, [repository]),
+        repository_admissions=(
+            (repository_plan_admission_evidence(repository, target.plan),)
+            if repository_path is not None
+            else repository_admissions_for(target, [repository])
+        ),
     )
     ticket, _ = owner.reserve_fleet_with(
         fleet_run_id,
@@ -607,7 +618,7 @@ def test_pi_busy_refusal_requires_an_active_writer_of_the_requested_lineage(tmp_
 
 
 def test_pi_writer_without_quiescence_reports_cleanup_uncertainty_after_restart(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     database = LocalDatabase(tmp_path / "state.db")
     original = _claim_attempt(database, "original")
@@ -639,6 +650,14 @@ def test_pi_writer_without_quiescence_reports_cleanup_uncertainty_after_restart(
     with pytest.raises(PiSessionUnavailable, match="cleanup is unverified") as refusal:
         _claim_attempt(reopened, "contender", prior_run_id="original")
     assert refusal.value.code is PiSessionRefusalCode.CLEANUP_UNVERIFIED
+    inspect_storage = Mock()
+    monkeypatch.setattr(
+        "oh_goon.runtime.journal.inspect_recovered_pi_session_storage", inspect_storage
+    )
+    inspection = Journal(reopened).inspect_pi_session("original")
+    assert inspection.availability == "unverified"
+    assert inspection.refusal_code is PiSessionRefusalCode.CLEANUP_UNVERIFIED
+    inspect_storage.assert_not_called()
     assert Journal(reopened).run_events("original") == before
     with pytest.raises(PiSessionCleanupUnverified):
         Journal(reopened).retire_pi_session("original")
@@ -848,7 +867,7 @@ def test_interrupted_successor_never_releases_an_older_pi_predecessor(tmp_path: 
 
 @pytest.mark.parametrize("cut", ["before_allocation", "after_native_save"])
 def test_restart_preserves_unobserved_writer_and_fences_late_settlement(
-    tmp_path: Path, cut: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cut: str
 ) -> None:
     database = LocalDatabase(tmp_path / "state.db")
     original = _claim_attempt(database, "original")
@@ -892,6 +911,21 @@ def test_restart_preserves_unobserved_writer_and_fences_late_settlement(
         "not_checked",
     )
     assert (evidence.quiescent_sequence is not None) == (cut == "after_native_save")
+    selected_availability = "orphaned" if cut == "after_native_save" else "unavailable"
+    observe_storage = Mock(return_value=selected_availability)
+    monkeypatch.setattr(
+        "oh_goon.runtime.journal.inspect_recovered_pi_session_storage", observe_storage
+    )
+    inspection = Journal(LocalDatabase(database.path, read_only=True)).inspect_pi_session(
+        "original"
+    )
+    assert inspection.availability == selected_availability
+    assert inspection.refusal_code is PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+    assert inspection.native is None
+    observe_storage.assert_called_once_with(
+        layout=ApplicationStatePathLayout.from_database(database.path),
+        storage_id=reservation.storage_id,
+    )
     replacement = _claim_attempt(recovered, "replacement")
     successor = replacement.reserve()
     assert successor.storage_id != reservation.storage_id
@@ -914,3 +948,68 @@ def test_restart_preserves_unobserved_writer_and_fences_late_settlement(
             connection, "replacement", FleetRunTerminalIntent.CANCEL, None
         )
     )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux native directory custody")
+def test_pi_interrupted_allocation_follows_committed_writer_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "source.txt").write_text("original source", encoding="utf-8")
+    assert GitService().run("init", "-q", str(repository)).returncode == 0
+    database = LocalDatabase(tmp_path / "state" / "state.db")
+    original = _claim_attempt(database, "original", repository_path=repository)
+    reservation = original.reserve()
+    reader = Journal(LocalDatabase(database.path, read_only=True))
+    detail = reader.read_view().required_run_detail("original")
+    assert reader.inspect_pi_session("original").availability == "busy"
+    layout = ApplicationStatePathLayout.from_database(database.path)
+    leaf = layout.pi_sessions / reservation.storage_id
+    native_mkdir = os.mkdir
+    observed_allocations: list[str] = []
+
+    def mkdir(path: str, mode: int = 0o777, *, dir_fd: int | None = None) -> None:
+        if dir_fd is not None and path in (layout.pi_sessions.name, reservation.storage_id):
+            assert reader.run_events("original").events[reservation.sequence - 1] == reservation
+            observed_allocations.append(path)
+        native_mkdir(path, mode, dir_fd=dir_fd)
+        if path == reservation.storage_id:
+            raise InterruptedError("controlled interruption after slot creation")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "mkdir", mkdir)
+        with (
+            pytest.raises(FleetPlanInvalid, match="storage is unavailable"),
+            pin_pi_session_directory(
+                layout=layout,
+                fleet_run_id=reservation.fleet_run_id,
+                repository=original.repository,
+                repository_admission=detail.repository_admissions[0],
+                step_id=reservation.step_id,
+                attempt_number=reservation.attempt_number,
+                workspace=repository,
+                require_current=partial(
+                    original.journal.require_pi_session_writer, original.session, reservation
+                ),
+            ),
+        ):
+            pytest.fail("Interrupted allocation reached Pi")
+    assert observed_allocations == [layout.pi_sessions.name, reservation.storage_id]
+    assert list(leaf.iterdir()) == []
+
+    recovered = LocalDatabase(database.path)
+    journal = Journal(recovered)
+    effect_recovery(
+        recovered,
+        RepositoryEffectAttemptStore(recovered),
+        journal,
+        ExecutionCoordinator(recovered),
+        GitService(),
+    ).recover(fleet_run_id="original")
+    completed = Journal(LocalDatabase(database.path, read_only=True))
+    assert completed.run_events("original").run.status is FleetRunStatus.FAILED
+    inspection = completed.inspect_pi_session("original")
+    assert inspection.availability == "unavailable"
+    assert inspection.refusal_code is PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+    assert list(leaf.iterdir()) == []

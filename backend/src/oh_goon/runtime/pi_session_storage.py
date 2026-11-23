@@ -10,6 +10,7 @@ import sys
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+from typing import Literal
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import (
@@ -466,6 +467,61 @@ def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionF
             return observation
         except OSError as exc:
             raise FleetPlanInvalid("Original Pi session file is unavailable") from exc
+
+
+def inspect_recovered_pi_session_storage(
+    *, layout: ApplicationStatePathLayout, storage_id: str
+) -> Literal["orphaned", "unavailable", "unverified"]:
+    """Observe occupancy only in the slot selected by an already reconciled writer."""
+    if (
+        sys.platform != "linux"
+        or not hasattr(os, "O_PATH")
+        or not _PI_STORAGE_ID.fullmatch(storage_id)
+    ):
+        return "unverified"
+
+    with ExitStack() as descriptors:
+        try:
+            _require_pi_personal_storage_separation(layout.pi_sessions)
+            directory_fd, check_state, state_mounts = _pin_path(layout.root, descriptors)
+            state_info = os.fstat(directory_fd)
+            if state_info.st_uid != os.geteuid() or stat.S_IMODE(state_info.st_mode) & 0o022:
+                return "unverified"
+            checks = [check_state]
+
+            def require_current() -> None:
+                _require_pi_personal_storage_separation(layout.pi_sessions)
+                for check in checks:
+                    check()
+                _require_direct_filesystem(*state_mounts)
+
+            for component in (layout.pi_sessions.name, storage_id):
+                try:
+                    directory_fd, check_child = _open_private_child(
+                        descriptors, directory_fd, component, create=False
+                    )
+                except FileNotFoundError:
+                    require_current()
+                    try:
+                        os.stat(component, dir_fd=directory_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        return "unavailable"
+                    return "unverified"
+                checks.append(check_child)
+
+            require_current()
+            name = PI_SESSION_NEW_FILE.name
+            if not _session_file_present(directory_fd, name):
+                require_current()
+                return "unverified" if _session_file_present(directory_fd, name) else "unavailable"
+            fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
+            descriptors.callback(os.close, fd)
+            before = _require_current_file(directory_fd, name, fd)
+            require_current()
+            after = _require_current_file(directory_fd, name, fd)
+            return "orphaned" if _file_state(before) == _file_state(after) else "unverified"
+        except (OSError, ValueError, FleetPlanInvalid):
+            return "unverified"
 
 
 @contextmanager

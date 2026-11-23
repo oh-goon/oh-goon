@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from oh_goon.core.errors import InvalidRequest, InvalidRunTransition, OperationNotFound, RunNotFound
+from oh_goon.core.execution_lifecycle_validation import pi_writer_cleanup_unverified
 from oh_goon.core.fleet_plan_projection import atomic_goon_by_step
 from oh_goon.core.game_tape_pi_session import project_pi_session_evidence
 from oh_goon.core.models.agent_providers import PiSessionCleanupUnverified
@@ -41,6 +42,7 @@ from oh_goon.core.models.run_events import (
     PiSessionRetirementRequestedEvent,
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
+    ReconciliationCompletedEvent,
     RunAdmittedEvent,
 )
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
@@ -594,6 +596,21 @@ class JournalReadView:
             (event for event in events if isinstance(event, PiSessionRetiredEvent)), None
         )
         return PiSessionRetirementSource(writer, observation, request, retired)
+
+    def reconciled_pi_session_writer(
+        self, fleet_run_id: str
+    ) -> PiSessionWriterReservedEvent | None:
+        """Select metadata-only storage inspection after original writer recovery."""
+        events = self._index.events_by_run.get(fleet_run_id, ())
+        writer = pi_session_recorded_writer(events)
+        require_latest_pi_writer(
+            writer, self._index.events_by_run, self._index.pi_session_writer_heads
+        )
+        if pi_writer_cleanup_unverified(writer, events) or not any(
+            isinstance(event, ReconciliationCompletedEvent) for event in events[writer.sequence :]
+        ):
+            return None
+        return writer
 
     def pi_session_has_active_writer(
         self, prior_run_id: str, repository_id: str, active_run_ids: frozenset[str]

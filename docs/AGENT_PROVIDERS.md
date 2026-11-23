@@ -206,7 +206,14 @@ oh-goon runs retire-pi-session RUN_ID --authorize --json
 ```
 
 Inspection reports bounded metadata and the availability observed in this
-state root. It starts no native process. The Journal revokes continuation
+state root. A live reserved writer reports `busy`. After original recovery,
+an exact retained file without an accepted writer result reports `orphaned`.
+A missing or empty reserved slot reports `unavailable`. Uncertain cleanup
+or storage ownership reports `unverified`. Orphan inspection reads metadata
+only. Reopen and retirement require an accepted writer and qualified saved
+bytes.
+
+The Journal revokes continuation
 before removing the exact saved file. A verified retirement reports
 `availability: unavailable` and `retirement: verified`. A later resume
 returns `PI_SESSION_UNAVAILABLE`. Original Run, Step, and verifier evidence

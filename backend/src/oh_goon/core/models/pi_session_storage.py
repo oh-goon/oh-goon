@@ -77,7 +77,7 @@ class PiSessionInspection(ImmutableModel):
 
     fleet_run_id: str = Field(min_length=1, max_length=160)
     native: PiSessionNativeObservation | None = None
-    availability: Literal["available", "unavailable", "unverified", "busy"]
+    availability: Literal["available", "unavailable", "unverified", "busy", "orphaned"]
     retirement: Literal["none", "pending", "verified"] = "none"
     refusal_code: PiSessionRefusalCode | None = None
 
