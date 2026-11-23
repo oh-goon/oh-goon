@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from threading import Barrier
+from typing import Literal
 from unittest.mock import Mock
 
 import pytest
@@ -22,6 +23,7 @@ from oh_goon.core.errors import (
     PiSessionBusy,
     PiSessionRefusalCode,
 )
+from oh_goon.core.game_tape_pi_session import fleet_run_detail_readback, fleet_run_event_readback
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentModel,
@@ -34,7 +36,13 @@ from oh_goon.core.models.agent_providers import (
     PiSessionUnavailable,
     ResolvedNativeAgent,
 )
+from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.explanation import ReasonCode
+from oh_goon.core.models.fleet_observation import (
+    AgentHarnessObservation,
+    AgentReviewObservation,
+    NativeAgentObservation,
+)
 from oh_goon.core.models.fleet_plan import (
     ResolvedAgentStep,
     ResolvedCommandStep,
@@ -113,6 +121,7 @@ def _pi_target(
     *,
     executable_sha256: str = "b" * 64,
     following_steps: tuple[ResolvedCommandStep, ...] = (),
+    role: Literal["report", "review"] = "report",
 ) -> FleetPlanTarget:
     connection = AgentConnection(
         profile="fixture",
@@ -137,7 +146,7 @@ def _pi_target(
     step = ResolvedAgentStep(
         step_id="agent",
         timeout_seconds=5,
-        workload=ResolvedNativeAgentWorkload(native_agent=native),
+        workload=ResolvedNativeAgentWorkload(native_agent=native, role=role),
         delivery_sha256="a" * 64,
         handoff_identity="frozen-fixture",
         source_step_id="agent",
@@ -216,6 +225,7 @@ def _claim_attempt(
     repository_path: Path | None = None,
     executable_sha256: str = "b" * 64,
     following_steps: tuple[ResolvedCommandStep, ...] = (),
+    role: Literal["report", "review"] = "report",
 ) -> _ClaimedPiAttempt:
     owner = ExecutionCoordinator(database)
     journal = Journal(database)
@@ -223,7 +233,10 @@ def _claim_attempt(
         {"name": "sample", "path": repository_path or database.path.parent / repo_name}
     )
     target = _pi_target(
-        prior_run_id, executable_sha256=executable_sha256, following_steps=following_steps
+        prior_run_id,
+        executable_sha256=executable_sha256,
+        following_steps=following_steps,
+        role=role,
     )
     intent = FleetRunAdmissionIntent(
         target=target,
@@ -261,7 +274,10 @@ def _claim_attempt(
 
 
 def _accepted_pi_result(
-    attempt: _ClaimedPiAttempt, *, following_failure: FailedPlanStepExecution | None = None
+    attempt: _ClaimedPiAttempt,
+    *,
+    following_failure: FailedPlanStepExecution | None = None,
+    agent_observations: tuple[AgentReviewObservation | NativeAgentObservation, ...] = (),
 ) -> None:
     run_id = attempt.session.require_fleet_run_id()
     target = attempt.journal.run_events(run_id).run.target
@@ -283,6 +299,7 @@ def _accepted_pi_result(
         stderr_evidence=empty_output,
         repository_state_before="before",
         repository_state_after="after",
+        observations=agent_observations,
         settlement=PlanStepSettlementEvidence(
             outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
         ),
@@ -335,6 +352,57 @@ def _observe_pi_file(
     )
     attempt.journal.observe_pi_session_writer(attempt.session, reservation, observation=observation)
     return observation
+
+
+def test_private_pi_readback_keeps_save_and_settlement_without_review_text(tmp_path: Path) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original", role="review")
+    reservation = original.reserve()
+    _observe_pi_file(original, reservation, sha256="a" * 64, leaf_id="leaf-a")
+    echo = "private Pi review echo from tool output"
+    native = NativeAgentObservation(
+        agent="pi",
+        implementation_identity=f"pi:sha256:{'b' * 64}",
+        profile="owned",
+        input_identity="fixture-input",
+        occurrence="agent",
+        source_identity="fixture-source",
+        skill_identity="fixture-skill",
+        role="review",
+        events=(AgentHarnessObservation(kind="agent", summary=echo),),
+        native_event_count=1,
+        settled=True,
+        failed=False,
+    )
+    review = AgentReviewObservation(
+        record=AgentReviewRecord(
+            reviewer="agent",
+            candidate_identity="fixture-source",
+            scope_identity="fixture-scope",
+            skill_identity="fixture-skill",
+            verdict="CLEAN",
+            summary=echo,
+            reviewed_paths=(),
+        )
+    )
+    _accepted_pi_result(original, agent_observations=(native, review))
+
+    reader = Journal(LocalDatabase(database.path, read_only=True))
+    detail = reader.read_view().required_run_detail("original")
+    internal = detail.operations[0].evidence
+    assert isinstance(internal, FleetPlanOperationEvidence)
+    assert internal.plan.steps[0].observations == (native, review)
+    public = fleet_run_detail_readback(detail)
+    assert public is not None
+    step = public["operations"][0]["evidence"]["plan"]["steps"][0]
+    assert echo not in repr(public)
+    assert step["settlement"]["outcome"] == "SUCCESS"
+    (claim,) = step["observations"]
+    assert claim["kind"] == "native_agent" and claim["settled"] and not claim["events"]
+    pi = public["game_tape"]["pi_session"]
+    assert pi["persistence"] == "observed" and pi["save_verification"] == "pi_rpc_synced"
+    assert pi["availability"] == "not_checked"
+    assert fleet_run_event_readback(reader.run_events("original"))["pi_session"] == pi
 
 
 def test_pi_writer_reservation_has_one_winner_and_stable_replay_refusal(tmp_path: Path) -> None:
@@ -578,7 +646,10 @@ def test_continuation_refuses_unqualified_original_persistence(
         )
         _accepted_pi_result(original)
         reader = Journal(LocalDatabase(database.path, read_only=True))
-        assert reader.run_events("original").events[legacy.sequence - 1] == legacy
+        historical = reader.run_events("original")
+        assert historical.events[legacy.sequence - 1] == legacy
+        public = fleet_run_event_readback(historical)["pi_session"]
+        assert public["persistence"] == "observed" and "save_verification" not in public
         inspected = reader.inspect_pi_session("original")
         assert inspected.availability == "unverified"
         assert inspected.refusal_code is PiSessionRefusalCode.HISTORY_UNQUALIFIED

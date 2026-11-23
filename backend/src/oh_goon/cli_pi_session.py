@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.core.errors import FleetDomainError
@@ -44,14 +45,22 @@ def run_pi_session_command(runtime: ApplicationRuntime, args: argparse.Namespace
                 )
             )
         else:
-            print(f"Pi session operation refused ({code})")
-            print(action)
+            print(f"Pi session operation refused ({code})", file=sys.stderr)
+            print(action, file=sys.stderr)
             if readback is not None:
-                print("Inspect argv " + json.dumps(readback))
+                print("Inspect argv " + json.dumps(readback), file=sys.stderr)
         return 2
 
+    observed_action = (
+        pi_session_safe_next_action(result.refusal_code)
+        if result.refusal_code is not None
+        else None
+    )
     if args.as_json:
-        print(result.model_dump_json())
+        report = result.model_dump(mode="json")
+        if observed_action is not None:
+            report["safe_next_action"] = observed_action
+        print(json.dumps(report))
     else:
         print(f"Fleet Run ID {result.fleet_run_id}")
         print(f"Pi availability {result.availability} | retirement {result.retirement}")
@@ -59,4 +68,6 @@ def run_pi_session_command(runtime: ApplicationRuntime, args: argparse.Namespace
             print(f"Recorded Pi identity {result.native.session_id} | leaf {result.native.leaf_id}")
         if result.refusal_code is not None:
             print(f"Reason {result.refusal_code}")
+        if observed_action is not None:
+            print(observed_action)
     return 0

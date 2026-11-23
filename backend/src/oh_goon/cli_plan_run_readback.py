@@ -87,6 +87,8 @@ def print_pi_session_readback(evidence: GameTapePiSessionEvidence | None) -> Non
         print(f"Recorded Pi identity {evidence.native.session_id} | leaf {evidence.native.leaf_id}")
     if evidence.byte_identity is not None:
         print(f"Recorded file evidence {evidence.byte_identity.replace('_', ' ')}")
+    if evidence.save_verification is not None:
+        print(f"Recorded save verification {evidence.save_verification}")
     print("Current Pi session availability was not checked")
     print(f"Admitted Pi implementation {evidence.implementation_identity}")
     if evidence.repository_source is not None:

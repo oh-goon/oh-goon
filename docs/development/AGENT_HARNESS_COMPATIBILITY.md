@@ -1205,6 +1205,28 @@ cover stale callbacks after a successor reserves the same session or claims a
 replacement Run. The installed proof is scoped to Pi 1.3.0 on Linux Bubblewrap
 with the built-in shell tool and synthetic inference.
 
+### Native Pi readback and availability — HUG-87
+
+**Disposition**. Retain the existing Journal, Game Tape, and CLI readback
+owners. The recorded save proof accompanies the native identity, writer
+lineage, and original Step settlements. A historical read leaves availability
+unchecked. Explicit inspection checks the selected slot and reports a bounded
+reason and safe next action. Pi launch and transcript loading are outside
+historical readback.
+
+Public Run detail and all embedded Fleet Snapshot copies apply the same
+private Pi projection. Task excerpts, native payloads, and free-form typed
+review records stay private. The original typed acceptor retains the record
+and its Step settlement. Pi continuation refusals report the prior Run and
+handoff command when a prior Run was selected.
+
+The [installed operator journey](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+checks successful continuation across fresh CLI processes and the public
+Fleet API. The [installed compaction case][cli-compaction-tests] checks a
+qualified session after an independent verifier fails, an unavailable
+predecessor that retains its accepted Run, and historical readback with the
+synthetic session slot absent.
+
 ### Installed exact reopen and refusal — HUG-70
 
 **Disposition: retain** the qualified Pi RPC exact-open gate. HUG-39's native

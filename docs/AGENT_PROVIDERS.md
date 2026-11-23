@@ -192,6 +192,13 @@ reopen. Read the recorded session, cleanup, and independent verifier evidence wi
 `runs handoff`, `runs outputs`, `runs events`, or `runs tape`. Persistent
 `ai --json` returns the same bounded handoff as `runs handoff --json`.
 A history read uses the recorded evidence from the selected runtime.
+`save_verification: pi_rpc_synced` records the qualified native save.
+A recorded digest alone identifies bytes and can come from an earlier
+unqualified receipt. Historical views leave current availability at
+`not_checked`. Current inspection can report a usable session after an
+independent verifier failed, or an unavailable session after its Run passed.
+Public Run detail and Fleet Snapshot omit private Pi task excerpts, native
+payloads, and free-form review records while reporting Step settlement.
 
 ### Inspect and retire a saved Pi session
 
@@ -214,7 +221,8 @@ an exact retained file without an accepted writer result reports `orphaned`.
 A missing or empty reserved slot reports `unavailable`. Uncertain cleanup
 or storage ownership reports `unverified`. Orphan inspection reads metadata
 only. Reopen and retirement require an accepted writer and qualified saved
-bytes.
+bytes. When inspection reports a refusal code, it includes the same safe
+next action as the corresponding continuation diagnostic.
 
 The Journal revokes continuation
 before removing the exact saved file. A verified retirement reports

@@ -641,7 +641,11 @@ def _main(
         except (FleetDomainError, OSError, ValueError) as exc:
             from oh_goon.cli_plan_diagnostics import print_safe_plan_diagnostic
 
-            print_safe_plan_diagnostic(exc, as_json=bool(getattr(args, "as_json", False)))
+            print_safe_plan_diagnostic(
+                exc,
+                as_json=bool(getattr(args, "as_json", False)),
+                pi_session=getattr(args, "_pi_session", None),
+            )
             return 2
         args._native_agent = selected
         runtime = _build_application_runtime(

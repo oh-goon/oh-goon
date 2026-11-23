@@ -14359,6 +14359,18 @@
             ],
             "title": "Safe Next Action"
           },
+          "save_verification": {
+            "anyOf": [
+              {
+                "const": "pi_rpc_synced",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Save Verification"
+          },
           "settlement": {
             "anyOf": [
               {
