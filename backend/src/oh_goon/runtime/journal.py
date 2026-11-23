@@ -890,12 +890,16 @@ class Journal:
                 quiescent_sequence=quiet.sequence,
                 observation=current_observation,
             )
-            if current_observation.persistence == "observed" and (
-                current_observation.file is None or current_observation.file.sha256 is None
-            ):
-                raise InvalidRunTransition(
-                    "New Pi persistence observations require exact file bytes"
-                )
+            if current_observation.persistence == "observed":
+                file = current_observation.file
+                if file is None or file.sha256 is None:
+                    raise InvalidRunTransition(
+                        "New Pi persistence observations require exact file bytes"
+                    )
+                if file.save_verification != "pi_rpc_synced":
+                    raise InvalidRunTransition(
+                        "New Pi persistence observations require a verified native save"
+                    )
             if reservation.continuation is not None:
                 require_pi_continuation_observation(
                     event, view.pi_session_origin_observation(reservation.continuation)

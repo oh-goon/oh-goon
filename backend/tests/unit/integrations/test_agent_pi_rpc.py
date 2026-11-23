@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from contextlib import nullcontext
@@ -18,8 +19,9 @@ from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_OBSERVATION_RECORD,
     PI_SESSION_REFUSAL_RECORD,
     PiSessionNativeObservation,
+    PiSessionSaveObservation,
 )
-from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
+from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES, CommandResult, CommandSupervisorReceipt
 from oh_goon.integrations import agent_inference_relay
 from oh_goon.integrations.agent_native_execution import NativeAgentEventParser
 from oh_goon.integrations.agent_pi_rpc import PiRpcContinuation, PiRpcControl
@@ -181,7 +183,13 @@ def test_persistent_rpc_observes_same_file_and_final_leaf_without_retaining_entr
         _response(
             "oh-goon:final-entries",
             "get_entries",
-            {"leafId": "native-leaf", "entries": [{"private": "PRIVATE_TRANSCRIPT"}]},
+            {
+                "leafId": "native-leaf",
+                "entries": [
+                    {"type": "thinking_level_change", "id": "setup-leaf"},
+                    {"type": "message", "id": "native-leaf", "private": "PRIVATE_TRANSCRIPT 🧪"},
+                ],
+            },
         ),
     ]
     if reverse:
@@ -190,8 +198,14 @@ def test_persistent_rpc_observes_same_file_and_final_leaf_without_retaining_entr
     assert control.read_input(1024) is None
     assert control.feed_stdout(replies[1]) == ()
     assert control.read_input(1024) == b""
-    assert control.finish() == PiSessionNativeObservation(
-        session_id="native-session", leaf_id="native-leaf"
+    assert control.finish() == PiSessionSaveObservation(
+        session_id="native-session",
+        leaf_id="native-leaf",
+        entry_count=2,
+        entries_sha256=hashlib.sha256(
+            b'{"id":"setup-leaf","type":"thinking_level_change"}\n'
+            b'{"id":"native-leaf","private":"PRIVATE_TRANSCRIPT \\ud83e\\uddea","type":"message"}\n'
+        ).hexdigest(),
     )
 
 
@@ -227,9 +241,20 @@ def test_persistent_rpc_requires_a_native_empty_conversation(message_count: obje
     assert control.read_input(1024) == b""
 
 
-@pytest.mark.parametrize("success", [True, False])
-def test_persistent_rpc_preserves_original_settlement_when_final_leaf_is_unavailable(
-    success: bool,
+@pytest.mark.parametrize(
+    ("success", "data"),
+    [
+        (None, None),
+        (False, None),
+        (True, {"leafId": None, "entries": []}),
+        (True, {"leafId": "leaf", "entries": []}),
+        (True, {"leafId": "leaf", "entries": [{"id": "other", "type": "message"}]}),
+        (True, {"leafId": "leaf", "entries": [{"type": "message"}]}),
+        (True, {"leafId": "leaf", "entries": ["invalid", {"id": "leaf", "type": "message"}]}),
+    ],
+)
+def test_persistent_rpc_preserves_settlement_when_save_evidence_is_unavailable(
+    success: bool | None, data: object
 ) -> None:
     control = _persistent_start()
     control.feed_stdout(
@@ -237,7 +262,8 @@ def test_persistent_rpc_preserves_original_settlement_when_final_leaf_is_unavail
     )
     _commands(control)
     _ack(control)
-    control.feed_stdout(_line({"type": "agent_settled", "aborted": False}))
+    terminal = _line({"type": "agent_settled", "aborted": False})
+    assert control.feed_stdout(terminal) == (terminal,)
     _commands(control)
     control.feed_stdout(
         _response(
@@ -246,22 +272,65 @@ def test_persistent_rpc_preserves_original_settlement_when_final_leaf_is_unavail
             {"sessionId": "native-session", "sessionFile": str(PI_SESSION_NEW_FILE)},
         )
     )
-    assert (
-        control.feed_stdout(
-            _line(
-                {
-                    "id": "oh-goon:final-entries",
-                    "type": "response",
-                    "command": "get_entries",
-                    "success": success,
-                    "data": {"leafId": None, "entries": []} if success else None,
-                }
+    if success is not None:
+        assert (
+            control.feed_stdout(
+                _line(
+                    {
+                        "id": "oh-goon:final-entries",
+                        "type": "response",
+                        "command": "get_entries",
+                        "success": success,
+                        "data": data,
+                    }
+                )
             )
+            == ()
         )
-        == ()
-    )
-    assert control.read_input(1024) == b""
+        assert control.read_input(1024) == b""
     assert control.finish() is None
+
+
+@pytest.mark.parametrize("truncated", [False, True], ids=["oversized", "truncated"])
+@pytest.mark.parametrize("correlated", [True, False], ids=["final-entries", "unknown"])
+def test_rpc_preserves_settlement_only_for_attributable_final_entries_loss(
+    truncated: bool, correlated: bool
+) -> None:
+    control = _persistent_start()
+    control.feed_stdout(
+        _response("oh-goon:entries", "get_entries", {"leafId": None, "entries": []})
+    )
+    _commands(control)
+    _ack(control)
+    terminal = _line({"type": "agent_settled", "aborted": False})
+    assert control.feed_stdout(terminal) == (terminal,)
+    _commands(control)
+    control.feed_stdout(
+        _response(
+            "oh-goon:final-state",
+            "get_state",
+            {"sessionId": "native-session", "sessionFile": str(PI_SESSION_NEW_FILE)},
+        )
+    )
+    request_id = "oh-goon:final-entries" if correlated else "other"
+    payload = "x" * (64 if truncated else MAX_COMMAND_INPUT_BYTES)
+    record = _response(
+        request_id,
+        "get_entries",
+        {"entries": [{"type": "message", "id": "leaf", "message": payload}], "leafId": "leaf"},
+    )
+    if truncated:
+        record = record[: record.index(payload) + 16]
+    assert control.feed_stdout(record[:12]) == ()
+    if correlated:
+        assert control.feed_stdout(record[12:]) == ()
+        if not truncated:
+            assert control.read_input(1024) == b""
+        assert control.finish() is None
+    else:
+        with pytest.raises(AgentProviderError, match="framing budget|correlated native settlement"):
+            control.feed_stdout(record[12:])
+            control.finish()
 
 
 def test_persistent_rpc_refuses_a_session_path_outside_the_original_selected_file() -> None:
@@ -279,7 +348,12 @@ def test_persistent_rpc_refuses_a_session_path_outside_the_original_selected_fil
 
 
 def test_native_pi_child_cannot_emit_private_relay_observation() -> None:
-    observation = PiSessionNativeObservation(session_id="native-session", leaf_id="native-leaf")
+    observation = PiSessionSaveObservation(
+        session_id="native-session",
+        leaf_id="native-leaf",
+        entry_count=1,
+        entries_sha256="a" * 64,
+    )
     private_record = _line(
         {"type": PI_SESSION_OBSERVATION_RECORD, "data": observation.model_dump(mode="json")}
     )
@@ -848,11 +922,21 @@ def test_continuation_correlates_old_leaf_and_returns_only_new_native_metadata()
             _response(
                 "oh-goon:final-entries",
                 "get_entries",
-                {"leafId": "advanced-leaf", "entries": [{"private": "current turn text"}]},
+                {
+                    "leafId": "advanced-leaf",
+                    "entries": [
+                        {"type": "message", "id": "advanced-leaf", "private": "current turn text"}
+                    ],
+                },
             )
         )
         == ()
     )
-    assert control.finish() == PiSessionNativeObservation(
-        session_id="prior-session", leaf_id="advanced-leaf"
+    assert control.finish() == PiSessionSaveObservation(
+        session_id="prior-session",
+        leaf_id="advanced-leaf",
+        entry_count=1,
+        entries_sha256=hashlib.sha256(
+            b'{"id":"advanced-leaf","private":"current turn text","type":"message"}\n'
+        ).hexdigest(),
     )

@@ -6,6 +6,7 @@ admitted prior session and native leaf before receiving the fresh frozen prompt.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import deque
 from threading import RLock
@@ -21,11 +22,20 @@ from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_OBSERVATION_RECORD,
     PI_SESSION_REFUSAL_RECORD,
     PiSessionNativeObservation,
+    PiSessionSaveObservation,
+    encode_pi_session_entry,
 )
 from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES
 from oh_goon.integrations.agent_native_execution import decode_native_agent_record
 
 type PiBrokerApi = Literal["openai-completions", "openai-responses", "anthropic-messages"]
+
+_FINAL_ENTRIES_ID = "oh-goon:final-entries"
+# Pi 1.3.0 serializes this envelope in order before the unbounded entries payload.
+_FINAL_ENTRIES_PREFIX = (
+    b'{"id":"oh-goon:final-entries","type":"response","command":"get_entries",'
+    b'"success":true,"data":{"entries":['
+)
 
 
 def pi_broker_api(api: ProviderApi) -> PiBrokerApi:
@@ -70,15 +80,15 @@ class PiRpcControl:
         self._continuation = continuation
         self._persistent = persistent or continuation is not None
         self._pending = bytearray()
+        self._discarding_final_entries = False
         self._failure: str | None = None
         self._refusal_code: PiSessionRefusalCode | None = None
         self._closed = False
-        self._complete = False
         self._state_seen = False
         self._entries_seen = False
         self._session_id: str | None = None
         self._leaf_id: str | None = None
-        self._final_leaf_id: str | None = None
+        self._save_observation: PiSessionSaveObservation | None = None
         self._prompt_sent = False
         self._prompt_accepted = False
         self._settled = False
@@ -90,9 +100,7 @@ class PiRpcControl:
         self._answered: set[str] = set()
         self._prompt = self._encode({"id": "oh-goon:prompt", "type": "prompt", "message": message})
         self._final = self._encode({"id": "oh-goon:final-state", "type": "get_state"})
-        self._final_entries = (
-            self._entries_request("oh-goon:final-entries") if self._persistent else b""
-        )
+        self._final_entries = self._entries_request(_FINAL_ENTRIES_ID) if self._persistent else b""
         initial = (
             self._encode({"id": "oh-goon:state", "type": "get_state"}),
             self._entries_request("oh-goon:entries"),
@@ -165,15 +173,35 @@ class PiRpcControl:
             forwarded: list[str] = []
             for index, part in enumerate(data.split(b"\n")):
                 if index:
-                    line = bytes(self._pending)
-                    self._pending.clear()
-                    event = self._consume(line)
-                    if event is not None:
-                        forwarded.append(event)
+                    if self._discarding_final_entries:
+                        self._discarding_final_entries = False
+                        self._answered.add(_FINAL_ENTRIES_ID)
+                        self._close_after_final_responses()
+                    else:
+                        line = bytes(self._pending)
+                        self._pending.clear()
+                        event = self._consume(line)
+                        if event is not None:
+                            forwarded.append(event)
+                if self._discarding_final_entries:
+                    continue
                 if len(self._pending) + len(part) > MAX_COMMAND_INPUT_BYTES:
-                    self._fail("Pi RPC record exceeds the native framing budget")
+                    prefix = self._pending[: len(_FINAL_ENTRIES_PREFIX)]
+                    prefix.extend(part[: len(_FINAL_ENTRIES_PREFIX) - len(prefix)])
+                    if not self._is_outstanding_final_entries(prefix):
+                        self._fail("Pi RPC record exceeds the native framing budget")
+                    self._pending.clear()
+                    self._discarding_final_entries = True
+                    continue
                 self._pending.extend(part)
             return tuple(forwarded)
+
+    def _is_outstanding_final_entries(self, record: bytes | bytearray) -> bool:
+        return (
+            _FINAL_ENTRIES_ID in self._requests
+            and _FINAL_ENTRIES_ID not in self._answered
+            and record.startswith(_FINAL_ENTRIES_PREFIX)
+        )
 
     def _consume(self, line: bytes) -> str | None:
         if not line.strip():
@@ -294,7 +322,7 @@ class PiRpcControl:
         ):
             self._fail("Pi RPC response has an unknown or repeated request identity")
         command = self._requests[request_id]
-        final_entries = request_id == "oh-goon:final-entries"
+        final_entries = request_id == _FINAL_ENTRIES_ID
         if value.get("command") != command:
             self._fail("Pi RPC command was refused or mismatched")
         if not final_entries and value.get("success") is not True:
@@ -312,15 +340,7 @@ class PiRpcControl:
             # This extra query reports persistence evidence. Its refusal or an
             # absent leaf cannot replace the original conversation disposition.
             if value.get("success") is True and isinstance(data, dict):
-                leaf = data.get("leafId")
-                if (
-                    type(leaf) is str
-                    and 1 <= len(leaf) <= 256
-                    and leaf != self._leaf_id
-                    and isinstance(data.get("entries"), list)
-                    and data["entries"]
-                ):
-                    self._final_leaf_id = leaf
+                self._save_observation = self._observe_final_entries(data)
         elif not isinstance(data, dict):
             self._fail("Pi RPC response omitted its native data")
         elif request_id == "oh-goon:state":
@@ -360,15 +380,43 @@ class PiRpcControl:
                     "Pi RPC replaced the observed native session identity",
                     refusal=PiSessionRefusalCode.IDENTITY_MISMATCH if self._persistent else None,
                 )
-        if "oh-goon:final-state" in self._answered and (
-            not self._persistent or "oh-goon:final-entries" in self._answered
-        ):
-            self._complete = True
-            self._closed = True
+        self._close_after_final_responses()
         if self._state_seen and self._entries_seen and not self._prompt_sent:
             self._prompt_sent = True
             self._requests["oh-goon:prompt"] = "prompt"
             self._outbox.append(self._prompt)
+
+    def _close_after_final_responses(self) -> None:
+        if "oh-goon:final-state" in self._answered and (
+            not self._persistent or _FINAL_ENTRIES_ID in self._answered
+        ):
+            self._closed = True
+
+    def _observe_final_entries(self, data: dict[str, object]) -> PiSessionSaveObservation | None:
+        leaf = data.get("leafId")
+        entries = data.get("entries")
+        if (
+            not isinstance(leaf, str)
+            or leaf == self._leaf_id
+            or not isinstance(entries, list)
+            or not entries
+            or not isinstance(entries[-1], dict)
+            or entries[-1].get("id") != leaf
+        ):
+            return None
+        assert self._session_id is not None
+        digest = hashlib.sha256()
+        try:
+            for entry in entries:
+                digest.update(encode_pi_session_entry(entry))
+            return PiSessionSaveObservation(
+                session_id=self._session_id,
+                leaf_id=leaf,
+                entry_count=len(entries),
+                entries_sha256=digest.hexdigest(),
+            )
+        except (TypeError, ValueError, RecursionError):
+            return None
 
     def _request_final_if_settled(self) -> None:
         if self._settled and self._prompt_accepted and not self._final_requested:
@@ -376,21 +424,17 @@ class PiRpcControl:
             self._requests["oh-goon:final-state"] = "get_state"
             self._outbox.append(self._final)
             if self._persistent:
-                self._requests["oh-goon:final-entries"] = "get_entries"
+                self._requests[_FINAL_ENTRIES_ID] = "get_entries"
                 self._outbox.append(self._final_entries)
 
-    def finish(self) -> PiSessionNativeObservation | None:
+    def finish(self) -> PiSessionSaveObservation | None:
         with self._lock:
             if self._failure is not None:
                 raise AgentProviderError(self._failure)
-            if self._pending or not self._complete:
+            if "oh-goon:final-state" not in self._answered or (
+                self._pending and not self._is_outstanding_final_entries(self._pending)
+            ):
                 self._fail("Pi RPC ended before complete correlated native settlement")
-            if not self._persistent or self._final_leaf_id is None:
-                return None
-            assert self._session_id is not None
-            try:
-                return PiSessionNativeObservation(
-                    session_id=self._session_id, leaf_id=self._final_leaf_id
-                )
-            except ValueError:
-                return None
+            # The final entries query qualifies a save independently of the
+            # final native state. At physical EOF its reply may be absent or torn.
+            return self._save_observation

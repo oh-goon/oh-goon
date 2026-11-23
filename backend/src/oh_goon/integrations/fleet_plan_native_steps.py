@@ -44,7 +44,7 @@ from oh_goon.core.models.fleet_plan import PLAN_CONTRACT_RETURN_CODE, ResolvedAg
 from oh_goon.core.models.fleet_plan_execution_policy import CicdExecutionPolicy
 from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_NEW_FILE,
-    PiSessionNativeObservation,
+    PiSessionSaveObservation,
     PiSessionWriterObservation,
 )
 from oh_goon.core.ports.pi_session_writer import ReservedPiSessionWriter
@@ -521,14 +521,14 @@ def _settle_pi_session_writer(
     runtime: StepRuntime,
     writer: ReservedPiSessionWriter,
     physical_execution_id: str | None,
-    native: PiSessionNativeObservation | None,
+    native: PiSessionSaveObservation | None,
 ) -> None:
     if physical_execution_id is None:
         return
     file = None
     if native is not None:
         try:
-            file = writer.observe_file()
+            file = writer.observe_file(native)
         except (FleetPlanInvalid, OperationCancelledError):
             # File/cancellation evidence alone cannot establish persistence.
             pass

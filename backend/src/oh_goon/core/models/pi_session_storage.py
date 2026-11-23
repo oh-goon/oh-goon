@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -48,6 +49,9 @@ class PiSessionFileObservation(ImmutableModel):
     sha256: str | None = Field(
         default=None, pattern=r"^[0-9a-f]{64}$", exclude_if=lambda value: value is None
     )
+    save_verification: Literal["pi_rpc_synced"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class PiSessionRetirementDirectoryIdentity(ImmutableModel):
@@ -70,6 +74,25 @@ class PiSessionNativeObservation(ImmutableModel):
 
     session_id: str = Field(min_length=1, max_length=256, pattern=r"^[a-zA-Z0-9_-]+$")
     leaf_id: str = Field(min_length=1, max_length=256, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
+class PiSessionSaveObservation(PiSessionNativeObservation):
+    """Transient evidence from Pi's correlated final ordered entries response."""
+
+    entry_count: int = Field(ge=1, le=1_048_576, strict=True)
+    entries_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+def encode_pi_session_entry(entry: object) -> bytes:
+    """Encode an opaque JSON entry consistently on either side of the save check."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("type"), str):
+        raise ValueError("Pi session save requires typed JSON entries")
+    return (
+        json.dumps(
+            entry, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":")
+        ).encode("ascii")
+        + b"\n"
+    )
 
 
 class PiSessionInspection(ImmutableModel):

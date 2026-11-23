@@ -271,11 +271,9 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     restart_task = "Review the retained compacted native conversation after application restart."
     restart_skill = tmp_path / "skills" / "restart"
     restart_skill_instructions = "# Fresh restart Skill\nCheck only the current synthetic source.\n"
-    check_restart = reopen and verification_passes
     if reopen:
         prior_skill.mkdir()
         (prior_skill / "SKILL.md").write_text(prior_skill_instructions, encoding="utf-8")
-    if check_restart:
         restart_skill.mkdir()
         (restart_skill / "SKILL.md").write_text(restart_skill_instructions, encoding="utf-8")
     prior_requests = 0
@@ -363,7 +361,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     self.reply(typed_review(prior_identity))
                     return
                 if restart_task in privileged:
-                    assert check_restart and restart_scratch is None
+                    assert reopen and restart_scratch is None
                     assert body["model"] == "native-compaction-fixture"
                     assert self.headers["Authorization"] == "Bearer SYNTHETIC_COMPACTION_KEY"
                     assert tools.keys() == {"read", "grep", "find", "ls"}
@@ -863,7 +861,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 runtime.shutdown(wait_for_runs=True)
             retained_requests = request_count
             restart_run_id: str | None = None
-            if check_restart:
+            if reopen:
                 cli = Path(sys.executable).with_name("oh-goon")
                 result = subprocess.run(
                     (
@@ -920,6 +918,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     == retained.game_tape.fleet_run_id
                     == admitted.fleet_run_id
                 )
+                assert retained.run == detail.run and retained.outcome is detail.outcome
                 retained_steps = retained.game_tape.repositories[0].steps
                 assert (
                     retained_steps[0].native_agent_observations
@@ -929,6 +928,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     step.settlement for step in steps
                 )
                 assert retained.operations == detail.operations
+                assert retained.game_tape.pi_session == detail.game_tape.pi_session
                 if restart_run_id is not None:
                     restart_detail = reopened.runs.get(restart_run_id)
                     assert restart_scratch is not None and current_scratch is not None
@@ -945,6 +945,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     assert restarted_pi.prior_run_id == admitted.fleet_run_id
                     assert restarted_pi.native.session_id == compacted_pi.native.session_id
                     assert restarted_pi.native.leaf_id != compacted_pi.native.leaf_id
+                    assert restarted_pi.persistence == "observed"
                     assert restart_detail.game_tape.repositories[0].steps[1].settlement.outcome == (
                         "SUCCESS"
                     )

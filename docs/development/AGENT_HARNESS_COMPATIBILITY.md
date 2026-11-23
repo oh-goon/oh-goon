@@ -1118,6 +1118,39 @@ respective owners. This mode does not qualify migration of native files,
 writes by other host processes, restored extensions, disk-full or power-loss
 durability, or portability to other runtimes.
 
+### Native Pi save evidence and verifier independence — HUG-76
+
+**Disposition**. Retain Pi 1.3.0's RPC and JSONL save owners. The final
+correlated entries response supplies a private ordered record digest and
+count. After the claimed worker proves process cleanup, the storage owner
+checks the matching complete records through the pinned file. A continuing
+save must retain the exact predecessor bytes and the newly observed suffix.
+The file and its directory must synchronize before the Journal accepts the
+save receipt. The transcript stays in its original slot.
+
+Incomplete records, missing entries, changed predecessor bytes, and sync or
+close errors leave persistence unknown. If Pi 1.3.0's final entries response
+exceeds the framing bound or ends before its newline, its ordered RPC
+envelope identifies it as the outstanding save query. The relay discards its
+contents and still requires the correlated final state and physical exit.
+The Agent and independent verifier retain their own results. Historical
+digest-only and metadata-only receipts remain
+readable with unverified save eligibility. New reopen and retirement
+requests require qualified evidence. Previously committed retirement
+requests retain their exact removal authority.
+
+The [installed torn-save test](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+exercises a successful Pi turn and verifier with malformed retained bytes,
+then checks a fresh continuation refusal. The
+[installed compaction test](../../backend/tests/integration/services/test_native_cli_compaction.py)
+reopens a qualified session after a failed independent verifier and checks
+the original failure after restart. The installed save fault cases inject
+file-sync ENOSPC and file-handle-close EIO after Pi writes a complete
+transcript. They also kill the claimed worker after file and directory sync
+and before Journal publication. Recovery preserves the original bytes and
+refuses continuation. Power-loss durability and a physically full filesystem
+remain unqualified.
+
 ### Installed exact reopen and refusal — HUG-70
 
 **Disposition: retain** the qualified Pi RPC exact-open gate. HUG-39's native

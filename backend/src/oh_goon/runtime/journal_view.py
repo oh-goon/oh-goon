@@ -10,7 +10,10 @@ from oh_goon.core.errors import InvalidRequest, InvalidRunTransition, OperationN
 from oh_goon.core.execution_lifecycle_validation import pi_writer_cleanup_unverified
 from oh_goon.core.fleet_plan_projection import atomic_goon_by_step
 from oh_goon.core.game_tape_pi_session import project_pi_session_evidence
-from oh_goon.core.models.agent_providers import PiSessionCleanupUnverified
+from oh_goon.core.models.agent_providers import (
+    PiSessionCleanupUnverified,
+    PiSessionHistoryUnqualified,
+)
 from oh_goon.core.models.agent_repair import AgentCampaignReadback
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
 from oh_goon.core.models.fleet import OperationState
@@ -578,12 +581,21 @@ class JournalReadView:
             prior_run_id, admission, self._index.events_by_run, self._index.pi_session_writer_heads
         )
         self._require_pi_writer_resource_settlement(writer)
+        self._require_pi_writer_save(observation)
         return writer, observation
 
     def _require_pi_writer_resource_settlement(self, writer: PiSessionWriterReservedEvent) -> None:
         operation = self._index.operations_by_id[writer.operation_id]
         if operation.resource_settlement != "SETTLED":
             raise PiSessionCleanupUnverified("Original Run resource cleanup is unverified")
+
+    @staticmethod
+    def _require_pi_writer_save(observation: PiSessionWriterObservedEvent) -> None:
+        file = observation.observation.file
+        if file is None or file.save_verification != "pi_rpc_synced":
+            raise PiSessionHistoryUnqualified(
+                "Selected Pi session has no verified native save receipt"
+            )
 
     def pi_session_retirement_source(self, fleet_run_id: str) -> PiSessionRetirementSource:
         events = self._index.events_by_run.get(fleet_run_id, ())
@@ -597,6 +609,9 @@ class JournalReadView:
             (event for event in events if isinstance(event, PiSessionRetirementRequestedEvent)),
             None,
         )
+        if request is None:
+            # A recorded request already revoked reuse and selected exact removal.
+            self._require_pi_writer_save(observation)
         retired = next(
             (event for event in events if isinstance(event, PiSessionRetiredEvent)), None
         )

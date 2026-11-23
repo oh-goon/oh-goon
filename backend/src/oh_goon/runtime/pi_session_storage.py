@@ -10,10 +10,11 @@ import sys
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Literal
+from typing import BinaryIO, Literal
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
     PiSessionCleanupUnverified,
     PiSessionHistoryUnqualified,
     PiSessionIdentityMismatch,
@@ -26,6 +27,8 @@ from oh_goon.core.models.pi_session_storage import (
     PiSessionFilePin,
     PiSessionRetirementDirectoryIdentity,
     PiSessionRetirementPin,
+    PiSessionSaveObservation,
+    encode_pi_session_entry,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
@@ -34,6 +37,8 @@ from oh_goon.core.product_identity import (
     pi_session_storage_id,
     repository_subject_instance_id_from_metadata,
 )
+from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES
+from oh_goon.integrations.agent_native_execution import decode_native_agent_record
 
 _MAX_PI_SESSION_BYTES = 16 * 1024 * 1024
 _PI_STORAGE_ID = re.compile(r"pi-session-[0-9a-f]{64}")
@@ -390,6 +395,69 @@ def _require_current_file(directory_fd: int, name: str, fd: int) -> os.stat_resu
     return info
 
 
+def _read_save_record(stream: BinaryIO, remaining: int) -> tuple[bytes, dict[str, object]]:
+    limit = min(remaining, MAX_COMMAND_INPUT_BYTES)
+    record = stream.readline(limit + 1)
+    if len(record) > limit or not record.endswith(b"\n"):
+        raise FleetPlanInvalid("Pi save contains an incomplete or oversized JSONL record")
+    try:
+        return record, decode_native_agent_record(record.decode("utf-8"))
+    except (AgentProviderError, UnicodeError) as exc:
+        raise FleetPlanInvalid("Pi save contains an invalid JSONL record") from exc
+
+
+def _verify_and_sync_save(
+    stream: BinaryIO,
+    directory_fd: int,
+    before: os.stat_result,
+    save: PiSessionSaveObservation,
+    prior_file: PiSessionFileObservation | None,
+) -> str:
+    """Bind Pi's final append evidence to the same file and directory we synchronize."""
+    digest = hashlib.sha256()
+    remaining = before.st_size
+    if prior_file is None:
+        header, metadata = _read_save_record(stream, remaining)
+        if metadata["type"] != "session" or metadata.get("id") != save.session_id:
+            raise FleetPlanInvalid("Pi save header differs from the original native session")
+        digest.update(header)
+        remaining -= len(header)
+    else:
+        if (
+            prior_file.save_verification != "pi_rpc_synced"
+            or prior_file.sha256 is None
+            or not 1 <= prior_file.size < before.st_size
+            or (prior_file.device, prior_file.inode) != (before.st_dev, before.st_ino)
+        ):
+            raise FleetPlanInvalid("Pi save has no exact qualified predecessor extent")
+        remaining_prefix = prior_file.size
+        while remaining_prefix:
+            chunk = stream.read(min(1024 * 1024, remaining_prefix))
+            if not chunk:
+                raise FleetPlanInvalid("Pi save is missing its retained predecessor bytes")
+            digest.update(chunk)
+            remaining_prefix -= len(chunk)
+        if digest.hexdigest() != prior_file.sha256:
+            raise FleetPlanInvalid("Pi save changed its retained predecessor bytes")
+        remaining -= prior_file.size
+
+    entries_digest = hashlib.sha256()
+    for _ in range(save.entry_count):
+        record, entry = _read_save_record(stream, remaining)
+        try:
+            entries_digest.update(encode_pi_session_entry(entry))
+        except (TypeError, ValueError, RecursionError) as exc:
+            raise FleetPlanInvalid("Pi save contains an invalid JSONL record") from exc
+        digest.update(record)
+        remaining -= len(record)
+    if remaining or stream.read(1) or entries_digest.hexdigest() != save.entries_sha256:
+        raise FleetPlanInvalid("Pi save bytes differ from the observed native append")
+
+    os.fsync(stream.fileno())
+    os.fsync(directory_fd)
+    return digest.hexdigest()
+
+
 def _observe_pinned_session_file(
     directory_fd: int,
     name: str,
@@ -397,6 +465,8 @@ def _observe_pinned_session_file(
     require_current: Callable[[], None],
     *,
     expected_file: PiSessionFileObservation | None = None,
+    save: PiSessionSaveObservation | None = None,
+    prior_file: PiSessionFileObservation | None = None,
 ) -> tuple[PiSessionFileObservation, os.stat_result]:
     require_current()
     before = _require_current_file(directory_fd, name, fd)
@@ -411,29 +481,46 @@ def _observe_pinned_session_file(
         raise PiSessionHistoryUnqualified("Retained Pi session size differs from its receipt")
     if not 1 <= before.st_size <= _MAX_PI_SESSION_BYTES:
         raise FleetPlanInvalid("Pi session exceeds its bounded persistence observation scope")
-    digest = hashlib.sha256()
-    byte_count = 0
+    save_verification = expected_file.save_verification if expected_file is not None else None
+    byte_count = before.st_size
     # The owned O_PATH handle was verified regular before opening a readable
     # descriptor. Never reopen a caller-controlled pathname to read bytes.
     with Path(f"/proc/self/fd/{fd}").open("rb") as stream:
         if _file_state(os.fstat(stream.fileno())) != _file_state(before):
             raise FleetPlanInvalid("Original Pi session file changed before hashing")
-        while chunk := stream.read(min(1024 * 1024, before.st_size + 1 - byte_count)):
-            byte_count += len(chunk)
-            digest.update(chunk)
+        if save is not None:
+            sha256 = _verify_and_sync_save(stream, directory_fd, before, save, prior_file)
+            save_verification = "pi_rpc_synced"
+        else:
+            digest = hashlib.sha256()
+            byte_count = 0
+            while chunk := stream.read(min(1024 * 1024, before.st_size + 1 - byte_count)):
+                byte_count += len(chunk)
+                digest.update(chunk)
+            sha256 = digest.hexdigest()
     require_current()
     after = _require_current_file(directory_fd, name, fd)
     if byte_count != before.st_size or _file_state(after) != _file_state(before):
         raise FleetPlanInvalid("Original Pi session file changed while hashing")
     observed = PiSessionFileObservation(
-        device=after.st_dev, inode=after.st_ino, size=after.st_size, sha256=digest.hexdigest()
+        device=after.st_dev,
+        inode=after.st_ino,
+        size=after.st_size,
+        sha256=sha256,
+        save_verification=save_verification,
     )
     if expected_file is not None and observed != expected_file:
         raise PiSessionHistoryUnqualified("Retained Pi session differs from its admitted receipt")
     return observed, after
 
 
-def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionFileObservation:
+def observe_pi_session_file(
+    pin: PiSessionDirectoryPin,
+    name: str,
+    save: PiSessionSaveObservation | None = None,
+    *,
+    prior_file: PiSessionFileObservation | None = None,
+) -> PiSessionFileObservation:
     """Observe an exact Pi-supplied basename after the original process settles."""
     if (
         not name.endswith(".jsonl")
@@ -445,8 +532,12 @@ def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionF
         or (pin.existing_file is not None and name != PI_SESSION_NEW_FILE.name)
     ):
         raise FleetPlanInvalid("Pi session file requires an exact native basename")
-    with ExitStack() as owned:
-        try:
+    if save is not None and (
+        name != PI_SESSION_NEW_FILE.name or (pin.existing_file is None) != (prior_file is None)
+    ):
+        raise FleetPlanInvalid("Pi save differs from the original native session and predecessor")
+    try:
+        with ExitStack() as owned:
             pin.require_current()
             identity = _directory_identity(pin.directory_fd)
             if identity[2:4] != (
@@ -462,11 +553,16 @@ def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionF
             else:
                 fd = pin.existing_file.fd
             observation, _metadata = _observe_pinned_session_file(
-                pin.directory_fd, name, fd, pin.require_current
+                pin.directory_fd,
+                name,
+                fd,
+                pin.require_current,
+                save=save,
+                prior_file=prior_file,
             )
             return observation
-        except OSError as exc:
-            raise FleetPlanInvalid("Original Pi session file is unavailable") from exc
+    except OSError as exc:
+        raise FleetPlanInvalid("Original Pi session file is unavailable") from exc
 
 
 def inspect_recovered_pi_session_storage(
