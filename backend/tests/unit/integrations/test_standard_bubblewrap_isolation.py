@@ -707,6 +707,27 @@ def test_pi_session_root_is_not_resolved_to_a_replacement_in_worker_transport(
     assert captured.application_state_paths == ((root,), ())
 
 
+def test_bound_bubblewrap_refuses_scratch_in_another_retained_pi_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    private_root = tmp_path / "pi-sessions"
+    other_slot = private_root / "other-session"
+    other_slot.mkdir(parents=True)
+    backend.bind_application_state(
+        private_paths=(private_root,), read_only_paths=(), pi_session_root=private_root
+    )
+    monkeypatch.setattr(tempfile, "tempdir", str(other_slot))
+    monkeypatch.setattr(
+        module, "run_command", lambda *a, **kw: pytest.fail("invalid scratch reached launch")
+    )
+    with pytest.raises(FleetPlanInvalid, match="scratch.*Pi session storage"):
+        backend.require_standard_available(_request(backend, workspace))
+    assert not tuple(other_slot.iterdir())
+
+
 @pytest.mark.parametrize("before_launch", ["current", "replaced", "unexpected-entry"])
 def test_pi_session_descriptor_binds_only_at_workload_birth(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before_launch: str

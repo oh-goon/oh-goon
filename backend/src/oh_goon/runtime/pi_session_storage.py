@@ -324,7 +324,20 @@ def _file_state(info: os.stat_result) -> tuple[int, ...]:
     )
 
 
+def _session_file_present(directory_fd: int, name: str) -> bool:
+    """The owned slot is either empty or contains its single selected native file."""
+    with os.scandir(directory_fd) as entries:
+        entry = next(entries, None)
+        if entry is None:
+            return False
+        if entry.name != name or next(entries, None) is not None:
+            raise FleetPlanInvalid("Private Pi session directory contains unrelated entries")
+    return True
+
+
 def _require_current_file(directory_fd: int, name: str, fd: int) -> os.stat_result:
+    if not _session_file_present(directory_fd, name):
+        raise FileNotFoundError("Original Pi session file is absent")
     info = os.fstat(fd)
     if (
         not stat.S_ISREG(info.st_mode)
@@ -404,16 +417,6 @@ def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionF
             raise FleetPlanInvalid("Original Pi session file is unavailable") from exc
 
 
-def _retirement_file_present(directory_fd: int) -> bool:
-    with os.scandir(directory_fd) as entries:
-        entry = next(entries, None)
-        if entry is None:
-            return False
-        if entry.name != PI_SESSION_NEW_FILE.name or next(entries, None) is not None:
-            raise PiSessionIdentityMismatch("Pi retirement directory contains unrelated entries")
-    return True
-
-
 @contextmanager
 def pin_pi_session_retirement(
     *,
@@ -465,7 +468,7 @@ def pin_pi_session_retirement(
                 raise PiSessionIdentityMismatch("Original Pi retirement directory changed")
             name = PI_SESSION_NEW_FILE.name
             retained: tuple[int, os.stat_result] | None = None
-            if _retirement_file_present(directory_fd):
+            if _session_file_present(directory_fd, name):
                 fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
                 descriptors.callback(os.close, fd)
                 observed, metadata = _observe_pinned_session_file(
@@ -488,7 +491,7 @@ def pin_pi_session_retirement(
         def remove() -> None:
             try:
                 require_current()
-                if _retirement_file_present(directory_fd):
+                if _session_file_present(directory_fd, name):
                     if retained is None:
                         raise PiSessionIdentityMismatch(
                             "A file appeared in the Pi retirement directory"
@@ -506,7 +509,7 @@ def pin_pi_session_retirement(
                 # successful unlink with no accepted Journal observation yet.
                 os.fsync(directory_fd)
                 require_current()
-                if _retirement_file_present(directory_fd):
+                if _session_file_present(directory_fd, name):
                     raise PiSessionIdentityMismatch(
                         "Original Pi retirement file absence is unproven"
                     )

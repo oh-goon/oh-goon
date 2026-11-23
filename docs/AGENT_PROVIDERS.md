@@ -194,7 +194,10 @@ A history read uses the recorded evidence from the selected runtime.
 
 A managed persistent Pi Run retains sensitive native conversation bytes in the
 selected runtime's private `pi-sessions` storage. Inspect the current session
-by exact Run ID. For retirement, select the latest qualified writer Run and
+by exact Run ID. Use a temporary base outside retained Pi storage.
+The original Journal and private storage owner retain partial or unconfirmed
+saves for scoped recovery. Disposable scratch cleanup leaves those slots
+intact. For retirement, select the latest qualified writer Run and
 explicitly authorize removal.
 
 ```sh

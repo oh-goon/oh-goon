@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from dataclasses import replace
@@ -69,6 +70,38 @@ def foundation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Runt
     finally:
         value.supervisor.shutdown(wait=True)
         value.lifecycle.close()
+
+
+@pytest.mark.parametrize("layout", ["exact", "scratch-alias", "store-alias"])
+def test_runtime_rejects_scratch_below_retained_pi_storage_before_preparation(
+    foundation: RuntimeFoundation, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, layout: str
+) -> None:
+    from oh_goon import _application_foundation as startup
+
+    configured_root = foundation.database.path.parent / "pi-sessions"
+    physical_root = tmp_path / "substituted" if layout == "store-alias" else configured_root
+    retained = physical_root / "original-session"
+    retained.mkdir(parents=True)
+    if layout == "store-alias":
+        configured_root.symlink_to(physical_root, target_is_directory=True)
+    transcript = retained / "session.jsonl"
+    transcript.write_text("synthetic retained Pi bytes")
+    temporary_base = retained
+    if layout == "scratch-alias":
+        temporary_base = tmp_path / "scratch-alias"
+        temporary_base.symlink_to(retained, target_is_directory=True)
+    monkeypatch.setattr(tempfile, "tempdir", str(temporary_base))
+
+    def unexpected() -> NoReturn:
+        pytest.fail("runtime prepared work with scratch inside retained Pi storage")
+
+    monkeypatch.setattr(startup, "LeagueFolderStore", unexpected)
+    revision = foundation.database.durable_revision()
+    with pytest.raises(FleetPlanInvalid, match="scratch.*Pi session storage"):
+        build_runtime_foundation(standard_local=True, startup_purpose="workflow")
+    assert foundation.database.durable_revision() == revision
+    assert tuple(retained.iterdir()) == (transcript,)
+    assert transcript.read_text() == "synthetic retained Pi bytes"
 
 
 def test_worker_configuration_keeps_resolved_roots_and_git_authority(

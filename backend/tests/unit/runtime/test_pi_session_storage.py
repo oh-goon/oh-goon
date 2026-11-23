@@ -138,6 +138,20 @@ def test_new_private_slot_is_run_scoped_and_retained_on_failure(
         os.fstat(next_attempt.directory_fd)
 
 
+def test_pi_persistence_refuses_unexpected_slot_entries_without_removing_them(
+    admitted_pi_scope: _AdmittedScope,
+) -> None:
+    with admitted_pi_scope.create() as pin:
+        session = pin.path / PI_SESSION_NEW_FILE.name
+        session.write_bytes(b"native session bytes\n")
+        unexpected = pin.path / "settings.json"
+        unexpected.write_bytes(b'{"synthetic":"unexpected configuration"}\n')
+        with pytest.raises(FleetPlanInvalid, match="contains unrelated entries"):
+            observe_pi_session_file(pin, session.name)
+    assert session.read_bytes() == b"native session bytes\n"
+    assert unexpected.read_bytes() == b'{"synthetic":"unexpected configuration"}\n'
+
+
 def test_rejects_foreign_workspace_inactive_step_and_stale_subject_before_writes(
     admitted_pi_scope: _AdmittedScope, tmp_path: Path
 ) -> None:
@@ -292,6 +306,7 @@ def test_retained_pi_file_reopens_and_records_a_new_digest_of_the_same_inode(
         ("removed", PiSessionUnavailable),
         ("replaced", PiSessionIdentityMismatch),
         ("edited", PiSessionHistoryUnqualified),
+        ("extra", PiSessionHistoryUnqualified),
         ("legacy", PiSessionHistoryUnqualified),
     ],
 )
@@ -313,6 +328,8 @@ def test_exact_reopen_refuses_changed_or_unproven_original_file(
         before = session.stat()
         session.write_bytes(b"tampered\n")
         os.utime(session, ns=(before.st_atime_ns, before.st_mtime_ns))
+    elif change == "extra":
+        (session.parent / "models.json").write_bytes(b"unexpected template bytes\n")
     else:
         receipt = receipt.model_copy(update={"sha256": None})
 
@@ -323,6 +340,9 @@ def test_exact_reopen_refuses_changed_or_unproven_original_file(
         pytest.fail("Unproven retained Pi bytes acquired writer custody")
     if change == "removed":
         assert not session.exists()
+    if change == "extra":
+        assert session.read_bytes() == original
+        assert (session.parent / "models.json").read_bytes() == b"unexpected template bytes\n"
     assert set(admitted_pi_scope.layout.pi_sessions.iterdir()) == {session.parent}
 
 
@@ -339,6 +359,25 @@ def test_retained_pi_file_is_rechecked_after_pin_before_native_launch(
         session.write_bytes(b"modified\n")
         with pytest.raises(PiSessionHistoryUnqualified, match="changed before launch"):
             file.require_before_launch()
+
+
+def test_pi_reopen_checks_slot_membership_at_launch_and_after_native_exit(
+    admitted_pi_scope: _AdmittedScope,
+    retained_pi_file: tuple[Path, PiSessionFileObservation],
+) -> None:
+    session, receipt = retained_pi_file
+    unexpected = session.parent / "late-entry"
+    with admitted_pi_scope.create(storage_id=session.parent.name, prior_file=receipt) as reopened:
+        file = reopened.existing_file
+        assert file is not None
+        file.require_before_launch()
+        unexpected.write_bytes(b"retain for explicit recovery\n")
+        with pytest.raises(PiSessionIdentityMismatch, match="identity changed before launch"):
+            file.require_before_launch()
+        with pytest.raises(FleetPlanInvalid, match="contains unrelated entries"):
+            observe_pi_session_file(reopened, session.name)
+    assert session.read_bytes() == b"retained\n"
+    assert unexpected.read_bytes() == b"retain for explicit recovery\n"
 
 
 def test_retirement_unlinks_one_exact_pi_file_without_touching_other_storage(

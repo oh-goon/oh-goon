@@ -39,7 +39,11 @@ from oh_goon.core.models.pi_session_storage import (
     PiSessionFilePin,
 )
 from oh_goon.core.path_authority import HostSandboxPathMapping, map_host_text_to_sandbox
-from oh_goon.core.path_layouts import SANDBOX_PATHS, AttemptPathLayout
+from oh_goon.core.path_layouts import (
+    SANDBOX_PATHS,
+    AttemptPathLayout,
+    require_pi_session_scratch_separation,
+)
 from oh_goon.core.ports.local_lace_allocation import LocalLaceAllocationRecorder
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentProof
 from oh_goon.core.product_identity import stable_id
@@ -750,8 +754,8 @@ class BubblewrapProcessIsolation:
 
         temporary_base = Path(tempfile.gettempdir()).resolve()
         session = request.pi_session_directory
-        if session is not None and temporary_base.is_relative_to(session.path):
-            raise FleetPlanInvalid("Native scratch cannot be created inside a Pi session directory")
+        if self._pi_session_root is not None:
+            require_pi_session_scratch_separation(temporary_base, self._pi_session_root)
         if request.protected_execution and temporary_base.is_relative_to(request.workspace):
             raise CapabilityUnavailable(
                 "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_setup; "

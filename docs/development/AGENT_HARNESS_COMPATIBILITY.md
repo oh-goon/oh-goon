@@ -973,6 +973,35 @@ passed through the claimed worker with its managed inference broker.
 This scope establishes native storage and command cleanup. Resistance to
 unmanaged host writers and aliases they create remains unqualified.
 
+### Retained Pi storage and disposable bootstrap — HUG-72
+
+**Disposition: retain** the native writer, original scoped mount, managed
+broker, and disposable native configuration. Application startup, claimed
+worker preparation, and the final Bubblewrap scratch owner reject an effective
+temporary base inside retained Pi storage. Only the native transcript belongs
+in a qualified slot. Persistence, reopen and retirement share that exact
+directory rule. Extra entries leave the save unresolved and stay with the
+original owner.
+
+The [installed compaction and restart proof][cli-compaction-tests] exercised
+Pi 1.3.0 in claimed workers on Linux 7.0.0-43 and Bubblewrap 0.11.1. A Run
+created a saved session, a resumed Run compacted it, and a fresh public
+`oh-goon ai` process resumed the compacted conversation under new source,
+Skill and verifier authority. The selected session retained its identity and
+file across those Runs. Observed host control, bootstrap, captured inputs
+and broker socket paths were gone after teardown. The retained slot contained
+only the verified transcript and lacked the synthetic host credential, local
+broker key and bootstrap copies. A separate failing-verifier case checked
+the same cleanup independently of its Run result.
+
+The original Journal and private storage owner retain partial or unconfirmed
+saves and fence unqualified reopen. Automatic scratch cleanup leaves these
+slots to their original custody. Exact retirement requires the qualified
+settled source and explicit operator authority. Native bind or storage
+qualification failure refuses the selected session rather than reconstructing
+it. Pi can access its own admitted session bytes. Unmanaged host writes,
+interrupted power-loss durability and other host modes remain unqualified.
+
 ### Original Pi writer custody — HUG-42
 
 The existing claimed worker can admit a fresh managed Pi RPC session for one
