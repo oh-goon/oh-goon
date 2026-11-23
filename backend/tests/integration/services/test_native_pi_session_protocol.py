@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -1028,21 +1029,41 @@ def test_installed_pi_private_session_survives_original_command_and_config_clean
     assert personal.read_bytes() == b"synthetic personal store canary"
 
 
-def _native_arguments(probe: _PiProbe, fragments: Mapping[str, tuple[str, ...]]) -> dict[str, Any]:
+def _native_arguments(
+    probe: _PiProbe,
+    fragments: Mapping[str, tuple[str, ...]],
+    *,
+    mode: Literal["json", "rpc"] = "json",
+) -> dict[str, Any]:
     # This exact selected distribution owns argument interpretation. Importing
     # its parser does not enter Pi startup, load an extension or invoke a model.
     parser = probe.program.parent.parent / "cli" / "args.js"
     assert parser.is_file() and parser.is_relative_to(probe.public_runtime)
+    # Trace the exact selected public bundle to the chunk that implements main.
+    assert '"./cli-runtime.js"' in probe.program.read_text(encoding="utf-8")
+    runtime = probe.program.with_name("cli-runtime.js")
+    imported = re.search(
+        r'import\{[^}]*\bmain\b[^}]*\}from"(\./chunks/[^"]+)"',
+        runtime.read_text(encoding="utf-8"),
+    )
+    assert imported is not None
+    bundled_parser = (runtime.parent / imported.group(1)).resolve(strict=True)
+    assert bundled_parser.is_relative_to(probe.public_runtime)
     node = shutil.which("node", path="/usr/bin:/bin")
     assert node, "Selected installed parser qualification requires native Node.js"
     script = """
+      import { deepStrictEqual } from "node:assert";
       import { pathToFileURL } from "node:url";
-      const { parseArgs } = await import(pathToFileURL(process.argv[1]).href);
-      const fragments = JSON.parse(process.argv[2]);
+      const { parseArgs: shipped } = await import(pathToFileURL(process.argv[1]).href);
+      const { parseArgs: effective } = await import(pathToFileURL(process.argv[2]).href);
+      const fragments = JSON.parse(process.argv[3]);
+      const mode = process.argv[4];
+      const normalize = result => ({...result, unknownFlags: Object.fromEntries(result.unknownFlags)});
       const observed = {};
       for (const [name, fragment] of Object.entries(fragments)) {
-        const parsed = parseArgs([...fragment, "--mode", "json", "--no-session"]);
-        observed[name] = {...parsed, unknownFlags: Object.fromEntries(parsed.unknownFlags)};
+        const argv = [...fragment, "--mode", mode, "--no-session"];
+        observed[name] = normalize(effective(argv));
+        deepStrictEqual(observed[name], normalize(shipped(argv)));
       }
       process.stdout.write(JSON.stringify(observed));
     """
@@ -1056,7 +1077,9 @@ def _native_arguments(probe: _PiProbe, fragments: Mapping[str, tuple[str, ...]])
                 "--eval",
                 script,
                 str(parser),
+                str(bundled_parser),
                 json.dumps(fragments),
+                mode,
             ),
             env={"PATH": "/usr/bin:/bin", "PI_SKIP_VERSION_CHECK": "1", "NO_COLOR": "1"},
             backend_configuration_id=probe.backend.configuration_identity(),
@@ -1082,10 +1105,14 @@ def _native_arguments(probe: _PiProbe, fragments: Mapping[str, tuple[str, ...]])
     assert not tuple(probe.session.parent.iterdir())
     with parser.open("rb") as stream:
         parser_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+    with bundled_parser.open("rb") as stream:
+        effective_parser_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
     print(
         json.dumps(
             {
                 "native_parser_sha256": parser_sha256,
+                "effective_parser_sha256": effective_parser_sha256,
+                "mode": mode,
                 "physical_execution_id": result.physical_execution_id,
                 "supervisor": result.supervisor.receipt_identity,
                 "cases": sorted(fragments),
@@ -1265,3 +1292,49 @@ def test_installed_pi_explicit_native_settings_preserve_owned_transport(pi_probe
     assert parsed["themes"] == ["./native-theme.json"]
     assert parsed["tools"] == ["read", "bash"]
     assert parsed["offline"] is True and parsed["noExtensions"] is True
+
+
+def test_installed_pi_model_option_spelling_is_opaque_when_consumed_as_a_value(
+    pi_probe: _PiProbe,
+) -> None:
+    fragments = {
+        "literal-model": ("--system-prompt", "--model"),
+        "literal-provider": ("--append-system-prompt", "--provider"),
+        "literal-model-equals": ("--system-prompt", "--model=synthetic-model"),
+        "literal-model-list": ("--extension", "--models"),
+        "model-options": (
+            "--provider",
+            "synthetic-provider",
+            "--model",
+            "synthetic-model",
+            "--models",
+            "synthetic-model",
+        ),
+        "extension-model-name": ("--model=synthetic-model",),
+    }
+    for mode in ("json", "rpc"):
+        observed = _native_arguments(pi_probe, fragments, mode=mode)
+        for parsed in observed.values():
+            assert parsed["mode"] == mode and parsed["noSession"] is True
+            assert parsed["diagnostics"] == []
+            assert parsed["messages"] == [] and parsed["fileArgs"] == []
+        assert observed["literal-model"]["systemPrompt"] == "--model"
+        assert observed["literal-provider"]["appendSystemPrompt"] == ["--provider"]
+        assert observed["literal-model-equals"]["systemPrompt"] == "--model=synthetic-model"
+        assert observed["literal-model-list"]["extensions"] == ["--models"]
+        for name in (
+            "literal-model",
+            "literal-provider",
+            "literal-model-equals",
+            "literal-model-list",
+        ):
+            assert {"model", "provider", "models"}.isdisjoint(observed[name])
+            assert observed[name]["unknownFlags"] == {}
+            assert validate_native_agent_arguments("pi", fragments[name]) is False
+        selected = observed["model-options"]
+        assert selected["provider"] == "synthetic-provider"
+        assert selected["model"] == "synthetic-model"
+        assert selected["models"] == ["synthetic-model"]
+        assert validate_native_agent_arguments("pi", fragments["model-options"]) is True
+        assert observed["extension-model-name"]["unknownFlags"] == {"model": "synthetic-model"}
+        assert validate_native_agent_arguments("pi", fragments["extension-model-name"]) is True

@@ -499,6 +499,48 @@ def test_managed_codex_attached_model_overrides_refuse_before_native_work(
 
 
 @pytest.mark.parametrize(
+    ("arguments", "explicit_model"),
+    [
+        (("--system-prompt", "--model"), False),
+        (("--append-system-prompt", "--provider"), False),
+        (("--system-prompt", "--model=fixture"), False),
+        (("--system-prompt", "--model", "--model", "private-model-canary"), True),
+        (("--provider=private-model-canary",), True),
+    ],
+)
+def test_managed_pi_model_policy_uses_native_option_boundaries(
+    arguments: tuple[str, ...], explicit_model: bool
+) -> None:
+    connection = AgentConnection.select(
+        AgentProvidersConfig(
+            default_model="approved",
+            providers={
+                "host": AgentProvider(
+                    api="openai-chat-completions", base_url="https://example.invalid/v1"
+                )
+            },
+            models={"approved": AgentModel(provider="host", model="approved")},
+        )
+    )
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="managed",
+        definition=NativeAgentDefinition(executable=sys.executable, arguments=arguments),
+        profile=NativeAgentProfile(
+            backend="bubblewrap", allowed_agents=("pi",), inference_profile="approved"
+        ),
+        executable_sha256="a" * 64,
+        connection=connection,
+    )
+    if explicit_model:
+        with pytest.raises(FleetPlanInvalid, match="Explicit native model arguments") as refused:
+            require_native_agent_compatibility(selected)
+        assert "private-model-canary" not in str(refused.value)
+    else:
+        require_native_agent_compatibility(selected)
+
+
+@pytest.mark.parametrize(
     "arguments", [("--api-key", "private-key-canary"), ("--api-key=private-key-canary",)]
 )
 def test_transported_native_selection_rejects_literal_credentials_before_admission(

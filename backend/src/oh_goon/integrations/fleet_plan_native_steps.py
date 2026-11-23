@@ -90,14 +90,6 @@ if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, _StepProcess
 
 
-def _explicit_model_arguments(selected: ResolvedNativeAgent) -> bool:
-    return any(
-        argument.partition("=")[0] in {"--model", "-m", "--provider", "--models", "--config", "-c"}
-        or (selected.agent == "codex" and argument.startswith(("-m", "-c")))
-        for argument in selected.definition.arguments
-    )
-
-
 def _codex_runtime_roots(selected: ResolvedNativeAgent) -> tuple[Path, ...]:
     return (
         Path(sys.prefix).resolve(),
@@ -186,7 +178,7 @@ def require_native_agent_compatibility(
             "Native reasoning requires managed inference for mandatory Hashmarks delivery"
         )
     try:
-        validate_native_agent_arguments(
+        explicit_model = validate_native_agent_arguments(
             selected.agent,
             selected.definition.arguments,
             sandbox_owner=selected.profile.sandbox_owner,
@@ -199,7 +191,7 @@ def require_native_agent_compatibility(
             "Selected native agent does not support the approved provider wire protocol"
         )
     opaque = selected.definition.configuration_directory is not None
-    if _explicit_model_arguments(selected) and not opaque:
+    if explicit_model and not opaque:
         raise FleetPlanInvalid(
             "Explicit native model arguments require a public native broker configuration"
         )
