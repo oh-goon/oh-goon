@@ -6,6 +6,7 @@ startup recovery nor scheduling, and is called only after SQLite custody claim.
 
 from __future__ import annotations
 
+import tempfile
 from copy import deepcopy
 from functools import partial
 from pathlib import Path
@@ -18,7 +19,10 @@ from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import ResolvedNativeAgent
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.run_resources import RunResourceEnvelopeEvidence
-from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.path_layouts import (
+    ApplicationStatePathLayout,
+    require_pi_session_scratch_separation,
+)
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.engine.command import CommandTerminal
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
@@ -322,6 +326,10 @@ def build_claimed_run_execution(
         raise FleetPlanInvalid("Run worker configuration differs from claimed Run")
     execution = ExecutionCoordinator(database)
     execution.require_claimed_fleet_worker(claimed_ticket)
+    state_paths = ApplicationStatePathLayout.from_database(database.path)
+    require_pi_session_scratch_separation(
+        Path(tempfile.gettempdir()).resolve(), state_paths.pi_sessions
+    )
     resource_scope = (
         ResolvedRunResourceScope.from_payload(configuration.run_resource_scope)
         if configuration.run_resource_scope is not None
@@ -411,6 +419,6 @@ def build_claimed_run_execution(
         git,
         effect_fence=RepositoryEffectFence(git),
         settlement=RepositoryEffectSettlement(database, journal, attempts),
-        state_paths=ApplicationStatePathLayout.from_database(database.path),
+        state_paths=state_paths,
     )
     return FleetRunExecution(lifecycle, FleetTargetScheduler(effects), live_output, diagnostics)

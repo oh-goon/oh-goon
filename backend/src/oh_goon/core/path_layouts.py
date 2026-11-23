@@ -11,6 +11,16 @@ from oh_goon.core.path_authority import (
 )
 
 
+def require_pi_session_scratch_separation(temporary_base: Path, pi_sessions: Path) -> None:
+    """Keep disposable execution artifacts out of the selected retained storage."""
+    if temporary_base.is_relative_to(pi_sessions) or (
+        pi_sessions.is_symlink() and temporary_base.is_relative_to(pi_sessions.resolve())
+    ):
+        raise FleetPlanInvalid(
+            "Temporary execution scratch cannot be placed inside Pi session storage"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ApplicationStatePathLayout:
     """Canonical persistent filesystem layout owned by one oh-goon database root."""

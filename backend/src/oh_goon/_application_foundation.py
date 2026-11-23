@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +20,10 @@ from oh_goon.core.capability_registry import capability_definitions
 from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
 from oh_goon.core.models.diagnostic import DiagnosticEvent
 from oh_goon.core.models.run_resources import RunConcurrencyPolicy, RunResourceEnvelopeEvidence
-from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.path_layouts import (
+    ApplicationStatePathLayout,
+    require_pi_session_scratch_separation,
+)
 from oh_goon.core.ports.candidate_execution import CandidateExecutionContext
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest, CapabilityRunner
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
@@ -114,6 +118,7 @@ class _LocalStateFoundation:
     journal: Journal
     execution: ExecutionCoordinator
     state: LocalState
+    paths: ApplicationStatePathLayout
 
 
 def _build_capability_runtime(
@@ -204,6 +209,11 @@ def _build_local_state_foundation(
     database = (
         LocalDatabase(read_only=True) if startup_purpose == "observation" else LocalDatabase()
     )
+    paths = ApplicationStatePathLayout.from_database(database.path)
+    if startup_purpose != "observation":
+        require_pi_session_scratch_separation(
+            Path(tempfile.gettempdir()).resolve(), paths.pi_sessions
+        )
     league_folders = LeagueFolderStore()
     journal = Journal(database)
     execution = ExecutionCoordinator(database)
@@ -217,7 +227,7 @@ def _build_local_state_foundation(
         startup_purpose == "workflow" and database.initialized_new_state
     ):
         state.reconcile_league_folders()
-    return _LocalStateFoundation(database, journal, execution, state)
+    return _LocalStateFoundation(database, journal, execution, state, paths)
 
 
 def _prove_startup_safety(
@@ -333,7 +343,7 @@ def build_runtime_foundation(
         run_capacity = capture_native_runtime_budget(run_concurrency)
     local = _build_local_state_foundation(startup_purpose=startup_purpose)
     database = local.database
-    state_paths = ApplicationStatePathLayout.from_database(database.path)
+    state_paths = local.paths
     if standard_process_isolation is not None:
         from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 

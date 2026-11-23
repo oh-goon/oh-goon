@@ -6,12 +6,16 @@ summarization, continuation, typed acceptance and process cleanup remain real.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
+import stat
 import subprocess
 import sys
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -25,10 +29,118 @@ from oh_goon.core.models.agent_providers import PiSessionIntent
 from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
-from oh_goon.core.models.run_events import PiSessionWriterObservedEvent
+from oh_goon.core.models.pi_session_storage import PI_SESSION_NEW_FILE
+from oh_goon.core.models.run import FleetRunDetail
+from oh_goon.core.models.run_events import (
+    PiSessionWriterObservedEvent,
+    PiSessionWriterReservedEvent,
+)
+from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from tests.fakes.native_context import controlled_native_context
+
+_SYNTHETIC_PI_BROKER_KEYS = (b"SYNTHETIC_PRIOR_KEY", b"SYNTHETIC_COMPACTION_KEY")
+
+
+@dataclass(frozen=True)
+class _LivePiScratch:
+    control: Path
+    frozen: Path
+    bootstrap: tuple[bytes, bytes]
+    local_key: bytes
+
+
+def _observe_live_pi_scratch(payload: dict[str, Any], model: str) -> _LivePiScratch:
+    """Read the selected fixture's generated public bootstrap while its Run is live."""
+    manifest = Path(payload["complete_source_manifest"])
+    control = manifest.parent
+    assert manifest.name == "source-manifest.json" and control.name.startswith("native-")
+    assert manifest.is_file() and (control / "prompt.txt").is_file()
+    frozen_source = Path(payload["captured_repository"])
+    frozen_skill = Path(payload["captured_skill"])
+    assert frozen_source.is_dir() and frozen_skill.is_dir()
+    assert frozen_source.parent == frozen_skill.parent
+    bootstrap_dir = control / "pi-bootstrap"
+    raw = []
+    for name in ("models.json", "settings.json"):
+        with (bootstrap_dir / name).open("rb") as stream:
+            data = stream.read(8193)
+        assert 0 < len(data) <= 8192
+        assert not any(key in data for key in _SYNTHETIC_PI_BROKER_KEYS)
+        raw.append(data)
+    models, settings = raw
+    provider = json.loads(models)["providers"]["oh-goon"]
+    assert provider["baseUrl"] == "http://127.0.0.1:18743/v1"
+    assert provider["models"] == [{"id": model}]
+    assert json.loads(settings) == {"defaultProvider": "oh-goon", "defaultModel": model}
+    assert provider["apiKey"] == "oh-goon-local"
+    return _LivePiScratch(control, frozen_source.parent, (models, settings), b"oh-goon-local")
+
+
+def _assert_pi_storage_outlives_scratch(
+    detail: FleetRunDetail, scratch: _LivePiScratch, layout: ApplicationStatePathLayout
+) -> Path:
+    """Correlate the original process mount receipt to the single retained native file."""
+    operation = detail.operations[0].evidence
+    assert isinstance(operation, FleetPlanOperationEvidence)
+    native = operation.plan.steps[0]
+    (attempt,) = native.attempts
+    isolation = attempt.standard_isolation
+    assert isolation is not None and isolation.broker_socket_mounted
+    assert isolation.private_configuration_overlay and isolation.filesystem_cleanup == "verified"
+    assert (
+        attempt.supervisor is not None and attempt.supervisor.final_process_group_quiescent is True
+    )
+    (broker,) = (
+        Path(source)
+        for flag, source, target in zip(native.argv, native.argv[1:], native.argv[2:], strict=False)
+        if flag == "--ro-bind" and target == "/run/oh-goon-broker"
+    )
+    # The successful model request traversed this exact original socket mount.
+    for removed in (
+        broker / "inference.sock",
+        broker,
+        broker.parent,
+        scratch.control,
+        scratch.frozen,
+    ):
+        with pytest.raises(FileNotFoundError):
+            removed.lstat()
+
+    (writer,) = [
+        event
+        for event in detail.lifecycle_events
+        if isinstance(event, PiSessionWriterReservedEvent)
+    ]
+    (observed,) = [
+        event
+        for event in detail.lifecycle_events
+        if isinstance(event, PiSessionWriterObservedEvent)
+    ]
+    assert observed.reservation_sequence == writer.sequence
+    receipt = observed.observation.file
+    assert receipt is not None and 0 < receipt.size <= 1024 * 1024
+    retained = layout.pi_sessions / writer.storage_id / PI_SESSION_NEW_FILE.name
+    assert tuple(retained.parent.iterdir()) == (retained,)
+    for directory in (layout.pi_sessions, retained.parent):
+        assert stat.S_IMODE(directory.lstat().st_mode) == 0o700
+    metadata = retained.lstat()
+    assert stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1
+    assert (metadata.st_dev, metadata.st_ino, metadata.st_size) == (
+        receipt.device,
+        receipt.inode,
+        receipt.size,
+    )
+    with retained.open("rb") as stream:
+        # Bounded synthetic test transcript, never an operator history.
+        saved = stream.read(receipt.size + 1)
+    assert len(saved) == receipt.size and hashlib.sha256(saved).hexdigest() == receipt.sha256
+    assert not any(
+        material in saved
+        for material in (*_SYNTHETIC_PI_BROKER_KEYS, scratch.local_key, *scratch.bootstrap)
+    )
+    return retained
 
 
 @pytest.mark.process
@@ -126,7 +238,13 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     public_runtime = Path(runtime_root).resolve(strict=True)
     assert public_runtime.is_dir() and program.is_relative_to(public_runtime)
     version = subprocess.run(
-        [str(program), "--version"], capture_output=True, text=True, timeout=10, check=True
+        [str(program), "--version"],
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path / "version-home")},
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
     ).stdout.strip()
     if reopen:
         assert version == "1.3.0", "Requalify the installed Pi restore behavior for another release"
@@ -150,11 +268,21 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     prior_task = "Review the earlier checkout and remember native-prior-conversation-canary."
     prior_skill = tmp_path / "skills" / "prior"
     prior_skill_instructions = "# Prior review\nRetain native-prior-skill-canary.\n"
+    restart_task = "Review the retained compacted native conversation after application restart."
+    restart_skill = tmp_path / "skills" / "restart"
+    restart_skill_instructions = "# Fresh restart Skill\nCheck only the current synthetic source.\n"
+    check_restart = reopen and verification_passes
     if reopen:
         prior_skill.mkdir()
         (prior_skill / "SKILL.md").write_text(prior_skill_instructions, encoding="utf-8")
+    if check_restart:
+        restart_skill.mkdir()
+        (restart_skill / "SKILL.md").write_text(restart_skill_instructions, encoding="utf-8")
     prior_requests = 0
     prior_identity: dict[str, str] | None = None
+    prior_scratch: _LivePiScratch | None = None
+    current_scratch: _LivePiScratch | None = None
+    restart_scratch: _LivePiScratch | None = None
     identity: dict[str, str] | None = None
     producer_evidence: str | None = None
     output_contract: str | None = None
@@ -204,7 +332,8 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     class ModelEndpoint(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             nonlocal identity, producer_evidence, output_contract, fixture_failure, request_count
-            nonlocal prior_requests, prior_identity
+            nonlocal prior_requests, prior_identity, prior_scratch, current_scratch
+            nonlocal restart_scratch
             try:
                 size = int(self.headers["Content-Length"])
                 assert 0 < size <= 1024 * 1024
@@ -228,9 +357,37 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     assert prior_task in privileged and prior_skill_instructions in privileged
                     assert {"write", "edit", "bash"} <= tools.keys()
                     prior_payload = frozen_prompt(messages, prior_task)
+                    prior_scratch = _observe_live_pi_scratch(prior_payload, "native-prior-fixture")
                     prior_identity = prior_payload["identity"]
                     assert prior_identity is not None
                     self.reply(typed_review(prior_identity))
+                    return
+                if restart_task in privileged:
+                    assert check_restart and restart_scratch is None
+                    assert body["model"] == "native-compaction-fixture"
+                    assert self.headers["Authorization"] == "Bearer SYNTHETIC_COMPACTION_KEY"
+                    assert tools.keys() == {"read", "grep", "find", "ls"}
+                    payload = frozen_prompt(messages, restart_task)
+                    assert payload["skill_instructions"] == restart_skill_instructions
+                    evidence = json.loads(payload["repository_evidence"])
+                    assert evidence["capture_identity"] == payload["identity"]["candidate_identity"]
+                    assert evidence["producer_implementation_identity"] == (
+                        require_loaded_hashmarks_runtime()
+                    )
+                    assert restart_skill_instructions in privileged
+                    assert payload["repository_evidence"] in privileged
+                    assert all(
+                        retired not in privileged
+                        for retired in (task, prior_task, skill_text, prior_skill_instructions)
+                    )
+                    assert any(
+                        compaction_marker in text
+                        for message in messages
+                        if message.get("role") not in {"system", "developer"}
+                        for text in texts(message)
+                    ), "Native compacted conversation is missing after process restart"
+                    restart_scratch = _observe_live_pi_scratch(payload, "native-compaction-fixture")
+                    self.reply("Confirmed the compacted native conversation.")
                     return
                 request_count += 1
                 assert request_count <= (8 if reopen else 6), (
@@ -256,6 +413,9 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     )
                     assert evidence["capture_identity"] == identity["candidate_identity"]
                     if reopen:
+                        current_scratch = _observe_live_pi_scratch(
+                            payload, "native-compaction-fixture"
+                        )
                         assert prior_identity is not None
                         assert (
                             identity["candidate_identity"] != prior_identity["candidate_identity"]
@@ -430,7 +590,9 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
         def log_message(self, *_args: object) -> None:
             pass
 
-    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state/app.sqlite"))
+    database = tmp_path / "state/app.sqlite"
+    layout = ApplicationStatePathLayout.from_database(database)
+    monkeypatch.setenv("OH_GOON_DB", str(database))
     monkeypatch.setenv("NATIVE_COMPACTION_KEY", "SYNTHETIC_COMPACTION_KEY")
     monkeypatch.setenv("NATIVE_PRIOR_KEY", "SYNTHETIC_PRIOR_KEY")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
@@ -507,6 +669,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
             )
             prior_run_id: str | None = None
             prior_observation = None
+            retained_session = None
             if reopen:
                 prior_selected, prior_backend, prior_git = resolve_native_cli_selection(
                     agent="pi",
@@ -547,6 +710,10 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                         ],
                     )
                     assert prior_requests == 1 and fixture_failure is None
+                    assert prior_scratch is not None
+                    retained_session = _assert_pi_storage_outlives_scratch(
+                        prior_detail, prior_scratch, layout
+                    )
                     (prior_observation,) = [
                         event.observation
                         for event in prior_runtime.runs.events(prior_run_id).events
@@ -624,6 +791,12 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     assert "--pi-rpc" in native.argv
                     assert native.argv[native.argv.index("--mode") + 1] == "rpc"
                 if reopen:
+                    assert prior_scratch is not None and current_scratch is not None
+                    assert prior_scratch.control != current_scratch.control
+                    assert prior_scratch.frozen != current_scratch.frozen
+                    assert _assert_pi_storage_outlives_scratch(detail, current_scratch, layout) == (
+                        retained_session
+                    )
                     assert steps[0].command == ()
                     assert all(not claim.events for claim in steps[0].native_agent_observations)
                 assert steps[0].settlement.outcome == "SUCCESS"
@@ -689,6 +862,54 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
             finally:
                 runtime.shutdown(wait_for_runs=True)
             retained_requests = request_count
+            restart_run_id: str | None = None
+            if check_restart:
+                cli = Path(sys.executable).with_name("oh-goon")
+                result = subprocess.run(
+                    (
+                        str(cli),
+                        "ai",
+                        "--agent",
+                        "pi",
+                        "--profile",
+                        "local",
+                        "--workspace",
+                        str(repository),
+                        "--config",
+                        str(catalog),
+                        "--skill",
+                        str(restart_skill),
+                        "--session",
+                        f"run:{admitted.fleet_run_id}",
+                        "--prompt",
+                        restart_task,
+                        "--verify",
+                        shlex.join(
+                            (
+                                "/usr/bin/python3",
+                                "-I",
+                                "-c",
+                                "from pathlib import Path; "
+                                f"assert Path('source.py').read_bytes() == {current!r}",
+                            )
+                        ),
+                        "--json",
+                    ),
+                    cwd=repository,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                assert result.returncode == 0, (
+                    fixture_failure,
+                    result.stderr[-3000:],
+                    result.stdout[-5000:],
+                )
+                restart_receipt = json.loads(result.stdout)
+                assert fixture_failure is None and restart_scratch is not None
+                assert restart_receipt["outcome"] == "SUCCESS"
+                restart_run_id = restart_receipt["fleet_run_id"]
+                assert restart_run_id not in {prior_run_id, admitted.fleet_run_id}
             reopened = ApplicationRuntime.build(
                 standard_local=True, standard_process_isolation=backend, git_service=git
             )
@@ -708,6 +929,28 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     step.settlement for step in steps
                 )
                 assert retained.operations == detail.operations
+                if restart_run_id is not None:
+                    restart_detail = reopened.runs.get(restart_run_id)
+                    assert restart_scratch is not None and current_scratch is not None
+                    assert restart_scratch.control != current_scratch.control
+                    assert restart_scratch.frozen != current_scratch.frozen
+                    assert (
+                        _assert_pi_storage_outlives_scratch(restart_detail, restart_scratch, layout)
+                        == retained_session
+                    )
+                    compacted_pi = retained.game_tape.pi_session
+                    restarted_pi = restart_detail.game_tape.pi_session
+                    assert compacted_pi is not None and compacted_pi.native is not None
+                    assert restarted_pi is not None and restarted_pi.native is not None
+                    assert restarted_pi.prior_run_id == admitted.fleet_run_id
+                    assert restarted_pi.native.session_id == compacted_pi.native.session_id
+                    assert restarted_pi.native.leaf_id != compacted_pi.native.leaf_id
+                    assert restart_detail.game_tape.repositories[0].steps[1].settlement.outcome == (
+                        "SUCCESS"
+                    )
+                    print(
+                        json.dumps({"compacted_session_restart": "verified", "scratch": "removed"})
+                    )
             finally:
                 reopened.shutdown(wait_for_runs=True)
             assert request_count == retained_requests
