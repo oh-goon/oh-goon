@@ -13,6 +13,7 @@ from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import (
+    PiSessionCleanupUnverified,
     PiSessionHistoryUnqualified,
     PiSessionIdentityMismatch,
     PiSessionUnavailable,
@@ -22,6 +23,8 @@ from oh_goon.core.models.pi_session_storage import (
     PiSessionDirectoryPin,
     PiSessionFileObservation,
     PiSessionFilePin,
+    PiSessionRetirementDirectoryIdentity,
+    PiSessionRetirementPin,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
@@ -29,6 +32,7 @@ from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.product_identity import pi_session_storage_id, repository_subject_instance_id
 
 _MAX_PI_SESSION_BYTES = 16 * 1024 * 1024
+_PI_STORAGE_ID = re.compile(r"pi-session-[0-9a-f]{64}")
 
 
 def require_pi_session_repository(workspace: Path) -> None:
@@ -187,7 +191,7 @@ def pin_pi_session_directory(
             "Pi session storage differs from the admitted direct Git workspace and Step"
         )
     if (storage_id is None) != (prior_file is None) or (
-        storage_id is not None and not re.fullmatch(r"pi-session-[0-9a-f]{64}", storage_id)
+        storage_id is not None and not _PI_STORAGE_ID.fullmatch(storage_id)
     ):
         raise FleetPlanInvalid("Pi session reopening requires the exact retained storage receipt")
     if prior_file is not None and prior_file.sha256 is None:
@@ -398,3 +402,119 @@ def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionF
             return observation
         except OSError as exc:
             raise FleetPlanInvalid("Original Pi session file is unavailable") from exc
+
+
+def _retirement_file_present(directory_fd: int) -> bool:
+    with os.scandir(directory_fd) as entries:
+        entry = next(entries, None)
+        if entry is None:
+            return False
+        if entry.name != PI_SESSION_NEW_FILE.name or next(entries, None) is not None:
+            raise PiSessionIdentityMismatch("Pi retirement directory contains unrelated entries")
+    return True
+
+
+@contextmanager
+def pin_pi_session_retirement(
+    *,
+    layout: ApplicationStatePathLayout,
+    storage_id: str,
+    expected_file: PiSessionFileObservation,
+    expected_directory: PiSessionRetirementDirectoryIdentity | None = None,
+) -> Generator[PiSessionRetirementPin, None, None]:
+    """Pin the exact settled file for an explicitly requested Journal retirement.
+
+    An unrecorded request requires present, proven bytes. A recorded request
+    may verify absence on the same retained directory after an interrupted
+    unlink. The caller must invoke removal inside its current Journal cut.
+    """
+    if sys.platform != "linux" or not hasattr(os, "O_PATH"):
+        raise PiSessionUnavailable("Pi session retirement requires Linux directory custody")
+    if not _PI_STORAGE_ID.fullmatch(storage_id) or layout.pi_sessions.is_relative_to(
+        Path.home() / ".pi"
+    ):
+        raise PiSessionIdentityMismatch("Pi retirement requires its original private storage")
+    if expected_file.sha256 is None or not 1 <= expected_file.size <= _MAX_PI_SESSION_BYTES:
+        raise PiSessionHistoryUnqualified("Pi retirement requires an exact retained byte receipt")
+
+    with ExitStack() as descriptors:
+        try:
+            state_fd, check_state, state_mounts = _pin_path(layout.root, descriptors)
+            state_info = os.fstat(state_fd)
+            if state_info.st_uid != os.geteuid() or stat.S_IMODE(state_info.st_mode) & 0o022:
+                raise PiSessionIdentityMismatch("Pi retirement requires owned application state")
+            root_fd, check_root = _open_private_child(
+                descriptors, state_fd, layout.pi_sessions.name, create=False
+            )
+            directory_fd, check_directory = _open_private_child(
+                descriptors, root_fd, storage_id, create=False
+            )
+
+            def require_current() -> None:
+                check_state()
+                check_root()
+                check_directory()
+                _require_direct_filesystem(*state_mounts)
+
+            require_current()
+            directory_info = os.fstat(directory_fd)
+            directory = PiSessionRetirementDirectoryIdentity(
+                device=directory_info.st_dev, inode=directory_info.st_ino
+            )
+            if expected_directory is not None and directory != expected_directory:
+                raise PiSessionIdentityMismatch("Original Pi retirement directory changed")
+            name = PI_SESSION_NEW_FILE.name
+            retained: tuple[int, os.stat_result] | None = None
+            if _retirement_file_present(directory_fd):
+                fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
+                descriptors.callback(os.close, fd)
+                observed, metadata = _observe_pinned_session_file(
+                    directory_fd, name, fd, require_current
+                )
+                if (observed.device, observed.inode) != (expected_file.device, expected_file.inode):
+                    raise PiSessionIdentityMismatch("Original Pi retirement file identity changed")
+                if observed != expected_file:
+                    raise PiSessionHistoryUnqualified("Original Pi retirement byte receipt changed")
+                retained = (fd, metadata)
+            elif expected_directory is None:
+                raise PiSessionUnavailable("Original Pi session file is absent before retirement")
+        except FleetPlanInvalid as exc:
+            raise PiSessionIdentityMismatch(
+                "Original Pi retirement storage could not be pinned"
+            ) from exc
+        except OSError as exc:
+            raise PiSessionUnavailable("Original Pi retirement storage is unavailable") from exc
+
+        def remove() -> None:
+            try:
+                require_current()
+                if _retirement_file_present(directory_fd):
+                    if retained is None:
+                        raise PiSessionIdentityMismatch(
+                            "A file appeared in the Pi retirement directory"
+                        )
+                    file_fd, original = retained
+                    current = _require_current_file(directory_fd, name, file_fd)
+                    if _file_state(current) != _file_state(original):
+                        raise PiSessionIdentityMismatch(
+                            "Original Pi retirement file changed before removal"
+                        )
+                    os.unlink(name, dir_fd=directory_fd)
+                if retained is not None and os.fstat(retained[0]).st_nlink != 0:
+                    raise PiSessionIdentityMismatch("Original Pi retirement file remains linked")
+                # Retain the private directory as the binding for retry after a
+                # successful unlink with no accepted Journal observation yet.
+                os.fsync(directory_fd)
+                require_current()
+                if _retirement_file_present(directory_fd):
+                    raise PiSessionIdentityMismatch(
+                        "Original Pi retirement file absence is unproven"
+                    )
+            except FleetPlanInvalid as exc:
+                raise PiSessionIdentityMismatch("Original Pi retirement storage changed") from exc
+            except OSError as exc:
+                raise PiSessionCleanupUnverified(
+                    "Original Pi retirement cleanup is unverified"
+                ) from exc
+
+        yield PiSessionRetirementPin(directory=directory, remove=remove)

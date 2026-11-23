@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Barrier
@@ -22,6 +24,8 @@ from oh_goon.core.models.agent_providers import (
     AgentProvider,
     NativeAgentDefinition,
     NativeAgentProfile,
+    NoPersistentPiSession,
+    PiSessionCleanupUnverified,
     PiSessionIntent,
     PiSessionUnavailable,
     ResolvedNativeAgent,
@@ -43,6 +47,8 @@ from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.pi_session_storage import (
     PiSessionFileObservation,
     PiSessionNativeObservation,
+    PiSessionRetirementDirectoryIdentity,
+    PiSessionRetirementPin,
     PiSessionWriterObservation,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
@@ -55,6 +61,8 @@ from oh_goon.core.models.run_admission import (
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     PiSessionContinuationOrigin,
+    PiSessionRetiredEvent,
+    PiSessionRetirementRequestedEvent,
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
 )
@@ -632,6 +640,178 @@ def test_pi_writer_without_quiescence_reports_cleanup_uncertainty_after_restart(
         _claim_attempt(reopened, "contender", prior_run_id="original")
     assert refusal.value.code is PiSessionRefusalCode.CLEANUP_UNVERIFIED
     assert Journal(reopened).run_events("original") == before
+    with pytest.raises(PiSessionCleanupUnverified):
+        Journal(reopened).retire_pi_session("original")
+    assert Journal(reopened).run_events("original") == before
+
+
+@pytest.mark.parametrize("unlink_interrupted", [False, True])
+def test_pi_retirement_revokes_before_unlink_and_converges_on_exact_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unlink_interrupted: bool
+) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    writer = original.reserve()
+    observed = _observe_pi_file(original, writer, sha256="a" * 64, leaf_id="old-leaf")
+    _accepted_pi_result(original)
+    historical = original.journal.run_events("original")
+    directory = PiSessionRetirementDirectoryIdentity(device=7, inode=11)
+    present, remove_attempts = True, 0
+    expected_directories: list[PiSessionRetirementDirectoryIdentity | None] = []
+
+    @contextmanager
+    def pin(
+        *,
+        layout: ApplicationStatePathLayout,
+        storage_id: str,
+        expected_file: PiSessionFileObservation,
+        expected_directory: PiSessionRetirementDirectoryIdentity | None = None,
+    ) -> Generator[PiSessionRetirementPin, None, None]:
+        assert layout == ApplicationStatePathLayout.from_database(database.path)
+        assert storage_id == writer.storage_id
+        assert expected_file == observed.file
+        expected_directories.append(expected_directory)
+        if expected_directory is None and not present:
+            raise PiSessionUnavailable("Original Pi session file is absent")
+
+        def remove() -> None:
+            nonlocal present, remove_attempts
+            remove_attempts += 1
+            if remove_attempts == 1:
+                if unlink_interrupted:
+                    present = False
+                raise PiSessionCleanupUnverified("Original Pi retirement cleanup is unverified")
+            assert expected_directory == directory
+            present = False
+
+        yield PiSessionRetirementPin(directory=directory, remove=remove)
+
+    monkeypatch.setattr("oh_goon.runtime.journal.pin_pi_session_retirement", pin)
+    inspector = Journal(LocalDatabase(database.path, read_only=True))
+    inspection = inspector.inspect_pi_session("original")
+    assert inspection.availability == "available"
+    assert inspection.native == PiSessionNativeObservation(
+        session_id="native-session", leaf_id="old-leaf"
+    )
+    assert original.journal.run_events("original") == historical
+    present = False
+    missing = inspector.inspect_pi_session("original")
+    assert missing.availability == "unavailable" and missing.retirement == "none"
+    assert missing.refusal_code is PiSessionRefusalCode.UNAVAILABLE
+    assert original.journal.run_events("original") == historical
+    present = True
+
+    with pytest.raises(PiSessionCleanupUnverified):
+        original.journal.retire_pi_session("original")
+    reopened = Journal(LocalDatabase(database.path))
+    pending = reopened.run_events("original")
+    assert pending.run == historical.run
+    assert pending.events[:-1] == historical.events
+    request = pending.events[-1]
+    assert isinstance(request, PiSessionRetirementRequestedEvent)
+    assert request.directory == directory
+    assert request.reservation_sequence == writer.sequence
+    assert reopened.inspect_pi_session("original").retirement == "pending"
+    with pytest.raises(PiSessionUnavailable, match="pending retirement"):
+        _claim_attempt(database, "revoked", prior_run_id="original")
+    assert reopened.run_events("original") == pending
+
+    retired = reopened.retire_pi_session("original")
+    assert isinstance(retired, PiSessionRetiredEvent)
+    assert retired.request_sequence == request.sequence
+    assert reopened.inspect_pi_session("original").availability == "unavailable"
+    assert reopened.inspect_pi_session("original").retirement == "verified"
+    assert reopened.retire_pi_session("original") == retired
+    assert reopened.run_events("original").events == (*pending.events, retired)
+    assert remove_attempts == 2 and not present
+    assert expected_directories == [None, None, None, directory]
+
+
+def test_pi_retirement_refuses_live_stale_and_foreign_writers_before_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    original_writer = original.reserve()
+    pin = Mock(side_effect=AssertionError("unqualified retirement reached native storage"))
+    monkeypatch.setattr("oh_goon.runtime.journal.pin_pi_session_retirement", pin)
+
+    with pytest.raises(PiSessionBusy):
+        original.journal.retire_pi_session("original")
+    foreign = Journal(LocalDatabase(tmp_path / "foreign" / "state.db"))
+    with pytest.raises(NoPersistentPiSession):
+        foreign.retire_pi_session("original")
+
+    _observe_pi_file(original, original_writer, sha256="a" * 64, leaf_id="old-leaf")
+    _accepted_pi_result(original)
+    successor = _claim_attempt(database, "successor", prior_run_id="original")
+    second_writer = successor.reserve()
+    _observe_pi_file(successor, second_writer, sha256="b" * 64, leaf_id="current-leaf")
+    _accepted_pi_result(successor)
+    before = successor.journal.run_events("original")
+    with pytest.raises(PiSessionUnavailable, match="newer writer reservation"):
+        original.journal.retire_pi_session("original")
+    assert successor.journal.run_events("original") == before
+    pin.assert_not_called()
+
+
+def test_pi_retirement_fences_a_previously_admitted_but_unreserved_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    writer = original.reserve()
+    _observe_pi_file(original, writer, sha256="a" * 64, leaf_id="old-leaf")
+    _accepted_pi_result(original)
+    contender = _claim_attempt(database, "contender", prior_run_id="original")
+    remove = Mock()
+
+    @contextmanager
+    def pin(**_options: object) -> Generator[PiSessionRetirementPin, None, None]:
+        yield PiSessionRetirementPin(
+            directory=PiSessionRetirementDirectoryIdentity(device=7, inode=11), remove=remove
+        )
+
+    monkeypatch.setattr("oh_goon.runtime.journal.pin_pi_session_retirement", pin)
+    original.journal.retire_pi_session("original")
+    before = contender.journal.run_events("contender")
+    with pytest.raises(PiSessionUnavailable, match="retired or pending retirement"):
+        contender.reserve()
+    assert contender.journal.run_events("contender") == before
+    remove.assert_called_once_with()
+
+
+def test_concurrent_pi_retirement_uses_one_durable_request_and_native_effect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    writer = original.reserve()
+    _observe_pi_file(original, writer, sha256="a" * 64, leaf_id="old-leaf")
+    _accepted_pi_result(original)
+    before = original.journal.run_events("original")
+    ready = Barrier(2)
+    remove = Mock()
+
+    @contextmanager
+    def pin(**_options: object) -> Generator[PiSessionRetirementPin, None, None]:
+        ready.wait(timeout=5)
+        yield PiSessionRetirementPin(
+            directory=PiSessionRetirementDirectoryIdentity(device=7, inode=11), remove=remove
+        )
+
+    monkeypatch.setattr("oh_goon.runtime.journal.pin_pi_session_retirement", pin)
+    with ThreadPoolExecutor(max_workers=2) as threads:
+        contenders = [
+            threads.submit(Journal(LocalDatabase(database.path)).retire_pi_session, "original")
+            for _ in range(2)
+        ]
+        first, second = [contender.result(timeout=5) for contender in contenders]
+    assert first == second
+    request, completion = original.journal.run_events("original").events[len(before.events) :]
+    assert isinstance(request, PiSessionRetirementRequestedEvent)
+    assert completion == first and first.request_sequence == request.sequence
+    remove.assert_called_once_with()
 
 
 def test_interrupted_successor_never_releases_an_older_pi_predecessor(tmp_path: Path) -> None:

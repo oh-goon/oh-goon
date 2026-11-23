@@ -9,6 +9,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from oh_goon.core.errors import PiSessionRefusalCode
 from oh_goon.core.models.base import ImmutableModel
 
 PI_SESSION_SANDBOX_DIRECTORY = PurePosixPath("/run/oh-goon-pi-session")
@@ -47,11 +48,36 @@ class PiSessionFileObservation(ImmutableModel):
     )
 
 
+class PiSessionRetirementDirectoryIdentity(ImmutableModel):
+    """The retained directory whose exact file absence can be verified on retry."""
+
+    device: int = Field(ge=0, strict=True)
+    inode: int = Field(gt=0, strict=True)
+
+
+@dataclass(frozen=True, slots=True)
+class PiSessionRetirementPin:
+    """Process-local custody for the Journal's explicitly authorized removal."""
+
+    directory: PiSessionRetirementDirectoryIdentity
+    remove: Callable[[], None] = field(repr=False)
+
+
 class PiSessionNativeObservation(ImmutableModel):
     """Pi's correlated final identity and leaf, without conversation contents."""
 
     session_id: str = Field(min_length=1, max_length=256, pattern=r"^[a-zA-Z0-9_-]+$")
     leaf_id: str = Field(min_length=1, max_length=256, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
+class PiSessionInspection(ImmutableModel):
+    """Bounded metadata and saved-file availability at one original Journal cut."""
+
+    fleet_run_id: str = Field(min_length=1, max_length=160)
+    native: PiSessionNativeObservation | None = None
+    availability: Literal["available", "unavailable", "unverified", "busy"]
+    retirement: Literal["none", "pending", "verified"] = "none"
+    refusal_code: PiSessionRefusalCode | None = None
 
 
 class PiSessionContinuationOrigin(ImmutableModel):

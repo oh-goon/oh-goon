@@ -1,4 +1,4 @@
-"""Public CLI continuation through the same managed Pi and original Run owner."""
+"""Public CLI continuation and retirement through the original Pi Run owner."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 
 from oh_goon.api.dependencies import fleet_run_control_plane
 from oh_goon.api.routes.fleet_runs import router as run_router
+from oh_goon.core.models.pi_session_storage import PI_SESSION_NEW_FILE
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.database import LocalDatabase
@@ -31,6 +32,7 @@ from oh_goon.runtime.journal import Journal
 _SECRET = "synthetic-pi-journey-broker-key"
 _PRIVATE_TOOL_OUTPUT = "PI_NATIVE_PRIVATE_TOOL_OUTPUT_53"
 _MODEL_REPLY = "The requested review is complete."
+_UNRELATED_TASK = "Keep this separate synthetic Pi session after retiring the first."
 _TASKS = (
     "Record the original Pi conversation before exiting Oh-Goon.",
     "Use the earlier Pi conversation in the initialized Plan.",
@@ -74,15 +76,16 @@ def _provider() -> Iterator[tuple[str, list[str], list[str], list[str], list[str
             users = "\n".join(
                 _message_text(message) for message in messages if message["role"] == "user"
             )
-            stages = len(requests)
-            assert stages < 6, "Readback or unexpected replay triggered broker inference"
-            phase = min(max(stages - 1, 0), 3)
-            task = _TASKS[phase]
             privileged = "\n".join(
                 _message_text(message)
                 for message in messages
                 if message["role"] in {"system", "developer"}
             )
+            stages = len(requests)
+            phase = min(max(stages - 1, 0), 3)
+            unrelated = _UNRELATED_TASK in privileged
+            assert stages < (7 if unrelated else 6), "Unexpected broker inference"
+            task = _UNRELATED_TASK if unrelated else _TASKS[phase]
             assert task in privileged
             assert "# Session journey Skill" in privileged
             payload = next(
@@ -98,6 +101,12 @@ def _provider() -> Iterator[tuple[str, list[str], list[str], list[str], list[str
             )
             assert evidence["capture_identity"] == payload["identity"]["candidate_identity"]
             assert payload["repository_evidence"] in privileged
+            if unrelated:
+                assert _UNRELATED_TASK not in requests
+                assert not any(old_task in users for old_task in _TASKS)
+                assert _PRIVATE_TOOL_OUTPUT not in json.dumps(messages)
+                requests.append(task)
+                return {"role": "assistant", "content": _MODEL_REPLY}, "stop"
             requests.append(task)
             source_digests.append(evidence["capture_identity"])
             if phase == 3:
@@ -233,7 +242,7 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
         assert str(session_root) not in combined
         assert "/run/oh-goon-pi-session" not in combined
         if args[0] in {"ai", "run", "runs"}:
-            assert not any(task in combined for task in _TASKS[:3])
+            assert not any(task in combined for task in (*_TASKS[:3], _UNRELATED_TASK))
             assert _MODEL_REPLY not in combined
         if result.returncode != expected:
             pytest.fail(
@@ -446,12 +455,15 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
         api = FastAPI()
         api.include_router(run_router, prefix="/api")
         api.dependency_overrides[fleet_run_control_plane] = lambda: SimpleNamespace(
-            get=view.required_run_detail, events=view.run_events
+            get=view.required_run_detail,
+            events=view.run_events,
+            history=view.run_history,
         )
         with TestClient(api) as client:
             detail_response = client.get(f"/api/fleet/runs/{second_id}")
             event_response = client.get(f"/api/fleet/runs/{second_id}/events?after=0&limit=1")
-        for response in (detail_response, event_response):
+            history_response = client.get("/api/fleet/runs")
+        for response in (detail_response, event_response, history_response):
             assert response.status_code == 200
             for private in (
                 *_TASKS,
@@ -470,6 +482,10 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
             == second["pi_session"]
         )
         assert api_events["next_sequence"] == 1 and api_events["has_more"]
+        assert {item["run"]["fleet_run_id"] for item in history_response.json()["items"]} == {
+            first_id,
+            second_id,
+        }
         operation = api_detail["operations"][0]
         (native_step,) = [
             step for step in operation["evidence"]["plan"]["steps"] if step["kind"] == "agent"
@@ -572,8 +588,105 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
             "--json",
         ]
         assert len(requests) == inference_count and not errors
+
+        separate = json.loads(
+            cli(
+                *ai,
+                "--session",
+                "new",
+                "--prompt",
+                _UNRELATED_TASK,
+                "--verify",
+                "./verify",
+                "--json",
+            )
+        )
+        assert separate["outcome"] == "SUCCESS" and not errors, errors
+        separate_id = separate["fleet_run_id"]
+        assert separate_id not in completed
+        completed.add(separate_id)
+        separate_session = session_summary(separate, None)
+        separate_reserved, separate_native = observation(separate_id, separate_session)
+        assert separate_native["session_id"] != third_native["session_id"]
+        assert separate_reserved["storage_id"] != third_reserved["storage_id"]
+        native_file = session_root / third_reserved["storage_id"] / PI_SESSION_NEW_FILE.name
+        separate_file = session_root / separate_reserved["storage_id"] / PI_SESSION_NEW_FILE.name
+        assert native_file.stat().st_ino == third_native["file"]["inode"]
+        separate_before = separate_file.stat()
+        assert separate_before.st_ino == separate_native["file"]["inode"]
+        assert len(requests) == inference_count + 1 and requests[-1] == _UNRELATED_TASK
+
+        # History surfaces cannot turn private native storage into an artifact.
+        logs = json.loads(cli("runs", "logs", third_id, "--json", expected=3))
+        assert logs["fleet_run_id"] == third_id and logs["state"] == "UNAVAILABLE"
+        assert not logs["chunks"]
+        destination = tmp_path / "undeclared-export.jsonl"
+        cli(
+            "runs",
+            "export-artifact",
+            third_id,
+            "--step",
+            third_session["step_id"],
+            "--path",
+            PI_SESSION_NEW_FILE.name,
+            "--output",
+            str(destination),
+            "--json",
+            expected=2,
+        )
+        assert not destination.exists()
+        events_before = json.loads(
+            cli("runs", "events", third_id, "--after", "0", "--limit", "100", "--json")
+        )["events"]
+        tape_before = json.loads(cli("runs", "tape", third_id, "--json"))
+        before = json.loads(cli("runs", "pi-session", third_id, "--json"))
+        assert before["availability"] == "available" and before["retirement"] == "none"
+        assert before["native"] == third_session["native"]
+        cli("runs", "retire-pi-session", third_id, "--json", expected=2)
+        assert native_file.stat().st_ino == third_native["file"]["inode"]
+
+        retired = json.loads(cli("runs", "retire-pi-session", third_id, "--authorize", "--json"))
+        assert retired["fleet_run_id"] == third_id and retired["native"] == before["native"]
+        assert retired["availability"] == "unavailable" and retired["retirement"] == "verified"
+        assert retired["refusal_code"] == "PI_SESSION_UNAVAILABLE"
+        with pytest.raises(FileNotFoundError):
+            native_file.lstat()
+        assert separate_file.stat() == separate_before
+        assert (
+            json.loads(cli("runs", "pi-session", separate_id, "--json"))["availability"]
+            == "available"
+        )
+        assert json.loads(cli("runs", "pi-session", third_id, "--json")) == retired
+        assert (
+            json.loads(cli("runs", "retire-pi-session", third_id, "--authorize", "--json"))
+            == retired
+        )
+
+        events_after = json.loads(
+            cli("runs", "events", third_id, "--after", "0", "--limit", "100", "--json")
+        )["events"]
+        assert events_after[: len(events_before)] == events_before
+        assert [event["event_type"] for event in events_after[len(events_before) :]] == [
+            "PI_SESSION_RETIREMENT_REQUESTED",
+            "PI_SESSION_RETIRED",
+        ]
+        tape_after = json.loads(cli("runs", "tape", third_id, "--json"))
+        assert tape_after["repositories"] == tape_before["repositories"]
+        assert tape_after["pi_session"] == tape_before["pi_session"]
+        assert tape_after["status"] == tape_before["status"] == "PASSED"
+        assert json.loads(cli("runs", "handoff", first_id, "--json"))["pi_session"] == first_session
+        blocked = json.loads(
+            cli(*ai, "--session", f"run:{third_id}", "--prompt", _TASKS[2], "--json", expected=2)
+        )
+        assert blocked["code"] == "PI_SESSION_UNAVAILABLE"
+        assert len(requests) == inference_count + 1 and not errors
         history = json.loads(cli("runs", "list", "--json"))
         assert {item["fleet_run_id"] for item in history["items"]} == completed
         print(
-            json.dumps({"pi": "create -> initialized-plan -> cli", "cross_harness": bool(opencode)})
+            json.dumps(
+                {
+                    "pi": "create -> initialized-plan -> cli -> retired",
+                    "cross_harness": bool(opencode),
+                }
+            )
         )

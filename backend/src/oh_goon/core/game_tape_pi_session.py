@@ -16,7 +16,7 @@ from oh_goon.core.models.game_tape_pi_session import (
 )
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.pi_session_storage import PiSessionNativeObservation
-from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail
+from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail, FleetRunHistoryPage
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     FleetRunEventBatch,
@@ -24,7 +24,7 @@ from oh_goon.core.models.run_events import (
     PiSessionWriterReservedEvent,
     StepCancelledEvent,
 )
-from oh_goon.core.models.target import FleetPlanTarget
+from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.plan_validation_diagnostics import pi_session_safe_next_action
 
 _FOLLOWING_STEP_LIMIT = 8
@@ -54,12 +54,7 @@ def fleet_run_event_readback(batch: FleetRunEventBatch) -> dict[str, Any]:
 
 def fleet_run_detail_readback(detail: FleetRunDetail) -> dict[str, Any] | None:
     """Reuse Game Tape's safe Step metadata in the original detail response."""
-    target = detail.run.target
-    private_steps = (
-        {step.step_id for step in target.plan.steps if is_private_pi_step(step)}
-        if isinstance(target, FleetPlanTarget)
-        else set()
-    )
+    private_steps = _private_pi_step_ids(detail.run.target)
     if not private_steps:
         return None
     result = detail.model_dump(mode="json", by_alias=True)
@@ -92,6 +87,29 @@ def fleet_run_detail_readback(detail: FleetRunDetail) -> dict[str, Any] | None:
                     public_observations.append(public)
             step["observations"] = public_observations
     return result
+
+
+def fleet_run_history_readback(page: FleetRunHistoryPage) -> dict[str, Any] | None:
+    """Keep the original Run page and cursor without persistent Pi task excerpts."""
+    step_ids = {
+        item.run.fleet_run_id: ids
+        for item in page.items
+        if (ids := _private_pi_step_ids(item.run.target))
+    }
+    if not step_ids:
+        return None
+    result = page.model_dump(mode="json", by_alias=True)
+    for item in result["items"]:
+        run = item["run"]
+        if private := step_ids.get(run["fleet_run_id"]):
+            _hide_pi_task(run, private)
+    return result
+
+
+def _private_pi_step_ids(target: OperationTarget | None) -> set[str]:
+    if not isinstance(target, FleetPlanTarget):
+        return set()
+    return {step.step_id for step in target.plan.steps if is_private_pi_step(step)}
 
 
 def _hide_pi_task(item: dict[str, Any], private_steps: set[str]) -> None:

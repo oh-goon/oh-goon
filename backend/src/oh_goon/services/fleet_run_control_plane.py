@@ -31,6 +31,7 @@ from oh_goon.core.errors import (
     FleetContentReferenceUnavailable,
     FleetPlanInvalid,
     FleetPlanSourceStale,
+    InvalidRequest,
     InvalidRunTransition,
     JournalConflict,
     OwnershipLost,
@@ -73,6 +74,7 @@ from oh_goon.core.models.game_tape import (
 from oh_goon.core.models.game_tape_failure_history import GameTapeFailureHistory
 from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
 from oh_goon.core.models.game_tape_performance import GameTapePerformanceReport
+from oh_goon.core.models.pi_session_storage import PiSessionInspection
 from oh_goon.core.models.run import (
     FleetRunDetail,
     FleetRunFailure,
@@ -1285,6 +1287,15 @@ class FleetRunControlPlane:
             step_id=step_id,
             sample_limit=sample_limit,
         )
+
+    def inspect_pi_session(self, fleet_run_id: str) -> PiSessionInspection:
+        return self._journal.inspect_pi_session(fleet_run_id)
+
+    def retire_pi_session(self, fleet_run_id: str, *, authorize: bool) -> PiSessionInspection:
+        if authorize is not True:
+            raise InvalidRequest("Pi session retirement requires explicit authorization")
+        self._journal.retire_pi_session(fleet_run_id)
+        return self._journal.inspect_pi_session(fleet_run_id)
 
     def events(
         self, fleet_run_id: str, after: int = 0, *, limit: int | None = None

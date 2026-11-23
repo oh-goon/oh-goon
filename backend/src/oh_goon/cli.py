@@ -657,7 +657,7 @@ def _main(
                 "application"
                 if args.runs_command == "continue"
                 else "workflow"
-                if args.runs_command == "retire-candidate"
+                if args.runs_command in {"retire-candidate", "retire-pi-session"}
                 else "observation"
             ),
             as_json=args.as_json,

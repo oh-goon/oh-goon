@@ -43,6 +43,8 @@ from oh_goon.core.models.run_events import (
     OutputAbandonedEvent,
     OutputFinalizedEvent,
     OutputQuarantinedEvent,
+    PiSessionRetiredEvent,
+    PiSessionRetirementRequestedEvent,
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
     ProcessExitedEvent,
@@ -198,6 +200,10 @@ class _RunFold:
             self.worker_resource_envelope = worker
             self.lifecycle_events.append(event)
             return
+        if isinstance(event, (PiSessionRetirementRequestedEvent, PiSessionRetiredEvent)):
+            self._apply_pi_session_retirement(event)
+            self.lifecycle_events.append(event)
+            return
         reconciliation_events = (
             ReconciliationRequiredEvent,
             ReconciliationStartedEvent,
@@ -254,6 +260,51 @@ class _RunFold:
             return
         self.state = self._transition(event)
         self.lifecycle_events.append(event)
+
+    def _apply_pi_session_retirement(
+        self, event: PiSessionRetirementRequestedEvent | PiSessionRetiredEvent
+    ) -> None:
+        if not self.state.status.terminal:
+            raise InvalidRunTransition("Pi session retirement requires its terminal writer Run")
+        history = self.lifecycle_events
+        request = next(
+            (item for item in history if isinstance(item, PiSessionRetirementRequestedEvent)),
+            None,
+        )
+        if isinstance(event, PiSessionRetiredEvent):
+            if (
+                request is None
+                or event.request_sequence != request.sequence
+                or any(isinstance(item, PiSessionRetiredEvent) for item in history)
+            ):
+                raise InvalidRunTransition("Pi retirement requires one exact unsettled request")
+            return
+        if request is not None or not (
+            1 <= event.reservation_sequence < event.observation_sequence <= len(history)
+        ):
+            raise InvalidRunTransition("Pi retirement requires one exact observed writer")
+        writer = history[event.reservation_sequence - 1]
+        observed = history[event.observation_sequence - 1]
+        if (
+            not isinstance(writer, PiSessionWriterReservedEvent)
+            or not isinstance(observed, PiSessionWriterObservedEvent)
+            or observed.reservation_sequence != writer.sequence
+            or observed.observation.persistence != "observed"
+            or observed.observation.file is None
+            or observed.observation.file.sha256 is None
+            or not any(
+                isinstance(item, StepSucceededEvent)
+                and item.operation_id == writer.operation_id
+                and item.step_id == writer.step_id
+                for item in history[observed.sequence :]
+            )
+            or not any(
+                report.provenance.operation_id == writer.operation_id
+                and report.resource_settlement == "SETTLED"
+                for report in self.completed_reports
+            )
+        ):
+            raise InvalidRunTransition("Pi retirement requires the qualified, settled writer")
 
     def _apply_reconciliation_lifecycle(
         self,

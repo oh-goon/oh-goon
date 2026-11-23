@@ -25,6 +25,7 @@ from oh_goon.core.models.run_admission import fleet_readmission_parent
 from oh_goon.core.models.run_events import (
     FleetRunEvent,
     PiSessionContinuationOrigin,
+    PiSessionRetirementRequestedEvent,
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
     RepositoryCompletedEvent,
@@ -127,6 +128,27 @@ def _build_readmission_index(
 _TERMINAL_RUN_EVENTS = (RunCompletedEvent, RunCancelledEvent, RunFailedEvent)
 
 
+def pi_session_recorded_writer(events: Sequence[FleetRunEvent]) -> PiSessionWriterReservedEvent:
+    writer = next((item for item in events if isinstance(item, PiSessionWriterReservedEvent)), None)
+    if writer is None:
+        raise NoPersistentPiSession("Selected prior Run has no persistent Pi writer")
+    return writer
+
+
+def require_latest_pi_writer(
+    writer: PiSessionWriterReservedEvent,
+    events_by_run: Mapping[str, Sequence[FleetRunEvent]],
+    writer_heads: Mapping[str, PiSessionWriterReservedEvent],
+) -> None:
+    head = writer_heads.get(writer.storage_id)
+    if head is None:
+        raise InvalidRunTransition("Missing original Pi writer lineage head")
+    if not any(isinstance(item, _TERMINAL_RUN_EVENTS) for item in events_by_run[head.fleet_run_id]):
+        raise PiSessionBusy("Selected Pi session still has an active writer")
+    if head != writer:
+        raise PiSessionUnavailable("Selected Pi session has a newer writer reservation")
+
+
 def pi_session_predecessor(
     prior_run_id: str,
     admission: RunAdmittedEvent,
@@ -135,9 +157,9 @@ def pi_session_predecessor(
 ) -> tuple[PiSessionWriterReservedEvent, PiSessionWriterObservedEvent]:
     """Resolve one accepted predecessor at the exact existing Journal cut."""
     events = events_by_run.get(prior_run_id, ())
-    prior = next((item for item in events if isinstance(item, PiSessionWriterReservedEvent)), None)
-    if prior is None or prior_run_id == admission.fleet_run_id:
+    if prior_run_id == admission.fleet_run_id:
         raise NoPersistentPiSession("Selected prior Run has no persistent Pi writer")
+    prior = pi_session_recorded_writer(events)
     previous = events[0]
     if (
         not isinstance(previous, RunAdmittedEvent)
@@ -156,13 +178,9 @@ def pi_session_predecessor(
         raise PiSessionIdentityMismatch(
             "Selected Pi session belongs to a different repository subject"
         )
-    head = writer_heads.get(prior.storage_id)
-    if head is None:
-        raise InvalidRunTransition("Missing original Pi writer lineage head")
-    if not any(isinstance(item, _TERMINAL_RUN_EVENTS) for item in events_by_run[head.fleet_run_id]):
-        raise PiSessionBusy("Selected Pi session still has an active writer")
-    if head != prior:
-        raise PiSessionUnavailable("Selected Pi session has a newer writer reservation")
+    require_latest_pi_writer(prior, events_by_run, writer_heads)
+    if any(isinstance(item, PiSessionRetirementRequestedEvent) for item in events):
+        raise PiSessionUnavailable("Selected Pi session is retired or pending retirement")
     old_target, new_target = previous.target, admission.target
     if (
         not isinstance(old_target, FleetPlanTarget)
@@ -175,6 +193,12 @@ def pi_session_predecessor(
         raise PiNativeConfigurationMismatch(
             "Selected Pi session has a different native implementation"
         )
+    return prior, pi_session_qualified_observation(prior, events)
+
+
+def pi_session_qualified_observation(
+    prior: PiSessionWriterReservedEvent, events: Sequence[FleetRunEvent]
+) -> PiSessionWriterObservedEvent:
     observed = next(
         (
             item
@@ -211,7 +235,7 @@ def pi_session_predecessor(
         raise PiSessionSettlementUncertain(
             "Selected Pi session has no accepted original Agent result"
         )
-    return prior, observed
+    return observed
 
 
 def pi_session_origin_observation(
@@ -357,6 +381,14 @@ class JournalIndex:
                 _index_pi_session_writer(
                     entry.event, run_history, run_events, pi_session_writer_heads
                 )
+            elif isinstance(entry.event, PiSessionRetirementRequestedEvent):
+                try:
+                    writer = pi_session_recorded_writer(run_history)
+                    require_latest_pi_writer(writer, run_events, pi_session_writer_heads)
+                except (PiSessionBusy, PiSessionUnavailable) as exc:
+                    raise InvalidRunTransition(
+                        "Pi retirement does not own the latest writer"
+                    ) from exc
             elif isinstance(entry.event, PiSessionWriterObservedEvent):
                 seq = entry.event.reservation_sequence
                 if 1 <= seq <= len(run_history):

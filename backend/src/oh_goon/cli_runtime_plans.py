@@ -77,6 +77,10 @@ def run_plan_command(runtime: ApplicationRuntime, args: argparse.Namespace) -> i
             from oh_goon.cli_candidate_workspace import run_candidate_workspace_command
 
             return run_candidate_workspace_command(runtime, args)
+        if args.runs_command in {"pi-session", "retire-pi-session"}:
+            from oh_goon.cli_pi_session import run_pi_session_command
+
+            return run_pi_session_command(runtime, args)
         if args.runs_command in {"investigate", "continue"}:
             from oh_goon.cli_agent_continuation import run_agent_continuation_command
 
