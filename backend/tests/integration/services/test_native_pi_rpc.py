@@ -133,7 +133,11 @@ export default function (pi) {
       const users = context.messages.filter(m => m.role === "user").map(m =>
         typeof m.content === "string" ? m.content :
         m.content.filter(p => p.type === "text").map(p => p.text).join("\\n"));
-      const text = users.at(-1)?.includes("WP139_ERROR") ? "Completed successfully" :
+      const task = users.at(-1) ?? "";
+      let terminalError;
+      if (task.includes("WP139_ERROR")) terminalError = "error";
+      if (task.includes("WP139_ABORTED")) terminalError = "aborted";
+      const text = terminalError ? "Completed successfully" :
         JSON.stringify({userCount: users.length,
         canarySeen: users.some(t => t.includes("WP00_CANARY"))});
       const output = {role: "assistant", content: [], api: model.api,
@@ -162,10 +166,10 @@ export default function (pi) {
       stream.push({type: "text_start", contentIndex: 0, partial: output});
       stream.push({type: "text_delta", contentIndex: 0, delta: text, partial: output});
       stream.push({type: "text_end", contentIndex: 0, content: text, partial: output});
-      if (users.at(-1)?.includes("WP139_ERROR")) {
-        output.stopReason = "error";
-        output.errorMessage = "Synthetic WP139 provider failure";
-        stream.push({type: "error", reason: "error", error: output});
+      if (terminalError) {
+        output.stopReason = terminalError;
+        output.errorMessage = "Synthetic terminal provider failure";
+        stream.push({type: "error", reason: terminalError, error: output});
         stream.end();
         return stream;
       }
@@ -372,16 +376,22 @@ def test_installed_pi_ephemeral_rpc_duplex_settles_and_preserves_literal_prompt(
 
 
 @pytest.mark.certification
-def test_installed_pi_ephemeral_rpc_provider_error_is_not_success_despite_zero_exit(
-    pi_rpc_probe: _PiRpcProbe,
+@pytest.mark.parametrize("reason", ["error", "aborted"])
+def test_installed_pi_ephemeral_rpc_failed_assistant_refuses_zero_exit_success(
+    pi_rpc_probe: _PiRpcProbe, reason: str
 ) -> None:
-    result = pi_rpc_probe.launch(b"WP139_ERROR")
+    result = pi_rpc_probe.launch(f"WP139_{reason.upper()}".encode())
     assert result.returncode == 0
     _assert_rpc_process_lifetime(pi_rpc_probe, result.physical_execution_id)
     parser = NativeAgentEventParser("pi")
+    reasons: list[str] = []
     for event in pi_rpc_probe.events:
-        assert json.loads(event)["type"] != "response"
+        record = json.loads(event)
+        assert record["type"] != "response"
+        if record["type"] == "message_end" and record["message"]["role"] == "assistant":
+            reasons.append(record["message"]["stopReason"])
         parser.feed(event)
+    assert reasons == [reason]
     events = parser.finish(returncode=result.returncode)
     assert events.final_text == "Completed successfully"
     assert events.failed and events.settled

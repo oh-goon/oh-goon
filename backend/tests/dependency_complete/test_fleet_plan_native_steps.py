@@ -24,11 +24,12 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ResolvedNativeAgent,
 )
-from oh_goon.core.models.agent_review import review_scope
+from oh_goon.core.models.agent_review import AgentAdjudicationRecord, review_scope
 from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
 from oh_goon.core.models.execution_identity import ExecutionIdentity
 from oh_goon.core.models.fleet_observation import (
     AgentHarnessObservation,
+    AgentReviewObservation,
     NativeAgentObservation,
     NativeServiceExecutionEvidence,
 )
@@ -62,6 +63,7 @@ from oh_goon.integrations.fleet_plan_native_steps import (
 )
 from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
 from oh_goon.integrations.fleet_plan_step_execution import StepRuntime, execute_direct_step
+from oh_goon.integrations.fleet_plan_step_publication import publish_direct_attempt_outputs
 from oh_goon.runtime.goon_templates import GoonTemplateStore
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 from oh_goon.services.fleet_plan_resolver import FleetPlanResolver
@@ -139,6 +141,41 @@ if mode == 'bad-utf8':
     os.write(1, b'\xff')
 """
 
+_PI_TYPED_STUB = """#!/usr/bin/python3
+import json, os, sys, urllib.request
+from pathlib import Path
+
+def emit(record):
+    print(json.dumps(record), flush=True)
+
+def respond(command, **data):
+    request = json.loads(sys.stdin.readline())
+    assert request['type'] == command
+    emit({'type': 'response', 'id': request['id'], 'command': command, 'success': True, 'data': data})
+    return request
+
+state = {'sessionId': 'pi-typed-fixture', 'sessionFile': None}
+respond('get_state', **state)
+respond('get_entries', entries=[], leafId=None)
+prompt = json.loads(respond('prompt', disposition='started')['message'])
+assert 'Hashmarks' in prompt['repository_evidence']
+assert prompt['working_workspace']['repository_access'] == 'read_only'
+provider = json.loads(Path(os.environ['PI_CODING_AGENT_DIR'], 'models.json').read_text())['providers']['oh-goon']
+request = urllib.request.Request(provider['baseUrl'] + '/chat/completions', data=json.dumps({
+    'model': provider['models'][0]['id'], 'messages': [{'role': 'user', 'content': 'Review fixture'}],
+    'stream': True,
+}).encode(), headers={'Content-Type': 'application/json', 'Authorization': 'Bearer oh-goon-local'})
+with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request) as response:
+    assert response.read()
+reply = json.dumps(prompt['context']['fixture_reply'])
+emit({'type': 'agent_start'})
+emit({'type': 'message_end', 'message': {'role': 'assistant', 'content': reply, 'stopReason': 'stop'}})
+emit({'type': 'agent_end'})
+emit({'type': 'agent_settled', 'aborted': False})
+respond('get_state', **state)
+assert sys.stdin.read() == ''
+"""
+
 
 def _case(
     tmp_path: Path,
@@ -148,6 +185,7 @@ def _case(
     repository_files: dict[str, str] | None = None,
     skill_instructions: str = "# Native fixture\nInspect complete captured source.\n",
     timeout_seconds: float = 10.0,
+    pi_role: Literal["adjudication", "proposal"] | None = None,
 ) -> tuple[Path, FrozenAgentStepHandoff, ResolvedAgentStep, StepRuntime]:
     repository = tmp_path / "repos/team/project"
     repository.mkdir(parents=True)
@@ -170,6 +208,7 @@ def _case(
     package = tmp_path / "goons/agents/native"
     package.mkdir(parents=True)
     (package / "README.md").write_text("# agents/native\n")
+    read_only = pi_role is not None or mode in {"review", "wrong-review"}
     (package / "goon.yml").write_text(
         """inputs:
   repo: {type: repository_reference}
@@ -181,7 +220,7 @@ steps:
   task: Inspect the captured source
   requested_effects:
     repository_access: """
-        + ("read_only" if mode in {"review", "wrong-review"} else "write")
+        + ("read_only" if read_only else "write")
         + """
     recipients: [company]
 """
@@ -203,7 +242,7 @@ steps:
         expected_source_sha256=source,
     )
     executable = tmp_path / "native-fixture"
-    executable.write_text(_STUB)
+    executable.write_text(_PI_TYPED_STUB if pi_role is not None else _STUB)
     executable.chmod(0o755)
     connection = AgentConnection.select(
         AgentProvidersConfig(
@@ -225,21 +264,30 @@ steps:
             pytest.skip("native Bubblewrap is unavailable")
         backend = BubblewrapProcessIsolation(binary)
     selected = ResolvedNativeAgent(
-        agent="opencode",
+        agent="pi" if pi_role is not None else "opencode",
         profile_name="test",
         definition=NativeAgentDefinition(
             executable=str(executable),
-            arguments=("--fixture-mode", mode),
+            arguments=() if pi_role is not None else ("--fixture-mode", mode),
         ),
-        profile=NativeAgentProfile(
-            backend="bubblewrap" if sandboxed else "local",
-            timeout_seconds=timeout_seconds,
+        profile=(
+            NativeAgentProfile(
+                backend="bubblewrap",
+                allowed_agents=("pi",),
+                inference_profile=connection.profile,
+                pi_rpc=True,
+                timeout_seconds=timeout_seconds,
+            )
+            if pi_role is not None
+            else NativeAgentProfile(
+                backend="bubblewrap" if sandboxed else "local", timeout_seconds=timeout_seconds
+            )
         ),
         executable_sha256=hashlib.sha256(executable.read_bytes()).hexdigest(),
         connection=connection,
         backend_configuration_id=backend.configuration_identity() if backend is not None else None,
     )
-    role: Literal["review", "report"] = "review" if mode in {"review", "wrong-review"} else "report"
+    role: AgentResultRole = pi_role or ("review" if read_only else "report")
     step = resolve_delivered_agent_step(handoff, native_agent=selected, role=role)
     packet = handoff.encode_prework_delivery()
     runtime = StepRuntime(
@@ -403,6 +451,108 @@ def test_native_read_only_phase_reuses_the_original_typed_acceptor(
     else:
         assert outcome.returncode != 0
     assert not (repository / "native-write.txt").exists()
+
+
+@pytest.mark.process
+@pytest.mark.parametrize("role", ["adjudication", "proposal"])
+@pytest.mark.parametrize("accepted", [True, False], ids=["valid", "invalid"])
+def test_pi_rpc_settlement_alone_cannot_accept_a_typed_phase_result(
+    tmp_path: Path,
+    model_transport: list[dict[str, Any]],
+    role: Literal["adjudication", "proposal"],
+    accepted: bool,
+) -> None:
+    repository, handoff, step, runtime = _case(tmp_path, pi_role=role, timeout_seconds=30)
+    candidate = handoff.source.repository.content_identity
+    member = next(item for item in handoff.source.repository.members if item.path == "main.py")
+    source = "repo/main.py"
+    context: dict[str, Any] = {"candidate_identity": candidate}
+    if role == "adjudication":
+        scope = review_scope(handoff)
+        finding = {"reviewer": "original-review", "finding_id": "f1"}
+        context["reviews"] = [
+            {
+                "schema": "oh-goon.agent-review/v1",
+                "reviewer": finding["reviewer"],
+                "candidate_identity": candidate,
+                "scope_identity": scope,
+                "skill_identity": handoff.source.skill.content_identity,
+                "verdict": "FINDING",
+                "summary": "Captured defect",
+                "reviewed_paths": [source],
+                "findings": [
+                    {
+                        "finding_id": finding["finding_id"],
+                        "explanation": "Incorrect answer",
+                        "evidence": [{"path": source, "sha256": member.sha256, "line": 2}],
+                    }
+                ],
+            }
+        ]
+        reply = {
+            "schema": "oh-goon.agent-adjudication/v1",
+            "candidate_identity": candidate,
+            "scope_identity": scope,
+            "dispositions": [{**finding, "decision": "repair", "rationale": "Scoped repair"}],
+            "queue": [
+                {
+                    "queue_id": "q1",
+                    "findings": [finding if accepted else {**finding, "finding_id": "different"}],
+                    "rationale": "Scoped repair",
+                    "regression_expectation": "Check the answer",
+                }
+            ],
+        }
+    else:
+        context["adjudication"] = {"queue": [{"queue_id": "q1"}]}
+        reply = {
+            "schema": "agent-patch-batch-v1",
+            "candidate_identity": candidate,
+            "summary": "Repair the admitted finding",
+            "operations": [
+                {
+                    "action": "update",
+                    "path": source,
+                    "source_sha256": member.sha256 if accepted else "f" * 64,
+                    "replacement": "def answer():\n    return 43\n",
+                },
+                {
+                    "action": "create",
+                    "path": "repo/test_regression.py",
+                    "source_sha256": None,
+                    "replacement": "from main import answer\nassert answer() == 43\n",
+                },
+            ],
+            "regressions": [
+                {"queue_id": "q1", "path": "repo/test_regression.py", "expectation": "Check answer"}
+            ],
+        }
+    step = step.model_copy(
+        update={"review_context": json.dumps({**context, "fixture_reply": reply})}
+    )
+
+    outcome = execute_direct_step(repository, step, runtime, step_order=1)
+    assert len(model_transport) == 1
+    (native,) = (item for item in outcome.observations if isinstance(item, NativeAgentObservation))
+    assert native.agent == "pi" and native.role == role and native.settled and not native.failed
+    isolation = outcome.standard_isolation
+    assert isolation is not None and isolation.workspace_read_only
+    settlement = settle_step_execution(step, outcome)
+    assert settlement.observed_returncode == 0 and settlement.cleanup == "VERIFIED"
+    assert settlement.outcome == ("SUCCESS" if accepted else "FAILED")
+    typed = [
+        item.record for item in outcome.observations if isinstance(item, AgentReviewObservation)
+    ]
+    if accepted and role == "adjudication":
+        assert len(typed) == 1 and isinstance(typed[0], AgentAdjudicationRecord)
+        assert typed[0].queue[0].queue_id == "q1"
+    else:
+        assert typed == []
+    if accepted and role == "proposal":
+        publication = publish_direct_attempt_outputs(step, outcome, repository)
+        assert json.loads(publication.outputs["proposal"]) == reply
+    assert (repository / "main.py").read_bytes() == member.data
+    assert not (repository / "test_regression.py").exists()
 
 
 @pytest.mark.parametrize(

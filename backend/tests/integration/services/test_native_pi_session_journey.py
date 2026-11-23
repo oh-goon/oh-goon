@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 import yaml
@@ -31,6 +31,9 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.errors import PiSessionRefusalCode, StateConflict
 from oh_goon.core.models.agent_providers import PiSessionIntent
+from oh_goon.core.models.agent_review import AgentReviewRecord
+from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
+from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.pi_session_storage import PI_SESSION_NEW_FILE
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
@@ -39,6 +42,8 @@ from oh_goon.core.models.run_events import (
     ProcessExitedEvent,
     ProcessStartedEvent,
     ProcessStateUnknownEvent,
+    StepAttemptCreatedEvent,
+    StepFailedEvent,
     StepSucceededEvent,
     TerminationRequestedEvent,
 )
@@ -50,10 +55,13 @@ from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.execution.lease_environment import SystemLeaseEnvironment
 from oh_goon.runtime.execution.run_supervisor import RunExecutionSupervisor, RunWorkerLaunch
 from oh_goon.runtime.journal import Journal
+from tests.fakes.native_protocol import observe_native_protocol
 
 _SECRET = "synthetic-pi-journey-broker-key"
 _PRIVATE_TOOL_OUTPUT = "PI_NATIVE_PRIVATE_TOOL_OUTPUT_53"
 _MODEL_REPLY = "The requested review is complete."
+_INTERRUPTED_REVIEW = "The interrupted review looks complete."
+_RECOVERED_REVIEW = "The current review completed after native retry."
 _UNRELATED_TASK = "Keep this separate synthetic Pi session after retiring the first."
 _TASKS = (
     "Record the original Pi conversation before exiting Oh-Goon.",
@@ -61,6 +69,8 @@ _TASKS = (
     "Continue the initialized Plan's Pi session in a fresh CLI process.",
     "Read the explicit prior Run handoff without adopting its native session.",
 )
+
+type _ContinuationResult = Literal["error", "length", "malformed", "retry"]
 
 
 def _message_text(message: dict[str, Any]) -> str:
@@ -78,6 +88,7 @@ def _provider(
     *,
     hold_request_number: int = 2,
     reply_after_hold: bool = False,
+    continuation_result: _ContinuationResult | None = None,
 ) -> Iterator[tuple[str, list[str], list[str], list[str], list[str]]]:
     errors: list[str] = []
     requests: list[str] = []
@@ -115,6 +126,8 @@ def _provider(
             )
             stages = len(requests)
             phase = min(max(stages - 1, 0), 3)
+            if continuation_result == "retry" and stages == 3:
+                phase = 1
             unrelated = _UNRELATED_TASK in privileged
             assert stages < (7 if unrelated else 6), "Unexpected broker inference"
             task = _UNRELATED_TASK if unrelated else _TASKS[phase]
@@ -185,12 +198,41 @@ def _provider(
                     "find",
                     "ls",
                 }
+            if phase == 1 and continuation_result is not None:
+                identity = payload["identity"]
+                scope = 17 if continuation_result == "malformed" else identity["scope_identity"]
+                review = {
+                    "schema": "oh-goon.agent-review/v1",
+                    **identity,
+                    "verdict": "CLEAN",
+                    "summary": _INTERRUPTED_REVIEW if stages == 2 else _RECOVERED_REVIEW,
+                    "reviewed_paths": {"complete_scope": scope},
+                    "findings": [],
+                }
+                return (
+                    {"role": "assistant", "content": json.dumps(review)},
+                    continuation_result
+                    if stages == 2 and continuation_result != "malformed"
+                    else "stop",
+                )
             return {"role": "assistant", "content": _MODEL_REPLY}, "stop"
 
         def reply(self, delta: dict[str, Any], finish: str) -> None:
+            terminal: dict[str, Any] = {
+                "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]
+            }
+            if finish in {"error", "retry"}:
+                terminal = {
+                    "error": {
+                        "message": "503 Service Unavailable"
+                        if finish == "retry"
+                        else "Synthetic terminal inference rejection",
+                        "type": "server_error" if finish == "retry" else "invalid_request_error",
+                    }
+                }
             chunks = [
                 {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
-                {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]},
+                terminal,
             ]
             data = (
                 "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
@@ -839,6 +881,7 @@ def _held_pi_journey(
     *,
     hold_request_number: int = 2,
     reply_after_hold: bool = False,
+    continuation_result: _ContinuationResult | None = None,
 ) -> Iterator[_HeldPiJourney]:
     executable = os.environ.get("OH_GOON_NATIVE_PI")
     runtime_root = os.environ.get("OH_GOON_NATIVE_PI_RUNTIME_ROOT")
@@ -890,7 +933,10 @@ def _held_pi_journey(
         "--json",
     )
     with _provider(
-        hold_inference, hold_request_number=hold_request_number, reply_after_hold=reply_after_hold
+        hold_inference,
+        hold_request_number=hold_request_number,
+        reply_after_hold=reply_after_hold,
+        continuation_result=continuation_result,
     ) as (
         url,
         requests,
@@ -1192,6 +1238,153 @@ def test_installed_pi_active_continuation_fences_second_controller_through_cance
         )
         assert journey.requests == [_TASKS[0], _TASKS[0], _TASKS[1]]
         assert not journey.errors
+
+
+@pytest.mark.certification
+@pytest.mark.parametrize("result", ["error", "length", "malformed", "retry"])
+def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result: _ContinuationResult
+) -> None:
+    recovering = result == "retry"
+    with _held_pi_journey(
+        tmp_path,
+        monkeypatch,
+        hold_request_number=3,
+        reply_after_hold=True,
+        continuation_result=result,
+    ) as journey:
+        initial = journey.invoke("new", _TASKS[0])
+        assert initial.returncode == 0, (initial.stdout[-3000:], initial.stderr[-3000:])
+        seed_id = json.loads(initial.stdout)["fleet_run_id"]
+        reader = Journal(LocalDatabase(journey.database_path, read_only=True))
+        seed = reader.run_events(seed_id)
+        assert seed.pi_session is not None and seed.pi_session.persistence == "observed"
+
+        read_protocol = observe_native_protocol(tmp_path, monkeypatch)
+        selected, backend, git = resolve_native_cli_selection(
+            agent="pi",
+            profile="pi-rpc",
+            workspace=journey.repository,
+            config_file=journey.config,
+            session=PiSessionIntent(mode="continue", prior_run_id=seed_id),
+        )
+        runtime = ApplicationRuntime.build(
+            standard_local=True,
+            standard_process_isolation=backend,
+            git_service=git,
+            startup_purpose="workflow",
+        )
+        try:
+            admitted = runtime.plans.run_native_agent(
+                selected=selected,
+                workspace=journey.repository,
+                skill=journey.skill,
+                task=_TASKS[1],
+                role="review",
+                verification=(("/usr/bin/true",),),
+            )
+            run_id = admitted.fleet_run_id
+            assert journey.held_inference_arrived.wait(65), journey.errors
+            journey.release_held_inference.set()
+            detail = runtime.runs.wait_for_terminal(run_id, timeout=60)
+            assert not journey.errors, journey.errors
+            assert detail.outcome is (
+                FleetRunOutcome.SUCCESS if recovering else FleetRunOutcome.ATTENTION_REQUIRED
+            )
+            events = runtime.runs.events(run_id).events
+            protocol = read_protocol(detail)
+        finally:
+            journey.release_held_inference.set()
+            runtime.shutdown(wait_for_runs=False, cancel_grace_seconds=2)
+
+        records = [json.loads(line) for line in protocol["stdout"].splitlines()]
+        assistant_messages = [
+            record["message"]
+            for record in records
+            if record["type"] == "message_end" and record["message"]["role"] == "assistant"
+        ]
+        expected_reasons = (
+            ["error", "stop"] if recovering else ["stop" if result == "malformed" else result]
+        )
+        assert [message["stopReason"] for message in assistant_messages] == expected_reasons
+        assert _INTERRUPTED_REVIEW in _message_text(assistant_messages[0])
+        kinds = [record["type"] for record in records]
+        assert kinds.count("agent_settled") == 1
+        assert kinds.index("agent_end") < kinds.index("agent_settled")
+        if recovering:
+            assert kinds.index("auto_retry_start") < kinds.index("auto_retry_end")
+            assert kinds.index("auto_retry_end") < kinds.index("agent_settled")
+
+        agent, verifier = detail.game_tape.repositories[0].steps
+        assert agent.settlement.observed_returncode == 0
+        assert agent.settlement.outcome == ("SUCCESS" if recovering else "FAILED")
+        assert agent.settlement.cleanup == "VERIFIED"
+        assert len(agent.attempts) == 1
+        operation = detail.operations[0].evidence
+        assert isinstance(operation, FleetPlanOperationEvidence)
+        agent_result = operation.plan.steps[0]
+        (native,) = (
+            item for item in agent_result.observations if isinstance(item, NativeAgentObservation)
+        )
+        assert native.settled and native.failed is (result in {"error", "length"})
+        assert all(_MODEL_REPLY not in item.summary for item in native.events)
+        reviews = [
+            item.record
+            for item in agent_result.observations
+            if isinstance(item, AgentReviewObservation)
+        ]
+        if recovering:
+            (review,) = reviews
+            assert isinstance(review, AgentReviewRecord) and review.summary == _RECOVERED_REVIEW
+        else:
+            assert not reviews
+        assert (
+            any(
+                isinstance(event, StepAttemptCreatedEvent) and event.step_id == verifier.step_id
+                for event in events
+            )
+            is recovering
+        )
+        if recovering:
+            assert verifier.settlement.outcome == "SUCCESS"
+
+        (receipt,) = (event for event in events if isinstance(event, PiSessionWriterObservedEvent))
+        quiescent = events[receipt.quiescent_sequence - 1]
+        assert isinstance(quiescent, DescendantsQuiescentEvent)
+        assert receipt.observation.persistence == "observed"
+        (exited,) = (
+            event
+            for event in events
+            if isinstance(event, ProcessExitedEvent)
+            and event.physical_execution_id == quiescent.physical_execution_id
+        )
+        (terminal,) = (
+            event
+            for event in events
+            if isinstance(event, (StepFailedEvent, StepSucceededEvent))
+            and event.step_id == agent.step_id
+        )
+        assert exited.returncode == 0
+        assert exited.sequence < quiescent.sequence < receipt.sequence < terminal.sequence
+
+        reopened = Journal(LocalDatabase(journey.database_path, read_only=True))
+        retained = reopened.read_view().required_run_detail(run_id)
+        assert retained.run == detail.run and retained.operations == detail.operations
+        assert retained.game_tape.repositories[0].steps == detail.game_tape.repositories[0].steps
+        assert reopened.run_events(run_id).events == events
+        assert reopened.inspect_pi_session(run_id).availability == (
+            "available" if recovering else "unverified"
+        )
+        retained_seed = reopened.run_events(seed_id)
+        assert (retained_seed.run, retained_seed.events, retained_seed.pi_session) == (
+            seed.run,
+            seed.events,
+            seed.pi_session,
+        )
+        expected_requests = [_TASKS[0], _TASKS[0], _TASKS[1]]
+        assert journey.requests == (
+            expected_requests + [_TASKS[1]] if recovering else expected_requests
+        )
 
 
 @pytest.mark.certification

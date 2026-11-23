@@ -673,6 +673,7 @@ def test_native_terminal_claim_cannot_authorize_later_assistant_output(
         ("pi", {"type": "turn_end"}),
         ("pi", {"type": "agent_end"}),
         ("pi", {"type": "tool_execution_start", "toolCallId": "call"}),
+        ("pi", {"type": "tool_execution_update", "toolCallId": "call"}),
         ("pi", {"type": "tool_execution_end", "toolCallId": "call", "isError": False}),
         ("pi", {"type": "compaction_start"}),
         ("pi", {"type": "compaction_end"}),
@@ -706,6 +707,49 @@ def test_native_terminal_claim_cannot_authorize_later_activity(
     # previous cycle's role payload for the typed acceptance owner.
     completed_later = parse_native_agent_events(agent, output + events(terminal), returncode=0)
     assert completed_later.settled and completed_later.final_text == ""
+
+
+@pytest.mark.parametrize(
+    "activity",
+    [
+        {"type": "turn_start"},
+        {"type": "message_start", "message": {"role": "assistant"}},
+        {"type": "message_update", "message": {"role": "assistant"}},
+        {"type": "tool_execution_start", "toolCallId": "call"},
+        {"type": "tool_execution_update", "toolCallId": "call"},
+        {"type": "tool_execution_end", "toolCallId": "call", "isError": False},
+        {"type": "auto_retry_start"},
+    ],
+)
+def test_pi_new_native_activity_requires_current_role_output(activity: dict[str, object]) -> None:
+    prior: dict[str, object] = {
+        "type": "message_end",
+        "message": {"role": "assistant", "content": "prior claim", "stopReason": "stop"},
+    }
+    current: dict[str, object] = {
+        "type": "message_end",
+        "message": {"role": "assistant", "content": "current claim", "stopReason": "stop"},
+    }
+    terminal: dict[str, object] = {"type": "agent_settled", "aborted": False}
+    stale = parse_native_agent_events("pi", events(prior, activity, terminal), returncode=0)
+    assert stale.settled and not stale.failed and stale.final_text == ""
+    fresh = parse_native_agent_events(
+        "pi", events(prior, activity, current, terminal), returncode=0
+    )
+    assert fresh.settled and not fresh.failed and fresh.final_text == "current claim"
+
+
+@pytest.mark.parametrize("abort_status", [{}, {"aborted": "true"}], ids=["missing", "string"])
+def test_pi_requires_native_abort_status_on_settlement(abort_status: dict[str, object]) -> None:
+    output = events(
+        {
+            "type": "message_end",
+            "message": {"role": "assistant", "content": "claim", "stopReason": "stop"},
+        },
+        {"type": "agent_settled", **abort_status},
+    )
+    with pytest.raises(AgentProviderError, match="abort status"):
+        parse_native_agent_events("pi", output, returncode=0)
 
 
 @pytest.mark.parametrize("stop_reason", ["error", "aborted", "length"])
@@ -945,7 +989,7 @@ def test_incremental_native_records_preserve_unicode_and_eof_without_newline(
                 "type": "message_end",
                 "message": {"role": "assistant", "content": text, "stopReason": "stop"},
             },
-            {"type": "agent_settled"},
+            {"type": "agent_settled", "aborted": False},
         )
     elif agent == "opencode":
         output = events(
@@ -970,7 +1014,7 @@ def test_incremental_native_records_preserve_unicode_and_eof_without_newline(
 def test_json_unicode_escape_pair_may_cross_transport_chunks() -> None:
     parser = NativeAgentEventParser("pi")
     parser.feed('{"type":"message_end","message":{"role":"assistant","content":"\\ud83d')
-    parser.feed('\\ude00"}}\n{"type":"agent_settled"}')
+    parser.feed('\\ude00"}}\n{"type":"agent_settled","aborted":false}')
     assert parser.finish(returncode=0).final_text == "😀"
 
 
