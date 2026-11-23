@@ -137,7 +137,6 @@ class _CanonicalRuns:
             repository_admissions=(),
             journal_revision=100,
             campaign_journal=None,
-            pi_session=None,
             feedback=self.feedback,
         )
 
@@ -159,6 +158,7 @@ class _CanonicalRuns:
             has_more=has_more,
             journal_revision=100,
             campaign_journal=None,
+            pi_session=None,
             model_dump=lambda *, mode: {
                 "events": [{"sequence": next_sequence, "code": "ORIGINAL_EVENT"}],
                 "next_sequence": next_sequence,
