@@ -365,7 +365,10 @@ class RepositoryEffectExecution:
                 yield ReservedPiSessionWriter(
                     directory=directory,
                     observe_file=partial(
-                        observe_pi_session_file, directory, PI_SESSION_NEW_FILE.name
+                        observe_pi_session_file,
+                        directory,
+                        PI_SESSION_NEW_FILE.name,
+                        prior_file=prior_file,
                     ),
                     settle=lambda observation: self._journal.observe_pi_session_writer(
                         session, reservation, observation=observation

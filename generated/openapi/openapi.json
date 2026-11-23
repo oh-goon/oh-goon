@@ -21467,6 +21467,18 @@
             "title": "Inode",
             "type": "integer"
           },
+          "save_verification": {
+            "anyOf": [
+              {
+                "const": "pi_rpc_synced",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Save Verification"
+          },
           "sha256": {
             "anyOf": [
               {

@@ -160,17 +160,20 @@ oh-goon ai --agent pi --profile pi-rpc --session new --prompt-file task.txt
 The claimed Step reserves the writer in the original Journal before giving Pi
 its private directory. Read the reservation and any session-file observation
 with `oh-goon runs events RUN_ID --after 0 --json`. A reservation alone leaves
-the write unconfirmed. A file observation records bounded metadata after the
-original process settles. The Run keeps its own outcome and verification
-results. New-session Runs require a fresh task, with the built-in managed
+the write unconfirmed. A qualified save matches Pi's final entries to the
+pinned file and synchronizes the file and its directory after the original
+process settles. A missing or incomplete save reports unknown persistence.
+The Run keeps its own outcome and verification results. New-session Runs require a fresh task, with the built-in managed
 configuration and a serial runtime. Candidate workspaces, repair campaigns,
 Step resource caps, custom native arguments and configuration, and Run replay
 are unsupported for this mode.
 
 Use `--session run:RUN_ID` to reopen a saved Pi session for a new read-only
 Agent Step in the same direct repository. Select the latest Run that completed
-its Agent Step and recorded the exact native session, active leaf, and saved
-file digest. Receipts written before file digests were recorded are ineligible.
+its Agent Step and recorded the exact native session, active leaf, and
+verified save receipt. Historical metadata-only and digest-only receipts
+remain readable. Inspection reports their save as unverified. Use a new
+session for fresh work when the saved predecessor has unverified persistence.
 The authored selection is `session: {mode: continue, prior_run_id: RUN_ID}`.
 An authored continuing Step must request read-only repository access.
 

@@ -43,7 +43,7 @@ from oh_goon.core.models.run_events import (
     TerminationRequestedEvent,
 )
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.core.vocabulary import FleetRunStatus
+from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution import ExecutionCoordinator
@@ -76,6 +76,7 @@ def _provider(
     hold_inference: Callable[[], None] | None = None,
     *,
     hold_request_number: int = 2,
+    reply_after_hold: bool = False,
 ) -> Iterator[tuple[str, list[str], list[str], list[str], list[str]]]:
     errors: list[str] = []
     requests: list[str] = []
@@ -88,7 +89,8 @@ def _provider(
                 response = self.respond()
                 if hold_inference is not None and len(requests) == hold_request_number:
                     hold_inference()
-                    return
+                    if not reply_after_hold:
+                        return
                 self.reply(*response)
             except Exception as error:
                 errors.append(str(error))
@@ -831,7 +833,11 @@ class _HeldPiJourney:
 
 @contextmanager
 def _held_pi_journey(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, hold_request_number: int = 2
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    hold_request_number: int = 2,
+    reply_after_hold: bool = False,
 ) -> Iterator[_HeldPiJourney]:
     executable = os.environ.get("OH_GOON_NATIVE_PI")
     runtime_root = os.environ.get("OH_GOON_NATIVE_PI_RUNTIME_ROOT")
@@ -882,7 +888,9 @@ def _held_pi_journey(
         "/usr/bin/true",
         "--json",
     )
-    with _provider(hold_inference, hold_request_number=hold_request_number) as (
+    with _provider(
+        hold_inference, hold_request_number=hold_request_number, reply_after_hold=reply_after_hold
+    ) as (
         url,
         requests,
         errors,
@@ -1183,3 +1191,98 @@ def test_installed_pi_active_continuation_fences_second_controller_through_cance
         )
         assert journey.requests == [_TASKS[0], _TASKS[0], _TASKS[1]]
         assert not journey.errors
+
+
+@pytest.mark.certification
+def test_installed_pi_torn_save_stays_unqualified_after_successful_verifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _held_pi_journey(tmp_path, monkeypatch, reply_after_hold=True) as journey:
+        selected, backend, git = resolve_native_cli_selection(
+            agent="pi",
+            profile="pi-rpc",
+            workspace=journey.repository,
+            config_file=journey.config,
+            session=PiSessionIntent(mode="new"),
+        )
+        runtime = ApplicationRuntime.build(
+            standard_local=True,
+            standard_process_isolation=backend,
+            git_service=git,
+            startup_purpose="workflow",
+        )
+        try:
+            runtime.locations.add(journey.repository)
+            admitted = runtime.plans.run_native_agent(
+                selected=selected,
+                workspace=journey.repository,
+                skill=journey.skill,
+                task=_TASKS[0],
+                verification=(("/usr/bin/true",),),
+            )
+            run_id = admitted.fleet_run_id
+            assert journey.held_inference_arrived.wait(65), journey.errors
+            journal = Journal(LocalDatabase(journey.database_path, read_only=True))
+            held = journal.run_events(run_id)
+            assert held.run.status is FleetRunStatus.RUNNING
+            (reservation,) = (
+                event for event in held.events if isinstance(event, PiSessionWriterReservedEvent)
+            )
+            assert not any(isinstance(event, PiSessionWriterObservedEvent) for event in held.events)
+            session_root = ApplicationStatePathLayout.from_database(
+                journey.database_path
+            ).pi_sessions
+            transcript = session_root / reservation.storage_id / PI_SESSION_NEW_FILE.name
+            before = transcript.read_bytes()
+            assert before.endswith(b"\n") and _PRIVATE_TOOL_OUTPUT.encode() in before
+            incomplete = b'{"type":"h76-incomplete-fixture"'
+            # Feed Pi a normal final response after leaving a partial append in its owned file.
+            with transcript.open("ab", buffering=0) as stream:
+                assert stream.write(incomplete) == len(incomplete)
+            journey.release_held_inference.set()
+            detail = runtime.runs.wait_for_terminal(run_id, timeout=40)
+        finally:
+            journey.release_held_inference.set()
+            runtime.shutdown(wait_for_runs=False, cancel_grace_seconds=2)
+
+        assert detail.outcome is FleetRunOutcome.SUCCESS
+        native, verifier = detail.game_tape.repositories[0].steps
+        assert native.settlement is not None and native.settlement.outcome == "SUCCESS"
+        assert any(observation.settled for observation in native.native_agent_observations)
+        assert verifier.settlement is not None and verifier.settlement.outcome == "SUCCESS"
+        retained = transcript.read_bytes()
+        assert retained.startswith(before + incomplete) and len(retained) > len(before + incomplete)
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(retained[len(before) :].split(b"\n", 1)[0])
+
+        reopened = Journal(LocalDatabase(journey.database_path, read_only=True))
+        settled = reopened.run_events(run_id)
+        assert settled.events[: len(held.events)] == held.events
+        (receipt,) = (
+            event for event in settled.events if isinstance(event, PiSessionWriterObservedEvent)
+        )
+        assert receipt.reservation_sequence == reservation.sequence
+        assert isinstance(settled.events[receipt.quiescent_sequence - 1], DescendantsQuiescentEvent)
+        assert receipt.observation.persistence == "unknown" and receipt.observation.file is None
+        assert settled.pi_session is not None and settled.pi_session.persistence == "unknown"
+        assert settled.pi_session.native is None
+        assert reopened.inspect_pi_session(run_id).availability == "unverified"
+
+        fresh = subprocess.run(
+            (journey.ai[0], "runs", "events", run_id, "--after", "0", "--limit", "100", "--json"),
+            cwd=journey.repository,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert fresh.returncode == 0, fresh.stderr
+        assert json.loads(fresh.stdout)["pi_session"]["persistence"] == "unknown"
+        refused = journey.invoke(f"run:{run_id}", _TASKS[1])
+        assert refused.returncode == 2, (refused.stdout, refused.stderr)
+        assert json.loads(refused.stdout)["code"] == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+        visible = fresh.stdout + fresh.stderr + refused.stdout + refused.stderr
+        assert incomplete.decode() not in visible and _PRIVATE_TOOL_OUTPUT not in visible
+        assert _SECRET not in visible and str(transcript) not in visible
+        assert transcript.read_bytes() == retained
+        assert tuple(session_root.iterdir()) == (transcript.parent,)
+        assert journey.requests == [_TASKS[0], _TASKS[0]] and not journey.errors

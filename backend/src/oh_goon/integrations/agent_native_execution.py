@@ -29,7 +29,7 @@ from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_REFUSAL_RECORD,
     PI_SESSION_SANDBOX_DIRECTORY,
     PiSessionDirectoryPin,
-    PiSessionNativeObservation,
+    PiSessionSaveObservation,
 )
 
 _MAX_EVENT_STREAM_BYTES = 1024 * 1024
@@ -644,7 +644,7 @@ class NativeAgentEventParser:
             raise AgentProviderError("Pi session observations require the native Pi relay")
         self._agent = agent
         self._pi_session_persistent = pi_session_persistent
-        self.pi_session_observation: PiSessionNativeObservation | None = None
+        self.pi_session_observation: PiSessionSaveObservation | None = None
         self.pi_session_refusal: PiSessionRefusalCode | None = None
         self._pending = ""
         self._pending_bytes = 0
@@ -794,7 +794,7 @@ class NativeAgentEventParser:
             raise AgentProviderError("Unexpected native relay control record")
         if event_type == PI_SESSION_OBSERVATION_RECORD:
             try:
-                self.pi_session_observation = PiSessionNativeObservation.model_validate(
+                self.pi_session_observation = PiSessionSaveObservation.model_validate(
                     record.get("data")
                 )
             except ValueError:

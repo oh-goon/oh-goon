@@ -8,6 +8,7 @@ from oh_goon.core.models.pi_session_storage import (
     PiSessionDirectoryPin,
     PiSessionFileObservation,
     PiSessionNativeObservation,
+    PiSessionSaveObservation,
     PiSessionWriterObservation,
 )
 
@@ -15,7 +16,7 @@ from oh_goon.core.models.pi_session_storage import (
 @dataclass(frozen=True, slots=True)
 class ReservedPiSessionWriter:
     directory: PiSessionDirectoryPin
-    observe_file: Callable[[], PiSessionFileObservation] = field(repr=False)
+    observe_file: Callable[[PiSessionSaveObservation], PiSessionFileObservation] = field(repr=False)
     settle: Callable[[PiSessionWriterObservation], None] = field(repr=False)
     prior_native: PiSessionNativeObservation | None = field(default=None, repr=False)
 

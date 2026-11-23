@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import stat
@@ -27,6 +28,8 @@ from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_NEW_FILE,
     PiSessionDirectoryPin,
     PiSessionFileObservation,
+    PiSessionSaveObservation,
+    encode_pi_session_entry,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
@@ -151,6 +154,161 @@ def test_pi_persistence_refuses_unexpected_slot_entries_without_removing_them(
             observe_pi_session_file(pin, session.name)
     assert session.read_bytes() == b"native session bytes\n"
     assert unexpected.read_bytes() == b'{"synthetic":"unexpected configuration"}\n'
+
+
+_NATIVE_SESSION_HEADER = b'{"type":"session","id":"original-session"}\n'
+
+
+def _native_save(*entries: dict[str, object]) -> PiSessionSaveObservation:
+    leaf_id = entries[-1]["id"]
+    assert isinstance(leaf_id, str)
+    return PiSessionSaveObservation(
+        session_id="original-session",
+        leaf_id=leaf_id,
+        entry_count=len(entries),
+        entries_sha256=hashlib.sha256(
+            b"".join(encode_pi_session_entry(entry) for entry in entries)
+        ).hexdigest(),
+    )
+
+
+def test_qualified_pi_save_syncs_file_and_slot_and_preserves_exact_byte_receipt(
+    admitted_pi_scope: _AdmittedScope, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry: dict[str, object] = {"type": "message", "id": "original-leaf"}
+    raw = _NATIVE_SESSION_HEADER + b'{"type": "message", "id": "original-leaf"}\n'
+    native_fsync = os.fsync
+    synchronized: list[tuple[int, int]] = []
+
+    def record_sync(fd: int) -> None:
+        info = os.fstat(fd)
+        synchronized.append((info.st_dev, info.st_ino))
+        native_fsync(fd)
+
+    with admitted_pi_scope.create() as pin:
+        session = pin.path / PI_SESSION_NEW_FILE.name
+        session.write_bytes(raw)
+        with monkeypatch.context() as patched:
+            patched.setattr(os, "fsync", record_sync)
+            receipt = observe_pi_session_file(pin, session.name, _native_save(entry))
+        slot_info = pin.path.stat()
+        assert synchronized == [
+            (receipt.device, receipt.inode),
+            (slot_info.st_dev, slot_info.st_ino),
+        ]
+    assert receipt.sha256 == hashlib.sha256(raw).hexdigest()
+    assert receipt.save_verification == "pi_rpc_synced"
+
+    with admitted_pi_scope.create(storage_id=session.parent.name, prior_file=receipt) as reopened:
+        assert reopened.existing_file is not None
+        reopened.existing_file.require_before_launch()
+    with pin_pi_session_retirement(
+        layout=admitted_pi_scope.layout,
+        storage_id=session.parent.name,
+        expected_file=receipt,
+    ):
+        assert session.read_bytes() == raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        _NATIVE_SESSION_HEADER + b'{"type":"message","id":"original-leaf"}',
+        _NATIVE_SESSION_HEADER + b'{"type":"message"\n',
+        _NATIVE_SESSION_HEADER + b'{"type":"message","type":"message","id":"original-leaf"}\n',
+        _NATIVE_SESSION_HEADER,
+        _NATIVE_SESSION_HEADER + b'{"type":"message","id":"other-leaf"}\n',
+        _NATIVE_SESSION_HEADER
+        + b'{"type":"message","id":"original-leaf"}\n{"type":"message","id":"unexpected"}\n',
+        b'{"type":"session","id":"foreign-session"}\n{"type":"message","id":"original-leaf"}\n',
+    ],
+    ids=(
+        "missing-newline",
+        "invalid-record",
+        "ambiguous-record",
+        "short-write",
+        "wrong-extent",
+        "extra-entry",
+        "wrong-native-header",
+    ),
+)
+def test_pi_save_refuses_unqualified_bytes_without_syncing_or_rewriting(
+    admitted_pi_scope: _AdmittedScope, monkeypatch: pytest.MonkeyPatch, raw: bytes
+) -> None:
+    entry: dict[str, object] = {"type": "message", "id": "original-leaf"}
+
+    def unexpected_sync(_fd: int) -> None:
+        pytest.fail("Unqualified bytes reached the positive save synchronization")
+
+    with admitted_pi_scope.create() as pin:
+        session = pin.path / PI_SESSION_NEW_FILE.name
+        session.write_bytes(raw)
+        monkeypatch.setattr(os, "fsync", unexpected_sync)
+        with pytest.raises(FleetPlanInvalid, match="Pi save"):
+            observe_pi_session_file(pin, session.name, _native_save(entry))
+    assert session.read_bytes() == raw
+
+
+@pytest.mark.parametrize(
+    ("target", "error_number"), [(stat.S_IFREG, errno.EIO), (stat.S_IFDIR, errno.ENOSPC)]
+)
+def test_pi_save_sync_failure_preserves_bytes_and_refuses_receipt(
+    admitted_pi_scope: _AdmittedScope,
+    monkeypatch: pytest.MonkeyPatch,
+    target: int,
+    error_number: int,
+) -> None:
+    entry: dict[str, object] = {"type": "message", "id": "original-leaf"}
+    raw = _NATIVE_SESSION_HEADER + b'{"type":"message","id":"original-leaf"}\n'
+    native_fsync = os.fsync
+    faults: list[int] = []
+
+    def fail_owned_sync(fd: int) -> None:
+        if stat.S_IFMT(os.fstat(fd).st_mode) == target:
+            faults.append(fd)
+            raise OSError(error_number, "controlled Pi save synchronization failure")
+        native_fsync(fd)
+
+    with admitted_pi_scope.create() as pin:
+        session = pin.path / PI_SESSION_NEW_FILE.name
+        session.write_bytes(raw)
+        monkeypatch.setattr(os, "fsync", fail_owned_sync)
+        with pytest.raises(FleetPlanInvalid, match="Original Pi session file is unavailable"):
+            observe_pi_session_file(pin, session.name, _native_save(entry))
+    assert len(faults) == 1
+    assert session.read_bytes() == raw
+
+
+@pytest.mark.parametrize("rewrite_prefix", [False, True])
+def test_pi_continuation_save_qualifies_only_the_native_append_to_exact_predecessor(
+    admitted_pi_scope: _AdmittedScope, rewrite_prefix: bool
+) -> None:
+    original: dict[str, object] = {"type": "message", "id": "original-leaf"}
+    next_entry: dict[str, object] = {"type": "message", "id": "latest-leaf"}
+    history = _NATIVE_SESSION_HEADER + b'{"type":"message","id":"original-leaf"}\n'
+    appended = b'{"type":"message","id":"latest-leaf"}\n'
+    with admitted_pi_scope.create() as pin:
+        session = pin.path / PI_SESSION_NEW_FILE.name
+        session.write_bytes(history)
+        predecessor = observe_pi_session_file(pin, session.name, _native_save(original))
+
+    with admitted_pi_scope.create(storage_id=session.parent.name, prior_file=predecessor) as pin:
+        prefix = history.replace(b"original-leaf", b"rewritten-one") if rewrite_prefix else history
+        raw = prefix + appended
+        session.write_bytes(raw)
+        if rewrite_prefix:
+            with pytest.raises(FleetPlanInvalid, match="changed its retained predecessor"):
+                observe_pi_session_file(
+                    pin, session.name, _native_save(next_entry), prior_file=predecessor
+                )
+        else:
+            receipt = observe_pi_session_file(
+                pin, session.name, _native_save(next_entry), prior_file=predecessor
+            )
+            assert receipt.save_verification == "pi_rpc_synced"
+            assert receipt.sha256 == hashlib.sha256(raw).hexdigest()
+            assert (receipt.device, receipt.inode) == (predecessor.device, predecessor.inode)
+    assert session.read_bytes() == raw
 
 
 def test_rejects_foreign_workspace_inactive_step_and_stale_subject_before_writes(

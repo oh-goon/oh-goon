@@ -322,7 +322,13 @@ def _observe_pi_file(
     observation = PiSessionWriterObservation(
         physical_execution_id="original-writer",
         persistence="observed",
-        file=PiSessionFileObservation(device=1, inode=2, size=10, sha256=sha256),
+        file=PiSessionFileObservation(
+            device=1,
+            inode=2,
+            size=10,
+            sha256=sha256,
+            save_verification="pi_rpc_synced",
+        ),
         session_id="native-session",
         leaf_id=leaf_id,
         file_name="session.jsonl",
@@ -525,12 +531,14 @@ def test_continuation_retains_exact_predecessor_and_advances_only_latest_writer(
     )
 
 
-@pytest.mark.parametrize("cut", ["metadata-only", "before-original-acceptance"])
-def test_continuation_refuses_unqualified_original_persistence(tmp_path: Path, cut: str) -> None:
+@pytest.mark.parametrize("cut", ["metadata-only", "digest-only", "before-original-acceptance"])
+def test_continuation_refuses_unqualified_original_persistence(
+    tmp_path: Path, cut: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database = LocalDatabase(tmp_path / "state.db")
     original = _claim_attempt(database, "original")
     reservation = original.reserve()
-    if cut == "metadata-only":
+    if cut != "before-original-acceptance":
         original.record_physical("original-writer")
         last = original.journal.run_events("original").events[-1]
         assert isinstance(last, DescendantsQuiescentEvent)
@@ -543,22 +551,42 @@ def test_continuation_refuses_unqualified_original_persistence(tmp_path: Path, c
             observation=PiSessionWriterObservation(
                 physical_execution_id="original-writer",
                 persistence="observed",
-                file=PiSessionFileObservation(device=1, inode=2, size=10),
+                file=PiSessionFileObservation(
+                    device=1, inode=2, size=10, sha256="a" * 64 if cut == "digest-only" else None
+                ),
                 session_id="native-session",
                 leaf_id="leaf-a",
                 file_name="session.jsonl",
             ),
         )
-        # Previously committed H42 metadata-only facts remain readable.
+        # Historical metadata-only and digest-only facts remain readable.
         assert legacy.observation.file is not None
-        assert "sha256" not in legacy.observation.file.model_dump(mode="json")
+        historical_file = legacy.observation.file.model_dump(mode="json")
+        assert ("sha256" in historical_file) == (cut == "digest-only")
+        assert "save_verification" not in historical_file
+        if cut == "digest-only":
+            before_publication = original.journal.run_events("original")
+            with pytest.raises(InvalidRunTransition, match="require a verified native save"):
+                original.journal.observe_pi_session_writer(
+                    original.session, reservation, observation=legacy.observation
+                )
+            assert original.journal.run_events("original") == before_publication
         original.session.mutate(
             lambda connection: JournalFactStore(original.database).append_run_event(
                 connection, legacy
             )
         )
         _accepted_pi_result(original)
-        reason = "no qualified persistence observation"
+        reader = Journal(LocalDatabase(database.path, read_only=True))
+        assert reader.run_events("original").events[legacy.sequence - 1] == legacy
+        inspected = reader.inspect_pi_session("original")
+        assert inspected.availability == "unverified"
+        assert inspected.refusal_code is PiSessionRefusalCode.HISTORY_UNQUALIFIED
+        reason = (
+            "no verified native save receipt"
+            if cut == "digest-only"
+            else "no qualified persistence observation"
+        )
         code = PiSessionRefusalCode.HISTORY_UNQUALIFIED
     else:
         _observe_pi_file(original, reservation, sha256="a" * 64, leaf_id="leaf-a")
@@ -583,6 +611,37 @@ def test_continuation_refuses_unqualified_original_persistence(tmp_path: Path, c
     assert after.revision == before.revision
     assert after.run_detail("contender") is None
     assert ExecutionCoordinator(database).active_lease() is None
+
+    if cut == "digest-only":
+        # Finish a retirement already committed by the earlier implementation.
+        events = after.run_events("original").events
+        request = PiSessionRetirementRequestedEvent(
+            event_type=FleetRunEventType.PI_SESSION_RETIREMENT_REQUESTED,
+            fleet_run_id="original",
+            sequence=len(events) + 1,
+            reservation_sequence=reservation.sequence,
+            observation_sequence=legacy.sequence,
+            directory=PiSessionRetirementDirectoryIdentity(device=7, inode=11),
+        )
+        with database.transaction(write=True) as connection:
+            JournalFactStore(database).append_run_event(connection, request)
+        journal = Journal(LocalDatabase(database.path))
+        assert journal.inspect_pi_session("original").retirement == "pending"
+        remove = Mock()
+
+        @contextmanager
+        def pin(**options: object) -> Generator[PiSessionRetirementPin, None, None]:
+            assert options["expected_directory"] == request.directory
+            assert options["expected_file"] == legacy.observation.file
+            yield PiSessionRetirementPin(directory=request.directory, remove=remove)
+
+        monkeypatch.setattr("oh_goon.runtime.journal.pin_pi_session_retirement", pin)
+        assert journal.retire_pi_session("original").request_sequence == request.sequence
+        remove.assert_called_once_with()
+        inspected = Journal(LocalDatabase(database.path, read_only=True)).inspect_pi_session(
+            "original"
+        )
+        assert (inspected.availability, inspected.retirement) == ("unavailable", "verified")
 
 
 @pytest.mark.parametrize(
