@@ -24,7 +24,7 @@ from oh_goon.core.models.agent_providers import AgentProviderError
 from oh_goon.core.models.fleet_plan_step_primitives import PLAN_CONTRACT_RETURN_CODE
 from oh_goon.core.models.pi_session_storage import PI_SESSION_OBSERVATION_RECORD
 from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES, CommandTerminal, run_command
-from oh_goon.integrations.agent_pi_rpc import PiRpcControl
+from oh_goon.integrations.agent_pi_rpc import PiRpcContinuation, PiRpcControl
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,7 +189,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--input-file", type=Path)
     parser.add_argument("--pi-rpc", action="store_true")
-    parser.add_argument("--pi-session-new", action="store_true")
+    session = parser.add_mutually_exclusive_group()
+    session.add_argument("--pi-session-new", action="store_true")
+    session.add_argument("--pi-session-continuation", type=Path)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
     command = options.command[1:] if options.command[:1] == ["--"] else options.command
@@ -197,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("supply a native command and exactly one terminal/input mode")
     if options.pi_rpc and (options.interactive or options.input_file is None):
         parser.error("Pi RPC requires noninteractive frozen prompt input")
-    if options.pi_session_new and not options.pi_rpc:
+    if (options.pi_session_new or options.pi_session_continuation) and not options.pi_rpc:
         parser.error("Private Pi session observations require Pi RPC")
     data = b""
     if options.input_file is not None:
@@ -205,8 +207,23 @@ def main(argv: list[str] | None = None) -> int:
             data = stream.read(MAX_COMMAND_INPUT_BYTES + 1)
         if len(data) > MAX_COMMAND_INPUT_BYTES:
             parser.error("native input exceeds the command owner's byte bound")
+    continuation = None
+    if options.pi_session_continuation is not None:
+        try:
+            with options.pi_session_continuation.open("rb") as stream:
+                payload = stream.read(4097)
+            if len(payload) > 4096:
+                raise ValueError("Oversize Pi continuation metadata")
+            continuation = PiRpcContinuation.model_validate_json(payload)
+        except (OSError, ValueError):
+            print("Pi RPC continuation authority is unavailable", file=sys.stderr)
+            return PLAN_CONTRACT_RETURN_CODE
     try:
-        rpc = PiRpcControl(data, persistent=options.pi_session_new) if options.pi_rpc else None
+        rpc = (
+            PiRpcControl(data, persistent=options.pi_session_new, continuation=continuation)
+            if options.pi_rpc
+            else None
+        )
     except AgentProviderError as error:
         print(str(error), file=sys.stderr)
         return PLAN_CONTRACT_RETURN_CODE

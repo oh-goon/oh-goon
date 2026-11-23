@@ -74,6 +74,7 @@ from oh_goon.integrations.agent_native_execution import (
     validate_native_agent_arguments,
     verify_native_agent_executable,
 )
+from oh_goon.integrations.agent_pi_rpc import PiRpcContinuation, pi_broker_api
 from oh_goon.integrations.agent_review_execution import (
     accept_agent_phase_output,
     agent_phase_output_contract,
@@ -223,9 +224,9 @@ def prepare_native_step_input(
     require_native_agent_compatibility(
         selected, role=step.workload.role, terminal_available=runtime.terminal is not None
     )
-    new_pi_session = selected.creates_pi_session
-    if new_pi_session != (runtime.pi_session_writer is not None) or (
-        new_pi_session and runtime.lifecycle_observer is None
+    persistent_pi = selected.uses_persistent_pi_session
+    if persistent_pi != (runtime.pi_session_writer is not None) or (
+        persistent_pi and runtime.lifecycle_observer is None
     ):
         raise FleetPlanInvalid("Native Pi requires its original claimed writer and Step lifecycle")
     if runtime.runtime_supervision is not None:
@@ -269,6 +270,11 @@ def prepare_native_step_input(
     )
     if prepared.handoff.session is not None and prepared.handoff.session != selected.session:
         raise FleetPlanInvalid("Authored Pi session differs from the admitted native selection")
+    if (
+        selected.continues_pi_session
+        and prepared.requested_effects.repository_access != "read_only"
+    ):
+        raise FleetPlanInvalid("Pi continuation requires read-only repository access")
     if (
         selected.profile.sandbox_owner == "execution_backend"
         and prepared.requested_effects.repository_access != "read_only"
@@ -347,7 +353,6 @@ def _bootstrap(
     elif selected.agent == "pi":
         native = directory / "pi-bootstrap"
         native.mkdir()
-        api_name = "openai-completions" if api == "openai-chat-completions" else api
         _write_private(
             native / "models.json",
             json.dumps(
@@ -355,7 +360,7 @@ def _bootstrap(
                     "providers": {
                         "oh-goon": {
                             "baseUrl": base_url + "/v1",
-                            "api": api_name,
+                            "api": pi_broker_api(api),
                             "apiKey": "oh-goon-local",
                             "models": [{"id": model}],
                         }
@@ -582,9 +587,9 @@ def execute_native_agent_step(
     selected = step.workload.native_agent
     assert selected is not None
     sandboxed = selected.profile.backend == "bubblewrap"
-    new_pi_session = selected.creates_pi_session
+    persistent_pi = selected.uses_persistent_pi_session
     private_output = (
-        new_pi_session
+        persistent_pi
         or selected.profile.codex_service is not None
         or (sandboxed and selected.profile.sandbox_owner == "execution_backend")
     )
@@ -639,7 +644,7 @@ def execute_native_agent_step(
         raise OperationCancelledError("Native Agent cancelled after repository evidence")
     model = selected.connection.resolve(process.host_environment) if selected.connection else None
     parser = (
-        NativeAgentEventParser(selected.agent, pi_session_new=new_pi_session)
+        NativeAgentEventParser(selected.agent, pi_session_persistent=persistent_pi)
         if not selected.interactive
         else None
     )
@@ -669,7 +674,7 @@ def execute_native_agent_step(
 
     with ExitStack() as writer_scope, ExitStack() as stack:
         writer = None
-        if new_pi_session:
+        if persistent_pi:
             assert runtime.pi_session_writer is not None
             _remaining(deadline)
             writer = writer_scope.enter_context(
@@ -808,6 +813,10 @@ def execute_native_agent_step(
                 )
             )
             mounts = list(frozen_mounts)
+            if writer is not None and (
+                (writer.prior_native is not None) != selected.continues_pi_session
+            ):
+                raise FleetPlanInvalid("Pi writer does not match its admitted session mode")
             definition = selected.definition
             private_configuration = (
                 Path(definition.configuration_directory)
@@ -833,6 +842,20 @@ def execute_native_agent_step(
                     model_inference_relay(broker.socket_path, port=0)
                 ).base_url
             invocation = _bootstrap(selected, invocation, control, base_url)
+            session_options: tuple[str, ...] = ()
+            if writer is not None:
+                if writer.prior_native is None:
+                    session_options = ("--pi-session-new",)
+                else:
+                    continuation = PiRpcContinuation(
+                        prior=writer.prior_native,
+                        model=model.model,
+                        api=pi_broker_api(model.provider.api),
+                        base_url=base_url + "/v1",
+                    )
+                    continuation_path = control / "pi-continuation.json"
+                    _write_private(continuation_path, continuation.model_dump_json().encode())
+                    session_options = ("--pi-session-continuation", str(continuation_path))
             environment = {**process.environment, **dict(invocation.environment)}
             environment["OH_GOON_NATIVE_BROKER_KEY"] = "oh-goon-local"
             if private_configuration is None:
@@ -864,7 +887,7 @@ def execute_native_agent_step(
                         else ("--input-file", str(prompt_file))
                     ),
                     *(("--pi-rpc",) if invocation.input_protocol == "pi_rpc" else ()),
-                    *(("--pi-session-new",) if writer is not None else ()),
+                    *session_options,
                     "--",
                     *argv,
                 )

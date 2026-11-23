@@ -17,6 +17,14 @@ PI_SESSION_OBSERVATION_RECORD = "oh_goon_pi_session_observation"
 
 
 @dataclass(frozen=True, slots=True)
+class PiSessionFilePin:
+    """The exact retained file borrowed for one continued launch."""
+
+    fd: int = field(repr=False)
+    require_before_launch: Callable[[], None] = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class PiSessionDirectoryPin:
     """A borrowed directory handle retained by the original storage scope."""
 
@@ -24,6 +32,7 @@ class PiSessionDirectoryPin:
     directory_fd: int = field(repr=False)
     workspace: Path
     require_current: Callable[[], None] = field(repr=False)
+    existing_file: PiSessionFilePin | None = field(default=None, repr=False)
 
 
 class PiSessionFileObservation(ImmutableModel):
@@ -32,6 +41,9 @@ class PiSessionFileObservation(ImmutableModel):
     device: int = Field(ge=0, strict=True)
     inode: int = Field(gt=0, strict=True)
     size: int = Field(ge=0, strict=True)
+    sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$", exclude_if=lambda value: value is None
+    )
 
 
 class PiSessionNativeObservation(ImmutableModel):

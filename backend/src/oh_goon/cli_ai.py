@@ -125,7 +125,7 @@ def add_ai_command[_Parser: argparse.ArgumentParser](
         "--session",
         action="append",
         metavar="MODE",
-        help="Choose ephemeral or new for Pi. New requires a dedicated managed Pi RPC profile.",
+        help="Choose ephemeral, new, or run:RUN_ID for Pi. Persistence requires a dedicated managed Pi RPC profile.",
     )
     parser.add_argument("--config", type=Path, help="Provider/native execution catalog")
     parser.add_argument("task", nargs="?", help="Task text, alternative to --prompt/--prompt-file")
@@ -245,7 +245,7 @@ def resolve_native_cli_selection(
         )
     selected = replace(selected, interactive=interactive)
     require_native_agent_compatibility(selected, terminal_available=interactive)
-    if selected.creates_pi_session:
+    if selected.uses_persistent_pi_session:
         from oh_goon.runtime.pi_session_storage import require_pi_session_repository
 
         require_pi_session_repository(workspace)
@@ -297,10 +297,8 @@ def run_ai_command(args: argparse.Namespace) -> int:
             interactive=args.interactive,
             handoff=args.handoff_from is not None,
         )
-        if session is not None and session.mode == "new" and getattr(args, "candidate", False):
-            raise PiSessionSelectionError(
-                "New persistent Pi sessions require the direct repository"
-            )
+        if session is not None and session.persistent and getattr(args, "candidate", False):
+            raise PiSessionSelectionError("Persistent Pi sessions require the direct repository")
         interactive = False if session is not None else _interactive(args)
         task = _task(args)
         workspace = args.workspace.expanduser().resolve(strict=True)

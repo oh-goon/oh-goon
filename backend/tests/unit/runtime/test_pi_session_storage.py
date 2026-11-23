@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import stat
 import sys
@@ -16,14 +17,18 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.fleet_plan_evidence import PlanSnapshotEvidence
-from oh_goon.core.models.pi_session_storage import PiSessionDirectoryPin
+from oh_goon.core.models.pi_session_storage import (
+    PI_SESSION_NEW_FILE,
+    PiSessionDirectoryPin,
+    PiSessionFileObservation,
+)
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.engine.git import GitService
-from oh_goon.runtime.pi_session_storage import create_pi_session_directory, observe_pi_session_file
+from oh_goon.runtime.pi_session_storage import observe_pi_session_file, pin_pi_session_directory
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux native directory custody")
 
@@ -45,16 +50,20 @@ class _AdmittedScope:
         step_id: str = "pi",
         attempt_number: int = 1,
         require_current: Callable[[], None] = _require_live,
+        storage_id: str | None = None,
+        prior_file: PiSessionFileObservation | None = None,
     ) -> AbstractContextManager[PiSessionDirectoryPin]:
-        return create_pi_session_directory(
+        return pin_pi_session_directory(
             layout=self.layout,
-            fleet_run_id="fleet-original",
+            fleet_run_id="fleet-original" if prior_file is None else "fleet-continuation",
             repository=self.repository,
             repository_admission=self.evidence,
             step_id=step_id,
             attempt_number=attempt_number,
             workspace=self.repository.path if workspace is None else workspace,
             require_current=require_current,
+            storage_id=storage_id,
+            prior_file=prior_file,
         )
 
 
@@ -232,3 +241,75 @@ def test_native_metadata_refuses_aliases_without_touching_foreign_contents(
         with pytest.raises(FleetPlanInvalid, match="exact native basename"):
             observe_pi_session_file(pin, "../unrelated.jsonl")
     assert foreign.read_bytes() == b"the original bytes\n"
+
+
+def test_retained_pi_file_reopens_and_records_a_new_digest_of_the_same_inode(
+    admitted_pi_scope: _AdmittedScope,
+) -> None:
+    old_history = b'{"type":"session"}\n'
+    appended = b'{"type":"message"}\n'
+    with admitted_pi_scope.create() as new:
+        session = new.path / PI_SESSION_NEW_FILE.name
+        session.write_bytes(old_history)
+        receipt = observe_pi_session_file(new, session.name)
+    assert receipt.sha256 == hashlib.sha256(old_history).hexdigest()
+    with admitted_pi_scope.create(storage_id=session.parent.name, prior_file=receipt) as reopened:
+        assert reopened.path == session.parent
+        file = reopened.existing_file
+        assert file is not None
+        file.require_before_launch()
+        assert os.fstat(file.fd).st_ino == receipt.inode
+        with session.open("ab") as stream:
+            stream.write(appended)
+        after = observe_pi_session_file(reopened, session.name)
+        assert (after.device, after.inode) == (receipt.device, receipt.inode)
+        assert after.sha256 == hashlib.sha256(old_history + appended).hexdigest()
+    with pytest.raises(OSError):
+        os.fstat(file.fd)
+
+
+@pytest.mark.parametrize("change", ["removed", "replaced", "edited", "legacy"])
+def test_exact_reopen_refuses_changed_or_unproven_original_file(
+    admitted_pi_scope: _AdmittedScope, change: str
+) -> None:
+    original = b"retained\n"
+    with admitted_pi_scope.create() as new:
+        session = new.path / PI_SESSION_NEW_FILE.name
+        session.write_bytes(original)
+        receipt = observe_pi_session_file(new, session.name)
+    if change == "removed":
+        session.unlink()
+    elif change == "replaced":
+        replacement = session.with_suffix(".temporary")
+        replacement.write_bytes(original)
+        replacement.replace(session)
+    elif change == "edited":
+        before = session.stat()
+        session.write_bytes(b"tampered\n")
+        os.utime(session, ns=(before.st_atime_ns, before.st_mtime_ns))
+    else:
+        receipt = receipt.model_copy(update={"sha256": None})
+
+    with (
+        pytest.raises(FleetPlanInvalid),
+        admitted_pi_scope.create(storage_id=session.parent.name, prior_file=receipt),
+    ):
+        pytest.fail("Unproven retained Pi bytes acquired writer custody")
+    if change == "removed":
+        assert not session.exists()
+    assert set(admitted_pi_scope.layout.pi_sessions.iterdir()) == {session.parent}
+
+
+def test_retained_pi_file_is_rechecked_after_pin_before_native_launch(
+    admitted_pi_scope: _AdmittedScope,
+) -> None:
+    with admitted_pi_scope.create() as new:
+        session = new.path / PI_SESSION_NEW_FILE.name
+        session.write_bytes(b"original\n")
+        receipt = observe_pi_session_file(new, session.name)
+    with admitted_pi_scope.create(storage_id=session.parent.name, prior_file=receipt) as reopened:
+        file = reopened.existing_file
+        assert file is not None
+        session.write_bytes(b"modified\n")
+        with pytest.raises(FleetPlanInvalid, match="changed before launch"):
+            file.require_before_launch()

@@ -15,7 +15,7 @@ from oh_goon.core.models.pi_session_storage import (
     PiSessionNativeObservation,
 )
 from oh_goon.integrations.agent_native_execution import NativeAgentEventParser
-from oh_goon.integrations.agent_pi_rpc import PiRpcControl
+from oh_goon.integrations.agent_pi_rpc import PiRpcContinuation, PiRpcControl
 
 
 @pytest.mark.parametrize(
@@ -279,7 +279,7 @@ def test_native_pi_child_cannot_emit_private_relay_observation() -> None:
     control = _persistent_start()
     with pytest.raises(AgentProviderError, match="relay-owned control record"):
         control.feed_stdout(private_record)
-    parser = NativeAgentEventParser("pi", pi_session_new=True)
+    parser = NativeAgentEventParser("pi", pi_session_persistent=True)
     parser.feed(private_record[:30])
     parser.feed(private_record[30:])
     events = parser.finish(returncode=0)
@@ -580,3 +580,116 @@ def test_rpc_completion_keeps_native_error_authoritative_despite_completed_looki
     result = parser.finish(returncode=0)
     assert result.final_text == "Completed successfully"
     assert result.settled and result.failed
+
+
+def _reopen_state() -> dict[str, Any]:
+    return {
+        "sessionId": "prior-session",
+        "sessionFile": str(PI_SESSION_NEW_FILE),
+        "messageCount": 2,
+        "isStreaming": False,
+        "isCompacting": False,
+        "pendingMessageCount": 0,
+        "model": {
+            "provider": "oh-goon",
+            "id": "current-model",
+            "api": "openai-completions",
+            "baseUrl": "http://127.0.0.1:18743/v1",
+        },
+    }
+
+
+def _reopen_control() -> PiRpcControl:
+    return PiRpcControl(
+        b"fresh authorized task",
+        continuation=PiRpcContinuation(
+            prior=PiSessionNativeObservation(session_id="prior-session", leaf_id="prior-leaf"),
+            model="current-model",
+            api="openai-completions",
+            base_url="http://127.0.0.1:18743/v1",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("state_override", "model_override", "error"),
+    [
+        ({"sessionId": "fresh-session"}, {}, "admitted native session"),
+        ({"sessionFile": "/tmp/unowned"}, {}, "exact selected private session file"),
+        ({"messageCount": 0}, {}, "admitted native session"),
+        ({"isCompacting": True}, {}, "was idle"),
+        ({"pendingMessageCount": None}, {}, "was idle"),
+        ({}, {"provider": "prior-provider"}, "current managed inference model"),
+        ({}, {"id": "prior-model"}, "current managed inference model"),
+        ({}, {"api": "openai-responses"}, "current managed inference model"),
+        ({}, {"baseUrl": "https://previous.invalid"}, "current managed inference model"),
+    ],
+)
+def test_continuation_rejects_mismatched_native_authority_without_prompt(
+    state_override: dict[str, object], model_override: dict[str, object], error: str
+) -> None:
+    control = _reopen_control()
+    _commands(control)
+    state = _reopen_state()
+    state["model"].update(model_override)
+    state.update(state_override)
+    with pytest.raises(AgentProviderError, match=error):
+        control.feed_stdout(_response("oh-goon:state", "get_state", state))
+    assert control.read_input(8192) == b""
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        {"leafId": "another-leaf", "entries": []},
+        {"leafId": "prior-leaf", "entries": [{"type": "message"}]},
+    ],
+)
+def test_continuation_refuses_an_unproved_branch_without_prompt(
+    entries: dict[str, object],
+) -> None:
+    control = _reopen_control()
+    _commands(control)
+    control.feed_stdout(_response("oh-goon:state", "get_state", _reopen_state()))
+    with pytest.raises(AgentProviderError, match="admitted native leaf"):
+        control.feed_stdout(_response("oh-goon:entries", "get_entries", entries))
+    assert control.read_input(8192) == b""
+
+
+def test_continuation_correlates_old_leaf_and_returns_only_new_native_metadata() -> None:
+    control = _reopen_control()
+    assert _commands(control) == [
+        {"id": "oh-goon:state", "type": "get_state"},
+        {"id": "oh-goon:entries", "type": "get_entries", "since": "prior-leaf"},
+    ]
+    assert (
+        control.feed_stdout(
+            _response("oh-goon:entries", "get_entries", {"leafId": "prior-leaf", "entries": []})
+        )
+        == ()
+    )
+    assert control.read_input(8192) is None
+    assert control.feed_stdout(_response("oh-goon:state", "get_state", _reopen_state())) == ()
+    assert _commands(control) == [
+        {"id": "oh-goon:prompt", "type": "prompt", "message": "fresh authorized task"},
+    ]
+    _ack(control)
+    control.feed_stdout(_line({"type": "agent_settled", "aborted": False}))
+    assert _commands(control) == [
+        {"id": "oh-goon:final-state", "type": "get_state"},
+        {"id": "oh-goon:final-entries", "type": "get_entries", "since": "prior-leaf"},
+    ]
+    assert control.feed_stdout(_response("oh-goon:final-state", "get_state", _reopen_state())) == ()
+    assert (
+        control.feed_stdout(
+            _response(
+                "oh-goon:final-entries",
+                "get_entries",
+                {"leafId": "advanced-leaf", "entries": [{"private": "current turn text"}]},
+            )
+        )
+        == ()
+    )
+    assert control.finish() == PiSessionNativeObservation(
+        session_id="prior-session", leaf_id="advanced-leaf"
+    )

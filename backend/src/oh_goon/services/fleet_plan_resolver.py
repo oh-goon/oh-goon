@@ -325,6 +325,12 @@ class FleetPlanResolver:
                 nonlocal repository_reference, aliases, aliases_loaded
                 if cancel_requested is not None and cancel_requested():
                     raise OperationCancelledError("Agent source capture cancelled")
+                if (
+                    native_agent is not None
+                    and native_agent.continues_pi_session
+                    and step.requested_effects.repository_access != "read_only"
+                ):
+                    raise FleetPlanInvalid("Pi continuation requires read-only repository access")
                 old = previous.get(occurrence) if previous is not None else None
                 if previous is not None and old is None:
                     raise FleetPlanInvalid("Agent continuation changed its occurrence membership")

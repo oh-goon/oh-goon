@@ -268,7 +268,7 @@ class FleetRunLifecycle:
                 profile=selected.profile,
                 definition=selected.definition,
             )
-            if selected.creates_pi_session and (
+            if selected.uses_persistent_pi_session and (
                 readmitted_from_run_id is not None
                 or rerun_from_run_id is not None
                 or target.candidate_workspace is not None
@@ -280,7 +280,7 @@ class FleetRunLifecycle:
                 )
             ):
                 raise PiSessionUnavailable(
-                    "New persistent Pi sessions require one Agent Step in a fresh direct Run"
+                    "Persistent Pi sessions require one Agent Step in a fresh direct Run"
                 )
         if isinstance(target, FleetPlanTarget) and target.candidate_workspace is not None:
             if (

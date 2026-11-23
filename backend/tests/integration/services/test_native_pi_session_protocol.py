@@ -52,8 +52,8 @@ from oh_goon.integrations.fleet_plan_process_isolation import (
     StandardReadOnlyMount,
 )
 from oh_goon.runtime.pi_session_storage import (
-    create_pi_session_directory,
     observe_pi_session_file,
+    pin_pi_session_directory,
 )
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
 
@@ -572,7 +572,7 @@ def test_installed_pi_private_session_survives_original_command_and_config_clean
     admission = repository_plan_admission_evidence(repository, plan)
     with (
         RepositoryWorkspaceAuthority.pin_repository_subject(workspace) as require_workspace,
-        create_pi_session_directory(
+        pin_pi_session_directory(
             layout=layout,
             fleet_run_id="installed-pi-storage-probe",
             repository=repository,

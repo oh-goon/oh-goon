@@ -21152,6 +21152,35 @@
         "title": "PathMissingCondition",
         "type": "object"
       },
+      "PiSessionContinuationOrigin": {
+        "additionalProperties": false,
+        "description": "The exact prior Run and its observed writer cut, never a filesystem selector.",
+        "properties": {
+          "observation_sequence": {
+            "minimum": 1.0,
+            "title": "Observation Sequence",
+            "type": "integer"
+          },
+          "prior_run_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Prior Run Id",
+            "type": "string"
+          },
+          "reservation_sequence": {
+            "minimum": 1.0,
+            "title": "Reservation Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prior_run_id",
+          "reservation_sequence",
+          "observation_sequence"
+        ],
+        "title": "PiSessionContinuationOrigin",
+        "type": "object"
+      },
       "PiSessionFileObservation": {
         "additionalProperties": false,
         "description": "Bounded native file metadata observed under the original directory pin.",
@@ -21165,6 +21194,18 @@
             "exclusiveMinimum": 0.0,
             "title": "Inode",
             "type": "integer"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
           },
           "size": {
             "minimum": 0.0,
@@ -21332,7 +21373,7 @@
       },
       "PiSessionWriterReservedEvent": {
         "additionalProperties": false,
-        "description": "Original Run-owned writer fence for one newly allocated Pi session.",
+        "description": "Original Run-owned writer fence for one admitted Pi session.",
         "properties": {
           "attempt_number": {
             "const": 1,
@@ -21343,6 +21384,16 @@
             "minimum": 1.0,
             "title": "Attempt Sequence",
             "type": "integer"
+          },
+          "continuation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PiSessionContinuationOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "event_type": {
             "const": "PI_SESSION_WRITER_RESERVED",

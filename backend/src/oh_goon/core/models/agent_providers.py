@@ -82,6 +82,10 @@ class PiSessionIntent(ImmutableModel):
             raise ValueError("A prior Fleet Run ID is required for continuation only")
         return self
 
+    @property
+    def persistent(self) -> bool:
+        return self.mode != "ephemeral"
+
     @classmethod
     def from_selector(cls, selector: str) -> PiSessionIntent:
         if selector == "ephemeral":
@@ -112,8 +116,6 @@ def require_pi_session_execution(
         raise PiSessionSelectionError("Pi session selection requires the Pi harness")
     if session.mode == "continue" and handoff:
         raise PiSessionSelectionError("Pi continuation cannot be combined with --handoff-from")
-    if session.mode == "continue":
-        raise PiSessionUnavailable("Pi continuation requires qualified exact session reopening")
     if interactive:
         raise PiSessionSelectionError("Explicit Pi session selection requires headless execution")
     if session.mode == "new" and handoff:
@@ -121,7 +123,7 @@ def require_pi_session_execution(
             "New persistent Pi sessions require a fresh task without a handoff"
         )
     if (
-        session.mode == "new"
+        session.persistent
         and profile is not None
         and (
             profile.backend != "bubblewrap"
@@ -136,7 +138,7 @@ def require_pi_session_execution(
         )
     ):
         raise PiSessionUnavailable(
-            "New persistent Pi sessions require a dedicated managed Pi RPC Bubblewrap profile "
+            "Persistent Pi sessions require a dedicated managed Pi RPC Bubblewrap profile "
             "with its default native configuration and no separate Step resource scope"
         )
 
@@ -608,8 +610,12 @@ class ResolvedNativeAgent:
     session: Annotated[PiSessionIntent | None, Field(exclude_if=lambda value: value is None)] = None
 
     @property
-    def creates_pi_session(self) -> bool:
-        return self.session is not None and self.session.mode == "new"
+    def uses_persistent_pi_session(self) -> bool:
+        return self.session is not None and self.session.persistent
+
+    @property
+    def continues_pi_session(self) -> bool:
+        return self.session is not None and self.session.mode == "continue"
 
     @property
     def disclosure_recipients(self) -> tuple[str, ...]:

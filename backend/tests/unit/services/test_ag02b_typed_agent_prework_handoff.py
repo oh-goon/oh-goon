@@ -131,17 +131,23 @@ def test_authored_pi_session_freezes_into_original_plan_delivery_and_lock(
 
 
 @pytest.mark.parametrize(
-    ("session", "agent", "error"),
+    ("session", "selector", "agent", "error"),
     [
-        ("{mode: ephemeral}", "codex", "requires the Pi harness"),
-        ("{mode: new}", "pi", "dedicated managed Pi RPC"),
-        ("{mode: continue, prior_run_id: fleet-original}", "pi", "exact session reopening"),
+        ("{mode: ephemeral}", "ephemeral", "codex", "requires the Pi harness"),
+        ("{mode: new}", "new", "pi", "dedicated managed Pi RPC"),
+        (
+            "{mode: continue, prior_run_id: fleet-original}",
+            "run:fleet-original",
+            "pi",
+            "dedicated managed Pi RPC",
+        ),
     ],
 )
 def test_authored_pi_session_refuses_before_original_agent_source_capture(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     session: str,
+    selector: str,
     agent: str,
     error: str,
 ) -> None:
@@ -163,13 +169,50 @@ def test_authored_pi_session_refuses_before_original_agent_source_capture(
         definition=NativeAgentDefinition(executable="/native/agent"),
         profile=NativeAgentProfile(backend="bubblewrap"),
         executable_sha256="a" * 64,
-        session=PiSessionIntent(mode="new") if session == "{mode: new}" else None,
+        session=PiSessionIntent.from_selector(selector),
     )
     monkeypatch.setattr(
         "oh_goon.services.agent_authoring_sources.capture_agent_sources",
         lambda *_args, **_kwargs: pytest.fail("Unsupported selection reached source capture"),
     )
     with pytest.raises(AgentProviderError, match=error):
+        resolver.resolve_frozen_agents(
+            source, native_agent=selected, repository=repository, **options
+        )
+
+
+def test_authored_pi_reopen_with_write_access_refuses_before_source_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.core.models.agent_providers import (
+        NativeAgentDefinition,
+        NativeAgentProfile,
+        PiSessionIntent,
+        ResolvedNativeAgent,
+    )
+
+    resolver, source, options, _, repository = _case(
+        tmp_path,
+        "- uses: agent\n  harness: native\n  task: inspect\n"
+        "  session: {mode: continue, prior_run_id: fleet-original}\n"
+        "  requested_effects: {repository_access: write}\n",
+    )
+    options.pop("expected_source_sha256")
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="pi-managed",
+        definition=NativeAgentDefinition(executable="/native/pi"),
+        profile=NativeAgentProfile(
+            backend="bubblewrap", allowed_agents=("pi",), inference_profile="managed", pi_rpc=True
+        ),
+        executable_sha256="a" * 64,
+        session=PiSessionIntent.from_selector("run:fleet-original"),
+    )
+    monkeypatch.setattr(
+        "oh_goon.services.agent_authoring_sources.capture_agent_sources",
+        lambda *_args, **_kwargs: pytest.fail("Writable reopen reached source capture"),
+    )
+    with pytest.raises(FleetPlanInvalid, match="requires read-only repository access"):
         resolver.resolve_frozen_agents(
             source, native_agent=selected, repository=repository, **options
         )

@@ -1,18 +1,30 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
-from oh_goon.core.errors import InvalidRunTransition
+from oh_goon.core.errors import InvalidRunTransition, PiSessionBusy
 from oh_goon.core.fleet_plan_projection import fleet_plan_logical_slot
+from oh_goon.core.models.agent_providers import PiSessionUnavailable
 from oh_goon.core.models.agent_repair import AgentCampaignRecord
 from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.operation import OperationReport
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import fleet_readmission_parent
-from oh_goon.core.models.run_events import FleetRunEvent, RepositoryCompletedEvent
+from oh_goon.core.models.run_events import (
+    FleetRunEvent,
+    PiSessionContinuationOrigin,
+    PiSessionWriterObservedEvent,
+    PiSessionWriterReservedEvent,
+    RepositoryCompletedEvent,
+    RunAdmittedEvent,
+    RunCancelledEvent,
+    RunCompletedEvent,
+    RunFailedEvent,
+    StepSucceededEvent,
+)
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.product_identity import operation_intent_key, repository_id
 from oh_goon.core.result_lifecycle import result_freshness
@@ -103,6 +115,149 @@ def _build_readmission_index(
     return MappingProxyType(child_by_parent)
 
 
+_TERMINAL_RUN_EVENTS = (RunCompletedEvent, RunCancelledEvent, RunFailedEvent)
+
+
+def pi_session_predecessor(
+    prior_run_id: str,
+    admission: RunAdmittedEvent,
+    events_by_run: Mapping[str, Sequence[FleetRunEvent]],
+    writer_heads: Mapping[str, PiSessionWriterReservedEvent],
+) -> tuple[PiSessionWriterReservedEvent, PiSessionWriterObservedEvent]:
+    """Resolve one accepted predecessor at the exact existing Journal cut."""
+    events = events_by_run.get(prior_run_id, ())
+    prior = next((item for item in events if isinstance(item, PiSessionWriterReservedEvent)), None)
+    if prior is None or prior_run_id == admission.fleet_run_id:
+        raise PiSessionUnavailable("Selected prior Run has no persistent Pi writer")
+    head = writer_heads.get(prior.storage_id)
+    if head is None:
+        raise InvalidRunTransition("Missing original Pi writer lineage head")
+    if not any(isinstance(item, _TERMINAL_RUN_EVENTS) for item in events_by_run[head.fleet_run_id]):
+        raise PiSessionBusy("Selected Pi session still has an active writer")
+    if head != prior:
+        raise PiSessionUnavailable("Selected Pi session has a newer writer reservation")
+    previous = events[0]
+    if (
+        not isinstance(previous, RunAdmittedEvent)
+        or len(previous.targets) != 1
+        or len(previous.repository_admissions) != 1
+    ):
+        raise InvalidRunTransition("Missing original Pi repository admission")
+    if (
+        len(admission.targets) != 1
+        or len(admission.repository_admissions) != 1
+        or admission.targets[0].repository_id != previous.targets[0].repository_id
+        or admission.targets[0].path != previous.targets[0].path
+        or admission.repository_admissions[0].source_authority.subject_instance_id
+        != previous.repository_admissions[0].source_authority.subject_instance_id
+    ):
+        raise PiSessionUnavailable("Selected Pi session belongs to a different repository subject")
+    old_target, new_target = previous.target, admission.target
+    if (
+        not isinstance(old_target, FleetPlanTarget)
+        or not isinstance(new_target, FleetPlanTarget)
+        or old_target.plan.native_agent is None
+        or new_target.plan.native_agent is None
+        or old_target.plan.native_agent.executable_sha256
+        != new_target.plan.native_agent.executable_sha256
+    ):
+        raise PiSessionUnavailable("Selected Pi session has a different native implementation")
+    observed = next(
+        (
+            item
+            for item in events[prior.sequence :]
+            if isinstance(item, PiSessionWriterObservedEvent)
+            and item.reservation_sequence == prior.sequence
+        ),
+        None,
+    )
+    if (
+        observed is None
+        or observed.observation.persistence != "observed"
+        or observed.observation.file is None
+        or observed.observation.file.sha256 is None
+    ):
+        raise PiSessionUnavailable("Selected Pi session has no qualified persistence observation")
+    accepted = next(
+        (
+            item
+            for item in events[observed.sequence :]
+            if isinstance(item, StepSucceededEvent)
+            and (item.repository_id, item.operation_id, item.step_id)
+            == (prior.repository_id, prior.operation_id, prior.step_id)
+        ),
+        None,
+    )
+    if accepted is None or not any(
+        isinstance(item, RepositoryCompletedEvent) and item.operation_id == prior.operation_id
+        for item in events[accepted.sequence :]
+    ):
+        raise PiSessionUnavailable("Selected Pi session has no accepted original Agent result")
+    return prior, observed
+
+
+def pi_session_origin_observation(
+    origin: PiSessionContinuationOrigin,
+    events_by_run: Mapping[str, Sequence[FleetRunEvent]],
+) -> PiSessionWriterObservedEvent:
+    events = events_by_run.get(origin.prior_run_id, ())
+    if 1 <= origin.observation_sequence <= len(events):
+        event = events[origin.observation_sequence - 1]
+        if (
+            isinstance(event, PiSessionWriterObservedEvent)
+            and event.sequence == origin.observation_sequence
+            and event.reservation_sequence == origin.reservation_sequence
+        ):
+            return event
+    raise InvalidRunTransition("Missing original Pi continuation observation")
+
+
+def require_pi_continuation_observation(
+    event: PiSessionWriterObservedEvent, predecessor: PiSessionWriterObservedEvent
+) -> None:
+    """An observed successor may advance a leaf within the original file and session."""
+    result, previous = event.observation, predecessor.observation
+    if result.persistence == "observed" and (
+        result.session_id != previous.session_id
+        or result.file is None
+        or result.file.sha256 is None
+        or previous.file is None
+        or (result.file.device, result.file.inode) != (previous.file.device, previous.file.inode)
+    ):
+        raise InvalidRunTransition("Pi continuation observation changed original session identity")
+
+
+def _index_pi_session_writer(
+    event: PiSessionWriterReservedEvent,
+    history: Sequence[FleetRunEvent],
+    events_by_run: Mapping[str, Sequence[FleetRunEvent]],
+    writer_heads: dict[str, PiSessionWriterReservedEvent],
+) -> None:
+    origin = event.continuation
+    if origin is None:
+        if event.storage_id in writer_heads:
+            raise InvalidRunTransition("Journal invariant violated: duplicate Pi writer origin")
+    else:
+        admission = history[0]
+        if not isinstance(admission, RunAdmittedEvent):
+            raise InvalidRunTransition("Journal invariant violated: missing Pi Run admission")
+        try:
+            prior, observed = pi_session_predecessor(
+                origin.prior_run_id, admission, events_by_run, writer_heads
+            )
+        except (PiSessionBusy, PiSessionUnavailable) as exc:
+            raise InvalidRunTransition(
+                "Journal invariant violated: unqualified Pi predecessor"
+            ) from exc
+        if (
+            prior.storage_id != event.storage_id
+            or prior.sequence != origin.reservation_sequence
+            or observed.sequence != origin.observation_sequence
+        ):
+            raise InvalidRunTransition("Journal invariant violated: Pi predecessor changed")
+    writer_heads[event.storage_id] = event
+
+
 @dataclass(frozen=True, slots=True)
 class CurrentFleetPlanOperation:
     revision: int
@@ -124,6 +279,7 @@ class JournalIndex:
     current_exact_positions: Mapping[tuple[str, tuple[str, str]], int]
     current_family_positions: Mapping[tuple[str, OperationAction], int]
     events_by_run: Mapping[str, tuple[FleetRunEvent, ...]]
+    pi_session_writer_heads: Mapping[str, PiSessionWriterReservedEvent]
     run_details_by_id: Mapping[str, FleetRunDetail]
     latest_run_by_intent: Mapping[tuple[str, str], str]
     latest_run_by_family: Mapping[OperationAction, str]
@@ -147,6 +303,7 @@ class JournalIndex:
         reconciliations_by_operation: dict[str, list[EffectReconciliationCommitted]] = {}
         acknowledgements_by_operation: dict[str, EffectAcknowledgementCommitted] = {}
         run_events: dict[str, list[FleetRunEvent]] = {}
+        pi_session_writer_heads: dict[str, PiSessionWriterReservedEvent] = {}
         admitted: list[tuple[int, str]] = []
         admission_sessions: dict[str, str] = {}
         current_fleet_plan_operations: dict[
@@ -177,7 +334,24 @@ class JournalIndex:
                 continue
             if not isinstance(entry, (RunEventCommitted, FleetOperationCommitted)):
                 continue
-            run_events.setdefault(entry.event.fleet_run_id, []).append(entry.event)
+            run_history = run_events.setdefault(entry.event.fleet_run_id, [])
+            if isinstance(entry.event, PiSessionWriterReservedEvent):
+                _index_pi_session_writer(
+                    entry.event, run_history, run_events, pi_session_writer_heads
+                )
+            elif isinstance(entry.event, PiSessionWriterObservedEvent):
+                seq = entry.event.reservation_sequence
+                if 1 <= seq <= len(run_history):
+                    reservation = run_history[seq - 1]
+                    if (
+                        isinstance(reservation, PiSessionWriterReservedEvent)
+                        and reservation.continuation is not None
+                    ):
+                        predecessor = pi_session_origin_observation(
+                            reservation.continuation, run_events
+                        )
+                        require_pi_continuation_observation(entry.event, predecessor)
+            run_history.append(entry.event)
             if isinstance(entry, FleetOperationCommitted) and isinstance(
                 entry.report.target, FleetPlanTarget
             ):
@@ -256,6 +430,7 @@ class JournalIndex:
             current_exact_positions=repository_indexes.exact_positions,
             current_family_positions=repository_indexes.family_positions,
             events_by_run=MappingProxyType(events_by_run),
+            pi_session_writer_heads=MappingProxyType(pi_session_writer_heads),
             run_details_by_id=MappingProxyType(run_details_by_id),
             latest_run_by_intent=MappingProxyType(latest_run_by_intent),
             latest_run_by_family=MappingProxyType(latest_run_by_family),

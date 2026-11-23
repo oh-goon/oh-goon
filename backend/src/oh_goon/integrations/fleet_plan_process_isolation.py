@@ -342,10 +342,11 @@ class NativeProfileCommandRunner:
             raise FleetPlanInvalid("Native stdout whitespace selection must be a boolean")
         if pi_session_directory is not None and (
             native_agent.agent != "pi"
-            or not native_agent.creates_pi_session
+            or not native_agent.uses_persistent_pi_session
             or not native_agent.profile.pi_rpc
+            or native_agent.continues_pi_session != (pi_session_directory.existing_file is not None)
         ):
-            raise FleetPlanInvalid("Native session pin requires the selected fresh Pi writer")
+            raise FleetPlanInvalid("Native session pin differs from its selected Pi writer")
         if cancel_requested is not None and cancel_requested():
             raise OperationCancelledError("Native workload cancelled before process launch")
         if allowed_write_roots and (not protected or allowed_write_roots != admitted_roots):
