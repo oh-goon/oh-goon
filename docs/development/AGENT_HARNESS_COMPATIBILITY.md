@@ -1044,6 +1044,27 @@ unconfirmed, even after Run recovery. The file stays with the original Run.
 The observed metadata is separate from the verifier result. HUG-43 extends
 this observation with a bounded file digest for eligible session predecessors.
 
+### Pi writer reservation and orphan recovery — HUG-74
+
+**Disposition**. Retain the original claimed Step, SQLite Journal and recovery
+owners. A separate Journal reader observes the committed writer reservation
+at private directory allocation. Recovery preserves that reservation as the
+lineage head through interrupted allocation and an unaccepted native save.
+
+The [installed claimed-worker test](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+uses Pi 1.3.0 and Bubblewrap on Linux with a synthetic provider. It interrupts
+the original worker after the native file appears and before the Agent result
+is accepted. Original recovery preserves the file, records the Run failure,
+and releases custody after proving process cleanup. A separate Journal read
+reports the orphan and refuses continuation. The accepted writer and verifier
+evidence remain separate from filesystem presence.
+
+After canonical reconciliation, inspection checks only the exact reserved
+slot and reports regular-file presence or proven absence. Ambiguous storage
+and unresolved process cleanup remain unverified. The fixture exercises
+process interruption. Power-loss durability and other host environments
+require separate qualification.
+
 ### Exact read-only Pi reopen — HUG-43
 
 **Disposition: retain** the Pi 1.3.0 RPC relay, managed inference bootstrap,

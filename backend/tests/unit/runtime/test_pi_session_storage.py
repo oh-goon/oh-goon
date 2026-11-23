@@ -32,9 +32,10 @@ from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.core.product_identity import repository_subject_instance_id
+from oh_goon.core.product_identity import pi_session_storage_id, repository_subject_instance_id
 from oh_goon.engine.git import GitService
 from oh_goon.runtime.pi_session_storage import (
+    inspect_recovered_pi_session_storage,
     observe_pi_session_file,
     pin_pi_session_directory,
     pin_pi_session_retirement,
@@ -484,6 +485,80 @@ def test_pi_reopen_checks_slot_membership_at_launch_and_after_native_exit(
             observe_pi_session_file(reopened, session.name)
     assert session.read_bytes() == b"retained\n"
     assert unexpected.read_bytes() == b"retain for explicit recovery\n"
+
+
+def test_recovered_pi_inspection_reports_only_exact_slot_occupancy(
+    admitted_pi_scope: _AdmittedScope, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scope = admitted_pi_scope
+    storage_id = pi_session_storage_id("fleet-original", scope.repository.repository_id, "pi", 1)
+    selected = scope.layout.pi_sessions / storage_id / PI_SESSION_NEW_FILE.name
+
+    def inspect() -> str:
+        return inspect_recovered_pi_session_storage(layout=scope.layout, storage_id=storage_id)
+
+    assert inspect() == "unavailable"
+    assert not scope.layout.pi_sessions.exists()
+    with scope.create(attempt_number=2) as sibling:
+        unrelated = sibling.path / PI_SESSION_NEW_FILE.name
+        unrelated.write_bytes(b"unrelated Pi session")
+    assert inspect() == "unavailable"
+    assert not selected.parent.exists()
+    with scope.create() as pin:
+        assert pin.path == selected.parent
+    assert inspect() == "unavailable"
+    assert tuple(selected.parent.iterdir()) == ()
+
+    native_open = os.open
+    path_open = Path.open
+
+    def metadata_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if path in (selected, selected.name, str(selected)):
+            assert flags & os.O_PATH
+        return native_open(path, flags, *args, **kwargs)
+
+    def refuse_contents(path: Path, *args: Any, **kwargs: Any) -> IO[Any]:
+        assert path.parent != Path("/proc/self/fd") and path != selected
+        return cast(IO[Any], path_open(path, *args, **kwargs))
+
+    for payload in (b"", b'{"partial":'):
+        selected.write_bytes(payload)
+        before = selected.stat()
+        with monkeypatch.context() as patched:
+            patched.setattr(os, "open", metadata_open)
+            patched.setattr(Path, "open", refuse_contents)
+            assert inspect() == "orphaned"
+        assert selected.read_bytes() == payload
+        after = selected.stat()
+        assert os.path.samestat(before, after) and before.st_mtime_ns == after.st_mtime_ns
+    assert unrelated.read_bytes() == b"unrelated Pi session"
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "special", "extra"])
+def test_recovered_pi_inspection_refuses_ambiguous_occupancy(
+    admitted_pi_scope: _AdmittedScope, tmp_path: Path, kind: str
+) -> None:
+    scope = admitted_pi_scope
+    other = tmp_path / "unrelated"
+    other.write_bytes(b"unrelated private bytes")
+    with scope.create() as pin:
+        selected = pin.path / PI_SESSION_NEW_FILE.name
+        if kind == "symlink":
+            selected.symlink_to(other)
+        elif kind == "hardlink":
+            os.link(other, selected)
+        elif kind == "special":
+            os.mkfifo(selected)
+        else:
+            selected.touch()
+            (pin.path / "unrelated-entry").touch()
+    entries = {item.name: item.lstat().st_ino for item in pin.path.iterdir()}
+    assert (
+        inspect_recovered_pi_session_storage(layout=scope.layout, storage_id=pin.path.name)
+        == "unverified"
+    )
+    assert {item.name: item.lstat().st_ino for item in pin.path.iterdir()} == entries
+    assert other.read_bytes() == b"unrelated private bytes"
 
 
 def test_retirement_unlinks_one_exact_pi_file_without_touching_other_storage(

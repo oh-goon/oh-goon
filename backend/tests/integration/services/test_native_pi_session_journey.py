@@ -5,15 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import select
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from types import SimpleNamespace
 from typing import Any
 
@@ -24,10 +26,23 @@ from fastapi.testclient import TestClient
 
 from oh_goon.api.dependencies import fleet_run_control_plane
 from oh_goon.api.routes.fleet_runs import router as run_router
+from oh_goon.application import ApplicationRuntime
+from oh_goon.core.errors import PiSessionRefusalCode
 from oh_goon.core.models.pi_session_storage import PI_SESSION_NEW_FILE
+from oh_goon.core.models.run_events import (
+    DescendantsQuiescentEvent,
+    PiSessionWriterObservedEvent,
+    PiSessionWriterReservedEvent,
+    ProcessStartedEvent,
+    ProcessStateUnknownEvent,
+    StepSucceededEvent,
+)
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.vocabulary import FleetRunStatus
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.execution import ExecutionCoordinator
+from oh_goon.runtime.execution.lease_environment import SystemLeaseEnvironment
 from oh_goon.runtime.journal import Journal
 
 _SECRET = "synthetic-pi-journey-broker-key"
@@ -52,7 +67,9 @@ def _message_text(message: dict[str, Any]) -> str:
 
 
 @contextmanager
-def _provider() -> Iterator[tuple[str, list[str], list[str], list[str], list[str]]]:
+def _provider(
+    hold_tool_followup: Callable[[], None] | None = None,
+) -> Iterator[tuple[str, list[str], list[str], list[str], list[str]]]:
     errors: list[str] = []
     requests: list[str] = []
     source_digests: list[str] = []
@@ -61,7 +78,11 @@ def _provider() -> Iterator[tuple[str, list[str], list[str], list[str], list[str
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             try:
-                self.reply(*self.respond())
+                response = self.respond()
+                if hold_tool_followup is not None and len(requests) == 2:
+                    hold_tool_followup()
+                    return
+                self.reply(*response)
             except Exception as error:
                 errors.append(str(error))
                 self.reply({"role": "assistant", "content": "Fixture refusal."}, "stop")
@@ -777,3 +798,211 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
                 }
             )
         )
+
+
+@pytest.mark.certification
+def test_installed_pi_worker_crash_preserves_reserved_native_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = os.environ.get("OH_GOON_NATIVE_PI")
+    runtime_root = os.environ.get("OH_GOON_NATIVE_PI_RUNTIME_ROOT")
+    if not executable or not runtime_root:
+        pytest.skip("Select the installed Pi executable and public runtime root")
+    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        pytest.skip("The installed worker crash cut requires Linux pidfds")
+    assert shutil.which("bwrap")
+    public_runtime = Path(runtime_root).resolve(strict=True)
+    program = Path(executable).resolve(strict=True)
+    assert program.is_relative_to(public_runtime)
+    package_cli = Path(sys.executable).with_name("oh-goon")
+    assert package_cli.is_file()
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run(("git", "init", "-q", str(repository)), check=True, timeout=10)
+    (repository / "source.py").write_text("VALUE = 42\n")
+    skill = tmp_path / "skill"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("# Session journey Skill\nReview the selected source.\n")
+    database_path = tmp_path / "state" / "app.sqlite"
+    session_root = ApplicationStatePathLayout.from_database(database_path).pi_sessions
+    config = tmp_path / "providers.json"
+    for name, path in (
+        ("HOME", tmp_path / "home"),
+        ("XDG_CONFIG_HOME", tmp_path / "config"),
+        ("XDG_DATA_HOME", tmp_path / "data"),
+        ("OH_GOON_DB", database_path),
+        ("OH_GOON_LEAGUE_FILE", tmp_path / "league.yml"),
+        ("OH_GOON_PROVIDERS_FILE", config),
+    ):
+        monkeypatch.setenv(name, str(path))
+    monkeypatch.setenv("OH_GOON_TEST_PI_JOURNEY_KEY", _SECRET)
+
+    followup_arrived, release_followup = Event(), Event()
+
+    def hold_tool_followup() -> None:
+        followup_arrived.set()
+        assert release_followup.wait(65), "Fixture did not release the held inference"
+
+    ai = (
+        str(package_cli),
+        "ai",
+        "--agent",
+        "pi",
+        "--profile",
+        "pi-rpc",
+        "--skill",
+        str(skill),
+        "--prompt",
+        _TASKS[0],
+        "--verify",
+        "/usr/bin/true",
+        "--json",
+        "--session",
+    )
+    with _provider(hold_tool_followup) as (url, requests, errors, _, _):
+        config.write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "local": {
+                            "api": "openai-chat-completions",
+                            "base_url": url,
+                            "api_key_env": "OH_GOON_TEST_PI_JOURNEY_KEY",
+                        }
+                    },
+                    "models": {
+                        "journey": {"provider": "local", "model": "pi-session-journey-fixture"}
+                    },
+                    "native_profiles": {
+                        "pi-rpc": {
+                            "backend": "bubblewrap",
+                            "allowed_agents": ["pi"],
+                            "workspace_roots": [str(repository)],
+                            "inference_profile": "journey",
+                            "pi_rpc": True,
+                            "timeout_seconds": 90,
+                        }
+                    },
+                    "native_agents": {
+                        "pi": {"executable": str(program), "runtime_roots": [str(public_runtime)]}
+                    },
+                }
+            )
+        )
+        log_path = tmp_path / "controller.log"
+        with log_path.open("wb") as console:
+            controller = subprocess.Popen(
+                (*ai, "new"), cwd=repository, stdout=console, stderr=subprocess.STDOUT
+            )
+        try:
+            assert followup_arrived.wait(65), (errors, log_path.read_text()[-3000:])
+            database = LocalDatabase(database_path, read_only=True)
+            lease = ExecutionCoordinator(database).active_lease()
+            assert lease is not None and lease.fleet_run_id and lease.custody is not None
+            run_id, custody = lease.fleet_run_id, lease.custody
+            assert custody.phase == "WORKER_OWNED"
+            assert custody.owner_pid not in {os.getpid(), controller.pid}
+            active_journal = Journal(database)
+            live = active_journal.run_events(run_id)
+            assert live.run.status is FleetRunStatus.RUNNING
+            assert active_journal.inspect_pi_session(run_id).availability == "busy"
+            (reservation,) = (
+                event for event in live.events if isinstance(event, PiSessionWriterReservedEvent)
+            )
+            (started,) = (
+                event
+                for event in live.events
+                if type(event) is ProcessStartedEvent
+                and event.step_id == reservation.step_id
+                and event.sequence > reservation.sequence
+            )
+            assert reservation.attempt_sequence < reservation.sequence < started.sequence
+            assert not any(isinstance(event, PiSessionWriterObservedEvent) for event in live.events)
+            slot = session_root / reservation.storage_id
+            native_file = slot / PI_SESSION_NEW_FILE.name
+            before = native_file.stat()
+            assert 0 < before.st_size < 1024 * 1024
+            with native_file.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+
+            identity = SystemLeaseEnvironment()
+            assert identity.process_identity(custody.owner_pid) == custody.owner_identity
+            worker = os.pidfd_open(custody.owner_pid)
+            try:
+                assert identity.process_identity(custody.owner_pid) == custody.owner_identity
+                controller.kill()
+                controller.wait(timeout=10)
+                assert identity.process_alive(custody.owner_pid)
+                signal.pidfd_send_signal(worker, signal.SIGKILL)
+                exited = select.poll()
+                exited.register(worker, select.POLLIN)
+                assert exited.poll(10_000), "Original claimed Run worker did not exit"
+            finally:
+                os.close(worker)
+        finally:
+            release_followup.set()
+            if controller.poll() is None:
+                try:
+                    controller.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    controller.kill()
+                    controller.wait(timeout=5)
+
+        interrupted = Journal(LocalDatabase(database_path, read_only=True)).run_events(run_id)
+        assert interrupted.run.status is FleetRunStatus.RUNNING
+        recovered = ApplicationRuntime.build(standard_local=True, startup_purpose="workflow")
+        try:
+            reconciled = recovered.recovery.recover_worker_exit(
+                run_id, quiescence_timeout_seconds=10
+            )
+            (quarantine,) = reconciled.effect_quarantines
+            assert quarantine.operation_id == reservation.operation_id
+            acknowledged = recovered.recovery.acknowledge(
+                quarantine.operation_id,
+                note="Inspected the synthetic Pi crash fixture",
+                expected_record_version=quarantine.record_version,
+            )
+            assert acknowledged.effect_quarantines == ()
+        finally:
+            recovered.shutdown(wait_for_runs=True)
+        reopened = LocalDatabase(database_path, read_only=True)
+        journal = Journal(reopened)
+        failed = journal.run_events(run_id)
+        assert failed.run.status is FleetRunStatus.FAILED
+        assert failed.events[: len(live.events)] == live.events
+        assert not any(
+            isinstance(event, (PiSessionWriterObservedEvent, StepSucceededEvent))
+            for event in failed.events
+        )
+        native_settlement = tuple(
+            type(event)
+            for event in failed.events[len(live.events) :]
+            if isinstance(event, ProcessStartedEvent)
+            and event.physical_execution_id == started.physical_execution_id
+        )
+        assert native_settlement == (ProcessStateUnknownEvent, DescendantsQuiescentEvent)
+        assert failed.pi_session is not None and failed.pi_session.persistence == "unknown"
+        assert failed.pi_session.native is None
+        inspection = journal.inspect_pi_session(run_id)
+        assert inspection.availability == "orphaned" and inspection.native is None
+        assert inspection.retirement == "none"
+        assert inspection.refusal_code == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+        with reopened.transaction() as connection:
+            assert ExecutionCoordinator(reopened).retained_leases_in(connection) == ()
+
+        refused = subprocess.run(
+            (*ai, f"run:{run_id}"), cwd=repository, capture_output=True, text=True, timeout=65
+        )
+        assert refused.returncode == 2, (refused.stdout[-3000:], refused.stderr[-3000:])
+        assert json.loads(refused.stdout)["code"] == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+        assert journal.run_events(run_id) == failed
+        assert requests == [_TASKS[0], _TASKS[0]] and not errors
+        assert tuple(session_root.iterdir()) == (slot,)
+        after = native_file.stat()
+        assert (after.st_dev, after.st_ino, after.st_size) == (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+        )
+        with native_file.open("rb") as stream:
+            assert hashlib.file_digest(stream, "sha256").hexdigest() == digest

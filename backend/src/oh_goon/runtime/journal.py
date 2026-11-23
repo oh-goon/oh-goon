@@ -123,7 +123,10 @@ from oh_goon.runtime.journal_facts import (
 from oh_goon.runtime.journal_index import require_pi_continuation_observation
 from oh_goon.runtime.journal_store import JournalFactStore
 from oh_goon.runtime.journal_view import JournalReadView, PiSessionRetirementSource
-from oh_goon.runtime.pi_session_storage import pin_pi_session_retirement
+from oh_goon.runtime.pi_session_storage import (
+    inspect_recovered_pi_session_storage,
+    pin_pi_session_retirement,
+)
 
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_step_execution import StepLifecycleObserver
@@ -952,17 +955,23 @@ class Journal:
                 )
             except PiSessionUnavailable as error:
                 code = error.code
+                availability: Literal["unavailable", "unverified", "orphaned"] = "unverified"
+                if code in {
+                    PiSessionRefusalCode.NO_PERSISTENT_SESSION,
+                    PiSessionRefusalCode.UNAVAILABLE,
+                    PiSessionRefusalCode.IDENTITY_MISMATCH,
+                }:
+                    availability = "unavailable"
+                elif code is PiSessionRefusalCode.SETTLEMENT_UNCERTAIN:
+                    writer = view.reconciled_pi_session_writer(fleet_run_id)
+                    if writer is not None:
+                        availability = inspect_recovered_pi_session_storage(
+                            layout=layout, storage_id=writer.storage_id
+                        )
                 return PiSessionInspection(
                     fleet_run_id=fleet_run_id,
                     native=native,
-                    availability="unavailable"
-                    if code
-                    in {
-                        PiSessionRefusalCode.NO_PERSISTENT_SESSION,
-                        PiSessionRefusalCode.UNAVAILABLE,
-                        PiSessionRefusalCode.IDENTITY_MISMATCH,
-                    }
-                    else "unverified",
+                    availability=availability,
                     refusal_code=code,
                 )
 
