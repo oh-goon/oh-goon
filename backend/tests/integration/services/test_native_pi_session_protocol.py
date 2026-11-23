@@ -15,6 +15,7 @@ import shutil
 import sys
 from collections import deque
 from collections.abc import Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from threading import Lock
@@ -22,6 +23,7 @@ from typing import Any, Literal
 
 import pytest
 
+from oh_goon.core.errors import PiSessionRefusalCode
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     NativeAgentDefinition,
@@ -35,16 +37,25 @@ from oh_goon.core.models.fleet_plan import (
 )
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
 from oh_goon.core.models.pi_session_storage import (
+    PI_SESSION_NEW_FILE,
     PI_SESSION_SANDBOX_DIRECTORY,
     PiSessionDirectoryPin,
+    PiSessionNativeObservation,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.engine.command import CommandCancelledError, CommandResult, run_command
+from oh_goon.engine.command import (
+    CommandCancelledError,
+    CommandInputSource,
+    CommandOutputObserver,
+    CommandResult,
+    run_command,
+)
 from oh_goon.integrations.agent_native_execution import (
     native_executable_sha256,
     validate_native_agent_arguments,
 )
+from oh_goon.integrations.agent_pi_rpc import PiRpcContinuation, PiRpcControl
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_preview import repository_plan_admission_evidence
 from oh_goon.integrations.fleet_plan_process_isolation import (
@@ -442,6 +453,121 @@ def test_installed_pi_exact_reopen_retains_identity_leaf_and_conversation(
     assert pi_probe.session.read_bytes().startswith(retained)
 
 
+_ISOLATED_SESSION_MODEL = "configured-session-fixture"
+_ISOLATED_SESSION_ENDPOINT = "http://127.0.0.1:1/v1"
+
+
+def _isolated_saved_session_command(
+    pi_probe: _PiProbe,
+    *,
+    selected_file: Path | None,
+    guest_path: PurePosixPath,
+    session_directory: Path,
+    guest_directory: PurePosixPath,
+    command_input: CommandInputSource,
+    observe: CommandOutputObserver,
+) -> CommandResult:
+    """Model-free installed component proof with a read-only selected descriptor."""
+    config = pi_probe.root / "isolated-session-config"
+    config.mkdir(mode=0o700)
+    (config / "models.json").write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "oh-goon": {
+                        "baseUrl": _ISOLATED_SESSION_ENDPOINT,
+                        "api": "openai-completions",
+                        "apiKey": "synthetic-only",
+                        "models": [{"id": _ISOLATED_SESSION_MODEL}],
+                    }
+                }
+            }
+        )
+    )
+    bwrap = shutil.which("bwrap")
+    assert bwrap is not None
+    workspace = str(pi_probe.workspace / "project")
+    argv = [
+        bwrap,
+        "--unshare-all",
+        "--die-with-parent",
+        "--new-session",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+    ]
+    for path in ("/usr", "/bin", "/lib", "/lib64", str(pi_probe.public_runtime), workspace):
+        if Path(path).exists():
+            argv.extend(("--ro-bind", path, path))
+    with ExitStack() as owned:
+        fds: list[int] = []
+        mounts = ["--dir", str(guest_directory)]
+        if selected_file is None or guest_path.parent != guest_directory:
+            directory_fd = os.open(session_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            owned.callback(os.close, directory_fd)
+            fds.append(directory_fd)
+            mounts = ["--bind-fd", str(directory_fd), str(guest_directory)]
+        if selected_file is not None:
+            file_fd = os.open(selected_file, os.O_RDONLY | os.O_NOFOLLOW)
+            owned.callback(os.close, file_fd)
+            fds.append(file_fd)
+            if guest_path.parent != guest_directory:
+                mounts.extend(("--dir", str(guest_path.parent)))
+            mounts.extend(("--ro-bind-fd", str(file_fd), str(guest_path)))
+        return run_command(
+            *argv,
+            "--ro-bind",
+            workspace,
+            "/workspace",
+            "--ro-bind",
+            str(config),
+            "/config/native",
+            *mounts,
+            "--clearenv",
+            "--setenv",
+            "PATH",
+            "/usr/bin:/bin",
+            "--setenv",
+            "HOME",
+            "/tmp/home",
+            "--setenv",
+            "PI_CODING_AGENT_DIR",
+            "/config/native",
+            "--chdir",
+            workspace,
+            "--",
+            str(pi_probe.program),
+            "--mode",
+            "rpc",
+            "--session-dir",
+            str(guest_directory),
+            "--session",
+            str(guest_path),
+            "--no-approve",
+            "--no-extensions",
+            "--no-mcp",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-themes",
+            "--no-context-files",
+            "--provider",
+            "oh-goon",
+            "--model",
+            _ISOLATED_SESSION_MODEL,
+            "--tools",
+            "read,grep,find,ls",
+            timeout=15,
+            pass_fds=tuple(fds),
+            input_source=command_input,
+            stream_output=observe,
+            max_capture_bytes_per_stream=65536,
+            require_process_group_quiescence=True,
+        )
+
+
 def test_installed_pi_clone_at_validated_tip_cannot_replace_explicit_leaf_fork(
     pi_probe: _PiProbe,
 ) -> None:
@@ -456,24 +582,7 @@ def test_installed_pi_clone_at_validated_tip_cannot_replace_explicit_leaf_fork(
     assert len(contents_before) < 65536
     child_directory = pi_probe.root / "selected-clone"
     child_directory.mkdir(mode=0o700)
-    config = pi_probe.root / "clone-config"
-    config.mkdir(mode=0o700)
-    selected_model = "fresh-clone-fixture"
-    (config / "models.json").write_text(
-        json.dumps(
-            {
-                "providers": {
-                    "oh-goon": {
-                        "baseUrl": "http://127.0.0.1:1/v1",
-                        "api": "openai-completions",
-                        "apiKey": "synthetic-only",
-                        "models": [{"id": selected_model}],
-                    }
-                }
-            }
-        )
-    )
-    parent_path = "/run/selected-parent/session.jsonl"
+    parent_path = PurePosixPath("/run/selected-parent/session.jsonl")
     child_path = PurePosixPath("/run/selected-clone")
     command_names = ("get_state", "get_entries", "fork", "clone", "get_state", "get_entries")
     control_fields: tuple[dict[str, str], ...] = (
@@ -530,9 +639,9 @@ def test_installed_pi_clone_at_validated_tip_cannot_replace_explicit_leaf_fork(
                     assert result["success"] is True
                     data = result["data"]
                     if index == 0:
-                        assert data["sessionFile"] == parent_path
+                        assert data["sessionFile"] == str(parent_path)
                         assert data["sessionId"] == prior["sessionId"]
-                        assert data["model"]["id"] == selected_model
+                        assert data["model"]["id"] == _ISOLATED_SESSION_MODEL
                         assert not data["isStreaming"] and not data["isCompacting"]
                     elif index in {1, 5}:
                         assert data == {"entries": [], "leafId": leaf}
@@ -541,96 +650,23 @@ def test_installed_pi_clone_at_validated_tip_cannot_replace_explicit_leaf_fork(
                     elif index == 4:
                         assert data["sessionId"] != prior["sessionId"]
                         assert data["messageCount"] == prior["messageCount"]
-                        assert data["model"]["id"] == selected_model
+                        assert data["model"]["id"] == _ISOLATED_SESSION_MODEL
                         assert PurePosixPath(data["sessionFile"]).parent == child_path
                 seen.append(result)
                 if len(seen) < len(command_names):
                     queue_request(len(seen))
             assert len(pending) <= 65536
 
-    bwrap = shutil.which("bwrap")
-    assert bwrap is not None
-    workspace = str(pi_probe.workspace / "project")
-    argv = [
-        bwrap,
-        "--unshare-all",
-        "--die-with-parent",
-        "--new-session",
-        "--proc",
-        "/proc",
-        "--dev",
-        "/dev",
-        "--tmpfs",
-        "/tmp",
-    ]
-    for path in ("/usr", "/bin", "/lib", "/lib64", str(pi_probe.public_runtime), workspace):
-        if Path(path).exists():
-            argv.extend(("--ro-bind", path, path))
-    root_fd = os.open(pi_probe.session, os.O_RDONLY | os.O_NOFOLLOW)
-    try:
-        child_fd = os.open(child_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
-            queue_request(0)
-            result = run_command(
-                *argv,
-                "--ro-bind",
-                workspace,
-                "/workspace",
-                "--ro-bind",
-                str(config),
-                "/config/native",
-                "--dir",
-                "/run/selected-parent",
-                "--ro-bind-fd",
-                str(root_fd),
-                parent_path,
-                "--bind-fd",
-                str(child_fd),
-                str(child_path),
-                "--clearenv",
-                "--setenv",
-                "PATH",
-                "/usr/bin:/bin",
-                "--setenv",
-                "HOME",
-                "/tmp/home",
-                "--setenv",
-                "PI_CODING_AGENT_DIR",
-                "/config/native",
-                "--chdir",
-                workspace,
-                "--",
-                str(pi_probe.program),
-                "--mode",
-                "rpc",
-                "--session-dir",
-                str(child_path),
-                "--session",
-                parent_path,
-                "--no-approve",
-                "--no-extensions",
-                "--no-mcp",
-                "--no-skills",
-                "--no-prompt-templates",
-                "--no-themes",
-                "--no-context-files",
-                "--provider",
-                "oh-goon",
-                "--model",
-                selected_model,
-                "--tools",
-                "read,grep,find,ls",
-                timeout=15,
-                pass_fds=(root_fd, child_fd),
-                input_source=CloneInput(),
-                stream_output=observe,
-                max_capture_bytes_per_stream=65536,
-                require_process_group_quiescence=True,
-            )
-        finally:
-            os.close(child_fd)
-    finally:
-        os.close(root_fd)
+    queue_request(0)
+    result = _isolated_saved_session_command(
+        pi_probe,
+        selected_file=pi_probe.session,
+        guest_path=parent_path,
+        session_directory=child_directory,
+        guest_directory=child_path,
+        command_input=CloneInput(),
+        observe=observe,
+    )
 
     assert result.returncode == 0, result.stderr
     assert result.supervisor.final_process_group_quiescent
@@ -643,7 +679,7 @@ def test_installed_pi_clone_at_validated_tip_cannot_replace_explicit_leaf_fork(
     with generated.open("rb") as stream:
         # These are synthetic bytes created by the installed fixture above.
         header = json.loads(stream.readline(4096))
-    assert header["id"] == new_session["sessionId"] and header["parentSession"] == parent_path
+    assert header["id"] == new_session["sessionId"] and header["parentSession"] == str(parent_path)
     assert pi_probe.session.read_bytes() == contents_before
     parent_after = pi_probe.session.stat()
     assert (parent_after.st_ino, parent_after.st_ctime_ns, parent_after.st_mtime_ns) == (
@@ -651,6 +687,123 @@ def test_installed_pi_clone_at_validated_tip_cannot_replace_explicit_leaf_fork(
         parent_before.st_ctime_ns,
         parent_before.st_mtime_ns,
     )
+
+
+@pytest.mark.parametrize(
+    ("resource", "expected"),
+    [
+        ("foreign-session", PiSessionRefusalCode.IDENTITY_MISMATCH),
+        ("older-leaf", PiSessionRefusalCode.IDENTITY_MISMATCH),
+        ("unknown-leaf", PiSessionRefusalCode.HISTORY_UNQUALIFIED),
+        ("missing-file", PiSessionRefusalCode.IDENTITY_MISMATCH),
+        ("renamed-file", PiSessionRefusalCode.IDENTITY_MISMATCH),
+    ],
+)
+def test_installed_pi_pre_prompt_gate_refuses_unproved_identity_or_leaf(
+    pi_probe: _PiProbe,
+    resource: str,
+    expected: PiSessionRefusalCode,
+) -> None:
+    _records(pi_probe.launch(prompt="Remember WP00_CANARY in the original session"))
+    prior, prior_tree = _state(pi_probe)
+    retained = pi_probe.session.read_bytes()
+    selected_file: Path | None = pi_probe.session
+    leaf = prior_tree["leafId"]
+    actual_leaf = leaf
+    actual_session = prior["sessionId"]
+    renamed = pi_probe.session.with_name("moved.jsonl")
+    if resource == "foreign-session":
+        selected_file = pi_probe.session.with_name("foreign.jsonl")
+        records = _records(
+            pi_probe.launch(
+                session=selected_file, prompt="This other synthetic session has its own identity"
+            )
+        )
+        actual_session = records[0]["id"]
+        assert actual_session != prior["sessionId"]
+    elif resource == "older-leaf":
+        _records(pi_probe.launch(prompt="Advance the original session to a later native leaf"))
+        after, tree = _state(pi_probe)
+        assert after["sessionId"] == prior["sessionId"]
+        assert tree["leafId"] != leaf
+        actual_leaf = tree["leafId"]
+        retained = pi_probe.session.read_bytes()
+    elif resource == "unknown-leaf":
+        leaf = "nonexistent-native-leaf"
+    elif resource == "missing-file":
+        pi_probe.session.unlink()
+        selected_file = None
+    elif resource == "renamed-file":
+        pi_probe.session.rename(renamed)
+        selected_file = None
+
+    control = PiRpcControl(
+        b"Fresh task must stay in Oh-Goon until the exact session and leaf are established",
+        continuation=PiRpcContinuation(
+            prior=PiSessionNativeObservation(session_id=prior["sessionId"], leaf_id=leaf),
+            model=_ISOLATED_SESSION_MODEL,
+            api="openai-completions",
+            base_url=_ISOLATED_SESSION_ENDPOINT,
+        ),
+    )
+    wire = bytearray()
+    event_types: list[str] = []
+
+    class ObservedInput:
+        def read_input(self, max_bytes: int) -> bytes | None:
+            data = control.read_input(max_bytes)
+            if data:
+                wire.extend(data)
+            return data
+
+    def observe(stream: str, text: str) -> None:
+        if stream == "stdout":
+            try:
+                forwarded = control.feed_stdout(text)
+            except AgentProviderError:
+                # The production relay similarly lets the latched refusal close
+                # input and waits for the original native process to dispose.
+                return
+            event_types.extend(json.loads(line)["type"] for line in forwarded)
+
+    native_directory = pi_probe.root / "isolated-write-scope"
+    native_directory.mkdir(mode=0o700)
+    result = _isolated_saved_session_command(
+        pi_probe,
+        selected_file=selected_file,
+        guest_path=PI_SESSION_NEW_FILE,
+        session_directory=native_directory,
+        guest_directory=PI_SESSION_SANDBOX_DIRECTORY,
+        command_input=ObservedInput(),
+        observe=observe,
+    )
+    assert result.supervisor.final_process_group_quiescent
+    assert not result.stdout_truncated and not event_types
+    responses = {message["id"]: message for message in _records(result)}
+    state = responses["oh-goon:state"]["data"]
+    if selected_file is not None:
+        assert state["sessionId"] == actual_session
+    else:
+        assert state["sessionId"] != prior["sessionId"] and state["messageCount"] == 0
+    if resource in {"older-leaf", "unknown-leaf"}:
+        entries = responses["oh-goon:entries"]
+        if resource == "older-leaf":
+            assert entries["success"] is True and entries["data"]["leafId"] == actual_leaf
+            assert entries["data"]["entries"]
+        else:
+            assert entries["success"] is False and entries["command"] == "get_entries"
+    outbound = [json.loads(line)["type"] for line in wire.splitlines()]
+    assert outbound in (["get_state"], ["get_state", "get_entries"])
+    with pytest.raises(AgentProviderError):
+        control.finish()
+    assert control.refusal_code is expected
+    assert not tuple(native_directory.iterdir())
+    if resource == "missing-file":
+        assert not pi_probe.session.exists()
+    elif resource == "renamed-file":
+        assert not pi_probe.session.exists() and renamed.read_bytes() == retained
+    else:
+        assert pi_probe.session.read_bytes() == retained
 
 
 def test_installed_pi_new_identity_and_close_do_not_prove_file_birth(pi_probe: _PiProbe) -> None:

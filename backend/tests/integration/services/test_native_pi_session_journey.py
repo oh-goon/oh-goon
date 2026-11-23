@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -209,6 +210,11 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
     subprocess.run(("git", "init", "-q", str(repository)), check=True, timeout=10)
     source = repository / "source.py"
     source.write_text("VALUE = 42\n")
+    foreign_repository = repository.with_name("other-app")
+    foreign_repository.mkdir()
+    subprocess.run(("git", "init", "-q", str(foreign_repository)), check=True, timeout=10)
+    foreign_source = foreign_repository / "source.py"
+    foreign_source.write_text("VALUE = 43\n")
     verifier = repository / "verify"
     verifier.write_text("#!/bin/sh\nset -eu\ntest \"$(cat source.py)\" = 'VALUE = 43'\n")
     verifier.chmod(0o755)
@@ -309,7 +315,7 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
                         "pi-rpc": {
                             "backend": "bubblewrap",
                             "allowed_agents": ["pi"],
-                            "workspace_roots": [str(repository)],
+                            "workspace_roots": [str(repository), str(foreign_repository)],
                             "inference_profile": "journey",
                             "pi_rpc": True,
                             "timeout_seconds": 40,
@@ -682,10 +688,91 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
         assert len(requests) == inference_count + 1 and not errors
         history = json.loads(cli("runs", "list", "--json"))
         assert {item["fleet_run_id"] for item in history["items"]} == completed
+
+        before_foreign = separate_file.stat()
+        cli("league", "add-folder", str(foreign_repository))
+        foreign = json.loads(
+            cli(
+                *ai,
+                "--workspace",
+                str(foreign_repository),
+                "--session",
+                f"run:{separate_id}",
+                "--prompt",
+                _TASKS[2],
+                "--json",
+                expected=2,
+            )
+        )
+        assert foreign["code"] == "PI_SESSION_IDENTITY_MISMATCH"
+        assert foreign["prior_run_id"] == separate_id
+        assert foreign_source.read_text() == "VALUE = 43\n"
+        assert separate_file.stat() == before_foreign
+        history = json.loads(cli("runs", "list", "--json"))
+        assert {item["fleet_run_id"] for item in history["items"]} == completed
+        assert len(requests) == inference_count + 1 and not errors
+
+        # The saved bytes still exist under a neighboring name. A fresh claimed
+        # Run must refuse the absent exact file without starting Pi or discovering
+        # the renamed resource as an alternative session.
+        retained_directories = set(session_root.iterdir())
+        renamed = separate_file.with_name("moved.jsonl")
+        separate_file.rename(renamed)
+        rejected = json.loads(
+            cli(
+                *ai,
+                "--session",
+                f"run:{separate_id}",
+                "--prompt",
+                _TASKS[2],
+                "--json",
+                expected=1,
+            )
+        )
+        rejected_id = rejected["fleet_run_id"]
+        assert rejected_id not in completed
+        assert rejected["status"] == "FAILED"
+        assert rejected["pi_session"]["prior_run_id"] == separate_id
+        assert rejected["pi_session"]["refusal_code"] == "PI_SESSION_UNAVAILABLE"
+        assert rejected["pi_session"]["persistence"] == "unknown"
+        rejected_events = json.loads(
+            cli("runs", "events", rejected_id, "--after", "0", "--limit", "100", "--json")
+        )["events"]
+        (fence,) = [
+            event
+            for event in rejected_events
+            if event["event_type"] == "PI_SESSION_WRITER_RESERVED"
+        ]
+        assert fence["storage_id"] == separate_reserved["storage_id"]
+        assert fence["continuation"]["prior_run_id"] == separate_id
+        assert (
+            rejected_events[fence["attempt_sequence"] - 1]["event_type"] == "STEP_ATTEMPT_CREATED"
+        )
+        assert not any(
+            event["sequence"] > fence["sequence"] and event["step_id"] == fence["step_id"]
+            for event in rejected_events
+            if event["event_type"] == "PROCESS_STARTING"
+        )
+        assert not any(
+            event["event_type"] == "PI_SESSION_WRITER_OBSERVED" for event in rejected_events
+        )
+        assert set(session_root.iterdir()) == retained_directories
+        assert set(separate_file.parent.iterdir()) == {renamed}
+        assert not tuple(native_file.parent.iterdir())
+        assert renamed.stat().st_ino == separate_native["file"]["inode"]
+        with renamed.open("rb") as stream:
+            assert (
+                hashlib.file_digest(stream, "sha256").hexdigest()
+                == separate_native["file"]["sha256"]
+            )
+        assert len(requests) == inference_count + 1 and not errors
+        history = json.loads(cli("runs", "list", "--json"))
+        assert {item["fleet_run_id"] for item in history["items"]} == completed | {rejected_id}
         print(
             json.dumps(
                 {
                     "pi": "create -> initialized-plan -> cli -> retired",
+                    "exact_open_refusals": ["different repository", "renamed retained file"],
                     "cross_harness": bool(opencode),
                 }
             )

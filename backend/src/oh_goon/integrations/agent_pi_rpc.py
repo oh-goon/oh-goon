@@ -295,10 +295,17 @@ class PiRpcControl:
             self._fail("Pi RPC response has an unknown or repeated request identity")
         command = self._requests[request_id]
         final_entries = request_id == "oh-goon:final-entries"
-        if value.get("command") != command or (
-            not final_entries and value.get("success") is not True
-        ):
+        if value.get("command") != command:
             self._fail("Pi RPC command was refused or mismatched")
+        if not final_entries and value.get("success") is not True:
+            refusal = None
+            if (
+                request_id == "oh-goon:entries"
+                and self._continuation is not None
+                and value.get("success") is False
+            ):
+                refusal = PiSessionRefusalCode.HISTORY_UNQUALIFIED
+            self._fail("Pi RPC command was refused or mismatched", refusal=refusal)
         data = value.get("data")
         self._answered.add(request_id)
         if final_entries:
