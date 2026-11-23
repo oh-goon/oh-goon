@@ -130,6 +130,71 @@ def test_private_application_state_is_refused_before_any_native_process(
     assert journal.read_text() == "private other Run"
 
 
+@pytest.mark.parametrize(
+    "surface", ["workspace", "config", "config-alias", "runtime-parent", "runtime-session"]
+)
+def test_default_pi_personal_mount_is_refused_before_native_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, surface: str
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    store = home / ".pi" / "agent"
+    sessions = store / "sessions"
+    sessions.mkdir(parents=True)
+    workspace = store if surface == "workspace" else tmp_path / "repo"
+    workspace.mkdir(exist_ok=True)
+    changes: dict[str, Any] = {}
+    if surface.startswith("config"):
+        selected = store
+        if surface == "config-alias":
+            selected = tmp_path / "selected-config"
+            selected.symlink_to(store, target_is_directory=True)
+        changes["private_configuration_directory"] = selected
+    elif surface.startswith("runtime"):
+        selected = store.parent if surface == "runtime-parent" else sessions
+        changes["read_only_mounts"] = (
+            StandardReadOnlyMount(selected, PurePosixPath("/opt/native-input")),
+        )
+
+    monkeypatch.setattr(
+        module,
+        "run_command",
+        lambda *a, **kw: pytest.fail("Pi private state reached native launch"),
+    )
+    with pytest.raises(FleetPlanInvalid, match="default Pi personal state") as refusal:
+        backend.require_standard_available(_request(backend, workspace, **changes))
+    assert str(home) not in str(refusal.value)
+
+
+def test_explicit_public_pi_release_mount_remains_available(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    release = home / ".pi" / "agent" / "install" / "releases" / "public-version"
+    release.mkdir(parents=True)
+    (release / "public-runtime").write_text("installed package fixture")
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    calls: list[tuple[str, ...]] = []
+
+    def command(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(0, "", "")
+
+    monkeypatch.setattr(module, "run_command", command)
+    backend.require_standard_available(
+        _request(
+            backend,
+            workspace,
+            read_only_mounts=(StandardReadOnlyMount(release, PurePosixPath(release)),),
+        )
+    )
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("hardlink_alias", [False, True])
 def test_late_sqlite_sidecar_mount_cannot_bypass_resolved_database_privacy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hardlink_alias: bool

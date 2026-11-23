@@ -23,7 +23,7 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.models.agent_providers import PiSessionIntent
 from oh_goon.core.models.agent_review import AgentReviewRecord
-from oh_goon.core.models.fleet_observation import AgentReviewObservation
+from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.run_events import PiSessionWriterObservedEvent
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
@@ -128,6 +128,8 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     version = subprocess.run(
         [str(program), "--version"], capture_output=True, text=True, timeout=10, check=True
     ).stdout.strip()
+    if reopen:
+        assert version == "1.3.0", "Requalify the installed Pi restore behavior for another release"
     repository = tmp_path / "repos" / "app"
     repository.mkdir(parents=True)
     original = b"VALUE = 42\n"
@@ -619,8 +621,11 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 )
                 steps = detail.game_tape.repositories[0].steps
                 if pi_rpc:
-                    assert "--pi-rpc" in steps[0].command
-                    assert steps[0].command[steps[0].command.index("--mode") + 1] == "rpc"
+                    assert "--pi-rpc" in native.argv
+                    assert native.argv[native.argv.index("--mode") + 1] == "rpc"
+                if reopen:
+                    assert steps[0].command == ()
+                    assert all(not claim.events for claim in steps[0].native_agent_observations)
                 assert steps[0].settlement.outcome == "SUCCESS"
                 assert steps[1].settlement.outcome == (
                     "SUCCESS" if verification_passes else "FAILED"
@@ -636,7 +641,8 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 if agent == "pi":
                     context = [
                         event.summary
-                        for claim in steps[0].native_agent_observations
+                        for claim in native.observations
+                        if isinstance(claim, NativeAgentObservation)
                         for event in claim.events
                         if event.kind == "context"
                     ]
@@ -673,6 +679,8 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                         {
                             "agent": agent,
                             "version": version,
+                            "entrypoint_sha256": selected.executable_sha256,
+                            "host_release": os.uname().release,
                             "stages": observations,
                             "outcome": detail.outcome.value,
                         }

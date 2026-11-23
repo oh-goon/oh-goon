@@ -486,6 +486,11 @@ class BubblewrapProcessIsolation:
             raise FleetPlanInvalid(
                 "Standard workspace cannot expose the host home or its ancestors"
             )
+        try:
+            pi_store = (home / ".pi" / "agent").resolve()
+        except (OSError, RuntimeError):
+            raise FleetPlanInvalid("Cannot establish the default Pi personal store path") from None
+        _require_pi_store_separation(request.workspace, pi_store)
         _require_standard_bind_structure(
             request.workspace, private_file_identities=private_file_identities
         )
@@ -528,11 +533,16 @@ class BubblewrapProcessIsolation:
             else ()
         )
         system_sources = _standard_system_roots()
+        for source in system_sources:
+            _require_pi_store_separation(source, pi_store)
         canonical_sources = set(system_sources) | {
             mount.source for mount in selected_mounts if mount.target == PurePosixPath(mount.source)
         }
         for mount in selected_mounts:
             source, target = mount.source, mount.target
+            _require_pi_store_separation(
+                source, pi_store, allow_public_release=target != PurePosixPath("/config/native")
+            )
             if (
                 not source.exists()
                 or any(source.is_relative_to(root) or root.is_relative_to(source) for root in roots)
@@ -1804,6 +1814,16 @@ def _standard_system_binds() -> tuple[str, ...]:
         if path.is_dir():
             arguments.extend(("--ro-bind", str(path.resolve()), value))
     return tuple(arguments)
+
+
+def _require_pi_store_separation(
+    source: Path, pi_store: Path, *, allow_public_release: bool = False
+) -> None:
+    """Protect the default native store while retaining explicit release code mounts."""
+    if (source.is_relative_to(pi_store) or pi_store.is_relative_to(source)) and not (
+        allow_public_release and source.is_relative_to(pi_store / "install" / "releases")
+    ):
+        raise FleetPlanInvalid("Native mounts cannot expose the default Pi personal state")
 
 
 def _require_standard_bind_structure(
