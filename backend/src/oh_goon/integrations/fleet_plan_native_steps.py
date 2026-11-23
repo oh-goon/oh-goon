@@ -514,6 +514,7 @@ def _native_observation_from_protocol(
         input_identity=prepared.input_identity,
         occurrence=prepared.occurrence,
         source_identity=prepared.source_identity,
+        skill_identity=prepared.skill_identity if selected.uses_persistent_pi_session else None,
         role=step.workload.role,
         events=protocol.observations,
         native_event_count=protocol.event_count,
@@ -944,6 +945,14 @@ def execute_native_agent_step(
     execution_returncode = (
         service_outcome.returncode if service_outcome is not None else result.returncode
     )
+    if (
+        persistent_pi
+        and execution_returncode != 0
+        and parser is not None
+        and parser_error is None
+        and parser.pi_session_refusal is not None
+    ):
+        outcome = replace(outcome, failure_kind=parser.pi_session_refusal)
     if private_output:
         outcome = replace(
             outcome,

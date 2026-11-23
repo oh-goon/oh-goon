@@ -146,7 +146,9 @@ explicit session choices in one Plan must agree. This applies to initialized
 workflows and eligible Shared Plans. Codex and OpenCode refuse a Pi selector.
 
 Use `--session new` with a dedicated managed Pi RPC Bubblewrap profile to
-create a private session in a fresh Run. The Run must select one direct Git
+create a private session in a fresh Run. The
+[create and reopen example](../examples/agent-providers/README.md#reopen-a-managed-pi-session)
+uses the same provider catalog for `ai` and an initialized Plan. The Run must select one direct Git
 repository and one native Agent Step. Ordinary independent verifier Steps
 still determine verification results. The authored Step equivalent is
 `session: {mode: new}`.
@@ -183,8 +185,10 @@ built-in `read`, `grep`, `find` and `ls` tools and a read-only repository
 mount. The writer receives only the selected private session file. The
 original Journal records the predecessor and fences a second writer. A failed
 or interrupted reservation may leave the lineage unavailable for another
-reopen. The existing `runs events` command shows the writer evidence and
-the Run’s independent verification results.
+reopen. Read the recorded session, cleanup, and independent verifier evidence with
+`runs handoff`, `runs outputs`, `runs events`, or `runs tape`. Persistent
+`ai --json` returns the same bounded handoff as `runs handoff --json`.
+A history read uses the recorded evidence from the selected runtime.
 
 Broker-backed native reasoning requires an explicit managed inference connection so qualified
 Hashmarks context reaches every model request, including follow-up and compaction.
@@ -526,7 +530,7 @@ runtime through `native_agents` as usual, then use
 Interactive, local, mixed-agent and unbrokered RPC profiles refuse before work.
 Omitting `pi_rpc` retains the existing native JSON transport.
 
-RPC still supplies `--no-session`. Within the existing admitted Step, the
+Ephemeral RPC supplies `--no-session`. Within the existing admitted Step, the
 inference relay uses the original command input pump to correlate native state
 and leaf responses, submit the frozen prompt and wait for `agent_settled`.
 Prompt acceptance or `agent_end` cannot close the child early. A final native
@@ -538,10 +542,10 @@ one-MiB command input budget; native event framing is LF-only.
 Native control responses are not forwarded into public output or treated as
 accepted role results. Malformed, refused, mismatched or incomplete control
 responses fail the transport; they never trigger a JSON fallback or resubmit
-the prompt. Native session/leaf observations are provenance, not a persistent
-session selector, exact-open authorization or a verified result. Persistent and
-cross-Run Pi sessions remain unsupported. The selected installed-mode evidence
-and extension-origin limits are in the
+the prompt. Ephemeral session and leaf observations describe only that native
+process. For saved sessions, use the explicit managed selection described
+[above](#run-a-native-coding-agent). The installed-mode evidence and
+extension-origin limits are in the
 [harness inventory](development/AGENT_HARNESS_COMPATIBILITY.md#ephemeral-pi-rpc-transport--hug-139).
 
 ### Use an existing Codex sign-in

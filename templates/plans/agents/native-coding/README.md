@@ -40,3 +40,8 @@ oh-goon run ./workflow/run.yml
 **Expected outputs:** Native Agent records and actual verification Step outcomes.
 
 The [Agent example](../../../../examples/agentic-review-repair-loop/README.md) explains Skill capture and bounded repair. A stored selection never grants fresh write consent.
+
+For an exact read-only Pi continuation, use the
+[managed Pi resume example](../../../../examples/agent-providers/README.md#use-the-same-selection-in-a-plan-and-goon).
+It uses the same Agent Step contract with a read-only Goon and the existing
+independent verifier.

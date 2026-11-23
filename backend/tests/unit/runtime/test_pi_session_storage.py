@@ -16,6 +16,11 @@ from typing import IO, Any, cast
 import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
+from oh_goon.core.models.agent_providers import (
+    PiSessionHistoryUnqualified,
+    PiSessionIdentityMismatch,
+    PiSessionUnavailable,
+)
 from oh_goon.core.models.fleet_plan_evidence import PlanSnapshotEvidence
 from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_NEW_FILE,
@@ -268,9 +273,17 @@ def test_retained_pi_file_reopens_and_records_a_new_digest_of_the_same_inode(
         os.fstat(file.fd)
 
 
-@pytest.mark.parametrize("change", ["removed", "replaced", "edited", "legacy"])
+@pytest.mark.parametrize(
+    ("change", "failure"),
+    [
+        ("removed", PiSessionUnavailable),
+        ("replaced", PiSessionIdentityMismatch),
+        ("edited", PiSessionHistoryUnqualified),
+        ("legacy", PiSessionHistoryUnqualified),
+    ],
+)
 def test_exact_reopen_refuses_changed_or_unproven_original_file(
-    admitted_pi_scope: _AdmittedScope, change: str
+    admitted_pi_scope: _AdmittedScope, change: str, failure: type[PiSessionUnavailable]
 ) -> None:
     original = b"retained\n"
     with admitted_pi_scope.create() as new:
@@ -291,7 +304,7 @@ def test_exact_reopen_refuses_changed_or_unproven_original_file(
         receipt = receipt.model_copy(update={"sha256": None})
 
     with (
-        pytest.raises(FleetPlanInvalid),
+        pytest.raises(failure),
         admitted_pi_scope.create(storage_id=session.parent.name, prior_file=receipt),
     ):
         pytest.fail("Unproven retained Pi bytes acquired writer custody")
@@ -311,5 +324,5 @@ def test_retained_pi_file_is_rechecked_after_pin_before_native_launch(
         file = reopened.existing_file
         assert file is not None
         session.write_bytes(b"modified\n")
-        with pytest.raises(FleetPlanInvalid, match="changed before launch"):
+        with pytest.raises(PiSessionHistoryUnqualified, match="changed before launch"):
             file.require_before_launch()

@@ -90,17 +90,23 @@ def _setup_args(paths: dict[str, Path], executable: Path, catalog: Path) -> list
 
 
 @pytest.mark.process
-@pytest.mark.parametrize("harness", ["codex", "pi", "opencode"])
+@pytest.mark.parametrize(
+    ("harness", "rpc"), [("codex", False), ("pi", False), ("pi", True), ("opencode", False)]
+)
 def test_native_setup_merges_catalog_preserves_native_state_and_observes_only_version(
     setup_paths: dict[str, Path],
     harness: NativeAgentName,
+    rpc: bool,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     paths = setup_paths
     catalog = paths["root"] / "providers.json"
     before = _catalog(catalog)
     executable = _executable(paths["root"], harness)
-    assert main(_setup_args(paths, executable, catalog)) == 0
+    argv = _setup_args(paths, executable, catalog)
+    if rpc:
+        argv.append("--pi-rpc")
+    assert main(argv) == 0
     captured = capsys.readouterr()
     report = json.loads(captured.out)
     assert captured.err == ""
@@ -118,7 +124,9 @@ def test_native_setup_merges_catalog_preserves_native_state_and_observes_only_ve
         else:
             assert authored[key] == value
     config = load_agent_providers(catalog)
-    assert config.native_profiles[f"{harness}-managed"].inference_profile == "gateway"
+    profile = config.native_profiles[f"{harness}-managed"]
+    assert profile.inference_profile == "gateway"
+    assert profile.pi_rpc is rpc
     assert config.native_agents[harness].executable == str(executable)
     assert (paths["home"] / "auth.json").read_text() == "NATIVE_LOGIN_CANARY"
     assert "NATIVE_LOGIN_CANARY" not in captured.out + captured.err + catalog.read_text()
@@ -164,7 +172,14 @@ def test_native_codex_setup_creates_explicit_protected_profile_and_default(
 
 @pytest.mark.parametrize(
     "defect",
-    ["missing-mode", "missing-workspace", "missing-home", "foreign-mode", "missing-inference"],
+    [
+        "missing-mode",
+        "missing-workspace",
+        "missing-home",
+        "foreign-mode",
+        "missing-inference",
+        "foreign-rpc",
+    ],
 )
 def test_native_setup_missing_or_incompatible_policy_refuses_before_native_probe(
     setup_paths: dict[str, Path],
@@ -186,7 +201,7 @@ def test_native_setup_missing_or_incompatible_policy_refuses_before_native_probe
             [
                 "--mode",
                 "managed"
-                if defect in {"missing-workspace", "missing-inference"}
+                if defect in {"missing-workspace", "missing-inference", "foreign-rpc"}
                 else "codex-login",
             ]
         )
@@ -194,6 +209,8 @@ def test_native_setup_missing_or_incompatible_policy_refuses_before_native_probe
         arguments.extend(["--workspace-root", str(paths["workspace"])])
     if defect == "foreign-mode":
         arguments[2] = "pi"
+    if defect == "foreign-rpc":
+        arguments.append("--pi-rpc")
     assert main(arguments) == 2
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "rejected"

@@ -25,6 +25,7 @@ class _Fact:
 
 class _Tape:
     journal_revision = 7
+    pi_session = None
     configuration = None
     why_not = None
     artifact_observation = None

@@ -31,3 +31,8 @@ reasoning. See [provider and native configuration](../../../../docs/AGENT_PROVID
 The [native coding Plan](../../../plans/agents/native-coding/README.md) follows
 this Agent with the project's selected verification executable. No model or
 agent executable is hardcoded in this package.
+
+For an exact read-only Pi continuation, use the
+[managed Pi resume example](../../../../examples/agent-providers/README.md#use-the-same-selection-in-a-plan-and-goon).
+It uses the same Agent Step contract with a read-only Goon and the existing
+independent verifier.

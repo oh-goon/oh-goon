@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import replace
 from datetime import datetime
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 from oh_goon.core.models.execution_authority_diagnostics import (
     PlanExecutionAuthorityDiagnosticEvidence,
@@ -39,6 +39,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
     PlanStepAttemptEvidence,
     PlanStepCancellationEvidence,
     PlanStepExecution,
+    PlanStepFailureKind,
     PlanStepSettlementEvidence,
     PlanToolEvidence,
     PublishedPlanOutputEvidence,
@@ -78,7 +79,7 @@ class _StepEvidenceFields(TypedDict):
     outputs: tuple[PublishedPlanOutputEvidence, ...]
     observations: tuple[FleetObservationEvidence, ...]
     settlement: PlanStepSettlementEvidence
-    failure_kind: Literal["model_output_truncated"] | None
+    failure_kind: PlanStepFailureKind | None
 
 
 def step_evidence(

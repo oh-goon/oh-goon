@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field, computed_field, field_validator, model_validator
 
+from oh_goon.core.errors import PiSessionRefusalCode
 from oh_goon.core.fleet_plan_evidence_identity import (
     egress_payload,
     execution_input_payload,
@@ -562,6 +563,9 @@ class PlanStepCancellationEvidence(ImmutableModel):
         return self
 
 
+type PlanStepFailureKind = Literal["model_output_truncated"] | PiSessionRefusalCode
+
+
 class _PlanStepExecutionBase(ImmutableModel):
     step_id: str
     kind: str
@@ -580,7 +584,7 @@ class _PlanStepExecutionBase(ImmutableModel):
     teardown: PlanStepTeardownEvidence | None = None
     observations: tuple[FleetObservationEvidence, ...] = Field(default_factory=tuple, max_length=8)
     settlement: PlanStepSettlementEvidence = Field(default_factory=PlanStepSettlementEvidence)
-    failure_kind: Literal["model_output_truncated"] | None = Field(
+    failure_kind: PlanStepFailureKind | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
@@ -589,7 +593,7 @@ class _PlanStepExecutionBase(ImmutableModel):
         if self.failure_kind is not None and (
             self.kind != "agent" or getattr(self, "status", None) != "FAILED"
         ):
-            raise ValueError("Provider failure metadata requires a failed Agent Step")
+            raise ValueError("Failure metadata requires a failed Agent Step")
         if (self.started_at is None) != (self.finished_at is None):
             raise ValueError("Fleet plan step timing requires both start and finish")
         if (

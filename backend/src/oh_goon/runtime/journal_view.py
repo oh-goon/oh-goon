@@ -8,6 +8,7 @@ from pathlib import Path
 
 from oh_goon.core.errors import InvalidRequest, InvalidRunTransition, OperationNotFound, RunNotFound
 from oh_goon.core.fleet_plan_projection import atomic_goon_by_step
+from oh_goon.core.game_tape_pi_session import project_pi_session_evidence
 from oh_goon.core.models.agent_repair import AgentCampaignReadback
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
 from oh_goon.core.models.fleet import OperationState
@@ -559,6 +560,18 @@ class JournalReadView:
             prior_run_id, admission, self._index.events_by_run, self._index.pi_session_writer_heads
         )
 
+    def pi_session_has_active_writer(
+        self, prior_run_id: str, repository_id: str, active_run_ids: frozenset[str]
+    ) -> bool:
+        for event in self._index.events_by_run.get(prior_run_id, ()):
+            if (
+                isinstance(event, PiSessionWriterReservedEvent)
+                and event.repository_id == repository_id
+            ):
+                head = self._index.pi_session_writer_heads[event.storage_id]
+                return head.fleet_run_id in active_run_ids
+        return False
+
     def pi_session_writer_is_head(self, reservation: PiSessionWriterReservedEvent) -> bool:
         return self._index.pi_session_writer_heads.get(reservation.storage_id) == reservation
 
@@ -595,6 +608,7 @@ class JournalReadView:
             next_sequence=page[-1].sequence if page else run_events[-1].sequence,
             journal_revision=self.revision,
             has_more=has_more,
+            pi_session=project_pi_session_evidence(detail) if detail is not None else None,
         ).model_copy(deep=True)
 
     def _required_indexed_run_state(self, fleet_run_id: str) -> FleetRunState:

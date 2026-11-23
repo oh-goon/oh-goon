@@ -22,6 +22,7 @@ from oh_goon.core.models.fleet_plan import (
 from oh_goon.core.models.fleet_plan_evidence import (
     PlanOutputEvidence,
     PlanStandardIsolationEvidence,
+    PlanStepFailureKind,
     PlanStepSettlementEvidence,
     PlanUvPreparationEvidence,
 )
@@ -68,7 +69,7 @@ class StepOutcome:
     )
     observed_returncode: int | None = None
     resource_cleanup: Literal["verified", "unverified"] = "verified"
-    failure_kind: Literal["model_output_truncated"] | None = None
+    failure_kind: PlanStepFailureKind | None = None
     model_usage: ModelUsageReport | None = None
 
     def __post_init__(self) -> None:

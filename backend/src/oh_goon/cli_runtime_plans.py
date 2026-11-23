@@ -415,6 +415,7 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         return 143 if isinstance(interruption, CliTermination) else 130
     except (FleetDomainError, ValueError) as exc:
         diagnostic_fields: dict[str, str] = {}
+        prior_readback: dict[str, object] = {}
         if admitted is not None and isinstance(exc, StateConflict):
             diagnostic_fields = {
                 "code": exc.code,
@@ -431,6 +432,10 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
             from oh_goon.core.plan_validation_diagnostics import safe_plan_diagnostic
 
             diagnostic = safe_plan_diagnostic(exc)
+            if diagnostic["stage"] == "pi_session":
+                from oh_goon.cli_plan_diagnostics import pi_prior_run_readback
+
+                prior_readback = pi_prior_run_readback(getattr(args, "_pi_session", None))
             message = f"{diagnostic['code']}: {diagnostic['safe_next_action']}"
             diagnostic_fields = {
                 "code": diagnostic["code"],
@@ -449,12 +454,18 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                         "fleet_run_id": admitted.fleet_run_id if admitted is not None else None,
                         "message": message,
                         **diagnostic_fields,
+                        **prior_readback,
                     },
                     sort_keys=True,
                 )
             )
         else:
             print(message)
+            if prior_readback:
+                print(
+                    "Prior Run handoff argv: "
+                    + json.dumps(prior_readback["prior_run_handoff_argv"])
+                )
         return 2
     if as_json:
         print(

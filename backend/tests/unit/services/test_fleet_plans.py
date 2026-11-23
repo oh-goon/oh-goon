@@ -869,6 +869,54 @@ def test_unqualified_start_and_persistent_rerun_refuse_before_work(
         assert effects.mock_calls == []
 
 
+@pytest.mark.parametrize("intent", ["{mode: new}", "{mode: continue, prior_run_id: prior}"])
+def test_shared_persistent_pi_refuses_before_native_preparation_or_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, intent: str
+) -> None:
+    from oh_goon.core.models.run_configuration import RunAgentSelection
+    from oh_goon.runtime.goon_templates import GoonTemplateStore
+
+    catalog = tmp_path / "catalog"
+    package = catalog / "agents" / "review"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# agents/review\n")
+    (package / "goon.yml").write_text(
+        f"steps:\n- uses: agent\n  harness: native\n  task: Inspect source\n  session: {intent}\n"
+    )
+    plan = tmp_path / "plan.yml"
+    plan.write_text("goons: [agents/review]\n")
+    resolver = FleetPlanResolver(goon_templates=GoonTemplateStore(catalog))
+    service = FleetPlanService(
+        resolver, Mock(), Mock(), Mock(), Mock(), content_store=Mock(), standard_local_fleet=True
+    )
+    for operation in ("_prepare_native_agent", "_agent_target"):
+        monkeypatch.setattr(
+            service,
+            operation,
+            Mock(side_effect=AssertionError("Unsupported Shared Pi reached work")),
+        )
+    monkeypatch.setattr(
+        resolver,
+        "resolve_frozen_agents",
+        Mock(side_effect=AssertionError("Unsupported Shared Pi reached source capture")),
+    )
+    selection = RunAgentSelection(
+        implementation="pi",
+        profile="managed",
+        acceptance="explicit",
+        repository_root=str(tmp_path),
+        skill_root=str(tmp_path),
+    )
+    with pytest.raises(PiSessionUnavailable, match="directly selected repository Run"):
+        service.prepare_agent_plan(
+            plan,
+            selection=selection,
+            repository=tmp_path,
+            inputs={},
+            root_expected_name="plan",
+        )
+
+
 def test_passive_native_history_selection_is_denied_before_backend_probe(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

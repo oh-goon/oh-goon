@@ -18,8 +18,10 @@ from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_plan_summary import configuration_summary
 from oh_goon.cli_result import CliTermination
 from oh_goon.core.errors import FleetDomainError, InvalidRequest, RunNotFound
+from oh_goon.core.game_tape_pi_session import fleet_run_event_readback
 from oh_goon.core.models.game_tape import GameTape, GameTapeStepExecution
 from oh_goon.core.models.game_tape_live_output import GameTapeLiveOutputBatch
+from oh_goon.core.models.game_tape_pi_session import GameTapePiSessionEvidence
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import (
     FleetExecutionAdmission,
@@ -62,7 +64,50 @@ def run_completion_facts(detail: FleetRunDetail) -> dict[str, object]:
             "not_run": summary.not_run_steps,
         },
         "why_not": tape.why_not.model_dump(mode="json") if tape.why_not is not None else None,
+        **_pi_session_field(tape),
     }
+
+
+def _pi_session_field(tape: GameTape) -> dict[str, object]:
+    return {"pi_session": tape.pi_session.model_dump(mode="json")} if tape.pi_session else {}
+
+
+def print_pi_session_readback(evidence: GameTapePiSessionEvidence | None) -> None:
+    """Display historical Pi evidence without loading its native storage."""
+    if evidence is None:
+        return
+    print(f"Pi session {evidence.mode} | persistence {evidence.persistence.replace('_', ' ')}")
+    if evidence.prior_run_id is not None:
+        print(f"Previous Pi Run {evidence.prior_run_id}")
+        print(
+            "Inspect previous Run "
+            + shlex.join(("oh-goon", "runs", "handoff", evidence.prior_run_id, "--json"))
+        )
+    if evidence.native is not None:
+        print(f"Recorded Pi identity {evidence.native.session_id} | leaf {evidence.native.leaf_id}")
+    if evidence.byte_identity is not None:
+        print(f"Recorded file evidence {evidence.byte_identity.replace('_', ' ')}")
+    print("Current Pi session availability was not checked")
+    print(f"Admitted Pi implementation {evidence.implementation_identity}")
+    if evidence.repository_source is not None:
+        print(f"Admitted source sha256:{evidence.repository_source.source_snapshot.sha256}")
+    print(f"Frozen Agent and Skill delivery sha256:{evidence.delivery_sha256}")
+    if evidence.skill_identity is not None:
+        print(f"Captured Skill {evidence.skill_identity}")
+    if evidence.quiescent_sequence is not None:
+        print(f"Pi writer descendants quiescent at event {evidence.quiescent_sequence}")
+    if evidence.settlement is not None:
+        item = evidence.settlement
+        print(f"Agent Step {evidence.step_id} {item.outcome} | cleanup {item.cleanup}")
+    for following in evidence.following_steps:
+        outcome = following.settlement.outcome if following.settlement is not None else "UNRECORDED"
+        print(f"Following Step {following.step_id} {outcome}")
+    if evidence.omitted_following_steps:
+        print(f"{evidence.omitted_following_steps} more following Steps are listed in Run Steps")
+    if evidence.refusal_code is not None:
+        print(f"Pi refusal {evidence.refusal_code}")
+    if evidence.safe_next_action is not None:
+        print(evidence.safe_next_action)
 
 
 def _artifact_readback_detail(
@@ -135,6 +180,7 @@ def _print_artifact_observation(tape: GameTape) -> None:
 def print_run_completion(detail: FleetRunDetail) -> None:
     """Show bounded original completion evidence from the supplied terminal read cut."""
     tape = detail.game_tape
+    print_pi_session_readback(tape.pi_session)
     summary = tape.summary
     print(
         f"Steps: {summary.executed_steps} executed; {summary.passed_steps} passed; "
@@ -332,10 +378,12 @@ def _select_last_run(runtime: ApplicationRuntime, args: argparse.Namespace) -> N
 def _events(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
     # Preserve original journal cursor and revision; no second pagination owner.
     batch = runtime.runs.events(args.fleet_run_id, after=args.after, limit=args.limit)
+    pi_session = batch.pi_session
     if args.as_json:
-        _print_json(batch.model_dump(mode="json"))
+        _print_json(fleet_run_event_readback(batch))
     else:
         print(f"Fleet Run ID: {batch.run.fleet_run_id}")
+        print_pi_session_readback(pi_session)
         for event in batch.events:
             print(f"{event.sequence}: {event.event_type.value}")
         print(f"Next sequence: {batch.next_sequence}")
@@ -425,6 +473,7 @@ def _tape(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         print(f"Fleet Run ID: {tape.fleet_run_id}")
         print(f"Game Tape status: {tape.status.value}")
         print(f"Journal revision: {tape.journal_revision}")
+        print_pi_session_readback(tape.pi_session)
         for line in configuration_summary(tape.configuration):
             print(line)
         if tape.why_not is not None:
@@ -520,6 +569,7 @@ def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         "schema": "oh-goon.plan-run-outputs/v1",
         "fleet_run_id": tape.fleet_run_id,
         "repositories": repositories,
+        **_pi_session_field(tape),
         "artifact_observation": (
             tape.artifact_observation.model_dump(mode="json")
             if tape.artifact_observation is not None
@@ -530,6 +580,7 @@ def _outputs(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         _print_json(result)
     else:
         print(f"Fleet Run ID: {tape.fleet_run_id}")
+        print_pi_session_readback(tape.pi_session)
         for repository_output in repositories:
             print(
                 f"Repository: {repository_output['repository']['name']} ({repository_output['repository_execution_id']})"
@@ -660,6 +711,7 @@ def run_handoff_projection(detail: FleetRunDetail) -> dict[str, Any]:
         "feedback": detail.feedback.model_dump(mode="json", by_alias=True),
         "fleet_run_id": detail.run.fleet_run_id,
         **_recorded_run_lineage(detail.execution),
+        **_pi_session_field(tape),
         "journal_revision": detail.journal_revision,
         "artifact_observation": (
             tape.artifact_observation.model_dump(mode="json")
@@ -725,6 +777,7 @@ def _handoff(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         print(f"Status: {result['status']} | Outcome: {result['outcome']}")
         print(f"Game Tape status: {result['game_tape_status']}")
         _print_run_lineage(detail.execution)
+        print_pi_session_readback(detail.game_tape.pi_session)
         print(
             f"Issues: {result['issue_count']} (displayed: {len(result['issue_focus'])}, "
             f"hidden: {result['hidden_issue_count']})"

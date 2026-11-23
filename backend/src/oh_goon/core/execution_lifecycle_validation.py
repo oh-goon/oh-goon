@@ -194,6 +194,25 @@ def pi_writer_step_settled(
     )
 
 
+def pi_writer_cleanup_unverified(
+    reservation: PiSessionWriterReservedEvent, events: Sequence[FleetRunEvent]
+) -> bool:
+    """A launch without its scoped quiescence receipt is cleanup uncertainty."""
+    active = {
+        event.physical_execution_id
+        for event in events[reservation.sequence :]
+        if type(event) is ProcessStartingEvent and _same_pi_attempt(event, reservation)
+    }
+    return bool(
+        active
+        - {
+            event.physical_execution_id
+            for event in events[reservation.sequence :]
+            if isinstance(event, DescendantsQuiescentEvent) and _same_pi_attempt(event, reservation)
+        }
+    )
+
+
 def validate_execution_lifecycle(
     state: FleetRunState, event: ExecutionLifecycleEvent, history: Sequence[FleetRunEvent]
 ) -> None:

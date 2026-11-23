@@ -8,6 +8,7 @@ import json
 from pydantic import BaseModel
 
 from oh_goon.core.agent_campaign_settlement import declared_regression_feedback
+from oh_goon.core.game_tape_pi_session import is_private_pi_step
 from oh_goon.core.models.agent_continuation_receipt import AgentContinuationState
 from oh_goon.core.models.agent_controls import MAX_AGENT_CONTROL_ID_CHARS
 from oh_goon.core.models.fleet_plan import ResolvedAgentStep, ResolvedCommandStep
@@ -542,16 +543,20 @@ def project_run_feedback(detail: FleetRunDetail) -> RunFeedback:
         if not isinstance(goal_step, ResolvedAgentStep):
             continue
         summary = goal_step.task_summary
+        private_pi = is_private_pi_step(goal_step)
+        shown = summary[:2048] if summary is not None and not private_pi else None
         goals.append(
             RunFeedbackGoal(
                 step_id=goal_step.step_id,
                 availability="recorded" if summary is not None else "unavailable",
-                summary=summary[:2048] if summary is not None else None,
+                summary=shown,
                 sha256=goal_step.task_sha256,
-                redacted=goal_step.task_redacted,
+                redacted=goal_step.task_redacted or (private_pi and summary is not None),
                 handoff_identity=goal_step.handoff_identity,
                 delivery_sha256=goal_step.delivery_sha256,
-                omitted_characters=goal_step.task_omitted_characters + max(0, len(summary) - 2048)
+                omitted_characters=goal_step.task_omitted_characters
+                + len(summary)
+                - len(shown or "")
                 if summary is not None
                 else 0,
             )

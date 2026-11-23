@@ -12,7 +12,11 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.agent_providers import PiSessionUnavailable
+from oh_goon.core.models.agent_providers import (
+    PiSessionHistoryUnqualified,
+    PiSessionIdentityMismatch,
+    PiSessionUnavailable,
+)
 from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_NEW_FILE,
     PiSessionDirectoryPin,
@@ -182,12 +186,12 @@ def pin_pi_session_directory(
         raise FleetPlanInvalid(
             "Pi session storage differs from the admitted direct Git workspace and Step"
         )
-    if (
-        (storage_id is None) != (prior_file is None)
-        or (storage_id is not None and not re.fullmatch(r"pi-session-[0-9a-f]{64}", storage_id))
-        or (prior_file is not None and prior_file.sha256 is None)
+    if (storage_id is None) != (prior_file is None) or (
+        storage_id is not None and not re.fullmatch(r"pi-session-[0-9a-f]{64}", storage_id)
     ):
         raise FleetPlanInvalid("Pi session reopening requires the exact retained storage receipt")
+    if prior_file is not None and prior_file.sha256 is None:
+        raise PiSessionHistoryUnqualified("Retained Pi session has no qualified byte receipt")
     continuing = prior_file is not None
     leaf = storage_id or pi_session_storage_id(
         fleet_run_id, repository.repository_id, step_id, attempt_number
@@ -248,21 +252,38 @@ def pin_pi_session_directory(
                 name = PI_SESSION_NEW_FILE.name
                 fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
                 owned.callback(os.close, fd)
-                observed, metadata = _observe_pinned_session_file(
-                    directory_fd, name, fd, require_original_storage_current
-                )
+                try:
+                    observed, metadata = _observe_pinned_session_file(
+                        directory_fd, name, fd, require_original_storage_current
+                    )
+                except FleetPlanInvalid as exc:
+                    raise PiSessionHistoryUnqualified(
+                        "Retained Pi session bytes could not be verified"
+                    ) from exc
+                if (observed.device, observed.inode) != (prior_file.device, prior_file.inode):
+                    raise PiSessionIdentityMismatch(
+                        "Retained Pi session file identity differs from its admitted receipt"
+                    )
                 if observed != prior_file:
-                    raise FleetPlanInvalid("Retained Pi session differs from its admitted receipt")
+                    raise PiSessionHistoryUnqualified(
+                        "Retained Pi session differs from its admitted receipt"
+                    )
 
                 def require_before_launch() -> None:
                     try:
                         current = _require_current_file(directory_fd, name, fd)
                     except OSError as exc:
-                        raise FleetPlanInvalid(
+                        raise PiSessionUnavailable(
                             "Retained Pi session is unavailable before launch"
                         ) from exc
+                    except FleetPlanInvalid as exc:
+                        raise PiSessionIdentityMismatch(
+                            "Retained Pi session file identity changed before launch"
+                        ) from exc
                     if _file_state(current) != _file_state(metadata):
-                        raise FleetPlanInvalid("Retained Pi session changed before launch")
+                        raise PiSessionHistoryUnqualified(
+                            "Retained Pi session changed before launch"
+                        )
 
                 file_pin = PiSessionFilePin(fd, require_before_launch)
             else:
@@ -272,6 +293,8 @@ def pin_pi_session_directory(
                             "New Pi session requires an empty original directory"
                         )
         except (OSError, ValueError) as exc:
+            if continuing:
+                raise PiSessionUnavailable("Retained Pi session storage is unavailable") from exc
             raise FleetPlanInvalid("Private Pi session storage is unavailable") from exc
         yield PiSessionDirectoryPin(
             layout.pi_sessions / leaf,

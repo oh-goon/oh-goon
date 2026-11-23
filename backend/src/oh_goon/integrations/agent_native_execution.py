@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from oh_goon.core.agent_harness_contract import AgentHarnessObservation
+from oh_goon.core.errors import PiSessionRefusalCode
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     ResolvedNativeAgent,
@@ -25,6 +26,7 @@ from oh_goon.core.models.agent_providers import (
 from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_NEW_FILE,
     PI_SESSION_OBSERVATION_RECORD,
+    PI_SESSION_REFUSAL_RECORD,
     PI_SESSION_SANDBOX_DIRECTORY,
     PiSessionDirectoryPin,
     PiSessionNativeObservation,
@@ -632,6 +634,7 @@ class NativeAgentEventParser:
         self._agent = agent
         self._pi_session_persistent = pi_session_persistent
         self.pi_session_observation: PiSessionNativeObservation | None = None
+        self.pi_session_refusal: PiSessionRefusalCode | None = None
         self._pending = ""
         self._pending_bytes = 0
         self._observations: list[AgentHarnessObservation] = []
@@ -773,7 +776,8 @@ class NativeAgentEventParser:
         event_type = record.get("type")
         if (
             self.pi_session_observation is not None
-            or event_type == PI_SESSION_OBSERVATION_RECORD
+            or self.pi_session_refusal is not None
+            or event_type in (PI_SESSION_OBSERVATION_RECORD, PI_SESSION_REFUSAL_RECORD)
             and not self._pi_session_persistent
         ):
             raise AgentProviderError("Unexpected native relay control record")
@@ -784,6 +788,14 @@ class NativeAgentEventParser:
                 )
             except ValueError:
                 raise AgentProviderError("Invalid native Pi relay observation") from None
+            return
+        if event_type == PI_SESSION_REFUSAL_RECORD:
+            if set(record) != {"type", "code"}:
+                raise AgentProviderError("Invalid native Pi relay refusal")
+            try:
+                self.pi_session_refusal = PiSessionRefusalCode(record["code"])
+            except ValueError:
+                raise AgentProviderError("Invalid native Pi relay refusal") from None
             return
         self._event_count += 1
         if self._agent == "opencode":

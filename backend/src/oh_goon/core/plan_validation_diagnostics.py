@@ -12,8 +12,10 @@ from oh_goon.core.errors import (
     DurableStateBusy,
     ExecutionBusy,
     ExecutionLockRejected,
+    FleetDomainError,
     FleetPlanInputRejected,
     FleetPlanSourceAcquisitionRequired,
+    PiSessionRefusalCode,
     ReviewedRepositorySourceStale,
     RunConfigurationInvalid,
     RunControlOwnerUnavailable,
@@ -22,6 +24,32 @@ from oh_goon.core.errors import (
 )
 
 _SCHEMA = "oh-goon.plan-validation-diagnostic/v1"
+_PI_HANDOFF = "Inspect the original Run with 'oh-goon runs handoff RUN_ID --json'."
+_PI_SESSION_ACTIONS: dict[str, str] = {
+    PiSessionRefusalCode.NO_PERSISTENT_SESSION: "Select a Run with a retained persistent Pi session.",
+    PiSessionRefusalCode.UNAVAILABLE: (
+        "Check the matching runtime and dedicated managed Pi RPC profile. Select the latest "
+        "qualified writer or explicitly start a fresh session."
+    ),
+    PiSessionRefusalCode.BUSY: (
+        "Wait for the original writer to settle before selecting the latest qualified Run."
+    ),
+    PiSessionRefusalCode.IDENTITY_MISMATCH: (
+        "Use the original registered repository and matching runtime. Preserve the retained history."
+    ),
+    PiSessionRefusalCode.CLEANUP_UNVERIFIED: (
+        "Use the original runtime's recovery evidence to establish process cleanup before continuing."
+    ),
+    PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH: (
+        "Use the matching installed Pi implementation and a qualified managed Pi RPC profile."
+    ),
+    PiSessionRefusalCode.HISTORY_UNQUALIFIED: (
+        "Preserve the retained history. Select a qualified session or explicitly start a fresh one."
+    ),
+    PiSessionRefusalCode.SETTLEMENT_UNCERTAIN: (
+        "Preserve the original evidence and use its matching runtime's recovery. Avoid replaying unresolved effects."
+    ),
+}
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,63}\Z")
 _CONFIG_ACTIONS = {
     "CONFIG_SCHEMA_INVALID": "Correct the named version 2 run.yml fields; select literal directory paths with target.repository or target.repositories.",
@@ -96,11 +124,24 @@ class SafePlanValidationDiagnostic(TypedDict):
     fields: NotRequired[list[str]]
 
 
+def pi_session_safe_next_action(code: str) -> str | None:
+    action = _PI_SESSION_ACTIONS.get(code)
+    if action is None:
+        return None
+    return f"{_PI_HANDOFF} {action}"
+
+
 def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
     """Project a *single* received rejection without a second semantic decision."""
     fields: list[str] = []
     inputs: list[str]
-    if isinstance(exc, RunConfigurationInvalid) and exc.diagnostic_code in _CONFIG_ACTIONS:
+    pi_action = pi_session_safe_next_action(exc.code) if isinstance(exc, FleetDomainError) else None
+    if pi_action is not None and isinstance(exc, FleetDomainError):
+        code = exc.code
+        inputs = []
+        stage = "pi_session"
+        action = pi_action
+    elif isinstance(exc, RunConfigurationInvalid) and exc.diagnostic_code in _CONFIG_ACTIONS:
         code = exc.diagnostic_code
         inputs = []
         stage = "run_configuration"

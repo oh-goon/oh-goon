@@ -18,6 +18,7 @@ from oh_goon.core.errors import (
     CapabilityUnavailable,
     ExecutionBusy,
     FleetPlanInvalid,
+    PiSessionBusy,
     ReviewedRepositorySourceStale,
     TargetSelectionError,
 )
@@ -798,7 +799,29 @@ class FleetAdmissionPlanner:
             state = self._state.read_view_in(connection, journal=admitted_cut.journal)
             if concurrency is not None:
                 require_concurrent_candidate_admission(intent.target, concurrency)
-            self._require_capacity_in(connection, admitted_cut, concurrency)
+            try:
+                self._require_capacity_in(connection, admitted_cut, concurrency)
+            except ExecutionBusy:
+                target = intent.target
+                native = target.plan.native_agent if isinstance(target, FleetPlanTarget) else None
+                if (
+                    native is not None
+                    and native.session is not None
+                    and native.session.prior_run_id is not None
+                    and isinstance(repository_scope, ExplicitRepositoryScope)
+                    and len(repository_scope.repository_ids) == 1
+                    and admitted_cut.journal.pi_session_has_active_writer(
+                        native.session.prior_run_id,
+                        repository_scope.repository_ids[0],
+                        frozenset(
+                            lease.fleet_run_id
+                            for lease in admitted_cut.active_leases
+                            if lease.fleet_run_id is not None
+                        ),
+                    )
+                ):
+                    raise PiSessionBusy("Selected Pi session still has an active writer") from None
+                raise
         if state.durable_revision != admitted_cut.durable_revision:
             raise AssertionError("Fleet admission cut produced mismatched durable revisions")
 

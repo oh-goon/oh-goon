@@ -6,8 +6,17 @@ from pathlib import Path
 from types import MappingProxyType
 
 from oh_goon.core.errors import InvalidRunTransition, PiSessionBusy
+from oh_goon.core.execution_lifecycle_validation import pi_writer_cleanup_unverified
 from oh_goon.core.fleet_plan_projection import fleet_plan_logical_slot
-from oh_goon.core.models.agent_providers import PiSessionUnavailable
+from oh_goon.core.models.agent_providers import (
+    NoPersistentPiSession,
+    PiNativeConfigurationMismatch,
+    PiSessionCleanupUnverified,
+    PiSessionHistoryUnqualified,
+    PiSessionIdentityMismatch,
+    PiSessionSettlementUncertain,
+    PiSessionUnavailable,
+)
 from oh_goon.core.models.agent_repair import AgentCampaignRecord
 from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.operation import OperationReport
@@ -128,14 +137,7 @@ def pi_session_predecessor(
     events = events_by_run.get(prior_run_id, ())
     prior = next((item for item in events if isinstance(item, PiSessionWriterReservedEvent)), None)
     if prior is None or prior_run_id == admission.fleet_run_id:
-        raise PiSessionUnavailable("Selected prior Run has no persistent Pi writer")
-    head = writer_heads.get(prior.storage_id)
-    if head is None:
-        raise InvalidRunTransition("Missing original Pi writer lineage head")
-    if not any(isinstance(item, _TERMINAL_RUN_EVENTS) for item in events_by_run[head.fleet_run_id]):
-        raise PiSessionBusy("Selected Pi session still has an active writer")
-    if head != prior:
-        raise PiSessionUnavailable("Selected Pi session has a newer writer reservation")
+        raise NoPersistentPiSession("Selected prior Run has no persistent Pi writer")
     previous = events[0]
     if (
         not isinstance(previous, RunAdmittedEvent)
@@ -151,7 +153,16 @@ def pi_session_predecessor(
         or admission.repository_admissions[0].source_authority.subject_instance_id
         != previous.repository_admissions[0].source_authority.subject_instance_id
     ):
-        raise PiSessionUnavailable("Selected Pi session belongs to a different repository subject")
+        raise PiSessionIdentityMismatch(
+            "Selected Pi session belongs to a different repository subject"
+        )
+    head = writer_heads.get(prior.storage_id)
+    if head is None:
+        raise InvalidRunTransition("Missing original Pi writer lineage head")
+    if not any(isinstance(item, _TERMINAL_RUN_EVENTS) for item in events_by_run[head.fleet_run_id]):
+        raise PiSessionBusy("Selected Pi session still has an active writer")
+    if head != prior:
+        raise PiSessionUnavailable("Selected Pi session has a newer writer reservation")
     old_target, new_target = previous.target, admission.target
     if (
         not isinstance(old_target, FleetPlanTarget)
@@ -161,7 +172,9 @@ def pi_session_predecessor(
         or old_target.plan.native_agent.executable_sha256
         != new_target.plan.native_agent.executable_sha256
     ):
-        raise PiSessionUnavailable("Selected Pi session has a different native implementation")
+        raise PiNativeConfigurationMismatch(
+            "Selected Pi session has a different native implementation"
+        )
     observed = next(
         (
             item
@@ -171,13 +184,16 @@ def pi_session_predecessor(
         ),
         None,
     )
-    if (
-        observed is None
-        or observed.observation.persistence != "observed"
-        or observed.observation.file is None
-        or observed.observation.file.sha256 is None
-    ):
-        raise PiSessionUnavailable("Selected Pi session has no qualified persistence observation")
+    if observed is None and pi_writer_cleanup_unverified(prior, events):
+        raise PiSessionCleanupUnverified("Original Pi writer cleanup is unverified")
+    if observed is None or observed.observation.persistence != "observed":
+        raise PiSessionSettlementUncertain(
+            "Selected Pi session has no qualified persistence observation"
+        )
+    if observed.observation.file is None or observed.observation.file.sha256 is None:
+        raise PiSessionHistoryUnqualified(
+            "Selected Pi session has no qualified persistence observation"
+        )
     accepted = next(
         (
             item
@@ -192,7 +208,9 @@ def pi_session_predecessor(
         isinstance(item, RepositoryCompletedEvent) and item.operation_id == prior.operation_id
         for item in events[accepted.sequence :]
     ):
-        raise PiSessionUnavailable("Selected Pi session has no accepted original Agent result")
+        raise PiSessionSettlementUncertain(
+            "Selected Pi session has no accepted original Agent result"
+        )
     return prior, observed
 
 

@@ -5,6 +5,7 @@ from typing import Literal, cast
 from oh_goon.core.execution_ledger import project_execution_ledger
 from oh_goon.core.game_tape_identity import repository_execution_id
 from oh_goon.core.game_tape_lifecycle import repository_status, run_status
+from oh_goon.core.game_tape_pi_session import project_pi_session_evidence
 from oh_goon.core.game_tape_run_facts import (
     environment_fingerprint,
     plan_source_label,
@@ -74,6 +75,7 @@ def project_game_tape(detail: FleetRunDetail) -> GameTape:
     return GameTape(
         journal_revision=detail.journal_revision,
         campaign_journal=detail.campaign_journal,
+        pi_session=project_pi_session_evidence(detail),
         terminal=detail.run.status.terminal,
         configuration=plan.configuration if plan is not None else None,
         fleet_run_id=detail.run.fleet_run_id,

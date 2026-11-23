@@ -14,6 +14,7 @@ from oh_goon.core.models.base import ImmutableModel
 PI_SESSION_SANDBOX_DIRECTORY = PurePosixPath("/run/oh-goon-pi-session")
 PI_SESSION_NEW_FILE = PI_SESSION_SANDBOX_DIRECTORY / "session.jsonl"
 PI_SESSION_OBSERVATION_RECORD = "oh_goon_pi_session_observation"
+PI_SESSION_REFUSAL_RECORD = "oh_goon_pi_session_refusal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +52,20 @@ class PiSessionNativeObservation(ImmutableModel):
 
     session_id: str = Field(min_length=1, max_length=256, pattern=r"^[a-zA-Z0-9_-]+$")
     leaf_id: str = Field(min_length=1, max_length=256, pattern=r"^[a-zA-Z0-9_-]+$")
+
+
+class PiSessionContinuationOrigin(ImmutableModel):
+    """The exact prior Run and its observed writer cut, never a filesystem selector."""
+
+    prior_run_id: str = Field(min_length=1, max_length=160)
+    reservation_sequence: int = Field(ge=1)
+    observation_sequence: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def require_observed_reservation(self) -> PiSessionContinuationOrigin:
+        if self.observation_sequence <= self.reservation_sequence:
+            raise ValueError("Pi continuation observation must follow its reservation")
+        return self
 
 
 class PiSessionWriterObservation(ImmutableModel):

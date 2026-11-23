@@ -4,16 +4,23 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from contextlib import nullcontext
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from oh_goon.core.errors import PiSessionRefusalCode
 from oh_goon.core.models.agent_providers import AgentProviderError
+from oh_goon.core.models.fleet_plan_step_primitives import PLAN_CONTRACT_RETURN_CODE
 from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_NEW_FILE,
     PI_SESSION_OBSERVATION_RECORD,
+    PI_SESSION_REFUSAL_RECORD,
     PiSessionNativeObservation,
 )
+from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
+from oh_goon.integrations import agent_inference_relay
 from oh_goon.integrations.agent_native_execution import NativeAgentEventParser
 from oh_goon.integrations.agent_pi_rpc import PiRpcContinuation, PiRpcControl
 
@@ -612,21 +619,59 @@ def _reopen_control() -> PiRpcControl:
 
 
 @pytest.mark.parametrize(
-    ("state_override", "model_override", "error"),
+    ("state_override", "model_override", "error", "code"),
     [
-        ({"sessionId": "fresh-session"}, {}, "admitted native session"),
-        ({"sessionFile": "/tmp/unowned"}, {}, "exact selected private session file"),
-        ({"messageCount": 0}, {}, "admitted native session"),
-        ({"isCompacting": True}, {}, "was idle"),
-        ({"pendingMessageCount": None}, {}, "was idle"),
-        ({}, {"provider": "prior-provider"}, "current managed inference model"),
-        ({}, {"id": "prior-model"}, "current managed inference model"),
-        ({}, {"api": "openai-responses"}, "current managed inference model"),
-        ({}, {"baseUrl": "https://previous.invalid"}, "current managed inference model"),
+        (
+            {"sessionId": "fresh-session"},
+            {},
+            "admitted native session",
+            PiSessionRefusalCode.IDENTITY_MISMATCH,
+        ),
+        (
+            {"sessionFile": "/tmp/unowned"},
+            {},
+            "exact selected private session file",
+            PiSessionRefusalCode.IDENTITY_MISMATCH,
+        ),
+        (
+            {"messageCount": 0},
+            {},
+            "qualified retained conversation history",
+            PiSessionRefusalCode.HISTORY_UNQUALIFIED,
+        ),
+        ({"isCompacting": True}, {}, "was idle", None),
+        ({"pendingMessageCount": None}, {}, "was idle", None),
+        (
+            {},
+            {"provider": "prior-provider"},
+            "current managed inference model",
+            PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH,
+        ),
+        (
+            {},
+            {"id": "prior-model"},
+            "current managed inference model",
+            PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH,
+        ),
+        (
+            {},
+            {"api": "openai-responses"},
+            "current managed inference model",
+            PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH,
+        ),
+        (
+            {},
+            {"baseUrl": "https://previous.invalid"},
+            "current managed inference model",
+            PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH,
+        ),
     ],
 )
 def test_continuation_rejects_mismatched_native_authority_without_prompt(
-    state_override: dict[str, object], model_override: dict[str, object], error: str
+    state_override: dict[str, object],
+    model_override: dict[str, object],
+    error: str,
+    code: PiSessionRefusalCode | None,
 ) -> None:
     control = _reopen_control()
     _commands(control)
@@ -636,6 +681,7 @@ def test_continuation_rejects_mismatched_native_authority_without_prompt(
     with pytest.raises(AgentProviderError, match=error):
         control.feed_stdout(_response("oh-goon:state", "get_state", state))
     assert control.read_input(8192) == b""
+    assert control.refusal_code is code
 
 
 @pytest.mark.parametrize(
@@ -654,6 +700,91 @@ def test_continuation_refuses_an_unproved_branch_without_prompt(
     with pytest.raises(AgentProviderError, match="admitted native leaf"):
         control.feed_stdout(_response("oh-goon:entries", "get_entries", entries))
     assert control.read_input(8192) == b""
+    assert control.refusal_code is PiSessionRefusalCode.IDENTITY_MISMATCH
+
+
+def test_pi_refusal_record_is_private_to_the_relay_and_contains_only_a_known_code() -> None:
+    code = PiSessionRefusalCode.IDENTITY_MISMATCH
+    refusal = {"type": PI_SESSION_REFUSAL_RECORD, "code": code}
+    control = _reopen_control()
+    with pytest.raises(AgentProviderError, match="relay-owned control record"):
+        control.feed_stdout(_line(refusal))
+    assert control.refusal_code is None
+
+    persistent = NativeAgentEventParser("pi", pi_session_persistent=True)
+    persistent.feed(_line(refusal))
+    received = persistent.finish(returncode=PLAN_CONTRACT_RETURN_CODE)
+    assert persistent.pi_session_refusal is code
+    assert received.event_count == 0 and received.observations == ()
+    for unsupported in (
+        {**refusal, "code": "/private/path"},
+        {**refusal, "raw": "credential-bearing native output"},
+    ):
+        with pytest.raises(AgentProviderError, match="Invalid native Pi relay refusal"):
+            NativeAgentEventParser("pi", pi_session_persistent=True).feed(_line(unsupported))
+    with pytest.raises(AgentProviderError, match="Unexpected native relay control record"):
+        NativeAgentEventParser("pi").feed(_line(refusal))
+
+
+@pytest.mark.parametrize("native_returncode", [0, 13])
+def test_relay_preserves_proved_native_refusal_without_private_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_returncode: int
+) -> None:
+    task = tmp_path / "input"
+    task.write_bytes(b"fresh authorized task")
+    authority = tmp_path / "continuation"
+    authority.write_text(
+        PiRpcContinuation(
+            prior=PiSessionNativeObservation(session_id="prior-session", leaf_id="prior-leaf"),
+            model="current-model",
+            api="openai-completions",
+            base_url="http://127.0.0.1:18743/v1",
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    output: list[bytes] = []
+
+    def observe_command(*argv: str, **options: Any) -> CommandResult:
+        input_source = options["input_source"]
+        assert isinstance(input_source, PiRpcControl)
+        _commands(input_source)
+        state = _reopen_state()
+        state["model"]["baseUrl"] = "https://private-retained-endpoint.invalid"
+        options["stream_output"]("stdout", _response("oh-goon:state", "get_state", state))
+        assert input_source.read_input(8192) == b""
+        return CommandResult(
+            argv=argv,
+            returncode=native_returncode,
+            stdout="",
+            stderr="",
+            supervisor=CommandSupervisorReceipt(final_process_group_quiescent=True),
+        )
+
+    monkeypatch.setattr(
+        agent_inference_relay, "model_inference_relay", lambda *_args, **_kwargs: nullcontext()
+    )
+    monkeypatch.setattr(agent_inference_relay, "run_command", observe_command)
+    monkeypatch.setattr(
+        agent_inference_relay, "_write_all", lambda _fd, payload: output.append(payload)
+    )
+    assert agent_inference_relay.main(
+        [
+            "--socket",
+            str(tmp_path / "relay"),
+            "--input-file",
+            str(task),
+            "--pi-rpc",
+            "--pi-session-continuation",
+            str(authority),
+            "--",
+            "pi",
+        ]
+    ) == (native_returncode or PLAN_CONTRACT_RETURN_CODE)
+    assert len(output) == 1
+    parser = NativeAgentEventParser("pi", pi_session_persistent=True)
+    parser.feed(output[0].decode("utf-8"))
+    assert parser.pi_session_refusal is PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH
+    assert b"private-retained-endpoint" not in output[0]
 
 
 def test_continuation_correlates_old_leaf_and_returns_only_new_native_metadata() -> None:

@@ -129,6 +129,9 @@ def add_native_setup_command[_Parser: argparse.ArgumentParser](
     )
     setup.add_argument("--inference-profile", help="Existing model profile for managed inference")
     setup.add_argument(
+        "--pi-rpc", action="store_true", help="Prepare a headless RPC profile for managed Pi"
+    )
+    setup.add_argument(
         "--home", type=Path, help="Explicit existing native Codex authentication home"
     )
     setup.add_argument("--model", help="Explicit model for the existing typed Codex connection")
@@ -182,6 +185,8 @@ def run_native_setup_command(args: argparse.Namespace) -> int:
             raise AgentProviderError("Select managed, codex-login or codex-service setup mode")
         if args.harness != "codex" and mode != "managed":
             raise AgentProviderError("Protected native login/service setup requires Codex")
+        if args.pi_rpc and (args.harness != "pi" or mode != "managed"):
+            raise AgentProviderError("Pi RPC requires managed Pi setup")
         if mode == "managed" and any(
             value is not None for value in (args.home, args.model, args.reasoning_effort)
         ):
@@ -238,6 +243,7 @@ def run_native_setup_command(args: argparse.Namespace) -> int:
                 allowed_agents=(harness,),
                 workspace_roots=workspace_roots,
                 inference_profile=inference,
+                pi_rpc=args.pi_rpc,
             )
         else:
             assert home is not None and model is not None and reasoning is not None
