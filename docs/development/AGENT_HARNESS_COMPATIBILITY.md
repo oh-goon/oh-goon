@@ -1128,9 +1128,13 @@ save must retain the exact predecessor bytes and the newly observed suffix.
 The file and its directory must synchronize before the Journal accepts the
 save receipt. The transcript stays in its original slot.
 
-Incomplete records, missing entries, changed predecessor bytes and sync
-errors leave persistence unknown. The Agent and independent verifier retain
-their own results. Historical digest-only and metadata-only receipts remain
+Incomplete records, missing entries, changed predecessor bytes, and sync or
+close errors leave persistence unknown. If Pi 1.3.0's final entries response
+exceeds the framing bound or ends before its newline, its ordered RPC
+envelope identifies it as the outstanding save query. The relay discards its
+contents and still requires the correlated final state and physical exit.
+The Agent and independent verifier retain their own results. Historical
+digest-only and metadata-only receipts remain
 readable with unverified save eligibility. New reopen and retirement
 requests require qualified evidence. Previously committed retirement
 requests retain their exact removal authority.
@@ -1140,10 +1144,12 @@ exercises a successful Pi turn and verifier with malformed retained bytes,
 then checks a fresh continuation refusal. The
 [installed compaction test](../../backend/tests/integration/services/test_native_cli_compaction.py)
 reopens a qualified session after a failed independent verifier and checks
-the original failure after restart. The original claimed-worker crash case
-covers native file creation before accepted publication. Storage owner tests
-inject file EIO and directory ENOSPC at sync. Power-loss durability and an
-installed Run on a full filesystem require separate qualification.
+the original failure after restart. The installed save fault cases inject
+file-sync ENOSPC and file-handle-close EIO after Pi writes a complete
+transcript. They also kill the claimed worker after file and directory sync
+and before Journal publication. Recovery preserves the original bytes and
+refuses continuation. Power-loss durability and a physically full filesystem
+remain unqualified.
 
 ### Installed exact reopen and refusal — HUG-70
 

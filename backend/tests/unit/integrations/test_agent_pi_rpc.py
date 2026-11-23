@@ -21,7 +21,7 @@ from oh_goon.core.models.pi_session_storage import (
     PiSessionNativeObservation,
     PiSessionSaveObservation,
 )
-from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
+from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES, CommandResult, CommandSupervisorReceipt
 from oh_goon.integrations import agent_inference_relay
 from oh_goon.integrations.agent_native_execution import NativeAgentEventParser
 from oh_goon.integrations.agent_pi_rpc import PiRpcContinuation, PiRpcControl
@@ -289,6 +289,48 @@ def test_persistent_rpc_preserves_settlement_when_save_evidence_is_unavailable(
         )
         assert control.read_input(1024) == b""
     assert control.finish() is None
+
+
+@pytest.mark.parametrize("truncated", [False, True], ids=["oversized", "truncated"])
+@pytest.mark.parametrize("correlated", [True, False], ids=["final-entries", "unknown"])
+def test_rpc_preserves_settlement_only_for_attributable_final_entries_loss(
+    truncated: bool, correlated: bool
+) -> None:
+    control = _persistent_start()
+    control.feed_stdout(
+        _response("oh-goon:entries", "get_entries", {"leafId": None, "entries": []})
+    )
+    _commands(control)
+    _ack(control)
+    terminal = _line({"type": "agent_settled", "aborted": False})
+    assert control.feed_stdout(terminal) == (terminal,)
+    _commands(control)
+    control.feed_stdout(
+        _response(
+            "oh-goon:final-state",
+            "get_state",
+            {"sessionId": "native-session", "sessionFile": str(PI_SESSION_NEW_FILE)},
+        )
+    )
+    request_id = "oh-goon:final-entries" if correlated else "other"
+    payload = "x" * (64 if truncated else MAX_COMMAND_INPUT_BYTES)
+    record = _response(
+        request_id,
+        "get_entries",
+        {"entries": [{"type": "message", "id": "leaf", "message": payload}], "leafId": "leaf"},
+    )
+    if truncated:
+        record = record[: record.index(payload) + 16]
+    assert control.feed_stdout(record[:12]) == ()
+    if correlated:
+        assert control.feed_stdout(record[12:]) == ()
+        if not truncated:
+            assert control.read_input(1024) == b""
+        assert control.finish() is None
+    else:
+        with pytest.raises(AgentProviderError, match="framing budget|correlated native settlement"):
+            control.feed_stdout(record[12:])
+            control.finish()
 
 
 def test_persistent_rpc_refuses_a_session_path_outside_the_original_selected_file() -> None:

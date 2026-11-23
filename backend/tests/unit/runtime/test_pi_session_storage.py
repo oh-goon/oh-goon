@@ -279,6 +279,45 @@ def test_pi_save_sync_failure_preserves_bytes_and_refuses_receipt(
     assert session.read_bytes() == raw
 
 
+def test_pi_save_close_failure_preserves_bytes_and_refuses_receipt(
+    admitted_pi_scope: _AdmittedScope, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entry: dict[str, object] = {"type": "message", "id": "original-leaf"}
+    raw = _NATIVE_SESSION_HEADER + b'{"type":"message","id":"original-leaf"}\n'
+    native_open = os.open
+    native_close = os.close
+    observed_fd = None
+    failed_close = False
+
+    with admitted_pi_scope.create() as pin:
+        session = pin.path / PI_SESSION_NEW_FILE.name
+        session.write_bytes(raw)
+
+        def track_observed_file(
+            path: str, flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+        ) -> int:
+            nonlocal observed_fd
+            fd = native_open(path, flags, mode, dir_fd=dir_fd)
+            if dir_fd == pin.directory_fd and path == session.name and flags & os.O_PATH:
+                observed_fd = fd
+            return fd
+
+        def fail_observation_close(fd: int) -> None:
+            nonlocal failed_close
+            native_close(fd)
+            if fd == observed_fd:
+                failed_close = True
+                raise OSError(errno.EIO, "controlled Pi save handle close failure")
+
+        with monkeypatch.context() as patched:
+            patched.setattr(os, "open", track_observed_file)
+            patched.setattr(os, "close", fail_observation_close)
+            with pytest.raises(FleetPlanInvalid, match="Original Pi session file is unavailable"):
+                observe_pi_session_file(pin, session.name, _native_save(entry))
+    assert failed_close
+    assert session.read_bytes() == raw
+
+
 @pytest.mark.parametrize("rewrite_prefix", [False, True])
 def test_pi_continuation_save_qualifies_only_the_native_append_to_exact_predecessor(
     admitted_pi_scope: _AdmittedScope, rewrite_prefix: bool

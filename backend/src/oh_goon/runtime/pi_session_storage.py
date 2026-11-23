@@ -536,8 +536,8 @@ def observe_pi_session_file(
         name != PI_SESSION_NEW_FILE.name or (pin.existing_file is None) != (prior_file is None)
     ):
         raise FleetPlanInvalid("Pi save differs from the original native session and predecessor")
-    with ExitStack() as owned:
-        try:
+    try:
+        with ExitStack() as owned:
             pin.require_current()
             identity = _directory_identity(pin.directory_fd)
             if identity[2:4] != (
@@ -561,8 +561,8 @@ def observe_pi_session_file(
                 prior_file=prior_file,
             )
             return observation
-        except OSError as exc:
-            raise FleetPlanInvalid("Original Pi session file is unavailable") from exc
+    except OSError as exc:
+        raise FleetPlanInvalid("Original Pi session file is unavailable") from exc
 
 
 def inspect_recovered_pi_session_storage(
