@@ -847,7 +847,12 @@ def test_ai_explicit_ephemeral_reaches_original_run_as_headless_pi(
             "PI_SESSION_UNAVAILABLE",
             "fresh task",
         ),
-        ("pi", ["--session", "run:prior-run"], "PI_SESSION_UNAVAILABLE", "exact session reopening"),
+        (
+            "pi",
+            ["--session", "run:prior-run", "--candidate"],
+            "PI_SESSION_SELECTION_INVALID",
+            "direct repository",
+        ),
         (
             "pi",
             ["--session", "run:prior-run", "--handoff-from", "other-run"],
@@ -891,10 +896,11 @@ def test_ai_rejects_unavailable_or_conflicting_session_before_task_and_runtime(
     native_cli.build.assert_not_called()
 
 
-def test_ai_new_refuses_an_unqualified_native_profile_before_runtime(
-    native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("session", ["new", "run:prior-run"])
+def test_ai_persistent_session_refuses_an_unqualified_native_profile_before_runtime(
+    native_cli: SimpleNamespace, capsys: pytest.CaptureFixture[str], session: str
 ) -> None:
-    assert main([*native_cli.argv, "--session", "new", "--json"]) == 2
+    assert main([*native_cli.argv, "--session", session, "--json"]) == 2
     report = json.loads(capsys.readouterr().out)
     assert report["code"] == "PI_SESSION_UNAVAILABLE"
     assert "dedicated managed Pi RPC" in report["safe_next_action"]

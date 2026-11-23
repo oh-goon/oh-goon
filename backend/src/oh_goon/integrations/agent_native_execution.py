@@ -301,18 +301,20 @@ def native_agent_command(
         raise AgentProviderError("Native command requires its prepared prompt file")
     if not workspace.is_absolute():
         raise AgentProviderError("Native command requires an absolute workspace")
-    new_pi_session = selected.creates_pi_session
-    if new_pi_session:
+    persistent_pi = selected.uses_persistent_pi_session
+    if persistent_pi:
         if (
             type(pi_session_directory) is not PiSessionDirectoryPin
             or pi_session_directory.workspace != workspace
             or not rpc
             or not selected.profile.pi_rpc
         ):
-            raise AgentProviderError("New Pi RPC requires its original private writer directory")
+            raise AgentProviderError(
+                "Persistent Pi RPC requires its original private writer directory"
+            )
     elif pi_session_directory is not None:
         raise AgentProviderError(
-            "Only the selected fresh Pi writer may receive a session directory"
+            "Only a selected persistent Pi writer may receive a session directory"
         )
     if (
         selected.profile.sandbox_owner == "execution_backend"
@@ -337,7 +339,7 @@ def native_agent_command(
         if configuration is not None:
             environment["PI_CODING_AGENT_DIR"] = configuration
         options: tuple[str, ...]
-        if new_pi_session:
+        if persistent_pi:
             options = (
                 "--mode",
                 "rpc",
@@ -352,6 +354,20 @@ def native_agent_command(
                 "--no-themes",
                 "--no-context-files",
             )
+            if selected.continues_pi_session:
+                if selected.connection is None:
+                    raise AgentProviderError(
+                        "Pi continuation requires its current broker selection"
+                    )
+                options += (
+                    "--no-approve",
+                    "--provider",
+                    "oh-goon",
+                    "--model",
+                    selected.connection.selection.model,
+                    "--tools",
+                    "read,grep,find,ls",
+                )
         elif interactive:
             options = ("--append-system-prompt", str(prompt_file))
         else:
@@ -608,13 +624,13 @@ class NativeAgentEventParser:
     owns physical exit, cancellation and process lifetime.
     """
 
-    def __init__(self, agent: str, *, pi_session_new: bool = False) -> None:
+    def __init__(self, agent: str, *, pi_session_persistent: bool = False) -> None:
         if agent not in ("opencode", "pi", "codex"):
             raise AgentProviderError("Unsupported native event protocol")
-        if pi_session_new and agent != "pi":
+        if pi_session_persistent and agent != "pi":
             raise AgentProviderError("Pi session observations require the native Pi relay")
         self._agent = agent
-        self._pi_session_new = pi_session_new
+        self._pi_session_persistent = pi_session_persistent
         self.pi_session_observation: PiSessionNativeObservation | None = None
         self._pending = ""
         self._pending_bytes = 0
@@ -758,7 +774,7 @@ class NativeAgentEventParser:
         if (
             self.pi_session_observation is not None
             or event_type == PI_SESSION_OBSERVATION_RECORD
-            and not self._pi_session_new
+            and not self._pi_session_persistent
         ):
             raise AgentProviderError("Unexpected native relay control record")
         if event_type == PI_SESSION_OBSERVATION_RECORD:

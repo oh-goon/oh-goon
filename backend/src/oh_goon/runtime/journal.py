@@ -31,7 +31,11 @@ from oh_goon.core.models.fleet import OperationState
 from oh_goon.core.models.fleet_plan import ResolvedCommandStep
 from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
 from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
-from oh_goon.core.models.pi_session_storage import PiSessionWriterObservation
+from oh_goon.core.models.pi_session_storage import (
+    PiSessionFileObservation,
+    PiSessionNativeObservation,
+    PiSessionWriterObservation,
+)
 from oh_goon.core.models.reconciliation import (
     RepositoryEffectAcknowledgementEvidence,
     RepositoryEffectReconciliationEvidence,
@@ -53,6 +57,7 @@ from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     FleetRunEvent,
     FleetRunEventBatch,
+    PiSessionContinuationOrigin,
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
     RepositoryCompletedEvent,
@@ -101,6 +106,7 @@ from oh_goon.runtime.journal_facts import (
     OperationCommitted,
     RunEventCommitted,
 )
+from oh_goon.runtime.journal_index import require_pi_continuation_observation
 from oh_goon.runtime.journal_store import JournalFactStore
 from oh_goon.runtime.journal_view import JournalReadView
 
@@ -753,6 +759,20 @@ class Journal:
             )
             if attempt is None or attempt.attempt_number != 1:
                 raise InvalidRunTransition("Pi writer requires the original first Step attempt")
+            admission = events[0]
+            assert isinstance(admission, RunAdmittedEvent)
+            predecessor = _admitted_pi_session_predecessor(view, admission)
+            continuation = None
+            if predecessor is not None:
+                prior, observed = predecessor
+                storage_id = prior.storage_id
+                continuation = PiSessionContinuationOrigin(
+                    prior_run_id=prior.fleet_run_id,
+                    reservation_sequence=prior.sequence,
+                    observation_sequence=observed.sequence,
+                )
+            else:
+                storage_id = pi_session_storage_id(fleet_run_id, repository_id, step_id, 1)
             event = PiSessionWriterReservedEvent(
                 event_type=FleetRunEventType.PI_SESSION_WRITER_RESERVED,
                 fleet_run_id=fleet_run_id,
@@ -762,8 +782,9 @@ class Journal:
                 step_id=step_id,
                 attempt_number=1,
                 attempt_sequence=attempt.sequence,
-                storage_id=pi_session_storage_id(fleet_run_id, repository_id, step_id, 1),
+                storage_id=storage_id,
                 lease_binding=_pi_session_lease_binding(session),
+                continuation=continuation,
             )
             project_fleet_run_detail([*events, event], view.operation)
             self._facts.append_run_event(connection, event)
@@ -784,6 +805,30 @@ class Journal:
             )
 
         session.observe(require_current)
+
+    def pi_session_continuation_source(
+        self, session: ExecutionSession, reservation: PiSessionWriterReservedEvent
+    ) -> tuple[PiSessionFileObservation, PiSessionNativeObservation]:
+        """Transport only the original admitted predecessor facts to the claimed writer."""
+        origin = reservation.continuation
+        if origin is None:
+            raise InvalidRunTransition("New Pi writer has no continuation source")
+
+        def observe(
+            connection: sqlite3.Connection,
+        ) -> tuple[PiSessionFileObservation, PiSessionNativeObservation]:
+            if session.cancel_requested_in(connection):
+                raise OperationCancelledError("Fleet cancellation fences Pi continuation")
+            view = self._facts.read_view(connection)
+            self._require_pi_session_writer_in(view, session, reservation)
+            previous = view.pi_session_origin_observation(origin).observation
+            assert previous.file is not None and previous.file.sha256 is not None
+            assert previous.session_id is not None and previous.leaf_id is not None
+            return previous.file, PiSessionNativeObservation(
+                session_id=previous.session_id, leaf_id=previous.leaf_id
+            )
+
+        return session.observe(observe)
 
     def observe_pi_session_writer(
         self,
@@ -819,6 +864,16 @@ class Journal:
                 quiescent_sequence=quiet.sequence,
                 observation=observation,
             )
+            if observation.persistence == "observed" and (
+                observation.file is None or observation.file.sha256 is None
+            ):
+                raise InvalidRunTransition(
+                    "New Pi persistence observations require exact file bytes"
+                )
+            if reservation.continuation is not None:
+                require_pi_continuation_observation(
+                    event, view.pi_session_origin_observation(reservation.continuation)
+                )
             project_fleet_run_detail([*events, event], view.operation)
             self._facts.append_run_event(connection, event)
 
@@ -841,6 +896,7 @@ class Journal:
             batch.run.status not in {FleetRunStatus.RUNNING, FleetRunStatus.CANCELLING}
             or not 1 <= reservation.sequence <= len(events)
             or events[reservation.sequence - 1] != reservation
+            or not view.pi_session_writer_is_head(reservation)
             or any(isinstance(item, PiSessionWriterObservedEvent) for item in later)
             or pi_writer_step_settled(reservation, later)
         ):
@@ -1199,6 +1255,7 @@ class Journal:
         _require_valid_readmission(view, fleet_run_id, intent, repository_scope, targets)
         _require_valid_rerun(view, fleet_run_id, intent, repository_scope, targets)
         admitted = _admitted_event(fleet_run_id, intent, repository_scope, targets)
+        _admitted_pi_session_predecessor(view, admitted)
         state = project_fleet_run_detail([admitted], view.operation).run
         return admitted, state
 
@@ -1349,3 +1406,14 @@ def _pi_session_lease_binding(session: ExecutionSession) -> str:
         "pi-writer",
         {"run": session.require_fleet_run_id(), "lease": session.original_fleet_lease_token()},
     )
+
+
+def _admitted_pi_session_predecessor(
+    view: JournalReadView, admission: RunAdmittedEvent
+) -> tuple[PiSessionWriterReservedEvent, PiSessionWriterObservedEvent] | None:
+    target = admission.target
+    native = target.plan.native_agent if isinstance(target, FleetPlanTarget) else None
+    if native is None or native.session is None or native.session.mode != "continue":
+        return None
+    assert native.session.prior_run_id is not None
+    return view.pi_session_predecessor(native.session.prior_run_id, admission)

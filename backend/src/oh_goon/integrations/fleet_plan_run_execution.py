@@ -273,12 +273,12 @@ class FleetPlanRunExecutor:
         if plan.execution.purpose is ExecutionPurpose.CICD:
             raise FleetPlanInvalid("Strict CI/CD plans require execute_strict_run")
         selected = plan.native_agent
-        new_pi_session = selected is not None and selected.creates_pi_session
-        if new_pi_session != (pi_session_writer is not None) or (
-            new_pi_session and lifecycle_observer is None
+        persistent_pi = selected is not None and selected.uses_persistent_pi_session
+        if persistent_pi != (pi_session_writer is not None) or (
+            persistent_pi and lifecycle_observer is None
         ):
             raise FleetPlanInvalid(
-                "New Pi execution requires its original claimed writer and Step lifecycle"
+                "Persistent Pi execution requires its original claimed writer and Step lifecycle"
             )
         retention_store = self._require_direct_retention(plan, repository_id)
         runtime = self._step_runtime(

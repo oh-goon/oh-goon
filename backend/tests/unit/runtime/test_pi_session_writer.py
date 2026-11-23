@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentDefinition,
     NativeAgentProfile,
     PiSessionIntent,
+    PiSessionUnavailable,
     ResolvedNativeAgent,
 )
 from oh_goon.core.models.fleet_plan import (
@@ -22,10 +24,18 @@ from oh_goon.core.models.fleet_plan import (
     ResolvedFleetPlan,
     ResolvedNativeAgentWorkload,
 )
+from oh_goon.core.models.fleet_plan_evidence import (
+    CompletedPlanStepExecution,
+    FleetPlanResult,
+    PlanOutputEvidence,
+    PlanStepSettlementEvidence,
+)
 from oh_goon.core.models.fleet_plan_execution_policy import MaintenanceExecutionPolicy
 from oh_goon.core.models.goon_plan_source import PlanFileSource
+from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.pi_session_storage import (
     PiSessionFileObservation,
+    PiSessionNativeObservation,
     PiSessionWriterObservation,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
@@ -36,6 +46,7 @@ from oh_goon.core.models.run_admission import (
 )
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
+    PiSessionContinuationOrigin,
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
 )
@@ -53,15 +64,19 @@ from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionSession
 from oh_goon.runtime.journal import Journal
+from oh_goon.runtime.journal_store import JournalFactStore
 from tests.factories.capabilities import capability_snapshot
 from tests.factories.fleet_plan_targets import structural_execution_identity
 from tests.factories.journal import start_repository
+from tests.factories.operation_reports import make_operation_report
 from tests.factories.repository_effect_runtime import effect_recovery
 from tests.factories.run_admission import repository_admissions_for
 from tests.fakes.fleet_worker import simulated_worker_coordinator
 
 
-def _new_pi_target() -> FleetPlanTarget:
+def _pi_target(
+    prior_run_id: str | None = None, *, executable_sha256: str = "b" * 64
+) -> FleetPlanTarget:
     connection = AgentConnection(
         profile="fixture",
         provider_name="fixture",
@@ -75,10 +90,12 @@ def _new_pi_target() -> FleetPlanTarget:
         profile=NativeAgentProfile(
             backend="bubblewrap", allowed_agents=("pi",), inference_profile="fixture", pi_rpc=True
         ),
-        executable_sha256="b" * 64,
+        executable_sha256=executable_sha256,
         connection=connection,
         backend_configuration_id="fixture-bubblewrap",
-        session=PiSessionIntent(mode="new"),
+        session=PiSessionIntent(
+            mode="continue" if prior_run_id is not None else "new", prior_run_id=prior_run_id
+        ),
     )
     step = ResolvedAgentStep(
         step_id="agent",
@@ -153,11 +170,20 @@ class _ClaimedPiAttempt:
             )
 
 
-def _claim_attempt(database: LocalDatabase, fleet_run_id: str) -> _ClaimedPiAttempt:
+def _claim_attempt(
+    database: LocalDatabase,
+    fleet_run_id: str,
+    *,
+    prior_run_id: str | None = None,
+    repo_name: str = "repo",
+    executable_sha256: str = "b" * 64,
+) -> _ClaimedPiAttempt:
     owner = ExecutionCoordinator(database)
     journal = Journal(database)
-    repository = RepositoryIdentity(name="sample", path=database.path.parent / "repo")
-    target = _new_pi_target()
+    repository = RepositoryIdentity.model_validate(
+        {"name": "sample", "path": database.path.parent / repo_name}
+    )
+    target = _pi_target(prior_run_id, executable_sha256=executable_sha256)
     intent = FleetRunAdmissionIntent(
         target=target,
         capability=capability_snapshot(OperationAction.EXECUTE_PLAN, target),
@@ -189,6 +215,63 @@ def _claim_attempt(database: LocalDatabase, fleet_run_id: str) -> _ClaimedPiAtte
     return _ClaimedPiAttempt(worker_database, journal, worker, session, repository, operation_id)
 
 
+def _accepted_pi_result(attempt: _ClaimedPiAttempt) -> None:
+    run_id = attempt.session.require_fleet_run_id()
+    target = attempt.journal.run_events(run_id).run.target
+    assert isinstance(target, FleetPlanTarget)
+    attempt.journal.execution_lifecycle_observer(
+        run_id, attempt.repository.repository_id, attempt.operation_id
+    )("agent", 1, "STEP_SUCCEEDED", returncode=0)
+    empty_output = PlanOutputEvidence(sha256="0" * 64, byte_count=0, line_count=0)
+    result = CompletedPlanStepExecution(
+        step_id="agent",
+        kind="agent",
+        stdout_evidence=empty_output,
+        stderr_evidence=empty_output,
+        repository_state_before="before",
+        repository_state_after="after",
+        settlement=PlanStepSettlementEvidence(
+            outcome="SUCCESS", cleanup="VERIFIED", reason="ACCEPTED_EXIT", observed_returncode=0
+        ),
+    )
+    report = make_operation_report(
+        attempt.repository,
+        OperationAction.EXECUTE_PLAN,
+        target=target,
+        fleet_run_id=run_id,
+        operation_id=attempt.operation_id,
+        evidence=FleetPlanOperationEvidence(
+            kind="FLEET_PLAN", plan=FleetPlanResult(plan_id=target.plan.plan_id, steps=(result,))
+        ),
+    )
+
+    def finish(connection: sqlite3.Connection) -> None:
+        attempt.journal.commit_operation_in(connection, report)
+        attempt.journal.terminalize_run_in(connection, run_id, FleetRunTerminalIntent.COMPLETE)
+
+    attempt.session.finish(finish)
+
+
+def _observe_pi_file(
+    attempt: _ClaimedPiAttempt,
+    reservation: PiSessionWriterReservedEvent,
+    *,
+    sha256: str,
+    leaf_id: str,
+) -> PiSessionWriterObservation:
+    attempt.record_physical("original-writer")
+    observation = PiSessionWriterObservation(
+        physical_execution_id="original-writer",
+        persistence="observed",
+        file=PiSessionFileObservation(device=1, inode=2, size=10, sha256=sha256),
+        session_id="native-session",
+        leaf_id=leaf_id,
+        file_name="session.jsonl",
+    )
+    attempt.journal.observe_pi_session_writer(attempt.session, reservation, observation=observation)
+    return observation
+
+
 def test_pi_writer_reservation_has_one_winner_and_stable_replay_refusal(tmp_path: Path) -> None:
     database = LocalDatabase(tmp_path / "state.db")
     attempt = _claim_attempt(database, "first")
@@ -212,6 +295,7 @@ def test_pi_writer_reservation_has_one_winner_and_stable_replay_refusal(tmp_path
     assert readback.events[-1] == winner
     assert winner.attempt_sequence == winner.sequence - 1
     assert attempt.session.original_fleet_lease_token() not in winner.model_dump_json()
+    assert "continuation" not in winner.model_dump(mode="json")
     with pytest.raises(OwnershipLost):
         attempt.journal.require_pi_session_writer(
             attempt.session, winner.model_copy(update={"sequence": winner.sequence - 1})
@@ -289,6 +373,184 @@ def test_pi_observation_needs_original_process_quiescence_even_after_cancel(tmp_
     assert receipt.reservation_sequence == reservation.sequence
     assert receipt.observation == observation
     assert isinstance(verified[receipt.quiescent_sequence - 1], DescendantsQuiescentEvent)
+
+
+def test_continuation_retains_exact_predecessor_and_advances_only_latest_writer(
+    tmp_path: Path,
+) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    created = original.reserve()
+    first = _observe_pi_file(original, created, sha256="a" * 64, leaf_id="leaf-a")
+    _accepted_pi_result(original)
+
+    reopened = _claim_attempt(LocalDatabase(database.path), "next", prior_run_id="original")
+    continued = reopened.reserve()
+    assert continued.storage_id == created.storage_id
+    assert continued.lease_binding != created.lease_binding
+    event = next(
+        item
+        for item in original.journal.run_events("original").events
+        if isinstance(item, PiSessionWriterObservedEvent)
+    )
+    assert continued.continuation == PiSessionContinuationOrigin(
+        prior_run_id="original",
+        reservation_sequence=created.sequence,
+        observation_sequence=event.sequence,
+    )
+    assert continued.continuation is not None
+    assert reopened.journal.pi_session_continuation_source(reopened.session, continued) == (
+        first.file,
+        PiSessionNativeObservation(session_id="native-session", leaf_id="leaf-a"),
+    )
+    before_stale_callback = reopened.journal.run_events("next")
+    with pytest.raises(OwnershipLost):
+        original.journal.observe_pi_session_writer(original.session, created, observation=first)
+    assert reopened.journal.run_events("next") == before_stale_callback
+    replacement = continued.model_copy(
+        update={
+            "continuation": continued.continuation.model_copy(update={"observation_sequence": 99})
+        }
+    )
+    with pytest.raises(OwnershipLost):
+        reopened.journal.pi_session_continuation_source(reopened.session, replacement)
+    second = _observe_pi_file(reopened, continued, sha256="b" * 64, leaf_id="leaf-b")
+    _accepted_pi_result(reopened)
+
+    before = reopened.journal.read_view()
+    with pytest.raises(PiSessionUnavailable, match="newer writer"):
+        _claim_attempt(database, "stale", prior_run_id="original")
+    after = reopened.journal.read_view()
+    assert after.revision == before.revision
+    assert after.run_detail("stale") is None
+    assert ExecutionCoordinator(database).active_lease() is None
+
+    latest = _claim_attempt(database, "latest", prior_run_id="next")
+    reservation = latest.reserve()
+    assert reservation.storage_id == created.storage_id
+    assert latest.journal.pi_session_continuation_source(latest.session, reservation) == (
+        second.file,
+        PiSessionNativeObservation(session_id="native-session", leaf_id="leaf-b"),
+    )
+
+
+@pytest.mark.parametrize("cut", ["metadata-only", "before-original-acceptance"])
+def test_continuation_refuses_unqualified_original_persistence(tmp_path: Path, cut: str) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    reservation = original.reserve()
+    if cut == "metadata-only":
+        original.record_physical("original-writer")
+        last = original.journal.run_events("original").events[-1]
+        assert isinstance(last, DescendantsQuiescentEvent)
+        legacy = PiSessionWriterObservedEvent(
+            event_type=FleetRunEventType.PI_SESSION_WRITER_OBSERVED,
+            sequence=last.sequence + 1,
+            fleet_run_id="original",
+            reservation_sequence=reservation.sequence,
+            quiescent_sequence=last.sequence,
+            observation=PiSessionWriterObservation(
+                physical_execution_id="original-writer",
+                persistence="observed",
+                file=PiSessionFileObservation(device=1, inode=2, size=10),
+                session_id="native-session",
+                leaf_id="leaf-a",
+                file_name="session.jsonl",
+            ),
+        )
+        # Previously committed H42 metadata-only facts remain readable.
+        assert legacy.observation.file is not None
+        assert "sha256" not in legacy.observation.file.model_dump(mode="json")
+        original.session.mutate(
+            lambda connection: JournalFactStore(original.database).append_run_event(
+                connection, legacy
+            )
+        )
+        _accepted_pi_result(original)
+        reason = "no qualified persistence observation"
+    else:
+        _observe_pi_file(original, reservation, sha256="a" * 64, leaf_id="leaf-a")
+        recovered = LocalDatabase(database.path)
+        effect_recovery(
+            recovered,
+            RepositoryEffectAttemptStore(recovered),
+            Journal(recovered),
+            ExecutionCoordinator(recovered),
+            GitService(),
+        ).recover(fleet_run_id="original")
+        reason = "no accepted original Agent result"
+    before = original.journal.read_view()
+    with pytest.raises(PiSessionUnavailable, match=reason):
+        _claim_attempt(database, "contender", prior_run_id="original")
+    after = original.journal.read_view()
+    assert after.revision == before.revision
+    assert after.run_detail("contender") is None
+    assert ExecutionCoordinator(database).active_lease() is None
+
+
+@pytest.mark.parametrize(
+    ("prior_run_id", "repo_name", "executable_sha256", "reason"),
+    [
+        ("unknown", "repo", "b" * 64, "no persistent Pi writer"),
+        ("original", "another", "b" * 64, "different repository subject"),
+        ("original", "repo", "c" * 64, "different native implementation"),
+    ],
+)
+def test_pi_continuation_admission_refuses_unknown_or_foreign_prior_before_work(
+    tmp_path: Path, prior_run_id: str, repo_name: str, executable_sha256: str, reason: str
+) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    reservation = original.reserve()
+    _observe_pi_file(original, reservation, sha256="a" * 64, leaf_id="leaf-a")
+    _accepted_pi_result(original)
+    before = original.journal.read_view()
+
+    with pytest.raises(PiSessionUnavailable, match=reason):
+        _claim_attempt(
+            database,
+            "refused",
+            prior_run_id=prior_run_id,
+            repo_name=repo_name,
+            executable_sha256=executable_sha256,
+        )
+
+    after = original.journal.read_view()
+    assert after.revision == before.revision
+    assert after.run_detail("refused") is None
+    assert ExecutionCoordinator(database).active_lease() is None
+
+
+def test_interrupted_successor_never_releases_an_older_pi_predecessor(tmp_path: Path) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    created = original.reserve()
+    _observe_pi_file(original, created, sha256="a" * 64, leaf_id="leaf-a")
+    _accepted_pi_result(original)
+    successor = _claim_attempt(database, "successor", prior_run_id="original")
+    claimed = successor.reserve()
+    assert claimed.storage_id == created.storage_id
+
+    recovered = LocalDatabase(database.path)
+    journal = Journal(recovered)
+    effect_recovery(
+        recovered,
+        RepositoryEffectAttemptStore(recovered),
+        journal,
+        ExecutionCoordinator(recovered),
+        GitService(),
+    ).recover(fleet_run_id="successor")
+    cut = journal.run_events("successor")
+    assert cut.run.status is FleetRunStatus.FAILED
+    assert cut.events[claimed.sequence - 1] == claimed
+    for selected, reason in (
+        ("original", "newer writer"),
+        ("successor", "no qualified persistence observation"),
+    ):
+        with pytest.raises(PiSessionUnavailable, match=reason):
+            _claim_attempt(recovered, "later", prior_run_id=selected)
+        assert journal.run_events("successor") == cut
+        assert journal.read_view().run_detail("later") is None
 
 
 @pytest.mark.parametrize("cut", ["before_allocation", "after_native_save"])

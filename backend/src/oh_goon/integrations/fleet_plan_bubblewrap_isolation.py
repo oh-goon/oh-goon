@@ -33,8 +33,10 @@ from oh_goon.core.models.fleet_plan_isolation import (
     IsolationKernelBoundary,
 )
 from oh_goon.core.models.pi_session_storage import (
+    PI_SESSION_NEW_FILE,
     PI_SESSION_SANDBOX_DIRECTORY,
     PiSessionDirectoryPin,
+    PiSessionFilePin,
 )
 from oh_goon.core.path_authority import HostSandboxPathMapping, map_host_text_to_sandbox
 from oh_goon.core.path_layouts import SANDBOX_PATHS, AttemptPathLayout
@@ -436,12 +438,11 @@ class BubblewrapProcessIsolation:
         if self.require_local_resource_intent:
             raise FleetPlanInvalid("Strict custody configuration cannot consume ordinary authority")
         self._require_application_state_separation(request)
-        session_identity = self._require_pi_session_mount(request)
+        session_identities = self._require_pi_session_mount(request)
         if request.protected_execution:
             _require_standard_git_layout(request.workspace)
         private_file_identities = self._private_application_file_identities()
-        if session_identity is not None:
-            private_file_identities |= {session_identity}
+        private_file_identities |= session_identities
         unsafe_environment = sorted(
             name
             for name in request.env
@@ -596,10 +597,10 @@ class BubblewrapProcessIsolation:
 
     def _require_pi_session_mount(
         self, request: StandardIsolatedProcessRequest
-    ) -> tuple[int, int] | None:
+    ) -> set[tuple[int, int]]:
         pin = request.pi_session_directory
         if pin is None:
-            return None
+            return set()
         if (
             sys.platform != "linux"
             or not hasattr(os, "O_PATH")
@@ -652,7 +653,7 @@ class BubblewrapProcessIsolation:
             raise FleetPlanInvalid("Pi session mount overlaps the guest workspace alias")
         return self._require_pi_session_pin_identity(pin)
 
-    def _require_pi_session_pin_identity(self, pin: PiSessionDirectoryPin) -> tuple[int, int]:
+    def _require_pi_session_pin_identity(self, pin: PiSessionDirectoryPin) -> set[tuple[int, int]]:
         """Recheck the admitted name against the live descriptor without reopening its mount."""
         pin.require_current()
         root = self._pi_session_root
@@ -675,13 +676,33 @@ class BubblewrapProcessIsolation:
             or (metadata.st_dev, metadata.st_ino) != (named.st_dev, named.st_ino)
         ):
             raise FleetPlanInvalid("Pi session mount descriptor differs from its private directory")
+        identities = {(metadata.st_dev, metadata.st_ino)}
+        retained = pin.existing_file
+        if retained is not None and (
+            type(retained) is not PiSessionFilePin
+            or type(retained.fd) is not int
+            or retained.fd < 0
+            or not callable(retained.require_before_launch)
+        ):
+            raise FleetPlanInvalid("Pi continuation requires its original retained file descriptor")
         try:
-            with os.scandir(pin.directory_fd) as entries:
-                if next(entries, None) is not None:
-                    raise FleetPlanInvalid("New Pi session mount requires an empty directory")
+            if retained is None:
+                with os.scandir(pin.directory_fd) as entries:
+                    if next(entries, None) is not None:
+                        raise FleetPlanInvalid("New Pi session mount requires an empty directory")
+            else:
+                retained.require_before_launch()
+                file = os.fstat(retained.fd)
+                if (
+                    not stat.S_ISREG(file.st_mode)
+                    or file.st_uid != os.geteuid()
+                    or file.st_nlink != 1
+                ):
+                    raise FleetPlanInvalid("Pi continuation requires its original regular file")
+                identities.add((file.st_dev, file.st_ino))
         except OSError as exc:
-            raise FleetPlanInvalid("Pi session mount directory could not be inspected") from exc
-        return metadata.st_dev, metadata.st_ino
+            raise FleetPlanInvalid("Pi session mount storage could not be inspected") from exc
+        return identities
 
     def _standard_resource_scope(self, request: StandardIsolatedProcessRequest) -> tuple[str, ...]:
         return standard_resource_scope_command(
@@ -850,10 +871,16 @@ class BubblewrapProcessIsolation:
                     )
                 if request.broker_directory is not None:
                     args.extend(("--ro-bind", str(request.broker_directory), "/run/oh-goon-broker"))
+                session_fd = None
                 if session is not None:
-                    args.extend(
-                        ("--bind-fd", str(session.directory_fd), str(PI_SESSION_SANDBOX_DIRECTORY))
-                    )
+                    if session.existing_file is None:
+                        session_fd = session.directory_fd
+                        session_target = PI_SESSION_SANDBOX_DIRECTORY
+                    else:
+                        session_fd = session.existing_file.fd
+                        session_target = PI_SESSION_NEW_FILE
+                        args.extend(("--dir", str(PI_SESSION_SANDBOX_DIRECTORY)))
+                    args.extend(("--bind-fd", str(session_fd), str(session_target)))
                 if writer_namespace is not None and (request.workspace / ".git").exists():
                     # Linked worktree administration remains exclusively with
                     # the trusted lifecycle Git owner. Keep this mask outside
@@ -994,7 +1021,7 @@ class BubblewrapProcessIsolation:
                         pass_fds=(
                             status.fileno(),
                             *(writer_namespace.pass_fds if writer_namespace is not None else ()),
-                            *((session.directory_fd,) if session is not None else ()),
+                            *((session_fd,) if session_fd is not None else ()),
                         ),
                         max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,
                         retain_output_tail=request.retain_output_tail,

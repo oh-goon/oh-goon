@@ -1,8 +1,7 @@
-"""Bounded control of one fresh Pi RPC child under the command owner.
+"""Bounded control of a Pi RPC child under the original command owner.
 
-Pi owns its session, events and automatic work. This adapter correlates the
-requested observations, submits one frozen prompt and closes input only after
-native settlement and a final identity check. It never adopts a saved session.
+Pi owns its session, events and automatic work. A continuation must match the
+admitted prior session and native leaf before receiving the fresh frozen prompt.
 """
 
 from __future__ import annotations
@@ -10,9 +9,12 @@ from __future__ import annotations
 import json
 from collections import deque
 from threading import RLock
-from typing import Never
+from typing import Literal, Never
 
-from oh_goon.core.models.agent_providers import AgentProviderError
+from pydantic import Field
+
+from oh_goon.core.models.agent_providers import AgentProviderError, ProviderApi
+from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.pi_session_storage import (
     PI_SESSION_NEW_FILE,
     PI_SESSION_OBSERVATION_RECORD,
@@ -20,6 +22,25 @@ from oh_goon.core.models.pi_session_storage import (
 )
 from oh_goon.engine.command import MAX_COMMAND_INPUT_BYTES
 from oh_goon.integrations.agent_native_execution import decode_native_agent_record
+
+type PiBrokerApi = Literal["openai-completions", "openai-responses", "anthropic-messages"]
+
+
+def pi_broker_api(api: ProviderApi) -> PiBrokerApi:
+    if api == "openai-chat-completions":
+        return "openai-completions"
+    if api == "ollama":
+        raise AgentProviderError("Pi requires a managed inference API supported by its transport")
+    return api
+
+
+class PiRpcContinuation(ImmutableModel):
+    """Exact native reopen facts and fresh broker configuration for one child."""
+
+    prior: PiSessionNativeObservation
+    model: str = Field(min_length=1, max_length=240)
+    api: PiBrokerApi
+    base_url: str = Field(min_length=1, max_length=200)
 
 
 class PiRpcControl:
@@ -30,7 +51,13 @@ class PiRpcControl:
     Callbacks may run on the command owner's reader and supervisor threads.
     """
 
-    def __init__(self, prompt: bytes, *, persistent: bool = False) -> None:
+    def __init__(
+        self,
+        prompt: bytes,
+        *,
+        persistent: bool = False,
+        continuation: PiRpcContinuation | None = None,
+    ) -> None:
         if type(prompt) is not bytes:
             raise AgentProviderError("Pi RPC requires its frozen prompt bytes")
         try:
@@ -38,7 +65,8 @@ class PiRpcControl:
         except UnicodeError:
             raise AgentProviderError("Pi RPC prompt must be valid UTF-8") from None
         self._lock = RLock()
-        self._persistent = persistent
+        self._continuation = continuation
+        self._persistent = persistent or continuation is not None
         self._pending = bytearray()
         self._failure: str | None = None
         self._closed = False
@@ -60,12 +88,11 @@ class PiRpcControl:
         self._prompt = self._encode({"id": "oh-goon:prompt", "type": "prompt", "message": message})
         self._final = self._encode({"id": "oh-goon:final-state", "type": "get_state"})
         self._final_entries = (
-            self._encode({"id": "oh-goon:final-entries", "type": "get_entries"})
-            if persistent
-            else b""
+            self._entries_request("oh-goon:final-entries") if self._persistent else b""
         )
-        initial = tuple(
-            self._encode({"id": key, "type": value}) for key, value in self._requests.items()
+        initial = (
+            self._encode({"id": "oh-goon:state", "type": "get_state"}),
+            self._entries_request("oh-goon:entries"),
         )
         if (
             sum(map(len, (*initial, self._prompt, self._final, self._final_entries)))
@@ -73,6 +100,12 @@ class PiRpcControl:
         ):
             raise AgentProviderError("Pi RPC encoded input exceeds the command byte budget")
         self._outbox = deque(initial)
+
+    def _entries_request(self, request_id: str) -> bytes:
+        request: dict[str, object] = {"id": request_id, "type": "get_entries"}
+        if self._continuation is not None:
+            request["since"] = self._continuation.prior.leaf_id
+        return self._encode(request)
 
     @staticmethod
     def _encode(value: dict[str, object]) -> bytes:
@@ -186,7 +219,9 @@ class PiRpcControl:
         if self._persistent:
             if data.get("sessionFile") != str(PI_SESSION_NEW_FILE):
                 self._fail("Pi RPC did not report its exact selected private session file")
-            if not self._state_seen and (
+            if self._continuation is not None:
+                self._require_continuation_state(session_id, data)
+            elif not self._state_seen and (
                 type(data.get("messageCount")) is not int or data["messageCount"] != 0
             ):
                 self._fail("Fresh Pi RPC reported existing or unavailable conversation history")
@@ -200,6 +235,31 @@ class PiRpcControl:
         ):
             self._fail("Pi RPC has unowned pending work")
         return session_id
+
+    def _require_continuation_state(self, session_id: str, data: dict[str, object]) -> None:
+        continuation = self._continuation
+        assert continuation is not None
+        count = data.get("messageCount")
+        if session_id != continuation.prior.session_id or type(count) is not int or count < 1:
+            self._fail("Pi RPC did not reopen the admitted native session")
+        model = data.get("model")
+        if not isinstance(model, dict) or any(
+            model.get(key) != expected
+            for key, expected in (
+                ("provider", "oh-goon"),
+                ("id", continuation.model),
+                ("api", continuation.api),
+                ("baseUrl", continuation.base_url),
+            )
+        ):
+            self._fail("Pi RPC did not select the current managed inference model")
+        if (
+            data.get("isStreaming") is not False
+            or data.get("isCompacting") is not False
+            or type(data.get("pendingMessageCount")) is not int
+            or data["pendingMessageCount"] != 0
+        ):
+            self._fail("Pi RPC did not prove its admitted session was idle")
 
     def _response(self, value: dict[str, object]) -> None:
         request_id = value.get("id")
@@ -244,7 +304,10 @@ class PiRpcControl:
                 and (type(leaf) is not str or not leaf.strip() or len(leaf) > 256 or "\x00" in leaf)
             ):
                 self._fail("Pi RPC omitted its bounded native leaf observation")
-            if self._persistent and any(
+            if self._continuation is not None:
+                if leaf != self._continuation.prior.leaf_id or data["entries"]:
+                    self._fail("Pi RPC did not reopen the admitted native leaf")
+            elif self._persistent and any(
                 isinstance(entry, dict) and entry.get("type") == "message"
                 for entry in data["entries"]
             ):

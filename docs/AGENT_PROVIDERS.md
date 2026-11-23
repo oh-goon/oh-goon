@@ -165,9 +165,26 @@ configuration and a serial runtime. Candidate workspaces, repair campaigns,
 Step resource caps, custom native arguments and configuration, and Run replay
 are unsupported for this mode.
 
-`--session run:RUN_ID` and `session: {mode: continue, prior_run_id: RUN_ID}`
-return `PI_SESSION_UNAVAILABLE` until HUG-43 qualifies exact native reopen.
-Use `--handoff-from RUN_ID` on an ephemeral Run for bounded prior-Run context.
+Use `--session run:RUN_ID` to reopen a saved Pi session for a new read-only
+Agent Step in the same direct repository. Select the latest Run that completed
+its Agent Step and recorded the exact native session, active leaf, and saved
+file digest. Receipts written before file digests were recorded are ineligible.
+The authored selection is `session: {mode: continue, prior_run_id: RUN_ID}`.
+An authored continuing Step must request read-only repository access.
+
+```sh
+oh-goon ai --agent pi --profile pi-rpc --session run:RUN_ID --prompt-file next-task.txt
+```
+
+The new Run captures the current repository, Skill and task and selects its
+own managed model connection and verifier. Pi verifies the exact native session
+and active leaf before receiving the new task. The continuing Agent has the
+built-in `read`, `grep`, `find` and `ls` tools and a read-only repository
+mount. The writer receives only the selected private session file. The
+original Journal records the predecessor and fences a second writer. A failed
+or interrupted reservation may leave the lineage unavailable for another
+reopen. The existing `runs events` command shows the writer evidence and
+the Run’s independent verification results.
 
 Broker-backed native reasoning requires an explicit managed inference connection so qualified
 Hashmarks context reaches every model request, including follow-up and compaction.

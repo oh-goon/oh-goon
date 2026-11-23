@@ -21,9 +21,11 @@ import pytest
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
+from oh_goon.core.models.agent_providers import PiSessionIntent
 from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
+from oh_goon.core.models.run_events import PiSessionWriterObservedEvent
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from tests.fakes.native_context import controlled_native_context
@@ -99,11 +101,13 @@ def test_controlled_pi_retains_task_across_task_free_context_requests(
 
 @pytest.mark.certification
 @pytest.mark.parametrize(
-    ("agent", "pi_rpc"),
+    ("agent", "pi_rpc", "reopen", "verification_passes"),
     (
-        pytest.param("pi", False, id="pi"),
-        pytest.param("pi", True, id="pi-rpc"),
-        pytest.param("opencode", False, id="opencode"),
+        pytest.param("pi", False, False, True, id="pi"),
+        pytest.param("pi", True, False, True, id="pi-rpc"),
+        pytest.param("pi", True, True, True, id="pi-rpc-reopen"),
+        pytest.param("pi", True, True, False, id="pi-rpc-reopen-verifier-fails"),
+        pytest.param("opencode", False, False, True, id="opencode"),
     ),
 )
 def test_installed_native_cli_preserves_frozen_context_through_compaction(
@@ -111,6 +115,8 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     monkeypatch: pytest.MonkeyPatch,
     agent: Literal["pi", "opencode"],
     pi_rpc: bool,
+    reopen: bool,
+    verification_passes: bool,
 ) -> None:
     executable = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}")
     runtime_root = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}_RUNTIME_ROOT")
@@ -125,7 +131,10 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     repository = tmp_path / "repos" / "app"
     repository.mkdir(parents=True)
     original = b"VALUE = 42\n"
-    (repository / "source.py").write_bytes(original)
+    current = b"VALUE = 43\n" if reopen else original
+    expected_verifier_source = current if verification_passes else original
+    source = repository / "source.py"
+    source.write_bytes(original)
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
     skill = tmp_path / "skills" / "context"
     skill.mkdir(parents=True)
@@ -136,6 +145,14 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     )
     (skill / "SKILL.md").write_text(skill_text, encoding="utf-8")
     task = "Review source.py and retain native-original-task-canary through context recovery."
+    prior_task = "Review the earlier checkout and remember native-prior-conversation-canary."
+    prior_skill = tmp_path / "skills" / "prior"
+    prior_skill_instructions = "# Prior review\nRetain native-prior-skill-canary.\n"
+    if reopen:
+        prior_skill.mkdir()
+        (prior_skill / "SKILL.md").write_text(prior_skill_instructions, encoding="utf-8")
+    prior_requests = 0
+    prior_identity: dict[str, str] | None = None
     identity: dict[str, str] | None = None
     producer_evidence: str | None = None
     output_contract: str | None = None
@@ -148,55 +165,106 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
         content = message.get("content", [])
         if isinstance(content, str):
             return [content]
+        if not isinstance(content, list):
+            return []
         return [
             part["text"]
             for part in content
             if isinstance(part, dict) and isinstance(part.get("text"), str)
         ]
 
+    def frozen_prompt(messages: list[dict[str, Any]], expected_task: str) -> dict[str, Any]:
+        for message in messages:
+            if message.get("role") != "user":
+                continue
+            for text in texts(message):
+                start = text.find('{"source_authority":')
+                if start < 0:
+                    continue
+                payload, _ = json.JSONDecoder().raw_decode(text[start:])
+                if payload["task"] == expected_task:
+                    assert isinstance(payload, dict)
+                    return payload
+        raise AssertionError("Frozen prompt for the selected task is missing")
+
+    def typed_review(selected_identity: dict[str, str]) -> str:
+        return json.dumps(
+            {
+                "schema": "oh-goon.agent-review/v1",
+                **selected_identity,
+                "verdict": "CLEAN",
+                "summary": "Native compaction context retained.",
+                "reviewed_paths": {"complete_scope": selected_identity["scope_identity"]},
+                "findings": [],
+            }
+        )
+
     class ModelEndpoint(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             nonlocal identity, producer_evidence, output_contract, fixture_failure, request_count
+            nonlocal prior_requests, prior_identity
             try:
                 size = int(self.headers["Content-Length"])
                 assert 0 < size <= 1024 * 1024
                 body = json.loads(self.rfile.read(size))
-                request_count += 1
-                assert request_count <= 6, "Native recovery exceeded the bounded scenario"
                 assert self.path == "/v1/chat/completions"
-                assert self.headers["Authorization"] == "Bearer SYNTHETIC_COMPACTION_KEY"
-                assert body["model"] == "native-compaction-fixture"
+                messages = body["messages"]
                 privileged = "\n".join(
                     text
-                    for message in body["messages"]
+                    for message in messages
                     if message.get("role") in {"system", "developer"}
                     for text in texts(message)
                 )
-                assert "Hashmarks" in privileged and skill_text in privileged
-                all_text = "\n".join(
-                    text for message in body["messages"] for text in texts(message)
+                tools = {
+                    item["function"]["name"]: item["function"] for item in (body.get("tools") or [])
+                }
+                if body["model"] == "native-prior-fixture":
+                    assert reopen and request_count == 0
+                    prior_requests += 1
+                    assert prior_requests == 1, "Previous native inference was replayed"
+                    assert self.headers["Authorization"] == "Bearer SYNTHETIC_PRIOR_KEY"
+                    assert prior_task in privileged and prior_skill_instructions in privileged
+                    assert {"write", "edit", "bash"} <= tools.keys()
+                    prior_payload = frozen_prompt(messages, prior_task)
+                    prior_identity = prior_payload["identity"]
+                    assert prior_identity is not None
+                    self.reply(typed_review(prior_identity))
+                    return
+                request_count += 1
+                assert request_count <= (8 if reopen else 6), (
+                    "Native recovery exceeded the bounded scenario"
                 )
+                assert self.headers["Authorization"] == "Bearer SYNTHETIC_COMPACTION_KEY"
+                assert body["model"] == "native-compaction-fixture"
+                assert "Hashmarks" in privileged and skill_text in privileged
+                all_text = "\n".join(text for message in messages for text in texts(message))
                 if identity is None:
-                    for message in body["messages"]:
-                        if message.get("role") != "user":
-                            continue
-                        for text in texts(message):
-                            start = text.find('{"source_authority":')
-                            if start < 0:
-                                continue
-                            payload, _ = json.JSONDecoder().raw_decode(text[start:])
-                            assert payload["task"] == task
-                            assert payload["skill_instructions"] == skill_text
-                            identity = payload["identity"]
-                            producer_evidence = payload["repository_evidence"]
-                            output_contract = payload["output_contract"]
-                            evidence = json.loads(producer_evidence)
-                            assert evidence["producer"] == "Hashmarks"
-                            assert (
-                                evidence["producer_implementation_identity"]
-                                == require_loaded_hashmarks_runtime()
-                            )
-                            assert evidence["capture_identity"] == identity["candidate_identity"]
+                    payload = frozen_prompt(messages, task)
+                    assert payload["skill_instructions"] == skill_text
+                    identity = payload["identity"]
+                    assert identity is not None
+                    producer_evidence = payload["repository_evidence"]
+                    output_contract = payload["output_contract"]
+                    assert producer_evidence is not None
+                    evidence = json.loads(producer_evidence)
+                    assert evidence["producer"] == "Hashmarks"
+                    assert (
+                        evidence["producer_implementation_identity"]
+                        == require_loaded_hashmarks_runtime()
+                    )
+                    assert evidence["capture_identity"] == identity["candidate_identity"]
+                    if reopen:
+                        assert prior_identity is not None
+                        assert (
+                            identity["candidate_identity"] != prior_identity["candidate_identity"]
+                        )
+                        assert prior_task in all_text, "Native prior conversation is missing"
+                if reopen:
+                    assert (
+                        prior_task not in privileged and prior_skill_instructions not in privileged
+                    )
+                    if tools:
+                        assert tools.keys() == {"read", "grep", "find", "ls"}
                 assert identity is not None and producer_evidence is not None
                 assert output_contract is not None
                 assert producer_evidence in privileged
@@ -253,7 +321,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                             + json.dumps(identity)
                         )
                     self.reply(summary)
-                elif body.get("tools"):
+                elif tools:
                     if "overflow" not in observations:
                         observations.append("overflow")
                         self.reply_error()
@@ -262,16 +330,32 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     assert compaction_marker in all_text
                     assert output_contract in all_text
                     assert all(value in all_text for value in identity.values())
+                    if reopen and "fresh-read" not in observations:
+                        observations.append("fresh-read")
+                        assert "path" in tools["read"]["parameters"]["properties"]
+                        self.reply_tool("read", {"path": "source.py"})
+                        return
+                    if reopen and "blocked-write" not in observations:
+                        assert any(
+                            "VALUE = 43" in text
+                            for message in messages
+                            if message["role"] == "tool"
+                            for text in texts(message)
+                        )
+                        observations.append("blocked-write")
+                        # A synthetic provider asks for an old tool absent from the current loadout.
+                        self.reply_tool("write", {"path": "forbidden.txt", "content": "forbidden"})
+                        return
+                    if reopen:
+                        result = next(
+                            message for message in reversed(messages) if message["role"] == "tool"
+                        )
+                        error = " ".join(texts(result)).lower()
+                        assert "write" in error and ("not found" in error or "unknown" in error), (
+                            error
+                        )
                     observations.append("continued")
-                    record = {
-                        "schema": "oh-goon.agent-review/v1",
-                        **identity,
-                        "verdict": "CLEAN",
-                        "summary": "Native compaction context retained.",
-                        "reviewed_paths": {"complete_scope": identity["scope_identity"]},
-                        "findings": [],
-                    }
-                    self.reply(json.dumps(record))
+                    self.reply(typed_review(identity))
                 else:
                     observations.append("context-only")
                     self.reply("Native context qualification")
@@ -300,17 +384,36 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
             self.wfile.write(data)
 
         def reply(self, text: str) -> None:
+            self.reply_delta({"role": "assistant", "content": text}, "stop")
+
+        def reply_tool(self, name: str, arguments: dict[str, str]) -> None:
+            self.reply_delta(
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": f"call_{name}",
+                            "type": "function",
+                            "function": {"name": name, "arguments": json.dumps(arguments)},
+                        }
+                    ],
+                },
+                "tool_calls",
+            )
+
+        def reply_delta(self, delta: dict[str, Any], reason: str) -> None:
             chunks = [
                 {
                     "choices": [
                         {
                             "index": 0,
-                            "delta": {"role": "assistant", "content": text},
+                            "delta": delta,
                             "finish_reason": None,
                         }
                     ]
                 },
-                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": reason}]},
             ]
             data = (
                 "".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks)
@@ -327,6 +430,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
 
     monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "state/app.sqlite"))
     monkeypatch.setenv("NATIVE_COMPACTION_KEY", "SYNTHETIC_COMPACTION_KEY")
+    monkeypatch.setenv("NATIVE_PRIOR_KEY", "SYNTHETIC_PRIOR_KEY")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
@@ -335,18 +439,35 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
         worker.start()
         try:
             catalog = tmp_path / "providers.json"
+            base_url = f"http://127.0.0.1:{endpoint.server_port}/v1"
             catalog.write_text(
                 json.dumps(
                     {
                         "providers": {
                             "local": {
                                 "api": "openai-chat-completions",
-                                "base_url": f"http://127.0.0.1:{endpoint.server_port}/v1",
+                                "base_url": base_url,
                                 "api_key_env": "NATIVE_COMPACTION_KEY",
-                            }
+                            },
+                            **(
+                                {
+                                    "prior": {
+                                        "api": "openai-chat-completions",
+                                        "base_url": base_url,
+                                        "api_key_env": "NATIVE_PRIOR_KEY",
+                                    }
+                                }
+                                if reopen
+                                else {}
+                            ),
                         },
                         "models": {
-                            "local": {"provider": "local", "model": "native-compaction-fixture"}
+                            "local": {"provider": "local", "model": "native-compaction-fixture"},
+                            **(
+                                {"prior": {"provider": "prior", "model": "native-prior-fixture"}}
+                                if reopen
+                                else {}
+                            ),
                         },
                         "native_profiles": {
                             "local": {
@@ -356,7 +477,21 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                                 "inference_profile": "local",
                                 "pi_rpc": pi_rpc,
                                 "timeout_seconds": 45,
-                            }
+                            },
+                            **(
+                                {
+                                    "prior": {
+                                        "backend": "bubblewrap",
+                                        "allowed_agents": ["pi"],
+                                        "workspace_roots": [str(repository.parent)],
+                                        "inference_profile": "prior",
+                                        "pi_rpc": True,
+                                        "timeout_seconds": 45,
+                                    }
+                                }
+                                if reopen
+                                else {}
+                            ),
                         },
                         "native_agents": {
                             agent: {
@@ -368,14 +503,73 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 ),
                 encoding="utf-8",
             )
+            prior_run_id: str | None = None
+            prior_observation = None
+            if reopen:
+                prior_selected, prior_backend, prior_git = resolve_native_cli_selection(
+                    agent="pi",
+                    profile="prior",
+                    workspace=repository,
+                    config_file=catalog,
+                    session=PiSessionIntent(mode="new"),
+                )
+                prior_runtime = ApplicationRuntime.build(
+                    standard_local=True,
+                    standard_process_isolation=prior_backend,
+                    git_service=prior_git,
+                )
+                try:
+                    prior_runtime.locations.add(repository)
+                    prior_admitted = prior_runtime.plans.run_native_agent(
+                        selected=prior_selected,
+                        workspace=repository,
+                        skill=prior_skill,
+                        task=prior_task,
+                        role="review",
+                        verification=(
+                            (
+                                "/usr/bin/python3",
+                                "-I",
+                                "-c",
+                                "from pathlib import Path; "
+                                f"assert Path('source.py').read_bytes() == {original!r}",
+                            ),
+                        ),
+                    )
+                    prior_run_id = prior_admitted.fleet_run_id
+                    prior_detail = prior_runtime.runs.wait_for_terminal(prior_run_id, timeout=60)
+                    assert prior_detail.outcome is FleetRunOutcome.SUCCESS, (
+                        fixture_failure,
+                        prior_runtime.runs.game_tape_live_output(prior_run_id).model_dump_json()[
+                            -8192:
+                        ],
+                    )
+                    assert prior_requests == 1 and fixture_failure is None
+                    (prior_observation,) = [
+                        event.observation
+                        for event in prior_runtime.runs.events(prior_run_id).events
+                        if isinstance(event, PiSessionWriterObservedEvent)
+                    ]
+                    assert prior_observation.persistence == "observed"
+                finally:
+                    prior_runtime.shutdown(wait_for_runs=True)
+                source.write_bytes(current)
+
             selected, backend, git = resolve_native_cli_selection(
-                agent=agent, profile="local", workspace=repository, config_file=catalog
+                agent=agent,
+                profile="local",
+                workspace=repository,
+                config_file=catalog,
+                session=PiSessionIntent(mode="continue", prior_run_id=prior_run_id)
+                if reopen
+                else None,
             )
             runtime = ApplicationRuntime.build(
                 standard_local=True, standard_process_isolation=backend, git_service=git
             )
             try:
-                runtime.locations.add(repository)
+                if not reopen:
+                    runtime.locations.add(repository)
                 admitted = runtime.plans.run_native_agent(
                     selected=selected,
                     workspace=repository,
@@ -388,12 +582,16 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                             "-I",
                             "-c",
                             "from pathlib import Path; "
-                            + f"assert Path('source.py').read_bytes() == {original!r}",
+                            + f"assert Path('source.py').read_bytes() == {expected_verifier_source!r}",
                         ),
                     ),
                 )
                 detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=60)
-                assert detail.outcome is FleetRunOutcome.SUCCESS, (
+                assert detail.outcome is (
+                    FleetRunOutcome.SUCCESS
+                    if verification_passes
+                    else FleetRunOutcome.ATTENTION_REQUIRED
+                ), (
                     fixture_failure,
                     observations,
                     runtime.runs.game_tape_live_output(admitted.fleet_run_id).model_dump_json()[
@@ -402,7 +600,9 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 )
                 assert fixture_failure is None
                 assert observations.count("overflow") == observations.count("continued") == 1
-                assert observations.count("compaction") == 1
+                # Pi summarizes prior history and the interrupted current turn
+                # separately when the overflow cut splits the reopened turn.
+                assert observations.count("compaction") == (2 if reopen else 1)
                 assert observations.count("context-only") <= 1
                 assert observations[-1] == "continued"
                 operation = detail.operations[0].evidence
@@ -421,7 +621,13 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 if pi_rpc:
                     assert "--pi-rpc" in steps[0].command
                     assert steps[0].command[steps[0].command.index("--mode") + 1] == "rpc"
-                assert steps[0].settlement.outcome == steps[1].settlement.outcome == "SUCCESS"
+                assert steps[0].settlement.outcome == "SUCCESS"
+                assert steps[1].settlement.outcome == (
+                    "SUCCESS" if verification_passes else "FAILED"
+                )
+                assert steps[1].status is (
+                    GameTapeStatus.PASSED if verification_passes else GameTapeStatus.FAILED
+                )
                 assert steps[1].native_agent_observations == ()
                 for step in steps:
                     assert step.settlement.cleanup == "VERIFIED"
@@ -435,7 +641,32 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                         if event.kind == "context"
                     ]
                     assert context == ["pi: compaction_start", "pi: compaction_end"]
-                assert (repository / "source.py").read_bytes() == original
+                assert source.read_bytes() == current
+                if reopen:
+                    assert not (repository / "forbidden.txt").exists()
+                    assert observations == [
+                        "overflow",
+                        "compaction",
+                        "compaction",
+                        "fresh-read",
+                        "blocked-write",
+                        "continued",
+                    ]
+                    assert prior_requests == 1 and prior_run_id and prior_observation is not None
+                    assert admitted.fleet_run_id != prior_run_id
+                    assert runtime.runs.get(prior_run_id).outcome is FleetRunOutcome.SUCCESS
+                    (observation,) = [
+                        event.observation
+                        for event in runtime.runs.events(admitted.fleet_run_id).events
+                        if isinstance(event, PiSessionWriterObservedEvent)
+                    ]
+                    assert observation.persistence == "observed"
+                    assert observation.session_id == prior_observation.session_id
+                    assert observation.leaf_id and observation.leaf_id != prior_observation.leaf_id
+                    assert observation.file is not None and prior_observation.file is not None
+                    assert observation.file.device == prior_observation.file.device
+                    assert observation.file.inode == prior_observation.file.inode
+                    assert observation.file.size > prior_observation.file.size
                 assert "SYNTHETIC_COMPACTION_KEY" not in detail.model_dump_json()
                 print(
                     json.dumps(

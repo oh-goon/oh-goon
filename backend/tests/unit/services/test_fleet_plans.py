@@ -796,8 +796,10 @@ def test_current_history_policy_precedes_new_admission_but_preserves_recorded_re
         assert effects.mock_calls == []
 
 
-@pytest.mark.parametrize("mode", ["prepared", "rerun"])
-@pytest.mark.parametrize("selector", ["new", "run:prior-run"])
+@pytest.mark.parametrize(
+    ("mode", "selector"),
+    [("prepared", "new"), ("prepared", "run:prior-run"), ("rerun", "new")],
+)
 def test_unqualified_start_and_persistent_rerun_refuse_before_work(
     tmp_path: Path, selector: str, mode: str
 ) -> None:
@@ -851,11 +853,7 @@ def test_unqualified_start_and_persistent_rerun_refuse_before_work(
             terminalize_run(journal, "recorded-run", FleetRunTerminalIntent.CANCEL)
         view = journal.read_view()
         recorded = view.run_detail("recorded-run")
-        expected = (
-            ("fresh direct Run" if mode == "rerun" else "dedicated managed Pi RPC")
-            if selector == "new"
-            else "exact session reopening"
-        )
+        expected = "fresh direct Run" if mode == "rerun" else "dedicated managed Pi RPC"
         with pytest.raises(PiSessionUnavailable, match=expected):
             if mode == "rerun":
                 assert recorded is not None and recorded.run.target == target

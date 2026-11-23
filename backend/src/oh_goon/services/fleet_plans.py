@@ -296,6 +296,7 @@ class FleetPlanService:
         Its resolved target and exact frozen source remain with the existing
         content/Run owners; this convenience owns no process or workflow loop.
         """
+        read_only_agent = role != "report" or selected.continues_pi_session
         if type(candidate) is not bool:
             raise FleetPlanInvalid("Candidate selection requires an explicit boolean")
         require_pi_session_execution(
@@ -306,9 +307,9 @@ class FleetPlanService:
             profile=selected.profile,
             definition=selected.definition,
         )
-        if selected.creates_pi_session and (candidate or self._run_concurrency is not None):
+        if selected.uses_persistent_pi_session and (candidate or self._run_concurrency is not None):
             raise PiSessionUnavailable(
-                "New persistent Pi sessions require a direct repository in a serial runtime"
+                "Persistent Pi sessions require a direct repository in a serial runtime"
             )
         if not self._standard_local_fleet or self._content_store is None:
             raise FleetPlanInvalid("Native Agent hosting requires ordinary Fleet execution")
@@ -412,7 +413,7 @@ class FleetPlanService:
                 capture_git = workspace_control_git(self._git_service)
             else:
                 selected = self._prepare_native_agent(
-                    selected, workspace, read_only_workspace=role != "report" and not verification
+                    selected, workspace, read_only_workspace=read_only_agent and not verification
                 )
 
             with TemporaryDirectory(prefix="oh-goon-native-plan-") as temporary:
@@ -444,7 +445,7 @@ class FleetPlanService:
                         "task": task,
                         "timeout_seconds": selected.profile.timeout_seconds,
                         "requested_effects": {
-                            "repository_access": "write" if role == "report" else "read_only",
+                            "repository_access": "read_only" if read_only_agent else "write",
                             "recipients": recipients,
                         },
                     },
@@ -557,11 +558,11 @@ class FleetPlanService:
         allow_candidate_metadata: bool = False,
     ) -> ResolvedNativeAgent:
         """Bind and preflight the original backend before any native Run admission."""
-        if selected.creates_pi_session:
+        if selected.uses_persistent_pi_session:
             from oh_goon.runtime.pi_session_storage import require_pi_session_repository
 
             if self._run_concurrency is not None:
-                raise PiSessionUnavailable("New persistent Pi sessions require a serial runtime")
+                raise PiSessionUnavailable("Persistent Pi sessions require a serial runtime")
             require_pi_session_repository(workspace)
         if selected.connection is not None:
             selected.connection.selection.require_history_authorization()
@@ -1555,10 +1556,8 @@ class FleetPlanService:
                 "bounded Agent repair requires explicit standard-local execution"
             )
         if native_agent is not None:
-            if native_agent.creates_pi_session:
-                raise PiSessionUnavailable(
-                    "New persistent Pi sessions require a standalone fresh Run"
-                )
+            if native_agent.uses_persistent_pi_session:
+                raise PiSessionUnavailable("Persistent Pi sessions require a standalone fresh Run")
             if review_write_roots is None:
                 raise FleetPlanInvalid("Native repair requires the complete review campaign")
             if native_workspace is None or agent_connection is not None:

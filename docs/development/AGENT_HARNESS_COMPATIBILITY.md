@@ -973,9 +973,36 @@ launch, and post-exit observation. A duplicate reservation refuses. File
 metadata and bounded native identity can be recorded only after the original
 process tree settles. Missing or interrupted evidence leaves the reservation
 unconfirmed, even after Run recovery. The file stays with the original Run.
-The observed metadata is separate from the verifier result and carries no
-permission to reopen. HUG-43 owns exact reopen, including effective native
-configuration and branch identity.
+The observed metadata is separate from the verifier result. HUG-43 extends
+this observation with a bounded file digest for eligible session predecessors.
+
+### Exact read-only Pi reopen — HUG-43
+
+**Disposition: retain** the Pi 1.3.0 RPC relay, managed inference bootstrap,
+owned settlement and isolated native storage. A fresh Run can select the
+latest accepted Agent writer in the same original repository subject and
+native implementation. The Journal rechecks predecessor custody when
+reserving the new writer. A reservation becomes the lineage head even if the
+worker is interrupted. The selected storage is a regular file bound by
+descriptor. Its saved SHA-256 is checked before exposing it to Pi. Files over
+16 MiB or without qualified saved bytes cannot supply continuation authority.
+
+The relay checks the exact native file, session ID and active leaf, current
+managed provider/model/wire endpoint, and idle state before submitting the
+fresh prompt. Pi's `get_entries` query is anchored at the prior leaf. It
+does not transfer the old transcript out of the relay. Explicit native model
+arguments and the fixed read-only built-in tools prevent restoration of
+previous tool grants. The current repository is physically read-only inside
+Bubblewrap. Native project approval, extensions, MCP, Skills, context files
+and prompt templates are disabled for the continuing process. The original
+broker supplies current captured task, Skill and Hashmarks evidence to each
+request, including native follow-up, compaction and retry.
+
+Native settlement, its post-turn file observation, command exit, descendant
+quiescence, the accepted Step result and independent verifier retain their
+respective owners. This mode does not qualify migration of native files,
+writes by other host processes, restored extensions, disk-full or power-loss
+durability, or portability to other runtimes.
 
 ## Native model usage observations — HUG-222, 2026-11-22
 

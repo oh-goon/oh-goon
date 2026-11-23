@@ -141,8 +141,22 @@ class StepAttemptCreatedEvent(_FleetRunEventBase):
     step_attempt_id: str = Field(min_length=1)
 
 
+class PiSessionContinuationOrigin(ImmutableModel):
+    """The exact prior Run and its observed writer cut, never a filesystem selector."""
+
+    prior_run_id: str = Field(min_length=1, max_length=160)
+    reservation_sequence: int = Field(ge=1)
+    observation_sequence: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def require_observed_reservation(self) -> PiSessionContinuationOrigin:
+        if self.observation_sequence <= self.reservation_sequence:
+            raise ValueError("Pi continuation observation must follow its reservation")
+        return self
+
+
 class PiSessionWriterReservedEvent(_FleetRunEventBase):
-    """Original Run-owned writer fence for one newly allocated Pi session."""
+    """Original Run-owned writer fence for one admitted Pi session."""
 
     event_type: Literal[FleetRunEventType.PI_SESSION_WRITER_RESERVED]
     repository_id: str = Field(min_length=1)
@@ -152,6 +166,9 @@ class PiSessionWriterReservedEvent(_FleetRunEventBase):
     attempt_sequence: int = Field(ge=1)
     storage_id: str = Field(pattern=r"^pi-session-[0-9a-f]{64}$")
     lease_binding: str = Field(pattern=r"^pi-writer-[0-9a-f]{64}$")
+    continuation: PiSessionContinuationOrigin | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class PiSessionWriterObservedEvent(_FleetRunEventBase):

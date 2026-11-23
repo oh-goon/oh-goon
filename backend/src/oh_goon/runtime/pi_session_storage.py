@@ -1,8 +1,10 @@
-"""Private native Pi files scoped to one original Run and Step attempt."""
+"""Pin private native Pi files for the current original Run and Step attempt."""
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import stat
 import sys
 from collections.abc import Callable, Generator
@@ -11,11 +13,18 @@ from pathlib import Path
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import PiSessionUnavailable
-from oh_goon.core.models.pi_session_storage import PiSessionDirectoryPin, PiSessionFileObservation
+from oh_goon.core.models.pi_session_storage import (
+    PI_SESSION_NEW_FILE,
+    PiSessionDirectoryPin,
+    PiSessionFileObservation,
+    PiSessionFilePin,
+)
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.product_identity import pi_session_storage_id, repository_subject_instance_id
+
+_MAX_PI_SESSION_BYTES = 16 * 1024 * 1024
 
 
 def require_pi_session_repository(workspace: Path) -> None:
@@ -98,15 +107,18 @@ def _pin_path(path: Path, owned: ExitStack) -> tuple[int, Callable[[], None], se
 
 
 def _open_private_child(
-    owned: ExitStack, parent: int, name: str, *, exclusive: bool
+    owned: ExitStack, parent: int, name: str, *, create: bool, exclusive: bool = False
 ) -> tuple[int, Callable[[], None]]:
     created = False
-    try:
-        os.mkdir(name, mode=0o700, dir_fd=parent)
-        created = True
-    except FileExistsError:
-        if exclusive:
-            raise FleetPlanInvalid("Original Pi session attempt directory already exists") from None
+    if create:
+        try:
+            os.mkdir(name, mode=0o700, dir_fd=parent)
+            created = True
+        except FileExistsError:
+            if exclusive:
+                raise FleetPlanInvalid(
+                    "Original Pi session attempt directory already exists"
+                ) from None
     directory = os.open(name, _directory_flags(), dir_fd=parent)
     owned.callback(os.close, directory)
     expected = _directory_identity(directory)
@@ -133,7 +145,7 @@ def _open_private_child(
 
 
 @contextmanager
-def create_pi_session_directory(
+def pin_pi_session_directory(
     *,
     layout: ApplicationStatePathLayout,
     fleet_run_id: str,
@@ -143,12 +155,13 @@ def create_pi_session_directory(
     attempt_number: int,
     workspace: Path,
     require_current: Callable[[], None],
+    storage_id: str | None = None,
+    prior_file: PiSessionFileObservation | None = None,
 ) -> Generator[PiSessionDirectoryPin, None, None]:
-    """Allocate a fresh private directory under already admitted Run/Step authority.
+    """Pin new or exact retained storage under the current admitted writer.
 
-    The caller holds original process custody through the pin's scope. Once
-    created, the leaf is retained even on failure. Reuse requires a separately
-    qualified admission and cannot be inferred from filesystem contents.
+    The caller holds original process custody through the pin's scope. A prior
+    receipt comes from the Journal of the exact selected continuation lineage.
     """
     if sys.platform != "linux" or not hasattr(os, "O_PATH"):
         raise FleetPlanInvalid(
@@ -169,7 +182,16 @@ def create_pi_session_directory(
         raise FleetPlanInvalid(
             "Pi session storage differs from the admitted direct Git workspace and Step"
         )
-    leaf = pi_session_storage_id(fleet_run_id, repository.repository_id, step_id, attempt_number)
+    if (
+        (storage_id is None) != (prior_file is None)
+        or (storage_id is not None and not re.fullmatch(r"pi-session-[0-9a-f]{64}", storage_id))
+        or (prior_file is not None and prior_file.sha256 is None)
+    ):
+        raise FleetPlanInvalid("Pi session reopening requires the exact retained storage receipt")
+    continuing = prior_file is not None
+    leaf = storage_id or pi_session_storage_id(
+        fleet_run_id, repository.repository_id, step_id, attempt_number
+    )
     with ExitStack() as owned:
         try:
             state_fd, check_state, state_mounts = _pin_path(layout.root, owned)
@@ -204,12 +226,12 @@ def create_pi_session_directory(
 
             require_original_current()
             root_fd, check_root = _open_private_child(
-                owned, state_fd, layout.pi_sessions.name, exclusive=False
+                owned, state_fd, layout.pi_sessions.name, create=not continuing
             )
             require_original_current()
             check_root()
             directory_fd, check_directory = _open_private_child(
-                owned, root_fd, leaf, exclusive=True
+                owned, root_fd, leaf, create=not continuing, exclusive=not continuing
             )
 
             def require_original_storage_current() -> None:
@@ -221,14 +243,102 @@ def create_pi_session_directory(
                     raise FleetPlanInvalid("Original Pi session storage is unavailable") from exc
 
             require_original_storage_current()
-            with os.scandir(directory_fd) as entries:
-                if next(entries, None) is not None:
-                    raise FleetPlanInvalid("New Pi session requires an empty original directory")
+            file_pin = None
+            if prior_file is not None:
+                name = PI_SESSION_NEW_FILE.name
+                fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
+                owned.callback(os.close, fd)
+                observed, metadata = _observe_pinned_session_file(
+                    directory_fd, name, fd, require_original_storage_current
+                )
+                if observed != prior_file:
+                    raise FleetPlanInvalid("Retained Pi session differs from its admitted receipt")
+
+                def require_before_launch() -> None:
+                    try:
+                        current = _require_current_file(directory_fd, name, fd)
+                    except OSError as exc:
+                        raise FleetPlanInvalid(
+                            "Retained Pi session is unavailable before launch"
+                        ) from exc
+                    if _file_state(current) != _file_state(metadata):
+                        raise FleetPlanInvalid("Retained Pi session changed before launch")
+
+                file_pin = PiSessionFilePin(fd, require_before_launch)
+            else:
+                with os.scandir(directory_fd) as entries:
+                    if next(entries, None) is not None:
+                        raise FleetPlanInvalid(
+                            "New Pi session requires an empty original directory"
+                        )
         except (OSError, ValueError) as exc:
             raise FleetPlanInvalid("Private Pi session storage is unavailable") from exc
         yield PiSessionDirectoryPin(
-            layout.pi_sessions / leaf, directory_fd, workspace, require_original_storage_current
+            layout.pi_sessions / leaf,
+            directory_fd,
+            workspace,
+            require_original_storage_current,
+            existing_file=file_pin,
         )
+
+
+def _file_state(info: os.stat_result) -> tuple[int, ...]:
+    # Reading the retained bytes can update access time. It cannot update any
+    # identity or change metadata used to fence the subsequent launch.
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_uid,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _require_current_file(directory_fd: int, name: str, fd: int) -> os.stat_result:
+    info = os.fstat(fd)
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != os.geteuid()
+        or _mount_id(fd) != _mount_id(directory_fd)
+    ):
+        raise FleetPlanInvalid("Pi session file is not an original singly owned regular file")
+    named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    if _file_state(named) != _file_state(info):
+        raise FleetPlanInvalid("Original Pi session file changed before observation")
+    return info
+
+
+def _observe_pinned_session_file(
+    directory_fd: int, name: str, fd: int, require_current: Callable[[], None]
+) -> tuple[PiSessionFileObservation, os.stat_result]:
+    require_current()
+    before = _require_current_file(directory_fd, name, fd)
+    if not 1 <= before.st_size <= _MAX_PI_SESSION_BYTES:
+        raise FleetPlanInvalid("Pi session exceeds its bounded persistence observation scope")
+    digest = hashlib.sha256()
+    byte_count = 0
+    # The owned O_PATH handle was verified regular before opening a readable
+    # descriptor. Never reopen a caller-controlled pathname to read bytes.
+    with Path(f"/proc/self/fd/{fd}").open("rb") as stream:
+        if _file_state(os.fstat(stream.fileno())) != _file_state(before):
+            raise FleetPlanInvalid("Original Pi session file changed before hashing")
+        while chunk := stream.read(min(1024 * 1024, before.st_size + 1 - byte_count)):
+            byte_count += len(chunk)
+            digest.update(chunk)
+    require_current()
+    after = _require_current_file(directory_fd, name, fd)
+    if byte_count != before.st_size or _file_state(after) != _file_state(before):
+        raise FleetPlanInvalid("Original Pi session file changed while hashing")
+    return (
+        PiSessionFileObservation(
+            device=after.st_dev, inode=after.st_ino, size=after.st_size, sha256=digest.hexdigest()
+        ),
+        after,
+    )
 
 
 def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionFileObservation:
@@ -240,6 +350,7 @@ def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionF
         or "\\" in name
         or "\x00" in name
         or name.startswith(".")
+        or (pin.existing_file is not None and name != PI_SESSION_NEW_FILE.name)
     ):
         raise FleetPlanInvalid("Pi session file requires an exact native basename")
     with ExitStack() as owned:
@@ -251,24 +362,16 @@ def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionF
                 os.geteuid(),
             ):
                 raise FleetPlanInvalid("Original Pi session directory changed before observation")
-            fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=pin.directory_fd)
-            owned.callback(os.close, fd)
-            info = os.fstat(fd)
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or info.st_nlink != 1
-                or info.st_uid != os.geteuid()
-                or _mount_id(fd) != identity[-1]
-            ):
-                raise FleetPlanInvalid(
-                    "Pi session file is not an original singly owned regular file"
+            if pin.existing_file is None:
+                fd = os.open(
+                    name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=pin.directory_fd
                 )
-            pin.require_current()
-            named = os.stat(name, dir_fd=pin.directory_fd, follow_symlinks=False)
-            if named != info or named.st_ctime_ns != info.st_ctime_ns:
-                raise FleetPlanInvalid("Original Pi session file changed before observation")
-            return PiSessionFileObservation(
-                device=info.st_dev, inode=info.st_ino, size=info.st_size
+                owned.callback(os.close, fd)
+            else:
+                fd = pin.existing_file.fd
+            observation, _metadata = _observe_pinned_session_file(
+                pin.directory_fd, name, fd, pin.require_current
             )
+            return observation
         except OSError as exc:
             raise FleetPlanInvalid("Original Pi session file is unavailable") from exc

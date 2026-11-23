@@ -43,7 +43,7 @@ from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionSession
 from oh_goon.runtime.fault_injection import FaultInjector, FaultPoint, NoFaultInjector
 from oh_goon.runtime.journal import Journal
-from oh_goon.runtime.pi_session_storage import create_pi_session_directory, observe_pi_session_file
+from oh_goon.runtime.pi_session_storage import observe_pi_session_file, pin_pi_session_directory
 from oh_goon.services.capability_executor import CapabilityExecutor
 from oh_goon.services.repository_effect_fence import RepositoryEffectFence
 from oh_goon.services.repository_effect_preparation import mutate_pre_effect_attempt
@@ -325,7 +325,7 @@ class RepositoryEffectExecution:
     ) -> PiSessionWriter | None:
         target = attempt.target
         native = target.plan.native_agent if isinstance(target, FleetPlanTarget) else None
-        if native is None or native.session is None or native.session.mode != "new":
+        if native is None or not native.uses_persistent_pi_session:
             return None
         layout = self._state_paths
         if layout is None or admission is None or attempt.fleet_run_id is None:
@@ -343,7 +343,12 @@ class RepositoryEffectExecution:
                 step_id=step_id,
                 attempt_number=attempt_number,
             )
-            with create_pi_session_directory(
+            prior_file, prior_native = (
+                self._journal.pi_session_continuation_source(session, reservation)
+                if reservation.continuation is not None
+                else (None, None)
+            )
+            with pin_pi_session_directory(
                 layout=layout,
                 fleet_run_id=reservation.fleet_run_id,
                 repository=repository,
@@ -354,6 +359,8 @@ class RepositoryEffectExecution:
                 require_current=partial(
                     self._journal.require_pi_session_writer, session, reservation
                 ),
+                storage_id=reservation.storage_id if prior_file is not None else None,
+                prior_file=prior_file,
             ) as directory:
                 yield ReservedPiSessionWriter(
                     directory=directory,
@@ -363,6 +370,7 @@ class RepositoryEffectExecution:
                     settle=lambda observation: self._journal.observe_pi_session_writer(
                         session, reservation, observation=observation
                     ),
+                    prior_native=prior_native,
                 )
 
         return reserve

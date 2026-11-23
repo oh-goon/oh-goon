@@ -32,7 +32,13 @@ from oh_goon.core.models.run import (
     FleetRunState,
     fleet_run_outcome,
 )
-from oh_goon.core.models.run_events import FleetRunEventBatch
+from oh_goon.core.models.run_events import (
+    FleetRunEventBatch,
+    PiSessionContinuationOrigin,
+    PiSessionWriterObservedEvent,
+    PiSessionWriterReservedEvent,
+    RunAdmittedEvent,
+)
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.product_identity import repository_id
 from oh_goon.core.vocabulary import (
@@ -48,7 +54,11 @@ from oh_goon.runtime._journal_failure_projection import (
 )
 from oh_goon.runtime.execution_timeline_read import project_bounded_execution_timeline
 from oh_goon.runtime.journal_facts import JournalEntry
-from oh_goon.runtime.journal_index import JournalIndex
+from oh_goon.runtime.journal_index import (
+    JournalIndex,
+    pi_session_origin_observation,
+    pi_session_predecessor,
+)
 
 
 def _fleet_run_failure_identity(detail: FleetRunDetail | None) -> FleetRunFailureIdentity | None:
@@ -541,6 +551,21 @@ class JournalReadView:
             )
             if failure is not None:
                 yield failure
+
+    def pi_session_predecessor(
+        self, prior_run_id: str, admission: RunAdmittedEvent
+    ) -> tuple[PiSessionWriterReservedEvent, PiSessionWriterObservedEvent]:
+        return pi_session_predecessor(
+            prior_run_id, admission, self._index.events_by_run, self._index.pi_session_writer_heads
+        )
+
+    def pi_session_writer_is_head(self, reservation: PiSessionWriterReservedEvent) -> bool:
+        return self._index.pi_session_writer_heads.get(reservation.storage_id) == reservation
+
+    def pi_session_origin_observation(
+        self, origin: PiSessionContinuationOrigin
+    ) -> PiSessionWriterObservedEvent:
+        return pi_session_origin_observation(origin, self._index.events_by_run)
 
     def run_events(
         self, fleet_run_id: str, after: int = 0, *, limit: int | None = None

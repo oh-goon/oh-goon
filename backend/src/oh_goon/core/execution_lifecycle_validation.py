@@ -142,16 +142,23 @@ def _validate_pi_session_reservation(
         or native.connection is None
         or native.backend_configuration_id is None
         or native.session is None
-        or native.session.mode != "new"
+        or native.session.mode == "ephemeral"
     ):
         raise InvalidRunTransition("Pi writer differs from the original admitted session and Step")
     attempt = _preceding_event(history, event.attempt_sequence)
     if not isinstance(attempt, StepAttemptCreatedEvent) or not _same_pi_attempt(attempt, event):
         raise InvalidRunTransition("Pi writer requires the exact original Step attempt")
-    if event.storage_id != pi_session_storage_id(
-        event.fleet_run_id, event.repository_id, event.step_id, event.attempt_number
+    if native.session.mode == "new":
+        if event.continuation is not None or event.storage_id != pi_session_storage_id(
+            event.fleet_run_id, event.repository_id, event.step_id, event.attempt_number
+        ):
+            raise InvalidRunTransition("Pi writer storage differs from its original Step attempt")
+    elif (
+        event.continuation is None
+        or event.continuation.prior_run_id != native.session.prior_run_id
+        or event.continuation.prior_run_id == event.fleet_run_id
     ):
-        raise InvalidRunTransition("Pi writer storage differs from its original Step attempt")
+        raise InvalidRunTransition("Pi writer differs from its admitted prior Run")
     if any(isinstance(item, PiSessionWriterReservedEvent) for item in history):
         raise InvalidRunTransition("Pi writer cannot reserve its original lineage more than once")
     if pi_writer_step_settled(event, history[attempt.sequence :]):

@@ -749,7 +749,7 @@ class FleetRunControlPlane:
         if (
             isinstance(intent.target, FleetPlanTarget)
             and intent.target.plan.native_agent is not None
-            and intent.target.plan.native_agent.creates_pi_session
+            and intent.target.plan.native_agent.uses_persistent_pi_session
             and (
                 source is not FleetRunSource.MANUAL
                 or self._run_capacity is not None
@@ -760,7 +760,7 @@ class FleetRunControlPlane:
             from oh_goon.core.models.agent_providers import PiSessionUnavailable
 
             raise PiSessionUnavailable(
-                "New persistent Pi sessions require one explicit repository in a fresh serial Run"
+                "Persistent Pi sessions require one explicit repository in a fresh serial Run"
             )
         with self._lifecycle.serialize_admission(f"run:{fleet_run_id}"):
             existing = _matching_existing_run(
