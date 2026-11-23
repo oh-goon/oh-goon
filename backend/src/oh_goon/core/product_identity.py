@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import stat
 import uuid
 from pathlib import Path
@@ -68,14 +69,21 @@ def repository_subject_instance_id(path: Path | str) -> str:
     except OSError as exc:
         raise ValueError(f"Cannot capture repository subject authority for {root}: {exc}") from exc
     marker = root / ".git"
-    marker_payload: dict[str, int] | None = None
     try:
         marker_stat = marker.lstat()
     except FileNotFoundError:
-        pass
+        marker_stat = None
     except OSError as exc:
         raise ValueError(f"Cannot capture repository subject authority for {root}: {exc}") from exc
-    else:
+    return repository_subject_instance_id_from_metadata(root, root_stat, marker_stat)
+
+
+def repository_subject_instance_id_from_metadata(
+    root: Path, root_stat: os.stat_result, marker_stat: os.stat_result | None
+) -> str:
+    """Identify a canonical repository root from metadata held by its filesystem owner."""
+    marker_payload: dict[str, int] | None = None
+    if marker_stat is not None:
         marker_payload = {
             "dev": marker_stat.st_dev,
             "ino": marker_stat.st_ino,

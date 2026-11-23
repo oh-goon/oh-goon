@@ -728,13 +728,17 @@ def test_bound_bubblewrap_refuses_scratch_in_another_retained_pi_slot(
     assert not tuple(other_slot.iterdir())
 
 
-@pytest.mark.parametrize("before_launch", ["current", "replaced", "unexpected-entry"])
+@pytest.mark.parametrize(
+    ("before_launch", "read_only"),
+    [("current", True), ("current", False), ("replaced", True), ("unexpected-entry", True)],
+)
 def test_pi_session_descriptor_binds_only_at_workload_birth(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before_launch: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before_launch: str, read_only: bool
 ) -> None:
     backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    git = workspace / ".git"
+    git.mkdir(parents=True)
     private = tmp_path / "private-sessions"
     private.mkdir(mode=0o700)
     selected = private / "one-original-step"
@@ -743,7 +747,10 @@ def test_pi_session_descriptor_binds_only_at_workload_birth(
         private_paths=(private,), read_only_paths=(), pi_session_root=private
     )
     descriptor = os.open(selected, os.O_RDONLY | os.O_DIRECTORY)
+    workspace_fd = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY)
+    git_fd = os.open(git, os.O_RDONLY | os.O_DIRECTORY)
     calls: list[tuple[tuple[str, ...], tuple[int, ...]]] = []
+    mounted: dict[str, tuple[str, os.stat_result]] = {}
     workload_started = False
 
     def observe(event: CommandProcessLifecycleEvent) -> None:
@@ -759,6 +766,11 @@ def test_pi_session_descriptor_binds_only_at_workload_birth(
         nonlocal workload_started
         calls.append((argv, options["pass_fds"]))
         if "--bind-fd" in argv:
+            for index, argument in enumerate(argv):
+                if argument in {"--ro-bind-fd", "--bind-fd"}:
+                    mount_fd = int(argv[index + 1])
+                    assert options["pass_fds"].count(mount_fd) == 1
+                    mounted[argv[index + 2]] = (argument, os.fstat(mount_fd))
             options["process_observer"](
                 CommandProcessLifecycleEvent(
                     kind="PROCESS_STARTING", physical_execution_id="pi-session-launch"
@@ -773,9 +785,9 @@ def test_pi_session_descriptor_binds_only_at_workload_birth(
         request = _request(
             backend,
             workspace,
-            read_only_workspace=True,
+            read_only_workspace=read_only,
             pi_session_directory=PiSessionDirectoryPin(
-                selected, descriptor, workspace, lambda: None
+                selected, descriptor, workspace, workspace_fd, git_fd, lambda: None
             ),
         )
         if before_launch != "current":
@@ -790,22 +802,41 @@ def test_pi_session_descriptor_binds_only_at_workload_birth(
         assert probe[-1] == "/bin/true"
         assert "--bind-fd" not in probe and descriptor not in probe_fds
         launch, inherited = calls[1]
-        assert launch.count("--bind-fd") == 1 and inherited.count(descriptor) == 1
-        index = launch.index("--bind-fd")
-        assert launch[index + 1 : index + 3] == (str(descriptor), str(PI_SESSION_SANDBOX_DIRECTORY))
+        assert inherited.count(descriptor) == 1
+        assert len(inherited) == len(set(inherited))
+        assert workspace_fd not in inherited and git_fd not in inherited
+        index = launch.index(str(PI_SESSION_SANDBOX_DIRECTORY))
+        assert launch[index - 2 : index] == ("--bind-fd", str(descriptor))
         assert str(selected) not in launch and str(private) not in launch
-        assert launch[launch.index("/workspace") - 2] == "--ro-bind"
+        workspace_mode = "--ro-bind-fd" if read_only else "--bind-fd"
+        for target in ("/workspace", str(workspace)):
+            mode, observed = mounted[target]
+            assert mode == workspace_mode
+            assert os.path.samestat(observed, workspace.stat())
+        assert launch.index("/tmp") < launch.index(str(workspace))
+        for target in ("/workspace/.git", str(git)):
+            if read_only:
+                mode, observed = mounted[target]
+                assert mode == "--ro-bind-fd"
+                assert os.path.samestat(observed, git.stat())
+            else:
+                assert target not in mounted
     finally:
+        os.close(git_fd)
+        os.close(workspace_fd)
         os.close(descriptor)
 
 
-@pytest.mark.parametrize("unavailable", ["foreign-fd", "guest-shadow", "resource-wrapper"])
+@pytest.mark.parametrize(
+    "unavailable", ["foreign-fd", "foreign-workspace-fd", "guest-shadow", "resource-wrapper"]
+)
 def test_pi_session_mount_refuses_unqualified_native_request_before_launch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unavailable: str
 ) -> None:
     backend = _backend(tmp_path, monkeypatch)
     workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    git = workspace / ".git"
+    git.mkdir(parents=True)
     private = tmp_path / "private-sessions"
     private.mkdir(mode=0o700)
     selected = private / "one-original-step"
@@ -818,6 +849,11 @@ def test_pi_session_mount_refuses_unqualified_native_request_before_launch(
     descriptor = os.open(
         foreign if unavailable == "foreign-fd" else selected, os.O_RDONLY | os.O_DIRECTORY
     )
+    workspace_fd = os.open(
+        foreign if unavailable == "foreign-workspace-fd" else workspace,
+        os.O_RDONLY | os.O_DIRECTORY,
+    )
+    git_fd = os.open(git, os.O_RDONLY | os.O_DIRECTORY)
     monkeypatch.setattr(
         module,
         "run_command",
@@ -828,7 +864,7 @@ def test_pi_session_mount_refuses_unqualified_native_request_before_launch(
             backend,
             workspace,
             pi_session_directory=PiSessionDirectoryPin(
-                selected, descriptor, workspace, lambda: None
+                selected, descriptor, workspace, workspace_fd, git_fd, lambda: None
             ),
             read_only_mounts=(StandardReadOnlyMount(foreign, PI_SESSION_SANDBOX_DIRECTORY),)
             if unavailable == "guest-shadow"
@@ -841,10 +877,12 @@ def test_pi_session_mount_refuses_unqualified_native_request_before_launch(
             with pytest.raises(CapabilityUnavailable, match="direct descriptor transport"):
                 backend.execute(request, timeout=1, cancel_requested=None)
         else:
-            text = "descriptor differs" if unavailable == "foreign-fd" else "explicit scope"
+            text = "explicit scope" if unavailable == "guest-shadow" else "descriptor differs"
             with pytest.raises(FleetPlanInvalid, match=text):
                 backend.execute(request, timeout=1, cancel_requested=None)
     finally:
+        os.close(git_fd)
+        os.close(workspace_fd)
         os.close(descriptor)
 
 

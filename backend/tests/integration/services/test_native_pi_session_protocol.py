@@ -960,6 +960,9 @@ def test_installed_pi_private_session_survives_original_command_and_config_clean
                 f"test -s {shlex.quote(str(native_file))}",
                 f"test -r {shlex.quote(str(native_file))}",
                 "test -r /workspace/source.py",
+                "test -r /workspace/.git/HEAD",
+                f"test /workspace/source.py -ef {shlex.quote(str(source))}",
+                f"test /workspace/.git -ef {shlex.quote(str(workspace / '.git'))}",
                 *(
                     f"test ! -e {shlex.quote(str(path))}"
                     for path in (sibling, journal, personal, pin.path / "selected.jsonl")

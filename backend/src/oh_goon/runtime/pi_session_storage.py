@@ -29,7 +29,10 @@ from oh_goon.core.models.pi_session_storage import (
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.core.product_identity import pi_session_storage_id, repository_subject_instance_id
+from oh_goon.core.product_identity import (
+    pi_session_storage_id,
+    repository_subject_instance_id_from_metadata,
+)
 
 _MAX_PI_SESSION_BYTES = 16 * 1024 * 1024
 _PI_STORAGE_ID = re.compile(r"pi-session-[0-9a-f]{64}")
@@ -45,6 +48,16 @@ def require_pi_session_repository(workspace: Path) -> None:
         raise PiSessionUnavailable("New persistent Pi sessions require a direct Git repository")
 
 
+def _require_pi_personal_storage_separation(storage: Path) -> None:
+    try:
+        personal = Path.home() / ".pi"
+        personal_roots = (personal, personal.resolve(), (personal / "agent").resolve())
+    except (OSError, RuntimeError) as exc:
+        raise FleetPlanInvalid("Default Pi personal storage could not be established") from exc
+    if any(storage.is_relative_to(root) or root.is_relative_to(storage) for root in personal_roots):
+        raise FleetPlanInvalid("Private Pi session storage overlaps default Pi personal storage")
+
+
 def _mount_id(fd: int) -> bytes:
     with Path(f"/proc/self/fdinfo/{fd}").open("rb") as stream:
         raw = stream.read(8193)
@@ -56,7 +69,7 @@ def _mount_id(fd: int) -> bytes:
     return mount_ids[0]
 
 
-def _require_direct_filesystem(*mount_ids: bytes) -> None:
+def _require_direct_filesystem(*mount_ids: bytes, workspace: Path | None = None) -> None:
     with Path("/proc/self/mountinfo").open("rb") as stream:
         raw = stream.read(1_048_577)
     rows = [line.partition(b" - ")[0].split() for line in raw.splitlines()]
@@ -71,6 +84,23 @@ def _require_direct_filesystem(*mount_ids: bytes) -> None:
         ):
             raise FleetPlanInvalid(
                 "Pi session scope requires a direct filesystem without bind aliases"
+            )
+
+    if workspace is not None:
+        # mountinfo escapes the four characters that cannot appear literally
+        # in a field. Bubblewrap recursively binds the workspace directory.
+        prefix = os.fsencode(workspace)
+        for character, escaped in (
+            (b"\\", rb"\134"),
+            (b" ", rb"\040"),
+            (b"\t", rb"\011"),
+            (b"\n", rb"\012"),
+        ):
+            prefix = prefix.replace(character, escaped)
+        prefix = prefix.rstrip(b"/") + b"/"
+        if any(row[4].startswith(prefix) for row in rows):
+            raise FleetPlanInvalid(
+                "Pi session workspace requires a direct filesystem without nested mounts"
             )
 
 
@@ -185,7 +215,6 @@ def pin_pi_session_directory(
         or workspace != repository.path
         or workspace.is_relative_to(layout.root)
         or layout.root.is_relative_to(workspace)
-        or layout.pi_sessions.is_relative_to(Path.home() / ".pi")
     ):
         raise FleetPlanInvalid(
             "Pi session storage differs from the admitted direct Git workspace and Step"
@@ -200,6 +229,7 @@ def pin_pi_session_directory(
     leaf = storage_id or pi_session_storage_id(
         fleet_run_id, repository.repository_id, step_id, attempt_number
     )
+    _require_pi_personal_storage_separation(layout.pi_sessions)
     with ExitStack() as owned:
         try:
             state_fd, check_state, state_mounts = _pin_path(layout.root, owned)
@@ -217,17 +247,26 @@ def pin_pi_session_directory(
 
             def require_original_current() -> None:
                 require_current()
+                _require_pi_personal_storage_separation(layout.pi_sessions)
                 check_state()
                 check_workspace()
-                _require_direct_filesystem(*(state_mounts | workspace_mounts))
+                _require_direct_filesystem(*(state_mounts | workspace_mounts), workspace=workspace)
                 observed_git = os.open(".git", _directory_flags(), dir_fd=workspace_fd)
                 try:
                     if _directory_identity(observed_git) != expected_git:
                         raise FleetPlanInvalid("Pi session Git root changed before use")
                 finally:
                     os.close(observed_git)
+                try:
+                    os.stat("commondir", dir_fd=git_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise FleetPlanInvalid("Pi session requires repository-local Git metadata")
                 if (
-                    repository_subject_instance_id(workspace)
+                    repository_subject_instance_id_from_metadata(
+                        workspace, os.fstat(workspace_fd), os.fstat(git_fd)
+                    )
                     != repository_admission.source_authority.subject_instance_id
                 ):
                     raise FleetPlanInvalid("Pi session repository subject changed before use")
@@ -257,21 +296,17 @@ def pin_pi_session_directory(
                 fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
                 owned.callback(os.close, fd)
                 try:
-                    observed, metadata = _observe_pinned_session_file(
-                        directory_fd, name, fd, require_original_storage_current
+                    _observed, metadata = _observe_pinned_session_file(
+                        directory_fd,
+                        name,
+                        fd,
+                        require_original_storage_current,
+                        expected_file=prior_file,
                     )
                 except FleetPlanInvalid as exc:
                     raise PiSessionHistoryUnqualified(
                         "Retained Pi session bytes could not be verified"
                     ) from exc
-                if (observed.device, observed.inode) != (prior_file.device, prior_file.inode):
-                    raise PiSessionIdentityMismatch(
-                        "Retained Pi session file identity differs from its admitted receipt"
-                    )
-                if observed != prior_file:
-                    raise PiSessionHistoryUnqualified(
-                        "Retained Pi session differs from its admitted receipt"
-                    )
 
                 def require_before_launch() -> None:
                     try:
@@ -301,10 +336,12 @@ def pin_pi_session_directory(
                 raise PiSessionUnavailable("Retained Pi session storage is unavailable") from exc
             raise FleetPlanInvalid("Private Pi session storage is unavailable") from exc
         yield PiSessionDirectoryPin(
-            layout.pi_sessions / leaf,
-            directory_fd,
-            workspace,
-            require_original_storage_current,
+            path=layout.pi_sessions / leaf,
+            directory_fd=directory_fd,
+            workspace=workspace,
+            workspace_fd=workspace_fd,
+            git_fd=git_fd,
+            require_current=require_original_storage_current,
             existing_file=file_pin,
         )
 
@@ -353,10 +390,24 @@ def _require_current_file(directory_fd: int, name: str, fd: int) -> os.stat_resu
 
 
 def _observe_pinned_session_file(
-    directory_fd: int, name: str, fd: int, require_current: Callable[[], None]
+    directory_fd: int,
+    name: str,
+    fd: int,
+    require_current: Callable[[], None],
+    *,
+    expected_file: PiSessionFileObservation | None = None,
 ) -> tuple[PiSessionFileObservation, os.stat_result]:
     require_current()
     before = _require_current_file(directory_fd, name, fd)
+    if expected_file is not None and (before.st_dev, before.st_ino) != (
+        expected_file.device,
+        expected_file.inode,
+    ):
+        raise PiSessionIdentityMismatch(
+            "Retained Pi session file identity differs from its admitted receipt"
+        )
+    if expected_file is not None and before.st_size != expected_file.size:
+        raise PiSessionHistoryUnqualified("Retained Pi session size differs from its receipt")
     if not 1 <= before.st_size <= _MAX_PI_SESSION_BYTES:
         raise FleetPlanInvalid("Pi session exceeds its bounded persistence observation scope")
     digest = hashlib.sha256()
@@ -373,12 +424,12 @@ def _observe_pinned_session_file(
     after = _require_current_file(directory_fd, name, fd)
     if byte_count != before.st_size or _file_state(after) != _file_state(before):
         raise FleetPlanInvalid("Original Pi session file changed while hashing")
-    return (
-        PiSessionFileObservation(
-            device=after.st_dev, inode=after.st_ino, size=after.st_size, sha256=digest.hexdigest()
-        ),
-        after,
+    observed = PiSessionFileObservation(
+        device=after.st_dev, inode=after.st_ino, size=after.st_size, sha256=digest.hexdigest()
     )
+    if expected_file is not None and observed != expected_file:
+        raise PiSessionHistoryUnqualified("Retained Pi session differs from its admitted receipt")
+    return observed, after
 
 
 def observe_pi_session_file(pin: PiSessionDirectoryPin, name: str) -> PiSessionFileObservation:
@@ -433,15 +484,14 @@ def pin_pi_session_retirement(
     """
     if sys.platform != "linux" or not hasattr(os, "O_PATH"):
         raise PiSessionUnavailable("Pi session retirement requires Linux directory custody")
-    if not _PI_STORAGE_ID.fullmatch(storage_id) or layout.pi_sessions.is_relative_to(
-        Path.home() / ".pi"
-    ):
+    if not _PI_STORAGE_ID.fullmatch(storage_id):
         raise PiSessionIdentityMismatch("Pi retirement requires its original private storage")
     if expected_file.sha256 is None or not 1 <= expected_file.size <= _MAX_PI_SESSION_BYTES:
         raise PiSessionHistoryUnqualified("Pi retirement requires an exact retained byte receipt")
 
     with ExitStack() as descriptors:
         try:
+            _require_pi_personal_storage_separation(layout.pi_sessions)
             state_fd, check_state, state_mounts = _pin_path(layout.root, descriptors)
             state_info = os.fstat(state_fd)
             if state_info.st_uid != os.geteuid() or stat.S_IMODE(state_info.st_mode) & 0o022:
@@ -454,6 +504,7 @@ def pin_pi_session_retirement(
             )
 
             def require_current() -> None:
+                _require_pi_personal_storage_separation(layout.pi_sessions)
                 check_state()
                 check_root()
                 check_directory()
@@ -471,13 +522,9 @@ def pin_pi_session_retirement(
             if _session_file_present(directory_fd, name):
                 fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd)
                 descriptors.callback(os.close, fd)
-                observed, metadata = _observe_pinned_session_file(
-                    directory_fd, name, fd, require_current
+                _observed, metadata = _observe_pinned_session_file(
+                    directory_fd, name, fd, require_current, expected_file=expected_file
                 )
-                if (observed.device, observed.inode) != (expected_file.device, expected_file.inode):
-                    raise PiSessionIdentityMismatch("Original Pi retirement file identity changed")
-                if observed != expected_file:
-                    raise PiSessionHistoryUnqualified("Original Pi retirement byte receipt changed")
                 retained = (fd, metadata)
             elif expected_directory is None:
                 raise PiSessionUnavailable("Original Pi session file is absent before retirement")
