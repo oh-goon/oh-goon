@@ -1002,6 +1002,32 @@ qualification failure refuses the selected session rather than reconstructing
 it. Pi can access its own admitted session bytes. Unmanaged host writes,
 interrupted power-loss durability and other host modes remain unqualified.
 
+### Private Pi session and repository identity — HUG-73
+
+**Disposition**. Retain the Pi 1.3.0 RPC exact-open gate, the native transcript
+format, and the existing claimed writer. Reopen and retirement compare the
+pinned file's device, inode and size with the Journal receipt before opening a
+readable descriptor. The bounded digest and stable metadata checks still
+qualify the bytes. Private storage rejects overlap with the lexical and
+resolved default Pi home and agent storage locations.
+
+At Pi workload launch, Bubblewrap mounts both repository aliases from the
+workspace handle checked against the admitted repository subject. The
+read-only Git metadata aliases use the checked Git handle. Each alias borrows
+its own descriptor within the existing launch lifetime. A fresh writer keeps
+its admitted repository access mode. A continuing writer has a read-only
+repository and receives the exact retained file descriptor.
+
+Linked worktrees, ambiguous mount aliases and mounts nested below the
+repository are unsupported for persistent Pi. The [installed storage
+proof][pi-session-tests] checks that both guest aliases expose the same
+repository and Git metadata, with the repository read-only and sibling,
+personal and application-control paths absent. The [installed claimed-worker
+journey](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+covers foreign-repository and missing-file refusals without fallback. Live
+changes to repository descendants by unmanaged host actors, concurrent
+privileged mount changes, and non-Linux filesystems remain outside this proof.
+
 ### Original Pi writer custody — HUG-42
 
 The existing claimed worker can admit a fresh managed Pi RPC session for one

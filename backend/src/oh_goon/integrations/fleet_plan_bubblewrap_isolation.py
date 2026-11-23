@@ -620,6 +620,7 @@ class BubblewrapProcessIsolation:
             or not hasattr(os, "O_PATH")
             or request.terminal is not None
             or request.protected_execution
+            or request.workspace_materialization is not None
             or any(value is not None for value in request.resources.model_dump().values())
         ):
             raise CapabilityUnavailable(
@@ -634,13 +635,19 @@ class BubblewrapProcessIsolation:
             or pin.workspace != request.workspace
             or not pin.path.is_absolute()
             or ".." in pin.path.parts
-            or type(pin.directory_fd) is not int
-            or pin.directory_fd < 0
+            or any(
+                type(fd) is not int or fd < 0
+                for fd in (pin.directory_fd, pin.workspace_fd, pin.git_fd)
+            )
             or not callable(pin.require_current)
         ):
             raise FleetPlanInvalid(
                 "Pi session mount is outside its original application or workspace"
             )
+        if pin.existing_file is not None and (
+            not request.read_only_workspace or request.allowed_write_roots
+        ):
+            raise FleetPlanInvalid("Retained Pi sessions require a read-only workspace")
         private_paths, read_only_paths = self._application_state_paths
         other_sources = (
             request.workspace,
@@ -677,6 +684,17 @@ class BubblewrapProcessIsolation:
             parent = root.lstat()
             named = pin.path.lstat()
             metadata = os.fstat(pin.directory_fd)
+            for fd, path in (
+                (pin.workspace_fd, pin.workspace),
+                (pin.git_fd, pin.workspace / ".git"),
+            ):
+                actual = os.fstat(fd)
+                selected = path.lstat()
+                if not stat.S_ISDIR(selected.st_mode) or (actual.st_dev, actual.st_ino) != (
+                    selected.st_dev,
+                    selected.st_ino,
+                ):
+                    raise FleetPlanInvalid("Pi workspace descriptor differs from its admitted root")
         except (OSError, RuntimeError) as exc:
             raise FleetPlanInvalid("Pi session mount directory identity is unavailable") from exc
         if (
@@ -825,17 +843,32 @@ class BubblewrapProcessIsolation:
                 for name in ("passwd", "group", "nsswitch.conf", "hosts"):
                     args.extend(("--ro-bind", str(paths.etc / name), "/etc/" + name))
                 workspace_mode = "--ro-bind" if request.read_only_workspace else "--bind"
-                if writer_namespace is not None:
-                    workspace_mode += "-fd"
-                args.extend(
-                    (
-                        workspace_mode,
-                        str(writer_namespace.workspace_fd)
-                        if writer_namespace is not None
-                        else str(request.workspace),
-                        "/workspace",
-                    )
-                )
+                pi_workspace_fds: list[int] = []
+
+                def borrow_pi_mount(fd: int) -> str:
+                    # Bubblewrap consumes each bind descriptor. Each guest alias
+                    # gets its own duplicate within the original launch scope.
+                    duplicate = os.dup(fd)
+                    namespace_owner.callback(os.close, duplicate)
+                    pi_workspace_fds.append(duplicate)
+                    return str(duplicate)
+
+                def bind_workspace(target: str) -> None:
+                    if writer_namespace is not None:
+                        fd = (
+                            writer_namespace.workspace_fd
+                            if target == "/workspace"
+                            else writer_namespace.workspace_alias_fd
+                        )
+                        args.extend((workspace_mode + "-fd", str(fd), target))
+                    elif session is not None:
+                        args.extend(
+                            (workspace_mode + "-fd", borrow_pi_mount(session.workspace_fd), target)
+                        )
+                    else:
+                        args.extend((workspace_mode, str(request.workspace), target))
+
+                bind_workspace("/workspace")
                 for source, target in (
                     (paths.home, "/home/fleet"),
                     (paths.tmp, "/tmp"),
@@ -844,15 +877,7 @@ class BubblewrapProcessIsolation:
                 ):
                     args.extend(("--bind", str(source), target))
                 if str(request.workspace) != "/workspace":
-                    args.extend(
-                        (
-                            workspace_mode,
-                            str(writer_namespace.workspace_alias_fd)
-                            if writer_namespace is not None
-                            else str(request.workspace),
-                            str(request.workspace),
-                        )
-                    )
+                    bind_workspace(str(request.workspace))
                 for root in request.allowed_write_roots:
                     relative = root.relative_to(request.workspace)
                     for island_target in dict.fromkeys(
@@ -862,13 +887,23 @@ class BubblewrapProcessIsolation:
                 if request.read_only_workspace:
                     for protected_relative in sorted(LIVE_CHECKOUT_PROTECTED_PATHS):
                         protected_source = request.workspace / protected_relative
-                        if protected_source.exists():
-                            for protected_target in dict.fromkeys(
-                                (
-                                    PurePosixPath("/workspace") / protected_relative,
-                                    PurePosixPath(protected_source),
+                        protected_targets = dict.fromkeys(
+                            (
+                                PurePosixPath("/workspace") / protected_relative,
+                                PurePosixPath(protected_source),
+                            )
+                        )
+                        if session is not None and protected_relative == PurePosixPath(".git"):
+                            for protected_target in protected_targets:
+                                args.extend(
+                                    (
+                                        "--ro-bind-fd",
+                                        borrow_pi_mount(session.git_fd),
+                                        str(protected_target),
+                                    )
                                 )
-                            ):
+                        elif protected_source.exists():
+                            for protected_target in protected_targets:
                                 args.extend(
                                     ("--ro-bind", str(protected_source), str(protected_target))
                                 )
@@ -1035,6 +1070,7 @@ class BubblewrapProcessIsolation:
                         pass_fds=(
                             status.fileno(),
                             *(writer_namespace.pass_fds if writer_namespace is not None else ()),
+                            *pi_workspace_fds,
                             *((session_fd,) if session_fd is not None else ()),
                         ),
                         max_capture_bytes_per_stream=MAX_FLEET_STEP_CAPTURE_BYTES_PER_STREAM,

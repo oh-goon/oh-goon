@@ -185,27 +185,32 @@ def test_original_authority_refusal_precedes_directory_creation(
     assert not admitted_pi_scope.layout.pi_sessions.exists()
 
 
-def test_native_mountinfo_alias_refuses_before_storage_allocation(
-    admitted_pi_scope: _AdmittedScope, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("topology", ["alias", "nested"])
+def test_unqualified_native_mount_topology_refuses_before_storage_allocation(
+    admitted_pi_scope: _AdmittedScope, monkeypatch: pytest.MonkeyPatch, topology: str
 ) -> None:
     mountinfo = Path("/proc/self/mountinfo")
     original_open = Path.open
     observed = mountinfo.read_bytes()
-    root_device = Path("/").stat().st_dev
-    device = f"{os.major(root_device)}:{os.minor(root_device)}".encode("ascii")
-    alias = b"2147483646 1 " + device + b" / /elsewhere rw - ext4 /dev/fixture rw\n"
+    if topology == "alias":
+        root_device = Path("/").stat().st_dev
+        device = f"{os.major(root_device)}:{os.minor(root_device)}".encode("ascii")
+        mount_point = b"/elsewhere"
+        diagnostic = "filesystem without bind aliases"
+    else:
+        device = b"4000:0"
+        mount_point = os.fsencode(admitted_pi_scope.repository.path / "fixture-mount")
+        diagnostic = "filesystem without nested mounts"
+    row = b"2147483646 1 " + device + b" / " + mount_point + b" rw - ext4 /dev/fixture rw\n"
 
     def open_mountinfo(path: Path, *args: Any, **kwargs: Any) -> IO[Any]:
         if path == mountinfo:
-            return BytesIO(observed + alias)
+            return BytesIO(observed + row)
         return cast(IO[Any], original_open(path, *args, **kwargs))
 
     monkeypatch.setattr(Path, "open", open_mountinfo)
-    with (
-        pytest.raises(FleetPlanInvalid, match="filesystem without bind aliases"),
-        admitted_pi_scope.create(),
-    ):
-        pytest.fail("Native alias gained storage authority")
+    with pytest.raises(FleetPlanInvalid, match=diagnostic), admitted_pi_scope.create():
+        pytest.fail("An unqualified mount topology acquired storage authority")
     assert not admitted_pi_scope.layout.pi_sessions.exists()
 
 
@@ -230,6 +235,50 @@ def test_private_storage_root_never_repairs_an_unproven_parent(
         assert list(root.iterdir()) == []
 
 
+@pytest.mark.parametrize("personal_relative_path", [".pi", ".pi/agent"])
+def test_canonical_personal_store_is_excluded_from_pi_storage(
+    admitted_pi_scope: _AdmittedScope,
+    retained_pi_file: tuple[Path, PiSessionFileObservation],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    personal_relative_path: str,
+) -> None:
+    selected, receipt = retained_pi_file
+    fixture_home = tmp_path / "fixture-home"
+    personal_path = fixture_home / personal_relative_path
+    canonical_storage = admitted_pi_scope.layout.pi_sessions
+    original_resolve = Path.resolve
+
+    def resolve(path: Path, strict: bool = False) -> Path:
+        if path == personal_path:
+            return canonical_storage
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setenv("HOME", str(fixture_home))
+    monkeypatch.setattr(Path, "resolve", resolve)
+    with (
+        pytest.raises(FleetPlanInvalid, match="overlaps default Pi personal storage"),
+        admitted_pi_scope.create(attempt_number=2),
+    ):
+        pytest.fail("Personal storage acquired a new private slot")
+    with (
+        pytest.raises(FleetPlanInvalid, match="overlaps default Pi personal storage"),
+        admitted_pi_scope.create(storage_id=selected.parent.name, prior_file=receipt),
+    ):
+        pytest.fail("Personal storage was opened for a continued write")
+    with (
+        pytest.raises(PiSessionIdentityMismatch),
+        pin_pi_session_retirement(
+            layout=admitted_pi_scope.layout,
+            storage_id=selected.parent.name,
+            expected_file=receipt,
+        ),
+    ):
+        pytest.fail("Personal storage acquired retirement authority")
+    assert tuple(canonical_storage.iterdir()) == (selected.parent,)
+    assert selected.read_bytes() == b"retained\n"
+
+
 def test_original_storage_handle_rejects_rename_and_replacement_at_launch(
     admitted_pi_scope: _AdmittedScope,
 ) -> None:
@@ -240,6 +289,27 @@ def test_original_storage_handle_rejects_rename_and_replacement_at_launch(
         with pytest.raises(FleetPlanInvalid, match="changed before use"):
             pin.require_current()
         assert os.fstat(pin.directory_fd).st_ino == moved.stat().st_ino
+
+
+def test_pi_last_use_requires_the_pinned_git_to_remain_repository_local(
+    admitted_pi_scope: _AdmittedScope, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with admitted_pi_scope.create() as pin:
+        pin.require_current()
+        native_stat = os.stat
+        fixture_marker = native_stat(admitted_pi_scope.repository.path / ".git/HEAD")
+
+        def observe_git_marker(
+            path: Any, *, dir_fd: int | None = None, follow_symlinks: bool = True
+        ) -> os.stat_result:
+            if path == "commondir" and dir_fd == pin.git_fd:
+                assert follow_symlinks is False
+                return fixture_marker
+            return native_stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(os, "stat", observe_git_marker)
+        with pytest.raises(FleetPlanInvalid, match="requires repository-local Git metadata"):
+            pin.require_current()
 
 
 def test_post_settlement_observation_refuses_original_leaf_moved_to_replaced_parent(
@@ -344,6 +414,42 @@ def test_exact_reopen_refuses_changed_or_unproven_original_file(
         assert session.read_bytes() == original
         assert (session.parent / "models.json").read_bytes() == b"unexpected template bytes\n"
     assert set(admitted_pi_scope.layout.pi_sessions.iterdir()) == {session.parent}
+
+
+@pytest.mark.parametrize("operation", ["reopen", "retire"])
+@pytest.mark.parametrize(
+    ("field", "failure"),
+    [("inode", PiSessionIdentityMismatch), ("size", PiSessionHistoryUnqualified)],
+)
+def test_admitted_pi_file_metadata_is_checked_before_any_readable_open(
+    admitted_pi_scope: _AdmittedScope,
+    retained_pi_file: tuple[Path, PiSessionFileObservation],
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    field: str,
+    failure: type[PiSessionUnavailable],
+) -> None:
+    selected, receipt = retained_pi_file
+    unqualified = receipt.model_copy(update={field: getattr(receipt, field) + 1})
+    original_open = Path.open
+
+    def reject_content_open(path: Path, *args: Any, **kwargs: Any) -> IO[Any]:
+        if path.parent == Path("/proc/self/fd"):
+            pytest.fail("Unqualified Pi session acquired a readable descriptor")
+        return cast(IO[Any], original_open(path, *args, **kwargs))
+
+    monkeypatch.setattr(Path, "open", reject_content_open)
+    with pytest.raises(failure):
+        if operation == "reopen":
+            with admitted_pi_scope.create(storage_id=selected.parent.name, prior_file=unqualified):
+                pytest.fail("Unqualified Pi session acquired writer custody")
+        else:
+            with pin_pi_session_retirement(
+                layout=admitted_pi_scope.layout,
+                storage_id=selected.parent.name,
+                expected_file=unqualified,
+            ):
+                pytest.fail("Unqualified Pi session acquired retirement authority")
 
 
 def test_retained_pi_file_is_rechecked_after_pin_before_native_launch(

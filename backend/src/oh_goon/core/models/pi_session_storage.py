@@ -1,4 +1,4 @@
-"""Process-local transport of one original Pi session directory handle."""
+"""Process-local transport of the original Pi storage and repository handles."""
 
 from __future__ import annotations
 
@@ -33,6 +33,8 @@ class PiSessionDirectoryPin:
     path: Path
     directory_fd: int = field(repr=False)
     workspace: Path
+    workspace_fd: int = field(repr=False)
+    git_fd: int = field(repr=False)
     require_current: Callable[[], None] = field(repr=False)
     existing_file: PiSessionFilePin | None = field(default=None, repr=False)
 
