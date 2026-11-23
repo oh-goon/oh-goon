@@ -37,6 +37,8 @@ _MAX_EVENT_RECORD_BYTES = 256 * 1024
 _MAX_OBSERVATIONS = 128
 _MAX_FINAL_TEXT_BYTES = 65536
 
+_NATIVE_MODEL_OPTIONS = frozenset({"--model", "-m", "--provider", "--models", "--config", "-c"})
+
 # Arity protects the adapter-owned suffix, rather than interpreting native
 # values. Pi still validates those values and resolves models/extensions. Keep
 # these framing facts qualified against the selected installed parser.
@@ -407,8 +409,8 @@ def validate_native_agent_arguments(
     arguments: tuple[str, ...],
     *,
     sandbox_owner: Literal["harness", "execution_backend"] = "harness",
-) -> None:
-    """Reject replacement of owned transport or explicitly delegated enforcement."""
+) -> bool:
+    """Validate native argv ownership and report explicit model options."""
     if sandbox_owner == "execution_backend":
         if agent != "codex":
             raise AgentProviderError(
@@ -428,8 +430,7 @@ def validate_native_agent_arguments(
         ):
             raise AgentProviderError("Execution backend owns the native sandbox selection")
     if agent == "pi":
-        _validate_pi_argument_framing(arguments)
-        return
+        return _validate_pi_argument_framing(arguments)
     reserved = {
         "opencode": {"--server", "--attach", "--standalone", "--no-standalone", "--dir"},
         "codex": {"--remote", "--remote-auth-token-env", "--no-daemon", "--cd", "-C", "--worktree"},
@@ -442,18 +443,26 @@ def validate_native_agent_arguments(
             "Native arguments cannot replace the owned terminal/server/workspace transport"
         )
 
+    return any(
+        argument.partition("=")[0] in _NATIVE_MODEL_OPTIONS
+        or (agent == "codex" and argument.startswith(("-m", "-c")))
+        for argument in arguments
+    )
 
-def _validate_pi_argument_framing(arguments: tuple[str, ...]) -> None:
+
+def _validate_pi_argument_framing(arguments: tuple[str, ...]) -> bool:
     """Keep extra argv from changing native transport, task or session authority.
 
     Only option boundaries are inspected. Values remain opaque; in particular,
     a value spelling an owned flag is not itself another option. Unknown long
     flags retain Pi's extension-flag framing, including inline equals values.
     """
+    explicit_model = False
     index = 0
     while index < len(arguments):
         argument = arguments[index]
         option, separator, _ = argument.partition("=")
+        explicit_model = explicit_model or option in _NATIVE_MODEL_OPTIONS
         if option == "--api-key":
             raise AgentProviderError("Native credentials must not be supplied in command arguments")
         if argument == "--" or option in _PI_OWNED_OPTIONS:
@@ -485,6 +494,8 @@ def _validate_pi_argument_framing(arguments: tuple[str, ...]) -> None:
             raise AgentProviderError(
                 "Native Pi arguments cannot add positional task/file inputs or unknown short options"
             )
+
+    return explicit_model
 
 
 def require_codex_authentication_home_separation(home: Path, tool_roots: tuple[Path, ...]) -> None:

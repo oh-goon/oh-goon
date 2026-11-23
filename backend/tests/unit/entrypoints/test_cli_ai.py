@@ -1071,6 +1071,70 @@ def test_native_prepare_captures_once_and_binds_selected_implementation(
 
 
 @pytest.mark.parametrize("entrypoint", ("ai", "prepare"))
+@pytest.mark.parametrize("selector", ("new", "run:prior-run"))
+@pytest.mark.parametrize("override", ("arguments", "configuration_directory"))
+def test_pi_persistent_profile_refuses_native_overrides_before_run_or_lock_publication(
+    native_cli: SimpleNamespace,
+    native_run_configuration: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    entrypoint: str,
+    selector: str,
+    override: str,
+) -> None:
+    catalog = json.loads(native_cli.config.read_text())
+    catalog["native_profiles"]["isolated"].update({"allowed_agents": ["pi"], "pi_rpc": True})
+    native_cli.config.write_text(json.dumps(catalog))
+    intent = PiSessionIntent.from_selector(selector)
+    lock = native_run_configuration.parent / "goon.lock"
+    if entrypoint == "ai":
+        argv = [*native_cli.argv, "--profile", "isolated", "--session", selector]
+    else:
+        goon = native_cli.workspace / "goon.yml"
+        goon.write_text(
+            goon.read_text()
+            .replace(
+                "  requested_effects:",
+                f"  session: {intent.model_dump_json()}\n  requested_effects:",
+            )
+            .replace("repository_access: write", "repository_access: read_only")
+        )
+        argv = ["workflow", "prepare", str(native_run_configuration)]
+
+    assert main(argv) == 0
+    if entrypoint == "ai":
+        assert (
+            native_cli.runtime.plans.run_native_agent.call_args.kwargs["selected"].session == intent
+        )
+    else:
+        assert load_execution_lock(lock).digest
+    lock_before = lock.read_bytes() if lock.exists() else None
+    native_cli.build.reset_mock()
+    native_cli.runtime.plans.run_native_agent.reset_mock()
+    native_cli.runtime.locations.add.reset_mock()
+    capsys.readouterr()
+
+    public_config = native_run_configuration.parent / "public-pi"
+    public_config.mkdir()
+    catalog["native_agents"]["pi"][override] = (
+        ["--thinking", "low"] if override == "arguments" else str(public_config)
+    )
+    native_cli.config.write_text(json.dumps(catalog))
+    source_capture = Mock(side_effect=AssertionError("Unqualified Pi selection reached capture"))
+    monkeypatch.setattr(
+        "oh_goon.services.agent_authoring_sources.capture_agent_sources", source_capture
+    )
+
+    assert main([*argv, "--json"]) == 2
+    assert json.loads(capsys.readouterr().out)["code"] == "PI_NATIVE_CONFIGURATION_MISMATCH"
+    native_cli.build.assert_not_called()
+    native_cli.runtime.plans.run_native_agent.assert_not_called()
+    native_cli.runtime.locations.add.assert_not_called()
+    source_capture.assert_not_called()
+    assert (lock.read_bytes() if lock.exists() else None) == lock_before
+
+
+@pytest.mark.parametrize("entrypoint", ("ai", "prepare"))
 @pytest.mark.parametrize(
     "arguments",
     (

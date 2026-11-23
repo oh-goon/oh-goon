@@ -889,9 +889,10 @@ account, paid inference, transcript parser or product command change is involved
 
 ## Pi argument ownership QA — HUG-71
 
-[HUG-71](https://linear.app/hugloss/issue/HUG-71) protects the currently supported
-native invocation before persistent-session selection is enabled. Exercise the
-selected installed parser, including its `--` terminator, positional tasks,
+[HUG-71](https://linear.app/hugloss/issue/HUG-71) protects typed session and
+transport ownership. [PR #95](https://github.com/oh-goon/oh-goon/pull/95) established
+the framing guard. Exercise the selected installed parser, including its
+`--` terminator, positional tasks,
 `@file` inputs, native session selectors and long equals forms that may reach
 extension flags. An appended `--mode json --no-session` does not protect the
 invocation when earlier arguments terminate option parsing or consume those
@@ -922,8 +923,20 @@ these distinctions in a read-only, denied-network Bubblewrap process; they do
 not start Pi or load an extension. [Native unit tests][native-tests],
 [resolver tests][resolver-tests] and the
 [CLI/Plan tests](../../backend/tests/unit/entrypoints/test_cli_ai.py) protect
-early refusals and valid caller options. Requalify framing on a native upgrade;
-these results do not certify arbitrary extensions or new persistent modes.
+early refusals and valid caller options.
+
+The existing compatibility check uses the same framing to identify explicit
+model options. A flag-shaped prompt value remains opaque when Pi consumes it
+as a value. Actual model options retain the public-configuration requirement.
+The installed Pi 1.3.0 cases preserve the owned mode and session flags with
+these literal values in JSON and RPC. The shipped parser and the selected
+bundled parser agree on the observed framing. Current CLI and authored-workflow
+tests also exercise
+the persistent profile boundary. Both `new` and `continue` require their
+dedicated managed selection before any caller configuration or argv effects.
+Use the [installed operator journey](#managed-pi-operator-journey--hug-53) for
+actual persistent execution evidence. Requalify framing on a native upgrade.
+Arbitrary extension behavior remains HUG-136 scope.
 
 ### Pi session intent — HUG-40
 
