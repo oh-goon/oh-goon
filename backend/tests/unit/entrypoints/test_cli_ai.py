@@ -16,8 +16,23 @@ from oh_goon import cli_ai
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli import main
 from oh_goon.cli_parser import build_parser
-from oh_goon.core.errors import FleetPlanInvalid, RepositoryEffectQuarantined
-from oh_goon.core.models.agent_providers import AgentProviderError, PiSessionIntent
+from oh_goon.core.errors import (
+    FleetDomainError,
+    FleetPlanInvalid,
+    PiSessionBusy,
+    RepositoryEffectQuarantined,
+)
+from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
+    NoPersistentPiSession,
+    PiNativeConfigurationMismatch,
+    PiSessionCleanupUnverified,
+    PiSessionHistoryUnqualified,
+    PiSessionIdentityMismatch,
+    PiSessionIntent,
+    PiSessionSettlementUncertain,
+    PiSessionUnavailable,
+)
 from oh_goon.core.models.game_tape import GameTapeSummary
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
 from oh_goon.engine.command import CommandResult, run_command
@@ -908,23 +923,49 @@ def test_ai_persistent_session_refuses_an_unqualified_native_profile_before_runt
     native_cli.build.assert_not_called()
 
 
+@pytest.mark.parametrize("as_json", [True, False], ids=["json", "text"])
+@pytest.mark.parametrize(
+    ("refusal", "action"),
+    [
+        (NoPersistentPiSession, "retained persistent Pi session"),
+        (PiSessionUnavailable, "latest qualified writer"),
+        (PiSessionBusy, "original writer to settle"),
+        (PiSessionIdentityMismatch, "original registered repository"),
+        (PiNativeConfigurationMismatch, "matching installed Pi implementation"),
+        (PiSessionHistoryUnqualified, "Preserve the retained history"),
+        (PiSessionSettlementUncertain, "Avoid replaying unresolved effects"),
+        (PiSessionCleanupUnverified, "establish process cleanup"),
+    ],
+)
 def test_ai_exact_pi_refusal_reports_an_original_run_reference_without_private_detail(
-    native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    native_cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    refusal: type[FleetDomainError],
+    action: str,
+    as_json: bool,
 ) -> None:
-    from oh_goon.core.models.agent_providers import PiSessionIdentityMismatch
-
+    private = "/private/pi-state/session.jsonl PRIVATE_TRANSCRIPT PRIVATE_PROVIDER_CREDENTIAL"
     monkeypatch.setattr(
         cli_ai,
         "resolve_native_cli_selection",
-        Mock(side_effect=PiSessionIdentityMismatch("/private/pi-state/session.jsonl")),
+        Mock(side_effect=refusal(private)),
     )
-    assert main([*native_cli.argv, "--session", "run:prior-run", "--json"]) == 2
+    argv = [*native_cli.argv, "--session", "run:prior-run"]
+    assert main([*argv, "--json"] if as_json else argv) == 2
     captured = capsys.readouterr()
-    report = json.loads(captured.out)
-    assert report["code"] == "PI_SESSION_IDENTITY_MISMATCH"
-    assert report["prior_run_id"] == "prior-run"
-    assert report["prior_run_handoff_argv"] == ["oh-goon", "runs", "handoff", "prior-run", "--json"]
-    assert "/private/pi-state" not in captured.out + captured.err
+    reference = ["oh-goon", "runs", "handoff", "prior-run", "--json"]
+    if as_json:
+        report = json.loads(captured.out)
+        assert report["code"] == refusal.code
+        assert report["prior_run_id"] == "prior-run"
+        assert report["prior_run_handoff_argv"] == reference
+        assert action in report["safe_next_action"]
+    else:
+        assert captured.out == ""
+        assert refusal.code in captured.err and action in captured.err
+        assert json.dumps(reference) in captured.err
+    assert not any(value in captured.out + captured.err for value in private.split())
     native_cli.build.assert_not_called()
 
 
@@ -1068,6 +1109,57 @@ def test_native_prepare_captures_once_and_binds_selected_implementation(
     assert main(argv) == 0
     assert load_execution_lock(root / "goon.lock").digest != before
     native_cli.build.assert_not_called()
+
+
+@pytest.mark.parametrize("as_json", [True, False], ids=["json", "text"])
+@pytest.mark.parametrize("stage", ["preflight", "admission"])
+def test_configured_pi_run_refusal_consistently_reports_prior_readback(
+    native_cli: SimpleNamespace,
+    native_run_configuration: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    as_json: bool,
+    stage: str,
+) -> None:
+    catalog = json.loads(native_cli.config.read_text())
+    catalog["native_profiles"]["isolated"].update({"allowed_agents": ["pi"], "pi_rpc": True})
+    native_cli.config.write_text(json.dumps(catalog))
+    goon = native_cli.workspace / "goon.yml"
+    goon.write_text(
+        goon.read_text()
+        .replace(
+            "  requested_effects:",
+            "  session: {mode: continue, prior_run_id: prior-run}\n  requested_effects:",
+        )
+        .replace("repository_access: write", "repository_access: read_only")
+    )
+    assert main(["workflow", "prepare", str(native_run_configuration)]) == 0
+    capsys.readouterr()
+    private = "/private/pi-state/session.jsonl PRIVATE_TRANSCRIPT PRIVATE_PROVIDER_CREDENTIAL"
+    native_cli.runtime.plans.require_cli_plan_preparation = Mock()
+    native_cli.runtime.plans.run = Mock(side_effect=PiSessionCleanupUnverified(private))
+    if stage == "preflight":
+        monkeypatch.setattr(
+            cli_ai, "native_plan_selection", Mock(side_effect=PiSessionCleanupUnverified(private))
+        )
+    argv = ["run", str(native_run_configuration)]
+    assert main([*argv, "--json"] if as_json else argv) == 2
+    captured = capsys.readouterr()
+    reference = ["oh-goon", "runs", "handoff", "prior-run", "--json"]
+    if as_json:
+        report = json.loads(captured.out)
+        assert report["code"] == PiSessionCleanupUnverified.code
+        assert report["stage"] == "pi_session"
+        assert "establish process cleanup" in report["safe_next_action"]
+        assert report["prior_run_id"] == "prior-run"
+        assert report["prior_run_handoff_argv"] == reference
+    else:
+        assert PiSessionCleanupUnverified.code not in captured.out
+        assert PiSessionCleanupUnverified.code in captured.err
+        assert "establish process cleanup" in captured.err
+        assert json.dumps(reference) in captured.err
+    assert not any(value in captured.out + captured.err for value in private.split())
+    native_cli.runtime.runs.wait_for_terminal.assert_not_called()
 
 
 @pytest.mark.parametrize("entrypoint", ("ai", "prepare"))

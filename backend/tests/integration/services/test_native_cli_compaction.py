@@ -38,6 +38,7 @@ from oh_goon.core.models.run_events import (
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.vocabulary import FleetRunOutcome, GameTapeStatus
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.runtime.database import LocalDatabase
 from tests.fakes.native_context import controlled_native_context
 
 _SYNTHETIC_PI_BROKER_KEYS = (b"SYNTHETIC_PRIOR_KEY", b"SYNTHETIC_COMPACTION_KEY")
@@ -141,6 +142,104 @@ def _assert_pi_storage_outlives_scratch(
         for material in (*_SYNTHETIC_PI_BROKER_KEYS, scratch.local_key, *scratch.bootstrap)
     )
     return retained
+
+
+def _assert_failed_verifier_pi_readback(
+    detail: FleetRunDetail,
+    repository: Path,
+    database: Path,
+    *,
+    private_markers: tuple[str, ...],
+) -> None:
+    """Read the failed Run and its retained Pi evidence in fresh CLI processes."""
+    tape = detail.game_tape
+    session = tape.pi_session
+    assert session is not None and session.native is not None and session.prior_run_id is not None
+    assert session.mode == "continue" and session.persistence == "observed"
+    assert session.availability == "not_checked"
+    assert session.settlement is not None and session.settlement.outcome == "SUCCESS"
+    assert session.settlement.cleanup == "VERIFIED"
+    (verifier,) = session.following_steps
+    assert verifier.settlement is not None and verifier.settlement.outcome == "FAILED"
+    assert detail.outcome is FleetRunOutcome.ATTENTION_REQUIRED
+    assert tape.status is GameTapeStatus.ATTENTION_REQUIRED
+    private_root = ApplicationStatePathLayout.from_database(database).pi_sessions
+    read_database = LocalDatabase(database, read_only=True)
+    revision = read_database.durable_revision()
+    executable = Path(sys.executable).with_name("oh-goon")
+    environment = {**os.environ, "OH_GOON_PROVIDERS_FILE": str(database.with_suffix(".missing"))}
+
+    def readback(command: str, run_id: str) -> dict[str, Any]:
+        options = ("--after", "0", "--limit", "100") if command == "events" else ()
+        result = subprocess.run(
+            (str(executable), "runs", command, run_id, *options, "--json"),
+            cwd=repository,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        visible = result.stdout + result.stderr
+        for marker in (
+            *private_markers,
+            *(key.decode() for key in _SYNTHETIC_PI_BROKER_KEYS),
+            "oh-goon-local",
+            str(private_root),
+            str(PI_SESSION_NEW_FILE),
+        ):
+            assert marker not in visible
+        assert result.returncode == 0, result.stderr
+        payload: dict[str, Any] = json.loads(result.stdout)
+        return payload
+
+    available = readback("pi-session", tape.fleet_run_id)
+    assert available["fleet_run_id"] == tape.fleet_run_id
+    assert available["availability"] == "available" and available["refusal_code"] is None
+    assert available["native"] == session.native.model_dump(mode="json")
+
+    prior = readback("pi-session", session.prior_run_id)
+    assert prior["availability"] == "unavailable"
+    assert prior["refusal_code"] == "PI_SESSION_UNAVAILABLE" and prior["safe_next_action"]
+    assert prior["native"]["session_id"] == available["native"]["session_id"]
+    assert prior["native"]["leaf_id"] != available["native"]["leaf_id"]
+    prior_tape = readback("tape", session.prior_run_id)
+    assert prior_tape["status"] == "PASSED"
+    assert prior_tape["pi_session"]["availability"] == "not_checked"
+
+    # Historical readback comes from the Journal even without the test transcript.
+    hidden_root = private_root.with_name("hidden-test-pi-sessions")
+    private_root.rename(hidden_root)
+    try:
+        expected = session.model_dump(mode="json")
+        assert expected["save_verification"] == "pi_rpc_synced"
+        for command in ("handoff", "outputs", "tape", "events"):
+            payload = readback(command, tape.fleet_run_id)
+            run = payload["run"] if command == "events" else payload
+            assert run["fleet_run_id"] == tape.fleet_run_id
+            assert payload["pi_session"] == expected
+            if command == "handoff":
+                assert payload["outcome"] == "ATTENTION_REQUIRED"
+                assert payload["game_tape_status"] == "ATTENTION_REQUIRED"
+            elif command == "tape":
+                assert payload["status"] == "ATTENTION_REQUIRED"
+            elif command == "events":
+                assert run["status"] == detail.run.status.value
+                (quiescent,) = (
+                    event
+                    for event in payload["events"]
+                    if event["sequence"] == expected["quiescent_sequence"]
+                )
+                assert quiescent["event_type"] == "DESCENDANTS_QUIESCENT"
+                assert any(
+                    event["event_type"] == "PROCESS_EXITED"
+                    and event["physical_execution_id"] == quiescent["physical_execution_id"]
+                    and event["returncode"] == 0
+                    for event in payload["events"]
+                )
+        assert not private_root.exists()
+    finally:
+        hidden_root.rename(private_root)
+    assert read_database.durable_revision() == revision
 
 
 @pytest.mark.process
@@ -872,6 +971,21 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
             finally:
                 runtime.shutdown(wait_for_runs=True)
             retained_requests = request_count
+            if reopen and not verification_passes:
+                _assert_failed_verifier_pi_readback(
+                    detail,
+                    repository,
+                    database,
+                    private_markers=(
+                        task,
+                        prior_task,
+                        compaction_marker,
+                        "native-frozen-skill-canary",
+                        "native-prior-skill-canary",
+                        "fixture-foreign-session",
+                    ),
+                )
+                assert request_count == retained_requests and restart_scratch is None
             restart_run_id: str | None = None
             if reopen:
                 cli = Path(sys.executable).with_name("oh-goon")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from oh_goon.core.models.fleet_observation import NativeAgentObservation
 from oh_goon.core.models.fleet_plan import (
@@ -26,6 +26,9 @@ from oh_goon.core.models.run_events import (
 )
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.plan_validation_diagnostics import pi_session_safe_next_action
+
+if TYPE_CHECKING:
+    from oh_goon.core.models.fleet import FleetSnapshot
 
 _FOLLOWING_STEP_LIMIT = 8
 
@@ -58,6 +61,31 @@ def fleet_run_detail_readback(detail: FleetRunDetail) -> dict[str, Any] | None:
     if not private_steps:
         return None
     result = detail.model_dump(mode="json", by_alias=True)
+    _hide_private_pi_run_detail(result, private_steps)
+    return result
+
+
+def fleet_snapshot_readback(snapshot: FleetSnapshot) -> dict[str, Any] | None:
+    """Protect the embedded copies of private Pi Runs on the Fleet surface."""
+    step_ids = {
+        detail.run.fleet_run_id: ids
+        for detail in (*snapshot.active_fleet_runs, *snapshot.latest_fleet_runs)
+        if (ids := _private_pi_step_ids(detail.run.target))
+    }
+    if not step_ids:
+        return None
+    result = snapshot.model_dump(mode="json", by_alias=True)
+    for detail in (
+        *result["active_fleet_runs"],
+        *result["latest_fleet_runs"],
+        result["active_fleet_run"],
+    ):
+        if detail is not None and (private := step_ids.get(detail["run"]["fleet_run_id"])):
+            _hide_private_pi_run_detail(detail, private)
+    return result
+
+
+def _hide_private_pi_run_detail(result: dict[str, Any], private_steps: set[str]) -> None:
     _hide_pi_task(result["run"], private_steps)
     safe_steps = {
         (repository["repository"]["repository_id"], step["step_id"]): step
@@ -82,11 +110,14 @@ def fleet_run_detail_readback(detail: FleetRunDetail) -> dict[str, Any] | None:
             safe_observations = iter(safe_step.get("native_agent_observations", []))
             public_observations = []
             for entry in step["observations"]:
+                # The accepted review record can repeat text from the private
+                # conversation, even when its typed result is valid.
+                if entry["kind"] == "agent_review":
+                    continue
                 public = next(safe_observations, None) if entry["kind"] == "native_agent" else entry
                 if public is not None:
                     public_observations.append(public)
             step["observations"] = public_observations
-    return result
 
 
 def fleet_run_history_readback(page: FleetRunHistoryPage) -> dict[str, Any] | None:
@@ -206,6 +237,7 @@ def project_pi_session_evidence(detail: FleetRunDetail) -> GameTapePiSessionEvid
     persistence: Literal["not_recorded", "unknown", "observed"]
     native = None
     byte_identity: Literal["digest_recorded", "metadata_only"] | None = None
+    save_verification: Literal["pi_rpc_synced"] | None = None
     if observed is not None:
         observation = observed.observation
         persistence = observation.persistence
@@ -220,6 +252,7 @@ def project_pi_session_evidence(detail: FleetRunDetail) -> GameTapePiSessionEvid
             byte_identity = (
                 "digest_recorded" if observation.file.sha256 is not None else "metadata_only"
             )
+            save_verification = observation.file.save_verification
     else:
         persistence = (
             "unknown" if reservation is not None and detail.run.status.terminal else "not_recorded"
@@ -277,6 +310,7 @@ def project_pi_session_evidence(detail: FleetRunDetail) -> GameTapePiSessionEvid
         quiescent_sequence=quiescent_sequence,
         persistence=persistence,
         byte_identity=byte_identity,
+        save_verification=save_verification,
         native=native,
         settlement=settlements.get(step.step_id),
         following_steps=tuple(

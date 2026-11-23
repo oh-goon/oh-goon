@@ -26,8 +26,9 @@ import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from oh_goon.api.dependencies import fleet_run_control_plane
+from oh_goon.api.dependencies import fleet_run_control_plane, fleet_service
 from oh_goon.api.routes.fleet_runs import router as run_router
+from oh_goon.api.routes.fleet_snapshot import router as fleet_snapshot_router
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.errors import PiSessionRefusalCode, StateConflict
@@ -49,6 +50,7 @@ from oh_goon.core.models.run_events import (
     TerminationRequestedEvent,
 )
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.projections import build_fleet_snapshot
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.database import LocalDatabase
@@ -368,6 +370,7 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
         assert session["prior_run_id"] == prior_run
         assert session["persistence"] == "observed"
         assert session["byte_identity"] == "digest_recorded"
+        assert session["save_verification"] == "pi_rpc_synced"
         assert session["availability"] == "not_checked"
         assert session["repository_source"] and session["skill_identity"]
         assert session["settlement"]["cleanup"] == "VERIFIED"
@@ -538,16 +541,27 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
         view = Journal(read_database).read_view()
         api = FastAPI()
         api.include_router(run_router, prefix="/api")
+        api.include_router(fleet_snapshot_router, prefix="/api")
         api.dependency_overrides[fleet_run_control_plane] = lambda: SimpleNamespace(
             get=view.required_run_detail,
             events=view.run_events,
             history=view.run_history,
         )
+        api.dependency_overrides[fleet_service] = lambda: SimpleNamespace(
+            snapshot=lambda: build_fleet_snapshot(
+                [],
+                durable_revision=revision,
+                journal_revision=view.revision,
+                active_fleet_runs=view.active_run_details(),
+                latest_fleet_runs=view.latest_run_details(),
+            )
+        )
         with TestClient(api) as client:
             detail_response = client.get(f"/api/fleet/runs/{second_id}")
             event_response = client.get(f"/api/fleet/runs/{second_id}/events?after=0&limit=1")
             history_response = client.get("/api/fleet/runs")
-        for response in (detail_response, event_response, history_response):
+            snapshot_response = client.get("/api/fleet")
+        for response in (detail_response, event_response, history_response, snapshot_response):
             assert response.status_code == 200
             for private in (
                 *_TASKS,
@@ -559,6 +573,12 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
             ):
                 assert private not in response.text
         api_detail = detail_response.json()
+        (snapshot_detail,) = (
+            detail
+            for detail in snapshot_response.json()["latest_fleet_runs"]
+            if detail["run"]["fleet_run_id"] == second_id
+        )
+        assert snapshot_detail == api_detail
         api_events = event_response.json()
         assert (
             api_detail["game_tape"]["pi_session"]

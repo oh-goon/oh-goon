@@ -464,11 +464,15 @@ def _run_selected(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
                 )
             )
         else:
-            print(message)
+            destination = (
+                sys.stderr if diagnostic_fields.get("stage") == "pi_session" else sys.stdout
+            )
+            print(message, file=destination)
             if prior_readback:
                 print(
                     "Prior Run handoff argv: "
-                    + json.dumps(prior_readback["prior_run_handoff_argv"])
+                    + json.dumps(prior_readback["prior_run_handoff_argv"]),
+                    file=destination,
                 )
         return 2
     if as_json:

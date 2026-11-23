@@ -36,6 +36,9 @@ class GameTapePiSessionEvidence(ImmutableModel):
     quiescent_sequence: int | None = Field(default=None, ge=1)
     persistence: Literal["not_recorded", "unknown", "observed"]
     byte_identity: Literal["digest_recorded", "metadata_only"] | None = None
+    save_verification: Literal["pi_rpc_synced"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     availability: Literal["not_checked"] = "not_checked"
     native: PiSessionNativeObservation | None = None
     settlement: PlanStepSettlementEvidence | None = None
