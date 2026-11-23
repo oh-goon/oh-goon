@@ -5,7 +5,6 @@ This is process/protocol conformance, not installed harness qualification.
 
 from __future__ import annotations
 
-import os
 import select
 import shutil
 import signal
@@ -29,51 +28,14 @@ from oh_goon.core.models.agent_providers import (
 )
 from oh_goon.core.models.run_events import ProcessStartedEvent, ProcessStartingEvent
 from oh_goon.core.models.target import FleetPlanTarget
-from oh_goon.core.process_birth import observe_process_birth, observe_process_state
+from oh_goon.core.process_birth import observe_process_state
 from oh_goon.core.vocabulary import FleetRunEventType, FleetRunOutcome, FleetRunStatus
 from oh_goon.engine.git import GitService
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
 from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
 from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
-from tests.fakes.native_lifetime import bind_native_descendant
-
-
-def _native_root(
-    runtime: ApplicationRuntime, run_id: str, step_id: str, executable: Path
-) -> ProcessStartedEvent:
-    deadline = monotonic() + 15
-    while True:
-        for event in reversed(runtime.runs.events(run_id).events):
-            if type(event) is not ProcessStartedEvent or event.step_id != step_id:
-                continue
-            try:
-                descriptor = os.pidfd_open(event.pid)
-            except ProcessLookupError:
-                continue
-            try:
-                birth = observe_process_birth(event.pid)
-                if (
-                    birth is None
-                    or event.process_identity != f"{birth.boot_id}:{birth.start_ticks}"
-                ):
-                    continue
-                if select.select([descriptor], [], [], 0)[0]:
-                    continue
-                with (Path("/proc") / str(event.pid) / "cmdline").open("rb") as source:
-                    arguments = source.read(65537)
-                assert len(arguments) <= 65536
-                parts = arguments.split(b"\0")
-                separators = [index for index, value in enumerate(parts) if value == b"--"]
-                workload = parts[separators[-1] + 1 :] if separators else parts
-                if any(Path(value.decode()).name == executable.name for value in workload if value):
-                    return event
-            except FileNotFoundError:
-                continue
-            finally:
-                os.close(descriptor)
-        assert monotonic() < deadline, "original native Step process did not become observable"
-        Event().wait(0.01)
+from tests.fakes.native_lifetime import bind_native_descendant, wait_for_native_step_process
 
 
 @pytest.mark.process
@@ -175,7 +137,9 @@ def test_native_child_cannot_outlive_original_claimed_run_settlement(
         )
         assert isinstance(admitted.target, FleetPlanTarget)
         step_id = admitted.target.plan.steps[0].step_id
-        root_event = _native_root(runtime, admitted.fleet_run_id, step_id, executable)
+        root_event = wait_for_native_step_process(
+            lambda: runtime.runs.events(admitted.fleet_run_id).events, step_id, executable
+        )
         with bind_native_descendant(root_event, token) as observed:
             assert (observed.child_pgid != observed.parent_pgid) is escaped
             stopped_by = monotonic() + 5

@@ -1128,8 +1128,10 @@ or exposing that path, including formerly accepted public configuration director
 Use their managed bootstrap or qualify the native-service route; do not select a
 personal configuration/authentication store through another input. Pi retains its
 explicit public non-secret configuration-directory contract. That Pi directory uses
-a private copy-on-write overlay; disposable native state cannot modify the host
-input. User auth/configuration stores are never deployment inputs or runtime roots.
+a private copy-on-write overlay. Bubblewrap refuses the default personal
+`~/.pi/agent` store as a configuration, workspace or broad runtime mount.
+Explicit read-only public release directories can supply Pi runtime code.
+Select a separate non-secret directory for public configuration.
 
 Pi `arguments` contain native options and their own values. Oh-Goon owns the
 invocation's task, session and transport: caller arguments cannot select native
@@ -1140,8 +1142,10 @@ refused before it can consume an adapter-owned flag. Use the outer CLI's
 tool, display and extension options retain their original order and values;
 native Pi still interprets those values. Explicit native model arguments retain
 the existing public broker-configuration requirement. Unknown extension flags
-do not attest the behavior of arbitrary extension code. Persistent session modes
-remain unqualified; see the [Pi argument QA boundary](development/AGENT_HARNESS_COMPATIBILITY.md#pi-argument-ownership-qa--hug-71).
+do not attest the behavior of arbitrary extension code. Managed persistent
+modes require the dedicated profile and built-in configuration. The
+[installed Pi configuration evidence](development/AGENT_HARNESS_COMPATIBILITY.md#selected-pi-configuration-and-native-tools--hug-54)
+covers explicit ephemeral MCP and extensions and the protected resume exclusions.
 
 Pi `--no-session` does not disable extensions, MCP or background tools. A native
 turn settling does not attest their cleanup. With Bubblewrap, CLI workloads retain

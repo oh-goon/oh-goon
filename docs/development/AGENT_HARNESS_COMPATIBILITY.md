@@ -365,7 +365,7 @@ The claimed Run worker and existing Step/Attempt remain the execution path.
 | Managed Codex/Pi/OpenCode CLI through Bubblewrap | **RETAIN** native tool/configuration semantics. Disposable broker configuration does not attest every native background feature. Pi's `--no-session` excludes product persistence; it does not disable extensions, MCP or background commands. Explicit public Pi configuration and nonconflicting extension arguments remain native-owned. | The original backend launches a private PID namespace and the original command owner retains exit, cancellation and cleanup evidence. A child changing its process group is distinct from escaping that namespace. No optional extension's internal session/disposal semantics are qualified merely by this boundary. |
 | Local Codex sign-in CLI | **RETAIN** the strict owned configuration with disabled hooks, plugins, Apps and native delegation settings. Delegation denial combines `agents.enabled=false` with the legacy/V2 feature exclusions. These settings are specific to this profile, not the general managed CLI configuration or universal native behavior proof. | The original local command owns its process group. Arbitrary daemonization or descendants escaping that group are **UNQUALIFIED**; a clean group receipt does not attest their absence. |
 | Owned Codex service | **RETAIN** effective feature exclusion before the workload turn, including the native `agents.enabled=false` override alongside delegation feature flags, plugins and per-thread MCP tools. Status discovery may still initialize configured MCP servers; startup isolation remains **UNSUPPORTED** under HUG-124. | The original local command owns daemon birth, process group, cancellation and cleanup; closing the client or receiving a turn/abort acknowledgement is insufficient. Group-escaped work remains **UNQUALIFIED**. No separately owned external daemon is adopted. |
-| Pi persistence/reload and OpenCode external service | Product Pi persistent sessions, cross-Run native-session adoption and extension hot reload remain **UNSUPPORTED/UNQUALIFIED**. OpenCode service supports readiness only, not session execution or background-task admission. | External servers retain their operator's lifetime. Transport closure does not kill them. Pi persistence and late restored-extension callbacks remain HUG-19/HUG-89 work, not another cleanup supervisor. |
+| Protected Pi resume and OpenCode external service | Pi read-only managed resume has its scoped [installed evidence](#exact-read-only-pi-reopen--hug-43). Restored extensions, MCP, and dynamic reload remain **UNQUALIFIED**. OpenCode owned-service readiness remains **UNQUALIFIED** for session execution. | Pi retains its original isolated Step and command owner. External servers retain their operator's lifetime. |
 
 The pinned ThinkRail [subagent specification](https://github.com/JetBrains/thinkrail/blob/f93fd03319293b3a19e201c274b00c898d7bf976/packages/pi-subagents/SPEC.md)
 allows background children to survive parent-turn abort. Its
@@ -750,8 +750,8 @@ cases linked here.
 | Terminal completion and failed process | A [native events][native-tests], [Step settlement][settlement-tests]; B [CLI success/error/deadline][cli-lifecycle-tests] | A [native events][native-tests]; B [CLI success/error/deadline][cli-lifecycle-tests] | A [native events][native-tests], [real-child Run][native-run-tests]; B [CLI success/error/deadline][cli-lifecycle-tests] | A [terminal/cleanup refusals][codex-execution-tests]; B [owned Run][codex-run-tests] | Unsupported session execution |
 | Cancellation / resource cleanup | A [shared command cancellation][command-tests]; B [original Run cancellation/deadline][cli-lifecycle-tests] | A [shared cancellation][command-tests], [Step timeout][receiver-tests]; B [original Run cancellation/deadline][cli-lifecycle-tests] | A [shared cancellation][command-tests]; B [original Run cancellation/deadline][cli-lifecycle-tests] | A [cancellation][codex-execution-tests]; B [campaign cancellation][codex-run-tests] | A [transport closure][opencode-service-tests]; B [client close preserves server; owner cancels; stdin lease][opencode-installed-service] |
 | Compaction / complete context | B [synthetic auth × HTTP/WebSocket][codex-context-tests]; protected HTTP has separate scope | B [native overflow/summary/continuation][cli-compaction-tests] | A [current protocol events][native-tests]; B [native overflow/summary/continuation][cli-compaction-tests] | A [transport][codex-service-tests]; B [automatic compaction Run][codex-run-tests] | Unsupported |
-| Same native session continuation | No OH-Goon continuation API; headless calls are ephemeral | No OH-Goon continuation API | No OH-Goon continuation API; headless calls use `--no-session` | A [fixed thread/profile][codex-service-tests]; B [persisted resume + explicit compaction][codex-installed-service]; cross-Run adoption unverified | Unsupported |
-| Selected tool / private-store boundary | B [managed review][codex-managed-tests], [protected HTTP context][codex-context-tests]; no general native-store exclusion claim | B [read-only native shell][cli-readonly-tests]; no general native-store exclusion or MCP conformance claim | B [read-only native shell][cli-readonly-tests]; no general native-store exclusion claim | A [capability/policy refusal][codex-execution-tests]; B [synthetic stores, reserved-directory states and phase commands][codex-installed-service], [configured MCP campaign][codex-run-tests] | Protected execution explicitly refused |
+| Same native session continuation | No OH-Goon continuation API; headless calls are ephemeral | No OH-Goon continuation API | B [exact managed read-only resume](#exact-read-only-pi-reopen--hug-43) and [operator journey](#managed-pi-operator-journey--hug-53) | A [fixed thread/profile][codex-service-tests]; B [persisted resume + explicit compaction][codex-installed-service]; cross-Run adoption unverified | Unsupported |
+| Selected tool / private-store boundary | B [managed review][codex-managed-tests], [protected HTTP context][codex-context-tests]; no general native-store exclusion claim | B [read-only native shell][cli-readonly-tests]; no general native-store exclusion or MCP conformance claim | B [read-only native shell][cli-readonly-tests] and [explicit ephemeral Pi tools and protected restore](#selected-pi-configuration-and-native-tools--hug-54) | A [capability/policy refusal][codex-execution-tests]; B [synthetic stores, reserved-directory states and phase commands][codex-installed-service], [configured MCP campaign][codex-run-tests] | Protected execution explicitly refused |
 | Independent verification / original durable evidence | B [original context Run][codex-context-tests], [lifecycle readback][cli-lifecycle-tests] | B [typed review + independent verifier][cli-readonly-tests], [cancelled receipt readback][cli-lifecycle-tests] | B [typed review + independent verifier][cli-readonly-tests], [lifecycle readback][cli-lifecycle-tests] | B [original Run and campaign][codex-run-tests] | Unsupported |
 
 Same-session continuation, fresh-session handoff and choosing a harness for a new
@@ -1023,6 +1023,40 @@ persistence grade, current source and Skill identity, cleanup, and verifier
 outcome. Readback leaves availability unchecked and omits the native
 prompt, response, tool payload and private process arguments. The provider
 in this proof is synthetic.
+
+### Selected Pi configuration and native tools — HUG-54
+
+**Disposition: retain** Pi's native settings and resource discovery, the
+explicit public copy-on-write configuration, the managed inference broker,
+and the original claimed Run and Step process owner. The standard Bubblewrap
+mount check refuses the default personal store, including direct aliases and
+enclosing roots. Explicit read-only mounts of public installed releases remain
+available. This check does not inspect native credential or configuration bytes.
+
+| Selected scope | Installed evidence |
+| --- | --- |
+| Ephemeral managed Pi with explicit public configuration | B [native config and tool proof][pi-native-config-tests]. The selected native Skill, system instructions and configured thinking reached the synthetic provider alongside fresh Oh-Goon Skill and Hashmarks evidence. Approved extension and stdio MCP tools ran under the read-only repository policy and wrote only to the private config overlay. Disabled tools refused invocation. The host config retained its original bytes and the synthetic personal store stayed outside the child. |
+| Exact managed read-only reopen | B [native config and tool proof][pi-native-config-tests] and [installed restore and compaction][cli-compaction-tests]. Pi reopened the saved session under the fresh selected model, endpoint, task and native built-in read grants. It refused previous write grants and excluded valid project extension, MCP and native Skill inputs. Public configuration and explicit extension arguments remained ineligible in this mode. A failed independent verifier retained its own Run outcome. |
+| Delayed selected native startup | B [installed startup cancellation][pi-startup-cancel-tests]. The original worker cancelled a stalled MCP initializer and a stalled extension startup. Birth-bound process observations verified the reaped owners and helpers with zero provider connections. |
+| Upgrade selection | A [writer admission regression](../../backend/tests/unit/runtime/test_pi_session_writer.py) refuses a different admitted executable identity. B cases bind exact observed release, public entrypoint and selected mode and require requalification for another release. |
+
+The selected runtime was Pi 1.3.0, Node 22.22.1 and Bubblewrap 0.11.1 on
+Linux 7.0.0-43-generic with synthetic inference. The public `dist/bundle/cli.js`
+SHA-256 was `e79626f2dd6f94aa45d30f3fa63cd84319a6eefcd150b353cfaf274366926774`.
+Its loaded `cli-runtime.js` SHA-256 was
+`f9811fa28c52accb8e2433499a85e857b714a002956005b7859ad00e5e35f380`.
+These hashes record the selected proof inputs. Full transitive runtime sealing
+remains HUG-137.
+
+In-flight settings reload, persistent extension/MCP execution, untrusted
+extension protocol origin, relocated personal stores, unqualified detached
+workers and other runtime environments remain **UNQUALIFIED**. Retain the
+protected restore exclusions until an installed case proves the effective
+configuration and tool policy before any unauthorized activity and verifies
+original teardown with the same owner.
+
+[pi-native-config-tests]: ../../backend/tests/integration/services/test_native_pi_configuration.py
+[pi-startup-cancel-tests]: ../../backend/tests/integration/services/test_native_pi_startup_cancellation.py
 
 ## Native model usage observations — HUG-222, 2026-11-22
 

@@ -5,14 +5,14 @@ from __future__ import annotations
 import os
 import select
 import signal
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from time import monotonic
 
-from oh_goon.core.models.run_events import ProcessStartedEvent
+from oh_goon.core.models.run_events import FleetRunEvent, ProcessStartedEvent
 from oh_goon.core.process_birth import ProcessBirthIdentity, observe_process_birth
 
 
@@ -21,10 +21,54 @@ class NativeDescendant:
     root: ProcessBirthIdentity
     parent: ProcessBirthIdentity
     child: ProcessBirthIdentity
+    root_fd: int
     parent_fd: int
     child_fd: int
     parent_pgid: int
     child_pgid: int
+
+
+def wait_for_native_step_process(
+    read_events: Callable[[], Sequence[FleetRunEvent]],
+    step_id: str,
+    executable: Path,
+    *,
+    timeout_seconds: float = 15,
+) -> ProcessStartedEvent:
+    """Find the live original Step workload rather than its earlier preparation process."""
+    deadline = monotonic() + timeout_seconds
+    while True:
+        for event in reversed(read_events()):
+            if type(event) is not ProcessStartedEvent or event.step_id != step_id:
+                continue
+            try:
+                descriptor = os.pidfd_open(event.pid)
+            except ProcessLookupError:
+                continue
+            try:
+                birth = observe_process_birth(event.pid)
+                if (
+                    birth is None
+                    or event.process_identity != f"{birth.boot_id}:{birth.start_ticks}"
+                    or select.select([descriptor], [], [], 0)[0]
+                ):
+                    continue
+                with (Path("/proc") / str(event.pid) / "cmdline").open("rb") as source:
+                    arguments = source.read(65537)
+                assert len(arguments) <= 65536
+                parts = arguments.split(b"\0")
+                separators = [index for index, value in enumerate(parts) if value == b"--"]
+                workload = parts[separators[-1] + 1 :] if separators else parts
+                if any(
+                    Path(os.fsdecode(value)).name == executable.name for value in workload if value
+                ):
+                    return event
+            except FileNotFoundError:
+                continue
+            finally:
+                os.close(descriptor)
+        assert monotonic() < deadline, "original native Step process did not become observable"
+        Event().wait(0.01)
 
 
 def _child_with_token(root: int, token: bytes) -> tuple[int, int] | None:
@@ -108,6 +152,7 @@ def bind_native_descendant(
                     root_birth,
                     parent_birth,
                     child_birth,
+                    root_fd,
                     parent_fd,
                     child_fd,
                     os.getpgid(parent_birth.pid),
