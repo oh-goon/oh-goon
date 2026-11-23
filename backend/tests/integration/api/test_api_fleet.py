@@ -1,8 +1,12 @@
 from pathlib import Path
+from types import SimpleNamespace
 
-import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from oh_goon.api.app import app as api_app
+from oh_goon.api.dependencies import fleet_service
+from oh_goon.api.routes.fleet_snapshot import router as fleet_snapshot_router
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentModel,
@@ -31,7 +35,6 @@ from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarg
 from oh_goon.core.projections import build_fleet_snapshot
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import FleetRunStatus, OperationAction
-from oh_goon.services.fleet import FleetService
 from tests.factories.capabilities import capability_snapshot
 from tests.factories.fleet_plan_targets import structural_execution_identity
 from tests.factories.run_admission import repository_admissions_for
@@ -58,7 +61,7 @@ def test_fleet_snapshot_does_not_infer_readiness_during_discovery(tmp_path: Path
 
 
 def test_fleet_snapshot_uses_private_pi_readback_for_live_and_latest_runs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     canary = "synthetic private Pi task excerpt"
     selected = ResolvedNativeAgent(
@@ -147,9 +150,12 @@ def test_fleet_snapshot_uses_private_pi_readback_for_live_and_latest_runs(
         latest_fleet_runs=[stopped_detail],
     )
     assert canary in observed.model_dump_json()
-    monkeypatch.setattr(FleetService, "snapshot", lambda _service: observed)
+    api = FastAPI()
+    api.include_router(fleet_snapshot_router, prefix="/api")
+    api.dependency_overrides[fleet_service] = lambda: SimpleNamespace(snapshot=lambda: observed)
 
-    response = authenticated_api_client(api_app).get("/api/fleet")
+    with TestClient(api) as client:
+        response = client.get("/api/fleet")
 
     response.raise_for_status()
     assert canary not in response.text
