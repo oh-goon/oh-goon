@@ -52,6 +52,10 @@ from tests.fakes.native_protocol import observe_native_protocol
     (
         ("pi", "stale-terminal", False),
         ("pi", "fresh-terminal", True),
+        ("pi", "agent-end-only", False),
+        ("pi", "late-tool-update", False),
+        ("pi", "aborted-assistant", False),
+        ("pi", "failed-exit", False),
         ("codex", "stale-terminal", False),
         ("codex", "missing-current-result", False),
         ("codex", "fresh-terminal", True),
@@ -115,10 +119,20 @@ def test_native_terminal_sequence_is_accepted_once_by_original_run(
         "    emit(tool)\n"
         "    if scenario!='nested-only':\n"
         "        emit(message('current role result'))\n"
-        "        emit({'type':{'pi':'agent_settled','codex':'turn.completed','opencode':'step_finish'}[agent]})\n"
+        "        emit({'type':'agent_settled','aborted':False} if agent=='pi' else {'type':{'codex':'turn.completed','opencode':'step_finish'}[agent]})\n"
         "elif agent=='opencode':\n"
         "    emit({'type':'step_start'})\n"
         "    emit(message('current role result'))\n"
+        "elif scenario in ('agent-end-only','late-tool-update','aborted-assistant'):\n"
+        "    emit({'type':'agent_start'})\n"
+        "    answer=message('current role result')\n"
+        "    if scenario=='aborted-assistant': answer['message']['stopReason']='aborted'\n"
+        "    emit(answer)\n"
+        "    emit({'type':'agent_end','messages':[]})\n"
+        "    if scenario=='aborted-assistant': emit({'type':'agent_settled','aborted':True})\n"
+        "    if scenario=='late-tool-update':\n"
+        "        emit({'type':'agent_settled','aborted':False})\n"
+        "        emit({'type':'tool_execution_update','toolCallId':'native-tool'})\n"
         "else:\n"
         "    terminal={'type':'agent_settled','aborted':False} if agent=='pi' else {'type':'turn.completed'}\n"
         "    emit({'type':'agent_start' if agent=='pi' else 'turn.started'})\n"
@@ -247,8 +261,12 @@ def test_native_terminal_sequence_is_accepted_once_by_original_run(
             ]
             assert len(root_reviews) == 1
             assert root_reviews[0]["summary"] == "current role result"
-        if scenario == "stale-terminal":
+        if scenario in ("stale-terminal", "agent-end-only", "late-tool-update"):
             assert not claim.settled
+        elif scenario == "failed-exit" and agent == "pi":
+            assert claim.settled and not claim.failed
+        elif scenario == "aborted-assistant":
+            assert claim.settled and claim.failed
         elif scenario == "omitted-failure":
             assert claim.failed and claim.omitted_observations > 0
             assert not any(event.summary == "codex: error" for event in claim.events)

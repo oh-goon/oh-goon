@@ -964,7 +964,11 @@ def execute_native_agent_step(
                 parsed = service_protocol
             else:
                 assert parser is not None
-                parsed = parser.finish(returncode=execution_returncode)
+                # Pi reports its own terminal disposition. The original exit
+                # independently gates role acceptance and Step settlement.
+                parsed = parser.finish(
+                    returncode=None if selected.agent == "pi" else execution_returncode
+                )
             events = tuple(
                 event.model_copy(update={"native_event_id": None}) if private_output else event
                 for event in parsed.observations

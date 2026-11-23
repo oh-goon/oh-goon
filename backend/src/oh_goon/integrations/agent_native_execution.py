@@ -847,23 +847,37 @@ class NativeAgentEventParser:
                 self._failed = True
                 self._observe("agent", "error")
         elif self._agent == "pi":
-            if event_type in (
+            message = record.get("message")
+            tool_activity = event_type in (
+                "tool_execution_start",
+                "tool_execution_update",
+                "tool_execution_end",
+            )
+            if tool_activity or event_type in (
                 "turn_start",
                 "turn_end",
                 "agent_end",
                 "message_start",
                 "message_update",
                 "message_end",
-                "tool_execution_start",
-                "tool_execution_end",
                 "compaction_start",
                 "compaction_end",
                 "auto_retry_start",
                 "auto_retry_end",
             ):
-                # A terminal claim covers the work observed before it. Later
-                # native activity needs its own agent_settled acknowledgment.
-                if self._settled:
+                # Later work invalidates settlement, and another operation
+                # cannot inherit role text from an earlier assistant message.
+                assistant_in_progress = (
+                    event_type in ("message_start", "message_update")
+                    and isinstance(message, dict)
+                    and message.get("role") == "assistant"
+                )
+                if (
+                    self._settled
+                    or tool_activity
+                    or assistant_in_progress
+                    or event_type in ("turn_start", "auto_retry_start")
+                ):
                     self._set_final_text("")
                 self._settled = False
             if event_type == "agent_start":
@@ -872,7 +886,6 @@ class NativeAgentEventParser:
                 self._assistant_failed = False
                 self._observe("agent", "agent_start")
             elif event_type == "message_end":
-                message = record.get("message")
                 if isinstance(message, dict) and message.get("role") == "assistant":
                     self._set_final_text(_pi_message_text(message.get("content")))
                     self._assistant_failed = message.get("stopReason") in (
@@ -883,8 +896,11 @@ class NativeAgentEventParser:
                     if self._assistant_failed:
                         self._observe("agent", f"stop_reason={message['stopReason']}")
             elif event_type == "agent_settled":
+                aborted = record.get("aborted")
+                if type(aborted) is not bool:
+                    raise AgentProviderError("Pi settlement omitted its native abort status")
                 self._settled = True
-                self._failed |= self._assistant_failed or record.get("aborted") is True
+                self._failed |= self._assistant_failed or aborted
                 self._observe("agent", "agent_settled")
             elif event_type in ("tool_execution_start", "tool_execution_end"):
                 self._observe("tool", event_type, record.get("toolCallId"))

@@ -1151,6 +1151,35 @@ and before Journal publication. Recovery preserves the original bytes and
 refuses continuation. Power-loss durability and a physically full filesystem
 remain unqualified.
 
+### Native Pi settlement and typed acceptance — HUG-79
+
+**Disposition**. Retain Pi 1.3.0's RPC control and the existing native event
+parser. The prompt acknowledgement confirms prompt acceptance. `agent_end`
+closes a native attempt that can lead to retry or compaction. The parser
+requires `agent_settled` with a boolean abort status. Later tool progress
+invalidates earlier settlement. A new turn, unfinished assistant message,
+retry, or tool activity clears earlier role text. A recovered native retry can
+supply current role output.
+
+Original command exit, descendant quiescence, typed acceptance, independent
+verification, and save evidence retain separate owners. A nonzero Pi process
+exit fails the Step while retaining the native terminal disposition. A proposal
+still requires a separately admitted apply before it can modify source.
+Strict Agent execution remains unsupported under the current admission policy.
+
+The [original-Run lifecycle tests][cli-lifecycle-tests] cover agent-end-only,
+late tool progress, aborted assistant output and nonzero exit after a native
+completion claim. The [installed Pi continuation tests](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+exercise the original worker and Journal with a local provider. They cover
+provider error, length truncation, malformed typed review, and native retry.
+The [installed RPC probe](../../backend/tests/integration/services/test_native_pi_rpc.py)
+checks native assistant abort with zero process exit using a synthetic
+provider. The [installed compaction tests][cli-compaction-tests] exercise recovery, a
+successful typed review with a failed independent verifier, and subsequent
+reopen. Resumed Pi's built-in read tool carries a control-shaped line as
+tool data. The [protocol-origin qualification](#native-protocol-origin-boundary)
+continues to bound optional shell, MCP, and in-process extension claims.
+
 ### Installed exact reopen and refusal — HUG-70
 
 **Disposition: retain** the qualified Pi RPC exact-open gate. HUG-39's native
