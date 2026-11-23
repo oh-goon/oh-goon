@@ -201,6 +201,17 @@ def _add_run_readback_commands[_Parser: argparse.ArgumentParser](
         "--reconcile", action="store_true", help="Reconcile an existing owned retirement receipt"
     )
     retire.add_argument("--json", action="store_true", dest="as_json")
+    pi_session = plan_subparsers.add_parser(
+        "pi-session", help="Inspect the current availability of one recorded Pi session"
+    )
+    pi_session.add_argument("fleet_run_id", help="Exact recorded Run ID")
+    pi_session.add_argument("--json", action="store_true", dest="as_json")
+    retire_pi = plan_subparsers.add_parser(
+        "retire-pi-session", help="Explicitly revoke and remove one saved Pi session"
+    )
+    retire_pi.add_argument("fleet_run_id", help="Exact latest writer Run ID")
+    retire_pi.add_argument("--authorize", action="store_true", required=True)
+    retire_pi.add_argument("--json", action="store_true", dest="as_json")
     investigate = plan_subparsers.add_parser(
         "investigate", help="Inspect a stopped campaign and its current candidate for a fresh Run"
     )

@@ -11,7 +11,10 @@ from oh_goon.core.models.game_tape_pi_session import GameTapePiSessionEvidence
 from oh_goon.core.models.pi_session_storage import (
     PiSessionContinuationOrigin as PiSessionContinuationOrigin,
 )
-from oh_goon.core.models.pi_session_storage import PiSessionWriterObservation
+from oh_goon.core.models.pi_session_storage import (
+    PiSessionRetirementDirectoryIdentity,
+    PiSessionWriterObservation,
+)
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import (
     FleetRunFailure,
@@ -170,6 +173,22 @@ class PiSessionWriterObservedEvent(_FleetRunEventBase):
     observation: PiSessionWriterObservation
 
 
+class PiSessionRetirementRequestedEvent(_FleetRunEventBase):
+    """Durable revocation bound to one exact previously observed native writer."""
+
+    event_type: Literal[FleetRunEventType.PI_SESSION_RETIREMENT_REQUESTED]
+    reservation_sequence: int = Field(ge=1)
+    observation_sequence: int = Field(ge=1)
+    directory: PiSessionRetirementDirectoryIdentity
+
+
+class PiSessionRetiredEvent(_FleetRunEventBase):
+    """Verified native file absence for the original explicit retirement."""
+
+    event_type: Literal[FleetRunEventType.PI_SESSION_RETIRED]
+    request_sequence: int = Field(ge=1)
+
+
 class ProcessStartingEvent(_FleetRunEventBase):
     event_type: Literal[FleetRunEventType.PROCESS_STARTING]
     repository_id: str = Field(min_length=1)
@@ -320,6 +339,8 @@ type FleetRunEvent = Annotated[
     | StepAttemptCreatedEvent
     | PiSessionWriterReservedEvent
     | PiSessionWriterObservedEvent
+    | PiSessionRetirementRequestedEvent
+    | PiSessionRetiredEvent
     | ProcessStartingEvent
     | ProcessStartedEvent
     | TerminationRequestedEvent

@@ -10674,6 +10674,8 @@
             "OUTPUT_ABANDONED": "#/components/schemas/OutputAbandonedEvent",
             "OUTPUT_FINALIZED": "#/components/schemas/OutputFinalizedEvent",
             "OUTPUT_QUARANTINED": "#/components/schemas/OutputQuarantinedEvent",
+            "PI_SESSION_RETIRED": "#/components/schemas/PiSessionRetiredEvent",
+            "PI_SESSION_RETIREMENT_REQUESTED": "#/components/schemas/PiSessionRetirementRequestedEvent",
             "PI_SESSION_WRITER_OBSERVED": "#/components/schemas/PiSessionWriterObservedEvent",
             "PI_SESSION_WRITER_RESERVED": "#/components/schemas/PiSessionWriterReservedEvent",
             "PROCESS_EXITED": "#/components/schemas/ProcessExitedEvent",
@@ -10732,6 +10734,12 @@
           },
           {
             "$ref": "#/components/schemas/PiSessionWriterObservedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/PiSessionRetirementRequestedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/PiSessionRetiredEvent"
           },
           {
             "$ref": "#/components/schemas/ProcessStartingEvent"
@@ -21556,6 +21564,116 @@
         ],
         "title": "PiSessionRefusalCode",
         "type": "string"
+      },
+      "PiSessionRetiredEvent": {
+        "additionalProperties": false,
+        "description": "Verified native file absence for the original explicit retirement.",
+        "properties": {
+          "event_type": {
+            "const": "PI_SESSION_RETIRED",
+            "title": "Event Type",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "request_sequence": {
+            "minimum": 1.0,
+            "title": "Request Sequence",
+            "type": "integer"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "fleet_run_id",
+          "event_type",
+          "request_sequence"
+        ],
+        "title": "PiSessionRetiredEvent",
+        "type": "object"
+      },
+      "PiSessionRetirementDirectoryIdentity": {
+        "additionalProperties": false,
+        "description": "The retained directory whose exact file absence can be verified on retry.",
+        "properties": {
+          "device": {
+            "minimum": 0.0,
+            "title": "Device",
+            "type": "integer"
+          },
+          "inode": {
+            "exclusiveMinimum": 0.0,
+            "title": "Inode",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "device",
+          "inode"
+        ],
+        "title": "PiSessionRetirementDirectoryIdentity",
+        "type": "object"
+      },
+      "PiSessionRetirementRequestedEvent": {
+        "additionalProperties": false,
+        "description": "Durable revocation bound to one exact previously observed native writer.",
+        "properties": {
+          "directory": {
+            "$ref": "#/components/schemas/PiSessionRetirementDirectoryIdentity"
+          },
+          "event_type": {
+            "const": "PI_SESSION_RETIREMENT_REQUESTED",
+            "title": "Event Type",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "observation_sequence": {
+            "minimum": 1.0,
+            "title": "Observation Sequence",
+            "type": "integer"
+          },
+          "reservation_sequence": {
+            "minimum": 1.0,
+            "title": "Reservation Sequence",
+            "type": "integer"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "fleet_run_id",
+          "event_type",
+          "reservation_sequence",
+          "observation_sequence",
+          "directory"
+        ],
+        "title": "PiSessionRetirementRequestedEvent",
+        "type": "object"
       },
       "PiSessionWriterObservation": {
         "additionalProperties": false,

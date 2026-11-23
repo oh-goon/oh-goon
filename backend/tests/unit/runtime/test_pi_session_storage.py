@@ -17,6 +17,7 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import (
+    PiSessionCleanupUnverified,
     PiSessionHistoryUnqualified,
     PiSessionIdentityMismatch,
     PiSessionUnavailable,
@@ -33,7 +34,11 @@ from oh_goon.core.models.source_authority import RepositorySourceAuthority
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.engine.git import GitService
-from oh_goon.runtime.pi_session_storage import observe_pi_session_file, pin_pi_session_directory
+from oh_goon.runtime.pi_session_storage import (
+    observe_pi_session_file,
+    pin_pi_session_directory,
+    pin_pi_session_retirement,
+)
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="Linux native directory custody")
 
@@ -92,6 +97,14 @@ def admitted_pi_scope(tmp_path: Path) -> _AdmittedScope:
     layout = ApplicationStatePathLayout(tmp_path / "state")
     layout.root.mkdir(mode=0o700)
     return _AdmittedScope(repository, evidence, layout)
+
+
+@pytest.fixture
+def retained_pi_file(admitted_pi_scope: _AdmittedScope) -> tuple[Path, PiSessionFileObservation]:
+    with admitted_pi_scope.create() as new:
+        selected = new.path / PI_SESSION_NEW_FILE.name
+        selected.write_bytes(b"retained\n")
+        return selected, observe_pi_session_file(new, selected.name)
 
 
 def test_new_private_slot_is_run_scoped_and_retained_on_failure(
@@ -326,3 +339,145 @@ def test_retained_pi_file_is_rechecked_after_pin_before_native_launch(
         session.write_bytes(b"modified\n")
         with pytest.raises(PiSessionHistoryUnqualified, match="changed before launch"):
             file.require_before_launch()
+
+
+def test_retirement_unlinks_one_exact_pi_file_without_touching_other_storage(
+    admitted_pi_scope: _AdmittedScope, retained_pi_file: tuple[Path, PiSessionFileObservation]
+) -> None:
+    selected, receipt = retained_pi_file
+    with admitted_pi_scope.create(attempt_number=2) as sibling:
+        unrelated = sibling.path / PI_SESSION_NEW_FILE.name
+        unrelated.write_bytes(b"another Pi session\n")
+    with (
+        selected.open("rb") as original,
+        pin_pi_session_retirement(
+            layout=admitted_pi_scope.layout,
+            storage_id=selected.parent.name,
+            expected_file=receipt,
+        ) as retirement,
+    ):
+        assert selected.exists()
+        retirement.remove()
+        assert os.fstat(original.fileno()).st_nlink == 0
+    assert list(selected.parent.iterdir()) == []
+    assert unrelated.read_bytes() == b"another Pi session\n"
+
+
+def test_interrupted_retirement_verifies_absence_only_under_the_prepared_directory(
+    admitted_pi_scope: _AdmittedScope,
+    retained_pi_file: tuple[Path, PiSessionFileObservation],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected, receipt = retained_pi_file
+
+    def interrupted(_fd: int) -> None:
+        raise InterruptedError("controlled interruption after unlink")
+
+    with pin_pi_session_retirement(
+        layout=admitted_pi_scope.layout,
+        storage_id=selected.parent.name,
+        expected_file=receipt,
+    ) as pending:
+        prepared = pending.directory
+        with monkeypatch.context() as patched:
+            patched.setattr(os, "fsync", interrupted)
+            with pytest.raises(PiSessionCleanupUnverified):
+                pending.remove()
+    assert not selected.exists()
+
+    with (
+        pytest.raises(PiSessionUnavailable, match="absent before retirement"),
+        pin_pi_session_retirement(
+            layout=admitted_pi_scope.layout,
+            storage_id=selected.parent.name,
+            expected_file=receipt,
+        ),
+    ):
+        pytest.fail("File absence without durable directory proof was accepted")
+    with pin_pi_session_retirement(
+        layout=admitted_pi_scope.layout,
+        storage_id=selected.parent.name,
+        expected_file=receipt,
+        expected_directory=prepared,
+    ) as retry:
+        retry.remove()
+
+    moved = selected.parent.with_name("moved")
+    selected.parent.rename(moved)
+    selected.parent.mkdir(mode=0o700)
+    with (
+        pytest.raises(PiSessionIdentityMismatch, match="directory changed"),
+        pin_pi_session_retirement(
+            layout=admitted_pi_scope.layout,
+            storage_id=selected.parent.name,
+            expected_file=receipt,
+            expected_directory=prepared,
+        ),
+    ):
+        pytest.fail("A replacement empty slot was accepted on retry")
+
+
+@pytest.mark.parametrize("change", ["symlink", "hardlink", "extra", "edited", "replaced", "legacy"])
+def test_retirement_refuses_unqualified_or_unrelated_bytes_without_mutation(
+    admitted_pi_scope: _AdmittedScope,
+    retained_pi_file: tuple[Path, PiSessionFileObservation],
+    tmp_path: Path,
+    change: str,
+) -> None:
+    selected, receipt = retained_pi_file
+    unrelated = tmp_path / "foreign"
+    unrelated.write_bytes(b"retained\n")
+    if change == "symlink":
+        selected.unlink()
+        selected.symlink_to(unrelated)
+    elif change == "hardlink":
+        unrelated.unlink()
+        os.link(selected, unrelated)
+    elif change == "extra":
+        (selected.parent / "unexpected.txt").write_bytes(b"leave untouched\n")
+    elif change == "edited":
+        selected.write_bytes(b"modified\n")
+    elif change == "replaced":
+        replacement = tmp_path / "replacement"
+        replacement.write_bytes(b"retained\n")
+        replacement.replace(selected)
+    else:
+        receipt = receipt.model_copy(update={"sha256": None})
+    entries = {
+        entry.name: (entry.lstat().st_ino, entry.read_bytes())
+        for entry in selected.parent.iterdir()
+    }
+    with (
+        pytest.raises(PiSessionUnavailable),
+        pin_pi_session_retirement(
+            layout=admitted_pi_scope.layout,
+            storage_id=selected.parent.name,
+            expected_file=receipt,
+        ),
+    ):
+        pytest.fail("An unproved private file acquired deletion authority")
+    assert {
+        entry.name: (entry.lstat().st_ino, entry.read_bytes())
+        for entry in selected.parent.iterdir()
+    } == entries
+    assert unrelated.read_bytes() == b"retained\n"
+
+
+def test_retirement_rechecks_late_file_replacement_before_unlink(
+    admitted_pi_scope: _AdmittedScope,
+    retained_pi_file: tuple[Path, PiSessionFileObservation],
+    tmp_path: Path,
+) -> None:
+    selected, receipt = retained_pi_file
+    earlier = tmp_path / "preserved-original"
+    with pin_pi_session_retirement(
+        layout=admitted_pi_scope.layout,
+        storage_id=selected.parent.name,
+        expected_file=receipt,
+    ) as retirement:
+        selected.rename(earlier)
+        selected.write_bytes(b"unrelated replacement\n")
+        with pytest.raises(PiSessionIdentityMismatch, match="storage changed"):
+            retirement.remove()
+    assert earlier.read_bytes() == b"retained\n"
+    assert selected.read_bytes() == b"unrelated replacement\n"

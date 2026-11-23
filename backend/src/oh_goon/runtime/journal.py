@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -13,8 +14,16 @@ from oh_goon.core.agent_campaign_settlement import (
 )
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.effect_attempts import LIVE_OWNED_EFFECT_STATUSES
-from oh_goon.core.errors import InvalidRunTransition, JournalConflict, OwnershipLost, PiSessionBusy
+from oh_goon.core.errors import (
+    InvalidRunTransition,
+    JournalConflict,
+    OwnershipLost,
+    PiSessionBusy,
+    PiSessionRefusalCode,
+)
 from oh_goon.core.execution_lifecycle_validation import pi_writer_step_settled
+from oh_goon.core.game_tape_pi_session import project_pi_session_evidence
+from oh_goon.core.models.agent_providers import PiSessionIdentityMismatch, PiSessionUnavailable
 from oh_goon.core.models.agent_repair import (
     MAX_AGENT_CAMPAIGN_MESSAGE_CHARS,
     TRUNCATED_AGENT_CAMPAIGN_MESSAGE,
@@ -33,7 +42,9 @@ from oh_goon.core.models.fleet_plan_evidence import PlanStepCancellationEvidence
 from oh_goon.core.models.operation import FleetPlanOperationEvidence, OperationReport
 from oh_goon.core.models.pi_session_storage import (
     PiSessionFileObservation,
+    PiSessionInspection,
     PiSessionNativeObservation,
+    PiSessionRetirementDirectoryIdentity,
     PiSessionWriterObservation,
 )
 from oh_goon.core.models.reconciliation import (
@@ -58,6 +69,8 @@ from oh_goon.core.models.run_events import (
     FleetRunEvent,
     FleetRunEventBatch,
     PiSessionContinuationOrigin,
+    PiSessionRetiredEvent,
+    PiSessionRetirementRequestedEvent,
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
     RepositoryCompletedEvent,
@@ -78,6 +91,7 @@ from oh_goon.core.models.run_resources import (
 )
 from oh_goon.core.models.storage_maintenance import FleetContentMaintenanceReceipt
 from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
+from oh_goon.core.path_layouts import ApplicationStatePathLayout
 from oh_goon.core.product_identity import pi_session_storage_id, stable_id
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.vocabulary import (
@@ -108,7 +122,8 @@ from oh_goon.runtime.journal_facts import (
 )
 from oh_goon.runtime.journal_index import require_pi_continuation_observation
 from oh_goon.runtime.journal_store import JournalFactStore
-from oh_goon.runtime.journal_view import JournalReadView
+from oh_goon.runtime.journal_view import JournalReadView, PiSessionRetirementSource
+from oh_goon.runtime.pi_session_storage import pin_pi_session_retirement
 
 if TYPE_CHECKING:
     from oh_goon.integrations.fleet_plan_step_execution import StepLifecycleObserver
@@ -902,6 +917,120 @@ class Journal:
         ):
             raise OwnershipLost("Pi writer reservation is stale, settled, or unknown")
         return events
+
+    def inspect_pi_session(self, fleet_run_id: str) -> PiSessionInspection:
+        """Inspect exact private storage at this Journal cut without admitting work."""
+        layout = ApplicationStatePathLayout.from_database(self._database.path)
+        with self._database.transaction() as connection:
+            view = self._facts.read_view(connection)
+            historical = project_pi_session_evidence(view.required_run_detail(fleet_run_id))
+            native = historical.native if historical is not None else None
+            try:
+                source = view.pi_session_retirement_source(fleet_run_id)
+                if source.requested is not None:
+                    return PiSessionInspection(
+                        fleet_run_id=fleet_run_id,
+                        native=native,
+                        availability="unavailable",
+                        retirement="verified" if source.retired is not None else "pending",
+                        refusal_code=PiSessionRefusalCode.UNAVAILABLE,
+                    )
+                expected = source.observation.observation.file
+                assert expected is not None
+                with pin_pi_session_retirement(
+                    layout=layout, storage_id=source.writer.storage_id, expected_file=expected
+                ):
+                    return PiSessionInspection(
+                        fleet_run_id=fleet_run_id, native=native, availability="available"
+                    )
+            except PiSessionBusy:
+                return PiSessionInspection(
+                    fleet_run_id=fleet_run_id,
+                    native=native,
+                    availability="busy",
+                    refusal_code=PiSessionRefusalCode.BUSY,
+                )
+            except PiSessionUnavailable as error:
+                code = error.code
+                return PiSessionInspection(
+                    fleet_run_id=fleet_run_id,
+                    native=native,
+                    availability="unavailable"
+                    if code
+                    in {
+                        PiSessionRefusalCode.NO_PERSISTENT_SESSION,
+                        PiSessionRefusalCode.UNAVAILABLE,
+                        PiSessionRefusalCode.IDENTITY_MISMATCH,
+                    }
+                    else "unverified",
+                    refusal_code=code,
+                )
+
+    def retire_pi_session(self, fleet_run_id: str) -> PiSessionRetiredEvent:
+        """Revoke continuation durably before requesting exact private file removal."""
+        source = self.read_view().pi_session_retirement_source(fleet_run_id)
+        if source.retired is not None:
+            return source.retired
+        file = source.observation.observation.file
+        assert file is not None
+        with pin_pi_session_retirement(
+            layout=ApplicationStatePathLayout.from_database(self._database.path),
+            storage_id=source.writer.storage_id,
+            expected_file=file,
+            expected_directory=source.requested.directory if source.requested is not None else None,
+        ) as pin:
+            request = self._request_pi_session_retirement(source, pin.directory)
+            return self._finish_pi_session_retirement(request, pin.remove)
+
+    def _request_pi_session_retirement(
+        self, source: PiSessionRetirementSource, directory: PiSessionRetirementDirectoryIdentity
+    ) -> PiSessionRetirementRequestedEvent:
+        run_id = source.writer.fleet_run_id
+        with self._database.transaction(write=True) as connection:
+            view = self._facts.read_view(connection)
+            current = view.pi_session_retirement_source(run_id)
+            if current.writer != source.writer or current.observation != source.observation:
+                raise OwnershipLost("Pi session retirement source changed before revocation")
+            if current.requested is not None:
+                if current.requested.directory != directory:
+                    raise PiSessionIdentityMismatch(
+                        "Pi retirement directory differs from its original request"
+                    )
+                return current.requested
+            events = view.run_events(run_id).events
+            request = PiSessionRetirementRequestedEvent(
+                event_type=FleetRunEventType.PI_SESSION_RETIREMENT_REQUESTED,
+                fleet_run_id=run_id,
+                sequence=len(events) + 1,
+                reservation_sequence=current.writer.sequence,
+                observation_sequence=current.observation.sequence,
+                directory=directory,
+            )
+            project_fleet_run_detail([*events, request], view.operation)
+            self._facts.append_run_event(connection, request)
+            return request
+
+    def _finish_pi_session_retirement(
+        self, request: PiSessionRetirementRequestedEvent, remove: Callable[[], None]
+    ) -> PiSessionRetiredEvent:
+        with self._database.transaction(write=True) as connection:
+            view = self._facts.read_view(connection)
+            current = view.pi_session_retirement_source(request.fleet_run_id)
+            if current.requested != request:
+                raise OwnershipLost("Pi retirement request changed before native removal")
+            if current.retired is not None:
+                return current.retired
+            events = view.run_events(request.fleet_run_id).events
+            retired = PiSessionRetiredEvent(
+                event_type=FleetRunEventType.PI_SESSION_RETIRED,
+                fleet_run_id=request.fleet_run_id,
+                sequence=len(events) + 1,
+                request_sequence=request.sequence,
+            )
+            project_fleet_run_detail([*events, retired], view.operation)
+            remove()
+            self._facts.append_run_event(connection, retired)
+            return retired
 
     def record_storage_maintenance(
         self,

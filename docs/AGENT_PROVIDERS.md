@@ -190,6 +190,39 @@ reopen. Read the recorded session, cleanup, and independent verifier evidence wi
 `ai --json` returns the same bounded handoff as `runs handoff --json`.
 A history read uses the recorded evidence from the selected runtime.
 
+### Inspect and retire a saved Pi session
+
+A managed persistent Pi Run retains sensitive native conversation bytes in the
+selected runtime's private `pi-sessions` storage. Inspect the current session
+by exact Run ID. For retirement, select the latest qualified writer Run and
+explicitly authorize removal.
+
+```sh
+oh-goon runs pi-session RUN_ID --json
+oh-goon runs retire-pi-session RUN_ID --authorize --json
+```
+
+Inspection reports bounded metadata and the availability observed in this
+state root. It starts no native process. The Journal revokes continuation
+before removing the exact saved file. A verified retirement reports
+`availability: unavailable` and `retirement: verified`. A later resume
+returns `PI_SESSION_UNAVAILABLE`. Original Run, Step, and verifier evidence
+remain readable.
+
+A pending retirement already blocks reopen. Run the same authorized command
+for the same Run ID to reconcile the original directory and prove removal.
+A live writer, unverified cleanup, a superseded Run or changed storage
+refuses retirement. Preserve the original evidence when the command refuses.
+Persistent sessions are retained until explicitly retired. Retirement verifies
+absence of the private file from its original directory. Disk-forensic
+erasure and backup disposal are outside that proof.
+
+Oh-Goon's product fork remains unsupported. Installed retirement and
+restart evidence covers the selected native Linux and Bubblewrap profile.
+WSL2, containerized hosts and other platforms require separate installed
+qualification. See the
+[bounded session lifecycle evidence](development/AGENT_HARNESS_COMPATIBILITY.md#pi-session-retirement-and-fork-boundary--hug-55).
+
 Broker-backed native reasoning requires an explicit managed inference connection so qualified
 Hashmarks context reaches every model request, including follow-up and compaction.
 OpenCode and Pi support the selected Chat Completions, Responses or Anthropic wire

@@ -13,7 +13,11 @@ from oh_goon.api.schemas.fleet import (
     FleetRunRequest,
 )
 from oh_goon.core.errors import FleetDomainError
-from oh_goon.core.game_tape_pi_session import fleet_run_detail_readback, fleet_run_event_readback
+from oh_goon.core.game_tape_pi_session import (
+    fleet_run_detail_readback,
+    fleet_run_event_readback,
+    fleet_run_history_readback,
+)
 from oh_goon.core.models.agent_continuation import (
     AgentContinuationInspection,
     AgentContinuationRequest,
@@ -112,8 +116,8 @@ def fleet_run_history(
     to_at: datetime | None = Query(default=None),
     plan_query: str | None = Query(default=None, max_length=240),
     control_plane: FleetRunControlPlane = Depends(fleet_run_control_plane),
-) -> FleetRunHistoryPage:
-    return control_plane.history(
+) -> FleetRunHistoryPage | JSONResponse:
+    page = control_plane.history(
         limit=limit,
         before_revision=before_revision,
         outcome=outcome,
@@ -124,6 +128,8 @@ def fleet_run_history(
         to_at=to_at,
         plan_query=plan_query,
     )
+    public = fleet_run_history_readback(page)
+    return JSONResponse(public) if public is not None else page
 
 
 @router.get("/overview", response_model=FleetRunOverview, operation_id="fleet_run_overview")

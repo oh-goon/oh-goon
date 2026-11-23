@@ -1058,6 +1058,38 @@ original teardown with the same owner.
 [pi-native-config-tests]: ../../backend/tests/integration/services/test_native_pi_configuration.py
 [pi-startup-cancel-tests]: ../../backend/tests/integration/services/test_native_pi_startup_cancellation.py
 
+### Pi session retirement and fork boundary — HUG-55
+
+**Disposition: retain** the exact-file Pi RPC adapter, scoped private
+storage, and original Journal writer authority. Inspection reads the
+original Journal cut and, for a currently eligible save, verifies exact
+bounded file bytes through the scoped descriptor. It presents opaque
+native session and leaf metadata. Public history uses the same privacy
+projection as the original Run detail and events.
+
+Retirement requires explicit authorization and the latest terminal qualified
+writer. The original Journal appends a revocation before authorizing removal.
+An interrupted retirement keeps the lineage unavailable. Retry proves the
+same retained private directory, verifies absence and synchronizes the
+directory before recording completion. Original Run and verifier outcomes
+remain distinct from retirement evidence. The empty directory remains as
+the exact retry binding.
+
+The [installed component probe][pi-session-tests] on Pi 1.3.0 exercised separate read-only
+parent and writable child mounts. Native `fork` refused the saved assistant
+leaf. Native `clone` copied the current active leaf to a fresh native ID
+with parent provenance, while the parent bytes and inode metadata matched
+their pre-clone state. The generated child name differs from the product's
+exact saved-file contract. Product fork remains **UNSUPPORTED**. A future
+qualified fork would need to bind the admitted parent branch and the
+native-created child resource through the same Journal and claimed Step.
+
+The [installed operator journey](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+covers native Linux restart and retirement with synthetic inference. Its
+selected scope uses the public Pi 1.3.0 release and Bubblewrap 0.11.1.
+WSL2, containers, other platforms, concurrent unmanaged writers, physical
+disk erasure and backup deletion remain **UNQUALIFIED**.
+
 ## Native model usage observations — HUG-222, 2026-11-22
 
 **Disposition: retain** the existing Codex service transport, scoped native

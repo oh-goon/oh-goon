@@ -1,4 +1,4 @@
-"""Installed Pi protocol observations; persistent product Runs remain unsupported.
+"""Installed Pi protocol observations separate from original product Runs.
 
 The native extension supplies synthetic model replies without network or credentials.
 Pi owns its session format, loading and persistence. Each process uses the original
@@ -440,6 +440,217 @@ def test_installed_pi_exact_reopen_retains_identity_leaf_and_conversation(
     assert after["sessionId"] == state["sessionId"]
     assert branch["leafId"] != entries["leafId"]
     assert pi_probe.session.read_bytes().startswith(retained)
+
+
+def test_installed_pi_clone_at_validated_tip_cannot_replace_explicit_leaf_fork(
+    pi_probe: _PiProbe,
+) -> None:
+    """Component evidence for an unsupported product fork mode."""
+    _records(pi_probe.launch(prompt="Remember WP00_CANARY in the original session"))
+    prior, tree = _state(pi_probe)
+    leaf = tree["leafId"]
+    accepted = next(entry for entry in tree["entries"] if entry["id"] == leaf)
+    assert accepted["type"] == "message" and accepted["message"]["role"] == "assistant"
+    parent_before = pi_probe.session.stat()
+    contents_before = pi_probe.session.read_bytes()
+    assert len(contents_before) < 65536
+    child_directory = pi_probe.root / "selected-clone"
+    child_directory.mkdir(mode=0o700)
+    config = pi_probe.root / "clone-config"
+    config.mkdir(mode=0o700)
+    selected_model = "fresh-clone-fixture"
+    (config / "models.json").write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "oh-goon": {
+                        "baseUrl": "http://127.0.0.1:1/v1",
+                        "api": "openai-completions",
+                        "apiKey": "synthetic-only",
+                        "models": [{"id": selected_model}],
+                    }
+                }
+            }
+        )
+    )
+    parent_path = "/run/selected-parent/session.jsonl"
+    child_path = PurePosixPath("/run/selected-clone")
+    command_names = ("get_state", "get_entries", "fork", "clone", "get_state", "get_entries")
+    control_fields: tuple[dict[str, str], ...] = (
+        {},
+        {"since": leaf},
+        {"entryId": leaf},
+        {},
+        {},
+        {"since": leaf},
+    )
+    guard = Lock()
+    outgoing: deque[bytes] = deque()
+    seen: list[dict[str, Any]] = []
+    pending = ""
+
+    def queue_request(index: int) -> None:
+        outgoing.append(
+            json.dumps(
+                {"id": f"controlled:{index}", "type": command_names[index], **control_fields[index]}
+            ).encode()
+            + b"\n"
+        )
+
+    class CloneInput:
+        def read_input(self, max_bytes: int) -> bytes | None:
+            with guard:
+                if outgoing:
+                    wire = outgoing.popleft()
+                    if len(wire) > max_bytes:
+                        outgoing.appendleft(wire[max_bytes:])
+                    return wire[:max_bytes]
+                return b"" if len(seen) == len(command_names) else None
+
+    def observe(stream: str, text: str) -> None:
+        nonlocal pending
+        if stream != "stdout":
+            return
+        with guard:
+            records = (pending + text).split("\n")
+            pending = records.pop()
+            for line in records:
+                if not line:
+                    continue
+                assert len(line) <= 65536
+                result = json.loads(line)
+                index = len(seen)
+                assert result["id"] == f"controlled:{index}"
+                assert result["command"] == command_names[index]
+                if index == 2:
+                    assert result["success"] is False
+                    assert "Invalid entry ID" in result["error"]
+                    assert not tuple(child_directory.iterdir())
+                else:
+                    assert result["success"] is True
+                    data = result["data"]
+                    if index == 0:
+                        assert data["sessionFile"] == parent_path
+                        assert data["sessionId"] == prior["sessionId"]
+                        assert data["model"]["id"] == selected_model
+                        assert not data["isStreaming"] and not data["isCompacting"]
+                    elif index in {1, 5}:
+                        assert data == {"entries": [], "leafId": leaf}
+                    elif index == 3:
+                        assert data == {"cancelled": False}
+                    elif index == 4:
+                        assert data["sessionId"] != prior["sessionId"]
+                        assert data["messageCount"] == prior["messageCount"]
+                        assert data["model"]["id"] == selected_model
+                        assert PurePosixPath(data["sessionFile"]).parent == child_path
+                seen.append(result)
+                if len(seen) < len(command_names):
+                    queue_request(len(seen))
+            assert len(pending) <= 65536
+
+    bwrap = shutil.which("bwrap")
+    assert bwrap is not None
+    workspace = str(pi_probe.workspace / "project")
+    argv = [
+        bwrap,
+        "--unshare-all",
+        "--die-with-parent",
+        "--new-session",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+    ]
+    for path in ("/usr", "/bin", "/lib", "/lib64", str(pi_probe.public_runtime), workspace):
+        if Path(path).exists():
+            argv.extend(("--ro-bind", path, path))
+    root_fd = os.open(pi_probe.session, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        child_fd = os.open(child_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            queue_request(0)
+            result = run_command(
+                *argv,
+                "--ro-bind",
+                workspace,
+                "/workspace",
+                "--ro-bind",
+                str(config),
+                "/config/native",
+                "--dir",
+                "/run/selected-parent",
+                "--ro-bind-fd",
+                str(root_fd),
+                parent_path,
+                "--bind-fd",
+                str(child_fd),
+                str(child_path),
+                "--clearenv",
+                "--setenv",
+                "PATH",
+                "/usr/bin:/bin",
+                "--setenv",
+                "HOME",
+                "/tmp/home",
+                "--setenv",
+                "PI_CODING_AGENT_DIR",
+                "/config/native",
+                "--chdir",
+                workspace,
+                "--",
+                str(pi_probe.program),
+                "--mode",
+                "rpc",
+                "--session-dir",
+                str(child_path),
+                "--session",
+                parent_path,
+                "--no-approve",
+                "--no-extensions",
+                "--no-mcp",
+                "--no-skills",
+                "--no-prompt-templates",
+                "--no-themes",
+                "--no-context-files",
+                "--provider",
+                "oh-goon",
+                "--model",
+                selected_model,
+                "--tools",
+                "read,grep,find,ls",
+                timeout=15,
+                pass_fds=(root_fd, child_fd),
+                input_source=CloneInput(),
+                stream_output=observe,
+                max_capture_bytes_per_stream=65536,
+                require_process_group_quiescence=True,
+            )
+        finally:
+            os.close(child_fd)
+    finally:
+        os.close(root_fd)
+
+    assert result.returncode == 0, result.stderr
+    assert result.supervisor.final_process_group_quiescent
+    assert len(seen) == len(command_names)
+    new_session = seen[4]["data"]
+    (generated,) = tuple(child_directory.iterdir())
+    assert generated.name == PurePosixPath(new_session["sessionFile"]).name
+    assert generated.name != "session.jsonl"
+    assert generated.name.endswith("_" + new_session["sessionId"] + ".jsonl")
+    with generated.open("rb") as stream:
+        # These are synthetic bytes created by the installed fixture above.
+        header = json.loads(stream.readline(4096))
+    assert header["id"] == new_session["sessionId"] and header["parentSession"] == parent_path
+    assert pi_probe.session.read_bytes() == contents_before
+    parent_after = pi_probe.session.stat()
+    assert (parent_after.st_ino, parent_after.st_ctime_ns, parent_after.st_mtime_ns) == (
+        parent_before.st_ino,
+        parent_before.st_ctime_ns,
+        parent_before.st_mtime_ns,
+    )
 
 
 def test_installed_pi_new_identity_and_close_do_not_prove_file_birth(pi_probe: _PiProbe) -> None:

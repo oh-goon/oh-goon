@@ -9,6 +9,7 @@ from pathlib import Path
 from oh_goon.core.errors import InvalidRequest, InvalidRunTransition, OperationNotFound, RunNotFound
 from oh_goon.core.fleet_plan_projection import atomic_goon_by_step
 from oh_goon.core.game_tape_pi_session import project_pi_session_evidence
+from oh_goon.core.models.agent_providers import PiSessionCleanupUnverified
 from oh_goon.core.models.agent_repair import AgentCampaignReadback
 from oh_goon.core.models.execution_observability import ExecutionTimeBucket, FleetExecutionTimeline
 from oh_goon.core.models.fleet import OperationState
@@ -36,6 +37,8 @@ from oh_goon.core.models.run import (
 from oh_goon.core.models.run_events import (
     FleetRunEventBatch,
     PiSessionContinuationOrigin,
+    PiSessionRetiredEvent,
+    PiSessionRetirementRequestedEvent,
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
     RunAdmittedEvent,
@@ -59,6 +62,9 @@ from oh_goon.runtime.journal_index import (
     JournalIndex,
     pi_session_origin_observation,
     pi_session_predecessor,
+    pi_session_qualified_observation,
+    pi_session_recorded_writer,
+    require_latest_pi_writer,
 )
 
 
@@ -101,6 +107,16 @@ def _validate_history_range(from_at: datetime | None, to_at: datetime | None) ->
         raise InvalidRequest("Fleet run history range must use timezone-aware timestamps")
     if not from_at < to_at <= from_at + timedelta(days=366):
         raise InvalidRequest("Fleet run history range must be ordered and cannot exceed 366 days")
+
+
+@dataclass(frozen=True, slots=True)
+class PiSessionRetirementSource:
+    """One original Journal cut for read-only pinning or explicit retirement."""
+
+    writer: PiSessionWriterReservedEvent
+    observation: PiSessionWriterObservedEvent
+    requested: PiSessionRetirementRequestedEvent | None
+    retired: PiSessionRetiredEvent | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -559,6 +575,25 @@ class JournalReadView:
         return pi_session_predecessor(
             prior_run_id, admission, self._index.events_by_run, self._index.pi_session_writer_heads
         )
+
+    def pi_session_retirement_source(self, fleet_run_id: str) -> PiSessionRetirementSource:
+        events = self._index.events_by_run.get(fleet_run_id, ())
+        writer = pi_session_recorded_writer(events)
+        require_latest_pi_writer(
+            writer, self._index.events_by_run, self._index.pi_session_writer_heads
+        )
+        observation = pi_session_qualified_observation(writer, events)
+        operation = self._index.operations_by_id[writer.operation_id]
+        if operation.resource_settlement != "SETTLED":
+            raise PiSessionCleanupUnverified("Original Run resource cleanup is unverified")
+        request = next(
+            (event for event in events if isinstance(event, PiSessionRetirementRequestedEvent)),
+            None,
+        )
+        retired = next(
+            (event for event in events if isinstance(event, PiSessionRetiredEvent)), None
+        )
+        return PiSessionRetirementSource(writer, observation, request, retired)
 
     def pi_session_has_active_writer(
         self, prior_run_id: str, repository_id: str, active_run_ids: frozenset[str]
