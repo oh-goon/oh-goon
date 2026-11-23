@@ -1180,6 +1180,31 @@ reopen. Resumed Pi's built-in read tool carries a control-shaped line as
 tool data. The [protocol-origin qualification](#native-protocol-origin-boundary)
 continues to bound optional shell, MCP, and in-process extension claims.
 
+### Native Pi incomplete tool calls — HUG-80
+
+**Disposition**. Retain the existing claimed-worker and Pi RPC owners.
+Before producing a qualified save observation, the relay requires closure of
+the original live tool executions and matching tool results in the bounded
+native `get_entries` reply. A missing result or unresolved execution leaves
+the save unqualified. The original Step, verifier, and process receipts retain
+their own dispositions. A recorded tool error closes that native call without
+establishing external-effect success or granting replay authority.
+
+Pi 1.3.0 can format an unresolved tool call for a provider by supplying an
+error placeholder in memory. The [installed formatter probe][pi-session-tests]
+shows that this leaves the input history unchanged. The placeholder provides
+no evidence of physical completion, and automatic repair remains unsupported.
+
+The [installed claimed-worker crash cases](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+kill the controller and worker after one synthetic repository append, both
+before and after Pi records its tool result. Original recovery retains the
+reservation, process lifetime, failed Run, and private bytes. The fresh
+continuation refuses before admission or inference, and the append count
+remains one. The [Journal writer tests](../../backend/tests/unit/runtime/test_pi_session_writer.py)
+cover stale callbacks after a successor reserves the same session or claims a
+replacement Run. The installed proof is scoped to Pi 1.3.0 on Linux Bubblewrap
+with the built-in shell tool and synthetic inference.
+
 ### Installed exact reopen and refusal — HUG-70
 
 **Disposition: retain** the qualified Pi RPC exact-open gate. HUG-39's native

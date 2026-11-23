@@ -291,6 +291,98 @@ def test_persistent_rpc_preserves_settlement_when_save_evidence_is_unavailable(
     assert control.finish() is None
 
 
+@pytest.mark.parametrize(
+    ("cut", "qualified"),
+    [
+        ("recorded-result", True),
+        ("recorded-error", True),
+        ("long-id", True),
+        ("partial-error", True),
+        ("partial-aborted", True),
+        ("active-at-settlement", False),
+        ("missing-result", False),
+        ("wrong-result", False),
+    ],
+)
+def test_pi_save_requires_closed_native_tool_calls(cut: str, qualified: bool) -> None:
+    control = _persistent_start()
+    control.feed_stdout(
+        _response("oh-goon:entries", "get_entries", {"leafId": None, "entries": []})
+    )
+    _commands(control)
+    _ack(control)
+    call_id = "response-call-" + "x" * 460 if cut == "long-id" else "call"
+    assistant = {
+        "role": "assistant",
+        "stopReason": "toolUse",
+        "content": [{"type": "toolCall", "id": call_id, "name": "read", "arguments": {}}],
+    }
+    tool = {"toolCallId": call_id, "toolName": "read"}
+    result = {
+        "role": "toolResult",
+        **tool,
+        "isError": cut == "recorded-error",
+        "content": [{"type": "text", "text": "private tool result"}],
+    }
+    events: list[dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
+    if cut.startswith("partial-"):
+        partial = {
+            **assistant,
+            "stopReason": cut.removeprefix("partial-"),
+            "content": [{"type": "toolCall", "id": "partial-call", "name": "read"}],
+        }
+        events.append({"type": "message_end", "message": partial})
+        entries.append({"type": "message", "id": "partial-entry", "message": partial})
+    events.extend(
+        (
+            {"type": "message_end", "message": assistant},
+            {"type": "tool_execution_start", **tool},
+        )
+    )
+    entries.append({"type": "message", "id": "call-entry", "message": assistant})
+    if cut != "active-at-settlement":
+        events.extend(
+            (
+                {"type": "tool_execution_end", **tool, "isError": result["isError"]},
+                {"type": "message_end", "message": result},
+            )
+        )
+    final = {"role": "assistant", "stopReason": "stop", "content": []}
+    events.extend(
+        (
+            {"type": "message_end", "message": final},
+            {"type": "agent_settled", "aborted": False},
+        )
+    )
+    for event in events:
+        record = _line(event)
+        assert control.feed_stdout(record) == (record,)
+    _commands(control)
+    control.feed_stdout(
+        _response(
+            "oh-goon:final-state",
+            "get_state",
+            {"sessionId": "native-session", "sessionFile": str(PI_SESSION_NEW_FILE)},
+        )
+    )
+    if cut != "missing-result":
+        saved_result = {**result, "toolCallId": "other-call"} if cut == "wrong-result" else result
+        entries.append({"type": "message", "id": "result-entry", "message": saved_result})
+    entries.append({"type": "message", "id": "leaf", "message": final})
+    assert (
+        control.feed_stdout(
+            _response(
+                "oh-goon:final-entries", "get_entries", {"entries": entries, "leafId": "leaf"}
+            )
+        )
+        == ()
+    )
+    assert control.read_input(1024) == b""
+    observation = control.finish()
+    assert (observation is not None) is qualified
+
+
 @pytest.mark.parametrize("truncated", [False, True], ids=["oversized", "truncated"])
 @pytest.mark.parametrize("correlated", [True, False], ids=["final-entries", "unknown"])
 def test_rpc_preserves_settlement_only_for_attributable_final_entries_loss(

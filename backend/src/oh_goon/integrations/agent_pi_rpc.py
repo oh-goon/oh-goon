@@ -36,6 +36,49 @@ _FINAL_ENTRIES_PREFIX = (
     b'{"id":"oh-goon:final-entries","type":"response","command":"get_entries",'
     b'"success":true,"data":{"entries":['
 )
+_TOOL_EVENTS = frozenset(("tool_execution_start", "tool_execution_update", "tool_execution_end"))
+_TOOL_CALL_TRACKING_OVERHEAD_BYTES = 128
+
+
+def _observe_saved_tool_entry(entry: object, pending: dict[str, str]) -> bool:
+    """Check the native append's tool identities without consuming tool data."""
+    if not isinstance(entry, dict) or entry.get("type") != "message":
+        return True
+    message = entry.get("message")
+    if not isinstance(message, dict):
+        return True
+    role = message.get("role")
+    if role == "toolResult":
+        call_id = message.get("toolCallId")
+        return (
+            isinstance(call_id, str)
+            and type(message.get("isError")) is bool
+            and call_id in pending
+            and pending.pop(call_id) == message.get("toolName")
+        )
+    if role in ("assistant", "user") and pending:
+        return False
+    content = message.get("content")
+    if (
+        role != "assistant"
+        or message.get("stopReason") in ("error", "aborted")
+        or not isinstance(content, list)
+    ):
+        return True
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "toolCall":
+            continue
+        call_id, name = block.get("id"), block.get("name")
+        if (
+            not isinstance(call_id, str)
+            or not call_id
+            or call_id in pending
+            or not isinstance(name, str)
+            or not name
+        ):
+            return False
+        pending[call_id] = name
+    return True
 
 
 def pi_broker_api(api: ProviderApi) -> PiBrokerApi:
@@ -89,6 +132,9 @@ class PiRpcControl:
         self._session_id: str | None = None
         self._leaf_id: str | None = None
         self._save_observation: PiSessionSaveObservation | None = None
+        self._active_tool_calls: dict[str, int] = {}
+        self._active_tool_call_bytes = 0
+        self._tool_activity_unverified = False
         self._prompt_sent = False
         self._prompt_accepted = False
         self._settled = False
@@ -243,7 +289,31 @@ class PiRpcControl:
             "tool_execution_start",
         }:
             self._fail("Pi RPC activity continued after native settlement")
+        if self._persistent and value["type"] in _TOOL_EVENTS:
+            self._observe_tool_activity(value)
         return line.decode("utf-8") + "\n"
+
+    def _observe_tool_activity(self, event: dict[str, object]) -> None:
+        call_id = event.get("toolCallId")
+        if self._settled or not isinstance(call_id, str) or not call_id:
+            self._tool_activity_unverified = True
+        elif event["type"] == "tool_execution_start":
+            try:
+                size = len(call_id.encode("utf-8")) + _TOOL_CALL_TRACKING_OVERHEAD_BYTES
+            except UnicodeError:
+                self._tool_activity_unverified = True
+                return
+            if call_id in self._active_tool_calls or (
+                self._active_tool_call_bytes + size > MAX_COMMAND_INPUT_BYTES
+            ):
+                self._tool_activity_unverified = True
+                return
+            self._active_tool_calls[call_id] = size
+            self._active_tool_call_bytes += size
+        elif call_id not in self._active_tool_calls:
+            self._tool_activity_unverified = True
+        elif event["type"] == "tool_execution_end":
+            self._active_tool_call_bytes -= self._active_tool_calls.pop(call_id)
 
     def _identity(self, data: dict[str, object]) -> str:
         session_id = data.get("sessionId")
@@ -406,9 +476,14 @@ class PiRpcControl:
             return None
         assert self._session_id is not None
         digest = hashlib.sha256()
+        pending_tool_calls: dict[str, str] = {}
         try:
             for entry in entries:
+                if not _observe_saved_tool_entry(entry, pending_tool_calls):
+                    return None
                 digest.update(encode_pi_session_entry(entry))
+            if pending_tool_calls:
+                return None
             return PiSessionSaveObservation(
                 session_id=self._session_id,
                 leaf_id=leaf,
@@ -437,4 +512,6 @@ class PiRpcControl:
                 self._fail("Pi RPC ended before complete correlated native settlement")
             # The final entries query qualifies a save independently of the
             # final native state. At physical EOF its reply may be absent or torn.
+            if self._tool_activity_unverified or self._active_tool_calls:
+                return None
             return self._save_observation
