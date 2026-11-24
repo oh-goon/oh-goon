@@ -1,11 +1,13 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from oh_goon.api.app import app as api_app
-from oh_goon.api.dependencies import fleet_service
+from oh_goon.api.dependencies import fleet_run_control_plane, fleet_service
+from oh_goon.api.routes.fleet_runs import router as fleet_runs_router
 from oh_goon.api.routes.fleet_snapshot import router as fleet_snapshot_router
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
@@ -60,10 +62,13 @@ def test_fleet_snapshot_does_not_infer_readiness_during_discovery(tmp_path: Path
     assert snapshot["repositories"][0]["guidance"]["reason_code"] == "NOT_CHECKED"
 
 
-def test_fleet_snapshot_uses_private_pi_readback_for_live_and_latest_runs(
+_PRIVATE_PI_TASK = "synthetic private Pi task excerpt"
+
+
+@pytest.fixture
+def private_pi_runs(
     tmp_path: Path,
-) -> None:
-    canary = "synthetic private Pi task excerpt"
+) -> tuple[RunningFleetRun, CancelledFleetRun]:
     selected = ResolvedNativeAgent(
         agent="pi",
         profile_name="fixture",
@@ -88,7 +93,7 @@ def test_fleet_snapshot_uses_private_pi_readback_for_live_and_latest_runs(
         delivery_sha256="b" * 64,
         handoff_identity="frozen-fixture",
         source_step_id="agent",
-        task_summary=canary,
+        task_summary=_PRIVATE_PI_TASK,
         task_sha256="c" * 64,
     )
     plan = ResolvedFleetPlan.create(
@@ -134,11 +139,20 @@ def test_fleet_snapshot_uses_private_pi_readback_for_live_and_latest_runs(
             "finished_at": now,
         }
     )
+    return live, stopped
+
+
+def test_fleet_snapshot_uses_private_pi_readback_for_live_and_latest_runs(
+    private_pi_runs: tuple[RunningFleetRun, CancelledFleetRun],
+) -> None:
+    live, stopped = private_pi_runs
+    target = live.target
+    assert isinstance(target, FleetPlanTarget)
     live_detail, stopped_detail = (
         FleetRunDetail(
             run=run,
             execution=DirectFleetExecutionAdmission(),
-            repository_admissions=repository_admissions_for(target, (repository,)),
+            repository_admissions=repository_admissions_for(target, run.targets),
         )
         for run in (live, stopped)
     )
@@ -149,7 +163,7 @@ def test_fleet_snapshot_uses_private_pi_readback_for_live_and_latest_runs(
         active_fleet_runs=(live_detail,),
         latest_fleet_runs=[stopped_detail],
     )
-    assert canary in observed.model_dump_json()
+    assert _PRIVATE_PI_TASK in observed.model_dump_json()
     api = FastAPI()
     api.include_router(fleet_snapshot_router, prefix="/api")
     api.dependency_overrides[fleet_service] = lambda: SimpleNamespace(snapshot=lambda: observed)
@@ -158,13 +172,42 @@ def test_fleet_snapshot_uses_private_pi_readback_for_live_and_latest_runs(
         response = client.get("/api/fleet")
 
     response.raise_for_status()
-    assert canary not in response.text
+    assert _PRIVATE_PI_TASK not in response.text
     public = response.json()
     active = public["active_fleet_runs"][0]
     latest = public["latest_fleet_runs"][0]
     assert public["active_fleet_run"] == active
     assert [item["run"]["fleet_run_id"] for item in (active, latest)] == ["pi-live", "pi-stopped"]
     assert all(item["game_tape"]["pi_session"]["mode"] == "new" for item in (active, latest))
+
+
+def test_fleet_cancel_acknowledges_private_pi_without_publishing_task_evidence(
+    private_pi_runs: tuple[RunningFleetRun, CancelledFleetRun],
+) -> None:
+    live, stopped = private_pi_runs
+    stopped = stopped.model_copy(update={"fleet_run_id": live.fleet_run_id})
+    original = stopped.model_dump(mode="json")
+    assert original["target"]["plan"]["steps"][0]["task_summary"] == _PRIVATE_PI_TASK
+
+    def cancel(fleet_run_id: str) -> CancelledFleetRun:
+        assert fleet_run_id == live.fleet_run_id
+        return stopped
+
+    api = FastAPI()
+    api.include_router(fleet_runs_router, prefix="/api")
+    api.dependency_overrides[fleet_run_control_plane] = lambda: SimpleNamespace(cancel=cancel)
+    with TestClient(api) as client:
+        response = client.post(f"/api/fleet/runs/{live.fleet_run_id}/cancel")
+
+    assert response.status_code == 202
+    assert _PRIVATE_PI_TASK not in response.text
+    public = response.json()
+    assert public["fleet_run_id"] == live.fleet_run_id
+    assert public["status"] == FleetRunStatus.CANCELLED
+    (step,) = public["target"]["plan"]["steps"]
+    assert step["step_id"] == "agent"
+    assert {"task_summary", "task_sha256", "review_context", "feedback_value"}.isdisjoint(step)
+    assert stopped.model_dump(mode="json") == original
 
 
 def test_dependency_discovery_does_not_scan_repository_files_without_observed_evidence(

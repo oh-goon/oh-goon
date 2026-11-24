@@ -17,6 +17,7 @@ from oh_goon.core.game_tape_pi_session import (
     fleet_run_detail_readback,
     fleet_run_event_readback,
     fleet_run_history_readback,
+    fleet_run_state_readback,
 )
 from oh_goon.core.models.agent_continuation import (
     AgentContinuationInspection,
@@ -307,14 +308,17 @@ def cancel_fleet_run(
     fleet_run_id: str,
     request: FleetRunCancellationRequest | None = None,
     control_plane: FleetRunControlPlane = Depends(fleet_run_control_plane),
-) -> FleetRunState:
-    if request is not None:
-        return control_plane.cancel(
+) -> FleetRunState | JSONResponse:
+    if request is None:
+        run = control_plane.cancel(fleet_run_id)
+    else:
+        run = control_plane.cancel(
             fleet_run_id,
             expected_launch=request.application_launch,
             expected_state=request.state,
         )
-    return control_plane.cancel(fleet_run_id)
+    public = fleet_run_state_readback(run)
+    return JSONResponse(public, status_code=202) if public is not None else run
 
 
 @router.get(
