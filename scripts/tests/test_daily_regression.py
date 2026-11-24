@@ -737,6 +737,28 @@ def test_daily_workflow_has_one_unfiltered_frozen_campaign_and_independent_owner
     assert _plan() and len(set(_plan())) == len(_plan())
 
 
+def test_daily_cross_owner_integration_prepares_the_locked_typescript_tools() -> None:
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/release-validation.yml").read_text()
+    )
+    job = workflow["jobs"]["full-regression"]
+    node_setup = next(
+        step
+        for step in job["steps"]
+        if step.get("uses", "").startswith("actions/setup-node@")
+    )
+    frontend_install = next(
+        step for step in job["steps"] if step.get("run") == "make frontend-install"
+    )
+    install_condition = frontend_install["if"]
+    env_reference, expected = install_condition.split(" == ", 1)
+    assert env_reference.startswith("env.") and expected == "'true'"
+    frontend_owners = job["env"][env_reference.removeprefix("env.")]
+    assert '"test-cross-owner-integration"' in frontend_owners
+    assert install_condition in node_setup["if"].split(" || ")
+    assert job["steps"].index(node_setup) < job["steps"].index(frontend_install)
+
+
 def test_effective_native_projection_keeps_interrupted_history_without_overriding_unique_pass(
     tmp_path: Path,
 ) -> None:

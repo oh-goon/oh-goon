@@ -489,9 +489,10 @@ This disposable cache is excluded from source identity and never enters the
 trusted-base merge controller as evidence.
 
 PR, merge-group and main-health concurrency are separate. Superseded PR work is
-cancelled; main pushes execute only distinct installed-source/CLI smoke. The
-complete Python CI example is a daily reusable/manual workflow with an explicit
-opt-in push trigger under `codex/python-ci-proof/**`. Qualification branches
+cancelled; main pushes execute the installed-source/CLI smoke with only the
+locked backend runtime dependencies. The complete Python CI example runs
+daily as a reusable workflow, with manual dispatch and an opt-in push trigger
+under `codex/python-ci-proof/**`. Qualification branches
 retain actual successful or failed job status and original Run receipts;
 ordinary PR updates keep their affected verification portfolio. Package/build
 smoke is admitted when
@@ -658,7 +659,10 @@ owners. There is no change filter, fast/daily marker exclusion, or reusable test
 PASS in this campaign. The marker is `not certification`: both `slow` exhaustive
 variants and expensive ordinary `daily` journeys remain included. Dependency
 downloads may use native uv/npm caches; environments and project code are
-materialized for the current checkout.
+materialized for the current checkout. The cross-owner integration job prepares
+the locked frontend tools used by its native TypeScript contract tests. Only
+owners that need Node prepare the pinned version, and only owners that install
+the frontend tools request the npm download cache.
 
 Backend integration keeps its 180-second batch deadline. The exact native-collected
 `test_one_hundred_real_run_storage_retention` member runs alone with a 900-second
