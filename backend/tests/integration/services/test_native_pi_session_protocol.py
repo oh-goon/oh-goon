@@ -736,9 +736,12 @@ def test_installed_pi_clone_at_validated_tip_cannot_replace_explicit_leaf_fork(
         ("unknown-leaf", PiSessionRefusalCode.HISTORY_UNQUALIFIED),
         ("missing-file", PiSessionRefusalCode.IDENTITY_MISMATCH),
         ("renamed-file", PiSessionRefusalCode.IDENTITY_MISMATCH),
+        ("model", PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH),
+        ("api", PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH),
+        ("endpoint", PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH),
     ],
 )
-def test_installed_pi_pre_prompt_gate_refuses_unproved_identity_or_leaf(
+def test_installed_pi_pre_prompt_gate_refuses_unproved_reopen_authority(
     pi_probe: _PiProbe,
     resource: str,
     expected: PiSessionRefusalCode,
@@ -777,12 +780,14 @@ def test_installed_pi_pre_prompt_gate_refuses_unproved_identity_or_leaf(
         selected_file = None
 
     control = PiRpcControl(
-        b"Fresh task must stay in Oh-Goon until the exact session and leaf are established",
+        b"Fresh task must stay in Oh-Goon until the native reopen authority is established",
         continuation=PiRpcContinuation(
             prior=PiSessionNativeObservation(session_id=prior["sessionId"], leaf_id=leaf),
-            model=_ISOLATED_SESSION_MODEL,
-            api="openai-completions",
-            base_url=_ISOLATED_SESSION_ENDPOINT,
+            model="other-admitted-model" if resource == "model" else _ISOLATED_SESSION_MODEL,
+            api="openai-responses" if resource == "api" else "openai-completions",
+            base_url=(
+                "http://127.0.0.1:2/v1" if resource == "endpoint" else _ISOLATED_SESSION_ENDPOINT
+            ),
         ),
     )
     wire = bytearray()
@@ -818,8 +823,12 @@ def test_installed_pi_pre_prompt_gate_refuses_unproved_identity_or_leaf(
     )
     assert result.supervisor.final_process_group_quiescent
     assert not result.stdout_truncated and not event_types
-    responses = {message["id"]: message for message in _records(result)}
-    state = responses["oh-goon:state"]["data"]
+    records = _records(result)
+    assert all(message["type"] == "response" for message in records)
+    responses = {message["id"]: message for message in records}
+    state_response = responses["oh-goon:state"]
+    assert state_response["command"] == "get_state" and state_response["success"] is True
+    state = state_response["data"]
     if selected_file is not None:
         assert state["sessionId"] == actual_session
     else:
@@ -833,6 +842,21 @@ def test_installed_pi_pre_prompt_gate_refuses_unproved_identity_or_leaf(
             assert entries["success"] is False and entries["command"] == "get_entries"
     outbound = [json.loads(line)["type"] for line in wire.splitlines()]
     assert outbound in (["get_state"], ["get_state", "get_entries"])
+    if expected is PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH:
+        # Pi really loaded its configured model, while this Run expects different authority.
+        # The control may send both read-only queries before the state reply arrives.
+        assert state["sessionFile"] == str(PI_SESSION_NEW_FILE)
+        assert state["messageCount"] == prior["messageCount"] > 0
+        assert state["model"]["provider"] == "oh-goon"
+        assert state["model"]["id"] == _ISOLATED_SESSION_MODEL
+        assert state["model"]["api"] == "openai-completions"
+        assert state["model"]["baseUrl"] == _ISOLATED_SESSION_ENDPOINT
+        assert responses.keys() <= {"oh-goon:state", "oh-goon:entries"}
+        if "oh-goon:entries" in responses:
+            entries = responses["oh-goon:entries"]
+            assert entries["success"] is True and entries["data"]["leafId"] == leaf
+            assert entries["data"]["entries"] == []
+        assert control.session_identity is None
     with pytest.raises(AgentProviderError):
         control.finish()
     assert control.refusal_code is expected
