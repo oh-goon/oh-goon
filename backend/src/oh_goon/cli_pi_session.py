@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 
 from oh_goon.application import ApplicationRuntime
@@ -51,11 +52,18 @@ def run_pi_session_command(runtime: ApplicationRuntime, args: argparse.Namespace
                 print("Inspect argv " + json.dumps(readback), file=sys.stderr)
         return 2
 
-    observed_action = (
-        pi_session_safe_next_action(result.refusal_code)
-        if result.refusal_code is not None
-        else None
-    )
+    observed_action: str | None
+    if result.retirement == "pending":
+        retry = shlex.join(
+            ("oh-goon", "runs", "retire-pi-session", fleet_run_id, "--authorize", "--json")
+        )
+        observed_action = f"Finish the pending retirement in the original runtime with '{retry}'."
+    else:
+        observed_action = (
+            pi_session_safe_next_action(result.refusal_code)
+            if result.refusal_code is not None
+            else None
+        )
     if args.as_json:
         report = result.model_dump(mode="json")
         if observed_action is not None:

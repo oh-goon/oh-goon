@@ -1336,6 +1336,28 @@ selected scope uses the public Pi 1.3.0 release and Bubblewrap 0.11.1.
 WSL2, containers, other platforms, concurrent unmanaged writers, physical
 disk erasure and backup deletion remain **UNQUALIFIED**.
 
+### Managed Pi retirement recovery — HUG-101
+
+**Disposition**. Retain the original Journal revocation and exact Linux
+file-removal owners. Pi 1.3.0 headless native deletion is **UNSUPPORTED**.
+Oh-Goon verifies removal only from the admitted private slot, after checking
+the latest terminal writer and its cleanup and save receipts.
+
+The [Journal retirement tests](../../backend/tests/unit/runtime/test_pi_session_writer.py)
+cover the race where another caller revokes or completes retirement while a
+stale caller is acquiring its file pin. A completed operation returns the
+original receipt. A pending operation verifies the exact recorded directory
+and synchronizes it before accepting absence. The
+[storage tests](../../backend/tests/unit/runtime/test_pi_session_storage.py)
+refuse late directory and symlink substitution without removing either file.
+
+The [installed Pi journey](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+exercises active-writer refusal and restart after unlink but before final
+receipt publication. Retry preserves the original Run and verifier, and a
+fresh continuation remains unavailable. Inspection provides the exact
+authorized retry command for the original runtime. The public outputs carry
+bounded metadata from the Journal.
+
 ## Native model usage observations — HUG-222, 2026-11-22
 
 **Disposition: retain** the existing Codex service transport, scoped native

@@ -126,6 +126,30 @@ def test_pi_inspection_reports_unavailable_status_and_safe_guidance(
         assert code in captured.out and expected_action in captured.out
 
 
+@pytest.mark.parametrize("as_json", [True, False], ids=["json", "text"])
+def test_pi_pending_retirement_guides_reconciliation_of_the_exact_run(
+    capsys: pytest.CaptureFixture[str], as_json: bool
+) -> None:
+    argv = ["runs", "pi-session", "fleet-original"]
+    args = build_parser().parse_args([*argv, "--json"] if as_json else argv)
+    runs = Mock()
+    runs.inspect_pi_session.return_value = PiSessionInspection(
+        fleet_run_id="fleet-original",
+        availability="unavailable",
+        retirement="pending",
+        refusal_code=PiSessionRefusalCode.UNAVAILABLE,
+    )
+    runtime = cast(ApplicationRuntime, SimpleNamespace(runs=runs))
+
+    assert run_pi_session_command(runtime, args) == 0
+    output = capsys.readouterr()
+    action = json.loads(output.out)["safe_next_action"] if as_json else output.out
+    assert "oh-goon runs retire-pi-session fleet-original --authorize --json" in action
+    assert "original runtime" in action
+    assert output.err == ""
+    runs.retire_pi_session.assert_not_called()
+
+
 @pytest.mark.parametrize("verified", [True, False])
 def test_pi_history_text_shows_save_proof_only_when_recorded(
     capsys: pytest.CaptureFixture[str], verified: bool

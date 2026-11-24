@@ -811,13 +811,25 @@ def test_interrupted_retirement_verifies_absence_only_under_the_prepared_directo
         ),
     ):
         pytest.fail("File absence without durable directory proof was accepted")
+    synced = []
+    real_fsync = os.fsync
+
+    def record_directory_sync(fd: int) -> None:
+        info = os.fstat(fd)
+        assert stat.S_ISDIR(info.st_mode)
+        synced.append((info.st_dev, info.st_ino))
+        real_fsync(fd)
+
     with pin_pi_session_retirement(
         layout=admitted_pi_scope.layout,
         storage_id=selected.parent.name,
         expected_file=receipt,
         expected_directory=prepared,
     ) as retry:
-        retry.remove()
+        with monkeypatch.context() as patched:
+            patched.setattr(os, "fsync", record_directory_sync)
+            retry.remove()
+    assert synced == [(prepared.device, prepared.inode)]
 
     moved = selected.parent.with_name("moved")
     selected.parent.rename(moved)
@@ -898,3 +910,31 @@ def test_retirement_rechecks_late_file_replacement_before_unlink(
             retirement.remove()
     assert earlier.read_bytes() == b"retained\n"
     assert selected.read_bytes() == b"unrelated replacement\n"
+
+
+@pytest.mark.parametrize("replacement", ["directory", "symlink"])
+def test_retirement_rechecks_slot_path_before_using_the_pinned_file(
+    admitted_pi_scope: _AdmittedScope,
+    retained_pi_file: tuple[Path, PiSessionFileObservation],
+    tmp_path: Path,
+    replacement: str,
+) -> None:
+    selected, receipt = retained_pi_file
+    original = tmp_path / "moved-session"
+    with pin_pi_session_retirement(
+        layout=admitted_pi_scope.layout,
+        storage_id=selected.parent.name,
+        expected_file=receipt,
+    ) as retirement:
+        selected.parent.rename(original)
+        if replacement == "symlink":
+            selected.parent.symlink_to(original, target_is_directory=True)
+        else:
+            selected.parent.mkdir(mode=0o700)
+            selected.write_bytes(b"another session\n")
+        with pytest.raises(PiSessionUnavailable):
+            retirement.remove()
+    assert (original / selected.name).read_bytes() == b"retained\n"
+    assert selected.read_bytes() == (
+        b"retained\n" if replacement == "symlink" else b"another session\n"
+    )

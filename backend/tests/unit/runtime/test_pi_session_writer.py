@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event
 from typing import Literal
 from unittest.mock import Mock
 
@@ -903,6 +903,8 @@ def test_pi_retirement_revokes_before_unlink_and_converges_on_exact_restart(
     missing = inspector.inspect_pi_session("original")
     assert missing.availability == "unavailable" and missing.retirement == "none"
     assert missing.refusal_code is PiSessionRefusalCode.UNAVAILABLE
+    with pytest.raises(PiSessionUnavailable, match="file is absent"):
+        original.journal.retire_pi_session("original")
     assert original.journal.run_events("original") == historical
     present = True
 
@@ -929,7 +931,7 @@ def test_pi_retirement_revokes_before_unlink_and_converges_on_exact_restart(
     assert reopened.retire_pi_session("original") == retired
     assert reopened.run_events("original").events == (*pending.events, retired)
     assert remove_attempts == 2 and not present
-    assert expected_directories == [None, None, None, directory]
+    assert expected_directories == [None, None, None, None, directory]
 
 
 def test_pi_retirement_refuses_live_stale_and_foreign_writers_before_storage(
@@ -960,8 +962,9 @@ def test_pi_retirement_refuses_live_stale_and_foreign_writers_before_storage(
     pin.assert_not_called()
 
 
-def test_pi_retirement_fences_a_previously_admitted_but_unreserved_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("winner", ["retirement", "resume"])
+def test_pi_retirement_and_resume_reservation_share_the_original_writer_fence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, winner: str
 ) -> None:
     database = LocalDatabase(tmp_path / "state.db")
     original = _claim_attempt(database, "original")
@@ -973,11 +976,21 @@ def test_pi_retirement_fences_a_previously_admitted_but_unreserved_run(
 
     @contextmanager
     def pin(**_options: object) -> Generator[PiSessionRetirementPin, None, None]:
+        if winner == "resume":
+            assert contender.reserve().storage_id == writer.storage_id
         yield PiSessionRetirementPin(
             directory=PiSessionRetirementDirectoryIdentity(device=7, inode=11), remove=remove
         )
 
     monkeypatch.setattr("oh_goon.runtime.journal.pin_pi_session_retirement", pin)
+    if winner == "resume":
+        original_events = original.journal.run_events("original").events
+        with pytest.raises(PiSessionBusy):
+            original.journal.retire_pi_session("original")
+        assert original.journal.run_events("original").events == original_events
+        remove.assert_not_called()
+        return
+
     original.journal.retire_pi_session("original")
     before = contender.journal.run_events("contender")
     with pytest.raises(PiSessionUnavailable, match="retired or pending retirement"):
@@ -1017,6 +1030,70 @@ def test_concurrent_pi_retirement_uses_one_durable_request_and_native_effect(
     assert isinstance(request, PiSessionRetirementRequestedEvent)
     assert completion == first and first.request_sequence == request.sequence
     remove.assert_called_once_with()
+
+
+@pytest.mark.parametrize("interrupted", [False, True], ids=["verified", "pending-after-unlink"])
+def test_concurrent_pi_retirement_converges_when_the_first_caller_unlinks_before_second_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interrupted: bool
+) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    writer = original.reserve()
+    _observe_pi_file(original, writer, sha256="a" * 64, leaf_id="old-leaf")
+    _accepted_pi_result(original)
+    historical = original.journal.run_events("original")
+    directory = PiSessionRetirementDirectoryIdentity(device=7, inode=11)
+    waiting, released = Event(), Event()
+    present = True
+    removal_checks: list[bool] = []
+
+    @contextmanager
+    def pin(
+        *, expected_directory: PiSessionRetirementDirectoryIdentity | None = None, **options: object
+    ) -> Generator[PiSessionRetirementPin, None, None]:
+        assert options["storage_id"] == writer.storage_id
+        if not waiting.is_set():
+            waiting.set()
+            assert released.wait(timeout=5)
+        if not present and expected_directory is None:
+            raise PiSessionUnavailable("Original Pi session file is absent before retirement")
+
+        def remove() -> None:
+            nonlocal present
+            removal_checks.append(present)
+            if present:
+                present = False
+                if interrupted:
+                    raise PiSessionCleanupUnverified("Retirement interrupted after unlink")
+            else:
+                assert expected_directory == directory
+
+        yield PiSessionRetirementPin(directory=directory, remove=remove)
+
+    monkeypatch.setattr("oh_goon.runtime.journal.pin_pi_session_retirement", pin)
+    first_receipt = None
+    with ThreadPoolExecutor(max_workers=1) as threads:
+        contender = threads.submit(
+            Journal(LocalDatabase(database.path)).retire_pi_session, "original"
+        )
+        try:
+            assert waiting.wait(timeout=5)
+            if interrupted:
+                with pytest.raises(PiSessionCleanupUnverified, match="interrupted after unlink"):
+                    original.journal.retire_pi_session("original")
+            else:
+                first_receipt = original.journal.retire_pi_session("original")
+        finally:
+            released.set()
+        completion = contender.result(timeout=5)
+    if not interrupted:
+        assert first_receipt == completion
+    after = original.journal.run_events("original")
+    assert after.run == historical.run and after.events[:-2] == historical.events
+    request, receipt = after.events[-2:]
+    assert isinstance(request, PiSessionRetirementRequestedEvent) and request.directory == directory
+    assert receipt == completion and completion.request_sequence == request.sequence
+    assert removal_checks == ([True, False] if interrupted else [True])
 
 
 def test_interrupted_successor_never_releases_an_older_pi_predecessor(tmp_path: Path) -> None:
