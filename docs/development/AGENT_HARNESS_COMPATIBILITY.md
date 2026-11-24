@@ -1358,6 +1358,56 @@ fresh continuation remains unavailable. Inspection provides the exact
 authorized retry command for the original runtime. The public outputs carry
 bounded metadata from the Journal.
 
+### Pi persistent-session host qualification — HUG-102
+
+**Disposition**. Retain the existing managed Pi RPC, Bubblewrap, and claimed
+Run-worker owners. This matrix adds Pi persistence evidence to the host
+qualification tracked in [HUG-110](https://linear.app/hugloss/issue/HUG-110).
+
+| Host and mode | Result | Boundary exercised |
+| --- | --- | --- |
+| Native Ubuntu 26.04.1 x86-64, Linux 7.0.0-43-generic, Bubblewrap 0.11.1 | **PASS** for the selected Linux persistent RPC path | Direct Git checkout and private state on tmpfs. A fresh CLI process reopens the original native session and leaf after the previous Run exits. Cancellation and deadline retain original physical cleanup and independent Step evidence in the Journal. |
+| Restricted Linux execution environment | **UNSUPPORTED** for the selected Bubblewrap profile | The direct user-namespace probe was denied. The supervised preflight also failed at descriptor-based execution. The selected Pi Run refused before inference or session allocation and identifies the Bubblewrap preflight prerequisite. |
+| WSL2 | **NOT_RUN** | No WSL2 environment was available. A separate installed case must prove the selected filesystem, descriptor mounts, and process lifetime. |
+| Shipped Ubuntu and openSUSE application containers | **UNSUPPORTED** for managed Pi persistence as shipped | The runtime images omit Pi and Bubblewrap. An installed test of a separately configured container mode is **NOT_RUN**. |
+
+The installed executable was Pi 1.3.0 with entrypoint SHA-256
+`e79626f2dd6f94aa45d30f3fa63cd84319a6eefcd150b353cfaf274366926774`.
+Native affinity exposed 16 CPUs and the observed cgroup v2 imposed no CPU or
+memory ceiling. The selected cases kept their existing process deadlines.
+This qualifies process restart on the tested tmpfs mount. Power-loss durability
+and persistence on other filesystems are **NOT_RUN** in this host check.
+
+Set `OH_GOON_NATIVE_PI` to the selected executable and
+`OH_GOON_NATIVE_PI_RUNTIME_ROOT` to its public runtime root. Run
+`uv run --offline --frozen --no-sync --project backend pytest -q -m certification`
+and the following installed test selectors in the
+[Pi session journey](../../backend/tests/integration/services/test_native_pi_session_journey.py).
+
+- `test_installed_pi_session_reopens_via_initialized_plan_and_cli`.
+- `test_installed_pi_active_continuation_fences_second_controller_through_cancel`.
+- `test_installed_pi_continuation_deadline_preserves_original_settlement`.
+- `test_installed_pi_torn_save_stays_unqualified_after_successful_verifier` and
+  `test_installed_pi_save_fault_preserves_original_run_facts`.
+
+The deadline case follows the original process through termination, exit and
+descendant quiescence. The Step retains a timeout with verified cleanup,
+session persistence remains unknown, and the verifier never starts. Fresh
+CLI readback reports the same settlement and lineage. The save fault cases
+inject ENOSPC, EIO, and interruption at the existing storage and Journal cuts.
+The [storage owner tests](../../backend/tests/unit/runtime/test_pi_session_storage.py)
+cover the depth bound, permissions, symlinks, injected mount topology, and
+foreign source authority. The
+[installed component probe][pi-session-tests] checks the external source root,
+private writable session mount, and original command cleanup.
+
+On the `e064bc08` source tree, `/usr/bin/time` measured two invocations of
+`test_installed_pi_private_session_survives_original_command_and_config_cleanup`
+used fresh test state on the same prepared environment. The first took 7.64 s
+elapsed and 6.53 s CPU. The immediate repeat took 8.09 s elapsed and 6.86 s CPU.
+Both proved process-group quiescence. OS caches were left in place, so these
+figures cover first and repeated invocations under the observed host load.
+
 ## Native model usage observations — HUG-222, 2026-11-22
 
 **Disposition: retain** the existing Codex service transport, scoped native

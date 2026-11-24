@@ -28,6 +28,7 @@ from oh_goon.core.models.agent_providers import (
     PiNativeConfigurationMismatch,
     PiSessionCleanupUnverified,
     PiSessionHistoryUnqualified,
+    PiSessionHostPreflightUnavailable,
     PiSessionIdentityMismatch,
     PiSessionIntent,
     PiSessionSettlementUncertain,
@@ -37,7 +38,10 @@ from oh_goon.core.models.game_tape import GameTapeSummary
 from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus, GameTapeStatus
 from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.git import GitService
-from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+from oh_goon.integrations.fleet_plan_bubblewrap_isolation import (
+    BubblewrapMountPreflightUnavailable,
+    BubblewrapProcessIsolation,
+)
 from oh_goon.integrations.fleet_plan_process_isolation import (
     IsolatedProcessRequest,
     StandardIsolatedProcessRequest,
@@ -969,6 +973,33 @@ def test_ai_exact_pi_refusal_reports_an_original_run_reference_without_private_d
     native_cli.build.assert_not_called()
 
 
+def test_ai_pi_host_preflight_reports_native_prerequisite_without_child_detail(
+    native_cli: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private = "PRIVATE_NATIVE_PREFLIGHT_OUTPUT"
+    catalog = json.loads(native_cli.config.read_text())
+    catalog["native_profiles"]["isolated"].update({"allowed_agents": ["pi"], "pi_rpc": True})
+    native_cli.config.write_text(json.dumps(catalog))
+    probe = Mock(side_effect=BubblewrapMountPreflightUnavailable(private))
+    monkeypatch.setattr(native_cli.backend, "execute", probe)
+    assert (
+        main([*native_cli.argv, "--profile", "isolated", "--session", "run:prior-run", "--json"])
+        == 2
+    )
+    output = capsys.readouterr()
+    report = json.loads(output.out)
+    assert report["code"] == PiSessionUnavailable.code
+    assert report["reason"] == "PI_SESSION_HOST_PREFLIGHT_UNAVAILABLE"
+    assert report["missing_capability"] == "linux_bubblewrap_mount_namespace_preflight"
+    assert "descriptor execution" in report["safe_next_action"]
+    assert report["prior_run_id"] == "prior-run"
+    assert private not in output.out + output.err
+    probe.assert_called_once()
+    native_cli.build.assert_not_called()
+
+
 def test_native_plan_run_reuses_frozen_cli_selection_and_original_run_owner(
     native_cli: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1113,6 +1144,7 @@ def test_native_prepare_captures_once_and_binds_selected_implementation(
 
 @pytest.mark.parametrize("as_json", [True, False], ids=["json", "text"])
 @pytest.mark.parametrize("stage", ["preflight", "admission"])
+@pytest.mark.parametrize("host_preflight", [True, False], ids=["host", "cleanup"])
 def test_configured_pi_run_refusal_consistently_reports_prior_readback(
     native_cli: SimpleNamespace,
     native_run_configuration: Path,
@@ -1120,6 +1152,7 @@ def test_configured_pi_run_refusal_consistently_reports_prior_readback(
     capsys: pytest.CaptureFixture[str],
     as_json: bool,
     stage: str,
+    host_preflight: bool,
 ) -> None:
     catalog = json.loads(native_cli.config.read_text())
     catalog["native_profiles"]["isolated"].update({"allowed_agents": ["pi"], "pi_rpc": True})
@@ -1136,27 +1169,33 @@ def test_configured_pi_run_refusal_consistently_reports_prior_readback(
     assert main(["workflow", "prepare", str(native_run_configuration)]) == 0
     capsys.readouterr()
     private = "/private/pi-state/session.jsonl PRIVATE_TRANSCRIPT PRIVATE_PROVIDER_CREDENTIAL"
+    error: PiSessionUnavailable
+    if host_preflight:
+        error = PiSessionHostPreflightUnavailable()
+        error.__cause__ = FleetPlanInvalid(private)
+        expected_action = "Linux Bubblewrap mount and namespace preflight"
+    else:
+        error = PiSessionCleanupUnverified(private)
+        expected_action = "establish process cleanup"
     native_cli.runtime.plans.require_cli_plan_preparation = Mock()
-    native_cli.runtime.plans.run = Mock(side_effect=PiSessionCleanupUnverified(private))
+    native_cli.runtime.plans.run = Mock(side_effect=error)
     if stage == "preflight":
-        monkeypatch.setattr(
-            cli_ai, "native_plan_selection", Mock(side_effect=PiSessionCleanupUnverified(private))
-        )
+        monkeypatch.setattr(cli_ai, "native_plan_selection", Mock(side_effect=error))
     argv = ["run", str(native_run_configuration)]
     assert main([*argv, "--json"] if as_json else argv) == 2
     captured = capsys.readouterr()
     reference = ["oh-goon", "runs", "handoff", "prior-run", "--json"]
     if as_json:
         report = json.loads(captured.out)
-        assert report["code"] == PiSessionCleanupUnverified.code
+        assert report["code"] == error.code
         assert report["stage"] == "pi_session"
-        assert "establish process cleanup" in report["safe_next_action"]
+        assert expected_action in report["safe_next_action"]
         assert report["prior_run_id"] == "prior-run"
         assert report["prior_run_handoff_argv"] == reference
     else:
-        assert PiSessionCleanupUnverified.code not in captured.out
-        assert PiSessionCleanupUnverified.code in captured.err
-        assert "establish process cleanup" in captured.err
+        assert error.code not in captured.out
+        assert error.code in captured.err
+        assert expected_action in captured.err
         assert json.dumps(reference) in captured.err
     assert not any(value in captured.out + captured.err for value in private.split())
     native_cli.runtime.runs.wait_for_terminal.assert_not_called()

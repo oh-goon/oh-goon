@@ -919,6 +919,7 @@ def _held_pi_journey(
     reply_after_hold: bool = False,
     continuation_result: _ContinuationResult | None = None,
     initial_tool_command: str | None = None,
+    timeout_seconds: int = 90,
 ) -> Iterator[_HeldPiJourney]:
     executable = os.environ.get("OH_GOON_NATIVE_PI")
     runtime_root = os.environ.get("OH_GOON_NATIVE_PI_RUNTIME_ROOT")
@@ -1002,7 +1003,7 @@ def _held_pi_journey(
                             "workspace_roots": [str(repository)],
                             "inference_profile": "journey",
                             "pi_rpc": True,
-                            "timeout_seconds": 90,
+                            "timeout_seconds": timeout_seconds,
                         }
                     },
                     "native_agents": {
@@ -1335,6 +1336,118 @@ def test_installed_pi_active_continuation_fences_second_controller_through_cance
         )
         assert journey.requests == [_TASKS[0], _TASKS[0], _TASKS[1]]
         assert not journey.errors
+
+
+@pytest.mark.certification
+def test_installed_pi_continuation_deadline_preserves_original_settlement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _held_pi_journey(
+        tmp_path, monkeypatch, hold_request_number=3, timeout_seconds=20
+    ) as journey:
+        seed = journey.invoke("new", _TASKS[0])
+        assert seed.returncode == 0, seed.stderr
+        seed_id = json.loads(seed.stdout)["fleet_run_id"]
+        database = LocalDatabase(journey.database_path, read_only=True)
+        journal = Journal(database)
+        original = journal.run_events(seed_id)
+        assert (
+            original.pi_session is not None
+            and original.pi_session.save_verification == "pi_rpc_synced"
+        )
+
+        selected, backend, git = resolve_native_cli_selection(
+            agent="pi",
+            profile="pi-rpc",
+            workspace=journey.repository,
+            config_file=journey.config,
+            session=PiSessionIntent(mode="continue", prior_run_id=seed_id),
+        )
+        runtime = ApplicationRuntime.build(
+            standard_local=True,
+            standard_process_isolation=backend,
+            git_service=git,
+            startup_purpose="workflow",
+        )
+        coordinator = ExecutionCoordinator(database)
+        try:
+            admitted = runtime.plans.run_native_agent(
+                selected=selected,
+                workspace=journey.repository,
+                skill=journey.skill,
+                task=_TASKS[1],
+                verification=(("/usr/bin/true",),),
+            )
+            run_id = admitted.fleet_run_id
+            assert journey.held_inference_arrived.wait(20), journey.errors
+            live = journal.run_events(run_id)
+            lease = coordinator.active_lease()
+            assert lease is not None and lease.fleet_run_id == run_id and lease.custody is not None
+            assert lease.custody.phase == "WORKER_OWNED" and lease.custody.owner_pid != os.getpid()
+            assert live.run.status is FleetRunStatus.RUNNING
+            (reservation,) = (
+                event for event in live.events if isinstance(event, PiSessionWriterReservedEvent)
+            )
+            assert reservation.continuation is not None
+            assert reservation.continuation.prior_run_id == seed_id
+            (writer_start,) = (
+                event
+                for event in live.events
+                if type(event) is ProcessStartedEvent
+                and event.step_id == reservation.step_id
+                and event.sequence > reservation.sequence
+            )
+            detail = runtime.runs.wait_for_terminal(run_id, timeout=30)
+        finally:
+            journey.release_held_inference.set()
+            runtime.shutdown(wait_for_runs=False, cancel_grace_seconds=2)
+
+        assert detail.outcome is FleetRunOutcome.ATTENTION_REQUIRED
+        agent, verifier = detail.game_tape.repositories[0].steps
+        assert agent.settlement.outcome == "TIMED_OUT"
+        assert agent.settlement.cleanup == "VERIFIED"
+        (attempt,) = agent.attempts
+        assert attempt.supervisor is not None and attempt.supervisor.cleanup_reason == "timeout"
+        assert attempt.supervisor.final_process_group_quiescent is True
+        assert not verifier.attempts
+        retained = journal.run_events(run_id)
+        assert retained.run == detail.run and retained.events[: len(live.events)] == live.events
+        termination, exited, quiescent = (
+            event
+            for event in retained.events
+            if isinstance(
+                event, (TerminationRequestedEvent, ProcessExitedEvent, DescendantsQuiescentEvent)
+            )
+            and event.physical_execution_id == writer_start.physical_execution_id
+        )
+        assert isinstance(termination, TerminationRequestedEvent)
+        assert termination.reason == "max_runtime_exceeded"
+        assert isinstance(exited, ProcessExitedEvent) and isinstance(
+            quiescent, DescendantsQuiescentEvent
+        )
+        (receipt,) = (
+            event for event in retained.events if isinstance(event, PiSessionWriterObservedEvent)
+        )
+        assert receipt.reservation_sequence == reservation.sequence
+        assert termination.sequence < exited.sequence < quiescent.sequence < receipt.sequence
+        assert receipt.quiescent_sequence == quiescent.sequence
+        assert receipt.observation.persistence == "unknown" and receipt.observation.file is None
+        assert coordinator.active_lease() is None
+        assert journal.inspect_pi_session(run_id).availability == "unverified"
+        previous = journal.run_events(seed_id)
+        assert (previous.run, previous.events, previous.pi_session) == (
+            original.run,
+            original.events,
+            original.pi_session,
+        )
+
+        tape = journey.runs("tape", run_id, "--json")
+        assert tape.returncode == 0, tape.stderr
+        evidence = json.loads(tape.stdout)["pi_session"]
+        assert evidence["prior_run_id"] == seed_id and evidence["persistence"] == "unknown"
+        assert evidence["settlement"] == agent.settlement.model_dump(mode="json")
+        assert evidence["quiescent_sequence"] == quiescent.sequence
+        assert journey.requests == [_TASKS[0], _TASKS[0], _TASKS[1]] and not journey.errors
 
 
 _PI_RETIREMENT_INTERRUPTION = """

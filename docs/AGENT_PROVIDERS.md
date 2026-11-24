@@ -244,7 +244,8 @@ are outside this operation.
 Oh-Goon's product fork remains unsupported. Installed retirement and
 restart evidence covers the selected native Linux and Bubblewrap profile.
 WSL2, containerized hosts and other platforms require separate installed
-qualification. See the
+qualification. See the [Pi host qualification matrix](development/AGENT_HARNESS_COMPATIBILITY.md#pi-persistent-session-host-qualification--hug-102)
+and the
 [bounded retirement evidence](development/AGENT_HARNESS_COMPATIBILITY.md#managed-pi-retirement-recovery--hug-101).
 
 Broker-backed native reasoning requires an explicit managed inference connection so qualified

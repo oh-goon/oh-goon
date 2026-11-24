@@ -26,6 +26,7 @@ from oh_goon.core.models.agent_providers import (
     DEFAULT_NATIVE_AGENT,
     AgentProviderError,
     AgentProvidersConfig,
+    PiSessionHostPreflightUnavailable,
     PiSessionIntent,
     PiSessionSelectionError,
     ResolvedNativeAgent,
@@ -231,6 +232,9 @@ def resolve_native_cli_selection(
 ) -> tuple[ResolvedNativeAgent, ProcessIsolationBackend | None, GitService]:
     """Resolve a single catalog and native workload before application mutation."""
     from oh_goon.engine.git import GitService
+    from oh_goon.integrations.fleet_plan_bubblewrap_isolation import (
+        BubblewrapMountPreflightUnavailable,
+    )
     from oh_goon.integrations.fleet_plan_native_steps import require_native_agent_compatibility
     from oh_goon.integrations.fleet_plan_process_isolation import native_profile_command_runner
     from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
@@ -266,7 +270,13 @@ def resolve_native_cli_selection(
         if isolation is not None
         else None,
     )
-    if git.root(workspace) != workspace:
+    try:
+        repository_root = git.root(workspace)
+    except BubblewrapMountPreflightUnavailable as exc:
+        if not selected.uses_persistent_pi_session:
+            raise
+        raise PiSessionHostPreflightUnavailable() from exc
+    if repository_root != workspace:
         raise AgentProviderError("Native workspace must be an existing Git repository root")
     return selected, isolation, git
 
@@ -394,7 +404,8 @@ def run_ai_command(args: argparse.Namespace) -> int:
             action = (
                 requirement[1] + " This refusal grants no execution, repair or replay authority."
             )
-        pi_action = pi_session_safe_next_action(code)
+        pi_host_unavailable = isinstance(exc, PiSessionHostPreflightUnavailable)
+        pi_action = pi_session_safe_next_action(exc) if isinstance(exc, FleetDomainError) else None
         if pi_action is not None:
             action = pi_action
         elif isinstance(exc, PiSessionSelectionError):
@@ -414,6 +425,11 @@ def run_ai_command(args: argparse.Namespace) -> int:
             "reason": reason if requirement is not None else "not-established",
             "missing_capability": requirement[0] if requirement is not None else "not-established",
         }
+        if pi_host_unavailable:
+            context.update(
+                reason="PI_SESSION_HOST_PREFLIGHT_UNAVAILABLE",
+                missing_capability="linux_bubblewrap_mount_namespace_preflight",
+            )
         if isinstance(exc, RepositoryEffectQuarantined):
             action = (
                 "Preserve the selected state. Run 'oh-goon doctor --runtime' with the "

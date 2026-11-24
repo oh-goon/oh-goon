@@ -26,6 +26,7 @@ from oh_goon.core.execution_lock_identity import build_execution_lock, verify_ex
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentProvidersConfig,
+    PiSessionHostPreflightUnavailable,
     PiSessionUnavailable,
     ResolvedNativeAgent,
     require_pi_session_execution,
@@ -567,6 +568,7 @@ class FleetPlanService:
         if selected.connection is not None:
             selected.connection.selection.require_history_authorization()
         from oh_goon.integrations.fleet_plan_bubblewrap_isolation import (
+            BubblewrapMountPreflightUnavailable,
             BubblewrapProcessIsolation,
         )
         from oh_goon.integrations.fleet_plan_native_steps import require_native_agent_compatibility
@@ -664,25 +666,29 @@ class FleetPlanService:
         if selected.profile.backend == "bubblewrap":
             assert isinstance(backend, BubblewrapProcessIsolation)
             with RepositoryWorkspaceAuthority.pin_repository_subject(workspace) as require_current:
-                backend.require_standard_available(
-                    StandardIsolatedProcessRequest(
-                        workspace=workspace,
-                        argv=(selected.definition.executable or "",),
-                        cwd=workspace,
-                        env={},
-                        backend_configuration_id=selected.backend_configuration_id or "",
-                        require_workspace_current=require_current,
-                        read_only_mounts=native_runtime_read_only_mounts(workspace, selected),
-                        resources=selected.profile.resources,
-                        read_only_workspace=read_only_workspace,
-                        protected_execution=protected,
-                        private_configuration_directory=(
-                            Path(selected.definition.configuration_directory)
-                            if selected.definition.configuration_directory is not None
-                            else None
-                        ),
-                    )
+                request = StandardIsolatedProcessRequest(
+                    workspace=workspace,
+                    argv=(selected.definition.executable or "",),
+                    cwd=workspace,
+                    env={},
+                    backend_configuration_id=selected.backend_configuration_id or "",
+                    require_workspace_current=require_current,
+                    read_only_mounts=native_runtime_read_only_mounts(workspace, selected),
+                    resources=selected.profile.resources,
+                    read_only_workspace=read_only_workspace,
+                    protected_execution=protected,
+                    private_configuration_directory=(
+                        Path(selected.definition.configuration_directory)
+                        if selected.definition.configuration_directory is not None
+                        else None
+                    ),
                 )
+                try:
+                    backend.require_standard_available(request)
+                except BubblewrapMountPreflightUnavailable as exc:
+                    if not selected.uses_persistent_pi_session:
+                        raise
+                    raise PiSessionHostPreflightUnavailable() from exc
         return selected
 
     def require_plan_ingress_preparation(self, fleet_run_id: str | None) -> None:

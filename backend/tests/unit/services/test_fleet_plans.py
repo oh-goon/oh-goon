@@ -5,7 +5,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import Mock
 
 import pytest
@@ -20,6 +20,7 @@ from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     NativeAgentDefinition,
     NativeAgentProfile,
+    PiSessionHostPreflightUnavailable,
     PiSessionIntent,
     PiSessionUnavailable,
     ResolvedNativeAgent,
@@ -51,7 +52,10 @@ from oh_goon.engine.command import CommandResult, run_command
 from oh_goon.engine.fleet_extensions import FleetExtensionStore
 from oh_goon.engine.fleet_tools import FleetToolStore
 from oh_goon.engine.git import GitService
-from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProcessIsolation
+from oh_goon.integrations.fleet_plan_bubblewrap_isolation import (
+    BubblewrapMountPreflightUnavailable,
+    BubblewrapProcessIsolation,
+)
 from oh_goon.integrations.fleet_plan_compilation import load_extension_catalog
 from oh_goon.integrations.gitlab_ci_component import GitLabComponentFetcher
 from oh_goon.integrations.gitlab_ci_goon import GitLabCiGoonMigrator
@@ -960,4 +964,59 @@ def test_passive_native_history_selection_is_denied_before_backend_probe(tmp_pat
             role="review",
         )
     assert backend.mock_calls == []
+    runs.start_prepared_plan.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["new", "continue", "ephemeral"])
+def test_failed_native_host_preflight_refuses_before_plan_admission(
+    tmp_path: Path, mode: Literal["new", "continue", "ephemeral"]
+) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / ".git").mkdir(parents=True)
+    backend = Mock(spec=BubblewrapProcessIsolation)
+    backend.configuration_identity.return_value = "selected-backend"
+    backend.require_standard_available.side_effect = BubblewrapMountPreflightUnavailable(
+        "Native preflight refused"
+    )
+    resolver, runs, dependency = Mock(), Mock(), Mock()
+    service = FleetPlanService(
+        resolver,
+        runs,
+        dependency,
+        dependency,
+        dependency,
+        content_store=dependency,
+        standard_local_fleet=True,
+        standard_process_isolation=backend,
+        git_service=GitService(command_runner=run_command, observation_runner=run_command),
+    )
+    connection = _recorded_history_connection(allowed=True)
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="isolated",
+        definition=NativeAgentDefinition(executable=sys.executable),
+        profile=NativeAgentProfile(
+            backend="bubblewrap",
+            allowed_agents=("pi",),
+            inference_profile=connection.profile,
+            pi_rpc=True,
+        ),
+        executable_sha256="a" * 64,
+        connection=connection,
+        session=PiSessionIntent(
+            mode=mode, prior_run_id="prior-run" if mode == "continue" else None
+        ),
+    )
+    expected = (
+        BubblewrapMountPreflightUnavailable
+        if mode == "ephemeral"
+        else PiSessionHostPreflightUnavailable
+    )
+    with pytest.raises(expected) as refusal:
+        service.run_native_agent(
+            selected=selected, workspace=workspace, skill=None, task="Inspect current source"
+        )
+    assert type(refusal.value) is expected
+    backend.require_standard_available.assert_called_once()
+    resolver.resolve_frozen_agents.assert_not_called()
     runs.start_prepared_plan.assert_not_called()

@@ -22,6 +22,7 @@ from oh_goon.core.errors import (
     RunResourceScopeUnavailable,
     RuntimeSafetyBlocked,
 )
+from oh_goon.core.models.agent_providers import PiSessionHostPreflightUnavailable
 
 _SCHEMA = "oh-goon.plan-validation-diagnostic/v1"
 _PI_HANDOFF = "Inspect the original Run with 'oh-goon runs handoff RUN_ID --json'."
@@ -124,8 +125,12 @@ class SafePlanValidationDiagnostic(TypedDict):
     fields: NotRequired[list[str]]
 
 
-def pi_session_safe_next_action(code: str) -> str | None:
-    action = _PI_SESSION_ACTIONS.get(code)
+def pi_session_safe_next_action(refusal: str | FleetDomainError) -> str | None:
+    if isinstance(refusal, PiSessionHostPreflightUnavailable):
+        return str(refusal)
+    action = _PI_SESSION_ACTIONS.get(
+        refusal.code if isinstance(refusal, FleetDomainError) else refusal
+    )
     if action is None:
         return None
     return f"{_PI_HANDOFF} {action}"
@@ -135,7 +140,7 @@ def safe_plan_diagnostic(exc: Exception) -> SafePlanValidationDiagnostic:
     """Project a *single* received rejection without a second semantic decision."""
     fields: list[str] = []
     inputs: list[str]
-    pi_action = pi_session_safe_next_action(exc.code) if isinstance(exc, FleetDomainError) else None
+    pi_action = pi_session_safe_next_action(exc) if isinstance(exc, FleetDomainError) else None
     if pi_action is not None and isinstance(exc, FleetDomainError):
         code = exc.code
         inputs = []
