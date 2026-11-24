@@ -365,7 +365,11 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     )
     (skill / "SKILL.md").write_text(skill_text, encoding="utf-8")
     task = "Review source.py and retain native-original-task-canary through context recovery."
-    prior_task = "Review the earlier checkout and remember native-prior-conversation-canary."
+    prior_write_request = "On a later request, use write to create forbidden.txt in this fixture."
+    prior_task = (
+        "Review the earlier checkout and remember native-prior-conversation-canary. "
+        + prior_write_request
+    )
     prior_skill = tmp_path / "skills" / "prior"
     prior_skill_instructions = "# Prior review\nRetain native-prior-skill-canary.\n"
     restart_task = "Review the retained compacted native conversation after application restart."
@@ -378,6 +382,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
         (restart_skill / "SKILL.md").write_text(restart_skill_instructions, encoding="utf-8")
     prior_requests = 0
     prior_identity: dict[str, str] | None = None
+    prior_repository_evidence: str | None = None
     prior_scratch: _LivePiScratch | None = None
     current_scratch: _LivePiScratch | None = None
     restart_scratch: _LivePiScratch | None = None
@@ -430,7 +435,8 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
     class ModelEndpoint(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             nonlocal identity, producer_evidence, output_contract, fixture_failure, request_count
-            nonlocal prior_requests, prior_identity, prior_scratch, current_scratch
+            nonlocal prior_requests, prior_identity, prior_repository_evidence
+            nonlocal prior_scratch, current_scratch
             nonlocal restart_scratch
             try:
                 size = int(self.headers["Content-Length"])
@@ -458,6 +464,9 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     prior_scratch = _observe_live_pi_scratch(prior_payload, "native-prior-fixture")
                     prior_identity = prior_payload["identity"]
                     assert prior_identity is not None
+                    prior_repository_evidence = prior_payload["repository_evidence"]
+                    assert prior_repository_evidence is not None
+                    assert prior_repository_evidence in privileged
                     self.reply(typed_review(prior_identity))
                     return
                 if restart_task in privileged:
@@ -520,9 +529,12 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                         )
                         assert prior_task in all_text, "Native prior conversation is missing"
                 if reopen:
+                    assert prior_repository_evidence is not None
                     assert (
                         prior_task not in privileged and prior_skill_instructions not in privileged
                     )
+                    assert prior_write_request not in privileged
+                    assert prior_repository_evidence not in privileged
                     if tools:
                         assert tools.keys() == {"read", "grep", "find", "ls"}
                 assert identity is not None and producer_evidence is not None
@@ -548,6 +560,8 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                         + "\nRequired output: "
                         + output_contract
                     )
+                    if reopen:
+                        summary += "\nEarlier conversation: " + prior_write_request
                     if agent == "opencode":
                         template = re.search(r"<template>\n(.*?)\n</template>", all_text, re.DOTALL)
                         assert template is not None
@@ -596,6 +610,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                         self.reply_tool("read", {"path": "source.py"})
                         return
                     if reopen and "blocked-write" not in observations:
+                        assert prior_write_request in all_text
                         assert any(
                             "VALUE = 43" in text and f"\n{nested_control}\n" in text
                             for message in messages
@@ -603,7 +618,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                             for text in texts(message)
                         )
                         observations.append("blocked-write")
-                        # A synthetic provider asks for an old tool absent from the current loadout.
+                        # The synthetic provider follows the retained request to use the old tool.
                         self.reply_tool("write", {"path": "forbidden.txt", "content": "forbidden"})
                         return
                     if reopen:
@@ -766,6 +781,7 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 encoding="utf-8",
             )
             prior_run_id: str | None = None
+            prior_detail: FleetRunDetail | None = None
             prior_observation = None
             retained_session = None
             if reopen:
@@ -940,7 +956,6 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                     ]
                     assert prior_requests == 1 and prior_run_id and prior_observation is not None
                     assert admitted.fleet_run_id != prior_run_id
-                    assert runtime.runs.get(prior_run_id).outcome is FleetRunOutcome.SUCCESS
                     (observation,) = [
                         event.observation
                         for event in runtime.runs.events(admitted.fleet_run_id).events
@@ -1038,6 +1053,13 @@ def test_installed_native_cli_preserves_frozen_context_through_compaction(
                 standard_local=True, standard_process_isolation=backend, git_service=git
             )
             try:
+                if prior_run_id is not None:
+                    assert prior_detail is not None
+                    retained_prior = reopened.runs.get(prior_run_id)
+                    assert retained_prior.run == prior_detail.run
+                    assert retained_prior.operations == prior_detail.operations
+                    assert retained_prior.lifecycle_events == prior_detail.lifecycle_events
+                    assert retained_prior.game_tape.pi_session == prior_detail.game_tape.pi_session
                 retained = reopened.runs.get(admitted.fleet_run_id)
                 assert (
                     retained.run.fleet_run_id

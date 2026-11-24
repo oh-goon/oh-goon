@@ -1214,6 +1214,31 @@ facts and reports unknown session persistence. Continuation is refused,
 the bytes remain intact, and the tool effect occurs once. Power-loss
 durability remains unqualified.
 
+### Fresh Pi context after exact reopen — HUG-77
+
+**Disposition**. Retain the existing claimed Run worker, frozen prompt
+delivery, and managed Pi RPC. The resumed Run admits its current repository,
+Skill, task, and tool policy. Pi restores its native history and owns its
+automatic compaction and retry. History and its summary remain model input
+with no new tool grants.
+
+The [installed reopen and compaction cases][cli-compaction-tests] change
+the captured source, Skill, task, and broker profile between Runs. The
+synthetic provider checks fresh Hashmarks evidence through the initial
+reopen, compaction requests, and tool follow-up. Pi reads the newer source.
+The earlier prompt's request to write a fixture file survives in the
+native summary and the resumed read-only tools refuse it. The original
+Run's recorded state, evidence, and outcome survive fresh readback.
+
+The [installed session cases](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+repeat the fresh source and Skill check after a transient provider error.
+Current typed output reaches an independent verifier that reads the revised
+source. A length stop or a completed review tied to the prior candidate
+fails the Agent Step before the verifier is started. The evidence is for
+Pi 1.3.0, managed RPC, Bubblewrap 0.11.1, and synthetic inference on native
+Linux. Explicit manual compaction through Oh-Goon remains unsupported in
+this mode. Provider-hosted history qualification remains HUG-106.
+
 ### Native Pi settlement and typed acceptance — HUG-79
 
 **Disposition**. Retain Pi 1.3.0's RPC control and the existing native event
