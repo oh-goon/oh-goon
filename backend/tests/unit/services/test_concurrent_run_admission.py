@@ -518,16 +518,10 @@ def test_distinct_allocations_for_one_registered_subject_do_not_inherit_cross_re
 def _put_candidates_in_same_parallel_work(stack: SimpleNamespace) -> None:
     first = stack.first
     second = stack.second
-    first_candidate = first.target.candidate_workspace
-    second_candidate = prepare_candidate_workspace(
-        database=stack.database,
-        repositories=stack.repositories,
-        repository_id=first.repository.repository_id,
-        fleet_run_id=second.run_id,
-        expected_source=first_candidate.source,
-    )
+    original_target = first.target
+    base = original_target.candidate_workspace
     work_id = "same-repository-work"
-    original_plan = first.target.plan
+    original_plan = original_target.plan
     native = original_plan.native_agent
     assert native is not None
     assert isinstance(original_plan.steps[0], ResolvedAgentStep)
@@ -560,8 +554,8 @@ def _put_candidates_in_same_parallel_work(stack: SimpleNamespace) -> None:
         ParallelAgentWorkIntent(
             work_id=work_id,
             repository_id=first.repository.repository_id,
-            source=first_candidate.source,
-            base_revision=first_candidate.workspace.base_revision,
+            source=base.source,
+            base_revision=base.workspace.base_revision,
             children=(
                 ParallelAgentChild(
                     fleet_run_id=first.run_id,
@@ -581,9 +575,18 @@ def _put_candidates_in_same_parallel_work(stack: SimpleNamespace) -> None:
         verifier,
     )
     second.repository, second.scope = first.repository, first.scope
-    for case, workspace in ((first, first_candidate), (second, second_candidate)):
-        candidate = workspace.model_copy(update={"parallel_work_id": work_id})
-        case.target = first.target.model_copy(
+    for case in (first, second):
+        candidate = prepare_candidate_workspace(
+            database=stack.database,
+            repositories=stack.repositories,
+            repository_id=case.repository.repository_id,
+            fleet_run_id=case.run_id,
+            expected_source=base.source,
+            expected_subject=base.source.subject_instance_id,
+            expected_base_revision=base.workspace.base_revision,
+            parallel_work_id=work_id,
+        )
+        case.target = original_target.model_copy(
             update={
                 "plan": plan,
                 "identity": structural_execution_identity(plan),
