@@ -776,22 +776,43 @@ class SQLiteExecutionLeaseStore:
         self,
         connection: sqlite3.Connection,
         fleet_run_id: str,
+        *,
+        concurrent_live_admission: RunConcurrencyAdmission | None = None,
     ) -> bool:
         """Mark one live Fleet owner cancelled inside the caller-owned transaction.
 
         A retained dead or closing reservation may resolve only its own Run.
         Missing custody cannot establish an orphan while another owner is active.
-        Dead-owner reclamation stays inside the caller's canonical write cut.
+        An exact concurrent admission selects live-only cancellation; recovery
+        retains missing, dead or closing custody for that Run.
         """
         self._database.require_atomic_write_cut(connection)
         retained = self.retained_fleet_lease_in(connection, fleet_run_id)
-        row = self._active_lease_row(connection, remove_dead=True, fleet_run_id=fleet_run_id)
+        if concurrent_live_admission is not None:
+            if concurrent_live_admission.fleet_run_id != fleet_run_id:
+                raise OwnershipLost("Concurrent cancellation belongs to another Run")
+            if retained is None:
+                return False
+            if self.concurrency_in(connection, fleet_run_id) != concurrent_live_admission:
+                raise OwnershipLost("Concurrent cancellation differs from the original reservation")
+        row = self._active_lease_row(
+            connection, remove_dead=concurrent_live_admission is None, fleet_run_id=fleet_run_id
+        )
         if row is None:
-            if retained is None and self.active_leases_in(connection):
+            if (
+                concurrent_live_admission is None
+                and retained is None
+                and self.active_leases_in(connection)
+            ):
                 raise OwnershipLost("Fleet run no longer owns the active execution lease")
             return False
         if str(row["kind"]) != "FLEET" or row["fleet_run_id"] != fleet_run_id:
             raise OwnershipLost("Fleet run no longer owns the active execution lease")
+        if concurrent_live_admission is not None and row["custody_phase"] not in (
+            "ADMITTED_UNCLAIMED",
+            "WORKER_OWNED",
+        ):
+            return False
         cursor = connection.execute(
             """
             UPDATE execution_lease

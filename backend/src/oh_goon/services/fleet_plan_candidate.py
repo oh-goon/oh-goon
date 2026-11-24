@@ -18,9 +18,10 @@ from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
 from oh_goon.core.models.candidate_execution_receipt import CandidateExecutionReceipt
 from oh_goon.core.models.candidate_workspace import CandidateRunInspection
 from oh_goon.core.models.effect_attempt import ClaimedRepositoryEffectAttempt
-from oh_goon.core.models.fleet_plan import DEFAULT_COMMAND_TIMEOUT_SECONDS
+from oh_goon.core.models.fleet_plan import DEFAULT_COMMAND_TIMEOUT_SECONDS, ResolvedCommandStep
 from oh_goon.core.models.fleet_plan_evidence import FleetPlanResult, PlanSnapshotEvidence
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
+from oh_goon.core.models.parallel_candidate_verification import is_parallel_verifier_step_id
 from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
@@ -37,11 +38,16 @@ from oh_goon.engine.git import (
 from oh_goon.integrations.content_snapshot import SnapshotIdentity
 from oh_goon.integrations.fleet_plan_native_steps import require_native_agent_compatibility
 from oh_goon.integrations.fleet_plan_process_isolation import NativeProfileCommandRunner
+from oh_goon.integrations.parallel_candidate_verifier import require_verifier_executable
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution_assignments import ExecutionAssignmentAuthority
 from oh_goon.runtime.execution_evidence_acceptance import ExecutionEvidenceAcceptanceAuthority
 from oh_goon.runtime.execution_materializations import ExecutionMaterializationAuthority
 from oh_goon.runtime.journal import Journal
+from oh_goon.runtime.parallel_agent_work import (
+    read_parallel_verifier,
+    reserve_parallel_candidate_workspaces,
+)
 from oh_goon.runtime.workspace_leases import NativeWorkspaceQuiescence, WorkspaceLeaseStore
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority, _worktree_git_environment
 from oh_goon.services.agent_authoring_sources import require_native_agent_source_path_privacy
@@ -159,6 +165,8 @@ def prepare_candidate_workspace(
     git: GitService | None = None,
     expected_source: RepositorySourceAuthority | None = None,
     expected_subject: str | None = None,
+    expected_base_revision: str | None = None,
+    parallel_work_id: str | None = None,
     validate_candidate_path: Callable[[Path], None] | None = None,
 ) -> CandidateWorkspaceAdmission:
     """Capture one registered clean source and materialize an independently owned candidate."""
@@ -184,18 +192,35 @@ def prepare_candidate_workspace(
             observation.require_repository()
             if observation.head_sha is None or observation.changed_files:
                 raise FleetPlanInvalid("Candidate source must be committed and clean")
-            candidate = workspaces.request(
-                repository_id=repository.repository_id,
-                base_revision=observation.head_sha,
-                kind=WorkspaceKind.WORKTREE,
-            )
+            if (
+                expected_base_revision is not None
+                and observation.head_sha != expected_base_revision
+            ):
+                raise StateConflict("Registered candidate base changed before preparation")
+            if parallel_work_id is None:
+                candidate = workspaces.request(
+                    repository_id=repository.repository_id,
+                    base_revision=observation.head_sha,
+                    kind=WorkspaceKind.WORKTREE,
+                )
+            else:
+                candidate, source_workspace = reserve_parallel_candidate_workspaces(
+                    database,
+                    workspaces,
+                    work_id=parallel_work_id,
+                    fleet_run_id=fleet_run_id,
+                    repository_id=repository.repository_id,
+                    base_revision=observation.head_sha,
+                    expected_source=expected_source,
+                )
             if validate_candidate_path is not None:
                 validate_candidate_path(workspaces.physical_path(candidate))
-            source_workspace = workspaces.request(
-                repository_id=repository.repository_id,
-                base_revision=observation.head_sha,
-                kind=WorkspaceKind.READ_SNAPSHOT,
-            )
+            if source_workspace is None:
+                source_workspace = workspaces.request(
+                    repository_id=repository.repository_id,
+                    base_revision=observation.head_sha,
+                    kind=WorkspaceKind.READ_SNAPSHOT,
+                )
             allocated = workspaces.allocate(source_workspace.workspace_id, expected_state_version=0)
             _, captured = workspaces.materialize_read_snapshot(
                 source_workspace,
@@ -231,6 +256,7 @@ def prepare_candidate_workspace(
             physical = workspaces.physical_path(candidate).lstat()
             return CandidateWorkspaceAdmission(
                 fleet_run_id=fleet_run_id,
+                parallel_work_id=parallel_work_id,
                 source=source,
                 source_workspace=source_workspace,
                 workspace=candidate,
@@ -332,6 +358,21 @@ class CandidateExecution:
         ):
             raise StateConflict("Candidate execution differs from original admitted Run authority")
         require_native_candidate_selection(target.plan.native_agent)
+        self.verifier = (
+            read_parallel_verifier(database, admission.parallel_work_id)
+            if admission.parallel_work_id is not None
+            else None
+        )
+        if admission.parallel_work_id is not None:
+            assert self.verifier is not None
+            step = target.plan.steps[-1]
+            if (
+                not isinstance(step, ResolvedCommandStep)
+                or not is_parallel_verifier_step_id(step.step_id)
+                or step.argv != self.verifier.argv
+            ):
+                raise StateConflict("Parallel candidate Step differs from its admitted verifier")
+            require_verifier_executable(self.verifier)
         backend_configuration_id = target.plan.native_agent.backend_configuration_id
         if backend_configuration_id is None:
             raise FleetPlanInvalid("Candidate execution requires its resolved native backend")

@@ -17,6 +17,11 @@ class CandidateWorkspaceAdmission(ImmutableModel):
     """Bind registered source to a real owned initial candidate, without granting a writer."""
 
     fleet_run_id: str = Field(min_length=1)
+    parallel_work_id: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+        exclude_if=lambda value: value is None,
+    )
     source: RepositorySourceAuthority
     source_workspace: WorkspaceRef
     workspace: WorkspaceRef

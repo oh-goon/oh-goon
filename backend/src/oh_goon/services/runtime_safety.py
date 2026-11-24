@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from oh_goon.core.errors import RuntimeSafetyBlocked
+from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
 from oh_goon.core.models.runtime_safety import (
     AssessedRuntimeSafetyProof,
     ProvenRuntimeSafetyProof,
@@ -50,12 +51,25 @@ class RuntimeSafetyService:
         *,
         safety: CommandSafety,
         repository_ids: tuple[str, ...],
+        candidate: CandidateWorkspaceAdmission | None = None,
     ) -> None:
         """Enforce repository quarantine from the exact already-admitted safety cut."""
+        sibling_quarantines: set[str] = set()
+        if candidate is not None and candidate.parallel_work_id is not None:
+            sibling_quarantines = {
+                scope.operation_id
+                for scope in cut.candidate_effect_quarantines
+                if scope.parallel_work_id == candidate.parallel_work_id
+                and scope.workspace_id != candidate.workspace.workspace_id
+            }
         require_effects_allowed_for_repositories(
             safety,
             repository_ids,
-            self._auditor.quarantines(cut),
+            (
+                entry
+                for entry in self._auditor.quarantines(cut)
+                if entry.operation_id not in sibling_quarantines
+            ),
         )
 
     def admit_effect_cut(self) -> ConsistentRuntimeSafetyCut:

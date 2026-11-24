@@ -10,6 +10,7 @@ from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
 from oh_goon.core.models.candidate_execution_receipt import CandidateExecutionReceipt
 from oh_goon.core.models.execution_materialization import ExecutionMaterialization
 from oh_goon.core.models.fleet_plan_evidence import FleetPlanResult
+from oh_goon.core.models.parallel_candidate_verification import ParallelCandidateVerifier
 from oh_goon.core.models.provenance import RepositoryStateFingerprint
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest
 
@@ -25,6 +26,9 @@ class CandidateExecutionContext(Protocol):
 
     @property
     def workspace_directory_fd(self) -> int: ...
+
+    @property
+    def verifier(self) -> ParallelCandidateVerifier | None: ...
 
     def require_current(self) -> None: ...
 

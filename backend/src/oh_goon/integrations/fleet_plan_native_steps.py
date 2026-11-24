@@ -28,6 +28,7 @@ from oh_goon.core.agent_harness_contract import (
 from oh_goon.core.diagnostic_redaction import redact_diagnostic_text
 from oh_goon.core.enforcer_lace_trust import canonical_bytes
 from oh_goon.core.errors import FleetPlanInvalid, InvalidRunTransition, OperationDeadlineExpired
+from oh_goon.core.models.agent_notes import AgentNotesError
 from oh_goon.core.models.agent_providers import (
     AgentProviderError,
     ResolvedNativeAgent,
@@ -73,6 +74,11 @@ from oh_goon.integrations.agent_native_execution import (
     require_codex_authentication_home_separation,
     validate_native_agent_arguments,
     verify_native_agent_executable,
+)
+from oh_goon.integrations.agent_pi_notes import (
+    PI_NOTES_EXTENSION,
+    PiNoteChannel,
+    pi_notes_arguments,
 )
 from oh_goon.integrations.agent_pi_rpc import PiRpcContinuation, pi_broker_api
 from oh_goon.integrations.agent_review_execution import (
@@ -581,8 +587,19 @@ def execute_native_agent_step(
     assert selected is not None
     sandboxed = selected.profile.backend == "bubblewrap"
     persistent_pi = selected.uses_persistent_pi_session
+    notes_for_step = runtime.agent_notes_for_step
+    if notes_for_step is not None and (
+        selected.agent != "pi"
+        or selected.interactive
+        or not sandboxed
+        or persistent_pi
+        or selected.connection is None
+        or step.workload.role != "report"
+    ):
+        raise FleetPlanInvalid("Shared notes require the private headless Pi candidate path")
     private_output = (
-        persistent_pi
+        notes_for_step is not None
+        or persistent_pi
         or selected.profile.codex_service is not None
         or (sandboxed and selected.profile.sandbox_owner == "execution_backend")
     )
@@ -792,6 +809,14 @@ def execute_native_agent_step(
                 raise
         else:
             assert model is not None
+            note_channel = None
+            if notes_for_step is not None:
+                try:
+                    note_channel = PiNoteChannel(
+                        notes_for_step(step.step_id, attempt_number, model)
+                    )
+                except AgentNotesError as error:
+                    raise FleetPlanInvalid("Shared notes authority is unavailable") from error
             broker = stack.enter_context(
                 approved_model_broker(
                     broker_parent,
@@ -799,10 +824,11 @@ def execute_native_agent_step(
                     task=prepared.task,
                     repository_evidence=disclosure,
                     skill_instructions=prepared.skill_instructions,
+                    notes=note_channel,
                     cancel_requested=lambda: (
-                        runtime.cancel_requested is not None and runtime.cancel_requested()
-                    )
-                    or time.monotonic() >= deadline,
+                        (runtime.cancel_requested is not None and runtime.cancel_requested())
+                        or time.monotonic() >= deadline
+                    ),
                 )
             )
             mounts = list(frozen_mounts)
@@ -835,6 +861,12 @@ def execute_native_agent_step(
                     model_inference_relay(broker.socket_path, port=0)
                 ).base_url
             invocation = _bootstrap(selected, invocation, control, base_url)
+            if note_channel is not None:
+                extension = control / "agent-notes.ts"
+                _write_private(extension, PI_NOTES_EXTENSION.encode("utf-8"))
+                invocation = replace(
+                    invocation, argv=(*invocation.argv, *pi_notes_arguments(extension))
+                )
             session_options: tuple[str, ...] = ()
             if writer is not None:
                 if writer.prior_native is None:
@@ -979,16 +1011,21 @@ def execute_native_agent_step(
                 parsed.event_count,
                 parsed.omitted_observations,
             )
-            summary = _retained_native_summary(
-                step,
-                parsed.final_text,
-                diagnostic=outcome.stderr if service_execution_failed else "",
-                host_environment=process.host_environment,
-            )
-            omitted += max(0, len(events) + 1 - 128)
-            events = (*events[-127:], summary)
-            if execution_returncode == 0:
-                outcome = replace(outcome, stdout=parsed.final_text, stdout_evidence=None)
+            if notes_for_step is not None:
+                # Native events and final text can quote private shared notes.
+                omitted += len(events)
+                events = ()
+            else:
+                summary = _retained_native_summary(
+                    step,
+                    parsed.final_text,
+                    diagnostic=outcome.stderr if service_execution_failed else "",
+                    host_environment=process.host_environment,
+                )
+                omitted += max(0, len(events) + 1 - 128)
+                events = (*events[-127:], summary)
+                if execution_returncode == 0:
+                    outcome = replace(outcome, stdout=parsed.final_text, stdout_evidence=None)
         observation = _native_observation_from_protocol(
             step,
             prepared,

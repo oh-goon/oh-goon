@@ -101,6 +101,7 @@ class StandardIsolatedProcessRequest:
     workspace_materialization: ExecutionMaterialization | None = None
     workspace_directory_fd: int | None = field(default=None, repr=False)
     pi_session_directory: PiSessionDirectoryPin | None = field(default=None, repr=False)
+    read_only_mount_cwd: PurePosixPath | None = None
 
     def __post_init__(self) -> None:
         if (self.workspace_materialization is None) != (self.workspace_directory_fd is None):
@@ -136,6 +137,14 @@ class StandardIsolatedProcessRequest:
         cwd = self.cwd.resolve(strict=True)
         if not cwd.is_relative_to(workspace):
             raise FleetPlanInvalid("Standard sandbox cwd is outside the approved workspace")
+        if self.read_only_mount_cwd is not None and (
+            self.workspace_materialization is None
+            or not any(
+                mount.target == self.read_only_mount_cwd and mount.source.is_dir()
+                for mount in self.read_only_mounts
+            )
+        ):
+            raise FleetPlanInvalid("Candidate verifier cwd requires its exact read-only mount")
         if self.terminal is not None and self.input_data is not None:
             raise FleetPlanInvalid("Standard sandbox terminal and input bytes are exclusive")
         if self.input_source is not None:
@@ -324,6 +333,7 @@ class NativeProfileCommandRunner:
         retain_output_tail: bool = False,
         preserve_stdout_whitespace: bool = False,
         pi_session_directory: PiSessionDirectoryPin | None = None,
+        read_only_mount_cwd: PurePosixPath | None = None,
     ) -> CommandResult:
         workspace = self.repository
         native_agent = self.native_agent
@@ -370,6 +380,7 @@ class NativeProfileCommandRunner:
                 or broker_directory is not None
                 or private_configuration_directory is not None
                 or pi_session_directory is not None
+                or read_only_mount_cwd is not None
             ):
                 raise FleetPlanInvalid("Requested physical native guarantees require Bubblewrap")
             return run_command(
@@ -426,6 +437,7 @@ class NativeProfileCommandRunner:
                 workspace_materialization=self.workspace_materialization,
                 workspace_directory_fd=self.workspace_directory_fd,
                 pi_session_directory=pi_session_directory,
+                read_only_mount_cwd=read_only_mount_cwd,
             )
             return standard_backend.execute(
                 request,

@@ -30,6 +30,7 @@ from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
 from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.ports.agent_notes import AgentNotesForStep
 from oh_goon.core.ports.capability_runner import CapabilityExecutionRequest, PreparedRunnerExecution
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.ports.pi_session_writer import PiSessionWriter, ReservedPiSessionWriter
@@ -38,11 +39,13 @@ from oh_goon.core.vocabulary import EffectAttemptStatus, EffectBoundaryKind, Fle
 from oh_goon.engine.command import CommandProcessLifecycleEvent, observe_command_processes
 from oh_goon.engine.errors import OperationCancelledError
 from oh_goon.engine.git import GitService
+from oh_goon.runtime.agent_notes import AgentNotesStore
 from oh_goon.runtime.database import DatabasePathIdentityLost
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionSession
 from oh_goon.runtime.fault_injection import FaultInjector, FaultPoint, NoFaultInjector
 from oh_goon.runtime.journal import Journal
+from oh_goon.runtime.parallel_agent_work import parallel_notes_enabled_in
 from oh_goon.runtime.pi_session_storage import observe_pi_session_file, pin_pi_session_directory
 from oh_goon.services.capability_executor import CapabilityExecutor
 from oh_goon.services.repository_effect_fence import RepositoryEffectFence
@@ -74,6 +77,7 @@ class RepositoryEffectExecution:
         effect_fence: RepositoryEffectFence,
         settlement: RepositoryEffectSettlement,
         state_paths: ApplicationStatePathLayout | None = None,
+        agent_notes: AgentNotesStore | None = None,
     ) -> None:
         self._executor = executor
         self._journal = journal
@@ -83,6 +87,7 @@ class RepositoryEffectExecution:
         self._effect_fence = effect_fence
         self._settlement = settlement
         self._state_paths = state_paths
+        self._agent_notes = agent_notes
 
     def effect_boundary(self, intent: ResolvedCapabilityIntent) -> EffectBoundaryKind:
         return self._executor.effect_boundary(intent)
@@ -258,6 +263,7 @@ class RepositoryEffectExecution:
                     session, attempt, validate_authority_in, check_cancellation=False
                 ),
                 pi_session_writer=self._pi_session_writer(session, attempt, repository_admission),
+                agent_notes_for_step=self._agent_notes_factory(session, attempt),
             )
             if activity is not None:
                 activity("Preparing immutable execution inputs for " + attempt.repository.path.name)
@@ -316,6 +322,30 @@ class RepositoryEffectExecution:
         finally:
             if prepared is not None:
                 prepared.close()
+
+    def _agent_notes_factory(
+        self, session: ExecutionSession, attempt: ClaimedRepositoryEffectAttempt
+    ) -> AgentNotesForStep | None:
+        target = attempt.target
+        candidate = target.candidate_workspace if isinstance(target, FleetPlanTarget) else None
+        work_id = candidate.parallel_work_id if candidate is not None else None
+        if work_id is None:
+            return None
+        run_id = session.require_fleet_run_id()
+        enabled = session.observe(
+            lambda connection: parallel_notes_enabled_in(connection, work_id, run_id)
+        )
+        if not enabled:
+            return None
+        if self._agent_notes is None:
+            raise StateConflict("Admitted parallel notes have no original runtime owner")
+        return partial(
+            self._agent_notes.bind,
+            session,
+            work_id,
+            attempt.repository.repository_id,
+            attempt.operation_id,
+        )
 
     def _pi_session_writer(
         self,

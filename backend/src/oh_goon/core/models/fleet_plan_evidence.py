@@ -30,6 +30,7 @@ from oh_goon.core.models.fleet_plan_requirements import RequirementCount, UvLock
 from oh_goon.core.models.fleet_plan_retry import PlanRetryDecisionEvidence
 from oh_goon.core.models.fleet_plan_tool_authority import PlanHostToolAuthorityEvidence
 from oh_goon.core.models.model_usage import ModelUsageReport
+from oh_goon.core.models.parallel_candidate_verification import ParallelCandidateVerifierObservation
 from oh_goon.core.models.shard_execution import CanonicalShardExecutionEvidence
 from oh_goon.core.process_birth import ProcessBirthIdentity
 from oh_goon.core.product_identity import stable_id
@@ -460,6 +461,9 @@ class PlanStepAttemptEvidence(ImmutableModel):
     )
     execution_authority: PlanExecutionAuthorityDiagnosticEvidence | None = None
     model_usage: ModelUsageReport | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    parallel_verifier: ParallelCandidateVerifierObservation | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 

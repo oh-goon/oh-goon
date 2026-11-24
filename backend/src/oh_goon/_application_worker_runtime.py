@@ -43,6 +43,7 @@ from oh_goon.runtime._executor_configuration import (
     restore_worker_executor_configuration,
     restore_worker_isolation_configuration,
 )
+from oh_goon.runtime.agent_notes import AgentNotesStore
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionTicket
@@ -420,5 +421,6 @@ def build_claimed_run_execution(
         effect_fence=RepositoryEffectFence(git),
         settlement=RepositoryEffectSettlement(database, journal, attempts),
         state_paths=state_paths,
+        agent_notes=AgentNotesStore(database, journal),
     )
     return FleetRunExecution(lifecycle, FleetTargetScheduler(effects), live_output, diagnostics)

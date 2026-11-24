@@ -23,6 +23,7 @@ from oh_goon.core.errors import (
     TargetSelectionError,
 )
 from oh_goon.core.execution_environment import ResolvedExecutionEnvironment
+from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
 from oh_goon.core.models.capability import (
     CapabilityRequirement,
     CapabilityRequirementCondition,
@@ -136,12 +137,14 @@ class FleetAdmissionPlanner:
         *,
         safety: CommandSafety,
         repository_ids: tuple[str, ...],
+        candidate: CandidateWorkspaceAdmission | None = None,
     ) -> None:
         """Use the *same* admitted cut for scoped repository quarantine proof."""
         runtime_safety.require_repository_effects_allowed(
             cut,
             safety=safety,
             repository_ids=repository_ids,
+            candidate=candidate,
         )
 
     @classmethod
@@ -835,6 +838,9 @@ class FleetAdmissionPlanner:
             admitted_cut,
             safety=intent.definition.safety,
             repository_ids=tuple(target.repository.repository_id for target in targets),
+            candidate=intent.target.candidate_workspace
+            if isinstance(intent.target, FleetPlanTarget)
+            else None,
         )
         return FleetAdmissionPlan(
             durable_revision=admitted_cut.durable_revision,
@@ -919,6 +925,9 @@ class FleetAdmissionPlanner:
             admitted,
             safety=intent.definition.safety,
             repository_ids=tuple(entry.repository.repository_id for entry in prepared.targets),
+            candidate=intent.target.candidate_workspace
+            if isinstance(intent.target, FleetPlanTarget)
+            else None,
         )
         self._require_capacity_in(connection, admitted, concurrency)
         return FleetAdmissionPlan(

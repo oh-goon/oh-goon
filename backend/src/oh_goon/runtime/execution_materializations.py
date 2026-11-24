@@ -247,12 +247,24 @@ class ExecutionMaterializationAuthority:
 
     def materialization(self, materialization_id: str) -> ExecutionMaterialization:
         with self._database.transaction() as connection:
-            row = connection.execute(
-                "SELECT payload_json FROM execution_materializations WHERE materialization_id=?",
-                (materialization_id,),
-            ).fetchone()
+            return self.materialization_in(connection, materialization_id)
+
+    @staticmethod
+    def materialization_in(
+        connection: sqlite3.Connection, materialization_id: str
+    ) -> ExecutionMaterialization:
+        row = connection.execute(
+            "SELECT payload_json, resolved_fingerprint FROM execution_materializations "
+            "WHERE materialization_id=?",
+            (materialization_id,),
+        ).fetchone()
         if row is None:
             raise ExecutionMaterializationNotFound(
                 f"Execution materialization not found: {materialization_id}"
             )
-        return ExecutionMaterialization.model_validate(json.loads(row["payload_json"]))
+        value = ExecutionMaterialization.model_validate_json(row["payload_json"])
+        if value.materialization_id != materialization_id or (
+            value.resolved_fingerprint != row["resolved_fingerprint"]
+        ):
+            raise ExecutionMaterializationStale("Stored execution materialization differs")
+        return value

@@ -526,10 +526,47 @@ Use that same `runtime.plans.run_native_agent(..., candidate=True)` owner with
 each independently resolved native selection and registered repository. Keep
 the runtime alive and explicitly shut it down after observing its Runs. A third
 request reports busy; there is no implicit queue or waiting retry. Runs
-over the same registered subject remain refused even with distinct candidates,
-because uncertain effects are currently quarantined by repository. Profiles
+over the same registered subject require the explicit parallel task below. Profiles
 with separately selected Step resource scopes, interactive terminals, other
 workload modes and a different controller cannot borrow these slots.
+
+#### Two agents on one repository
+
+Use `oh-goon runs start-parallel REQUEST.json` in the configured controller
+scope described above. The request selects an explicit work ID, a clean registered
+workspace and expected Git commit, two briefs for the same task, two headless Pi
+profiles, native budgets, note access, and an independent verifier. The CLI waits
+for the original Runs. Use the same request to inspect an uncertain launch
+acknowledgement by its original identity.
+
+The request requires `work_id`, `workspace`, `expected_base_revision`, `task`,
+`briefs` (two distinct strings), `native_profiles` (two profile names),
+`capacity` (the policy shown above), `notes_enabled`, and `verifier`.
+`provider_catalog` optionally selects an absolute provider configuration path.
+The verifier includes `acceptance`, an absolute native `executable` under
+`/usr`, its `executable_sha256`, an `arguments` array, and frozen `inputs`.
+Each input specifies `name`, UTF-8 `content`, and its `sha256`. Use exact
+`{candidate}` and `{input:verify.py}` argument tokens to bind the read-only
+candidate snapshot and each named verifier input. For example, a Python verifier
+can select `["-I", "{input:verify.py}", "{candidate}"]`.
+
+```sh
+oh-goon runs parallel-work WORK_ID --json
+oh-goon runs parallel-notes WORK_ID --after 0 --json
+oh-goon runs cancel-parallel WORK_ID --run RUN_ID
+oh-goon runs verify-candidate RUN_ID --json
+oh-goon runs export-candidate RUN_ID --checkpoint-id CHECKPOINT_ID --output /private/candidate.patch
+```
+
+Omit `--run` to request cancellation of the whole task. The request closes the
+selected dispatch and reaches each admitted live Run through its original
+cancellation authority. Read the task and original Runs to confirm settlement.
+Notes are attributed, bounded peer context. The note-enabled Pi mode loads only
+the built-in task note tools alongside the admitted native tools. Game Tape
+shows publication and delivery metadata. The verifier and the original Run
+determine candidate eligibility. An export creates a fresh file for the selected
+checkpoint and preserves the operator's checkout and refs.
+[Parallel agent work requirements](development/PARALLEL_AGENT_WORK_REQUIREMENTS.md)
 
 Run terminal status does not imply its native resource slot is already free.
 The original native scope must settle first. Dirty/unpromoted candidate data,

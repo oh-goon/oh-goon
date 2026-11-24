@@ -1643,6 +1643,167 @@
         "title": "AgentModel",
         "type": "object"
       },
+      "AgentNoteAuthor": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "base_source_sha256": {
+            "title": "Base Source Sha256",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "repository_id": {
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "repository_id",
+          "step_id",
+          "attempt_id",
+          "base_source_sha256",
+          "workspace_id"
+        ],
+        "title": "AgentNoteAuthor",
+        "type": "object"
+      },
+      "AgentNoteDelivery": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "harness": {
+            "const": "pi",
+            "default": "pi",
+            "title": "Harness",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "note_id": {
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Note Id",
+            "type": "integer"
+          },
+          "outcome": {
+            "enum": [
+              "prepared",
+              "acknowledged"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "receiving_run_id": {
+            "title": "Receiving Run Id",
+            "type": "string"
+          },
+          "recipient": {
+            "title": "Recipient",
+            "type": "string"
+          },
+          "step_id": {
+            "title": "Step Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note_id",
+          "receiving_run_id",
+          "step_id",
+          "attempt_id",
+          "recipient",
+          "model",
+          "outcome"
+        ],
+        "title": "AgentNoteDelivery",
+        "type": "object"
+      },
+      "AgentNoteReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/AgentNoteAuthor"
+          },
+          "body_expired": {
+            "default": false,
+            "title": "Body Expired",
+            "type": "boolean"
+          },
+          "event_sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Sequence"
+          },
+          "kind": {
+            "enum": [
+              "idea",
+              "observation",
+              "dead_end",
+              "question"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note_id": {
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Note Id",
+            "type": "integer"
+          },
+          "reply_to": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply To"
+          },
+          "request_id": {
+            "pattern": "^[a-zA-Z0-9_.:-]{1,100}$",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note_id",
+          "request_id",
+          "kind",
+          "author"
+        ],
+        "title": "AgentNoteReceipt",
+        "type": "object"
+      },
       "AgentProvider": {
         "additionalProperties": false,
         "properties": {
@@ -3246,6 +3407,18 @@
             "minLength": 1,
             "title": "Fleet Run Id",
             "type": "string"
+          },
+          "parallel_work_id": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parallel Work Id"
           },
           "source": {
             "$ref": "#/components/schemas/RepositorySourceAuthority"
@@ -7731,7 +7904,7 @@
             "type": "integer"
           },
           "schema_version": {
-            "default": 95,
+            "default": 96,
             "minimum": 1.0,
             "title": "Schema Version",
             "type": "integer"
@@ -11769,6 +11942,16 @@
             "$ref": "#/components/schemas/GameTapeObservabilityReceipt",
             "description": "Expose the current Game Tape evidence-lifecycle policy without storing a per-run copy.",
             "readOnly": true
+          },
+          "parallel_agent_work": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParallelAgentTape"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "pi_session": {
             "anyOf": [
@@ -21259,6 +21442,285 @@
         "title": "OutputQuarantinedEvent",
         "type": "object"
       },
+      "ParallelAgentChild": {
+        "additionalProperties": false,
+        "properties": {
+          "fleet_run_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "native_selection_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Native Selection Id",
+            "type": "string"
+          },
+          "task_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Task Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "task_sha256",
+          "native_selection_id"
+        ],
+        "title": "ParallelAgentChild",
+        "type": "object"
+      },
+      "ParallelAgentChildReadback": {
+        "additionalProperties": false,
+        "properties": {
+          "cancellation_requested": {
+            "default": false,
+            "title": "Cancellation Requested",
+            "type": "boolean"
+          },
+          "candidate_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dispatch": {
+            "enum": [
+              "pending",
+              "never_started",
+              "unresolved",
+              "admitted"
+            ],
+            "title": "Dispatch",
+            "type": "string"
+          },
+          "fleet_run_id": {
+            "title": "Fleet Run Id",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetRunOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "source_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetRunStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "fleet_run_id",
+          "dispatch"
+        ],
+        "title": "ParallelAgentChildReadback",
+        "type": "object"
+      },
+      "ParallelAgentTape": {
+        "additionalProperties": false,
+        "description": "Task coordination metadata within the existing Run readback.",
+        "properties": {
+          "deliveries": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AgentNoteDelivery"
+            },
+            "title": "Deliveries",
+            "type": "array"
+          },
+          "publications": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AgentNoteReceipt"
+            },
+            "title": "Publications",
+            "type": "array"
+          },
+          "work": {
+            "$ref": "#/components/schemas/ParallelAgentWorkReadback"
+          }
+        },
+        "required": [
+          "work"
+        ],
+        "title": "ParallelAgentTape",
+        "type": "object"
+      },
+      "ParallelAgentWorkIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "base_revision": {
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "title": "Base Revision",
+            "type": "string"
+          },
+          "children": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "$ref": "#/components/schemas/ParallelAgentChild"
+              },
+              {
+                "$ref": "#/components/schemas/ParallelAgentChild"
+              }
+            ],
+            "title": "Children",
+            "type": "array"
+          },
+          "notes_enabled": {
+            "title": "Notes Enabled",
+            "type": "boolean"
+          },
+          "repository_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/RepositorySourceAuthority"
+          },
+          "verifier_id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Verifier Id",
+            "type": "string"
+          },
+          "work_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "repository_id",
+          "source",
+          "base_revision",
+          "children",
+          "notes_enabled",
+          "verifier_id"
+        ],
+        "title": "ParallelAgentWorkIntent",
+        "type": "object"
+      },
+      "ParallelAgentWorkReadback": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "boolean"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/ParallelAgentChildReadback"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "dispatch_closed": {
+            "title": "Dispatch Closed",
+            "type": "boolean"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/ParallelAgentWorkIntent"
+          }
+        },
+        "required": [
+          "intent",
+          "dispatch_closed",
+          "cancelled",
+          "children"
+        ],
+        "title": "ParallelAgentWorkReadback",
+        "type": "object"
+      },
+      "ParallelCandidateVerifierObservation": {
+        "additionalProperties": false,
+        "description": "The adjudicating Step's content binding, interpreted by its native settlement.",
+        "properties": {
+          "byte_count": {
+            "minimum": 0.0,
+            "title": "Byte Count",
+            "type": "integer"
+          },
+          "entry_count": {
+            "minimum": 0.0,
+            "title": "Entry Count",
+            "type": "integer"
+          },
+          "postcondition": {
+            "enum": [
+              "UNCHANGED",
+              "MISMATCH"
+            ],
+            "title": "Postcondition",
+            "type": "string"
+          },
+          "source_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Sha256",
+            "type": "string"
+          },
+          "verifier_id": {
+            "minLength": 1,
+            "title": "Verifier Id",
+            "type": "string"
+          },
+          "workspace_fingerprint": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Workspace Fingerprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verifier_id",
+          "source_sha256",
+          "byte_count",
+          "entry_count",
+          "workspace_fingerprint",
+          "postcondition"
+        ],
+        "title": "ParallelCandidateVerifierObservation",
+        "type": "object"
+      },
       "ParallelRepositoryExecution": {
         "additionalProperties": false,
         "properties": {
@@ -24217,6 +24679,16 @@
               }
             ],
             "title": "Observed Returncode"
+          },
+          "parallel_verifier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParallelCandidateVerifierObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "physical_execution_id": {
             "anyOf": [

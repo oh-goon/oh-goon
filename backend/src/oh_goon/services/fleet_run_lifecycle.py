@@ -65,6 +65,7 @@ from oh_goon.runtime.enforcer_lace_restart_reclaim_fence import (
 from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionSession, ExecutionTicket
 from oh_goon.runtime.executor_pool import FleetExecutorPool
 from oh_goon.runtime.journal import Journal
+from oh_goon.runtime.parallel_agent_work import maintain_parallel_note_retention
 from oh_goon.runtime.run_admission_lock import serialize_run_admission
 from oh_goon.runtime.run_launch_receipt import current_application_launch_receipt
 from oh_goon.services.fleet_policy_enrollment import FleetPolicyEnrollment
@@ -1889,7 +1890,9 @@ class FleetRunLifecycle:
                 connection, fleet_run_id, proof, reservation
             )
 
-        return self._execution.release_worker_reservation_with(ticket, proof, record)
+        settled = self._execution.release_worker_reservation_with(ticket, proof, record)
+        maintain_parallel_note_retention(self._database, fleet_run_id=fleet_run_id)
+        return settled
 
     def reconcile_worker_reservation(
         self, fleet_run_id: str, proof: VerifiedWorkerResourceClosure
@@ -1897,7 +1900,7 @@ class FleetRunLifecycle:
         """Original native restart proof closes one already reconciled dead controller."""
         if proof.admission.fleet_run_id != fleet_run_id:
             raise StateConflict("Recovered native resources belong to another Run")
-        return self._execution.release_recovered_worker_reservation_with(
+        settled = self._execution.release_recovered_worker_reservation_with(
             fleet_run_id,
             proof,
             lambda connection, reservation: self._record_worker_resource_closure_in(
@@ -1907,6 +1910,8 @@ class FleetRunLifecycle:
                 reservation,
             ),
         )
+        maintain_parallel_note_retention(self._database, fleet_run_id=fleet_run_id)
+        return settled
 
     def _record_worker_resource_closure_in(
         self,

@@ -55,8 +55,13 @@ registered repositories in the same runtime and SQLite database. Both retain the
 fresh claimed worker, repository subject and exclusive candidate writer.
 DIRECT effects, strict execution and other workload modes retain their
 exclusive boundaries. This adds no worker pool, waiting queue or scheduler.
-Same-subject candidate overlap remains refused because quarantine authority is
-currently repository-scoped; separate candidate paths do not change that scope.
+HUG-225 permits same-subject overlap for the two original candidates of one
+explicit task. The Journal binds both planned children to the same registered
+subject, clean base, captured bytes, and frozen verifier. It checks their
+distinct allocations and physical roots in the original admission cut.
+Unrelated Runs still use the distinct-subject rule. Candidate-local quarantine
+requires the original durable namespace and workspace materialization. Shared
+or unproved effects retain the repository-wide fence.
 
 The selected environment has one bounded native systemd user slice and a
 distinct capped scope for every worker. Aggregate CPU, memory and PID limits,
@@ -69,7 +74,8 @@ limits refuses before executable work. A per-worker memory failure stays in
 that worker's scope; aggregate/global pressure is a shared failure domain.
 
 The existing execution-lease table owns both atomic reservations and custody.
-Schema 95 uses bounded slots with exact Run/token joins; older stores remain
+Schema 96 adds parallel task membership and bounded note metadata alongside the
+existing exact slot and Run/token joins. Older stores remain
 preserved and refused by the existing schema owner. Same-controller capacity
 cannot be borrowed by a different runtime. Global scope/reset/scratch mutation
 fences consider every retained slot, including physical closure pending after

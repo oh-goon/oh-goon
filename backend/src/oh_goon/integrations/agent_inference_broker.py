@@ -11,6 +11,7 @@ import contextlib
 import json
 import socket
 import socketserver
+import sqlite3
 import ssl
 import tempfile
 import threading
@@ -21,12 +22,19 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from oh_goon.core.errors import OwnershipLost
+from oh_goon.core.models.agent_notes import AgentNotesError
 from oh_goon.core.models.agent_providers import (
     PROVIDER_HISTORY_AUTHORIZATION_MESSAGE,
     AgentProviderError,
     ProviderHistoryAuthorizationRequired,
     ResolvedAgentModel,
     validate_provider_history_policy,
+)
+from oh_goon.integrations.agent_pi_notes import (
+    PI_NOTES_REQUEST_BYTES,
+    PI_NOTES_ROUTE,
+    PiNoteChannel,
 )
 
 _ROUTES = {
@@ -178,9 +186,12 @@ class _BrokerServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = False
     block_on_close = True
 
-    def __init__(self, path: Path, selected: ResolvedAgentModel, context: str) -> None:
+    def __init__(
+        self, path: Path, selected: ResolvedAgentModel, context: str, notes: PiNoteChannel | None
+    ) -> None:
         self.selected = selected
         self.context = context
+        self.notes = notes
         self.revoked = threading.Event()
         self.lock = threading.Lock()
         self.connections: set[socket.socket] = set()
@@ -309,9 +320,15 @@ class _BrokerHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if not self._validate_envelope():
             return
+        if self.path == PI_NOTES_ROUTE and self.server.notes is not None:
+            self._post_notes(self.server.notes)
+            return
         selected = self.server.selected
         if self.path != _ROUTES[selected.provider.api][0]:
             self._error(404, "Inference route differs from the selected provider protocol")
+            return
+        if self.server.notes is not None and not self.server.notes.ready:
+            self._error(503, "Shared notes tool did not initialize")
             return
         lengths = self.headers.get_all("Content-Length", [])
         if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdecimal():
@@ -342,6 +359,47 @@ class _BrokerHandler(BaseHTTPRequestHandler):
             self._error(400, message)
             return
         asyncio.run(self._forward(body))
+
+    def _post_notes(self, notes: PiNoteChannel) -> None:
+        lengths = self.headers.get_all("Content-Length", [])
+        if (
+            self.headers.get("Authorization") != "Bearer oh-goon-local"
+            or self.headers.get("Content-Type") != "application/json"
+            or len(lengths) != 1
+            or not lengths[0].isascii()
+            or not lengths[0].isdecimal()
+            or len(lengths[0]) > 5
+        ):
+            self._error(400, "Invalid shared notes request")
+            return
+        length = int(lengths[0])
+        if not 0 < length <= PI_NOTES_REQUEST_BYTES:
+            self._error(413, "Shared notes request exceeds its byte limit")
+            return
+        try:
+            raw = self.rfile.read(length)
+            if len(raw) != length:
+                self._error(400, "Incomplete shared notes request")
+                return
+            # Reject repeated keys before typed operation dispatch.
+            payload = json.loads(raw, object_pairs_hook=_unique_pairs, parse_constant=_nonfinite)
+            response = notes.request(payload)
+        except (ValueError, RecursionError):
+            self._error(400, "Invalid shared notes operation")
+            return
+        except AgentNotesError as error:
+            self._error(409, error.code)
+            return
+        except (OwnershipLost, sqlite3.Error):
+            self._error(503, "Shared notes authority or storage is unavailable")
+            return
+        data = json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
 
     async def _forward(self, body: bytes) -> None:
         import httpx2
@@ -437,6 +495,7 @@ def approved_model_broker(
     repository_evidence: str,
     skill_instructions: str,
     cancel_requested: Callable[[], bool] | None = None,
+    notes: PiNoteChannel | None = None,
 ) -> Generator[ApprovedModelBroker, None, None]:
     """Own a private, revocable inference socket for one resolved native workload."""
     if not isinstance(selected, ResolvedAgentModel) or any(
@@ -462,7 +521,7 @@ def approved_model_broker(
         private = Path(temporary)
         private.chmod(0o700)
         path = private / "inference.sock"
-        server = _BrokerServer(path, selected, context)
+        server = _BrokerServer(path, selected, context, notes)
         stopped = threading.Event()
         thread = threading.Thread(
             target=server.serve_forever, kwargs={"poll_interval": 0.05}, name="oh-goon-inference"

@@ -39,6 +39,7 @@ export function GameTapeSummary({ tape, compact = false }: { tape: GameTape; com
       <div className={summary.failed_steps > 0 ? "game-tape-summary__failure-answer" : ""}><span className="eyebrow">{t("gameTape.summary.whatFailed")}</span><strong>{failureAnswer}</strong>{summary.failed_steps > 1 ? <small>{t("gameTape.summary.moreFailures", { count: summary.failed_steps - 1 })}</small> : null}</div>
     </section>
     <GameTapeCampaignJournal campaign={tape.campaign_journal} />
+    <ParallelAgentWork observation={tape.parallel_agent_work} />
     <details className="advanced-disclosure game-tape-summary__run-facts"><summary>{t("gameTape.summary.moreRunFacts")}</summary>
       <dl className="game-tape-summary__facts">
         <div><dt>{t("gameTape.summary.plan")}</dt><dd>{executionReference?.plan_name ?? "—"}</dd></div>
@@ -61,6 +62,35 @@ export function GameTapeSummary({ tape, compact = false }: { tape: GameTape; com
       <EnvironmentFingerprints tape={tape} />
     </details> : null}
   </div>;
+}
+
+function ParallelAgentWork({ observation }: { observation: GameTape["parallel_agent_work"] }) {
+  const { t } = useTranslation();
+  if (!observation) return null;
+  const { work } = observation;
+  const publications = observation.publications ?? [];
+  const deliveries = observation.deliveries ?? [];
+  return <details className="advanced-disclosure game-tape-summary__run-facts">
+    <summary>{t("gameTape.parallel.title")}</summary>
+    <dl className="game-tape-receipt">
+      <div><dt>{t("gameTape.parallel.task")}</dt><dd><code>{work.intent.work_id}</code></dd></div>
+      <div><dt>{t("gameTape.parallel.base")}</dt><dd><code>{work.intent.base_revision}</code></dd></div>
+    </dl>
+    <ul>{work.children.map((child) => <li key={child.fleet_run_id}>
+      <code>{child.fleet_run_id}</code> · {child.status ?? child.dispatch}
+      {child.refusal ? <> · {child.refusal}</> : null}
+    </li>)}</ul>
+    <h3>{t("gameTape.parallel.publications", { count: publications.length })}</h3>
+    {publications.length ? <ul>{publications.map((note) => <li key={note.note_id}>
+      #{note.note_id} · {note.kind} · <code>{note.author.fleet_run_id}</code>
+      {note.reply_to ? <> · {t("gameTape.parallel.reply", { number: note.reply_to })}</> : null}
+      {note.body_expired ? <> · {t("gameTape.parallel.expired")}</> : null}
+    </li>)}</ul> : null}
+    <h3>{t("gameTape.parallel.deliveries", { count: deliveries.length })}</h3>
+    {deliveries.length ? <ul>{deliveries.map((delivery) => <li key={`${delivery.note_id}:${delivery.attempt_id}`}>
+      #{delivery.note_id} · <code>{delivery.receiving_run_id}</code> · {t(`gameTape.parallel.${delivery.outcome}`)}
+    </li>)}</ul> : null}
+  </details>;
 }
 
 function SummaryRepositoryPager({ page, pageCount, from, to, total, onPage }: { page: number; pageCount: number; from: number; to: number; total: number; onPage(page: number): void }) {

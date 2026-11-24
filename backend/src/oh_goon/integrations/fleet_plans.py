@@ -364,9 +364,13 @@ class FleetPlanRunner:
             lifecycle_observer=self._lifecycle_observer(request),
             agent_delivery_for=self._agent_delivery_for(target, attempt.repository.repository_id),
             execution_target=target,
+            agent_notes_for_step=request.agent_notes_for_step,
             workspace_materialization=candidate.materialization,
             workspace_directory_fd=candidate.workspace_directory_fd,
             require_candidate_current=candidate.require_current,
+            candidate_verifier=candidate.verifier
+            if target.candidate_workspace.parallel_work_id is not None
+            else None,
         )
         result = FleetPlanResult(plan_id=target.plan.plan_id, steps=execution.steps)
         receipt = candidate.settle(result)

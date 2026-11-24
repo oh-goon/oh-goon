@@ -655,6 +655,15 @@ def _main(
             startup_purpose=startup_purpose,
             as_json=bool(getattr(args, "as_json", False)),
         )
+    elif args.command == "runs" and args.runs_command in {
+        "start-parallel",
+        "parallel-work",
+        "cancel-parallel",
+        "parallel-notes",
+    }:
+        from oh_goon.cli_parallel_agents import run_parallel_agent_command
+
+        return run_parallel_agent_command(args)
     elif args.command == "runs":
         runtime = _build_application_runtime(
             startup_purpose=(

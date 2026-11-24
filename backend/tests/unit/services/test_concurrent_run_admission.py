@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from dataclasses import replace
 from types import SimpleNamespace
@@ -11,7 +12,13 @@ from typing import cast
 import pytest
 from pydantic import JsonValue
 
-from oh_goon.core.errors import FleetPlanInvalid, JournalConflict, TargetSelectionError
+from oh_goon.core.errors import (
+    FleetPlanInvalid,
+    JournalConflict,
+    RepositoryEffectQuarantined,
+    StateConflict,
+    TargetSelectionError,
+)
 from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentModel,
@@ -36,7 +43,17 @@ from oh_goon.core.models.fleet_plan import (
 )
 from oh_goon.core.models.fleet_plan_execution_policy import VerificationExecutionPolicy
 from oh_goon.core.models.goon_plan_source import PlanFileSource
+from oh_goon.core.models.parallel_agent_work import (
+    ParallelAgentChild,
+    ParallelAgentWorkIntent,
+    parallel_native_selection_id,
+)
+from oh_goon.core.models.parallel_candidate_verification import (
+    FrozenVerifierInput,
+    ParallelCandidateVerifier,
+)
 from oh_goon.core.models.repository import RepositoryIdentity
+from oh_goon.core.models.run import FleetRunState
 from oh_goon.core.models.run_admission import ExplicitRepositoryScope
 from oh_goon.core.models.run_events import RunResourcesObservedEvent
 from oh_goon.core.models.run_resources import (
@@ -44,23 +61,33 @@ from oh_goon.core.models.run_resources import (
     RunResourceEnvelopeObservation,
 )
 from oh_goon.core.models.target import AgentStepDeliveryReference, FleetPlanTarget
+from oh_goon.core.product_identity import repository_attempt_operation_id
 from oh_goon.core.run_projection import project_fleet_run_detail
 from oh_goon.core.vocabulary import (
+    CommandSafety,
+    EffectBoundaryKind,
     FleetRunEventType,
     FleetRunSource,
+    FleetRunStatus,
     FleetRunTerminalIntent,
     OperationAction,
     Verdict,
 )
+from oh_goon.engine.git import GitService
 from oh_goon.integrations.fleet_content_store import FleetContentStore
 from oh_goon.integrations.run_resource_envelope import VerifiedWorkerResourceClosure
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
-from oh_goon.runtime.execution import ExecutionCoordinator
+from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionTicket
+from oh_goon.runtime.execution_assignments import ExecutionAssignmentAuthority
+from oh_goon.runtime.execution_materializations import ExecutionMaterializationAuthority
 from oh_goon.runtime.executor_pool import FleetExecutorPool
+from oh_goon.runtime.parallel_agent_work import begin_parallel_work, cancel_parallel_work
 from oh_goon.runtime.safety import RuntimeSafetyGate
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
-from oh_goon.services.fleet_admission import FleetAdmissionPlanner
+from oh_goon.runtime.workspace_leases import WorkspaceLeaseStore
+from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
+from oh_goon.services.fleet_admission import FleetAdmissionPlan, FleetAdmissionPlanner
 from oh_goon.services.fleet_plan_candidate import prepare_candidate_workspace
 from oh_goon.services.fleet_run_lifecycle import FleetRunLifecycle
 from oh_goon.services.invariant_auditor import SystemInvariantAuditor
@@ -170,6 +197,8 @@ def prepared_candidates(tmp_path):
                 workload=ResolvedNativeAgentWorkload(native_agent=native),
                 delivery_sha256=digest,
                 handoff_identity="handoff-fixture",
+                task_summary="Admitted task",
+                task_sha256=hashlib.sha256(b"Admitted task").hexdigest(),
             ),
             ResolvedCommandStep(step_id="verify", argv=("/bin/true",), timeout_seconds=5),
         ),
@@ -218,7 +247,9 @@ def prepared_candidates(tmp_path):
         state=state,
         journal=journal,
         execution=execution,
+        attempts=attempts,
         planner=planner,
+        safety=safety,
         lifecycle=lifecycle,
         discovery=discovery,
         repositories=service,
@@ -227,13 +258,15 @@ def prepared_candidates(tmp_path):
     )
 
 
-def prepare(stack, case):
+def prepare(stack: SimpleNamespace, case: SimpleNamespace) -> FleetAdmissionPlan:
     return stack.planner.plan(
         case.intent, repository_scope=case.scope, concurrency=case.concurrency
-    )
+    )  # type: ignore[no-any-return]
 
 
-def admit(stack, case, prepared):
+def admit(
+    stack: SimpleNamespace, case: SimpleNamespace, prepared: FleetAdmissionPlan
+) -> tuple[ExecutionTicket, FleetRunState]:
     return stack.lifecycle.admit(
         case.run_id,
         case.intent,
@@ -251,7 +284,7 @@ def admit(stack, case, prepared):
             repository_scope=case.scope,
             concurrency=case.concurrency,
         ).durable_revision,
-    )
+    )  # type: ignore[no-any-return]
 
 
 def test_sibling_control_progress_does_not_invalidate_prepared_source_or_trigger_discovery(
@@ -480,6 +513,214 @@ def test_distinct_allocations_for_one_registered_subject_do_not_inherit_cross_re
     with pytest.raises(JournalConflict, match="distinct registered repository subjects"):
         admit(stack, second, prepared)
     assert stack.journal.read_view().run_detail(second.run_id) is None
+
+
+def _put_candidates_in_same_parallel_work(stack: SimpleNamespace) -> None:
+    first = stack.first
+    second = stack.second
+    first_candidate = first.target.candidate_workspace
+    second_candidate = prepare_candidate_workspace(
+        database=stack.database,
+        repositories=stack.repositories,
+        repository_id=first.repository.repository_id,
+        fleet_run_id=second.run_id,
+        expected_source=first_candidate.source,
+    )
+    work_id = "same-repository-work"
+    original_plan = first.target.plan
+    native = original_plan.native_agent
+    assert native is not None
+    assert isinstance(original_plan.steps[0], ResolvedAgentStep)
+    task_sha256 = original_plan.steps[0].task_sha256
+    assert task_sha256 is not None
+    verifier = ParallelCandidateVerifier(
+        acceptance="Use the admitted fixture verification",
+        executable="/usr/bin/true",
+        executable_sha256=hashlib.sha256(b"native verifier fixture").hexdigest(),
+        arguments=("{input:verify}", "{candidate}"),
+        inputs=(
+            FrozenVerifierInput(
+                name="verify", content="accept", sha256=hashlib.sha256(b"accept").hexdigest()
+            ),
+        ),
+    )
+    plan = ResolvedFleetPlan.create(
+        name=original_plan.name,
+        description=original_plan.description,
+        execution=original_plan.execution,
+        native_agent=native,
+        steps=(
+            original_plan.steps[0],
+            ResolvedCommandStep(step_id="verify-1", argv=verifier.argv, timeout_seconds=5),
+        ),
+    )
+    selection_id = parallel_native_selection_id(native)
+    assert begin_parallel_work(
+        stack.database,
+        ParallelAgentWorkIntent(
+            work_id=work_id,
+            repository_id=first.repository.repository_id,
+            source=first_candidate.source,
+            base_revision=first_candidate.workspace.base_revision,
+            children=(
+                ParallelAgentChild(
+                    fleet_run_id=first.run_id,
+                    task_sha256=task_sha256,
+                    native_selection_id=selection_id,
+                ),
+                ParallelAgentChild(
+                    fleet_run_id=second.run_id,
+                    task_sha256=task_sha256,
+                    native_selection_id=selection_id,
+                ),
+            ),
+            notes_enabled=False,
+            verifier_id=verifier.identity,
+        ),
+        hashlib.sha256(b"same-repository-work").hexdigest(),
+        verifier,
+    )
+    second.repository, second.scope = first.repository, first.scope
+    for case, workspace in ((first, first_candidate), (second, second_candidate)):
+        candidate = workspace.model_copy(update={"parallel_work_id": work_id})
+        case.target = first.target.model_copy(
+            update={
+                "plan": plan,
+                "identity": structural_execution_identity(plan),
+                "candidate_workspace": candidate,
+                "reviewed_repository_source": candidate.source,
+            }
+        )
+        case.intent = resolved_intent(OperationAction.EXECUTE_PLAN, case.target)
+
+
+def test_same_subject_parallel_work_admits_distinct_original_candidate_runs(
+    prepared_candidates: SimpleNamespace,
+) -> None:
+    stack = prepared_candidates
+    _put_candidates_in_same_parallel_work(stack)
+    admit(stack, stack.first, prepare(stack, stack.first))
+    admit(stack, stack.second, prepare(stack, stack.second))
+    active = stack.journal.active_run_details()
+    assert {detail.run.fleet_run_id for detail in active} == {
+        stack.first.run_id,
+        stack.second.run_id,
+    }
+    assert all(detail.run.targets == (stack.first.repository,) for detail in active)
+    candidates = [detail.run.target.candidate_workspace for detail in active]
+    assert candidates[0].source == candidates[1].source
+    assert candidates[0].workspace.base_revision == candidates[1].workspace.base_revision
+    assert len({candidate.workspace.workspace_id for candidate in candidates}) == 2
+    assert len({candidate.source_workspace.workspace_id for candidate in candidates}) == 2
+    assert (
+        len({(candidate.workspace_device, candidate.workspace_inode) for candidate in candidates})
+        == 2
+    )
+
+
+def test_parallel_stop_reaches_live_run_and_refuses_its_still_pending_peer(
+    prepared_candidates: SimpleNamespace,
+) -> None:
+    stack = prepared_candidates
+    _put_candidates_in_same_parallel_work(stack)
+    first, second = stack.first, stack.second
+    admit(stack, first, prepare(stack, first))
+    external = LocalDatabase(stack.database.path)
+    work_id = first.target.candidate_workspace.parallel_work_id
+
+    cancelled = cancel_parallel_work(external, work_id)
+    assert cancelled.cancelled and cancelled.dispatch_closed
+    assert cancelled.children[0].status is FleetRunStatus.CANCELLING
+    assert cancelled.children[1].dispatch == "never_started"
+    assert cancelled.children[1].refusal == "cancelled_before_admission"
+    assert cancel_parallel_work(external, work_id) == cancelled
+    events = stack.journal.run_events(first.run_id).events
+    assert sum(event.event_type is FleetRunEventType.RUN_CANCEL_REQUESTED for event in events) == 1
+    with pytest.raises(StateConflict, match="dispatch"):
+        admit(stack, second, prepare(stack, second))
+    assert stack.journal.read_view().run_detail(second.run_id) is None
+
+
+@pytest.mark.parametrize("scoped", [True, False], ids=["proved-local", "unknown"])
+def test_only_proven_candidate_local_uncertainty_allows_its_parallel_peer(
+    prepared_candidates: SimpleNamespace, scoped: bool
+) -> None:
+    stack = prepared_candidates
+    _put_candidates_in_same_parallel_work(stack)
+    first = stack.first
+    admit(stack, first, prepare(stack, first))
+    candidate = first.target.candidate_workspace
+    repository = first.repository
+    operation_id = repository_attempt_operation_id(first.run_id, repository.repository_id)
+    baseline = GitService().fingerprint(repository.path)
+    with stack.database.transaction(write=True) as connection:
+        stack.attempts.begin_fleet_in(
+            connection,
+            repository.path,
+            first.intent.definition.durable_snapshot(),
+            fleet_run_id=first.run_id,
+            operation_id=operation_id,
+            target=first.target,
+            baseline=baseline,
+            effect_boundary=EffectBoundaryKind.EXTERNAL,
+        )
+    if scoped:
+        workspaces = RepositoryWorkspaceAuthority(stack.database)
+        assignment = ExecutionAssignmentAuthority(
+            stack.database, workspaces
+        ).issue_candidate_mutation(
+            candidate.workspace,
+            attempt_id=operation_id,
+            expected_checkpoint_id=candidate.checkpoint.checkpoint_id,
+            wall_time_seconds=60,
+            isolation_requirements=("private_filesystem", "private_pid_namespace"),
+            input_artifact_ids=(candidate.source.authority_id, first.target.execution_digest),
+        )
+        _, lease = WorkspaceLeaseStore(stack.database, workspaces=workspaces).acquire(
+            candidate.workspace,
+            assignment,
+            executor_id=stack.database.session_id,
+            executor_generation=1,
+            expected_state_version=candidate.state_version,
+        )
+        descriptor = os.open(
+            workspaces.physical_path(candidate.workspace), os.O_RDONLY | os.O_DIRECTORY
+        )
+        try:
+            materialization = ExecutionMaterializationAuthority(stack.database).materialize(
+                candidate.workspace,
+                assignment,
+                lease,
+                writer_scope_kind="native_namespace_scope",
+                workspace_directory_fd=descriptor,
+            )
+        finally:
+            os.close(descriptor)
+        with stack.database.transaction(write=True) as connection:
+            stack.attempts.bind_execution_input_in(
+                connection, operation_id, materialization.materialization_id
+            )
+    with stack.database.transaction(write=True) as connection:
+        stack.attempts.start_effect_in(connection, operation_id)
+        stack.attempts.mark_unknown_in(connection, operation_id, note="Writer stopped unexpectedly")
+
+    cut = stack.safety.admit_effect_cut()
+    with pytest.raises(RepositoryEffectQuarantined):
+        stack.safety.require_repository_effects_allowed(
+            cut, safety=CommandSafety.WORKTREE_MUTATION, repository_ids=(repository.repository_id,)
+        )
+    with pytest.raises(RepositoryEffectQuarantined):
+        stack.safety.require_repository_effects_allowed(
+            cut,
+            safety=CommandSafety.WORKTREE_MUTATION,
+            repository_ids=(repository.repository_id,),
+            candidate=candidate,
+        )
+    if scoped:
+        admit(stack, stack.second, prepare(stack, stack.second))
+    else:
+        with pytest.raises(RepositoryEffectQuarantined):
+            prepare(stack, stack.second)
 
 
 def test_worker_projection_preserves_incomplete_accounting_with_verified_cleanup(

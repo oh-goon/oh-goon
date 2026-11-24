@@ -1449,6 +1449,17 @@
       "observedExit": "Observed process exit",
       "unavailable": "Step settlement evidence is unavailable."
     },
+    "parallel": {
+      "title": "Parallel agent work",
+      "task": "Task identity",
+      "base": "Base revision",
+      "publications": "Published notes ({{count}})",
+      "deliveries": "Note deliveries ({{count}})",
+      "reply": "Reply to #{{number}}",
+      "expired": "Note expired",
+      "prepared": "Prepared",
+      "acknowledged": "Acknowledged"
+    },
     "campaign": {
       "title": "Agent campaign Journal",
       "identity": "Campaign",

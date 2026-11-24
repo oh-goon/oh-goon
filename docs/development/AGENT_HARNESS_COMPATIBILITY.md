@@ -1358,6 +1358,21 @@ fresh continuation remains unavailable. Inspection provides the exact
 authorized retry command for the original runtime. The public outputs carry
 bounded metadata from the Journal.
 
+### Pi task notes for parallel candidates — HUG-225
+
+**Disposition**. Retain the original headless Pi command, explicit native
+configuration, and managed inference broker. A note-enabled candidate loads a
+single Oh-Goon extension while Pi's ambient extension discovery stays disabled.
+The broker requires the extension's ready operation before delivering model
+requests in this mode. The two note tools use the broker's existing private
+per-Run transport and revalidate original Step authority on each operation.
+
+Game Tape records the author, attempt, note identity and observed delivery
+state. The selected mode keeps note text out of general transcript readback.
+The [installed parallel notes case](../../backend/tests/integration/services/test_native_parallel_agent_notes.py)
+exercises the Pi 1.3.0 tool path, Bubblewrap and the native Linux Run scopes
+against a synthetic managed inference endpoint. [Parallel work requirements](PARALLEL_AGENT_WORK_REQUIREMENTS.md)
+
 ### Pi persistent-session host qualification — HUG-102
 
 **Disposition**. Retain the existing managed Pi RPC, Bubblewrap, and claimed

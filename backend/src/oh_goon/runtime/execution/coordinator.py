@@ -447,9 +447,13 @@ class ExecutionCoordinator:
         self,
         connection: sqlite3.Connection,
         fleet_run_id: str,
+        *,
+        concurrent_live_admission: RunConcurrencyAdmission | None = None,
     ) -> bool:
         """Cancel exact Run custody; another active owner cannot prove its absence."""
-        return self._leases.request_fleet_cancel_in(connection, fleet_run_id)
+        return self._leases.request_fleet_cancel_in(
+            connection, fleet_run_id, concurrent_live_admission=concurrent_live_admission
+        )
 
     def active_lease(self) -> ExecutionLease | None:
         return self._leases.active_lease()

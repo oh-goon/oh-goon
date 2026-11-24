@@ -28,6 +28,7 @@ from oh_goon.core.models.fleet_plan_evidence import (
 )
 from oh_goon.core.models.fleet_plan_execution_policy import ExecutionPurpose, FleetPlanRunLimits
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
+from oh_goon.core.models.parallel_candidate_verification import ParallelCandidateVerifier
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.source_authority import RepositorySourceAuthority
@@ -40,6 +41,7 @@ from oh_goon.core.path_authority import (
     canonical_path,
 )
 from oh_goon.core.path_layouts import AttemptPathLayout, RunPathLayout
+from oh_goon.core.ports.agent_notes import AgentNotesForStep
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.ports.pi_session_writer import PiSessionWriter
@@ -242,12 +244,14 @@ class FleetPlanRunExecutor:
         lifecycle_observer: StepLifecycleObserver | None = None,
         agent_delivery_for: Callable[[str, str], bytes] | None = None,
         pi_session_writer: PiSessionWriter | None = None,
+        agent_notes_for_step: AgentNotesForStep | None = None,
         execution_limits: FleetPlanRunLimits | None = None,
         repair_context: AgentRepairContext | None = None,
         execution_target: FleetPlanTarget | None = None,
         workspace_materialization: ExecutionMaterialization | None = None,
         workspace_directory_fd: int | None = None,
         require_candidate_current: Callable[[], None] | None = None,
+        candidate_verifier: ParallelCandidateVerifier | None = None,
     ) -> PlanExecutionOutcome:
         """Execute one already-preflighted direct plan through live host authority."""
 
@@ -270,6 +274,13 @@ class FleetPlanRunExecutor:
             and workspace_materialization is None
         ):
             raise FleetPlanInvalid("Candidate execution has no current materialization")
+        parallel_work_id = (
+            execution_target.candidate_workspace.parallel_work_id
+            if execution_target is not None and execution_target.candidate_workspace is not None
+            else None
+        )
+        if (parallel_work_id is None) != (candidate_verifier is None):
+            raise FleetPlanInvalid("Parallel verifier does not match the original candidate Run")
         if plan.execution.purpose is ExecutionPurpose.CICD:
             raise FleetPlanInvalid("Strict CI/CD plans require execute_strict_run")
         selected = plan.native_agent
@@ -307,9 +318,11 @@ class FleetPlanRunExecutor:
             else ExecutionIdentity(digest=build_execution_lock(plan).digest),
             native_profile=plan.native_agent,
             pi_session_writer=pi_session_writer,
+            agent_notes_for_step=agent_notes_for_step,
             workspace_materialization=workspace_materialization,
             workspace_directory_fd=workspace_directory_fd,
             require_candidate_current=require_candidate_current,
+            candidate_verifier=candidate_verifier,
         )
         if not any(getattr(step, "project_source", None) is not None for step in plan.steps):
             sequence = FleetPlanStepSequence(repository, runtime, output_observer)

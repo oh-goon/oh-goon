@@ -934,6 +934,19 @@ class FleetRunControlPlane:
             observe_artifacts, artifact_limit, artifact_byte_budget, artifact_time_budget_seconds
         )
         detail = self._journal.read_view().required_run_detail(fleet_run_id)
+        target = detail.run.target
+        if (
+            isinstance(target, FleetPlanTarget)
+            and target.candidate_workspace is not None
+            and target.candidate_workspace.parallel_work_id is not None
+        ):
+            detail = detail.model_copy(
+                update={
+                    "parallel_agent_work": self._journal.parallel_agent_tape(
+                        target.candidate_workspace.parallel_work_id
+                    )
+                }
+            )
         try:
             from oh_goon.integrations.hashmarks import (
                 loaded_hashmarks_producer_provenance,

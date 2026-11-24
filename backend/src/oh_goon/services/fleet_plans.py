@@ -76,6 +76,10 @@ from oh_goon.core.models.goon_plan_source import (
     SharedPlanSource,
     TeamGoonSource,
 )
+from oh_goon.core.models.parallel_agent_work import (
+    ParallelAgentWorkReadback,
+    ParallelAgentWorkRequest,
+)
 from oh_goon.core.models.run import FleetRunDetail, FleetRunState
 from oh_goon.core.models.run_configuration import RunAgentSelection
 from oh_goon.core.models.schedule import (
@@ -167,6 +171,10 @@ if TYPE_CHECKING:
     from oh_goon.core.models.agent_source import FrozenAgentStepHandoff
     from oh_goon.core.models.candidate_execution import CandidateWorkspaceAdmission
     from oh_goon.core.models.candidate_workspace import CandidateRunInspection
+    from oh_goon.core.models.parallel_candidate_verification import (
+        ParallelCandidateExport,
+        ParallelCandidateVerification,
+    )
     from oh_goon.core.models.run_resources import RunConcurrencyPolicy
     from oh_goon.integrations.fleet_content_store import FleetContentStore
     from oh_goon.runtime.database import LocalDatabase
@@ -245,6 +253,35 @@ class FleetPlanService:
             fleet_run_id, database=self._workspace_database, detail=self._runs.get(fleet_run_id)
         )
 
+    def verify_parallel_candidate(self, fleet_run_id: str) -> ParallelCandidateVerification:
+        from oh_goon.services.parallel_candidate_verification import verify_parallel_candidate
+
+        if self._workspace_database is None:
+            raise FleetPlanInvalid("Verification readback requires the original workspace owner")
+        return verify_parallel_candidate(
+            self._runs.get(fleet_run_id),
+            database=self._workspace_database,
+            git=self._git_service,
+        )
+
+    def export_parallel_candidate(
+        self, fleet_run_id: str, *, checkpoint_id: str, destination: Path
+    ) -> ParallelCandidateExport:
+        from oh_goon.services.parallel_candidate_verification import export_parallel_candidate
+
+        if self._workspace_database is None or self._content_store is None:
+            raise FleetPlanInvalid(
+                "Candidate export requires original workspace and artifact owners"
+            )
+        return export_parallel_candidate(
+            self._runs.get(fleet_run_id),
+            database=self._workspace_database,
+            content_store=self._content_store,
+            checkpoint_id=checkpoint_id,
+            destination=destination,
+            git=self._git_service,
+        )
+
     def retire_candidate_run(
         self,
         fleet_run_id: str,
@@ -274,6 +311,16 @@ class FleetPlanService:
             git=self._git_service,
         )
 
+    def start_parallel_agent_work(
+        self,
+        request: ParallelAgentWorkRequest,
+        *,
+        selected: tuple[ResolvedNativeAgent, ResolvedNativeAgent],
+    ) -> ParallelAgentWorkReadback:
+        from oh_goon.services.fleet_plan_parallel_agents import start_parallel_agent_work
+
+        return start_parallel_agent_work(self, request, selected=selected)
+
     def run_native_agent(
         self,
         *,
@@ -290,6 +337,8 @@ class FleetPlanService:
         expected_repository_instance_ids: dict[str, str] | None = None,
         continuation_receipt: AgentContinuationReceipt | None = None,
         candidate: bool = False,
+        parallel_work_id: str | None = None,
+        expected_candidate_base_revision: str | None = None,
     ) -> FleetRunState:
         """Author one ordinary native-workload Plan and admit it through Fleet.
 
@@ -300,6 +349,16 @@ class FleetPlanService:
         read_only_agent = role != "report" or selected.continues_pi_session
         if type(candidate) is not bool:
             raise FleetPlanInvalid("Candidate selection requires an explicit boolean")
+        if parallel_work_id is not None and (
+            not candidate
+            or self._run_concurrency is None
+            or fleet_run_id is None
+            or reviewed_repository_source is None
+            or expected_candidate_base_revision is None
+        ):
+            raise FleetPlanInvalid(
+                "Parallel work requires its exact concurrent candidate authority"
+            )
         require_pi_session_execution(
             selected.session,
             agent=selected.agent,
@@ -400,6 +459,8 @@ class FleetPlanService:
                     expected_subject=(expected_repository_instance_ids or {}).get(
                         logical_repository_id
                     ),
+                    expected_base_revision=expected_candidate_base_revision,
+                    parallel_work_id=parallel_work_id,
                     validate_candidate_path=lambda path: require_native_workspace_scope(
                         path, selected
                     ),

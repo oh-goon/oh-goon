@@ -193,8 +193,15 @@ class GitService:
         cancel_requested: Cancel = None,
         *,
         env: Mapping[str, str] | None = None,
+        full_untracked_inventory: bool = False,
     ) -> GitObservation:
-        return _observe(self, repository, cancel_requested, env=env)
+        return _observe(
+            self,
+            repository,
+            cancel_requested,
+            env=env,
+            full_untracked_inventory=full_untracked_inventory,
+        )
 
     def require_no_ignored_files(
         self, repository: Path, *, env: Mapping[str, str] | None = None
@@ -254,6 +261,7 @@ def _observe(
     cancel_requested: Cancel,
     *,
     env: Mapping[str, str] | None,
+    full_untracked_inventory: bool,
 ) -> GitObservation:
     confined_file_reads = git.observation_runner is not None
     if not repository.is_dir():
@@ -264,7 +272,7 @@ def _observe(
             "--porcelain=v2",
             "--branch",
             "-z",
-            "--untracked-files=normal",
+            "--untracked-files=all" if full_untracked_inventory else "--untracked-files=normal",
             cwd=repository,
             cancel_requested=cancel_requested,
             env=env,

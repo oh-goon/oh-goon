@@ -353,6 +353,9 @@ class BubblewrapProcessIsolation:
                 "resources": request.resources.model_dump(),
                 "workspace": str(request.workspace),
                 "read_only_workspace": request.read_only_workspace,
+                "read_only_mount_cwd": (
+                    str(request.read_only_mount_cwd) if request.read_only_mount_cwd else None
+                ),
                 "write_roots": [str(root) for root in request.allowed_write_roots],
                 "mounts": [(str(m.source), str(m.target)) for m in request.read_only_mounts],
                 "private_configuration_directory": str(request.private_configuration_directory)
@@ -1019,7 +1022,7 @@ class BubblewrapProcessIsolation:
                 args.extend(
                     (
                         "--chdir",
-                        str(request.cwd),
+                        str(request.read_only_mount_cwd or request.cwd),
                         "--",
                         *argv,
                     )

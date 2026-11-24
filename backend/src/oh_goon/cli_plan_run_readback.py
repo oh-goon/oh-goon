@@ -476,6 +476,13 @@ def _tape(runtime: ApplicationRuntime, args: argparse.Namespace) -> int:
         print(f"Game Tape status: {tape.status.value}")
         print(f"Journal revision: {tape.journal_revision}")
         print_pi_session_readback(tape.pi_session)
+        if tape.parallel_agent_work is not None:
+            observation = tape.parallel_agent_work
+            print(f"Parallel work {observation.work.intent.work_id}")
+            print(
+                f"  {len(observation.publications)} note publications and "
+                f"{len(observation.deliveries)} delivery observations"
+            )
         for line in configuration_summary(tape.configuration):
             print(line)
         if tape.why_not is not None:
