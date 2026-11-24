@@ -144,6 +144,8 @@ The original Plan and Goon resolution binds the selection to the native profile,
 executable and workspace in the resolved workload and execution lock. All
 explicit session choices in one Plan must agree. This applies to initialized
 workflows and eligible Shared Plans. Codex and OpenCode refuse a Pi selector.
+Shared Plan preview and execution refuse persistent Pi selections. An eligible
+ephemeral Shared Plan uses the runtime's scoped native execution boundary.
 
 Use `--session new` with a dedicated managed Pi RPC Bubblewrap profile to
 create a private session in a fresh Run. The
@@ -167,6 +169,8 @@ The Run keeps its own outcome and verification results. New-session Runs require
 configuration and a serial runtime. Candidate workspaces, repair campaigns,
 Step resource caps, custom native arguments and configuration, and Run replay
 are unsupported for this mode.
+Schedule creation refuses saved Plans that require original Agent admission.
+A Schedule occurrence also refuses a retained target from a persistent Pi Run.
 
 Use `--session run:RUN_ID` to reopen a saved Pi session for a new read-only
 Agent Step in the same direct repository. Select the latest Run that completed

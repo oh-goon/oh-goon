@@ -1,5 +1,8 @@
+import subprocess
 from contextlib import closing
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from oh_goon.api.app import app as api_app
@@ -161,3 +164,98 @@ def test_schedule_can_be_created_from_shared_plan_without_browser_resolution() -
             "inputs": {"severity": "high"},
         }
     ]
+
+
+def test_schedule_refuses_saved_pi_continuation_before_persisting_definition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from oh_goon.api import dependencies
+    from oh_goon.api.app import create_app
+    from oh_goon.application import ApplicationRuntime
+    from oh_goon.core.product_identity import repository_id, repository_subject_instance_id
+    from oh_goon.runtime import goon_templates
+
+    monkeypatch.setenv("OH_GOON_DB", str(tmp_path / "journal.sqlite"))
+    monkeypatch.setenv("OH_GOON_LEAGUE_FILE", str(tmp_path / "league.yml"))
+    monkeypatch.setenv("OH_GOON_SHARED_PLAN_DIR", str(tmp_path / "shared-plans"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    repository = tmp_path / "teams" / "example"
+    repository.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repository)], check=True, timeout=10)
+    team = repository_id(repository)
+    instance = repository_subject_instance_id(repository)
+    catalog = tmp_path / "catalog"
+    for key, content in (
+        ("general/scheduled-probe", "steps:\n- run: /usr/bin/true\n"),
+        (
+            "agents/resume-pi",
+            "steps:\n"
+            "- uses: agent\n"
+            "  harness: native\n"
+            "  role: review\n"
+            "  task: Inspect source\n"
+            "  session: {mode: continue, prior_run_id: prior-pi-run}\n"
+            "  requested_effects: {repository_access: read_only, recipients: [configured_model]}\n",
+        ),
+    ):
+        package = catalog / key
+        package.mkdir(parents=True)
+        (package / "README.md").write_text(f"# {key}\n")
+        (package / "goon.yml").write_text(content)
+    monkeypatch.setattr(goon_templates, "default_goon_templates_root", lambda: catalog)
+
+    runtime = ApplicationRuntime.build(standard_local=True)
+    try:
+        runtime.locations.add(repository.parent)
+        plan = runtime.shared_plan.save("schedule-proof", "goons: [general/scheduled-probe]\n")
+        app = create_app(local_access_token="pi-schedule-admission-test-token")
+        app.dependency_overrides[dependencies.shared_plan_service] = lambda: runtime.shared_plan
+        app.dependency_overrides[dependencies.shared_plan_schedule_service] = (
+            lambda: runtime.shared_plan_schedules
+        )
+        app.dependency_overrides[dependencies.schedule_service] = lambda: runtime.schedules
+        with closing(authenticated_api_client(app)) as client:
+            preview = client.post(
+                "/api/league/shared-plan-previews",
+                json={
+                    "plan_key": plan.plan_key,
+                    "expected_revision": plan.sha256,
+                    "repository_ids": [team],
+                },
+            )
+            assert preview.status_code == 200, preview.text
+            reviewed = preview.json()
+            request = {
+                "name": "Schedule proof",
+                "repository_ids": [team],
+                "expected_repository_instance_ids": {team: instance},
+                "plan_key": plan.plan_key,
+                "expected_plan_revision": plan.sha256,
+                "expected_plan_id": reviewed["plan_id"],
+                "expected_execution_digest": reviewed["execution_digest"],
+                "interval_minutes": 60,
+                "state": "paused",
+            }
+            created = client.post("/api/schedules/plain-plan/from-shared-plan", json=request)
+            assert created.status_code == 201, created.text
+            assert created.json()["target"]["identity"]["digest"] == reviewed["execution_digest"]
+            before = client.get("/api/schedules")
+            assert before.status_code == 200
+
+            continuation = runtime.shared_plan.save(
+                plan.plan_key, "goons: [agents/resume-pi]\n", expected_revision=plan.sha256
+            )
+            # Select the exact saved revision for an Agent source that has no schedulable digest.
+            refused = client.post(
+                "/api/schedules/pi-continuation/from-shared-plan",
+                json={**request, "expected_plan_revision": continuation.sha256},
+            )
+            assert refused.status_code == 400, refused.text
+            assert refused.json()["code"] == "FLEET_PLAN_INVALID"
+            assert "original Run/Step admission" in refused.json()["message"]
+            after = client.get("/api/schedules")
+            assert after.status_code == 200 and after.json() == before.json()
+            assert not runtime.runs.history().items
+    finally:
+        runtime.shutdown(wait_for_runs=True)
