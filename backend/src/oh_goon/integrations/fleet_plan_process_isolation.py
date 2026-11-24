@@ -40,6 +40,7 @@ from oh_goon.engine.command import (
 )
 from oh_goon.engine.command_supervision import CommandRuntimeSupervision
 from oh_goon.engine.errors import OperationCancelledError
+from oh_goon.integrations.agent_provider_client import require_provider_key_file_separation
 from oh_goon.integrations.fleet_plan_environment import direct_plan_environment
 from oh_goon.integrations.fleet_plan_lace_policy import require_policy_aware_lace_backend
 from oh_goon.integrations.fleet_plan_run import FleetPlanStepAttempt
@@ -555,6 +556,16 @@ def native_runtime_read_only_mounts(
     if native_agent.definition.executable is not None:
         roots.append(Path(native_agent.definition.executable))
     public = tuple(Path(root).resolve() for root in ("/usr", "/bin", "/sbin", "/lib", "/lib64"))
+    configuration = native_agent.definition.configuration_directory
+    require_provider_key_file_separation(
+        native_agent.connection,
+        (
+            workspace,
+            *roots,
+            *public,
+            *((Path(configuration),) if configuration is not None else ()),
+        ),
+    )
     selected: list[Path] = []
     for root in sorted(
         {root.resolve(strict=True) for root in roots}, key=lambda path: len(path.parts)

@@ -244,8 +244,15 @@ def _http_url(value: str) -> str:
     return value.rstrip("/")
 
 
+MAX_PROVIDER_HEADER_VALUE_BYTES = 8192
+
+
 def _header_value(value: str) -> str:
-    if not value or len(value) > 8192 or any(ord(ch) < 32 or ord(ch) > 126 for ch in value):
+    if (
+        not value
+        or len(value) > MAX_PROVIDER_HEADER_VALUE_BYTES
+        or any(ord(ch) < 32 or ord(ch) > 126 for ch in value)
+    ):
         raise ValueError("header values must be bounded printable ASCII")
     return value
 
@@ -256,6 +263,9 @@ class AgentProvider(ImmutableModel):
     api: ProviderApi
     base_url: str = Field(min_length=1, max_length=2048)
     api_key_env: str | None = None
+    api_key_file: str | None = Field(
+        default=None, min_length=1, max_length=4096, exclude_if=lambda value: value is None
+    )
     headers: dict[str, str] = Field(default_factory=dict, max_length=32)
     headers_from_env: dict[str, str] = Field(default_factory=dict, max_length=32)
     timeout_seconds: float = Field(default=60.0, gt=0, le=600, allow_inf_nan=False)
@@ -276,11 +286,20 @@ class AgentProvider(ImmutableModel):
             raise ValueError("api_key_env must name an environment variable")
         return value
 
+    @field_validator("api_key_file")
+    @classmethod
+    def validate_key_path(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or "\x00" in value):
+            raise ValueError("api_key_file must name a nonblank path without NUL")
+        return value
+
     @model_validator(mode="after")
     def validate_headers(self) -> AgentProvider:
+        if self.api_key_env is not None and self.api_key_file is not None:
+            raise ValueError("select api_key_env or api_key_file, not both")
         seen = set()
         auth_header = "x-api-key" if self.api == "anthropic-messages" else "authorization"
-        if self.api_key_env is not None:
+        if self.api_key_env is not None or self.api_key_file is not None:
             seen.add(auth_header)
         for headers, from_env in ((self.headers, False), (self.headers_from_env, True)):
             for name, value in headers.items():
@@ -551,7 +570,13 @@ class AgentProvidersConfig(ImmutableModel):
             raise ValueError("native inference must reference a declared model profile")
         return self
 
-    def resolve(self, profile: str | None, *, environment: Mapping[str, str]) -> ResolvedAgentModel:
+    def resolve(
+        self,
+        profile: str | None,
+        *,
+        environment: Mapping[str, str],
+        file_api_key: SecretStr | None = None,
+    ) -> ResolvedAgentModel:
         selected = profile if profile is not None else self.default_model
         if selected is None or selected not in self.models:
             raise AgentProviderError(
@@ -575,8 +600,19 @@ class AgentProvidersConfig(ImmutableModel):
 
         for name, variable in provider.headers_from_env.items():
             headers[name] = credential(variable)
-        if provider.api_key_env is not None:
-            key = credential(provider.api_key_env)
+        if provider.api_key_env is not None or provider.api_key_file is not None:
+            if provider.api_key_file is not None:
+                if file_api_key is None:
+                    raise AgentProviderError("Selected provider requires resolved API key file")
+                try:
+                    key = _header_value(file_api_key.get_secret_value())
+                    if not key.strip():
+                        raise ValueError("blank API key")
+                except ValueError:
+                    raise AgentProviderError("Selected provider API key file is invalid") from None
+            else:
+                assert provider.api_key_env is not None
+                key = credential(provider.api_key_env)
             if provider.api == "anthropic-messages":
                 headers["x-api-key"] = key
             else:
@@ -622,12 +658,14 @@ class AgentConnection(ImmutableModel):
             selection=model.model_copy(deep=True),
         )
 
-    def resolve(self, environment: Mapping[str, str]) -> ResolvedAgentModel:
+    def resolve(
+        self, environment: Mapping[str, str], *, file_api_key: SecretStr | None = None
+    ) -> ResolvedAgentModel:
         return AgentProvidersConfig(
             default_model=self.profile,
             providers={self.provider_name: self.provider},
             models={self.profile: self.selection},
-        ).resolve(self.profile, environment=environment)
+        ).resolve(self.profile, environment=environment, file_api_key=file_api_key)
 
 
 @dataclass(frozen=True, slots=True)

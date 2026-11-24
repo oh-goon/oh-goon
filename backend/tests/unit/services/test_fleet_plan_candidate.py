@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
 import pytest
@@ -14,10 +17,16 @@ from oh_goon.core.models.agent_providers import (
     AgentConnection,
     AgentModel,
     AgentProvider,
+    AgentProviderError,
     AgentProvidersConfig,
     NativeAgentDefinition,
     NativeAgentProfile,
     ResolvedNativeAgent,
+)
+from oh_goon.core.models.parallel_agent_work import ParallelAgentWorkRequest
+from oh_goon.core.models.parallel_candidate_verification import (
+    FrozenVerifierInput,
+    ParallelCandidateVerifier,
 )
 from oh_goon.core.models.repository import RepositoryIdentity
 from oh_goon.core.product_identity import repository_subject_instance_id
@@ -25,16 +34,26 @@ from oh_goon.core.vocabulary.workspace import WorkspaceLifecycleState
 from oh_goon.engine.git import GitService
 from oh_goon.integrations import source_snapshot
 from oh_goon.runtime.database import LocalDatabase
+from oh_goon.runtime.parallel_agent_work import replay_parallel_work
 from oh_goon.runtime.workspaces import RepositoryWorkspaceAuthority
+from oh_goon.services import fleet_plan_parallel_agents
 from oh_goon.services.fleet_plan_candidate import (
     prepare_candidate_workspace,
     release_unadmitted_candidate,
     require_native_candidate_selection,
     workspace_control_git,
 )
+from oh_goon.services.fleet_plan_parallel_agents import (
+    parallel_request_hash,
+    start_parallel_agent_work,
+)
 from oh_goon.services.repositories import RepositoryService
 from oh_goon.services.repository_discovery import RepositoryDiscoveryService
 from tests.factories.local_state import local_state
+from tests.factories.run_resources import run_concurrency_policy
+
+if TYPE_CHECKING:
+    from oh_goon.services.fleet_plans import FleetPlanService
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -230,3 +249,86 @@ def test_candidate_mode_refuses_unsupported_native_configuration_before_preparat
     invalid = replace(selected, definition=selected.definition.model_copy(update=changes))
     with pytest.raises(FleetPlanInvalid, match="Candidate execution requires"):
         require_native_candidate_selection(invalid)
+
+
+def test_parallel_work_refuses_a_selected_key_file_before_snapshot_and_admission(
+    case: tuple[LocalDatabase, RepositoryService, RepositoryIdentity],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database, repositories, repository = case
+    key = repository.path / "synthetic-provider-key"
+    key.write_text("synthetic-test-value\n")
+    _git(repository.path, "add", key.name)
+    _git(repository.path, "commit", "-qm", "synthetic credential")
+
+    catalog = AgentProvidersConfig(
+        providers={
+            "plain": AgentProvider(api="openai-chat-completions", base_url="http://127.0.0.1:1"),
+            "file": AgentProvider(
+                api="openai-chat-completions", base_url="http://127.0.0.1:1", api_key_file=str(key)
+            ),
+        },
+        models={
+            "plain": AgentModel(provider="plain", model="synthetic"),
+            "file": AgentModel(provider="file", model="synthetic"),
+        },
+    )
+    selected = ResolvedNativeAgent(
+        agent="pi",
+        profile_name="plain",
+        definition=NativeAgentDefinition(executable="/usr/bin/true"),
+        profile=NativeAgentProfile(backend="bubblewrap", inference_profile="plain"),
+        executable_sha256="a" * 64,
+        connection=AgentConnection.select(catalog, "plain"),
+    )
+    file_selected = replace(
+        selected,
+        profile_name="file",
+        profile=NativeAgentProfile(backend="bubblewrap", inference_profile="file"),
+        connection=AgentConnection.select(catalog, "file"),
+    )
+    capacity = run_concurrency_policy()
+    verifier_executable = Path("/usr/bin/true").resolve(strict=True)
+    request = ParallelAgentWorkRequest(
+        work_id="credential-file",
+        workspace=repository.path,
+        expected_base_revision=_git(repository.path, "rev-parse", "HEAD"),
+        task="Check candidates",
+        briefs=("Try one change", "Try another change"),
+        native_profiles=("plain", "file"),
+        capacity=capacity,
+        notes_enabled=False,
+        verifier=ParallelCandidateVerifier(
+            acceptance="Check the candidate",
+            executable=str(verifier_executable),
+            executable_sha256=hashlib.sha256(verifier_executable.read_bytes()).hexdigest(),
+            arguments=("{input:check}", "{candidate}"),
+            inputs=(
+                FrozenVerifierInput(
+                    name="check", content="", sha256=hashlib.sha256(b"").hexdigest()
+                ),
+            ),
+        ),
+    )
+    snapshot = Mock()
+    run = Mock()
+    service = cast(
+        "FleetPlanService",
+        SimpleNamespace(
+            _workspace_database=database,
+            _standard_local_fleet=True,
+            _run_concurrency=capacity,
+            _repositories=repositories,
+            _git_service=None,
+            require_plan_ingress_preparation=Mock(),
+            run_native_agent=run,
+        ),
+    )
+    monkeypatch.setattr(fleet_plan_parallel_agents, "source_snapshot_identity", snapshot)
+
+    with pytest.raises(AgentProviderError, match="overlaps an Agent source or tool root"):
+        start_parallel_agent_work(service, request, selected=(selected, file_selected))
+
+    snapshot.assert_not_called()
+    run.assert_not_called()
+    assert replay_parallel_work(database, request.work_id, parallel_request_hash(request)) is None

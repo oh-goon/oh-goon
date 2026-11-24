@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import replace
 
 import pytest
@@ -8,6 +9,7 @@ from oh_goon.core.agent_review_plan import agent_review_phases
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.execution_lock_identity import build_execution_lock
 from oh_goon.core.models.agent_providers import (
+    AgentProviderError,
     CodexServiceConnection,
     NativeAgentDefinition,
     NativeAgentProfile,
@@ -115,6 +117,33 @@ def test_bound_skills_and_public_inputs_follow_native_projection(tmp_path):
     assert selections == [connection]
     assert len({h.source.authored_skill_reference for h in deliveries.values()}) == 6
     assert {s.workload.connection.profile for s in plan.steps if s.kind == "agent"} == {"review"}
+
+
+@pytest.mark.parametrize("scope", ["repository", "skill", "alias"])
+def test_provider_credential_refuses_capture_before_reading_sources(tmp_path, monkeypatch, scope):
+    from oh_goon.services import agent_authoring_sources
+
+    resolver, path, repository, options = agent_review_case(tmp_path)
+    if scope == "repository":
+        key_file = repository / "synthetic-key"
+    elif scope == "skill":
+        key_file = tmp_path / "skills" / "single-source-of-truth-review" / "synthetic-key"
+    else:
+        key_file = tmp_path / "synthetic-key"
+    key_file.write_text("synthetic-only-key")
+    if scope == "alias":
+        os.link(key_file, repository / "credential-alias")
+    connection = options["connection"]
+    options["connection"] = connection.model_copy(
+        update={"provider": connection.provider.model_copy(update={"api_key_file": str(key_file)})}
+    )
+    monkeypatch.setattr(
+        agent_authoring_sources,
+        "_snapshot_authorized_tree",
+        lambda *args, **kwargs: pytest.fail("private credential was not refused before capture"),
+    )
+    with pytest.raises(AgentProviderError, match="Provider API key file overlaps|Cannot establish"):
+        resolver.resolve_frozen_agents(path, **options)
 
 
 def test_native_apply_argument_bounds_are_checked_before_the_first_phase(tmp_path):

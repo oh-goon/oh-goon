@@ -1502,9 +1502,31 @@ max_output_tokens = 2048
 parameters = { temperature = 0.2 }
 ```
 
-`api_key_env` names a variable containing a raw API key. The client sends it as Bearer authentication, or as `x-api-key` for Anthropic. Omit it when your endpoint needs no authentication. `headers_from_env` supports explicitly named additional credential headers. `headers` holds static non-secret metadata; credential headers cannot be pasted there. Configuration errors and transport failures omit credential values and upstream error bodies.
+`api_key_env` names a variable containing a raw API key. Alternatively,
+`api_key_file` names an ASCII file containing only the raw key and an optional
+trailing newline. Select exactly one of these fields when authentication is
+required. Relative file paths resolve from the provider catalog directory.
+Catalog inspection and validation do not open credential files. At execution,
+the connection owner reads only the selected file with a bounded read. It
+requires a regular file with one link and a valid header value, then freezes
+authentication for transport.
+Missing or invalid files fail without falling back to environment credentials.
+Keep key files outside captured repositories, Skill directories, and mounts
+that expose host files to isolated native agents. Oh-Goon checks those roots
+before capture or launch.
+
+The client sends the key as Bearer authentication, or as `x-api-key` for Anthropic.
+Omit both fields when your endpoint needs no authentication. `headers_from_env`
+supports explicitly named additional credential headers. `headers` holds static
+non-secret metadata; credential headers cannot be pasted there. Configuration
+errors and transport failures omit credential values and upstream error bodies.
 
 `timeout_seconds` controls native HTTP timeouts and defaults to 60 seconds. `max_request_bytes` and `max_response_bytes` each default to 1 MiB and can be configured up to 16 MiB. These are transfer limits, not model context estimates. TLS verification stays enabled. `ca_file` selects a trusted CA bundle; relative paths are relative to the configuration file. `proxy_url` explicitly selects a proxy. Ambient proxy, netrc and certificate environment variables are not reread by the transport.
+
+Provider Agent Steps use the selected provider's `max_request_bytes` to bound
+the complete qualified Hashmarks presentation. The assembled UTF-8 request,
+including repository and Skill content, must fit the same limit before
+transport. Oversize requests fail before inference.
 
 ## Native generation parameters
 

@@ -56,8 +56,9 @@ from oh_goon.cli import main
         ),
     ],
 )
+@pytest.mark.parametrize("key_source", ["environment", "file"])
 def test_cli_connects_to_explicit_http_endpoint_without_provider_installation(
-    tmp_path, monkeypatch, capsys, api, suffix, reply
+    tmp_path, monkeypatch, capsys, api, suffix, reply, key_source
 ):
     observed = []
 
@@ -83,13 +84,18 @@ def test_cli_connects_to_explicit_http_endpoint_without_provider_installation(
         monkeypatch.setenv("HTTP_PROXY", "http://unselected-proxy.invalid:9999")
         monkeypatch.setenv("NO_PROXY", "")
         monkeypatch.setenv("PROVIDER_TEST_KEY", "private-test-key")
+        key_reference = 'api_key_env = "PROVIDER_TEST_KEY"'
+        if key_source == "file":
+            (tmp_path / "api-key").write_text("private-test-key\n")
+            monkeypatch.delenv("PROVIDER_TEST_KEY")
+            key_reference = 'api_key_file = "api-key"'
         config = tmp_path / "providers.toml"
         config.write_text(f'''version = 1
 default_model = "review"
 [providers.custom]
 api = "{api}"
 base_url = "http://127.0.0.1:{server.server_port}/prefix"
-api_key_env = "PROVIDER_TEST_KEY"
+{key_reference}
 [models.review]
 provider = "custom"
 model = "server/model:tag"

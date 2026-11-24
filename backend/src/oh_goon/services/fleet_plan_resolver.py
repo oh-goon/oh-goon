@@ -357,6 +357,9 @@ class FleetPlanResolver:
                         )
                     )
                     aliases_loaded = True
+                provider_connection = native_agent.connection if native_agent is not None else None
+                if step.harness.startswith("provider-"):
+                    provider_connection = connection() if callable(connection) else connection
                 source = capture_agent_sources(
                     definitions,
                     values,
@@ -371,6 +374,7 @@ class FleetPlanResolver:
                     cancel_requested=cancel_requested,
                     tree_cache=trees,
                     private_native_roots=private_native_roots,
+                    provider_connection=provider_connection,
                 )
                 if (
                     repository_reference is not None

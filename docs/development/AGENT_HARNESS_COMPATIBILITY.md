@@ -299,6 +299,12 @@ Earlier installed-context results retain their recorded source and policy scope;
 this A-level security proof does not qualify the new default for every installed
 harness or provider.
 
+**Retain** the current native broker, request/header and session adaptations.
+The managed connection owner resolves an explicit `api_key_file` into the same
+immutable authenticated model snapshot used by environment credentials.
+Credential-file proof uses synthetic files and local HTTP endpoints. Its scope
+covers managed inference credential loading and the existing broker transport.
+
 HUG-49's source subtraction was limited to two unreachable assignments in
 `native_agent_command`: Codex/OpenCode `configuration_directory` values were
 already rejected before prepared-source access, yet later branches still tried

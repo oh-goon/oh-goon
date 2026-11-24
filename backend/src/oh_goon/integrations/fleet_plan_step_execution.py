@@ -626,6 +626,11 @@ def _execute_typed_step(
                 disclosure = task_evidence_prompt(
                     evidence.stdout,
                     expected_capture_identity=handoff.source.repository.content_identity,
+                    max_chars=(
+                        step.workload.connection.provider.max_request_bytes
+                        if isinstance(step.workload, ResolvedProviderAgentWorkload)
+                        else 6000
+                    ),
                 )
                 outcome = _execute_model_agent(
                     handoff=handoff,

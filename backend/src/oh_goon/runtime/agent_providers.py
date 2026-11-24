@@ -183,10 +183,15 @@ def resolve_agent_provider_catalog(
     """Resolve the captured catalog's paths without another source read."""
     providers = {
         name: provider.model_copy(
-            update={"ca_file": str((path.parent / Path(provider.ca_file).expanduser()).resolve())}
+            update={
+                field: _configuration_path(path, value)
+                for field, value in (
+                    ("ca_file", provider.ca_file),
+                    ("api_key_file", provider.api_key_file),
+                )
+                if value is not None
+            }
         )
-        if provider.ca_file is not None
-        else provider
         for name, provider in config.providers.items()
     }
     native_agents = {
