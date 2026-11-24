@@ -645,6 +645,53 @@ passing refusal tests.
   completed-text alternative fails the installed success case; restoring it
   passes. **Retain**; no fixed upstream version is asserted.
 
+### OpenCode ACP evaluation — HUG-224
+
+**Product enablement is a no-go.** Retain the managed OpenCode
+CLI and its [settlement adaptation](#opencode-cli-settlement--retain-pending-installed-replacement-proof).
+The selected ACP peer can complete a typed review in isolation. The experiment
+found no reduction in model requests on the matched task. Shipping this mode
+requires a duplex controller in the existing relay, exact Run and Step binding
+for the dialogue, and explicit authority for any client callbacks.
+[HUG-224](https://linear.app/hugloss/issue/HUG-224)
+
+The 2026-11-24 evaluation used OpenCode 2.1.2 on Linux 7.0.0-43-generic with
+Bubblewrap 0.11.1 at Oh-Goon base `553ea77a`. The raw OpenCode executable digest
+was `cf5841e6666aeb469abec8b39ca494cef07a637756454a34a742b2f4996e1675`.
+The [installed managed CLI case][cli-readonly-tests] also passed through the
+original claimed Run and Agent Step with independent verification and cleanup.
+
+In the matched component probe, the CLI and ACP reviewed the same two frozen
+files using the same scripted model and managed inference broker. Both read
+both files, produced a `CLEAN` record accepted by the original typed review
+owner, passed a separate native verifier, and reached process-group quiescence.
+Each made three tool-bearing requests and one context-only request. The ACP
+probe selected protocol v1, kept one fresh native session, and correlated its
+single prompt's `end_turn` response before accepting that result. The read-only
+workspace and private configuration were enforced by the existing Bubblewrap
+boundary. The probe used synthetic inference and disposable state.
+[ACP initialization](https://agentclientprotocol.com/protocol/v1/initialization) ·
+[OpenCode ACP mode](https://opencode.ai/docs/cli/acp/)
+
+The shipped immutable-stdin relay, given an ACP initialize frame, reached EOF
+without a negotiated reply or a model call. The test-only duplex controller
+sent a `session/cancel` notification, and the original `session/prompt` reply
+carried `stopReason: cancelled`. Discarding that terminal reply in a separate
+completed turn, or closing stdin during a live turn, left the component
+observation incomplete. Process retirement was verified in both cases. A separate
+probe sent the same `session/new` request ID twice and observed two distinct
+native sessions. An RPC ID is correlation, so a missing acknowledgement cannot
+authorize replay. [ACP transport](https://agentclientprotocol.com/protocol/v1/transports) ·
+[ACP cancellation](https://agentclientprotocol.com/protocol/v1/prompt-turn#cancellation)
+
+The component probes used the existing command, broker, isolation, and typed
+result owners. Product qualification still requires ACP inside the original
+claimed Agent Step, canonical cancellation and observer-disconnect evidence,
+and a test of client filesystem, terminal and permission callbacks against the
+admitted grants. The probe advertised no client capabilities and supplied no
+MCP servers. Session load, resume, fork, and native credential stores remain
+outside this disposition. OpenCode HTTP service keeps its readiness-only scope.
+
 ### CODEX-SERVICE-RESERVED-DIRECTORY — retain; native replacement fails
 
 - **Harness/mode and owner:** Codex owned service;
