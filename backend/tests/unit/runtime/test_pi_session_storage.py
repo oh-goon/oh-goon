@@ -156,7 +156,7 @@ def test_pi_persistence_refuses_unexpected_slot_entries_without_removing_them(
     assert unexpected.read_bytes() == b'{"synthetic":"unexpected configuration"}\n'
 
 
-_NATIVE_SESSION_HEADER = b'{"type":"session","id":"original-session"}\n'
+_NATIVE_SESSION_HEADER = b'{"type":"session","id":"original-session","version":3}\n'
 
 
 def _native_save(*entries: dict[str, object]) -> PiSessionSaveObservation:
@@ -202,6 +202,34 @@ def test_qualified_pi_save_syncs_file_and_slot_and_preserves_exact_byte_receipt(
     with admitted_pi_scope.create(storage_id=session.parent.name, prior_file=receipt) as reopened:
         assert reopened.existing_file is not None
         reopened.existing_file.require_before_launch()
+    with pin_pi_session_retirement(
+        layout=admitted_pi_scope.layout,
+        storage_id=session.parent.name,
+        expected_file=receipt,
+    ):
+        assert session.read_bytes() == raw
+
+
+@pytest.mark.parametrize("version", [2, 4, 3.0, "3"], ids=["legacy", "future", "float", "string"])
+def test_pi_reopen_refuses_unqualified_format_even_with_matching_receipt(
+    admitted_pi_scope: _AdmittedScope, version: int | float | str
+) -> None:
+    entry: dict[str, object] = {"type": "message", "id": "original-leaf"}
+    raw = encode_pi_session_entry(
+        {"type": "session", "id": "original-session", "version": version}
+    ) + encode_pi_session_entry(entry)
+    with admitted_pi_scope.create() as pin:
+        session = pin.path / PI_SESSION_NEW_FILE.name
+        session.write_bytes(raw)
+        receipt = observe_pi_session_file(pin, session.name, _native_save(entry))
+    assert receipt.save_verification == "pi_rpc_synced"
+    assert receipt.sha256 == hashlib.sha256(raw).hexdigest()
+
+    with (
+        pytest.raises(PiSessionHistoryUnqualified, match="format is unqualified"),
+        admitted_pi_scope.create(storage_id=session.parent.name, prior_file=receipt),
+    ):
+        pytest.fail("Unqualified Pi session format acquired writer custody")
     with pin_pi_session_retirement(
         layout=admitted_pi_scope.layout,
         storage_id=session.parent.name,

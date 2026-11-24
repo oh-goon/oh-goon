@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import sys
 from collections import deque
 from collections.abc import Mapping
@@ -132,6 +133,23 @@ export default function (pi) {
 """
 
 
+_TRUNCATE_INTERRUPTION = r"""
+const fs = require("node:fs");
+const { syncBuiltinESMExports } = require("node:module");
+const selected = process.argv[process.argv.indexOf("--session") + 1];
+const open = fs.openSync;
+fs.openSync = (path, flags, ...args) => {
+  const fd = open(path, flags, ...args);
+  if (path === selected && flags === "w" && fs.fstatSync(fd).size === 0) {
+    fs.writeSync(2, "synthetic Pi session rewrite truncated\n");
+    process.kill(process.pid, "SIGKILL");
+  }
+  return fd;
+};
+syncBuiltinESMExports();
+"""
+
+
 class _PersistentStorageProbeInput:
     """Drive a selected installed storage probe through its original process input."""
 
@@ -211,6 +229,7 @@ class _PiProbe:
         session_id: str | None = None,
         cwd: Path | None = None,
         cancel_on_stream: bool = False,
+        interrupt_rewrite: bool = False,
         persistent_storage: PiSessionDirectoryPin | None = None,
         storage_probe_command: str | None = None,
     ) -> CommandResult:
@@ -244,8 +263,18 @@ class _PiProbe:
         workspace = (
             persistent_storage.workspace if persistent_storage is not None else self.workspace
         )
+        launcher: tuple[str, ...] = (str(self.program),)
+        if interrupt_rewrite:
+            assert mode == "rpc" and prompt is None and session_id is None
+            assert persistent_storage is None and not cancel_on_stream
+            assert selected_session == self.session and self.session.is_file()
+            node = shutil.which("node", path="/usr/bin:/bin")
+            assert node is not None
+            hook = config / "interrupt-rewrite.cjs"
+            hook.write_text(_TRUNCATE_INTERRUPTION, encoding="utf-8")
+            launcher = (node, "--require", str(hook), *launcher)
         argv = (
-            str(self.program),
+            *launcher,
             "--offline",
             "--mode",
             mode,
@@ -915,8 +944,92 @@ def test_installed_pi_exact_open_negative_boundaries(pi_probe: _PiProbe, resourc
         assert state["sessionId"] != original
         assert not any(entry["type"] == "message" for entry in entries["entries"])
         assert pi_probe.session.exists() == (resource == "empty")
+        if resource == "empty":
+            header = json.loads(pi_probe.session.read_bytes().splitlines()[0])
+            assert header["type"] == "session" and header["id"] == state["sessionId"]
         if resource == "renamed":
             assert renamed.read_bytes() == good
+
+
+def _write_legacy_session(pi_probe: _PiProbe, version: Literal[1, 2]) -> bytes:
+    timestamp = "2025-01-01T00:00:00.000Z"
+    header = {
+        "type": "session",
+        "version": version,
+        "id": "synthetic-legacy-session",
+        "timestamp": timestamp,
+        "cwd": str(pi_probe.workspace / "project"),
+    }
+    entries: list[dict[str, object]] = [
+        {
+            "type": "message",
+            "timestamp": timestamp,
+            "message": {
+                "role": "user",
+                "content": "synthetic legacy prompt",
+                "timestamp": 1735689600000,
+            },
+        },
+        {
+            "type": "message",
+            "timestamp": timestamp,
+            "message": {
+                "role": "hookMessage",
+                "customType": "fixture",
+                "content": "synthetic legacy hook",
+                "display": False,
+                "timestamp": 1735689600000,
+            },
+        },
+    ]
+    if version == 2:
+        entries[0].update(id="12345678", parentId=None)
+        entries[1].update(id="abcdef12", parentId="12345678")
+    contents = "".join(json.dumps(entry) + "\n" for entry in [header, *entries]).encode()
+    pi_probe.session.write_bytes(contents)
+    return contents
+
+
+@pytest.mark.parametrize("version", (1, 2))
+def test_installed_pi_open_migrates_legacy_session_in_place(
+    pi_probe: _PiProbe, version: Literal[1, 2]
+) -> None:
+    original = _write_legacy_session(pi_probe, version)
+    original_inode = pi_probe.session.stat().st_ino
+    state, tree = _state(pi_probe)
+
+    migrated = pi_probe.session.read_bytes()
+    assert migrated != original
+    assert pi_probe.session.stat().st_ino == original_inode
+    header, initial, history_tip, selection = map(json.loads, migrated.splitlines())
+    assert header == {**json.loads(original.splitlines()[0]), "version": 3}
+    assert state["sessionId"] == header["id"]
+    assert tree["entries"] == [initial, history_tip, selection]
+    assert initial["parentId"] is None and history_tip["parentId"] == initial["id"]
+    assert initial["id"] and history_tip["id"] and initial["id"] != history_tip["id"]
+    assert initial["message"]["content"] == "synthetic legacy prompt"
+    assert history_tip["message"]["role"] == "custom"
+    assert history_tip["message"]["content"] == "synthetic legacy hook"
+    if version == 2:
+        assert (initial["id"], history_tip["id"]) == ("12345678", "abcdef12")
+    # Selecting the fixture's thinking mode also records a native entry at open.
+    assert selection["type"] == "thinking_level_change" and selection["thinkingLevel"] == "off"
+    assert selection["parentId"] == history_tip["id"] and tree["leafId"] == selection["id"]
+
+
+def test_installed_pi_open_interrupted_after_legacy_truncate_leaves_empty_file(
+    pi_probe: _PiProbe,
+) -> None:
+    _write_legacy_session(pi_probe, 2)
+    original_inode = pi_probe.session.stat().st_ino
+
+    result = pi_probe.launch(mode="rpc", interrupt_rewrite=True)
+
+    assert result.returncode in (-signal.SIGKILL, 128 + signal.SIGKILL)
+    assert "synthetic Pi session rewrite truncated" in result.stderr
+    assert not result.stdout.strip()
+    assert pi_probe.session.stat().st_ino == original_inode
+    assert pi_probe.session.read_bytes() == b""
 
 
 def test_installed_pi_foreign_project_selection_is_not_an_authorization(pi_probe: _PiProbe) -> None:

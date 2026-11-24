@@ -42,6 +42,8 @@ from oh_goon.integrations.agent_native_execution import decode_native_agent_reco
 
 _MAX_PI_SESSION_BYTES = 16 * 1024 * 1024
 _PI_STORAGE_ID = re.compile(r"pi-session-[0-9a-f]{64}")
+# The installed Pi 1.3.0 continuation qualification covers current format only.
+_PI_CONTINUATION_SESSION_VERSION = 3
 
 
 def require_pi_session_repository(workspace: Path) -> None:
@@ -308,6 +310,7 @@ def pin_pi_session_directory(
                         fd,
                         require_original_storage_current,
                         expected_file=prior_file,
+                        require_current_format=prior_file.save_verification == "pi_rpc_synced",
                     )
                 except FleetPlanInvalid as exc:
                     raise PiSessionHistoryUnqualified(
@@ -465,6 +468,7 @@ def _observe_pinned_session_file(
     require_current: Callable[[], None],
     *,
     expected_file: PiSessionFileObservation | None = None,
+    require_current_format: bool = False,
     save: PiSessionSaveObservation | None = None,
     prior_file: PiSessionFileObservation | None = None,
 ) -> tuple[PiSessionFileObservation, os.stat_result]:
@@ -494,6 +498,19 @@ def _observe_pinned_session_file(
         else:
             digest = hashlib.sha256()
             byte_count = 0
+            if require_current_format:
+                header, metadata = _read_save_record(stream, before.st_size)
+                version = metadata.get("version")
+                if (
+                    metadata["type"] != "session"
+                    or type(version) is not int
+                    or version != _PI_CONTINUATION_SESSION_VERSION
+                ):
+                    raise PiSessionHistoryUnqualified(
+                        "Retained Pi session format is unqualified for native continuation"
+                    )
+                digest.update(header)
+                byte_count = len(header)
             while chunk := stream.read(min(1024 * 1024, before.st_size + 1 - byte_count)):
                 byte_count += len(chunk)
                 digest.update(chunk)

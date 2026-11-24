@@ -1388,9 +1388,31 @@ sending the prompt.
 This proof selects Pi 1.3.0 with its public release entrypoint
 SHA-256 `e79626f2dd6f94aa45d30f3fa63cd84319a6eefcd150b353cfaf274366926774`,
 Bubblewrap 0.11.1 and Linux 7.0.0-43-generic. Repository ownership comes from
-admission. Native RPC supplies file, session and leaf facts. Version migration,
-native startup rewrite and the effective imported-runtime upgrade boundary
-retain their existing HUG-132 and HUG-137 qualification scope.
+admission. Native RPC supplies file, session and leaf facts. The effective
+imported-runtime upgrade boundary remains HUG-137.
+
+### Native Pi open and legacy migration — HUG-132
+
+**Disposition**. Retain the exact file receipt and original claimed Step
+reservation. Managed reopen checks the qualified native version-3 header
+while verifying the exact predecessor bytes. This check precedes the
+writable file mount and native launch. Historical readback and retirement
+still use their existing byte receipts. Managed cross-version migration
+remains unsupported.
+
+The [installed, model-free protocol probes][pi-session-tests] show that
+Pi 1.3.0 initializes an empty file, rejects wholly malformed nonempty
+content, and rewrites valid older formats during open. Version-2 migration
+preserves the session and original entry IDs. The probe's explicit thinking
+selection then advances the active leaf. Interrupting a disposable
+version-2 fixture after native truncation leaves it empty before any prompt
+or rewritten entry.
+
+The [installed managed journey](../../backend/tests/integration/services/test_native_pi_session_journey.py)
+refuses empty, malformed, legacy, and foreign-header bytes in the selected
+slot of a previously qualified Run. Its original Step records a typed
+failure before native launch, with no new inference or save receipt.
+The slot bytes and earlier Run evidence remain intact.
 
 ### Managed Pi operator journey — HUG-53
 
