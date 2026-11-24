@@ -99,7 +99,10 @@ def test_oversized_complete_source_fails_before_provider_process_or_scratch_payl
     connection = step.workload.connection.model_copy(
         update={
             "provider": step.workload.connection.provider.model_copy(
-                update={"max_request_bytes": 1024}
+                update={
+                    "max_request_bytes": 1024,
+                    "api_key_file": str(tmp_path / "unavailable-provider-key"),
+                }
             )
         }
     )
@@ -700,3 +703,60 @@ def test_review_schema_selection_cannot_change_a_previous_occurrences_frozen_ide
         assert schema["properties"]["skill_identity"]["enum"] == [
             handoff.source.skill.content_identity
         ]
+
+
+@pytest.mark.parametrize("request_budget", [6500, 8000])
+def test_provider_step_preserves_evidence_within_selected_request_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request_budget: int
+) -> None:
+    from oh_goon.integrations import fleet_plan_step_execution as execution
+
+    resolver, path, repo, options = agent_review_case(tmp_path)
+    connection = options["connection"]
+    options["connection"] = connection.model_copy(
+        update={
+            "provider": connection.provider.model_copy(update={"max_request_bytes": request_budget})
+        }
+    )
+    plan, deliveries, _ = resolver.resolve_frozen_agents(path, **options)
+    step = plan.steps[0]
+    handoff = deliveries[step.step_id]
+    evidence = "Producer-owned presentation " + "x" * 7000
+    received: list[str] = []
+
+    def disclose(stdout: str, *, expected_capture_identity: str, max_chars: int = 6000) -> str:
+        assert stdout == "packet"
+        assert expected_capture_identity == handoff.source.repository.content_identity
+        if len(evidence) > max_chars:
+            raise FleetPlanInvalid("Native task evidence presentation exceeds the prompt budget")
+        return evidence
+
+    def consume(**kwargs):
+        received.append(kwargs["repository_evidence"])
+        return execution.StepOutcome(argv=("synthetic-provider",), returncode=0)
+
+    monkeypatch.setattr(execution, "task_evidence_prompt", disclose)
+    monkeypatch.setattr(execution, "_execute_model_agent", consume)
+    monkeypatch.setattr(
+        execution,
+        "_execute_command_step",
+        lambda *args: execution.StepOutcome(
+            argv=("synthetic-producer",), returncode=0, stdout="packet"
+        ),
+    )
+    runtime = SimpleNamespace(
+        agent_delivery_for=lambda *args: handoff.encode_prework_delivery(),
+        cancel_requested=None,
+    )
+    if request_budget < len(evidence):
+        with pytest.raises(FleetPlanInvalid, match="exceeds the prompt budget"):
+            execution._execute_typed_step(repo, step, SimpleNamespace(), runtime, attempt_number=1)
+        assert received == []
+    else:
+        assert (
+            execution._execute_typed_step(
+                repo, step, SimpleNamespace(), runtime, attempt_number=1
+            ).returncode
+            == 0
+        )
+        assert received == [evidence]

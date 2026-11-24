@@ -520,11 +520,16 @@ def test_explicit_direct_history_permission_preserves_provider_decision(
 
 
 @pytest.mark.process
-def test_authorized_history_reaches_native_provider_review_worker_once(tmp_path: Path) -> None:
+@pytest.mark.parametrize("credential_source", ["environment", "file"])
+def test_authorized_history_reaches_native_provider_review_worker_once(
+    tmp_path: Path, credential_source: str
+) -> None:
     observed: list[dict[str, object]] = []
+    authorization: list[str | None] = []
 
     class RefusingProvider(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
+            authorization.append(self.headers.get("Authorization"))
             observed.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
             body = b"PRIVATE_PROVIDER_HISTORY_REFUSAL"
             self.send_response(403)
@@ -540,7 +545,17 @@ def test_authorized_history_reaches_native_provider_review_worker_once(tmp_path:
     serving.start()
     try:
         # The fixture is shared with the existing typed phase acceptance tests.
-        resolver, source, _, options = agent_review_case(tmp_path)
+        resolver, source, _, options = agent_review_case(tmp_path / "fixture")
+        fixture_key = "SYNTHETIC_PROVIDER_WORKER_KEY"
+        if credential_source == "file":
+            credential_file = tmp_path / "credential"
+            credential_file.touch(mode=0o600)
+            credential_file.write_text(fixture_key + "\n", encoding="ascii")
+            credential = {"api_key_file": str(credential_file)}
+            host_environment: dict[str, str] = {}
+        else:
+            credential = {"api_key_env": "FIXTURE_MODEL_KEY"}
+            host_environment = {"FIXTURE_MODEL_KEY": fixture_key}
         connection = AgentConnection.select(
             AgentProvidersConfig.model_validate(
                 {
@@ -549,6 +564,7 @@ def test_authorized_history_reaches_native_provider_review_worker_once(tmp_path:
                         "chosen": {
                             "api": "openai-responses",
                             "base_url": f"http://127.0.0.1:{provider.server_port}",
+                            **credential,
                         }
                     },
                     "models": {
@@ -569,7 +585,7 @@ def test_authorized_history_reaches_native_provider_review_worker_once(tmp_path:
         scratch = tmp_path / "worker-scratch"
         scratch.mkdir()
         process: Any = SimpleNamespace(
-            host_environment={},
+            host_environment=host_environment,
             environment=dict(os.environ),
             paths=SimpleNamespace(tmp=scratch),
             command_runner=run_command,
@@ -587,6 +603,9 @@ def test_authorized_history_reaches_native_provider_review_worker_once(tmp_path:
         assert "HTTP 403" in outcome.stderr
         assert "PRIVATE_PROVIDER_HISTORY_REFUSAL" not in outcome.stderr
         assert len(observed) == 1
+        assert authorization == [f"Bearer {fixture_key}"]
+        assert fixture_key not in outcome.stdout + outcome.stderr
+        assert fixture_key not in json.dumps(observed)
         assert observed[0]["previous_response_id"] == "authorized-reference"
         assert "allow_provider_history" not in observed[0]
         assert not (scratch / "agent-provider-request.json").exists()
@@ -736,3 +755,157 @@ def test_incomplete_tool_or_empty_responses_fail_explicitly(api, payload):
         AgentProviderClient(transport=httpx2.MockTransport(handler)).complete(
             selection(api), [AgentMessage("user", "hello")]
         )
+
+
+@pytest.mark.parametrize("line_ending", [b"", b"\n", b"\r\n"])
+def test_file_key_is_selected_once_and_transport_uses_frozen_authentication(tmp_path, line_ending):
+    from oh_goon.integrations.agent_provider_client import resolve_agent_connection
+    from oh_goon.runtime.agent_providers import load_agent_providers
+
+    key = tmp_path / "key"
+    config_path = tmp_path / "providers.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "api": {
+                        "api": "openai-responses",
+                        "base_url": "https://models.example/v1",
+                        "api_key_file": "key",
+                    }
+                },
+                "models": {"review": {"provider": "api", "model": "test-model"}},
+            }
+        )
+    )
+    config = load_agent_providers(config_path)
+    connection = AgentConnection.select(config, "review")
+    # Catalog load/selection succeeds while the credential file does not exist.
+    key.write_bytes(b"synthetic-original-key" + line_ending)
+    selected = resolve_agent_connection(connection, {"OPENAI_API_KEY": "wrong-key"})
+    key.unlink()
+    requests = []
+
+    def handler(request):
+        assert request.headers["Authorization"] == "Bearer synthetic-original-key"
+        requests.append(request)
+        return httpx2.Response(200, json=response_for("openai-responses"))
+
+    reply = AgentProviderClient(transport=httpx2.MockTransport(handler)).complete(
+        selected, [AgentMessage("user", "explicit text")]
+    )
+    assert reply.text == "hello" and len(requests) == 1
+    assert "synthetic-original-key" not in repr(selected)
+
+
+@pytest.mark.parametrize(
+    "contents", [None, "", " ", "x" * 8195, "private\ninjected", "key\n\n", "\u00e9"]
+)
+def test_invalid_file_key_refuses_without_environment_fallback_or_secret_output(tmp_path, contents):
+    from oh_goon.integrations.agent_provider_client import resolve_agent_connection
+
+    key = tmp_path / "key"
+    if contents is not None:
+        key.write_text(contents)
+    connection = AgentConnection.select(
+        AgentProvidersConfig.model_validate(
+            {
+                "providers": {
+                    "api": {
+                        "api": "openai-responses",
+                        "base_url": "https://models.example",
+                        "api_key_file": str(key),
+                    }
+                },
+                "models": {"review": {"provider": "api", "model": "test-model"}},
+            }
+        ),
+        "review",
+    )
+    with pytest.raises(AgentProviderError) as caught:
+        resolve_agent_connection(connection, {"OPENAI_API_KEY": "available-but-unselected"})
+    assert str(caught.value) in {
+        "Cannot load selected provider API key file",
+        "Selected provider API key file is invalid",
+    }
+
+
+def test_provider_refuses_competing_environment_and_file_key_authority():
+    from pydantic import ValidationError
+
+    from oh_goon.core.models.agent_providers import AgentProvider
+
+    with pytest.raises(ValidationError, match="select api_key_env or api_key_file"):
+        AgentProvider(
+            api="openai-responses",
+            base_url="https://models.example",
+            api_key_env="API_KEY",
+            api_key_file="/unused/key",
+        )
+
+
+@pytest.mark.parametrize("kind", ["directory", "fifo", "symlink", "hardlink", "parent-alias"])
+def test_file_key_refuses_special_files_and_aliases_without_blocking(tmp_path, kind):
+    from oh_goon.integrations.agent_provider_client import resolve_agent_connection
+
+    key = tmp_path / "key"
+    if kind == "directory":
+        key.mkdir()
+    elif kind == "symlink":
+        synthetic = tmp_path / "synthetic"
+        synthetic.write_text("synthetic-key")
+        key.symlink_to(synthetic)
+    elif kind == "hardlink":
+        synthetic = tmp_path / "synthetic"
+        synthetic.write_text("synthetic-key")
+        os.link(synthetic, key)
+    elif kind == "parent-alias":
+        synthetic = tmp_path / "synthetic"
+        synthetic.mkdir()
+        (synthetic / "key").write_text("synthetic-key")
+        redirected = tmp_path / "redirected"
+        redirected.symlink_to(synthetic, target_is_directory=True)
+        key = redirected / "key"
+    elif hasattr(os, "mkfifo"):
+        os.mkfifo(key)
+    else:
+        pytest.skip("native FIFO unavailable")
+    connection = AgentConnection.select(
+        AgentProvidersConfig.model_validate(
+            {
+                "providers": {
+                    "api": {
+                        "api": "openai-responses",
+                        "base_url": "https://models.example",
+                        "api_key_file": str(key),
+                    }
+                },
+                "models": {"review": {"provider": "api", "model": "test-model"}},
+            }
+        ),
+        "review",
+    )
+    with pytest.raises(AgentProviderError, match="Cannot load selected provider API key file"):
+        resolve_agent_connection(connection, {})
+
+
+def test_file_key_refuses_an_unresolved_path_without_using_cwd():
+    from oh_goon.integrations.agent_provider_client import resolve_agent_connection
+
+    selection = AgentConnection.select(
+        AgentProvidersConfig.model_validate(
+            {
+                "providers": {
+                    "api": {
+                        "api": "openai-responses",
+                        "base_url": "https://models.example",
+                        "api_key_file": "relative-key",
+                    }
+                },
+                "models": {"review": {"provider": "api", "model": "test-model"}},
+            }
+        ),
+        "review",
+    )
+    with pytest.raises(AgentProviderError, match="requires its resolved absolute path"):
+        resolve_agent_connection(selection, {})

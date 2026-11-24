@@ -7,14 +7,21 @@ model text does not launch tools, authorize disclosure, or certify execution.
 from __future__ import annotations
 
 import json
+import os
 import ssl
+import stat
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, NoReturn
 
+from pydantic import SecretStr
+
 from oh_goon.core.models.agent_providers import (
+    MAX_PROVIDER_HEADER_VALUE_BYTES,
     PROVIDER_HISTORY_AUTHORIZATION_MESSAGE,
+    AgentConnection,
     AgentMessage,
     AgentProviderError,
     AgentReply,
@@ -29,6 +36,79 @@ from oh_goon.core.models.model_usage import (
     reported_token_values,
 )
 from oh_goon.core.product_identity import stable_id
+
+
+def _provider_key_path(reference: str) -> Path:
+    path = Path(reference)
+    if not path.is_absolute() or ".." in path.parts:
+        raise AgentProviderError("Provider API key file requires its resolved absolute path")
+    return path
+
+
+def _require_regular_key_file(metadata: os.stat_result) -> None:
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise ValueError("not a unique regular credential file")
+
+
+def _credential_file_metadata(path: Path) -> os.stat_result:
+    if path.parent.resolve() != path.parent:
+        raise ValueError("credential file parent no longer matches its resolved path")
+    metadata = path.stat(follow_symlinks=False)
+    _require_regular_key_file(metadata)
+    return metadata
+
+
+def require_provider_key_file_separation(
+    connection: AgentConnection | None, read_roots: Sequence[Path]
+) -> None:
+    """Keep selected credentials out of captured source and native-readable roots."""
+    if connection is None or connection.provider.api_key_file is None:
+        return
+    path = _provider_key_path(connection.provider.api_key_file)
+    try:
+        overlaps = any(path.is_relative_to(root.resolve()) for root in read_roots)
+    except (OSError, RuntimeError):
+        raise AgentProviderError("Cannot establish selected provider API key file scope") from None
+    if overlaps:
+        raise AgentProviderError("Provider API key file overlaps an Agent source or tool root")
+    try:
+        # A hardlink can put the same credential bytes in a different pathname.
+        # An absent key stays valid configuration until actual request execution.
+        _credential_file_metadata(path)
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError, RuntimeError):
+        raise AgentProviderError("Cannot establish selected provider API key file scope") from None
+
+
+def resolve_agent_connection(
+    connection: AgentConnection, environment: Mapping[str, str]
+) -> ResolvedAgentModel:
+    """Read only the selected credential file, once, before HTTP transport."""
+    key = None
+    if connection.provider.api_key_file is not None:
+        path = _provider_key_path(connection.provider.api_key_file)
+        limit = MAX_PROVIDER_HEADER_VALUE_BYTES + 2  # optional CRLF
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            before = _credential_file_metadata(path)
+            descriptor = os.open(path, flags)
+            with os.fdopen(descriptor, "rb") as source:
+                opened = os.fstat(source.fileno())
+                _require_regular_key_file(opened)
+                if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                    raise ValueError("credential file changed before opening")
+                raw = source.read(limit + 1)
+            if len(raw) > limit:
+                raise ValueError("credential file exceeds limit")
+            if raw.endswith(b"\r\n"):
+                raw = raw.removesuffix(b"\r\n")
+            else:
+                raw = raw.removesuffix(b"\n")
+            key = SecretStr(raw.decode("ascii"))
+        except (OSError, ValueError, RuntimeError):
+            raise AgentProviderError("Cannot load selected provider API key file") from None
+    return connection.resolve(environment, file_api_key=key)
 
 
 class AgentProviderClient:

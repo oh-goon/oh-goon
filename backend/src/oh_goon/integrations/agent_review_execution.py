@@ -256,12 +256,15 @@ def execute_provider_agent(
         raise FleetPlanInvalid("provider Agent lacks its frozen connection")
     for name in step_host_environment_names(step):
         require_exportable_host_environment_name(name)
-    selected = step.workload.connection.resolve(process.host_environment)
+    from oh_goon.integrations.agent_provider_client import resolve_agent_connection
+
     payload = provider_agent_request(step, handoff, repository_evidence=repository_evidence)
-    invocation_id = secrets.token_hex(16)
     encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
-    if len(encoded) > selected.provider.max_request_bytes:
+    connection = step.workload.connection
+    if len(encoded) > connection.provider.max_request_bytes:
         raise FleetPlanInvalid("complete Agent source exceeds the selected provider request budget")
+    selected = resolve_agent_connection(connection, process.host_environment)
+    invocation_id = secrets.token_hex(16)
     request_file = process.paths.tmp / "agent-provider-request.json"
     with request_file.open("xb") as stream:
         os.chmod(request_file, 0o600)

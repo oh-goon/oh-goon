@@ -59,6 +59,52 @@ This writes an ordinary project-owned Composite at `goons/agents/review-repair/`
 
 Edit the ordinary imports to replace, append or reorder reviews. Duplicate/missing aliases and invalid Skill references reject before publication. There is no runtime reviewer array or second scheduler. The entire draft is published exclusively as one directory. It remains NOT_READY without a canonical lock; complete its missing fields and prepare it explicitly.
 
+## Direct OpenAI API campaign
+
+Use the model-backed `run.yml` above with the shipped
+`agents/agentic-review-repair-loop` Plan and
+`agent.model_profile: openai-sol-low`. Add this profile to a private copy of the
+[provider catalog example](../agent-providers/providers.toml), which already defines
+the OpenAI Responses provider and `OPENAI_API_KEY` reference.
+
+```toml
+[models.openai-sol-low]
+provider = "openai"
+model = "gpt-6.1-sol"
+max_output_tokens = 8192
+parameters = { reasoning = { effort = "low" }, store = false }
+```
+
+To authenticate from a file, replace the provider's `api_key_env` with
+`api_key_file` in the private catalog. Keep credentials outside the repository
+and Skills. [Credential configuration](../../docs/AGENT_PROVIDERS.md#choose-a-protocol) ·
+[GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+
+Keep the API and Codex service workflows in separate directories, each with its
+own `run.yml` and `goon.lock`. In the API workflow, use `agent.model_profile` as
+the agent selection. In the native workflow, use `agent.implementation` and
+`agent.profile`. Prepare each workflow after changing its selection, then set
+the shell path to the workflow you want to run.
+
+```sh
+export OH_GOON_PROVIDERS_FILE=/absolute/path/to/providers.toml
+export OH_GOON_SKILL_WORKFLOW=/absolute/path/to/api-workflow
+oh-goon agent providers validate
+oh-goon workflow inspect "$OH_GOON_SKILL_WORKFLOW/run.yml" --json
+oh-goon workflow prepare "$OH_GOON_SKILL_WORKFLOW/run.yml"
+oh-goon workflow validate "$OH_GOON_SKILL_WORKFLOW/run.yml"
+oh-goon run "$OH_GOON_SKILL_WORKFLOW/run.yml" --authorize-repair
+```
+
+To use the native workflow, set `OH_GOON_SKILL_WORKFLOW` to its directory.
+The selected file and lock determine the execution mode for the entire Run.
+Provider phases send frozen evidence and Skill content in a model request.
+The native campaign below uses the selected harness's tools and session.
+
+If your subscription includes API credits, select a key in the linked API
+organization. Confirm available credit in that organization before running a
+live campaign. [API credits eligibility](https://help.openai.com/en/articles/20001626-api-credits-benefit-for-eligible-chatgpt-subscriptions)
+
 ## Native Codex service campaign
 
 The [Hashmarks acceptance contract](../../docs/AGENT_SKILLS.md#hashmarks-dogfood-acceptance) defines separate qualification scenarios and source/evidence requirements. This recipe alone is not a live convergence receipt.

@@ -24,6 +24,7 @@ from oh_goon.core.product_identity import (
     stable_id,
 )
 from oh_goon.integrations.agent_native_execution import native_executable_sha256
+from oh_goon.integrations.agent_provider_client import require_provider_key_file_separation
 from oh_goon.integrations.source_snapshot import source_snapshot_identity
 from oh_goon.runtime.parallel_agent_work import (
     begin_parallel_work,
@@ -82,6 +83,8 @@ def start_parallel_agent_work(
     workspace = request.workspace.resolve(strict=True)
     if workspace != request.workspace:
         raise FleetPlanInvalid("Parallel work requires the canonical registered repository path")
+    for agent in selected:
+        require_provider_key_file_separation(agent.connection, (workspace,))
     logical_repository_id = repository_id(workspace)
     registered = service._repositories.require_included(logical_repository_id)
     if registered.path != workspace:

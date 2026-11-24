@@ -78,6 +78,13 @@ def test_selection_is_a_snapshot_of_config_and_credentials(tmp_path):
     assert b'"temperature": 0.2' in selected.parameters_json
 
 
+def test_absent_file_credential_preserves_existing_connection_serialization(tmp_path):
+    connection = AgentConnection.select(load(tmp_path), "review")
+    encoded = connection.model_dump(mode="json")
+    assert "api_key_file" not in encoded["provider"]
+    assert AgentConnection.model_validate(encoded) == connection
+
+
 def test_provider_history_permission_defaults_to_denial_and_survives_selected_transport(
     tmp_path: Path,
 ) -> None:

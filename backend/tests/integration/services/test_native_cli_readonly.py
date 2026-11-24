@@ -126,14 +126,15 @@ def test_controlled_readonly_context_still_requires_typed_role_acceptance(
 
 @pytest.mark.certification
 @pytest.mark.parametrize(
-    ("agent", "pi_rpc", "persistent_action"),
+    ("agent", "pi_rpc", "persistent_action", "file_credential"),
     (
-        pytest.param("opencode", False, None, id="opencode"),
-        pytest.param("pi", False, None, id="pi"),
-        pytest.param("pi", True, None, id="pi-rpc"),
-        pytest.param("pi", True, "settle", id="pi-rpc-new"),
-        pytest.param("pi", True, "cancel", id="pi-rpc-new-cancel"),
-        pytest.param("pi", True, "worker-crash", id="pi-rpc-new-worker-crash"),
+        pytest.param("opencode", False, None, False, id="opencode"),
+        pytest.param("opencode", False, None, True, id="opencode-key-file"),
+        pytest.param("pi", False, None, False, id="pi"),
+        pytest.param("pi", True, None, False, id="pi-rpc"),
+        pytest.param("pi", True, "settle", False, id="pi-rpc-new"),
+        pytest.param("pi", True, "cancel", False, id="pi-rpc-new-cancel"),
+        pytest.param("pi", True, "worker-crash", False, id="pi-rpc-new-worker-crash"),
     ),
 )
 def test_installed_native_cli_reviews_through_the_read_only_boundary(
@@ -142,6 +143,7 @@ def test_installed_native_cli_reviews_through_the_read_only_boundary(
     agent: Literal["opencode", "pi"],
     pi_rpc: bool,
     persistent_action: Literal["settle", "cancel", "worker-crash"] | None,
+    file_credential: bool,
 ) -> None:
     executable = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}")
     runtime_root = os.environ.get(f"OH_GOON_NATIVE_{agent.upper()}_RUNTIME_ROOT")
@@ -163,7 +165,11 @@ def test_installed_native_cli_reviews_through_the_read_only_boundary(
     subprocess.run(["git", "-C", str(workspace), "add", "source.py"], check=True)
     original_index = (workspace / ".git" / "index").read_bytes()
     private = tmp_path / "foreign-host-source"
-    private.write_text("synthetic-host-private-canary", encoding="utf-8")
+    private.touch(mode=0o600)
+    private.write_text(
+        "SYNTHETIC_RO_HOST_KEY\n" if file_credential else "synthetic-host-private-canary",
+        encoding="ascii",
+    )
     tools = tmp_path / "public-tools"
     tools.mkdir()
     probe = tools / "readonly_probe.py"
@@ -526,7 +532,12 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
             pass
 
     monkeypatch.setenv("OH_GOON_DB", str(database_path))
-    monkeypatch.setenv("NATIVE_RO_HOST_KEY", "SYNTHETIC_RO_HOST_KEY")
+    if file_credential:
+        credential = {"api_key_file": str(private)}
+        monkeypatch.delenv("NATIVE_RO_HOST_KEY", raising=False)
+    else:
+        credential = {"api_key_env": "NATIVE_RO_HOST_KEY"}
+        monkeypatch.setenv("NATIVE_RO_HOST_KEY", "SYNTHETIC_RO_HOST_KEY")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "host-data"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "host-config"))
     monkeypatch.setenv("HOME", str(tmp_path / "synthetic-home"))
@@ -543,7 +554,7 @@ print('NATIVE_READONLY_PROOF '+json.dumps(facts,sort_keys=True))
                             "approved": {
                                 "api": "openai-chat-completions",
                                 "base_url": f"http://127.0.0.1:{endpoint.server_port}/v1",
-                                "api_key_env": "NATIVE_RO_HOST_KEY",
+                                **credential,
                             }
                         },
                         "models": {

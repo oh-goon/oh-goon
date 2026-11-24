@@ -20,6 +20,9 @@ import pytest
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models.agent_providers import (
+    AgentConnection,
+    AgentProviderError,
+    AgentProvidersConfig,
     NativeAgentDefinition,
     NativeAgentProfile,
     ResolvedNativeAgent,
@@ -766,6 +769,39 @@ def test_forged_native_user_configuration_is_refused_before_mount_discovery(
     )
     with pytest.raises(FleetPlanInvalid, match="outside agent execution"):
         native_runtime_read_only_mounts(tmp_path, selected)
+
+
+def test_read_only_native_runtime_root_cannot_mount_provider_credential(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    public_runtime = tmp_path / "runtime"
+    public_runtime.mkdir()
+    key = public_runtime / "synthetic-key"
+    key.write_text("synthetic-only-key")
+    connection = AgentConnection.select(
+        AgentProvidersConfig.model_validate(
+            {
+                "providers": {
+                    "provider": {
+                        "api": "openai-responses",
+                        "base_url": "https://models.example",
+                        "api_key_file": str(key),
+                    }
+                },
+                "models": {"model": {"provider": "provider", "model": "synthetic-model"}},
+            }
+        ),
+        "model",
+    )
+    selected = replace(
+        _selection(_fake_backend(tmp_path)),
+        definition=NativeAgentDefinition(
+            executable="/usr/bin/true", runtime_roots=(str(public_runtime),)
+        ),
+        connection=connection,
+    )
+    with pytest.raises(AgentProviderError, match="Provider API key file overlaps"):
+        native_runtime_read_only_mounts(repository, selected)
 
 
 @pytest.mark.parametrize("attempt", ["removed_credential", "host_network"])

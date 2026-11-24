@@ -1828,6 +1828,19 @@
             ],
             "title": "Api Key Env"
           },
+          "api_key_file": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key File"
+          },
           "base_url": {
             "maxLength": 2048,
             "minLength": 1,

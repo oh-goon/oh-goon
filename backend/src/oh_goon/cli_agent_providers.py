@@ -28,7 +28,7 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     ProviderApi,
 )
-from oh_goon.integrations.agent_provider_client import AgentProviderClient
+from oh_goon.integrations.agent_provider_client import AgentProviderClient, resolve_agent_connection
 from oh_goon.runtime.agent_providers import (
     agent_providers_path,
     create_agent_providers,
@@ -433,7 +433,9 @@ def run_provider_command(args: argparse.Namespace) -> int:
         else:
             config = load_agent_providers(path)
             if args.provider_command == "request":
-                selected = config.resolve(args.model, environment=os.environ)
+                selected = resolve_agent_connection(
+                    AgentConnection.select(config, args.model), os.environ
+                )
                 prompt = _prompt(args, selected.provider.max_request_bytes)
                 reply = AgentProviderClient().complete(selected, [AgentMessage("user", prompt)])
                 if args.as_json:
@@ -454,6 +456,7 @@ def run_provider_command(args: argparse.Namespace) -> int:
                         "api": provider.api,
                         "base_url": provider.base_url,
                         "api_key_env": provider.api_key_env,
+                        "api_key_file": provider.api_key_file,
                         "header_names": list(provider.headers),
                         "headers_from_env": provider.headers_from_env,
                     }

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable, cast
 
 from oh_goon.core.errors import FleetPlanInvalid
 from oh_goon.core.models import agent_source
+from oh_goon.core.models.agent_providers import AgentConnection
 from oh_goon.core.models.fleet_plan import AgentStepRequestedEffects
 from oh_goon.core.models.fleet_plan_composition import (
     PlanInputDefinition,
@@ -29,6 +30,7 @@ from oh_goon.core.source_tree_policy import (
     is_transient_source_path,
 )
 from oh_goon.engine.errors import OperationCancelledError
+from oh_goon.integrations.agent_provider_client import require_provider_key_file_separation
 
 if TYPE_CHECKING:
     from oh_goon.core.enforcer_lace_trust import ReceiptAuthenticator
@@ -53,6 +55,7 @@ def capture_agent_sources(
     tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
     expected_repository: Path | None = None,
     private_native_roots: tuple[Path, ...] = (),
+    provider_connection: AgentConnection | None = None,
 ) -> agent_source.FrozenAgentSourceCapture:
     """Capture bytes ONCE via the existing AG-01 reader, without effects.
 
@@ -87,6 +90,7 @@ def capture_agent_sources(
         tree_cache=tree_cache,
         expected_repository=expected_repository,
         private_native_roots=private_native_roots,
+        provider_connection=provider_connection,
     )
     frozen = agent_source.FrozenAgentSourceCapture(
         plan_source_sha256=plan_source_sha256,
@@ -160,6 +164,7 @@ def explain_agent_sources(
     tree_cache: dict[tuple[str, str], agent_source.FrozenSourceTree] | None = None,
     expected_repository: Path | None = None,
     private_native_roots: tuple[Path, ...] = (),
+    provider_connection: AgentConnection | None = None,
 ) -> dict[str, object]:
     """Project immutable read-only identities without admitting or executing work."""
     repo_ref, authored_skill_ref, accepted = agent_source_references(definitions, values)
@@ -198,22 +203,19 @@ def explain_agent_sources(
     if not skill_ref.startswith("local:"):
         raise FleetPlanInvalid("AG-01 skill must use a bounded, immutable source reference")
 
-    for root, reference in (
+    selections = (
         (repository_root, repo_ref),
         (prepared.root if prepared else skill_root, skill_ref),
-    ):
+    )
+    for root, reference in selections:
         _require_public_agent_source_selection(root, reference)
 
+    source_roots = tuple(root / reference.removeprefix("local:") for root, reference in selections)
+    require_provider_key_file_separation(provider_connection, source_roots)
     if private_native_roots:
         # Reject both source selections before the first fd-anchored byte read.
         # Native homes are explicit directory scopes; no store files are opened.
-        _require_private_native_source_separation(
-            private_native_roots,
-            (
-                repository_root / repo_ref.removeprefix("local:"),
-                (prepared.root if prepared else skill_root) / skill_ref.removeprefix("local:"),
-            ),
-        )
+        _require_private_native_source_separation(private_native_roots, source_roots)
 
     repository = _snapshot_authorized_tree(
         repository_root,

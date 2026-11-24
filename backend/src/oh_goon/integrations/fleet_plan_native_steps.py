@@ -652,7 +652,13 @@ def execute_native_agent_step(
     _remaining(deadline)
     if runtime.cancel_requested is not None and runtime.cancel_requested():
         raise OperationCancelledError("Native Agent cancelled after repository evidence")
-    model = selected.connection.resolve(process.host_environment) if selected.connection else None
+    from oh_goon.integrations.agent_provider_client import resolve_agent_connection
+
+    model = (
+        resolve_agent_connection(selected.connection, process.host_environment)
+        if selected.connection is not None
+        else None
+    )
     parser = (
         NativeAgentEventParser(selected.agent, pi_session_persistent=persistent_pi)
         if not selected.interactive

@@ -620,6 +620,9 @@ class FleetPlanService:
         allow_candidate_metadata: bool = False,
     ) -> ResolvedNativeAgent:
         """Bind and preflight the original backend before any native Run admission."""
+        from oh_goon.integrations.agent_provider_client import require_provider_key_file_separation
+
+        require_provider_key_file_separation(selected.connection, (workspace,))
         if selected.uses_persistent_pi_session:
             from oh_goon.runtime.pi_session_storage import require_pi_session_repository
 
