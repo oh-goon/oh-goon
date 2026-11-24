@@ -203,6 +203,7 @@ unqualified receipt. Historical views leave current availability at
 independent verifier failed, or an unavailable session after its Run passed.
 Public Run detail and Fleet Snapshot omit private Pi task excerpts, native
 payloads, and free-form review records while reporting Step settlement.
+HTTP cancellation acknowledgements also omit private Pi task excerpts.
 
 ### Inspect and retire a saved Pi session
 

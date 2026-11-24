@@ -16,7 +16,12 @@ from oh_goon.core.models.game_tape_pi_session import (
 )
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.pi_session_storage import PiSessionNativeObservation
-from oh_goon.core.models.run import FailedFleetRun, FleetRunDetail, FleetRunHistoryPage
+from oh_goon.core.models.run import (
+    FailedFleetRun,
+    FleetRunDetail,
+    FleetRunHistoryPage,
+    FleetRunState,
+)
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
     FleetRunEventBatch,
@@ -52,6 +57,16 @@ def fleet_run_event_readback(batch: FleetRunEventBatch) -> dict[str, Any]:
     protected = {evidence.step_id}
     for item in (result["run"], *result["events"]):
         _hide_pi_task(item, protected)
+    return result
+
+
+def fleet_run_state_readback(run: FleetRunState) -> dict[str, Any] | None:
+    """Serialize a private Pi Run acknowledgement without exposing its task fields."""
+    private_steps = _private_pi_step_ids(run.target)
+    if not private_steps:
+        return None
+    result = run.model_dump(mode="json", by_alias=True)
+    _hide_pi_task(result, private_steps)
     return result
 
 
