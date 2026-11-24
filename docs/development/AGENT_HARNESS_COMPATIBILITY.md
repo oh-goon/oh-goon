@@ -674,10 +674,11 @@ boundary. The probe used synthetic inference and disposable state.
 [OpenCode ACP mode](https://opencode.ai/docs/cli/acp/)
 
 The shipped immutable-stdin relay, given an ACP initialize frame, reached EOF
-without a negotiated reply or a model call. With a test-only duplex controller,
-`session/cancel` returned `cancelled` on the original prompt. Discarding the
-original terminal reply after the two reads, or closing stdin during a live
-turn, left the claim incomplete even though the process retired. A separate
+without a negotiated reply or a model call. The test-only duplex controller
+sent a `session/cancel` notification, and the original `session/prompt` reply
+carried `stopReason: cancelled`. Discarding that terminal reply in a separate
+completed turn, or closing stdin during a live turn, left the component
+observation incomplete. Process retirement was verified in both cases. A separate
 probe sent the same `session/new` request ID twice and observed two distinct
 native sessions. An RPC ID is correlation, so a missing acknowledgement cannot
 authorize replay. [ACP transport](https://agentclientprotocol.com/protocol/v1/transports) ·
