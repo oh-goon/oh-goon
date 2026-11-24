@@ -97,6 +97,7 @@ def _provider(
     reply_after_hold: bool = False,
     continuation_result: _ContinuationResult | None = None,
     initial_tool_command: str | None = None,
+    held_reply: str | None = None,
 ) -> Iterator[tuple[str, list[str], list[str], list[str], list[str]]]:
     errors: list[str] = []
     requests: list[str] = []
@@ -111,6 +112,8 @@ def _provider(
                     hold_inference()
                     if not reply_after_hold:
                         return
+                    if held_reply is not None:
+                        response = {"role": "assistant", "content": held_reply}, "stop"
                 self.reply(*response)
             except Exception as error:
                 errors.append(str(error))
@@ -919,6 +922,7 @@ def _held_pi_journey(
     reply_after_hold: bool = False,
     continuation_result: _ContinuationResult | None = None,
     initial_tool_command: str | None = None,
+    held_reply: str | None = None,
     timeout_seconds: int = 90,
 ) -> Iterator[_HeldPiJourney]:
     executable = os.environ.get("OH_GOON_NATIVE_PI")
@@ -976,6 +980,7 @@ def _held_pi_journey(
         reply_after_hold=reply_after_hold,
         continuation_result=continuation_result,
         initial_tool_command=initial_tool_command,
+        held_reply=held_reply,
     ) as (
         url,
         requests,
@@ -1798,6 +1803,219 @@ def test_installed_pi_torn_save_stays_unqualified_after_successful_verifier(
         assert incomplete.decode() not in visible and _PRIVATE_TOOL_OUTPUT not in visible
         assert _SECRET not in visible and str(transcript) not in visible
         assert transcript.read_bytes() == retained
+        assert tuple(session_root.iterdir()) == (transcript.parent,)
+        assert journey.requests == [_TASKS[0], _TASKS[0]] and not journey.errors
+
+
+@pytest.mark.certification
+def test_installed_pi_append_enospc_preserves_original_run_and_session_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if not os.environ.get("OH_GOON_NATIVE_PI") or not os.environ.get(
+        "OH_GOON_NATIVE_PI_RUNTIME_ROOT"
+    ):
+        pytest.skip("Select the installed Pi executable and public runtime root")
+    if any(shutil.which(tool) is None for tool in ("unshare", "mount", "strace")):
+        pytest.skip("The native Pi append fault requires Linux namespaces, mount and strace")
+    # Only the fresh child can fill its private filesystem. Bound its descriptor
+    # limit so ptrace does not turn the command guard's close sweep into a timeout.
+    if os.environ.get("OH_GOON_TEST_PI_APPEND_MOUNT_NAMESPACE") != os.readlink("/proc/self/ns/mnt"):
+        completed = subprocess.run(
+            (
+                "unshare",
+                "--user",
+                "--map-root-user",
+                "--mount",
+                "--propagation",
+                "private",
+                "--pid",
+                "--fork",
+                "--mount-proc",
+                "--kill-child=KILL",
+                sys.executable,
+                "-c",
+                "import os, resource, sys; "
+                "soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE); "
+                "resource.setrlimit(resource.RLIMIT_NOFILE, "
+                "(min(soft, 512) if soft >= 0 else 512, hard)); "
+                'os.environ["OH_GOON_TEST_PI_APPEND_MOUNT_NAMESPACE"] = '
+                'os.readlink("/proc/self/ns/mnt"); '
+                'os.execv(sys.executable, [sys.executable, "-m", "pytest", *sys.argv[1:]])',
+                "--tb=short",
+                "-m",
+                "certification",
+                f"{Path(__file__).resolve()}::"
+                "test_installed_pi_append_enospc_preserves_original_run_and_session_facts",
+            ),
+            capture_output=True,
+            text=True,
+            timeout=130,
+        )
+        if completed.returncode != 0 or "1 passed" not in completed.stdout:
+            pytest.fail(completed.stdout[-8192:] + completed.stderr[-2048:], pytrace=False)
+        return
+
+    state_root = tmp_path / "state"
+    state_root.mkdir(mode=0o700)
+    subprocess.run(
+        (
+            "mount",
+            "-t",
+            "tmpfs",
+            "-o",
+            "size=8m,nr_inodes=512,mode=0700,nodev,nosuid,noexec",
+            "tmpfs",
+            str(state_root),
+        ),
+        check=True,
+        timeout=10,
+    )
+    capacity = os.statvfs(state_root)
+    assert state_root.stat().st_dev != tmp_path.stat().st_dev
+    assert capacity.f_blocks * capacity.f_frsize == 8 * 1024 * 1024
+    assert capacity.f_bavail == capacity.f_blocks
+    effect_command = (
+        f"printf %s {shlex.quote(_TOOL_EFFECT)} >> tool-effect.log"
+        f" && printf %s {shlex.quote(_PRIVATE_TOOL_OUTPUT)}"
+    )
+    with _held_pi_journey(
+        tmp_path,
+        monkeypatch,
+        reply_after_hold=True,
+        initial_tool_command=effect_command,
+        held_reply=_MODEL_REPLY * 512,
+    ) as journey:
+        effect = journey.repository / "tool-effect.log"
+        effect.touch()
+        console = tmp_path / "console.log"
+        trace = tmp_path / "native-writes.trace"
+        with console.open("wb") as output:
+            controller = subprocess.Popen(
+                (
+                    "strace",
+                    "-f",
+                    "-qq",
+                    "-yy",
+                    "-s",
+                    "0",
+                    "-e",
+                    "trace=write,writev",
+                    "-e",
+                    "status=failed",
+                    "-o",
+                    str(trace),
+                    *journey.ai,
+                    "--prompt",
+                    _TASKS[0],
+                    "--session",
+                    "new",
+                ),
+                cwd=journey.repository,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+            )
+        filler = state_root / "owned-filler"
+        try:
+            deadline = time.monotonic() + 65
+            while not journey.held_inference_arrived.wait(0.1):
+                assert controller.poll() is None and time.monotonic() < deadline, (
+                    journey.errors,
+                    console.read_text()[-3000:],
+                )
+            assert effect.read_text() == _TOOL_EFFECT
+            database = LocalDatabase(journey.database_path, read_only=True)
+            lease = ExecutionCoordinator(database).active_lease()
+            assert lease is not None and lease.fleet_run_id and lease.custody is not None
+            assert lease.custody.phase == "WORKER_OWNED"
+            run_id = lease.fleet_run_id
+            held = Journal(database).run_events(run_id)
+            assert held.run.status is FleetRunStatus.RUNNING
+            (reservation,) = (
+                event for event in held.events if isinstance(event, PiSessionWriterReservedEvent)
+            )
+            session_root = ApplicationStatePathLayout.from_database(
+                journey.database_path
+            ).pi_sessions
+            transcript = session_root / reservation.storage_id / PI_SESSION_NEW_FILE.name
+            before = transcript.read_bytes()
+            assert before.endswith(b"\n") and _PRIVATE_TOOL_OUTPUT.encode() in before
+            assert len(before) % capacity.f_frsize, "Pi needs a partial block for the short append"
+            with filler.open("xb") as stream:
+                free = os.fstatvfs(stream.fileno())
+                os.posix_fallocate(stream.fileno(), 0, free.f_bavail * free.f_frsize)
+            assert os.statvfs(state_root).f_bavail == 0
+            journey.release_held_inference.set()
+            deadline = time.monotonic() + 15
+            while True:
+                with trace.open() as stream:
+                    writes = stream.read(64 * 1024)
+                if any(
+                    f"<{PI_SESSION_NEW_FILE}>" in line and "= -1 ENOSPC" in line
+                    for line in writes.splitlines()
+                ):
+                    break
+                assert controller.poll() is None and time.monotonic() < deadline, (
+                    writes[-3000:],
+                    console.read_text()[-3000:],
+                    journey.errors,
+                )
+                time.sleep(0.01)
+        finally:
+            filler.unlink(missing_ok=True)
+            journey.release_held_inference.set()
+            try:
+                controller.wait(timeout=35)
+            except subprocess.TimeoutExpired:
+                controller.kill()
+                controller.wait(timeout=5)
+                raise
+
+        assert controller.returncode == 1
+        retained = transcript.read_bytes()
+        assert retained.startswith(before) and len(retained) > len(before)
+        assert not retained.endswith(b"\n")
+        journal = Journal(LocalDatabase(journey.database_path, read_only=True))
+        finished = journal.run_events(run_id)
+        detail = journal.read_view().required_run_detail(run_id)
+        assert finished.run.status is FleetRunStatus.COMPLETED
+        assert detail.outcome is FleetRunOutcome.ATTENTION_REQUIRED
+        native, verifier = detail.game_tape.repositories[0].steps
+        (claim,) = native.native_agent_observations
+        assert claim.settled and claim.failed
+        assert native.settlement is not None and native.settlement.outcome == "FAILED"
+        assert native.settlement.observed_returncode == 0
+        assert native.settlement.cleanup == "VERIFIED"
+        assert verifier.settlement is not None and verifier.settlement.outcome == "SKIPPED"
+        assert verifier.settlement.reason == "NOT_STARTED"
+        assert finished.events[: len(held.events)] == held.events
+        assert finished.pi_session is not None and finished.pi_session.native is None
+        assert finished.pi_session.persistence == "unknown"
+        assert finished.pi_session.quiescent_sequence is not None
+        assert isinstance(
+            finished.events[finished.pi_session.quiescent_sequence - 1], DescendantsQuiescentEvent
+        )
+        assert journal.inspect_pi_session(run_id).availability == "unverified"
+
+        fresh = journey.runs("events", run_id, "--after", "0", "--limit", "100", "--json")
+        assert fresh.returncode == 0, fresh.stderr
+        readback = json.loads(fresh.stdout)
+        assert readback["run"]["status"] == "COMPLETED"
+        session = readback["pi_session"]
+        assert session["persistence"] == "unknown" and session["native"] is None
+        assert session["settlement"] == native.settlement.model_dump(mode="json")
+        assert session["following_steps"] == [
+            {"step_id": verifier.step_id, "settlement": verifier.settlement.model_dump(mode="json")}
+        ]
+        refused = journey.invoke(f"run:{run_id}", _TASKS[1])
+        assert refused.returncode == 2, (refused.stdout, refused.stderr)
+        assert json.loads(refused.stdout)["code"] == PiSessionRefusalCode.SETTLEMENT_UNCERTAIN
+        visible = fresh.stdout + fresh.stderr + refused.stdout + refused.stderr
+        assert (
+            _PRIVATE_TOOL_OUTPUT not in visible
+            and _SECRET not in visible
+            and str(transcript) not in visible
+        )
+        assert transcript.read_bytes() == retained and effect.read_text() == _TOOL_EFFECT
         assert tuple(session_root.iterdir()) == (transcript.parent,)
         assert journey.requests == [_TASKS[0], _TASKS[0]] and not journey.errors
 

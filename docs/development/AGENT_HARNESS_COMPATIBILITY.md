@@ -1201,8 +1201,18 @@ the original failure after restart. The installed save fault cases inject
 file-sync ENOSPC and file-handle-close EIO after Pi writes a complete
 transcript. They also kill the claimed worker after file and directory sync
 and before Journal publication. Recovery preserves the original bytes and
-refuses continuation. Power-loss durability and a physically full filesystem
-remain unqualified.
+refuses continuation.
+
+The installed append ENOSPC case fills a private 8 MiB tmpfs during the held
+second inference, after one native tool effect. On native Linux with Pi
+1.3.0 and Bubblewrap 0.11.1, the syscall trace identifies ENOSPC on the
+Pi transcript and the file retains a short final append. The process exit
+is zero and Pi reports a settled failure. The original Run completes with
+an attention-required outcome, a failed Agent Step, verified descendant
+cleanup, and an unstarted verifier. Fresh CLI readback preserves these
+facts and reports unknown session persistence. Continuation is refused,
+the bytes remain intact, and the tool effect occurs once. Power-loss
+durability remains unqualified.
 
 ### Native Pi settlement and typed acceptance — HUG-79
 
