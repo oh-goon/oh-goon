@@ -58,6 +58,55 @@ CREATE TABLE IF NOT EXISTS execution_lease (
 CREATE UNIQUE INDEX IF NOT EXISTS execution_lease_fleet_run
     ON execution_lease(fleet_run_id) WHERE kind='FLEET';
 
+CREATE TABLE IF NOT EXISTS parallel_agent_work (
+    work_id TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL,
+    intent_json TEXT NOT NULL CHECK (json_valid(intent_json)),
+    verifier_json TEXT NOT NULL CHECK (json_valid(verifier_json)),
+    controller_json TEXT NOT NULL CHECK (json_valid(controller_json)),
+    closed INTEGER NOT NULL DEFAULT 0 CHECK (closed IN (0, 1)),
+    cancelled INTEGER NOT NULL DEFAULT 0 CHECK (cancelled IN (0, 1)),
+    CHECK (cancelled = 0 OR closed = 1)
+);
+
+CREATE TABLE IF NOT EXISTS parallel_agent_children (
+    fleet_run_id TEXT PRIMARY KEY,
+    work_id TEXT NOT NULL REFERENCES parallel_agent_work(work_id),
+    ordinal INTEGER NOT NULL CHECK (ordinal IN (0, 1)),
+    refusal TEXT,
+    cancellation_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancellation_requested IN (0, 1)),
+    UNIQUE (work_id, ordinal)
+);
+
+CREATE TABLE IF NOT EXISTS parallel_agent_notes (
+    work_id TEXT NOT NULL REFERENCES parallel_agent_work(work_id),
+    note_id INTEGER NOT NULL CHECK (note_id BETWEEN 1 AND 100),
+    writer_run_id TEXT NOT NULL REFERENCES parallel_agent_children(fleet_run_id),
+    writer_attempt_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    body TEXT,
+    body_bytes INTEGER NOT NULL CHECK (body_bytes BETWEEN 1 AND 4096),
+    PRIMARY KEY (work_id, note_id),
+    UNIQUE (work_id, writer_run_id, writer_attempt_id, request_id)
+);
+CREATE TABLE IF NOT EXISTS parallel_agent_note_deliveries (
+    work_id TEXT NOT NULL,
+    note_id INTEGER NOT NULL,
+    receiving_run_id TEXT NOT NULL REFERENCES parallel_agent_children(fleet_run_id),
+    step_id TEXT NOT NULL,
+    attempt_id TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    model TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('prepared', 'acknowledged')),
+    PRIMARY KEY (work_id, note_id, receiving_run_id, attempt_id),
+    FOREIGN KEY (work_id, note_id) REFERENCES parallel_agent_notes(work_id, note_id)
+);
+CREATE TABLE IF NOT EXISTS parallel_agent_note_expiry (
+    work_id TEXT PRIMARY KEY REFERENCES parallel_agent_work(work_id),
+    expires_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS executor_placement_queue (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,

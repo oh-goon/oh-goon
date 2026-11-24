@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import AwareDatetime, Field, computed_field, model_validator
 
+from oh_goon.core.models.agent_notes import ParallelAgentTape
 from oh_goon.core.models.agent_repair import AgentCampaignReadback
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.execution_authority_diagnostics import (
@@ -574,6 +575,9 @@ class GameTape(ImmutableModel):
     schema_name: Literal["oh-goon.game-tape/v1"] = "oh-goon.game-tape/v1"
     journal_revision: int | None = Field(default=None, ge=0)
     campaign_journal: AgentCampaignReadback | None = None
+    parallel_agent_work: ParallelAgentTape | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     pi_session: GameTapePiSessionEvidence | None = Field(
         default=None, exclude_if=lambda value: value is None
     )

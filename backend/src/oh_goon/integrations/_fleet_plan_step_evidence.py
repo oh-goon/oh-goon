@@ -280,6 +280,7 @@ def attempt_evidence(
         execution_authority_economics=tuple(_economics_evidence(item) for item in economics),
         execution_authority=execution_authority,
         model_usage=outcome.model_usage,
+        parallel_verifier=outcome.parallel_verifier,
     )
 
 

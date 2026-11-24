@@ -5,7 +5,11 @@ from collections import Counter
 from typing import TypedDict
 
 from oh_goon.core.effect_attempts import LIVE_OWNED_EFFECT_STATUSES
-from oh_goon.core.errors import JournalCorruption
+from oh_goon.core.errors import (
+    ExecutionMaterializationNotFound,
+    ExecutionMaterializationStale,
+    JournalCorruption,
+)
 from oh_goon.core.models.effect_attempt import (
     RepositoryEffectAttempt,
 )
@@ -28,14 +32,18 @@ from oh_goon.core.models.recovery import (
 )
 from oh_goon.core.models.run_admission import DirectFleetExecutionAdmission
 from oh_goon.core.models.schedule_execution import ScheduleRunRecord
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.product_identity import validate_repository_attempt_operation_id
 from oh_goon.core.vocabulary import EffectAttemptOwner
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.durable_revision import read_durable_revision
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
 from oh_goon.runtime.execution import ExecutionCoordinator, ExecutionLease
+from oh_goon.runtime.execution_materializations import ExecutionMaterializationAuthority
 from oh_goon.runtime.journal import Journal
+from oh_goon.runtime.journal_view import JournalReadView
 from oh_goon.runtime.safety_cut import (
+    CandidateEffectQuarantine,
     ConsistentRuntimeSafetyCut,
     JournalCorruptRuntimeSafetyCut,
     RuntimeSafetyCut,
@@ -89,7 +97,64 @@ class SystemInvariantAuditor:
             journal = self._journal.read_view_from_connection(connection)
         except JournalCorruption as exc:
             return JournalCorruptRuntimeSafetyCut(**common, journal_error=str(exc))
-        return ConsistentRuntimeSafetyCut(**common, journal=journal)
+        return ConsistentRuntimeSafetyCut(
+            **common,
+            journal=journal,
+            candidate_effect_quarantines=tuple(
+                scope
+                for attempt in common["effect_attempts"]
+                if (scope := self._candidate_effect_quarantine_in(connection, journal, attempt))
+                is not None
+            ),
+        )
+
+    @staticmethod
+    def _candidate_effect_quarantine_in(
+        connection: sqlite3.Connection, journal: JournalReadView, attempt: RepositoryEffectAttempt
+    ) -> CandidateEffectQuarantine | None:
+        if (
+            not attempt.quarantines_repository
+            or attempt.fleet_run_id is None
+            or attempt.execution_input_id is None
+            or not isinstance(attempt.target, FleetPlanTarget)
+        ):
+            return None
+        candidate = attempt.target.candidate_workspace
+        if candidate is None or candidate.parallel_work_id is None:
+            return None
+        original = journal.run_detail(attempt.fleet_run_id)
+        if (
+            original is None
+            or not isinstance(original.execution, DirectFleetExecutionAdmission)
+            or original.execution.concurrency is None
+            or original.run.target != attempt.target
+            or candidate.fleet_run_id != attempt.fleet_run_id
+            or candidate.workspace.repository_id != attempt.repository.repository_id
+        ):
+            return None
+        try:
+            materialization = ExecutionMaterializationAuthority.materialization_in(
+                connection, attempt.execution_input_id
+            )
+        except (ExecutionMaterializationNotFound, ExecutionMaterializationStale, ValueError):
+            return None
+        if (
+            materialization.writer_scope_kind != "native_namespace_scope"
+            or materialization.attempt_id != attempt.operation_id
+            or materialization.workspace_id != candidate.workspace.workspace_id
+            or materialization.input_checkpoint_id != candidate.checkpoint.checkpoint_id
+            or materialization.input_artifact_ids
+            != (candidate.source.authority_id, attempt.target.execution_digest)
+            or materialization.workspace_device != candidate.workspace_device
+            or materialization.workspace_inode != candidate.workspace_inode
+            or materialization.workspace_mode != candidate.workspace_mode
+        ):
+            return None
+        return CandidateEffectQuarantine(
+            operation_id=attempt.operation_id,
+            parallel_work_id=candidate.parallel_work_id,
+            workspace_id=candidate.workspace.workspace_id,
+        )
 
     def audit(self, cut: RuntimeSafetyCut | None = None) -> InvariantAudit:
         cut = cut or self.read_cut()
@@ -333,20 +398,31 @@ class SystemInvariantAuditor:
         return findings
 
     @staticmethod
-    def _quarantine_findings(cut: RuntimeSafetyCut) -> list[InvariantFinding]:
-        return [
-            InspectRepositoryEffectFinding(
-                finding_type="INSPECT_REPOSITORY_EFFECT",
-                code="REPOSITORY_EFFECT_QUARANTINED",
-                severity=InvariantSeverity.WARNING,
-                message=(
-                    f"Repository {item.repository.repository_id} remains quarantined by "
-                    f"{item.origin.kind.value.lower()} effect {item.operation_id} ({item.status.value})"
-                ),
-                operation_id=item.operation_id,
+    def _quarantine_findings(cut: ConsistentRuntimeSafetyCut) -> list[InvariantFinding]:
+        candidate_workspaces = {
+            scope.operation_id: scope.workspace_id for scope in cut.candidate_effect_quarantines
+        }
+        findings: list[InvariantFinding] = []
+        for item in effect_quarantines(cut.effect_attempts):
+            workspace_id = candidate_workspaces.get(item.operation_id)
+            subject = (
+                f"Candidate workspace {workspace_id}"
+                if workspace_id is not None
+                else f"Repository {item.repository.repository_id}"
             )
-            for item in effect_quarantines(cut.effect_attempts)
-        ]
+            findings.append(
+                InspectRepositoryEffectFinding(
+                    finding_type="INSPECT_REPOSITORY_EFFECT",
+                    code="REPOSITORY_EFFECT_QUARANTINED",
+                    severity=InvariantSeverity.WARNING,
+                    message=(
+                        f"{subject} remains quarantined by {item.origin.kind.value.lower()} "
+                        f"effect {item.operation_id} ({item.status.value})"
+                    ),
+                    operation_id=item.operation_id,
+                )
+            )
+        return findings
 
     @staticmethod
     def _schedule_findings(cut: RuntimeSafetyCut) -> list[InvariantFinding]:

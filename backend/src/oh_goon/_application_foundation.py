@@ -42,6 +42,7 @@ from oh_goon.runtime._executor_configuration import (
     ExecutorPoolConfiguration,
     configured_executor_pool,
 )
+from oh_goon.runtime.agent_notes import AgentNotesStore
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.diagnostics import DiagnosticRouter, JsonlDiagnosticSink, StderrDiagnosticSink
 from oh_goon.runtime.effect_attempts import RepositoryEffectAttemptStore
@@ -51,6 +52,7 @@ from oh_goon.runtime.game_tape_live_output import GameTapeLiveOutputStore
 from oh_goon.runtime.journal import Journal
 from oh_goon.runtime.league_folders import LeagueFolderStore
 from oh_goon.runtime.lifecycle import RuntimeLifecycle
+from oh_goon.runtime.parallel_agent_work import maintain_parallel_note_retention
 from oh_goon.runtime.safety import RuntimeSafetyGate
 from oh_goon.runtime.schedule_definitions import ScheduleDefinitionStore
 from oh_goon.runtime.schedule_executions import ScheduleExecutionStore
@@ -369,6 +371,8 @@ def build_runtime_foundation(
         effect_settlement,
         recover=startup_purpose == "application",
     )
+    if startup_purpose == "application":
+        maintain_parallel_note_retention(database)
     diagnostics = DiagnosticRouter(
         (StderrDiagnosticSink(),)
         if startup_purpose == "observation"
@@ -439,6 +443,7 @@ def build_runtime_foundation(
         effect_fence=RepositoryEffectFence(git),
         settlement=effect_settlement,
         state_paths=state_paths,
+        agent_notes=AgentNotesStore(database, local.journal),
     )
     direct_operations = DirectEffectAdmission(
         local.journal,

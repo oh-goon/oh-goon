@@ -32,6 +32,7 @@ from oh_goon.core.models.fleet_plan_release_evidence import (
 )
 from oh_goon.core.models.fleet_plan_step_primitives import StepFailurePolicy, StepLifecycle
 from oh_goon.core.models.model_usage import ModelUsageReport
+from oh_goon.core.models.parallel_candidate_verification import ParallelCandidateVerifierObservation
 from oh_goon.engine.command import CommandResult, CommandSupervisorReceipt
 from oh_goon.engine.command_runtime_authority import RuntimeAuthorityReceipt
 from oh_goon.engine.errors import OperationCancelledError
@@ -71,6 +72,7 @@ class StepOutcome:
     resource_cleanup: Literal["verified", "unverified"] = "verified"
     failure_kind: PlanStepFailureKind | None = None
     model_usage: ModelUsageReport | None = None
+    parallel_verifier: ParallelCandidateVerifierObservation | None = None
 
     def __post_init__(self) -> None:
         if self.supervisor is not None and (

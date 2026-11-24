@@ -1449,6 +1449,17 @@
       "observedExit": "Observerad processreturkod",
       "unavailable": "Evidens för stegets fastställda resultat saknas."
     },
+    "parallel": {
+      "title": "Parallellt agentarbete",
+      "task": "Uppgiftsidentitet",
+      "base": "Basrevision",
+      "publications": "Publicerade anteckningar ({{count}})",
+      "deliveries": "Leveranser av anteckningar ({{count}})",
+      "reply": "Svar på #{{number}}",
+      "expired": "Anteckningen har löpt ut",
+      "prepared": "Förberedd",
+      "acknowledged": "Bekräftad"
+    },
     "campaign": {
       "title": "Agentkampanjens journal",
       "identity": "Kampanj",

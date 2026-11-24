@@ -29,7 +29,7 @@ from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.models.workspace import CandidateCheckpoint, WorkspaceRef, WorkspaceState
 from oh_goon.core.path_authority import canonical_path, ensure_private_directory, storage_component
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
-from oh_goon.core.product_identity import new_checkpoint_id, new_workspace_id
+from oh_goon.core.product_identity import new_checkpoint_id, new_workspace_id, stable_id
 from oh_goon.core.time import utc_now
 from oh_goon.core.vocabulary import FleetRunEventType
 from oh_goon.core.vocabulary.workspace import WorkspaceKind, WorkspaceLifecycleState
@@ -209,7 +209,26 @@ class RepositoryWorkspaceAuthority:
         workspace_id: str | None = None,
     ) -> WorkspaceRef:
         """Create durable workspace identity/state without materializing repository bytes."""
+        with self._database.transaction(write=True) as connection:
+            return self.request_in(
+                connection,
+                repository_id=repository_id,
+                base_revision=base_revision,
+                kind=kind,
+                workspace_id=workspace_id,
+            )
 
+    def request_in(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        repository_id: str,
+        base_revision: str,
+        kind: WorkspaceKind,
+        workspace_id: str | None = None,
+    ) -> WorkspaceRef:
+        """Reserve identity in an original owner transaction before physical effects."""
+        self._database.require_atomic_write_cut(connection)
         reference = WorkspaceRef(
             workspace_id=workspace_id or new_workspace_id(),
             repository_id=repository_id,
@@ -218,35 +237,70 @@ class RepositoryWorkspaceAuthority:
         )
         now = utc_now().isoformat()
         try:
-            with self._database.transaction(write=True) as connection:
-                connection.execute(
-                    """
-                    INSERT INTO workspaces(
-                        workspace_id, repository_id, base_revision, kind, created_at
-                    ) VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        reference.workspace_id,
-                        reference.repository_id,
-                        reference.base_revision,
-                        reference.kind.value,
-                        now,
-                    ),
-                )
-                connection.execute(
-                    """
-                    INSERT INTO workspace_state(
-                        workspace_id, lifecycle_state, state_version,
-                        current_lease_id, current_checkpoint_id, updated_at
-                    ) VALUES (?, 'REQUESTED', 0, NULL, NULL, ?)
-                    """,
-                    (reference.workspace_id, now),
-                )
+            connection.execute(
+                """
+                INSERT INTO workspaces(
+                    workspace_id, repository_id, base_revision, kind, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    reference.workspace_id,
+                    reference.repository_id,
+                    reference.base_revision,
+                    reference.kind.value,
+                    now,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO workspace_state(
+                    workspace_id, lifecycle_state, state_version,
+                    current_lease_id, current_checkpoint_id, updated_at
+                ) VALUES (?, 'REQUESTED', 0, NULL, NULL, ?)
+                """,
+                (reference.workspace_id, now),
+            )
         except sqlite3.IntegrityError as exc:
             raise WorkspaceStateStale(
                 f"Workspace identity is already allocated: {reference.workspace_id}"
             ) from exc
         return reference
+
+    def observe_requested_state_in(
+        self, connection: sqlite3.Connection, workspace: WorkspaceRef
+    ) -> WorkspaceState | None:
+        """Read a planned workspace in the same cut as its durable original request."""
+        row = connection.execute(
+            "SELECT workspace_id, repository_id, base_revision, kind "
+            "FROM workspaces WHERE workspace_id=?",
+            (workspace.workspace_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        if _workspace_ref(row) != workspace:
+            raise WorkspaceStateStale("Planned workspace differs from its durable identity")
+        return self._state_for_update(connection, workspace.workspace_id)
+
+    @staticmethod
+    def parallel_child_reference(
+        *,
+        work_id: str,
+        fleet_run_id: str,
+        repository_id: str,
+        base_revision: str,
+        kind: WorkspaceKind,
+    ) -> WorkspaceRef:
+        """Resolve durable workspace lineage from one reserved lane and workspace role."""
+        prefix = "workspace"
+        identity = stable_id(
+            prefix, {"parallel_work_id": work_id, "fleet_run_id": fleet_run_id, "kind": kind.value}
+        )
+        return WorkspaceRef(
+            workspace_id=identity[: len(prefix) + 1 + 32],
+            repository_id=repository_id,
+            base_revision=base_revision,
+            kind=kind,
+        )
 
     def reference(self, workspace_id: str) -> WorkspaceRef:
         with self._database.transaction() as connection:

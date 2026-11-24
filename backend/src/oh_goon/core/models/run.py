@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import AwareDatetime, Field, computed_field, model_validator
 
 from oh_goon.core.errors import ErrorKind, FleetDomainError
+from oh_goon.core.models.agent_notes import ParallelAgentTape
 from oh_goon.core.models.agent_repair import AgentCampaignReadback
 from oh_goon.core.models.base import ImmutableModel
 from oh_goon.core.models.capability import CapabilitySnapshot
@@ -228,6 +229,7 @@ class FleetRunDetail(ImmutableModel):
 
     journal_revision: int | None = Field(default=None, ge=0)
     campaign_journal: AgentCampaignReadback | None = None
+    parallel_agent_work: ParallelAgentTape | None = Field(default=None, exclude=True)
     run: FleetRunState
     execution: FleetExecutionAdmission
     resource_observation: RunResourceEnvelopeObservation | None = Field(

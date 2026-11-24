@@ -7,7 +7,7 @@ import os
 import shlex
 import shutil
 import subprocess
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +30,8 @@ from oh_goon.integrations.fleet_plan_bubblewrap_isolation import BubblewrapProce
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution import ExecutionCoordinator
 from oh_goon.runtime.execution.sqlite_lease import WorkerResourceReservation
+
+NativeTwoRunModelTurn = Callable[[str, dict[str, Any]], tuple[dict[str, Any], str]]
 
 PAIR_VERIFICATION_ARGV = (
     "/usr/bin/python3",
@@ -70,6 +72,7 @@ class NativeTwoRunProvider:
     facts: dict[str, dict[str, Any]]
     errors: list[str]
     database_path: Path
+    forbidden_paths: dict[str, tuple[Path, ...]]
 
     def release_all(self) -> None:
         for event in (*self.release.values(), *self.finish.values()):
@@ -91,13 +94,16 @@ class NativeTwoRunCase(NativeTwoRunProvider):
             verification=(PAIR_VERIFICATION_ARGV,),
         )
 
-    def active_reservations(self) -> dict[str, WorkerResourceReservation]:
+    def active_reservations(
+        self, fleet_run_ids: dict[str, str] | None = None
+    ) -> dict[str, WorkerResourceReservation]:
         database = LocalDatabase(self.database_path, read_only=True)
         owner = ExecutionCoordinator(database)
         with database.transaction() as connection:
             result = {}
             for label in ("a", "b"):
-                value = owner.worker_resource_reservation_in(connection, f"two-run-{label}")
+                run_id = f"two-run-{label}" if fleet_run_ids is None else fleet_run_ids[label]
+                value = owner.worker_resource_reservation_in(connection, run_id)
                 assert value is not None
                 result[label] = value
             return result
@@ -111,6 +117,8 @@ def native_two_run_provider(
     program: Path,
     public_runtime: Path,
     probe_namespaces: bool = False,
+    same_repository: bool = False,
+    model_turn: NativeTwoRunModelTurn | None = None,
 ) -> Generator[NativeTwoRunProvider, None, None]:
     """No alternate executor: the fixture supplies only a selected model protocol."""
     root.mkdir(parents=True, exist_ok=True)
@@ -132,6 +140,9 @@ def native_two_run_provider(
     os.environ.pop("OH_GOON_EXECUTORS_FILE", None)
     repositories: dict[str, Path] = {}
     for label in ("a", "b", "third"):
+        if same_repository and label == "b":
+            repositories[label] = repositories["a"]
+            continue
         repository = root / "repositories" / label
         repository.mkdir(parents=True)
         (repository / "code.py").write_text(f"# Original repository {label}\nVALUE = 41\n")
@@ -156,6 +167,7 @@ def native_two_run_provider(
     requests: dict[str, list[dict[str, Any]]] = {label: [] for label in repositories}
     facts: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
+    forbidden_paths: dict[str, tuple[Path, ...]] = {}
     tool_sent: set[str] = set()
     lock = Lock()
 
@@ -179,6 +191,9 @@ def native_two_run_provider(
                     self.reply(
                         {"role": "assistant", "content": "Native candidate context loaded"}, "stop"
                     )
+                    return
+                if model_turn is not None:
+                    self.reply(*model_turn(label, body))
                     return
                 if label not in tool_sent:
                     entered[label].set()
@@ -205,8 +220,21 @@ def native_two_run_provider(
                             "namespace_probe['mount_namespace']=os.readlink('/proc/self/ns/mnt')\n"
                         )
                         facts_source = facts_source[:-1] + ",'namespaces':namespace_probe}"
+                    if same_repository:
+                        forbidden = tuple(str(path) for path in forbidden_paths[label])
+                        source += (
+                            f"for path in {forbidden!r}:\n"
+                            " for mode in ('rb','ab'):\n"
+                            "  try:\n"
+                            "   with pathlib.Path(path).open(mode): pass\n"
+                            "  except OSError: pass\n"
+                            "  else: raise AssertionError('foreign path exposed')\n"
+                            "marker=pathlib.Path('.git')\n"
+                            "assert not marker.is_file() or 'gitdir:' not in marker.read_text()\n"
+                        )
+                    result = "VALUE = 43\n" if same_repository and label == "b" else "VALUE = 42\n"
                     source += (
-                        "pathlib.Path('code.py').write_text('VALUE = 42\\n')\n"
+                        f"pathlib.Path('code.py').write_text({result!r})\n"
                         f"print('HUG223_FACTS:'+json.dumps({facts_source}))\n"
                     )
                     command = shlex.join(("/usr/bin/python3", "-c", source))
@@ -327,6 +355,7 @@ def native_two_run_provider(
             facts=facts,
             errors=errors,
             database_path=root / "state" / "application.sqlite",
+            forbidden_paths=forbidden_paths,
         )
     finally:
         for event in (*release.values(), *finish.values()):
@@ -344,6 +373,8 @@ def native_two_run_case(
     program: Path,
     public_runtime: Path,
     probe_namespaces: bool = False,
+    same_repository: bool = False,
+    model_turn: NativeTwoRunModelTurn | None = None,
 ) -> Generator[NativeTwoRunCase, None, None]:
     """Layer the original application over the separately owned model endpoint."""
     with native_two_run_provider(
@@ -352,6 +383,8 @@ def native_two_run_case(
         program=program,
         public_runtime=public_runtime,
         probe_namespaces=probe_namespaces,
+        same_repository=same_repository,
+        model_turn=model_turn,
     ) as provider:
         backend = BubblewrapProcessIsolation(shutil.which("bwrap") or "")
         runtime = ApplicationRuntime.build(
@@ -369,6 +402,7 @@ def native_two_run_case(
             facts=provider.facts,
             errors=provider.errors,
             database_path=provider.database_path,
+            forbidden_paths=provider.forbidden_paths,
             runtime=runtime,
         )
         try:

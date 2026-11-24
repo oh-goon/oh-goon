@@ -25,6 +25,7 @@ from oh_goon.core.errors import (
 )
 from oh_goon.core.execution_lifecycle_validation import pi_writer_step_settled
 from oh_goon.core.game_tape_pi_session import project_pi_session_evidence
+from oh_goon.core.models.agent_notes import ParallelAgentTape
 from oh_goon.core.models.agent_providers import PiSessionIdentityMismatch, PiSessionUnavailable
 from oh_goon.core.models.agent_repair import (
     MAX_AGENT_CAMPAIGN_MESSAGE_CHARS,
@@ -214,6 +215,11 @@ class Journal:
 
     def read_view_from_connection(self, connection: sqlite3.Connection) -> JournalReadView:
         return self._facts.read_view(connection)
+
+    def parallel_agent_tape(self, work_id: str) -> ParallelAgentTape:
+        from oh_goon.runtime.agent_notes import AgentNotesStore
+
+        return AgentNotesStore(self._database, self).tape(work_id)
 
     def begin_agent_campaign(self, intent: AgentCampaignIntent) -> AgentCampaignReadback:
         """Retain original intent; this does not admit any child or resume work."""
@@ -1375,11 +1381,20 @@ class Journal:
             )
         view = self._facts.read_view(connection)
         active = view.active_runs()
+        from oh_goon.runtime.parallel_agent_work import require_parallel_candidate_binding_in
+
+        work_id = require_parallel_candidate_binding_in(
+            connection, fleet_run_id=fleet_run_id, target=intent.target
+        )
         concurrency = (
             intent.execution.concurrency
             if isinstance(intent.execution, DirectFleetExecutionAdmission)
             else None
         )
+        if work_id is not None and concurrency is None:
+            raise JournalConflict(
+                "Parallel Agent work requires its original concurrent Run reservation"
+            )
         if active and concurrency is None:
             raise JournalConflict(
                 f"Fleet run {active[0].fleet_run_id} ({active[0].action.value}) is already "
@@ -1400,6 +1415,7 @@ class Journal:
             candidate = intent.target.candidate_workspace
             assert candidate is not None
             allocated = {candidate.workspace.workspace_id, candidate.source_workspace.workspace_id}
+            candidate_root = (candidate.workspace_device, candidate.workspace_inode)
             for lease in leases.retained_leases_in(connection):
                 if lease.fleet_run_id == fleet_run_id:
                     continue
@@ -1426,10 +1442,21 @@ class Journal:
                     raise JournalConflict(
                         "Concurrent Runs cannot share an owned candidate allocation"
                     )
+                if candidate_root == (previous.workspace_device, previous.workspace_inode):
+                    raise JournalConflict("Concurrent Runs cannot share a physical candidate root")
                 if candidate.workspace.repository_id == previous.workspace.repository_id:
-                    raise JournalConflict(
-                        "Initial concurrent Runs require distinct registered repository subjects"
-                    )
+                    if work_id is None or previous.parallel_work_id != work_id:
+                        raise JournalConflict(
+                            "Concurrent Runs require distinct registered repository subjects "
+                            "or the same admitted Parallel Agent work"
+                        )
+                    if (
+                        candidate.workspace.base_revision != previous.workspace.base_revision
+                        or candidate.source != previous.source
+                    ):
+                        raise JournalConflict(
+                            "Parallel Agent Runs must share the exact captured base"
+                        )
         if view.run_detail(fleet_run_id) is not None:
             raise JournalConflict(f"Fleet run already exists: {fleet_run_id}")
         _require_valid_readmission(view, fleet_run_id, intent, repository_scope, targets)

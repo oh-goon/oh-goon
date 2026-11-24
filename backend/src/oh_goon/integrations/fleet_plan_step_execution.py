@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Protocol, TypedDict, Unpack, cast
 
 from oh_goon.core.agent_model_selection import (
@@ -62,6 +62,11 @@ from oh_goon.core.models.fleet_plan_observation_steps import ResolvedDependencyI
 from oh_goon.core.models.fleet_plan_requirements import UV_PROJECT_SELECTION_SWITCHES
 from oh_goon.core.models.fleet_plan_step_primitives import PlanStreamOutput
 from oh_goon.core.models.lace_trusted_local import TrustedLocalRunConsent
+from oh_goon.core.models.parallel_candidate_verification import (
+    VERIFIER_SOURCE_ROOT,
+    ParallelCandidateVerifier,
+    is_parallel_verifier_step_id,
+)
 from oh_goon.core.models.pi_session_storage import PiSessionDirectoryPin
 from oh_goon.core.models.termination import TerminationSignal
 from oh_goon.core.path_authority import (
@@ -69,6 +74,7 @@ from oh_goon.core.path_authority import (
     canonical_path,
 )
 from oh_goon.core.path_layouts import AttemptPathLayout
+from oh_goon.core.ports.agent_notes import AgentNotesForStep
 from oh_goon.core.ports.diagnostics import DiagnosticEmitter
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.ports.pi_session_writer import PiSessionWriter
@@ -145,6 +151,10 @@ from oh_goon.integrations.hashmarks import (
     prompt_observation,
     task_evidence_prompt,
 )
+from oh_goon.integrations.parallel_candidate_verifier import (
+    observe_parallel_verifier_result,
+    prepare_parallel_verifier,
+)
 
 
 class CommandRunner(Protocol):
@@ -170,6 +180,7 @@ class CommandRunner(Protocol):
         private_configuration_directory: Path | None = None,
         preserve_native_executable_path: bool = True,
         pi_session_directory: PiSessionDirectoryPin | None = None,
+        read_only_mount_cwd: PurePosixPath | None = None,
     ) -> CommandResult: ...
 
 
@@ -192,6 +203,7 @@ class _CommandRunOptions(TypedDict, total=False):
     private_configuration_directory: Path | None
     preserve_native_executable_path: bool
     pi_session_directory: PiSessionDirectoryPin | None
+    read_only_mount_cwd: PurePosixPath | None
 
 
 class _IsolatedExecuteOptions(TypedDict, total=False):
@@ -265,9 +277,11 @@ class StepRuntime:
     workspace_pin: Callable[[Path], AbstractContextManager[Callable[[], None]]] | None = None
     native_profile: ResolvedNativeAgent | None = None
     pi_session_writer: PiSessionWriter | None = None
+    agent_notes_for_step: AgentNotesForStep | None = None
     workspace_materialization: ExecutionMaterialization | None = None
     workspace_directory_fd: int | None = None
     require_candidate_current: Callable[[], None] | None = None
+    candidate_verifier: ParallelCandidateVerifier | None = None
     project_sources: Mapping[str, Path] = field(default_factory=dict)
     project_workspaces: Mapping[str, Path] = field(default_factory=dict)
     on_unsettled_run_process: Callable[[], None] | None = None
@@ -384,7 +398,10 @@ def execute_direct_step(
                         process,
                         step,
                         attempt_number,
-                        output_observer,
+                        None
+                        if runtime.agent_notes_for_step is not None
+                        and isinstance(step, ResolvedAgentStep)
+                        else output_observer,
                         runtime.diagnostics,
                         runtime.fleet_run_id,
                         runtime.repository_id,
@@ -1111,6 +1128,38 @@ def _execute_command_step(
     repository: Path, step: ResolvedCommandStep, process: _StepProcess, runtime: StepRuntime
 ) -> StepOutcome:
     argv = step.argv
+    if runtime.candidate_verifier is not None and is_parallel_verifier_step_id(step.step_id):
+        verifier = runtime.candidate_verifier
+        if argv != verifier.argv or runtime.require_candidate_current is None:
+            raise FleetPlanInvalid(
+                "Verification Step differs from its original candidate authority"
+            )
+        runtime.require_candidate_current()
+        source, workspace_fingerprint, mounts = prepare_parallel_verifier(
+            repository, process.paths.config, verifier, cancel_requested=runtime.cancel_requested
+        )
+        result = from_command(
+            process.command_runner(
+                *argv,
+                cwd=step_working_directory(repository, step),
+                timeout=_command_timeout(step, runtime),
+                cancel_requested=runtime.cancel_requested,
+                env=process.environment,
+                runtime_supervision=runtime.runtime_supervision,
+                read_only_mounts=mounts,
+                read_only_mount_cwd=VERIFIER_SOURCE_ROOT,
+            )
+        )
+        return replace(
+            result,
+            parallel_verifier=observe_parallel_verifier_result(
+                repository,
+                source,
+                workspace_fingerprint,
+                verifier,
+                cancel_requested=runtime.cancel_requested,
+            ),
+        )
     if step.uv is not None and argv[:3] != ("uv", "run", f"--{step.uv.lock_mode}"):
         raise FleetPlanInvalid(f"Native uv argv mode differs from resolved step {step.step_id}")
     managed = process.managed_runtime
@@ -1397,6 +1446,7 @@ def _direct_step_command_runner(
     retain_output_tail: bool = False,
     preserve_stdout_whitespace: bool = False,
     pi_session_directory: PiSessionDirectoryPin | None = None,
+    read_only_mount_cwd: PurePosixPath | None = None,
 ) -> CommandResult:
     if (
         read_only_mounts
@@ -1406,6 +1456,7 @@ def _direct_step_command_runner(
         or host_network
         or private_configuration_directory is not None
         or pi_session_directory is not None
+        or read_only_mount_cwd is not None
         or not preserve_native_executable_path
         or retain_output_tail
     ):

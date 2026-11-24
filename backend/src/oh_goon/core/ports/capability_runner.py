@@ -10,8 +10,9 @@ from oh_goon.core.models.fleet_plan_evidence import PlanIsolationBackendEvidence
 from oh_goon.core.models.operation import OperationExecution
 from oh_goon.core.models.run import FleetRunDetail
 from oh_goon.core.models.run_admission import PlanRepositoryAdmissionEvidence
-from oh_goon.core.models.target import OperationTarget
+from oh_goon.core.models.target import FleetPlanTarget, OperationTarget
 from oh_goon.core.models.termination import TerminationSignal
+from oh_goon.core.ports.agent_notes import AgentNotesForStep
 from oh_goon.core.ports.local_lace_intent import LocalLaceIntentReservation
 from oh_goon.core.ports.pi_session_writer import PiSessionWriter
 from oh_goon.core.vocabulary import EffectBoundaryKind
@@ -32,6 +33,7 @@ class CapabilityExecutionRequest:
     require_execution_current: Callable[[], None] | None = None
     require_settlement_current: Callable[[], None] | None = None
     pi_session_writer: PiSessionWriter | None = None
+    agent_notes_for_step: AgentNotesForStep | None = None
 
     def __post_init__(self) -> None:
         if self.attempt.capability != self.definition.durable_snapshot():
@@ -70,6 +72,16 @@ class CapabilityExecutionRequest:
             or self.admitted_run is not None
         ):
             raise ValueError("Pi writer custody requires a direct admitted Fleet repository")
+        if self.agent_notes_for_step is not None and (
+            not isinstance(self.attempt.target, FleetPlanTarget)
+            or self.attempt.target.candidate_workspace is None
+            or self.attempt.target.candidate_workspace.parallel_work_id is None
+            or self.attempt.fleet_run_id is None
+            or self.repository_admission is None
+            or self.isolation_backend is not None
+            or self.pi_session_writer is not None
+        ):
+            raise ValueError("Agent notes require an admitted parallel candidate Run")
 
 
 class PreparedRunnerExecution(Protocol):

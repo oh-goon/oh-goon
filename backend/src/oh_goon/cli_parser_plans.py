@@ -177,6 +177,45 @@ def _add_run_readback_commands[_Parser: argparse.ArgumentParser](
     plan_subparsers: argparse._SubParsersAction[_Parser],
 ) -> None:
     """Original Fleet history and readback retain their exact identity authority."""
+    parallel = plan_subparsers.add_parser(
+        "start-parallel", help="Run two original candidates on one task and Git base"
+    )
+    parallel.add_argument("request", type=Path)
+    parallel.add_argument("--json", action="store_true", dest="as_json")
+    parallel.set_defaults(fleet_run_id=None)
+    work = plan_subparsers.add_parser(
+        "parallel-work", help="Inspect both original Runs for an exact parallel work ID"
+    )
+    work.add_argument("work_id")
+    work.add_argument("--json", action="store_true", dest="as_json")
+    work.set_defaults(fleet_run_id=None)
+    cancel_work = plan_subparsers.add_parser(
+        "cancel-parallel", help="Request cancellation of a parallel task or one of its Runs"
+    )
+    cancel_work.add_argument("work_id")
+    cancel_work.add_argument("--run", dest="fleet_run_id")
+    cancel_work.add_argument("--json", action="store_true", dest="as_json")
+    notes = plan_subparsers.add_parser(
+        "parallel-notes", help="Read bounded notes and delivery evidence for an exact task"
+    )
+    notes.add_argument("work_id")
+    notes.add_argument("--after", type=_nonnegative_cursor, default=0)
+    notes.add_argument("--receipt-run", help="Author Run of an exact note request")
+    notes.add_argument("--request-id", help="Exact note publication request identity")
+    notes.add_argument("--json", action="store_true", dest="as_json")
+    notes.set_defaults(fleet_run_id=None)
+    verify = plan_subparsers.add_parser(
+        "verify-candidate", help="Read the exact independent verification of one parallel candidate"
+    )
+    verify.add_argument("fleet_run_id")
+    verify.add_argument("--json", action="store_true", dest="as_json")
+    export_candidate = plan_subparsers.add_parser(
+        "export-candidate", help="Export the complete patch of one exact verified candidate"
+    )
+    export_candidate.add_argument("fleet_run_id")
+    export_candidate.add_argument("--checkpoint-id", required=True)
+    export_candidate.add_argument("--output", type=Path, required=True)
+    export_candidate.add_argument("--json", action="store_true", dest="as_json")
     history = plan_subparsers.add_parser(
         "list", help="Page original Run history in the selected state root"
     )

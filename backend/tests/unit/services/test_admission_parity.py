@@ -47,7 +47,9 @@ class _SafetyProof:
             active_schedules=(),
         )
 
-    def require_repository_effects_allowed(self, cut, *, safety, repository_ids) -> None:
+    def require_repository_effects_allowed(
+        self, cut, *, safety, repository_ids, candidate=None
+    ) -> None:
         del cut, safety, repository_ids
 
 
@@ -102,7 +104,9 @@ class _CommitDuringSafetyProof:
             active_schedules=(),
         )
 
-    def require_repository_effects_allowed(self, cut, *, safety, repository_ids) -> None:
+    def require_repository_effects_allowed(
+        self, cut, *, safety, repository_ids, candidate=None
+    ) -> None:
         del cut, safety, repository_ids
 
 
@@ -134,7 +138,9 @@ class _ClaimDuringSafetyProof:
             active_schedules=(),
         )
 
-    def require_repository_effects_allowed(self, cut, *, safety, repository_ids) -> None:
+    def require_repository_effects_allowed(
+        self, cut, *, safety, repository_ids, candidate=None
+    ) -> None:
         del cut, safety, repository_ids
 
 

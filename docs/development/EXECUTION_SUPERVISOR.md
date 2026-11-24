@@ -31,9 +31,9 @@ It is not a claim of zero preparatory processes or source transport.
 `ApplicationRuntime.build(run_concurrency=...)` selects the bounded two-Run
 contract in the [current architecture decision](ARCHITECTURE_DECISIONS.md#explicit-capacity-for-two-independent-native-runs).
 It requires an already selected native aggregate slice, full worker ceilings
-and controller reserve, headless owned Pi/Bubblewrap candidates over distinct
-registered subjects, and one
-original controller/session/database. A third request is busy; another runtime
+and controller reserve, headless owned Pi/Bubblewrap candidates, and one
+original controller/session/database. Same-subject candidates require the exact
+admitted parallel task and candidate-local custody. A third request is busy; another runtime
 cannot borrow a slot. DIRECT and global mutation fences still consider every
 retained execution lease. There is no queue or automatic capacity promotion.
 

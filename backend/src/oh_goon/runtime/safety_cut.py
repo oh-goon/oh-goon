@@ -9,6 +9,15 @@ from oh_goon.runtime.journal_view import JournalReadView
 
 
 @dataclass(frozen=True, slots=True)
+class CandidateEffectQuarantine:
+    """A repository effect whose original native writer was limited to one worktree."""
+
+    operation_id: str
+    parallel_work_id: str
+    workspace_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class _RuntimeSafetyCutBase:
     """Facts that remain meaningful even when Journal integrity cannot be established."""
 
@@ -24,6 +33,7 @@ class ConsistentRuntimeSafetyCut(_RuntimeSafetyCutBase):
     """One transactionally consistent safety cut with a validated Journal view."""
 
     journal: JournalReadView
+    candidate_effect_quarantines: tuple[CandidateEffectQuarantine, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
