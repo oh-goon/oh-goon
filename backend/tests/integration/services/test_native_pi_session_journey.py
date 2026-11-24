@@ -67,6 +67,10 @@ _PRIVATE_TOOL_OUTPUT = "PI_NATIVE_PRIVATE_TOOL_OUTPUT_53"
 _TOOL_CALL_ID = "call-private-journey-tool"
 _TOOL_EFFECT = "native tool effect\n"
 _MODEL_REPLY = "The requested review is complete."
+_SEED_SKILL = "# Session journey Skill\nReview the selected source.\n"
+_REOPENED_SKILL = "# Reopened review Skill\nInspect the current value before reporting.\n"
+_SEED_SOURCE = b"VALUE = 42\n"
+_REOPENED_SOURCE = b"VALUE = 43\n"
 _INTERRUPTED_REVIEW = "The interrupted review looks complete."
 _RECOVERED_REVIEW = "The current review completed after native retry."
 _UNRELATED_TASK = "Keep this separate synthetic Pi session after retiring the first."
@@ -77,7 +81,7 @@ _TASKS = (
     "Read the explicit prior Run handoff without adopting its native session.",
 )
 
-type _ContinuationResult = Literal["error", "length", "malformed", "retry"]
+type _ContinuationResult = Literal["error", "length", "malformed", "retry", "stale"]
 
 
 def _message_text(message: dict[str, Any]) -> str:
@@ -103,6 +107,8 @@ def _provider(
     requests: list[str] = []
     source_digests: list[str] = []
     cross_harness_handoffs: list[str] = []
+    seed_evidence: str | None = None
+    reopened_evidence: str | None = None
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
@@ -120,6 +126,7 @@ def _provider(
                 self.reply({"role": "assistant", "content": "Fixture refusal."}, "stop")
 
         def respond(self) -> tuple[dict[str, Any], str]:
+            nonlocal seed_evidence, reopened_evidence
             assert self.path == "/v1/chat/completions"
             assert self.headers["Authorization"] == f"Bearer {_SECRET}"
             size = int(self.headers["Content-Length"])
@@ -143,20 +150,41 @@ def _provider(
             assert stages < (7 if unrelated else 6), "Unexpected broker inference"
             task = _UNRELATED_TASK if unrelated else _TASKS[phase]
             assert task in privileged
-            assert "# Session journey Skill" in privileged
             payload = next(
                 payload
                 for row in users.splitlines()
                 if (start := row.find('{"source_authority":')) >= 0
                 and (payload := json.JSONDecoder().raw_decode(row[start:])[0])["task"] == task
             )
-            evidence = json.loads(payload["repository_evidence"])
+            packet = payload["repository_evidence"]
+            evidence = json.loads(packet)
             assert evidence["producer"] == "Hashmarks"
             assert (
                 evidence["producer_implementation_identity"] == require_loaded_hashmarks_runtime()
             )
             assert evidence["capture_identity"] == payload["identity"]["candidate_identity"]
-            assert payload["repository_evidence"] in privileged
+            assert packet in privileged
+            instructions = privileged.replace(packet, "")
+            if continuation_result is not None and phase > 0:
+                assert payload["skill_instructions"] == _REOPENED_SKILL
+                assert _REOPENED_SKILL in instructions and _SEED_SKILL not in privileged
+                assert task in instructions.replace(_REOPENED_SKILL, "")
+                assert seed_evidence is not None and seed_evidence not in privileged
+                assert evidence["capture_identity"] != source_digests[0]
+                assert (Path(payload["captured_repository"]) / "source.py").read_bytes() == (
+                    _REOPENED_SOURCE
+                )
+                if reopened_evidence is None:
+                    reopened_evidence = packet
+                assert reopened_evidence == packet
+            else:
+                assert _SEED_SKILL in instructions
+                if continuation_result is not None:
+                    assert payload["skill_instructions"] == _SEED_SKILL
+                    assert (Path(payload["captured_repository"]) / "source.py").read_bytes() == (
+                        _SEED_SOURCE
+                    )
+                    seed_evidence = packet
             if unrelated:
                 assert _UNRELATED_TASK not in requests
                 assert not any(old_task in users for old_task in _TASKS)
@@ -213,6 +241,8 @@ def _provider(
             if phase == 1 and continuation_result is not None:
                 identity = payload["identity"]
                 scope = 17 if continuation_result == "malformed" else identity["scope_identity"]
+                if continuation_result == "stale":
+                    identity = {**identity, "candidate_identity": source_digests[0]}
                 review = {
                     "schema": "oh-goon.agent-review/v1",
                     **identity,
@@ -224,7 +254,7 @@ def _provider(
                 return (
                     {"role": "assistant", "content": json.dumps(review)},
                     continuation_result
-                    if stages == 2 and continuation_result != "malformed"
+                    if stages == 2 and continuation_result not in {"malformed", "stale"}
                     else "stop",
                 )
             return {"role": "assistant", "content": _MODEL_REPLY}, "stop"
@@ -938,10 +968,10 @@ def _held_pi_journey(
     repository = tmp_path / "repository"
     repository.mkdir()
     subprocess.run(("git", "init", "-q", str(repository)), check=True, timeout=10)
-    (repository / "source.py").write_text("VALUE = 42\n")
+    (repository / "source.py").write_bytes(_SEED_SOURCE)
     skill = tmp_path / "skill"
     skill.mkdir()
-    (skill / "SKILL.md").write_text("# Session journey Skill\nReview the selected source.\n")
+    (skill / "SKILL.md").write_text(_SEED_SKILL)
     database_path = tmp_path / "state" / "app.sqlite"
     config = tmp_path / "providers.json"
     for name, path in (
@@ -1566,7 +1596,7 @@ def test_installed_pi_retirement_recovers_after_unlink_before_journal_commit(
 
 
 @pytest.mark.certification
-@pytest.mark.parametrize("result", ["error", "length", "malformed", "retry"])
+@pytest.mark.parametrize("result", ["error", "length", "malformed", "retry", "stale"])
 def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result: _ContinuationResult
 ) -> None:
@@ -1584,6 +1614,9 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
         reader = Journal(LocalDatabase(journey.database_path, read_only=True))
         seed = reader.run_events(seed_id)
         assert seed.pi_session is not None and seed.pi_session.persistence == "observed"
+        assert seed.pi_session.native is not None
+        (journey.repository / "source.py").write_bytes(_REOPENED_SOURCE)
+        (journey.skill / "SKILL.md").write_text(_REOPENED_SKILL)
 
         read_protocol = observe_native_protocol(tmp_path, monkeypatch)
         selected, backend, git = resolve_native_cli_selection(
@@ -1606,7 +1639,15 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
                 skill=journey.skill,
                 task=_TASKS[1],
                 role="review",
-                verification=(("/usr/bin/true",),),
+                verification=(
+                    (
+                        "/usr/bin/python3",
+                        "-I",
+                        "-c",
+                        "from pathlib import Path; "
+                        f"assert Path('source.py').read_bytes() == {_REOPENED_SOURCE!r}",
+                    ),
+                ),
             )
             run_id = admitted.fleet_run_id
             assert journey.held_inference_arrived.wait(65), journey.errors
@@ -1628,9 +1669,9 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
             for record in records
             if record["type"] == "message_end" and record["message"]["role"] == "assistant"
         ]
-        expected_reasons = (
-            ["error", "stop"] if recovering else ["stop" if result == "malformed" else result]
-        )
+        expected_reasons = [result] if result in {"error", "length"} else ["stop"]
+        if recovering:
+            expected_reasons = ["error", "stop"]
         assert [message["stopReason"] for message in assistant_messages] == expected_reasons
         assert _INTERRUPTED_REVIEW in _message_text(assistant_messages[0])
         kinds = [record["type"] for record in records]
@@ -1641,6 +1682,15 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
             assert kinds.index("auto_retry_end") < kinds.index("agent_settled")
 
         agent, verifier = detail.game_tape.repositories[0].steps
+        session = detail.game_tape.pi_session
+        assert session is not None and session.prior_run_id == seed_id
+        assert session.skill_identity != seed.pi_session.skill_identity
+        assert (
+            session.repository_source is not None and seed.pi_session.repository_source is not None
+        )
+        assert session.repository_source.source_snapshot != (
+            seed.pi_session.repository_source.source_snapshot
+        )
         assert agent.settlement.observed_returncode == 0
         assert agent.settlement.outcome == ("SUCCESS" if recovering else "FAILED")
         assert agent.settlement.cleanup == "VERIFIED"
@@ -1661,6 +1711,7 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
         if recovering:
             (review,) = reviews
             assert isinstance(review, AgentReviewRecord) and review.summary == _RECOVERED_REVIEW
+            assert review.skill_identity == session.skill_identity
         else:
             assert not reviews
         assert (
@@ -1672,11 +1723,16 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
         )
         if recovering:
             assert verifier.settlement.outcome == "SUCCESS"
+        else:
+            assert verifier.settlement.outcome == "SKIPPED"
+            assert verifier.settlement.reason == "NOT_STARTED"
 
         (receipt,) = (event for event in events if isinstance(event, PiSessionWriterObservedEvent))
         quiescent = events[receipt.quiescent_sequence - 1]
         assert isinstance(quiescent, DescendantsQuiescentEvent)
         assert receipt.observation.persistence == "observed"
+        assert receipt.observation.session_id == seed.pi_session.native.session_id
+        assert receipt.observation.leaf_id != seed.pi_session.native.leaf_id
         (exited,) = (
             event
             for event in events
