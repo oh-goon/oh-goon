@@ -3,18 +3,28 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from contextlib import closing
+from pathlib import Path
 
 import pytest
 
 from oh_goon.api import dependencies
 from oh_goon.api.app import create_app
 from oh_goon.application import ApplicationRuntime
-from oh_goon.core.errors import FleetPlanInvalid
-from oh_goon.core.models.agent_providers import AgentModel, AgentProvider, AgentProvidersConfig
-from oh_goon.core.path_layouts import ContentStorePathLayout
+from oh_goon.cli_ai import resolve_native_cli_selection
+from oh_goon.core.errors import FleetPlanInvalid, PiSessionRefusalCode
+from oh_goon.core.models.agent_providers import (
+    AgentModel,
+    AgentProvider,
+    AgentProvidersConfig,
+    PiSessionIntent,
+)
+from oh_goon.core.path_layouts import ApplicationStatePathLayout, ContentStorePathLayout
 from oh_goon.core.product_identity import repository_id
+from oh_goon.runtime import goon_templates
+from oh_goon.runtime.database import LocalDatabase
 from tests.factories.agent_review import agent_review_case
 from tests.integration.api.client import authenticated_api_client
 
@@ -92,6 +102,141 @@ def test_agent_inspection_lock_and_preview_share_one_resolved_meaning(shared_age
     assert lock.json()["execution_digest"] == request["expected_execution_digest"]
     assert not runtime.runs.history().items
     assert not list(runtime.shared_plan.root.rglob("goon.lock"))
+
+
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="Bubblewrap required for Pi preview")
+def test_shared_pi_previews_ephemeral_and_refuses_persistent_sessions_before_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    subprocess.run(("git", "init", "-q", str(repository)), check=True, timeout=10)
+    (repository / "source.py").write_text("VALUE = 42\n")
+    skill = tmp_path / "skill"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("# Shared Pi fixture\nReview the source.\n")
+    catalog = tmp_path / "catalog"
+    package = catalog / "agents" / "pi-review"
+    package.mkdir(parents=True)
+    (package / "README.md").write_text("# agents/pi-review\n")
+    goon = package / "goon.yml"
+    authored = """\
+inputs:
+  repo: {type: repository_reference}
+  skill: {type: skill_reference}
+  acceptance: {type: acceptance_profile}
+steps:
+- uses: agent
+  harness: native
+  role: review
+  task: Review the selected source.
+  requested_effects:
+    repository_access: read_only
+    recipients: [configured_model]
+"""
+    goon.write_text(authored + "  session: {mode: ephemeral}\n")
+    monkeypatch.setattr(goon_templates, "default_goon_templates_root", lambda: catalog)
+
+    providers = tmp_path / "providers.json"
+    providers.write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "fixture": {
+                        "api": "openai-chat-completions",
+                        "base_url": "http://127.0.0.1:1",
+                    }
+                },
+                "models": {"fixture": {"provider": "fixture", "model": "test/pi"}},
+                "native_profiles": {
+                    "managed": {
+                        "backend": "bubblewrap",
+                        "allowed_agents": ["pi"],
+                        "workspace_roots": [str(repository)],
+                        "inference_profile": "fixture",
+                        "pi_rpc": True,
+                    }
+                },
+                "native_agents": {"pi": {"executable": "/usr/bin/true"}},
+            }
+        )
+    )
+    database_path = tmp_path / "state" / "app.sqlite"
+    for name, path in {
+        "XDG_CONFIG_HOME": tmp_path / "config",
+        "XDG_DATA_HOME": tmp_path / "data",
+        "OH_GOON_DB": database_path,
+        "OH_GOON_LEAGUE_FILE": tmp_path / "league.yml",
+        "OH_GOON_PROVIDERS_FILE": providers,
+    }.items():
+        monkeypatch.setenv(name, str(path))
+
+    _, backend, git = resolve_native_cli_selection(
+        agent="pi",
+        profile="managed",
+        workspace=repository,
+        config_file=providers,
+        session=PiSessionIntent(mode="ephemeral"),
+    )
+    assert backend is not None
+    runtime = ApplicationRuntime.build(
+        standard_local=True, standard_process_isolation=backend, git_service=git
+    )
+    try:
+        runtime.locations.add(repository)
+        document = runtime.shared_plan.save("shared-pi", "goons: [agents/pi-review]\n")
+        app = create_app(local_access_token="shared-pi-authority-test-token")
+        app.dependency_overrides[dependencies.shared_plan_service] = lambda: runtime.shared_plan
+        app.dependency_overrides[dependencies.fleet_run_control_plane] = lambda: runtime.runs
+        selected_repo = repository_id(repository)
+        selection = {
+            "plan_key": document.plan_key,
+            "repository_ids": [selected_repo],
+            "inputs": {"repo": "local:repo", "skill": "local:skill"},
+            "agent": {
+                "implementation": "pi",
+                "profile": "managed",
+                "acceptance": "agentic-review",
+                "repository_root": str(tmp_path),
+                "skill_root": str(tmp_path),
+            },
+        }
+        database = LocalDatabase(database_path, read_only=True)
+        revision = database.durable_revision()
+        with closing(authenticated_api_client(app)) as client:
+            preview_args = {**selection, "expected_revision": document.sha256}
+            response = client.post("/api/league/shared-plan-previews", json=preview_args)
+            assert response.status_code == 200, response.text
+            preview = response.json()
+            (team,) = preview["teams"]
+            assert team["state"] == "READY"
+            run_args = {
+                **selection,
+                "expected_plan_revision": document.sha256,
+                "expected_plan_id": preview["plan_id"],
+                "expected_execution_digest": preview["execution_digest"],
+                "repository_instance_ids": {selected_repo: team["repository_instance_id"]},
+            }
+            for mode, intent in (
+                ("new", "{mode: new}"),
+                ("continue", "{mode: continue, prior_run_id: previous-run}"),
+            ):
+                goon.write_text(authored + f"  session: {intent}\n")
+                for route, request in (
+                    ("/api/league/shared-plan-previews", preview_args),
+                    (
+                        "/api/league/shared-plan-runs",
+                        {**run_args, "fleet_run_id": f"shared-{mode}"},
+                    ),
+                ):
+                    refused = client.post(route, json=request)
+                    assert refused.status_code == 400, refused.text
+                    assert refused.json()["code"] == PiSessionRefusalCode.UNAVAILABLE
+                    assert database.durable_revision() == revision
+        assert not runtime.runs.history().items
+        assert not ApplicationStatePathLayout.from_database(database_path).pi_sessions.exists()
+    finally:
+        runtime.shutdown(wait_for_runs=True)
 
 
 @pytest.mark.parametrize("role", ["coding", "review"])

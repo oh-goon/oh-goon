@@ -32,7 +32,7 @@ from oh_goon.api.routes.fleet_snapshot import router as fleet_snapshot_router
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
 from oh_goon.core.errors import PiSessionRefusalCode, StateConflict
-from oh_goon.core.models.agent_providers import PiSessionIntent
+from oh_goon.core.models.agent_providers import PiSessionIntent, PiSessionUnavailable
 from oh_goon.core.models.agent_review import AgentReviewRecord
 from oh_goon.core.models.fleet_observation import AgentReviewObservation, NativeAgentObservation
 from oh_goon.core.models.operation import FleetPlanOperationEvidence
@@ -51,9 +51,17 @@ from oh_goon.core.models.run_events import (
     StepSucceededEvent,
     TerminationRequestedEvent,
 )
+from oh_goon.core.models.schedule import ScheduleCreate
+from oh_goon.core.models.target import FleetPlanTarget
 from oh_goon.core.path_layouts import ApplicationStatePathLayout
+from oh_goon.core.product_identity import repository_subject_instance_id
 from oh_goon.core.projections import build_fleet_snapshot
-from oh_goon.core.vocabulary import FleetRunOutcome, FleetRunStatus
+from oh_goon.core.vocabulary import (
+    FleetRunOutcome,
+    FleetRunStatus,
+    ScheduleRepositoryRunStatus,
+    ScheduleState,
+)
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
 from oh_goon.runtime.database import LocalDatabase
 from oh_goon.runtime.execution import ExecutionCoordinator
@@ -308,7 +316,9 @@ def _provider(
 
 
 @pytest.mark.certification
-def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Path) -> None:
+def test_installed_pi_session_reopens_via_initialized_plan_and_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     executable = os.environ.get("OH_GOON_NATIVE_PI")
     runtime_root = os.environ.get("OH_GOON_NATIVE_PI_RUNTIME_ROOT")
     if not executable or not runtime_root:
@@ -347,6 +357,7 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
         "XDG_CONFIG_HOME": str(tmp_path / "config"),
         "XDG_DATA_HOME": str(tmp_path / "data"),
         "OH_GOON_DB": str(database),
+        "OH_GOON_LEAGUE_FILE": str(tmp_path / "league.yml"),
         "OH_GOON_PROVIDERS_FILE": str(config),
         "OH_GOON_TEST_PI_JOURNEY_KEY": _SECRET,
     }
@@ -563,6 +574,51 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
         assert source_digests[0] != source_digests[2]
         assert first_id != second_id
 
+        read_database = LocalDatabase(database, read_only=True)
+        journal = Journal(read_database)
+        before_replay = journal.run_events(second_id)
+        target = before_replay.run.target
+        assert isinstance(target, FleetPlanTarget)
+        selected_repo = second_session["repository_id"]
+        with monkeypatch.context() as state:
+            for name in ("OH_GOON_DB", "OH_GOON_LEAGUE_FILE", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
+                state.setenv(name, environment[name])
+            runtime = ApplicationRuntime.build(standard_local=True, startup_purpose="workflow")
+            try:
+                with pytest.raises(PiSessionUnavailable):
+                    runtime.runs.rerun(second_id, new_fleet_run_id="pi-history-rerun")
+                # A retained definition from outside the public create path
+                # still has to pass the original scheduled child admission.
+                schedule = runtime.schedules.create_prepared(
+                    "pi-history-schedule",
+                    ScheduleCreate(
+                        name="Pi replay fixture",
+                        repository_ids=(selected_repo,),
+                        repository_instance_ids={
+                            selected_repo: repository_subject_instance_id(repository)
+                        },
+                        target=target,
+                        interval_minutes=60,
+                        state=ScheduleState.PAUSED,
+                    ),
+                )
+                occurrence = runtime.schedules.start(
+                    schedule.schedule_id,
+                    "pi-history-occurrence",
+                    expected_generation_id=schedule.generation_id,
+                    expected_record_version=schedule.record_version,
+                )
+                (scheduled,) = runtime.schedules.occurrence_repositories(
+                    schedule.schedule_id, occurrence.schedule_run_id
+                ).items
+                assert scheduled.status is ScheduleRepositoryRunStatus.NOT_STARTED
+                assert scheduled.failure is not None and scheduled.fleet_run_id is None
+                assert scheduled.failure.code == PiSessionRefusalCode.UNAVAILABLE
+            finally:
+                runtime.shutdown(wait_for_runs=True)
+        assert journal.run_events(second_id) == before_replay
+        assert requests == [_TASKS[0], _TASKS[0], _TASKS[1]] and not errors
+
         for readback in ("handoff", "outputs", "tape"):
             payload = json.loads(cli("runs", readback, second_id, "--json"))
             assert payload["fleet_run_id"] == second_id
@@ -573,7 +629,6 @@ def test_installed_pi_session_reopens_via_initialized_plan_and_cli(tmp_path: Pat
         feedback = json.loads(cli("runs", "feedback", second_id, "--json"))
         (goal,) = feedback["goals"]
         assert goal["summary"] is None and goal["sha256"]
-        read_database = LocalDatabase(database, read_only=True)
         revision = read_database.durable_revision()
         view = Journal(read_database).read_view()
         api = FastAPI()
