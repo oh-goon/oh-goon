@@ -1,3 +1,5 @@
+import { PARALLEL_AGENT_WORK_SCENARIO } from "./parallelAgentWork";
+
 export const SHARED_RUN_SUBMIT_RELEASE_EVENT = "oh-goon:e2e:release-shared-run-submit";
 export const ARTIFACT_OBSERVATION_REQUEST_EVENT = "oh-goon:e2e:artifact-observation-request";
 export const ARTIFACT_OBSERVATION_RELEASE_EVENT = "oh-goon:e2e:release-artifact-observation";
@@ -13,6 +15,7 @@ export interface BrowserFixtureScenarioDefinition {
   readonly campaignDecision?: "converged" | "missing" | "not_admitted";
   readonly artifactObservation?: "immediate" | "held";
   readonly catalogExploration?: "held";
+  readonly parallelAgentWork?: boolean;
 }
 
 export const BROWSER_FIXTURE_SCENARIOS = {
@@ -29,6 +32,7 @@ export const BROWSER_FIXTURE_SCENARIOS = {
   "artifact-observation": { artifactObservation: "immediate" },
   "artifact-observation-held": { artifactObservation: "held" },
   "catalog-held": { catalogExploration: "held" },
+  [PARALLEL_AGENT_WORK_SCENARIO]: { parallelAgentWork: true },
 } satisfies Record<string, BrowserFixtureScenarioDefinition>;
 
 export type BrowserFixtureScenario = keyof typeof BROWSER_FIXTURE_SCENARIOS;

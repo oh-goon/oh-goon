@@ -6,7 +6,7 @@ import { dependencyMatches, dependencyPopulationId, emptyDependencyOverview } fr
 import { CatalogFixtureApi, CATALOG_FIXTURE_PLAN_ID, catalogFixtureRunDetail } from "./fixtures/catalog";
 import { fixtureLockDriftDiagnostic } from "./fixtures/diagnostics";
 import { defaultFailureGroup, requireFailureGroup, scaleFailureGroups, scaleFailureRunId } from "./fixtures/failures";
-import { fixtureArtifactReadback, fixtureCampaignReadback, fixtureCampaignResultForId, fixtureFailureHistory, fixtureLiveOutput, fixtureRunDiff } from "./fixtures/gameTape";
+import { fixtureCampaignReadback, fixtureCampaignResultForId, fixtureFailureHistory, fixtureGameTapeReadback, fixtureLiveOutput, fixtureRunDiff } from "./fixtures/gameTape";
 import { AgentContinuationFixtureApi, CONTINUATION_CAMPAIGN_ID, fixtureStoppedCampaign } from "./fixtures/agentContinuation";
 import { fixtureObservationWindows } from "./fixtures/executionTimeline";
 import {
@@ -701,7 +701,7 @@ export class BrowserFixtureApiClient extends InMemoryApiClient {
         }
       }
     }
-    return fixtureArtifactReadback(detail, this.scenarioConfig.artifactObservation, observeArtifacts);
+    return fixtureGameTapeReadback(detail, this.scenarioConfig, observeArtifacts);
   }
 
   override async compareFleetRuns(runId: string, baselineRunId: string) {

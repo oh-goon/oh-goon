@@ -2,11 +2,21 @@ import { GameTapeStatus } from "@generated/enums";
 import type { AgentCampaignReadback, AgentCampaignResult, FleetRunDetail, GameTapeArtifactObservation, GameTapeFailureHistory, GameTapeLiveOutputBatch, GameTapeLiveOutputChunk, GameTapeRunDiff } from "@generated/models";
 
 import { PRIMARY_REPOSITORY } from "./identities";
+import { fixtureParallelAgentReadback } from "./parallelAgentWork";
 import { FIXTURE_PLAN_ID } from "./plans";
 import { ARTIFACT_OBSERVATION_RELEASE_EVENT, ARTIFACT_OBSERVATION_REQUEST_EVENT, ARTIFACT_OBSERVATION_RESPONSE_EVENT, type BrowserFixtureScenarioDefinition } from "./scenarios";
 import { FIXTURE_FINISHED, FIXTURE_NOW } from "./time";
 
-export async function fixtureArtifactReadback(
+export function fixtureGameTapeReadback(
+  detail: FleetRunDetail,
+  scenario: BrowserFixtureScenarioDefinition,
+  observeArtifacts: boolean,
+): Promise<FleetRunDetail> {
+  fixtureParallelAgentReadback(detail, scenario.parallelAgentWork === true);
+  return fixtureArtifactReadback(detail, scenario.artifactObservation, observeArtifacts);
+}
+
+async function fixtureArtifactReadback(
   detail: FleetRunDetail,
   mode: BrowserFixtureScenarioDefinition["artifactObservation"],
   observeArtifacts: boolean,
