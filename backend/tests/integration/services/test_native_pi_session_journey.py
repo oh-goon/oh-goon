@@ -67,6 +67,7 @@ _PRIVATE_TOOL_OUTPUT = "PI_NATIVE_PRIVATE_TOOL_OUTPUT_53"
 _TOOL_CALL_ID = "call-private-journey-tool"
 _TOOL_EFFECT = "native tool effect\n"
 _MODEL_REPLY = "The requested review is complete."
+_PI_REOPEN_EXIT_CODE = 23
 _SEED_SKILL = "# Session journey Skill\nReview the selected source.\n"
 _REOPENED_SKILL = "# Reopened review Skill\nInspect the current value before reporting.\n"
 _SEED_SOURCE = b"VALUE = 42\n"
@@ -81,7 +82,7 @@ _TASKS = (
     "Read the explicit prior Run handoff without adopting its native session.",
 )
 
-type _ContinuationResult = Literal["error", "length", "malformed", "retry", "stale"]
+type _ContinuationResult = Literal["error", "length", "malformed", "retry", "stale", "failed-exit"]
 
 
 def _message_text(message: dict[str, Any]) -> str:
@@ -254,7 +255,8 @@ def _provider(
                 return (
                     {"role": "assistant", "content": json.dumps(review)},
                     continuation_result
-                    if stages == 2 and continuation_result not in {"malformed", "stale"}
+                    if stages == 2
+                    and continuation_result not in {"malformed", "stale", "failed-exit"}
                     else "stop",
                 )
             return {"role": "assistant", "content": _MODEL_REPLY}, "stop"
@@ -965,6 +967,31 @@ def _held_pi_journey(
     assert program.is_relative_to(public_runtime)
     package_cli = Path(sys.executable).with_name("oh-goon")
     assert package_cli.is_file()
+    runtime_roots = [str(public_runtime)]
+    if continuation_result == "failed-exit":
+        # Run the installed entrypoint in this same Node process. Change the
+        # explicit native shutdown code only when opening the seed's saved file.
+        launcher_root = tmp_path / "pi-exit-fixture"
+        launcher_root.mkdir()
+        launcher = launcher_root / "pi.mjs"
+        launcher.write_text(
+            f"""#!/usr/bin/env node
+import {{ existsSync }} from "node:fs";
+import {{ pathToFileURL }} from "node:url";
+const [node, , ...args] = process.argv;
+const session = args[args.indexOf("--session") + 1];
+if (args.includes("--session") && existsSync(session)) {{
+  const exit = process.exit.bind(process);
+  process.exit = (status) => exit(status === 0 ? {_PI_REOPEN_EXIT_CODE} : status);
+}}
+const entry = {json.dumps(str(program))};
+process.argv = [node, entry, ...args];
+await import(pathToFileURL(entry).href);
+"""
+        )
+        launcher.chmod(0o755)
+        program = launcher
+        runtime_roots.append(str(launcher_root))
     repository = tmp_path / "repository"
     repository.mkdir()
     subprocess.run(("git", "init", "-q", str(repository)), check=True, timeout=10)
@@ -1042,7 +1069,7 @@ def _held_pi_journey(
                         }
                     },
                     "native_agents": {
-                        "pi": {"executable": str(program), "runtime_roots": [str(public_runtime)]}
+                        "pi": {"executable": str(program), "runtime_roots": runtime_roots}
                     },
                 }
             )
@@ -1596,11 +1623,15 @@ def test_installed_pi_retirement_recovers_after_unlink_before_journal_commit(
 
 
 @pytest.mark.certification
-@pytest.mark.parametrize("result", ["error", "length", "malformed", "retry", "stale"])
+@pytest.mark.parametrize(
+    "result", ["error", "length", "malformed", "retry", "stale", "failed-exit"]
+)
 def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result: _ContinuationResult
 ) -> None:
     recovering = result == "retry"
+    failed_exit = result == "failed-exit"
+    expected_exit = _PI_REOPEN_EXIT_CODE if failed_exit else 0
     with _held_pi_journey(
         tmp_path,
         monkeypatch,
@@ -1691,7 +1722,7 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
         assert session.repository_source.source_snapshot != (
             seed.pi_session.repository_source.source_snapshot
         )
-        assert agent.settlement.observed_returncode == 0
+        assert agent.settlement.observed_returncode == expected_exit
         assert agent.settlement.outcome == ("SUCCESS" if recovering else "FAILED")
         assert agent.settlement.cleanup == "VERIFIED"
         assert len(agent.attempts) == 1
@@ -1730,9 +1761,24 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
         (receipt,) = (event for event in events if isinstance(event, PiSessionWriterObservedEvent))
         quiescent = events[receipt.quiescent_sequence - 1]
         assert isinstance(quiescent, DescendantsQuiescentEvent)
-        assert receipt.observation.persistence == "observed"
-        assert receipt.observation.session_id == seed.pi_session.native.session_id
-        assert receipt.observation.leaf_id != seed.pi_session.native.leaf_id
+        if failed_exit:
+            assert receipt.observation.persistence == "unknown" and receipt.observation.file is None
+            prior_writer = next(
+                event for event in seed.events if isinstance(event, PiSessionWriterReservedEvent)
+            )
+            retained_transcript = (
+                ApplicationStatePathLayout.from_database(journey.database_path).pi_sessions
+                / prior_writer.storage_id
+                / PI_SESSION_NEW_FILE.name
+            )
+            with retained_transcript.open("rb") as stream:
+                transcript = stream.read(128 * 1024)
+            assert len(transcript) < 128 * 1024 and transcript.endswith(b"\n")
+            assert _INTERRUPTED_REVIEW.encode() in transcript
+        else:
+            assert receipt.observation.persistence == "observed"
+            assert receipt.observation.session_id == seed.pi_session.native.session_id
+            assert receipt.observation.leaf_id != seed.pi_session.native.leaf_id
         (exited,) = (
             event
             for event in events
@@ -1745,7 +1791,7 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
             if isinstance(event, (StepFailedEvent, StepSucceededEvent))
             and event.step_id == agent.step_id
         )
-        assert exited.returncode == 0
+        assert exited.returncode == expected_exit
         assert exited.sequence < quiescent.sequence < receipt.sequence < terminal.sequence
 
         reopened = Journal(LocalDatabase(journey.database_path, read_only=True))
@@ -1762,6 +1808,18 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
             seed.events,
             seed.pi_session,
         )
+        if failed_exit:
+            fresh = journey.runs("handoff", run_id, "--json")
+            assert fresh.returncode == 0, fresh.stderr
+            public = json.loads(fresh.stdout)
+            assert public["outcome"] == "ATTENTION_REQUIRED"
+            public_session = public["pi_session"]
+            assert public_session["settlement"]["observed_returncode"] == expected_exit
+            assert public_session["persistence"] == "unknown" and public_session["native"] is None
+            assert all(
+                value not in fresh.stdout + fresh.stderr
+                for value in (_INTERRUPTED_REVIEW, _PRIVATE_TOOL_OUTPUT, _SECRET)
+            )
         expected_requests = [_TASKS[0], _TASKS[0], _TASKS[1]]
         assert journey.requests == (
             expected_requests + [_TASKS[1]] if recovering else expected_requests

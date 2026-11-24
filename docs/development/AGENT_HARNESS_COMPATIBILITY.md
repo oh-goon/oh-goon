@@ -1287,7 +1287,14 @@ The [original-Run lifecycle tests][cli-lifecycle-tests] cover agent-end-only,
 late tool progress, aborted assistant output and nonzero exit after a native
 completion claim. The [installed Pi continuation tests](../../backend/tests/integration/services/test_native_pi_session_journey.py)
 exercise the original worker and Journal with a local provider. They cover
-provider error, length truncation, malformed typed review, and native retry.
+provider error, length truncation, malformed or stale typed review, and
+native retry. The installed failed-exit case uses a test launcher that
+loads Pi 1.3.0 in the same Node process and injects a nonzero exit during
+shutdown of the reopened session. Pi emits a settled review and appends it
+to the transcript. The original process exit still fails the Agent Step,
+the verifier remains unstarted, and persistence is unknown. Fresh CLI
+readback retains the failure and verified cleanup without the private
+review text. The seed Run retains its original evidence.
 The [installed RPC probe](../../backend/tests/integration/services/test_native_pi_rpc.py)
 checks native assistant abort with zero process exit using a synthetic
 provider. The [installed compaction tests][cli-compaction-tests] exercise recovery, a
