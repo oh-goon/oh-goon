@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from contextlib import ExitStack
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -994,12 +996,40 @@ class Journal:
             return source.retired
         file = source.observation.observation.file
         assert file is not None
-        with pin_pi_session_retirement(
+        pin_retirement = partial(
+            pin_pi_session_retirement,
             layout=ApplicationStatePathLayout.from_database(self._database.path),
             storage_id=source.writer.storage_id,
             expected_file=file,
-            expected_directory=source.requested.directory if source.requested is not None else None,
-        ) as pin:
+        )
+        with ExitStack() as owned:
+            try:
+                pin = owned.enter_context(
+                    pin_retirement(
+                        expected_directory=(
+                            source.requested.directory if source.requested is not None else None
+                        )
+                    )
+                )
+            except PiSessionUnavailable as error:
+                if (
+                    source.requested is not None
+                    or error.code is not PiSessionRefusalCode.UNAVAILABLE
+                ):
+                    raise
+                # Another authorized caller can unlink after this caller's first read.
+                current = self.read_view().pi_session_retirement_source(fleet_run_id)
+                if current.writer != source.writer or current.observation != source.observation:
+                    raise OwnershipLost(
+                        "Pi session retirement source changed before pinning"
+                    ) from error
+                if current.requested is None:
+                    raise
+                if current.retired is not None:
+                    return current.retired
+                pin = owned.enter_context(
+                    pin_retirement(expected_directory=current.requested.directory)
+                )
             request = self._request_pi_session_retirement(source, pin.directory)
             return self._finish_pi_session_retirement(request, pin.remove)
 

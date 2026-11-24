@@ -39,6 +39,8 @@ from oh_goon.core.models.operation import FleetPlanOperationEvidence
 from oh_goon.core.models.pi_session_storage import PI_SESSION_NEW_FILE
 from oh_goon.core.models.run_events import (
     DescendantsQuiescentEvent,
+    PiSessionRetiredEvent,
+    PiSessionRetirementRequestedEvent,
     PiSessionWriterObservedEvent,
     PiSessionWriterReservedEvent,
     ProcessExitedEvent,
@@ -898,6 +900,15 @@ class _HeldPiJourney:
             timeout=65,
         )
 
+    def runs(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            (self.ai[0], "runs", *args),
+            cwd=self.repository,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
 
 @contextmanager
 def _held_pi_journey(
@@ -1250,6 +1261,22 @@ def test_installed_pi_active_continuation_fences_second_controller_through_cance
             busy = journey.invoke(prior, _TASKS[1])
             assert busy.returncode == 2, (busy.stdout[-3000:], busy.stderr[-3000:])
             assert json.loads(busy.stdout)["code"] == PiSessionRefusalCode.BUSY
+            session_root = ApplicationStatePathLayout.from_database(
+                journey.database_path
+            ).pi_sessions
+            transcript = session_root / reservation.storage_id / PI_SESSION_NEW_FILE.name
+            live_file_stat = transcript.stat()
+            refused_retire = journey.runs("retire-pi-session", seed_id, "--authorize", "--json")
+            assert refused_retire.returncode == 2
+            refusal = json.loads(refused_retire.stdout)
+            assert refusal["code"] == PiSessionRefusalCode.BUSY
+            assert refusal["readback_argv"] == ["oh-goon", "runs", "pi-session", seed_id, "--json"]
+            assert transcript.stat() == live_file_stat
+            visible = refused_retire.stdout + refused_retire.stderr
+            assert all(
+                private not in visible
+                for private in (_PRIVATE_TOOL_OUTPUT, _SECRET, str(session_root), *_TASKS)
+            )
             assert coordinator.active_lease() == lease
             assert journal.read_view().revision == live_revision
             assert journey.requests == [_TASKS[0], _TASKS[0], _TASKS[1]]
@@ -1308,6 +1335,116 @@ def test_installed_pi_active_continuation_fences_second_controller_through_cance
         )
         assert journey.requests == [_TASKS[0], _TASKS[0], _TASKS[1]]
         assert not journey.errors
+
+
+_PI_RETIREMENT_INTERRUPTION = """
+import os
+import signal
+import sys
+
+from oh_goon.cli import main
+from oh_goon.core.models.pi_session_storage import PI_SESSION_NEW_FILE
+
+device, inode = map(int, sys.argv[1:3])
+unlink = os.unlink
+
+def unlink_then_interrupt(path, *, dir_fd=None):
+    unlink(path, dir_fd=dir_fd)
+    if path == PI_SESSION_NEW_FILE.name and dir_fd is not None:
+        directory = os.fstat(dir_fd)
+        if (directory.st_dev, directory.st_ino) == (device, inode):
+            os.kill(os.getpid(), signal.SIGKILL)
+
+os.unlink = unlink_then_interrupt
+raise SystemExit(main(sys.argv[3:]))
+"""
+
+
+@pytest.mark.certification
+def test_installed_pi_retirement_recovers_after_unlink_before_journal_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _held_pi_journey(tmp_path, monkeypatch, hold_request_number=3) as journey:
+        seeded = journey.invoke("new", _TASKS[0])
+        assert seeded.returncode == 0, seeded.stderr
+        receipt = json.loads(seeded.stdout)
+        assert receipt["outcome"] == "SUCCESS"
+        run_id = receipt["fleet_run_id"]
+        journal = Journal(LocalDatabase(journey.database_path, read_only=True))
+        accepted = journal.run_events(run_id)
+        assert accepted.pi_session is not None
+        (verifier,) = accepted.pi_session.following_steps
+        assert verifier.settlement is not None and verifier.settlement.outcome == "SUCCESS"
+        (writer,) = (
+            event for event in accepted.events if isinstance(event, PiSessionWriterReservedEvent)
+        )
+        session_root = ApplicationStatePathLayout.from_database(journey.database_path).pi_sessions
+        directory = session_root / writer.storage_id
+        transcript = directory / PI_SESSION_NEW_FILE.name
+        original_directory = directory.stat()
+        assert transcript.is_file()
+
+        retire_args = ("retire-pi-session", run_id, "--authorize", "--json")
+        interrupted = subprocess.run(
+            (
+                sys.executable,
+                "-I",
+                "-c",
+                _PI_RETIREMENT_INTERRUPTION,
+                str(original_directory.st_dev),
+                str(original_directory.st_ino),
+                "runs",
+                *retire_args,
+            ),
+            cwd=journey.repository,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert interrupted.returncode == -signal.SIGKILL
+        assert not transcript.exists()
+        assert directory.stat().st_ino == original_directory.st_ino
+        pending = journal.run_events(run_id)
+        assert pending.run == accepted.run and pending.pi_session == accepted.pi_session
+        assert pending.events[:-1] == accepted.events
+        request = pending.events[-1]
+        assert isinstance(request, PiSessionRetirementRequestedEvent)
+        assert request.reservation_sequence == writer.sequence
+
+        inspection = journey.runs("pi-session", run_id, "--json")
+        assert inspection.returncode == 0
+        current = json.loads(inspection.stdout)
+        assert (current["availability"], current["retirement"]) == ("unavailable", "pending")
+        assert f"retire-pi-session {run_id} --authorize --json" in current["safe_next_action"]
+        refused = journey.invoke(f"run:{run_id}", _TASKS[1])
+        assert refused.returncode == 2
+        assert json.loads(refused.stdout)["code"] == PiSessionRefusalCode.UNAVAILABLE
+        assert journal.run_events(run_id) == pending
+
+        recovered = journey.runs(*retire_args)
+        assert recovered.returncode == 0
+        disposition = json.loads(recovered.stdout)
+        assert (disposition["availability"], disposition["retirement"]) == (
+            "unavailable",
+            "verified",
+        )
+        assert disposition["native"] == receipt["pi_session"]["native"]
+        completed = journal.run_events(run_id)
+        assert completed.run == accepted.run and completed.pi_session == accepted.pi_session
+        assert completed.events[:-1] == pending.events
+        retired = completed.events[-1]
+        assert (
+            isinstance(retired, PiSessionRetiredEvent)
+            and retired.request_sequence == request.sequence
+        )
+        assert not list(directory.iterdir())
+        assert journey.requests == [_TASKS[0], _TASKS[0]] and not journey.errors
+        for response in (interrupted, inspection, refused, recovered):
+            visible = response.stdout + response.stderr
+            assert all(
+                private not in visible
+                for private in (_PRIVATE_TOOL_OUTPUT, _SECRET, str(session_root), *_TASKS)
+            )
 
 
 @pytest.mark.certification

@@ -230,19 +230,22 @@ before removing the exact saved file. A verified retirement reports
 returns `PI_SESSION_UNAVAILABLE`. Original Run, Step, and verifier evidence
 remain readable.
 
-A pending retirement already blocks reopen. Run the same authorized command
-for the same Run ID to reconcile the original directory and prove removal.
+A pending retirement already blocks reopen. Inspection shows the exact
+authorized command to retry for that Run in the matching runtime. The retry
+reconciles the original directory and proves removal.
 A live writer, unverified cleanup, a superseded Run or changed storage
 refuses retirement. Preserve the original evidence when the command refuses.
-Persistent sessions are retained until explicitly retired. Retirement verifies
-absence of the private file from its original directory. Disk-forensic
-erasure and backup disposal are outside that proof.
+Persistent sessions are retained until explicitly retired. Oh-Goon's managed
+retirement verifies absence of the private file from its original directory.
+Headless Pi-native deletion is unsupported for the selected Pi 1.3.0 profile.
+Personal Pi history, export, sharing, disk-forensic erasure, and backup disposal
+are outside this operation.
 
 Oh-Goon's product fork remains unsupported. Installed retirement and
 restart evidence covers the selected native Linux and Bubblewrap profile.
 WSL2, containerized hosts and other platforms require separate installed
 qualification. See the
-[bounded session lifecycle evidence](development/AGENT_HARNESS_COMPATIBILITY.md#pi-session-retirement-and-fork-boundary--hug-55).
+[bounded retirement evidence](development/AGENT_HARNESS_COMPATIBILITY.md#managed-pi-retirement-recovery--hug-101).
 
 Broker-backed native reasoning requires an explicit managed inference connection so qualified
 Hashmarks context reaches every model request, including follow-up and compaction.
