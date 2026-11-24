@@ -1882,6 +1882,95 @@ def test_installed_pi_resumed_turn_keeps_native_and_step_results_independent(
 
 
 @pytest.mark.certification
+@pytest.mark.parametrize("change", ["empty", "malformed", "legacy", "foreign-header"])
+def test_managed_pi_refuses_changed_session_bytes_before_native_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    with _held_pi_journey(
+        tmp_path, monkeypatch, hold_request_number=3, reply_after_hold=True
+    ) as journey:
+        journey.release_held_inference.set()
+        initial = journey.invoke("new", _TASKS[0])
+        assert initial.returncode == 0, (initial.stdout[-3000:], initial.stderr[-3000:])
+        seed_id = json.loads(initial.stdout)["fleet_run_id"]
+        journal = Journal(LocalDatabase(journey.database_path, read_only=True))
+        seed = journal.run_events(seed_id)
+        assert seed.run.status is FleetRunStatus.COMPLETED
+        assert seed.pi_session is not None and seed.pi_session.save_verification == "pi_rpc_synced"
+        (original_writer,) = (
+            event for event in seed.events if isinstance(event, PiSessionWriterReservedEvent)
+        )
+        session_root = ApplicationStatePathLayout.from_database(journey.database_path).pi_sessions
+        transcript = session_root / original_writer.storage_id / PI_SESSION_NEW_FILE.name
+        with transcript.open("rb") as stream:
+            current = stream.read(128 * 1024)
+        assert 0 < len(current) < 128 * 1024
+        header_bytes, entries = current.split(b"\n", 1)
+        header = json.loads(header_bytes)
+        assert header["type"] == "session" and header["version"] == 3
+
+        if change == "empty":
+            changed = b""
+        elif change == "malformed":
+            changed = b"not a native session\n"
+        else:
+            if change == "legacy":
+                header["version"] = 2
+            else:
+                original_id = header["id"]
+                header["id"] = ("b" if original_id[0] == "a" else "a") + original_id[1:]
+            changed = json.dumps(header, separators=(",", ":")).encode() + b"\n" + entries
+            assert len(changed) == len(current)
+        assert changed != current
+        transcript.write_bytes(changed)
+        changed_file = transcript.stat()
+
+        refused = journey.invoke(f"run:{seed_id}", _TASKS[1])
+        assert refused.returncode == 1, (refused.stdout[-3000:], refused.stderr[-3000:])
+        response = json.loads(refused.stdout)
+        assert response["outcome"] == "ATTENTION_REQUIRED"
+        evidence = response["pi_session"]
+        assert evidence["prior_run_id"] == seed_id
+        assert evidence["refusal_code"] == PiSessionRefusalCode.HISTORY_UNQUALIFIED
+        assert evidence["persistence"] == "unknown" and evidence["native"] is None
+        assert evidence["settlement"]["reason"] == "FAILED_TO_START"
+        assert all(
+            value not in refused.stdout + refused.stderr
+            for value in (str(transcript), _PRIVATE_TOOL_OUTPUT, _SECRET, *_TASKS)
+        )
+
+        attempted = journal.run_events(response["fleet_run_id"])
+        (reservation,) = (
+            event for event in attempted.events if isinstance(event, PiSessionWriterReservedEvent)
+        )
+        assert reservation.storage_id == original_writer.storage_id
+        assert not any(
+            type(event) is ProcessStartedEvent
+            and event.sequence > reservation.sequence
+            and event.step_id == reservation.step_id
+            for event in attempted.events
+        )
+        assert not any(
+            isinstance(event, PiSessionWriterObservedEvent) for event in attempted.events
+        )
+        assert journey.requests == [_TASKS[0], _TASKS[0]] and not journey.errors
+        assert tuple(session_root.iterdir()) == (transcript.parent,)
+        assert transcript.read_bytes() == changed
+        retained = transcript.stat()
+        assert (retained.st_dev, retained.st_ino, retained.st_mtime_ns) == (
+            changed_file.st_dev,
+            changed_file.st_ino,
+            changed_file.st_mtime_ns,
+        )
+        original = journal.run_events(seed_id)
+        assert (original.run, original.events, original.pi_session) == (
+            seed.run,
+            seed.events,
+            seed.pi_session,
+        )
+
+
+@pytest.mark.certification
 def test_installed_pi_torn_save_stays_unqualified_after_successful_verifier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

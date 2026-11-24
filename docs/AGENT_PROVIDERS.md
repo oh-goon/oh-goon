@@ -199,6 +199,8 @@ Their recorded Run evidence remains readable. Start a fresh session or use
 a separately admitted bounded handoff for a different recipient.
 Provider-held history authorization remains a separate selection.
 
+Managed reopen requires the qualified version-3 Pi history format and
+the exact saved bytes. Cross-version migration remains unsupported.
 Pi verifies the exact native session and active leaf before receiving the
 new task. The continuing Agent has the
 built-in `read`, `grep`, `find` and `ls` tools and a read-only repository
