@@ -66,6 +66,17 @@ class PiSessionUnavailable(PiSessionSelectionError):
     code = PiSessionRefusalCode.UNAVAILABLE
 
 
+class PiSessionHostPreflightUnavailable(PiSessionUnavailable):
+    """The selected persistent Pi host could not establish native isolation."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Persistent Pi requires Linux Bubblewrap mount and namespace preflight. "
+            "Use the matching runtime with native user namespaces, descriptor execution "
+            "and private filesystem custody before retrying."
+        )
+
+
 class NoPersistentPiSession(PiSessionUnavailable):
     code = PiSessionRefusalCode.NO_PERSISTENT_SESSION
 

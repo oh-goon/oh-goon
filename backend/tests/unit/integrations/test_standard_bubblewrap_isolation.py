@@ -2293,6 +2293,26 @@ def test_protected_preflight_reports_unavailable_without_untrusted_child_diagnos
     assert "PRIVATE" not in str(error.value) and "EPERM" not in str(error.value)
 
 
+def test_ordinary_preflight_descriptor_denial_has_a_typed_prerequisite_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _backend(tmp_path, monkeypatch)
+    calls = []
+
+    def denied(*argv: str, **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        raise PermissionError("PRIVATE native launch detail")
+
+    monkeypatch.setattr(module, "run_command", denied)
+    request = _request(backend, tmp_path)
+    with pytest.raises(module.BubblewrapMountPreflightUnavailable) as error:
+        backend.require_standard_available(request)
+
+    assert error.value.code == FleetPlanInvalid.code
+    assert "PRIVATE" not in str(error.value)
+    assert len(calls) == 1 and calls[0][-1] == "/bin/true"
+
+
 def test_preflight_uses_and_keys_actual_workspace_write_mount_topology(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

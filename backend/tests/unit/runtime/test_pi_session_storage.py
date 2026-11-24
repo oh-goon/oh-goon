@@ -383,6 +383,20 @@ def test_original_authority_refusal_precedes_directory_creation(
     assert not admitted_pi_scope.layout.pi_sessions.exists()
 
 
+def test_excessive_pi_state_path_depth_refuses_before_storage_allocation(
+    admitted_pi_scope: _AdmittedScope, tmp_path: Path
+) -> None:
+    deep_root = tmp_path.joinpath(*(["state"] * 32))
+    deep_root.mkdir(mode=0o700, parents=True)
+    layout = ApplicationStatePathLayout(deep_root)
+    scope = _AdmittedScope(admitted_pi_scope.repository, admitted_pi_scope.evidence, layout)
+
+    with pytest.raises(FleetPlanInvalid, match="bounded absolute native scope"), scope.create():
+        pytest.fail("An over-depth state path acquired a private slot")
+
+    assert tuple(deep_root.iterdir()) == ()
+
+
 @pytest.mark.parametrize("topology", ["alias", "nested"])
 def test_unqualified_native_mount_topology_refuses_before_storage_allocation(
     admitted_pi_scope: _AdmittedScope, monkeypatch: pytest.MonkeyPatch, topology: str

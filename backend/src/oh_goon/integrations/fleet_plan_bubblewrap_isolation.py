@@ -133,6 +133,10 @@ class BubblewrapWorkerConfiguration(ImmutableModel):
     pi_session_root: Path | None = Field(default=None, exclude_if=lambda path: path is None)
 
 
+class BubblewrapMountPreflightUnavailable(FleetPlanInvalid):
+    """The selected ordinary mount/namespace probe could not establish the workload boundary."""
+
+
 class BubblewrapProcessIsolation:
     """One Bubblewrap owner for ordinary namespaces and selected strict custody."""
 
@@ -384,12 +388,16 @@ class BubblewrapProcessIsolation:
                 runtime_supervision=None,
                 _preflight=True,
             )
+        except FleetPlanInvalid as exc:
+            if request.protected_execution:
+                raise
+            raise BubblewrapMountPreflightUnavailable(str(exc)) from exc
         except (OSError, subprocess.TimeoutExpired) as exc:
             if request.protected_execution:
                 raise CapabilityUnavailable(
                     "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_preflight; mechanism=native_launch"
                 ) from exc
-            raise FleetPlanInvalid(
+            raise BubblewrapMountPreflightUnavailable(
                 "Selected Bubblewrap mount/namespace preflight could not be established"
             ) from exc
         if result.returncode != 0:
@@ -398,7 +406,7 @@ class BubblewrapProcessIsolation:
                     "Protected execution unavailable; backend=bubblewrap; phase=mount_namespace_preflight; "
                     f"mechanism=native_setup; child_exit={result.returncode}"
                 )
-            raise FleetPlanInvalid(
+            raise BubblewrapMountPreflightUnavailable(
                 "Selected Bubblewrap mount/namespace setup is unavailable: "
                 + result.stderr.strip()[:1000]
             )
