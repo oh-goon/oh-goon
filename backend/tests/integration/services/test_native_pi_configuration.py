@@ -7,6 +7,7 @@ import os
 import select
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,7 +19,8 @@ import pytest
 
 from oh_goon.application import ApplicationRuntime
 from oh_goon.cli_ai import resolve_native_cli_selection
-from oh_goon.core.models.agent_providers import PiSessionIntent, PiSessionUnavailable
+from oh_goon.core.errors import PiSessionRefusalCode
+from oh_goon.core.models.agent_providers import PiSessionIntent
 from oh_goon.core.models.run_events import (
     ProcessExitedEvent,
     ProcessStartedEvent,
@@ -26,11 +28,15 @@ from oh_goon.core.models.run_events import (
 )
 from oh_goon.core.vocabulary import FleetRunOutcome
 from oh_goon.integrations.hashmarks.runtime_contract import require_loaded_hashmarks_runtime
+from oh_goon.runtime.database import LocalDatabase
 from tests.fakes.native_lifetime import NativeDescendant, bind_native_descendant
 
 _TASK = "Review the synthetic repository with the selected native tools."
 _SKILL = "# Pi configuration fixture\nReview the selected source without changing it.\n"
 _BROKER_KEY = "synthetic-local-native-pi-key"
+_PRIOR_BROKER_KEY = "synthetic-prior-native-pi-key"
+_CURRENT_MODEL = "pi-configuration-fixture"
+_PRIOR_MODEL = "pi-previous-endpoint-fixture"
 _APPROVED_EXTENSION = "fixture_inspect"
 _DENIED_EXTENSION = "fixture_denied"
 _APPROVED_MCP = "mcp__approved__probe"
@@ -150,8 +156,10 @@ def _tool_call(name: str, ordinal: int, arguments: dict[str, str] | None = None)
     }
 
 
-def _source_prompt(body: dict[str, Any], task: str = _TASK) -> dict[str, Any]:
-    assert body["model"] == "pi-configuration-fixture"
+def _source_prompt(
+    body: dict[str, Any], task: str = _TASK, *, model: str = _CURRENT_MODEL
+) -> dict[str, Any]:
+    assert body["model"] == model
     privileged = "\n".join(
         _text(message) for message in body["messages"] if message["role"] in {"system", "developer"}
     )
@@ -197,6 +205,8 @@ def _review(payload: dict[str, Any]) -> dict[str, Any]:
 @contextmanager
 def _server(
     respond: Callable[[dict[str, Any]], dict[str, Any]],
+    *,
+    key: str = _BROKER_KEY,
 ) -> Iterator[tuple[str, list[str]]]:
     errors: list[str] = []
 
@@ -204,7 +214,7 @@ def _server(
         def do_POST(self) -> None:
             try:
                 assert self.path == "/v1/chat/completions"
-                assert self.headers["Authorization"] == f"Bearer {_BROKER_KEY}"
+                assert self.headers["Authorization"] == f"Bearer {key}"
                 size = int(self.headers["Content-Length"])
                 assert 0 < size < 1024 * 1024
                 delta = respond(json.loads(self.rfile.read(size)))
@@ -246,17 +256,21 @@ def _catalog(
     url: str,
     native: Path | None = None,
     arguments: tuple[str, ...] = (),
+    *,
+    provider: str = "local",
+    model: str = _CURRENT_MODEL,
+    key_env: str = "OH_GOON_PI_CONFIGURATION_TEST_KEY",
 ) -> str:
     return json.dumps(
         {
             "providers": {
-                "local": {
+                provider: {
                     "api": "openai-chat-completions",
                     "base_url": url,
-                    "api_key_env": "OH_GOON_PI_CONFIGURATION_TEST_KEY",
+                    "api_key_env": key_env,
                 }
             },
-            "models": {"fixture": {"provider": "local", "model": "pi-configuration-fixture"}},
+            "models": {"fixture": {"provider": provider, "model": model}},
             "native_profiles": {
                 "isolated": {
                     "backend": "bubblewrap",
@@ -540,8 +554,9 @@ def test_installed_pi_public_overlay_selects_actual_native_extension_and_mcp(
 
 
 @pytest.mark.certification
-def test_installed_pi_continuation_excludes_native_project_features(
+def test_installed_pi_continuation_enforces_current_native_policy(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     installed_pi_configuration: tuple[Path, Path, Path, Path],
 ) -> None:
     program, public_runtime, repository, skill = installed_pi_configuration
@@ -552,15 +567,48 @@ def test_installed_pi_continuation_excludes_native_project_features(
     mcp_marker = "/tmp/oh-goon-pi-project-mcp-started"
     project_native = repository / ".pi"
     project_native.mkdir()
-    requests: list[str] = []
-    continuing = False
+    private_store = Path(os.environ["HOME"]) / ".pi" / "agent"
+    private_store.mkdir(parents=True)
+    private_canary = "SYNTHETIC_PI_PERSONAL_STORE"
+    private_file = private_store / "auth.json"
+    private_file.write_text(json.dumps({"fixture": private_canary}))
+    prior_write = "prior-write.txt"
+    # Qualify an in-place write without changing the admitted directory identity.
+    (repository / prior_write).write_text("seed")
+    denied_write = "reopened-write.txt"
+    denied_shell = "reopened-shell.txt"
+    prior_tool_ordinal = 100
+    prior_calls = 0
+    current_calls = 0
+    calls: tuple[tuple[str, dict[str, str], str], ...] = (
+        (project_mcp, {}, project_mcp),
+        (project_extension, {}, project_extension),
+        ("write", {"path": denied_write, "content": "fixture"}, "write"),
+        ("bash", {"command": f"printf fixture > {denied_shell}"}, "bash"),
+        ("read", {"path": extension_marker}, extension_marker),
+        ("read", {"path": mcp_marker}, mcp_marker),
+        ("read", {"path": str(private_file)}, str(private_file)),
+    )
 
-    def respond(body: dict[str, Any]) -> dict[str, Any]:
-        if not continuing:
-            payload = _source_prompt(body, prior_task)
-            assert not requests
-            requests.append("prior")
-            return _review(payload)
+    def respond_prior(body: dict[str, Any]) -> dict[str, Any]:
+        nonlocal prior_calls
+        _source_prompt(body, prior_task, model=_PRIOR_MODEL)
+        assert {"write", "bash"} <= {item["function"]["name"] for item in body["tools"]}
+        prior_calls += 1
+        if prior_calls == 1:
+            return _tool_call(
+                "write", prior_tool_ordinal, {"path": prior_write, "content": "fixture"}
+            )
+        assert prior_calls == 2
+        assert any(
+            prior_write in _text(message)
+            for message in body["messages"]
+            if message["role"] == "tool"
+        )
+        return {"role": "assistant", "content": "The prior fixture write is complete."}
+
+    def respond_current(body: dict[str, Any]) -> dict[str, Any]:
+        nonlocal current_calls
         payload = _source_prompt(body)
         users = "\n".join(
             _text(message) for message in body["messages"] if message["role"] == "user"
@@ -581,29 +629,47 @@ def test_installed_pi_continuation_excludes_native_project_features(
             "find",
             "ls",
         }
-        results = [_text(message) for message in body["messages"] if message["role"] == "tool"]
+        results = [
+            _text(message)
+            for message in body["messages"]
+            if message["role"] == "tool"
+            and message.get("tool_call_id") != f"call_config_{prior_tool_ordinal}"
+        ]
         count = len(results)
-        assert len(requests) == count + 1
+        assert prior_calls == 2 and current_calls == count
+        assert private_canary not in json.dumps(body["messages"])
         if count >= 1:
-            expected = (project_mcp, project_extension, extension_marker, mcp_marker)[count - 1]
+            _, _, expected = calls[count - 1]
             result = results[-1].lower()
-            assert expected in result
-            assert any(word in result for word in ("not found", "unknown", "enoent")), result
-        calls: tuple[tuple[str, dict[str, str]], ...] = (
-            (project_mcp, {}),
-            (project_extension, {}),
-            ("read", {"path": extension_marker}),
-            ("read", {"path": mcp_marker}),
-        )
-        requests.append("current")
+            assert expected.lower() in result
+            assert any(
+                word in result for word in ("not found", "unknown", "enoent", "permission denied")
+            ), result
+        current_calls += 1
         if count == len(calls):
             return _review(payload)
-        name, arguments = calls[count]
+        name, arguments, _ = calls[count]
         return _tool_call(name, count, arguments)
 
-    with _server(respond) as (url, errors):
+    prior_key_env = "OH_GOON_PI_PRIOR_CONFIGURATION_TEST_KEY"
+    monkeypatch.setenv(prior_key_env, _PRIOR_BROKER_KEY)
+    with (
+        _server(respond_prior, key=_PRIOR_BROKER_KEY) as (prior_url, prior_errors),
+        _server(respond_current) as (url, errors),
+    ):
+        assert prior_url != url
         catalog = tmp_path / "providers.json"
-        catalog.write_text(_catalog(repository, program, public_runtime, url))
+        catalog.write_text(
+            _catalog(
+                repository,
+                program,
+                public_runtime,
+                prior_url,
+                provider="previous",
+                model=_PRIOR_MODEL,
+                key_env=prior_key_env,
+            )
+        )
         original, backend, git = resolve_native_cli_selection(
             agent="pi",
             profile="isolated",
@@ -621,14 +687,19 @@ def test_installed_pi_continuation_excludes_native_project_features(
                 workspace=repository,
                 skill=skill,
                 task=prior_task,
-                role="review",
+                role="report",
                 verification=_verification(),
             )
             prior_id = admitted.fleet_run_id
-            assert prior_runtime.runs.wait_for_terminal(prior_id, timeout=60).outcome is (
-                FleetRunOutcome.SUCCESS
-            ), errors
-            assert requests == ["prior"] and not errors
+            prior = prior_runtime.runs.wait_for_terminal(prior_id, timeout=60)
+            assert prior.outcome is FleetRunOutcome.SUCCESS, prior_errors
+            assert prior_calls == 2 and current_calls == 0 and not prior_errors and not errors
+            assert (repository / prior_write).read_text() == "fixture"
+            prior_agent = prior.game_tape.repositories[0].steps[0]
+            prior_isolation = prior_agent.attempts[0].standard_isolation
+            assert prior_isolation is not None and not prior_isolation.workspace_read_only
+            prior_session = prior.game_tape.pi_session
+            assert prior_session is not None and prior_session.native is not None
         finally:
             prior_runtime.shutdown(wait_for_runs=True)
 
@@ -668,26 +739,52 @@ def test_installed_pi_continuation_excludes_native_project_features(
         selected_session = PiSessionIntent(mode="continue", prior_run_id=prior_id)
         public_native = tmp_path / "other-public-config"
         public_native.mkdir()
-        for options in (
-            _catalog(repository, program, public_runtime, url, native=public_native),
-            _catalog(
-                repository,
-                program,
-                public_runtime,
-                url,
-                arguments=("--extension", str(discovered_extension)),
-            ),
+        database = LocalDatabase(Path(os.environ["OH_GOON_DB"]), read_only=True)
+        revision = database.durable_revision()
+        for native, arguments, withheld in (
+            (public_native, (), str(public_native)),
+            (private_store, (), str(private_store)),
+            (None, ("--extension", str(discovered_extension)), str(discovered_extension)),
+            (None, ("--model", _PRIOR_MODEL), _PRIOR_MODEL),
         ):
-            catalog.write_text(options)
-            with pytest.raises(PiSessionUnavailable):
-                resolve_native_cli_selection(
-                    agent="pi",
-                    profile="isolated",
-                    workspace=repository,
-                    config_file=catalog,
-                    session=selected_session,
-                )
-        assert requests == ["prior"] and not errors
+            catalog.write_text(
+                _catalog(repository, program, public_runtime, url, native, arguments)
+            )
+            refused = subprocess.run(
+                (
+                    str(Path(sys.executable).with_name("oh-goon")),
+                    "ai",
+                    "--agent",
+                    "pi",
+                    "--profile",
+                    "isolated",
+                    "--workspace",
+                    str(repository),
+                    "--config",
+                    str(catalog),
+                    "--skill",
+                    str(skill),
+                    "--session",
+                    f"run:{prior_id}",
+                    "--prompt",
+                    _TASK,
+                    "--json",
+                ),
+                cwd=repository,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert refused.returncode == 2, (refused.stdout, refused.stderr)
+            refusal = json.loads(refused.stdout)
+            assert refusal["code"] == PiSessionRefusalCode.NATIVE_CONFIGURATION_MISMATCH
+            assert refusal["prior_run_id"] == prior_id and refusal["safe_next_action"]
+            assert all(
+                item not in refused.stdout + refused.stderr
+                for item in (withheld, private_canary, _PRIOR_BROKER_KEY, _BROKER_KEY)
+            )
+            assert database.durable_revision() == revision
+            assert prior_calls == 2 and current_calls == 0 and not prior_errors and not errors
         catalog.write_text(_catalog(repository, program, public_runtime, url))
         selected, backend, git = resolve_native_cli_selection(
             agent="pi",
@@ -700,7 +797,6 @@ def test_installed_pi_continuation_excludes_native_project_features(
             standard_local=True, standard_process_isolation=backend, git_service=git
         )
         try:
-            continuing = True
             admitted = runtime.plans.run_native_agent(
                 selected=selected,
                 workspace=repository,
@@ -712,16 +808,29 @@ def test_installed_pi_continuation_excludes_native_project_features(
             detail = runtime.runs.wait_for_terminal(admitted.fleet_run_id, timeout=60)
             assert detail.outcome is FleetRunOutcome.SUCCESS, (
                 errors,
-                requests,
+                current_calls,
                 runtime.runs.game_tape_live_output(admitted.fleet_run_id).model_dump_json()[-6500:],
             )
-            assert not errors and requests == ["prior", *(["current"] * 5)]
+            assert not errors and not prior_errors
+            assert prior_calls == 2 and current_calls == len(calls) + 1
             evidence = detail.game_tape.pi_session
             assert evidence is not None and evidence.prior_run_id == prior_id
             assert evidence.persistence == "observed" and evidence.native is not None
+            assert evidence.native.session_id == prior_session.native.session_id
+            assert evidence.native.leaf_id != prior_session.native.leaf_id
             agent, verifier = detail.game_tape.repositories[0].steps
             assert agent.settlement.outcome == verifier.settlement.outcome == "SUCCESS"
             assert agent.settlement.cleanup == verifier.settlement.cleanup == "VERIFIED"
-            assert runtime.runs.get(prior_id).outcome is FleetRunOutcome.SUCCESS
+            isolation = agent.attempts[0].standard_isolation
+            assert isolation is not None and isolation.workspace_read_only
+            assert isolation.host_and_external_ip_networking == "denied"
+            assert isolation.broker_socket_mounted and isolation.filesystem_cleanup == "verified"
+            assert (
+                not (repository / denied_write).exists()
+                and not (repository / denied_shell).exists()
+            )
+            assert (repository / prior_write).read_text() == "fixture"
+            assert json.loads(private_file.read_text()) == {"fixture": private_canary}
+            assert runtime.runs.get(prior_id).run == prior.run
         finally:
             runtime.shutdown(wait_for_runs=True)

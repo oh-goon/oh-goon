@@ -1239,6 +1239,34 @@ Pi 1.3.0, managed RPC, Bubblewrap 0.11.1, and synthetic inference on native
 Linux. Explicit manual compaction through Oh-Goon remains unsupported in
 this mode. Provider-hosted history qualification remains HUG-106.
 
+### Effective Pi policy after exact reopen — HUG-78
+
+**Disposition**. Retain the dedicated managed Pi RPC profile, private broker,
+and original Bubblewrap Step. Before releasing the prompt, the RPC gate checks
+the reopened session's provider, model, API, and broker address against the
+current Run. The broker uses the current upstream selection and credentials.
+The reopened child receives the built-in read tools and a read-only repository.
+
+The [installed configuration journey][pi-native-config-tests] overwrites a
+fixture file in a writable original Run while retaining the repository
+directory identity. The next Run resumes the same session with a
+different model, credential, and upstream endpoint. It uses the new endpoint
+for every inference request and the prior endpoint receives no further
+requests. Attempts to use write, shell, a project extension, and project MCP
+are refused. Reads of the synthetic personal store and the extension and MCP
+startup markers fail. The current verifier and original cleanup succeed.
+Explicit native configuration directories and model or extension overrides
+produce a redacted typed refusal with no new Run or inference.
+
+The [installed protocol probe](../../backend/tests/integration/services/test_native_pi_session_protocol.py)
+uses actual Pi state to check model, API, and broker-address mismatch. The
+typed refusal leaves the prompt undelivered and the retained bytes intact.
+This qualifies Pi 1.3.0 managed RPC on native Linux with Bubblewrap 0.11.1
+and synthetic endpoints. Optional extension and MCP execution is qualified
+separately for the selected ephemeral profile. Persistent optional tools
+remain outside this configuration, and real-account identity and historical
+disclosure are separately tracked in HUG-109 and HUG-131.
+
 ### Native Pi settlement and typed acceptance — HUG-79
 
 **Disposition**. Retain Pi 1.3.0's RPC control and the existing native event
