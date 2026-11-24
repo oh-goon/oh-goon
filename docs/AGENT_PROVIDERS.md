@@ -186,8 +186,21 @@ oh-goon ai --agent pi --profile pi-rpc --session run:RUN_ID --prompt-file next-t
 ```
 
 The new Run captures the current repository, Skill and task and selects its
-own managed model connection and verifier. Pi verifies the exact native session
-and active leaf before receiving the new task. The continuing Agent has the
+own verifier. Exact reopen requires the original inference recipient policy:
+provider, API, endpoint, model, routing settings, and effective credentials.
+Oh-Goon checks the selected policy at Run admission and verifies the resolved
+credential scope before it reserves or mounts the session. The credential
+values stay with the broker. The private Journal proof and its local key
+stay outside public readback and the native session mount.
+
+Sessions written before receiver proof, sessions using mutable custom CA
+files, and selections with changed credentials or recipients cannot reopen.
+Their recorded Run evidence remains readable. Start a fresh session or use
+a separately admitted bounded handoff for a different recipient.
+Provider-held history authorization remains a separate selection.
+
+Pi verifies the exact native session and active leaf before receiving the
+new task. The continuing Agent has the
 built-in `read`, `grep`, `find` and `ls` tools and a read-only repository
 mount. The writer receives only the selected private session file. The
 original Journal records the predecessor and fences a second writer. A failed

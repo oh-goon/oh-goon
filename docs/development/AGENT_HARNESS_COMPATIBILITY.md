@@ -1223,7 +1223,7 @@ automatic compaction and retry. History and its summary remain model input
 with no new tool grants.
 
 The [installed reopen and compaction cases][cli-compaction-tests] change
-the captured source, Skill, task, and broker profile between Runs. The
+the captured source, Skill, and task between Runs under the same inference recipient. The
 synthetic provider checks fresh Hashmarks evidence through the initial
 reopen, compaction requests, and tool follow-up. Pi reads the newer source.
 The earlier prompt's request to write a fixture file survives in the
@@ -1249,10 +1249,8 @@ The reopened child receives the built-in read tools and a read-only repository.
 
 The [installed configuration journey][pi-native-config-tests] overwrites a
 fixture file in a writable original Run while retaining the repository
-directory identity. The next Run resumes the same session with a
-different model, credential, and upstream endpoint. It uses the new endpoint
-for every inference request and the prior endpoint receives no further
-requests. Attempts to use write, shell, a project extension, and project MCP
+directory identity. The next Run resumes the same session with the
+original inference recipient. Attempts to use write, shell, a project extension, and project MCP
 are refused. Reads of the synthetic personal store and the extension and MCP
 startup markers fail. The current verifier and original cleanup succeed.
 Explicit native configuration directories and model or extension overrides
@@ -1266,6 +1264,27 @@ and synthetic endpoints. Optional extension and MCP execution is qualified
 separately for the selected ephemeral profile. Persistent optional tools
 remain outside this configuration, and real-account identity and historical
 disclosure are separately tracked in HUG-109 and HUG-131.
+
+### Pi history disclosure after exact reopen — HUG-131
+
+**Disposition**. Retain native Pi's conversation construction, the original
+claimed Run writer, and the existing inference broker. The Journal checks
+the frozen recipient policy of the exact prior writer before admitting a
+continuation. Before a new writer reservation, the worker verifies a private
+keyed proof made from the same resolved recipient and headers consumed by the
+broker. Older records without that proof remain readable. A new Run cannot
+authorize their native history by inspecting or rewriting the transcript.
+Custom CA files are loaded later by the upstream client, so the selected
+mode leaves this trust scope unqualified for reopen.
+
+The [installed configuration journey][pi-native-config-tests] retains a
+synthetic conversation marker in the original Run. A different upstream
+endpoint cannot receive a request. Rotating the credential under its
+unchanged configuration reference also refuses before the Pi writer and
+broker start. Restoring the original authorized scope permits a fresh
+read-only Run to recover the genuine native history and reach its independent
+verifier. Historical availability and current tool grants remain separate
+from this disclosure boundary.
 
 ### Native Pi settlement and typed acceptance — HUG-79
 

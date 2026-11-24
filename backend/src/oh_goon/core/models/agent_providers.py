@@ -644,6 +644,18 @@ class AgentConnection(ImmutableModel):
     provider: AgentProvider
     selection: AgentModel
 
+    def has_same_history_recipient(self, previous: AgentConnection) -> bool:
+        """Compare frozen disclosure policy before the worker proves its actual credentials."""
+        transport_limits = {"timeout_seconds", "max_request_bytes", "max_response_bytes"}
+        request_limits = {"max_output_tokens", "chat_token_parameter"}
+        return (
+            self.provider_name == previous.provider_name
+            and self.provider.model_dump(exclude=transport_limits)
+            == previous.provider.model_dump(exclude=transport_limits)
+            and self.selection.model_dump(exclude=request_limits)
+            == previous.selection.model_dump(exclude=request_limits)
+        )
+
     @classmethod
     def select(cls, config: AgentProvidersConfig, profile: str | None = None) -> AgentConnection:
         name = profile if profile is not None else config.default_model

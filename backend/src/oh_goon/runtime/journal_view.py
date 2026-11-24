@@ -582,6 +582,22 @@ class JournalReadView:
         )
         self._require_pi_writer_resource_settlement(writer)
         self._require_pi_writer_save(observation)
+        prior = self._index.events_by_run[prior_run_id][0]
+        assert isinstance(prior, RunAdmittedEvent)
+        previous, current = prior.target, admission.target
+        assert isinstance(previous, FleetPlanTarget) and isinstance(current, FleetPlanTarget)
+        assert previous.plan.native_agent is not None and current.plan.native_agent is not None
+        previous_receiver = previous.plan.native_agent.connection
+        current_receiver = current.plan.native_agent.connection
+        if (
+            writer.history_receiver_proof is None
+            or previous_receiver is None
+            or current_receiver is None
+            or not current_receiver.has_same_history_recipient(previous_receiver)
+        ):
+            raise PiSessionHistoryUnqualified(
+                "Selected Pi history is not qualified for the current inference recipient"
+            )
         return writer, observation
 
     def _require_pi_writer_resource_settlement(self, writer: PiSessionWriterReservedEvent) -> None:

@@ -32,6 +32,7 @@ from oh_goon.core.models.agent_providers import (
     NativeAgentProfile,
     NoPersistentPiSession,
     PiSessionCleanupUnverified,
+    PiSessionHistoryUnqualified,
     PiSessionIntent,
     PiSessionUnavailable,
     ResolvedNativeAgent,
@@ -182,14 +183,19 @@ class _ClaimedPiAttempt:
     session: ExecutionSession
     repository: RepositoryIdentity
     operation_id: str
+    prior_run_id: str | None
 
-    def reserve(self) -> PiSessionWriterReservedEvent:
+    def reserve(
+        self, *, receiver_proof: str | None = "pi-history-receiver-v1:" + "a" * 64
+    ) -> PiSessionWriterReservedEvent:
         return self.journal.reserve_pi_session_writer(
             self.session,
             repository_id=self.repository.repository_id,
             operation_id=self.operation_id,
             step_id="agent",
             attempt_number=1,
+            history_receiver_proof=receiver_proof,
+            expected_prior_receiver_proof=receiver_proof if self.prior_run_id else None,
         )
 
     def record_physical(self, physical_id: str, *, quiescent: bool = True) -> None:
@@ -270,7 +276,9 @@ def _claim_attempt(
     observer("agent", 1, "STEP_REACHED")
     observer("agent", 1, "STEP_STARTED")
     observer("agent", 1, "STEP_ATTEMPT_CREATED", attempt_number=1)
-    return _ClaimedPiAttempt(worker_database, journal, worker, session, repository, operation_id)
+    return _ClaimedPiAttempt(
+        worker_database, journal, worker, session, repository, operation_id, prior_run_id
+    )
 
 
 def _accepted_pi_result(
@@ -402,7 +410,31 @@ def test_private_pi_readback_keeps_save_and_settlement_without_review_text(tmp_p
     pi = public["game_tape"]["pi_session"]
     assert pi["persistence"] == "observed" and pi["save_verification"] == "pi_rpc_synced"
     assert pi["availability"] == "not_checked"
-    assert fleet_run_event_readback(reader.run_events("original"))["pi_session"] == pi
+    batch = reader.run_events("original")
+    (writer,) = (event for event in batch.events if isinstance(event, PiSessionWriterReservedEvent))
+    assert writer.history_receiver_proof == reservation.history_receiver_proof is not None
+    public_events = fleet_run_event_readback(batch)
+    assert public_events["pi_session"] == pi
+    assert "history_receiver_proof" not in repr(public_events)
+
+
+def test_legacy_pi_history_stays_readable_without_authorizing_reopen(tmp_path: Path) -> None:
+    database = LocalDatabase(tmp_path / "state.db")
+    original = _claim_attempt(database, "original")
+    reservation = original.reserve(receiver_proof=None)
+    _observe_pi_file(original, reservation, sha256="a" * 64, leaf_id="leaf-a")
+    _accepted_pi_result(original)
+
+    reader = Journal(LocalDatabase(database.path, read_only=True))
+    retained = reader.run_events("original")
+    assert retained.run.status is FleetRunStatus.COMPLETED
+    assert retained.pi_session is not None and retained.pi_session.persistence == "observed"
+    uncertain = reader.inspect_pi_session("original")
+    assert uncertain.availability == "unverified"
+    assert uncertain.refusal_code == PiSessionRefusalCode.HISTORY_UNQUALIFIED
+    with pytest.raises(PiSessionHistoryUnqualified):
+        _claim_attempt(database, "continuation", prior_run_id="original")
+    assert reader.run_events("original") == retained
 
 
 def test_pi_writer_reservation_has_one_winner_and_stable_replay_refusal(tmp_path: Path) -> None:
